@@ -62,4 +62,19 @@ public class ArbiterSettings : AnalysisSettings
     [CommandOption("--since <ISO-8601>")]
     [Description("Only report ledger events at or after this ISO-8601 timestamp.")]
     public string? Since { get; set; }
+
+    /// <summary>The single rule to report for <c>tune</c>.</summary>
+    [CommandOption("--rule <ID>")]
+    [Description("Only report this rule id in tune.")]
+    public string? Rule { get; set; }
+
+    /// <summary>The candidate thresholds for <c>tune</c>.</summary>
+    [CommandOption("--thresholds <CSV>")]
+    [Description("Comma-separated candidate thresholds in [0, 1] for tune. Defaults to 0.5,0.6,0.7,0.8,0.9.")]
+    public string? Thresholds { get; set; }
+
+    /// <summary>Whether <c>tune</c> writes machine-readable JSON rather than the text report.</summary>
+    [CommandOption("--json")]
+    [Description("Write tune's report as JSON.")]
+    public bool Json { get; set; }
 }

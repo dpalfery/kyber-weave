@@ -156,6 +156,30 @@ public sealed class ArbiterSystemOneClientTests
         Assert.Equal(RuleEngine.Undecidable, result.AnswersByRule[ChoiceRuleId]);
     }
 
+    /// <summary>A confidence exactly at the 0.8 floor clears it, so the answer stands and the difficulty retarget can follow.</summary>
+    [Fact]
+    public async Task Choice_ConfidenceExactlyAtTheFloor_IsAnswered()
+    {
+        using StubHandler handler = new(JsonResponse(ChoiceBody(confidence: 0.8)));
+        using SystemOneClient client = Client(handler);
+
+        ArbiterStep1BatchResult result = await client.AskStep1Async([ChoiceRule(0.8)], Facts());
+
+        Assert.Equal("within-task", result.AnswersByRule[ChoiceRuleId]);
+    }
+
+    /// <summary>A confidence just under the 0.8 floor is undecidable, so no retarget follows from it.</summary>
+    [Fact]
+    public async Task Choice_ConfidenceJustBelowTheFloor_IsUndecidable()
+    {
+        using StubHandler handler = new(JsonResponse(ChoiceBody(confidence: 0.79)));
+        using SystemOneClient client = Client(handler);
+
+        ArbiterStep1BatchResult result = await client.AskStep1Async([ChoiceRule(0.8)], Facts());
+
+        Assert.Equal(RuleEngine.Undecidable, result.AnswersByRule[ChoiceRuleId]);
+    }
+
     [Fact]
     public async Task Scores_ProbabilityOutsideTheScale_DropsTheListAndKeepsTheConfidence()
     {

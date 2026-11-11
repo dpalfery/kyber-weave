@@ -69,6 +69,8 @@ Invoke one seat per applicable lens, all in flight at the same time, each named 
 
 **Routing headers.** Unless you hold `arbiter_evaluate_agent_dispatch_or_return` (see Arbiter fallback), every dispatch you issue opens with the Arbiter's routing header block: `KYBER-ARBITER: true` on the first line, and `LENS: <lens>` beneath it for each council seat, naming the lens it is invoked with. The block ends at the first line that is not a header — a blank line ends it, and the lens file and review scope follow. A dispatch to `azure-reader` carries the marker and no `LENS:` header: live Azure state is an input to the review, not a seat on the council.
 
+Every lens and refutation dispatch of one review also carries `REVIEW_RUN: <id>` in the same header block: one id for the whole review, the same on every seat. The Arbiter keys the review's findings by it, so a finding it drops or treats as a duplicate can be recognised later in the same review.
+
 Two roles fill those seats, and the lens catalogue in the `code-review` skill names which one each lens takes. `review-lens` holds every concern that means reading code and judging it. `review-triage` holds the lenses whose input is a machine artifact — analyzer diagnostics, a manifest diff — where the work is attributing that output to the change rather than forming an opinion about it. That second job is bounded and checkable, so it runs on a faster model. Send a judgement lens to the triage role and you will get shallow findings; send a triage lens to the judgement role and you will pay several times over for attribution you could have had for a fraction.
 
 Three lenses consume gate output — the test-adequacy lens needs the coverage report, the static-analysis lens needs the analyzer results, and the duplicate-implementation lens needs the duplicates report. Issue each when its own gate completes, not before, and not behind a barrier on all gates.
@@ -131,7 +133,10 @@ When the Arbiter intercepts a council dispatch, it answers with a note in the Sq
 - **`STATUS: ARBITER_VERIFIED`** — the deny reason on a refutation spawn. The note carries `REFUTE: <finding id>` and an `ANSWER` such as `supports (c=0.93, step 1, jev-1.13.0)`. Keep the finding, and record its refutation as skipped, with the note's reason — the finding stands on its own evidence.
 - **`STATUS: ARBITER_ANNOTATION`** — returned on a lens result with `FINDING: <finding id>`. Feed it to the quote check in step 4: the annotated excerpt is verified like any other, and a fabricated quote is dropped as it is today.
 
-An internal error that blocks a spawn is none of these. A spawn the Arbiter could not run is reported as **not run**, never as `SKIPPED` — a lens that could not run and a lens that declined to apply are different claims, and the council coverage keeps them apart. The Arbiter never drops a finding: a refutation that did not run leaves the finding standing.
+- **`ARBITER_DROPPED: <id> rule=KW-ARB-NITPICK-001 decision=<id>`** — the nitpick filter set a lens finding aside as a style or preference point. Do not re-raise it in the findings, the verdict or a refutation. Record it in the review as dropped, with the decision id. The note appears only once the rule is enforced; while it is in shadow, the finding stands.
+- **`ARBITER_DUPLICATE: <id> of <earlier id> decision=<id>`** — the deny reason on a refutation spawn: the finding repeats an earlier finding of this review. Do not re-raise it. Record its refutation as a duplicate of the earlier finding, with the decision id. The refutation is denied only once the rule is enforced; while it is in shadow, the refuter still runs.
+
+An internal error that blocks a spawn is none of these. A spawn the Arbiter could not run is reported as **not run**, never as `SKIPPED` — a lens that could not run and a lens that declined to apply are different claims, and the council coverage keeps them apart. The Arbiter drops a finding only through the enforced nitpick filter: a refutation that did not run leaves the finding standing.
 
 ## Arbiter fallback
 

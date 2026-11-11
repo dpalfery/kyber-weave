@@ -94,6 +94,18 @@ public static class GateReportFacts
             : facts;
     }
 
+    /// <summary>
+    /// Whether the repository's gate report shows a failed gate, which corroborates a lens finding. The same
+    /// report reader <see cref="Agrees(string?, string?)"/> uses, so a finding and a digest are checked against one source.
+    /// </summary>
+    /// <returns><c>true</c> when a gate ran and failed; <c>false</c> when the report is missing or shows none failed.</returns>
+    public static bool FailedGateCorroborates(string? repositoryRoot)
+    {
+        GateReport? report = string.IsNullOrWhiteSpace(repositoryRoot) ? null : TryRead(repositoryRoot);
+        return report?.Gates is not null
+            && report.Gates.Any(gate => gate is not null && !gate.Passed && !gate.NotApplicable);
+    }
+
     /// <summary>Whether a returned digest's gate report corroborates its claimed status.</summary>
     /// <param name="returnedText">The worker's return text, digest included.</param>
     /// <param name="repositoryRoot">The root a relative report path resolves against.</param>

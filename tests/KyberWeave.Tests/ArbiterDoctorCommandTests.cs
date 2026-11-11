@@ -54,6 +54,132 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
         Assert.Contains("dispatch-unconfirmed", execution.Output, StringComparison.Ordinal);
     }
 
+    private const string ShadowModelTargetingYaml =
+        "arbiter:\n" +
+        "  enabled: true\n" +
+        "  model-targeting:\n" +
+        "    mode: shadow\n";
+
+    private const string ModelTargetsJson =
+        "{\"schema\":\"kyber-arbiter.model-targets/v1\",\"harness\":\"claude\"," +
+        "\"preset\":{\"name\":\"work\",\"digest\":\"d\"},\"bundle-digest\":\"b\"," +
+        "\"profiles\":{\"fast\":\"claude-haiku-5-5\"},\"agents\":{}}";
+
+    /// <summary>The global model-targets file for Claude, where the global scope writes it.</summary>
+    private string GlobalModelTargetsPath =>
+        Path.Combine(_home.Path, ".kyber-weave", "arbiter", "model-targets.claude.json");
+
+    /// <summary>The global Squad lock, which the targets file must be at least as new as.</summary>
+    private string GlobalLockPath =>
+        Path.Combine(_home.Path, ".kyber-weave", "squad", "global", "squad.lock.yml");
+
+    /// <summary>
+    /// Targeting is on and Claude is hooked, but the targets file is absent: a model override
+    /// would be dropped without anyone seeing it, so the doctor warns and names the fix.
+    /// </summary>
+    [Fact]
+    public void Doctor_WarnsModelMissingWhenTargetingIsOnAndTheHookedTargetHasNoTargetsFile()
+    {
+        UserHostConfig.WriteGlobalTargets(_home.Path, ["claude"]);
+        WriteProjectConfig(ShadowModelTargetingYaml);
+
+        CommandExecution execution = RunDoctor();
+
+        Assert.Contains("KW-ARB-MODEL-001", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("Run kyber-weave squad update", execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>A targets file that does not parse is the same warning as a missing one.</summary>
+    [Fact]
+    public void Doctor_WarnsModelUnreadableWhenTheTargetsFileDoesNotParse()
+    {
+        UserHostConfig.WriteGlobalTargets(_home.Path, ["claude"]);
+        WriteProjectConfig(ShadowModelTargetingYaml);
+        WriteFile(GlobalModelTargetsPath, "{not json");
+
+        CommandExecution execution = RunDoctor();
+
+        Assert.Contains("KW-ARB-MODEL-001", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("Run kyber-weave squad update", execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A targets file older than the Squad lock was written before the last squad update, so it
+    /// may name models the lock no longer does.
+    /// </summary>
+    [Fact]
+    public void Doctor_WarnsModelStaleWhenTheTargetsFileIsOlderThanTheSquadLock()
+    {
+        UserHostConfig.WriteGlobalTargets(_home.Path, ["claude"]);
+        WriteProjectConfig(ShadowModelTargetingYaml);
+        WriteFile(GlobalModelTargetsPath, ModelTargetsJson);
+        WriteFile(GlobalLockPath, "schema: kyber-squad.lock/v2\n");
+        File.SetLastWriteTimeUtc(GlobalModelTargetsPath, DateTime.UtcNow.AddHours(-2));
+        File.SetLastWriteTimeUtc(GlobalLockPath, DateTime.UtcNow);
+
+        CommandExecution execution = RunDoctor();
+
+        Assert.Contains("KW-ARB-MODEL-001", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("Run kyber-weave squad update", execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>The negative for the stale case: a targets file newer than the lock is not warned.</summary>
+    [Fact]
+    public void Doctor_DoesNotWarnModelWhenTheTargetsFileIsCurrent()
+    {
+        UserHostConfig.WriteGlobalTargets(_home.Path, ["claude"]);
+        WriteProjectConfig(ShadowModelTargetingYaml);
+        WriteFile(GlobalModelTargetsPath, ModelTargetsJson);
+        WriteFile(GlobalLockPath, "schema: kyber-squad.lock/v2\n");
+        File.SetLastWriteTimeUtc(GlobalLockPath, DateTime.UtcNow.AddHours(-2));
+        File.SetLastWriteTimeUtc(GlobalModelTargetsPath, DateTime.UtcNow);
+
+        CommandExecution execution = RunDoctor();
+
+        Assert.DoesNotContain("KW-ARB-MODEL-001", execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>Targeting off means no model is routed, so a missing targets file is not a warning.</summary>
+    [Fact]
+    public void Doctor_DoesNotWarnModelWhenTargetingIsOff()
+    {
+        UserHostConfig.WriteGlobalTargets(_home.Path, ["claude"]);
+        WriteProjectConfig(
+            """
+            arbiter:
+              enabled: true
+              model-targeting:
+                mode: off
+            """);
+
+        CommandExecution execution = RunDoctor();
+
+        Assert.DoesNotContain("KW-ARB-MODEL-001", execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>With no hooked target installed there is no override to honour, so no warning.</summary>
+    [Fact]
+    public void Doctor_DoesNotWarnModelWhenNoHookedTargetIsInstalled()
+    {
+        UserHostConfig.WriteGlobalTargets(_home.Path, ["warp"]);
+        WriteProjectConfig(ShadowModelTargetingYaml);
+
+        CommandExecution execution = RunDoctor();
+
+        Assert.DoesNotContain("KW-ARB-MODEL-001", execution.Output, StringComparison.Ordinal);
+    }
+
+    private CommandExecution RunDoctor() =>
+        Capture(() => new ArbiterDoctorCommand().Execute(
+            null!,
+            new ArbiterSettings { Path = _repo.Path }));
+
+    private static void WriteFile(string path, string content)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, content);
+    }
+
     private void WriteProjectConfig(string yaml)
     {
         string dir = Path.Combine(_repo.Path, ".kyber-weave");

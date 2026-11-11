@@ -93,6 +93,37 @@ public sealed class WorktreeIndexGuardTests : IDisposable
         Assert.Contains(
             executor.CallsTo("codegraph"),
             call => call.ArgumentList.Contains("init", StringComparer.Ordinal));
+        Assert.True(outcome.Created, "An index that init built counts as created, even when the folder was already there.");
+    }
+
+    [Fact]
+    public void AnUnreadableConfigurationIsAFailedIndexNotACrash()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("The test removes read permission with a Unix file mode.");
+            return;
+        }
+
+        Govern(Governed);
+        string config = Path.Combine(_root, ".kyber-weave", "kyber-weave.yml");
+        File.SetUnixFileMode(config, UnixFileMode.None);
+        try
+        {
+            if (CanStillRead(config))
+            {
+                Assert.Skip("File permissions are not enforced for this user, as when the suite runs as root.");
+            }
+
+            WorktreeIndexOutcome outcome = Ensure(Codegraph());
+
+            Assert.Equal(WorktreeIndexStatus.Failed, outcome.Status);
+            Assert.Contains(outcome.Checks, check => !check.Passed);
+        }
+        finally
+        {
+            File.SetUnixFileMode(config, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
     }
 
     [Fact]
@@ -186,6 +217,19 @@ public sealed class WorktreeIndexGuardTests : IDisposable
 
         Assert.Equal(WorktreeIndexStatus.NotGoverned, outcome.Status);
         Assert.Empty(executor.CallsTo("codegraph"));
+    }
+
+    private static bool CanStillRead(string path)
+    {
+        try
+        {
+            _ = File.ReadAllText(path);
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private void Govern(string yaml, bool createDocs = true)

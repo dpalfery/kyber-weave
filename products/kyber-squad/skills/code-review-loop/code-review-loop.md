@@ -27,6 +27,18 @@ the review URL; pull requests and merge requests are called PRs below.
 
 ## Fix and validate
 
+For each bot review comment, call `arbiter_classify_bot_review_comment` with its path, line, body
+and commit before changing code. A `real` answer is fixed as below. A `nitpick` or
+`already-fixed` answer is not fixed: reply with the reason and resolve the thread. An unsure
+answer is `real`.
+
+For a bot's PR-level summary comment with a findings table (`Severity | File | Line | Issue`),
+call `arbiter_classify_bot_review_comment` with `summary: true`, the summary as `body`, and
+`author`. Always pass `author`, appending `[bot]` when the platform reports the author type as Bot.
+Each row comes back `real`, `nitpick` or `already-fixed`. Fix the `real` rows as below; leave the
+nitpick and already-fixed rows unchanged. Rows past 50, and every row of a comment from a non-bot
+author, come back `real`. Human comments are never classified.
+
 Use the repository's prescribed code and documentation discovery tools before text
 search. Make the smallest change that addresses the actual concern and preserve
 existing fixes. Do not broaden dependencies, policy, or scope merely to satisfy a bot.
@@ -66,7 +78,9 @@ files or structured arguments instead of shell interpolation.
   approving the entire review for resolving an individual finding.
 
 On GitHub, prefer its available tools; an authenticated `gh` CLI is a fallback.
-Top-level review comments are not resolvable threads.
+Top-level review comments are not resolvable threads. A bot summary comment is answered with ONE
+PR comment, not per-row replies: list its rows under Fixed (each with its commit link), Already
+fixed, Nitpick and Not changed.
 `gh api repos/OWNER/REPO/pulls/PR/comments` reads inline comments; GraphQL `reviewThreads` supplies resolution state. Edit an authored reply with
 `PATCH /repos/OWNER/REPO/pulls/comments/COMMENT_ID`, or add a reply with
 `POST /repos/OWNER/REPO/pulls/PR/comments/COMMENT_ID/replies`. Resolve the verified thread

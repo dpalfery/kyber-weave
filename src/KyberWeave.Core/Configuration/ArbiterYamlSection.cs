@@ -10,6 +10,36 @@ internal sealed class ArbiterYamlSection
     public ArbiterProviderYaml? Provider { get; set; }
 
     public List<ArbiterRuleYaml>? Rules { get; set; }
+
+    public ArbiterModelTargetingYaml? ModelTargeting { get; set; }
+
+    public ArbiterStoresYaml? Stores { get; set; }
+
+    public ArbiterCommentTriageYaml? CommentTriage { get; set; }
+}
+
+/// <summary>The <c>arbiter.model-targeting</c> mapping.</summary>
+internal sealed class ArbiterModelTargetingYaml
+{
+    public string? Mode { get; set; }
+
+    public Dictionary<string, string>? DifficultyProfiles { get; set; }
+
+    public List<string>? Ladder { get; set; }
+}
+
+/// <summary>The <c>arbiter.stores</c> mapping.</summary>
+internal sealed class ArbiterStoresYaml
+{
+    public int? MaxItemBytes { get; set; }
+
+    public int? RetainDays { get; set; }
+}
+
+/// <summary>The <c>arbiter.comment-triage</c> mapping.</summary>
+internal sealed class ArbiterCommentTriageYaml
+{
+    public List<string>? BotLogins { get; set; }
 }
 
 /// <summary>The <c>arbiter.global</c> mapping under the user-level config.</summary>
@@ -46,6 +76,12 @@ internal sealed class ArbiterRuleYaml
     public double? ProbabilityBelow { get; set; }
 
     public Dictionary<string, string>? Effects { get; set; }
+
+    /// <summary>The <c>shadow</c> flag: a shadow rule is evaluated and logged without gating the trigger.</summary>
+    public bool? Shadow { get; set; }
+
+    /// <summary>A list-fact name at rule level. Only shipped rules may set it, inside their <c>ask</c>.</summary>
+    public string? ForEach { get; set; }
 
     /// <summary>
     /// The trigger name, or trigger names for a rule that runs on several triggers
@@ -124,4 +160,7 @@ internal sealed class ArbiterAskYaml
     public string? When { get; set; }
 
     public List<string>? TunedFor { get; set; }
+
+    /// <summary>A list-fact name; the question is asked once per list item.</summary>
+    public string? ForEach { get; set; }
 }

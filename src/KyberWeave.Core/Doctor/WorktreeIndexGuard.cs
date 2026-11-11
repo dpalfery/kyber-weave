@@ -1,4 +1,5 @@
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Core.Processes;
 
 namespace KyberWeave.Core.Doctor;
 
@@ -20,7 +21,7 @@ public enum WorktreeIndexStatus
 
 /// <summary>The result of ensuring one tree's CodeGraph index.</summary>
 /// <param name="Status">The index state.</param>
-/// <param name="Created">True when this call created the index: it was absent before and is ready now.</param>
+/// <param name="Created">True when this call created the index with <c>codegraph init</c> and it is ready now.</param>
 /// <param name="StopsRun">True when the caller must stop: the index is unusable and the repository stops on tool failure.</param>
 /// <param name="Checks">The <c>codegraph.*</c> checks, in order, for the caller to report.</param>
 public sealed record WorktreeIndexOutcome(
@@ -55,10 +56,29 @@ public static class WorktreeIndexGuard
         ArgumentNullException.ThrowIfNull(executor);
         ArgumentException.ThrowIfNullOrWhiteSpace(lockDirectory);
 
-        if (!DocsEnabled.IsEnabled(root, ReadText))
+        bool governed;
+        try
+        {
+            governed = DocsEnabled.IsEnabled(root, ReadText);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Present but unreadable is not absent: report it, so the caller neither crashes nor skips the index.
+            DoctorCheck unreadable = new(
+                "codegraph.index",
+                false,
+                $"the repository configuration could not be read: {ex.Message}",
+                $"make .kyber-weave/kyber-weave.yml readable, then run: kyber-weave doctor --ensure {ShellQuote.Quote(root)}");
+            return new WorktreeIndexOutcome(
+                WorktreeIndexStatus.Failed,
+                Created: false,
+                StopsRun: RepositoryDoctor.StopsOnToolFailure(root),
+                [unreadable]);
+        }
+
+        if (!governed)
             return new WorktreeIndexOutcome(WorktreeIndexStatus.NotGoverned, Created: false, StopsRun: false, []);
 
-        bool existed = Directory.Exists(Path.Combine(root, CodeGraphProvisioner.IndexDirectoryName));
         CodeGraphOutcome outcome = CodeGraphProvisioner.Run(root, DoctorMode.Ensure, options, executor, lockDirectory);
 
         WorktreeIndexStatus status = outcome.BinaryMissing
@@ -70,11 +90,21 @@ public static class WorktreeIndexGuard
 
         return new WorktreeIndexOutcome(
             status,
-            Created: !existed && status is WorktreeIndexStatus.Ready,
+            Created: outcome.Initialised && status is WorktreeIndexStatus.Ready,
             StopsRun: stops,
             outcome.Checks);
     }
 
-    private static string? ReadText(string path) =>
-        File.Exists(path) ? File.ReadAllText(path) : null;
+    /// <summary>Reads a file, treating one that is not there as absent and letting an unreadable one throw.</summary>
+    private static string? ReadText(string path)
+    {
+        try
+        {
+            return File.ReadAllText(path);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return null;
+        }
+    }
 }

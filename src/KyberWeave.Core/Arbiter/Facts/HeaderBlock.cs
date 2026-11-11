@@ -25,6 +25,7 @@ public sealed partial class HeaderBlock
         "TASK",
         "LENS",
         "REFUTE",
+        "REVIEW_RUN",
     };
 
     /// <summary>The fifteen lens names a <c>LENS</c> header or <c>REFUTE</c> lens may name.</summary>
@@ -171,6 +172,8 @@ public sealed partial class HeaderBlock
         "TASK" => PlanTaskIdRegex().IsMatch(value) || SpecTaskIdRegex().IsMatch(value),
         "LENS" => LensNames.Contains(value),
         "REFUTE" => IsValidRefute(value),
+        // Any non-empty value: the store keys it by digest, so its characters and length name no path.
+        "REVIEW_RUN" => value.Length > 0,
         _ => false,
     };
 
@@ -203,7 +206,7 @@ public sealed partial class HeaderBlock
     }
 
     [GeneratedRegex(
-        @"^(?<name>KYBER-ARBITER|PLAN_FILE|TASK|LENS|REFUTE):[ \t]*(?<value>\S.*?)[ \t]*$",
+        @"^(?<name>KYBER-ARBITER|PLAN_FILE|TASK|LENS|REFUTE|REVIEW_RUN):[ \t]*(?<value>\S.*?)[ \t]*$",
         RegexOptions.CultureInvariant)]
     private static partial Regex HeaderLineRegex();
 

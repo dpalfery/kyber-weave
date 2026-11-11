@@ -967,9 +967,55 @@ applicability to the change: a lens that does not apply is recorded as `SKIPPED`
 reason. Before the refutation pass, `REFUTE: <finding-id>` headers route each finding to
 claim verification against its quoted code; a verified finding keeps its refutation
 recorded as skipped. Quote fabrication and pre-existing code arrive as annotations that feed
-the existing quote check. The Arbiter never drops a finding on a model answer alone, and
-code-reviewer runs `kyber-weave arbiter audit --plan <PLAN_FILE>` at the end of a run and
+the existing quote check. The Arbiter drops a finding only through the nitpick filter, and only
+for a confident nitpick once that rule is enforced (see [Nitpick filter, duplicates and the review run](#nitpick-filter-duplicates-and-the-review-run-phase-3)).
+A failed refutation, an unrun check or a shadowed rule never drops a finding. code-reviewer runs `kyber-weave arbiter audit --plan <PLAN_FILE>` at the end of a run and
 cites the result. See the [Kyber Arbiter architecture](../kyber-arbiter/architecture.md).
+
+### Hunk-level lens skipping (KW-ARB-LENS-002)
+
+Where the Arbiter hook is installed, a lens spawn is judged against the change's hunks before the
+lens starts. `KW-ARB-LENS-002` skips a lens only when the change has no code for that lens to judge,
+and the skip needs positive evidence:
+
+- every changed path is one of three kinds: **comment-only** (every hunk holds only comments in the
+  file's language), **rename-only** (a rename at 100% similarity), or **Markdown** (`*.md`);
+- the changed set is non-empty. An empty or unreadable set is `undecidable`, which allows, so the
+  lens runs.
+
+Comment-only is judged per file, and a file is comment-only only when every one of its hunks is. A
+single code line in one hunk makes the file code, even when its other hunks are comments. The
+comment syntax per extension is in the [Kyber Arbiter architecture](../kyber-arbiter/architecture.md#hunk-comment-syntax).
+Untracked files count as one whole-file hunk.
+
+The rule names six lenses that cannot find anything in such a change: `correctness`,
+`test-adequacy`, `performance`, `di-composition`, `duplicate-implementation` and `model-placement`.
+Every other lens is never skipped by this rule. In particular it never skips:
+
+- `security`: a secret can be added in a comment;
+- `documentation-accuracy`: comments are documentation;
+- `blast-radius-revertibility`: a rename moves callers.
+
+The rule is enforced, not shadowed. Its skips appear in the decision log like any other enforced
+answer. The rule only applies where the hook runs, and code-reviewer's `LENS:` headers are what
+let it judge each spawn.
+
+### Nitpick filter, duplicates and the review run (phase 3)
+
+Every lens and refutation dispatch of one review carries `REVIEW_RUN: <id>` in its routing header
+block, with the same id on every seat. The id keys the review's findings in a run store under
+`<arbiter-dir>/stores/`, so a later decision in the same review can read them back.
+
+- **Nitpick filter (`KW-ARB-NITPICK-001`).** A `Critical` finding, or one a failed gate corroborates,
+  is never dropped. Any other finding is asked once, and only a confident nitpick drops it. The
+  finding is set aside and the hook adds `ARBITER_DROPPED: <id> rule=KW-ARB-NITPICK-001 decision=<id>`.
+  The reviewer records it under **Dropped** in the report and does not re-raise it.
+- **Refutation of a dropped finding (`KW-ARB-NITPICK-002`).** Skipped with `verify`, so no refuter runs.
+- **Duplicate refutation (`KW-ARB-DUP-001`).** A finding that repeats an earlier finding of the same
+  review, in the same file within 20 lines, is denied as `ARBITER_DUPLICATE: <id> of <earlier id>
+  decision=<id>`. The reviewer records it under **Dropped** and does not re-raise it.
+- **Shadow.** All three rules ship in shadow. Until a rule is enforced, no finding is dropped and every
+  refuter runs; the decision log records each would-be drop or duplicate in `would-effect`.
 
 ## Current limitations
 

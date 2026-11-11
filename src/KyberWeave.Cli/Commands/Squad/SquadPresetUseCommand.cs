@@ -1,4 +1,5 @@
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Core.Arbiter.ModelTargets;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Validation;
@@ -283,7 +284,9 @@ public sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
                     ? SquadDeploymentPlan.ResolveOwnedFilePath(activeReceipt, anchorRoot, effectiveGlobalRoots, file)
                     : Path.Combine(anchorRoot, file.RelativePath);
                 return File.Exists(physicalPath) ? File.ReadAllBytes(physicalPath) : null;
-            });
+            },
+            new ArbiterModelTargetsPreset(preset.Name, preset.Digest),
+            bundled: canonical.Profiles);
 
         if (settings.DryRun)
         {

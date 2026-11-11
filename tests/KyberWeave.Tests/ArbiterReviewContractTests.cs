@@ -92,7 +92,7 @@ public sealed class ArbiterReviewContractTests
 
         Assert.Contains("not run", contract, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("never as `SKIPPED`", contract, StringComparison.Ordinal);
-        Assert.Contains("never drops a finding", contract, StringComparison.Ordinal);
+        Assert.Contains("drops a finding only through the enforced nitpick filter", contract, StringComparison.Ordinal);
     }
 
     [Fact]

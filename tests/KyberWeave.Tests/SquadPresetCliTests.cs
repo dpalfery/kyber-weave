@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Processes;
@@ -115,6 +116,86 @@ public sealed class SquadPresetCliTests : IDisposable
 
         string updatedAgent = File.ReadAllText(Path.Combine(_projectDir, ".claude", "agents", "architect.md"));
         Assert.Contains("model: gpt-4o-mini", updatedAgent, StringComparison.Ordinal);
+    }
+
+    #endregion
+
+    #region Arbiter Model Targets Table Shares the Agent Transaction
+
+    private const string StaleArbiterTable =
+        "{\"schema\":\"kyber-arbiter.model-targets/v1\",\"harness\":\"claude\"," +
+        "\"preset\":{\"name\":\"none\",\"digest\":\"0\"},\"bundle-digest\":\"0\"," +
+        "\"profiles\":{\"architect\":\"bundled-model\"}," +
+        "\"agents\":{\"architect\":{\"profile\":\"architect\",\"token\":\"bundled-model\"}}}";
+
+    [Fact]
+    public void UseOnDeployedProjectTargetRewritesArbiterTableInTheSameTransactionAsAgents()
+    {
+        WritePreset("fast", FastPresetYaml);
+        string initialAgentContent = """
+                                     ---
+                                     name: architect
+                                     model: bundled-model
+                                     ---
+                                     You are architect.
+                                     """;
+        SeedProjectDeployment(
+            _projectDir,
+            "claude",
+            (".claude/agents/architect.md", initialAgentContent),
+            ("artifacts/arbiter/model-targets.claude.json", StaleArbiterTable));
+
+        CliResult result = Run("squad", "preset", "use", "fast", "--target", "claude");
+
+        Assert.Equal(0, result.ExitCode);
+        string updatedAgent = File.ReadAllText(Path.Combine(_projectDir, ".claude", "agents", "architect.md"));
+        Assert.Contains("model: gpt-4o-mini", updatedAgent, StringComparison.Ordinal);
+        using JsonDocument table = JsonDocument.Parse(
+            File.ReadAllText(Path.Combine(_projectDir, "artifacts", "arbiter", "model-targets.claude.json")));
+        Assert.Equal(
+            "gpt-4o-mini",
+            table.RootElement.GetProperty("agents").GetProperty("architect").GetProperty("token").GetString());
+    }
+
+    [Fact]
+    public void UseWhenArbiterTableCannotBeWrittenLeavesAgentsAndTableUnchanged()
+    {
+        // Forced failure: the arbiter directory is read-only, so the table cannot be written. The
+        // transaction must fail as a whole, leaving the agent and the table exactly as they were.
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        WritePreset("fast", FastPresetYaml);
+        string initialAgentContent = """
+                                     ---
+                                     name: architect
+                                     model: bundled-model
+                                     ---
+                                     You are architect.
+                                     """;
+        SeedProjectDeployment(
+            _projectDir,
+            "claude",
+            (".claude/agents/architect.md", initialAgentContent),
+            ("artifacts/arbiter/model-targets.claude.json", StaleArbiterTable));
+        string arbiterDir = Path.Combine(_projectDir, "artifacts", "arbiter");
+        string agentPath = Path.Combine(_projectDir, ".claude", "agents", "architect.md");
+        string tablePath = Path.Combine(arbiterDir, "model-targets.claude.json");
+        File.SetUnixFileMode(arbiterDir, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        try
+        {
+            CliResult result = Run("squad", "preset", "use", "fast", "--target", "claude");
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Equal(initialAgentContent, File.ReadAllText(agentPath));
+            Assert.Equal(StaleArbiterTable, File.ReadAllText(tablePath));
+        }
+        finally
+        {
+            File.SetUnixFileMode(arbiterDir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
     }
 
     #endregion

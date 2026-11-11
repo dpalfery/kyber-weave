@@ -51,3 +51,7 @@ of it runs at all. `kyber-weave doctor --ensure` is the first command of every s
 repair itself stops the run. For discovery, `codegraph_explore` answers first; in a worktree, or
 when that tool is not among those on offer, run `codegraph explore "…"` in your own shell,
 because the MCP servers stay bound to the canonical checkout and a worktree keeps its own index.
+
+## Triage shortcut
+
+When the Arbiter judges the defect a trivial single-site fix, the investigator dispatch is answered without spawning `bug-crusher-investigator`. The digest that comes back carries `VERDICT: TRIVIAL` and `ARBITER_DECISION: <id>` in place of the investigator's report. Treat that digest as the diagnosis: it is the investigator's stand-in, so apply the fix under the skill's transcription-only rule without a second investigation. The skill's tripwires still apply. The shortcut is shipped in shadow, so the investigator runs until the Arbiter enforces it.

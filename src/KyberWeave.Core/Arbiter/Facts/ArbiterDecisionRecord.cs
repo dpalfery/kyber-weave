@@ -78,7 +78,49 @@ public sealed record ArbiterDecisionRule(
     [property: JsonPropertyName("threshold")] double? Threshold,
     [property: JsonPropertyName("effect")] string Effect,
     [property: JsonPropertyName("facts")] IReadOnlyList<ArbiterRuleFactRef> Facts,
-    [property: JsonPropertyName("evidence")] string? Evidence);
+    [property: JsonPropertyName("evidence")] string? Evidence)
+{
+    /// <summary>Whether the rule was a shadow rule; omitted otherwise.</summary>
+    [JsonPropertyName("shadow")]
+    public bool? Shadow { get; init; }
+
+    /// <summary>The effect the rule would have had; omitted when it gated nothing.</summary>
+    [JsonPropertyName("would-effect")]
+    public string? WouldEffect { get; init; }
+
+    /// <summary>The <c>ForEach</c> list item this answer is for; omitted otherwise.</summary>
+    [JsonPropertyName("candidate")]
+    public string? Candidate { get; init; }
+
+    /// <summary>Whether this rule's drop was outranked by another rule's annotation; omitted otherwise.</summary>
+    [JsonPropertyName("suppressed")]
+    public bool? Suppressed { get; init; }
+
+    /// <summary>
+    /// The full shape with the three optional fields. Deserialisation binds through this
+    /// constructor so every field a line carries is read back.
+    /// </summary>
+    [JsonConstructor]
+    public ArbiterDecisionRule(
+        string id,
+        int step,
+        string answer,
+        IReadOnlyList<double>? probabilities,
+        double? confidence,
+        double? threshold,
+        string effect,
+        IReadOnlyList<ArbiterRuleFactRef> facts,
+        string? evidence,
+        bool? shadow = null,
+        string? wouldEffect = null,
+        string? candidate = null)
+        : this(id, step, answer, probabilities, confidence, threshold, effect, facts, evidence)
+    {
+        Shadow = shadow;
+        WouldEffect = wouldEffect;
+        Candidate = candidate;
+    }
+}
 
 /// <summary>
 /// One decision record (<c>decisions.jsonl</c>, schema
@@ -132,4 +174,62 @@ public sealed record ArbiterDecisionRecord(
     /// <summary>The decision schema id.</summary>
     [JsonPropertyName("schema")]
     public string Schema => SchemaName;
+
+    /// <summary>
+    /// On a secondary trigger's record, the ledger event of the primary dispatch it sits behind.
+    /// Omitted on a primary record.
+    /// </summary>
+    [JsonPropertyName("primary-ledger-id")]
+    public string? PrimaryLedgerId { get; init; }
+
+    /// <summary>The structured model block of the dispatch's model target, when one was resolved; omitted otherwise.</summary>
+    [JsonPropertyName("model")]
+    public ArbiterModelBlock? Model { get; init; }
+
+    /// <summary>Whether the model was substituted for the one requested; omitted when unknown.</summary>
+    [JsonPropertyName("substitute")]
+    public bool? Substitute { get; init; }
+
+    /// <summary>The earlier decision this one repeats, when it is a duplicate; omitted otherwise.</summary>
+    [JsonPropertyName("duplicate-of")]
+    public string? DuplicateOf { get; init; }
+
+    /// <summary>
+    /// The full shape with the four optional fields. Deserialisation binds through this
+    /// constructor so every field a line carries is read back.
+    /// </summary>
+    [JsonConstructor]
+    public ArbiterDecisionRecord(
+        string id,
+        DateTimeOffset at,
+        string source,
+        string harness,
+        string? session,
+        string ledgerId,
+        string trigger,
+        string? caller,
+        string callerSource,
+        string? target,
+        string? planFile,
+        string? planDigest,
+        string? task,
+        string ruleSet,
+        IReadOnlyList<ArbiterDecisionRule> rules,
+        ArbiterProviderRecord provider,
+        string outcome,
+        int repeat,
+        int durationMs,
+        string? primaryLedgerId = null,
+        ArbiterModelBlock? model = null,
+        bool? substitute = null,
+        string? duplicateOf = null)
+        : this(
+            id, at, source, harness, session, ledgerId, trigger, caller, callerSource, target, planFile,
+            planDigest, task, ruleSet, rules, provider, outcome, repeat, durationMs)
+    {
+        PrimaryLedgerId = primaryLedgerId;
+        Model = model;
+        Substitute = substitute;
+        DuplicateOf = duplicateOf;
+    }
 }

@@ -194,13 +194,15 @@ public sealed class ArbiterAntigravityRenderingTests : IDisposable
             new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: HookTimeoutSeconds),
             SquadDeploymentScope.Project);
 
+        // The Arbiter adds exactly one file: its model targets table. Every other owned file must match byte for byte.
+        const string table = "artifacts/arbiter/model-targets.antigravity.json";
         Assert.Equal(
-            omitted.Files.Select(f => (f.Target, f.RelativePath)).Order().ToList(),
+            omitted.Files.Select(f => (f.Target, f.RelativePath)).Append(("antigravity", table)).Order().ToList(),
             enabled.Files.Select(f => (f.Target, f.RelativePath)).Order().ToList());
         foreach ((SquadDeploymentFile expected, SquadDeploymentFile actual) in omitted.Files
             .OrderBy(f => f.Target, StringComparer.Ordinal)
             .ThenBy(f => f.RelativePath, StringComparer.Ordinal)
-            .Zip(enabled.Files
+            .Zip(enabled.Files.Where(f => f.RelativePath != table)
                 .OrderBy(f => f.Target, StringComparer.Ordinal)
                 .ThenBy(f => f.RelativePath, StringComparer.Ordinal)))
         {

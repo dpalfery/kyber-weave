@@ -65,6 +65,31 @@ public sealed record ArbiterEvent
     /// </summary>
     public bool ObservesReturns { get; init; } = true;
 
+    /// <summary>
+    /// The dispatch field that carries a sub-agent's model, when the serving harness lets the Arbiter
+    /// set it; null when it does not. The hook host copies it from the harness adapter so
+    /// <c>harness.model-override</c> reads the harness's declaration, not an assumption.
+    /// </summary>
+    public string? ModelOverrideField { get; init; }
+
+    /// <summary>
+    /// The model aliases the serving harness accepts on a sub-agent dispatch, when it lets the Arbiter set
+    /// one; null when the caller did not declare them, which skips the accepted-token check.
+    /// </summary>
+    public IReadOnlySet<string>? ModelOverrideAliases { get; init; }
+
+    /// <summary>
+    /// The model the caller asked the dispatch to run on, when the dispatch input names one. Source
+    /// <c>caller</c>: it is what the caller wrote, not what the harness rendered.
+    /// </summary>
+    public string? Model { get; init; }
+
+    /// <summary>
+    /// The model token the target agent is rendered with, as the harness reads it from the rendered
+    /// agent file. Source <c>rendered</c>.
+    /// </summary>
+    public string? RenderedModelToken { get; init; }
+
     /// <summary>The tool output, on post-dispatch (return) events.</summary>
     public string? ToolOutput { get; init; }
 
