@@ -1,5 +1,5 @@
 ---
-id: adr/0068-the-review-council-loops-until-approve-and-computes-its-verdict-from-seat-output
+id: adr/0069-the-review-council-loops-until-approve-and-computes-its-verdict-from-seat-output
 title: The review council loops until APPROVE and computes its verdict from seat output
 doc-type: adr
 status: current
@@ -14,7 +14,7 @@ code-refs:
   - CitedLineCheck
 ---
 
-# ADR 0068: The review council loops until APPROVE and computes its verdict from seat output
+# ADR 0069: The review council loops until APPROVE and computes its verdict from seat output
 
 ## Status
 

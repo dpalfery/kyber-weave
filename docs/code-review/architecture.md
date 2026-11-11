@@ -13,7 +13,7 @@ decided-by:
   - adr/0005-task-level-fast-review
   - adr/0053-kyber-arbiter-three-step-decision-gates
   - adr/0064-project-knowledge-lives-in-gates-and-standards-reached-through-tools
-  - adr/0068-the-review-council-loops-until-approve-and-computes-its-verdict-from-seat-output
+  - adr/0069-the-review-council-loops-until-approve-and-computes-its-verdict-from-seat-output
 code-refs:
   - VerdictEngine
   - GateRunner
