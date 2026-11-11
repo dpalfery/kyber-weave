@@ -610,6 +610,47 @@ internal sealed class RunStartProbe : IDisposable
         Git("remote", "set-url", "origin", Path.Combine(_temp.Path, "absent.git"));
     }
 
+    /// <summary>The file every CodeGraph stub call appends to: one line per call, the working directory then the arguments.</summary>
+    public string CodegraphCallLog => Path.Combine(_temp.Path, "codegraph-calls.log");
+
+    /// <summary>
+    ///     Replaces the CodeGraph stub with one that logs each call, then runs <paramref name="behaviour" />. A case
+    ///     uses it to make one verb fail and to read back the directory that verb ran in.
+    /// </summary>
+    public void ScriptCodegraph(string behaviour)
+    {
+        WriteCodegraph(
+            "#!/bin/sh\n"
+            + $"printf '%s|%s\\n' \"$(pwd -P)\" \"$*\" >> '{CodegraphCallLog}'\n"
+            + behaviour
+            + "\n");
+    }
+
+    /// <summary>
+    ///     Commits the host configuration and a docs folder, then pushes them. A worktree is cut from the remote, so an
+    ///     uncommitted file would not reach it, and the repository would look ungoverned from inside the worktree.
+    /// </summary>
+    public void PublishGovernance(string yaml)
+    {
+        WriteHostConfig(yaml);
+        Directory.CreateDirectory(Path.Combine(Root, "docs"));
+        File.WriteAllText(Path.Combine(Root, "docs", "README.md"), "# docs\n", Encoding.UTF8);
+        Git("add", "-A");
+        Git("commit", "-m", "govern the repository");
+        Git("push", "origin", "main");
+    }
+
+    /// <summary>
+    ///     Ignores a <c>.codegraph</c> folder in the checkout, as a real repository does, so an index on disk does not
+    ///     count as uncommitted work and push the run into a worktree.
+    /// </summary>
+    public void IgnoreCodegraphIndex()
+    {
+        string exclude = Path.Combine(Root, ".git", "info", "exclude");
+        Directory.CreateDirectory(Path.GetDirectoryName(exclude)!);
+        File.AppendAllText(exclude, ".codegraph/\n", Encoding.UTF8);
+    }
+
     private ProbeResult RunStartOn(string path, params string[] arguments)
     {
         List<string> argv = ["run", "start", .. arguments];
@@ -737,8 +778,14 @@ internal sealed class RunStartProbe : IDisposable
 
     private void WriteCodegraphStub()
     {
+        WriteCodegraph(CodegraphStub);
+    }
+
+    private void WriteCodegraph(string script)
+    {
         string path = Path.Combine(_stubBin, "codegraph");
-        File.WriteAllText(path, CodegraphStub, Encoding.UTF8);
+        // Encoding.UTF8 writes a byte-order mark, which hides the #! line and makes the kernel refuse to exec the stub.
+        File.WriteAllText(path, script, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 
         // The suite skips on Windows, so this only runs where the mode bits exist.
         if (OperatingSystem.IsWindows()) return;

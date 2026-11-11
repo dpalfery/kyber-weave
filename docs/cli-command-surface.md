@@ -363,6 +363,11 @@ kyber-weave run start --harness <token> --type <type> --slug <slug> \
    commit you are looking at" visible.
 10. Creates the branch with `--no-track`, in the checkout when it is clean and carries no other
     worktree, and in a worktree of its own otherwise.
+11. Prepares the CodeGraph index of the tree the branch landed in, when the repository has governed
+    docs: `codegraph init` when that tree has none, which is every new worktree, and `codegraph sync`
+    otherwise. A tree it cannot index is exit `1` with the remedy `kyber-weave doctor --ensure <tree>`;
+    the branch stays in place and needs no second `run start` once that command passes. With
+    `stop-on-tool-failure: false` the failure is a warning and the run is ready.
 
 **The branch and title shapes.** Both name the harness, because the diff does not:
 
@@ -403,6 +408,7 @@ stale entry with `git worktree prune` first.
 | `location` | `in-place` or `worktree`. |
 | `revision` | The commit the base resolved to, or `null` when it did not resolve. |
 | `resumed` | Whether this run continued an existing branch. |
+| `index` | The CodeGraph index of the tree the branch landed in: `created`, `ready` (synced), `not-governed` (no governed docs, so not checked), or `warning` (it could not be prepared and `stop-on-tool-failure` is `false`). A missing `codegraph` binary never reaches this key: the run has already ended with exit `3`. |
 | `versions.failing` | `--failing-version` as given, or `null`. |
 | `versions.head` | The nearest tag at `HEAD`, else its abbreviated commit. |
 | `versions.base` | The nearest tag at the base ref, else its abbreviated commit. |
