@@ -321,8 +321,8 @@ decision <id> score 0.82 profile general token claude-sonnet-5-5 delivered true 
 
 - `profile` is the semantic profile the target chose (`fast`, `general`, `deep-planning` and so on).
 - `token` is the model token the table names for that profile, or `none` when the profile has no token.
-- `delivered` is `true` when the Arbiter recorded no reason that blocks the write. It is not proof the
-  model ran. In `shadow`, `delivered` is always `false`.
+- `delivered` is `true` when the Claude adapter wrote the model field and no reason blocked the write. It is
+  not proof the model ran. In `shadow`, `delivered` is always `false`.
 - `RESULT:` is the worker's own report, paired from the ledger.
 
 A row appears only for a scored answer that carries a model block. The text report does not print the
@@ -331,23 +331,22 @@ A row appears only for a scored answer that carries a model block. The text repo
 
 ### What `delivered: true` does and does not mean
 
-`delivered: true` means the Arbiter wrote the model field onto the Claude `Agent` dispatch. It does
-not mean the model ran. Two settings can override it after the write:
+`delivered: true` means the Arbiter wrote the model field onto the Claude `Agent` dispatch, and the decision
+records it only after that write held. It does not mean the model ran. Two settings can override it after the write:
 
 - An installed mod's `agent.spawn` hook can replace the model.
 - The `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` environment variable forces a model on every sub-agent.
 
 Check the dispatch's own transcript if you need to know which model ran.
 
-### Known gaps in delivery
+### When a retarget is not written
 
-- `delivered` is recorded in `decisions.jsonl` before the adapter writes the model field. A write that
-  fails is visible only in the hook log, as a line beginning `model-write-failed`, with `delivered:
-  false`. The decision record still says `true`. Search the hook log when a retarget looks wrong.
-- A token that is neither an accepted alias nor a full Claude id of an accepted family is not written.
-  The hook log shows `model.reason: token-not-accepted`, but the decision record can still say `delivered: true`.
-- `arbiter tune` pairs decisions with the `RESULT:` line only. The `TASK_GATE:` outcome is not paired
-  yet.
+- A token that is neither an accepted alias nor a full Claude id of an accepted family is not written. The
+  decision records `delivered: false` with `model.reason: token-not-accepted`, and the dispatch runs as it
+  would with no model block.
+- A write that throws is recorded as `delivered: false` with `model.reason: model-write-failed`. The hook log
+  has a line beginning `model-write-failed`. The dispatch runs without the model field, and its routing header
+  is stripped. Check `decisions.jsonl` first, then the hook log, when a retarget looks wrong.
 
 ## Recording a harness defect
 

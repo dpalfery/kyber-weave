@@ -355,6 +355,7 @@ dispatch. The mode also controls the `KW-ARB-MODEL-001` doctor check.
 | `serve` call | Outcome labelled advisory | `source: serve` |
 | Invalid new configuration | **Known gap.** The config loader throws on an invalid `arbiter:` key, so the hook fails closed for the whole hook with `KW-ARB-HOOK-001`. The design intended to skip only the affected rule. | `validate` and `doctor` name `KW-ARB-CONFIG-012` to `-015` |
 | Model targets table missing or unreadable | The dispatch is kept on its model | `model.reason: model-targets-unreadable`; `KW-ARB-MODEL-001` at doctor time |
+| Claude model write throws | The dispatch runs with its routing header stripped and no model field | `delivered: false`, `model.reason: model-write-failed`; hook log line `model-write-failed` |
 | Store unwritable | The rule that needs the store answers `undecidable` | Run stores ship in phase 3 |
 
 ## Model targets
@@ -417,8 +418,8 @@ one rung up the ladder after a failed attempt. It only retargets. No model call 
 that `KW-ARB-DIFFICULTY-001` is a step-1 rule and asks the decision model its question as every step-1
 rule does.
 
-**Eligibility.** Only an implementation-class target reaches `delegate.model`: the `worker` and
-`publishing-worker` capability profiles, from `ArbiterSquadCatalog`. A planner classifies as
+**Eligibility.** Only an implementation-class target reaches `delegate.model`. `ArbiterSquadCatalog.TargetClassFor`
+maps the `worker`, `publishing-worker` and `documentation` capability profiles to `implementation`. A planner classifies as
 `delegate.planner`, a reviewer and every other caller as `investigate`, and an unidentified target as
 `not-squad`. So bug-crusher's dispatches to specialists are not retargeted in this version.
 
@@ -426,9 +427,12 @@ rule does.
 
 1. If `KW-ARB-LADDER-001` wants a retarget and `model-targeting.ladder.next` exists, its profile is the
    target (source `ladder`).
-2. Otherwise, if `KW-ARB-DIFFICULTY-001` wants a retarget, its answer `easy`, `standard` or `hard` maps
-   through `model-targeting.difficulty-profiles` (source `difficulty`).
-3. Otherwise there is no target and no `model` block.
+2. Otherwise, if the prior attempt failed, there is no target and no `model` block. A failed retry is never
+   sent to a cheaper profile by difficulty, so this holds even when `KW-ARB-DIFFICULTY-001` wants a retarget.
+3. Otherwise, if `KW-ARB-DIFFICULTY-001` wants a retarget, its answer `easy`, `standard` or `hard` maps
+   through `model-targeting.difficulty-profiles` (source `difficulty`). Difficulty therefore applies only on a
+   first attempt or after a pass.
+4. Otherwise there is no target and no `model` block.
 
 A rule wants a retarget when it is enforced to retarget, or when it is in shadow and its would-be effect
 is a retarget. Shadow therefore still records the choice the enforced mode would make.
@@ -443,17 +447,31 @@ delivery:
 | `no-token` | The targeted profile has no token in the table |
 | `same-as-rendered` | The token equals the one the target agent is already rendered with |
 | `unsupported-harness` | The harness declares no model override field |
+| `token-not-accepted` | The harness has an override field but would not write the token: it is neither an accepted alias nor a full `claude-<family>-...` id of an accepted family |
 | `shadow` | `model-targeting.mode` is `shadow`; the choice is recorded only |
 
-With no reason, the dispatch is delivered. The record's `delivered` is `true` exactly when no reason is set.
+With no reason, the hook path asks the Claude adapter to write the token before the decision is recorded.
+The record's `delivered` is `true` only when that write held. A write that throws is recorded afterwards as
+`delivered: false` with reason `model-write-failed`. See [Delivery](#model-targeting-phase-2) below.
 
 **Ladder.** `KW-ARB-LADDER-001` decides from the ledger alone, in this order: `returns-unobservable` when
 the harness cannot observe returns; `first-attempt` when there is no prior attempt or it passed;
 `profile-unrecorded` when the failed attempt's profile was not recorded; `top-of-ladder` when no rung
-is above it; otherwise `step-up`, the only answer that retargets. The ledger's pre events record
-`model-profile`, `model-token` and `model-source`. Two catalogued facts feed the rule from the same
-prior attempt: `model-targeting.prior-result` (`pass` or `fail`) and `model-targeting.prior-profile`.
-No model call is made.
+is above it; otherwise `step-up`, the only answer that retargets. Every answer except `step-up` keeps the model,
+and a failed prior attempt that does not step up also blocks the difficulty answer (see the profile choice above).
+Two catalogued facts feed the rule from the same prior attempt: `model-targeting.prior-result` (`pass` or `fail`)
+and `model-targeting.prior-profile`. No model call is made.
+
+The ledger's `delegate` pre events record `model-profile`, `model-token` and `model-source`. They are absent on
+other triggers. `model-source` is:
+
+- `caller` when the caller named a model. That model is the token, and no profile is recorded.
+- `rendered` when a rendered token is known: one already on the event, or else the token of the target's
+  entry in the model targets table. The profile and token come from that entry.
+- `unknown` otherwise, including an entry whose token is null.
+
+`same-as-rendered` is reachable: when the event carries no rendered token, the rendered token is the target
+agent's table entry, so a retarget to a profile whose token equals it is kept.
 
 **Delivery (Claude only).** The Claude adapter writes the model in the same `updatedInput` that strips
 the routing header from `prompt`. Every other tool-input field is copied unchanged. The written `model`
@@ -462,24 +480,22 @@ value follows the alias rule:
 - An accepted alias (`sonnet`, `opus`, `haiku`, `fable`) is written as it is.
 - A full id whose family is an accepted alias (`^claude-(haiku|sonnet|opus|fable)-`) writes the family
   alias, and the hook log records `model.reason: alias-derived (<token> -> <family>)`.
-- Any other token is not written. The hook log records `model.reason: token-not-accepted`, and the
-  dispatch runs on the harness's default model.
+- Any other token is not written. The decision records `delivered: false` with reason `token-not-accepted`,
+and no model field is written.
 
-The hook log then records `model: <alias>; delivered: true` on a write, or `model-write-failed: <message>;
-delivered: false` when the write throws. Other harnesses have no model override in this phase, so a
+On the hook path the decision asks the adapter to write before it records `delivered`, so the record says
+`true` only for a write that held. The hook log records `model: <alias>; delivered: true` on a write. When the
+write throws, the decision records `delivered: false` with reason `model-write-failed`, the hook log records
+`model-write-failed: <message>; delivered: false`, and the dispatch runs with its routing header stripped and no
+model field for every target. Other harnesses have no model override in this phase, so a
 retarget there records `unsupported-harness` and nothing is written.
 
 **`delivered` is a claim about the write, not the run.** Claude documents settings that override the
 requested model, such as an installed `agent.spawn` hook and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`. A
 `delivered: true` therefore shows the field was written, not that the model ran.
 
-**Known gaps.**
-
-- The decision record's `delivered` is set when the reason steps clear, before the adapter writes. A
-  failed write (`model-write-failed`) or a `token-not-accepted` token therefore still shows
-  `delivered: true` in `decisions.jsonl`. Only the hook log shows `delivered: false`.
-- The `model` block is written on the decision record. `arbiter tune` reads the profile and delivered
-  flag from it; see the [runbook](runbook.md#tuning-thresholds-arbiter-tune).
+The `model` block is written on the decision record. `arbiter tune` reads the profile and delivered
+flag from it; see the [runbook](runbook.md#tuning-thresholds-arbiter-tune).
 
 **Serve path.** The `serve` call (the MCP evaluation tool used when no hook fires) never writes a model.
 Its outcome is labelled advisory, and a would-be retarget is reported as one line:
