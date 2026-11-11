@@ -33,12 +33,14 @@ public sealed record GateReport(
 /// <param name="ChangedPaths">Repository-relative paths the change touches.</param>
 /// <param name="ChangedLines">Total added and removed lines.</param>
 /// <param name="PathLineCounts">Per-path added and removed lines, when the producer counted them.</param>
+/// <param name="Coverage">Per-lens outcome of the council, when the producer recorded it.</param>
 public sealed record FindingsReport(
     string Schema,
     IReadOnlyList<ReviewFinding> Findings,
     IReadOnlyList<string> ChangedPaths,
     int ChangedLines,
-    IReadOnlyDictionary<string, int>? PathLineCounts = null)
+    IReadOnlyDictionary<string, int>? PathLineCounts = null,
+    IReadOnlyList<LensCoverage>? Coverage = null)
 {
     /// <summary>The current findings format.</summary>
     public const string CurrentSchema = "kyber-weave.review-findings/v1";
@@ -52,6 +54,12 @@ public sealed record FindingsReport(
         return new ReviewScope(ChangedPaths, ChangedLines, PathLineCounts);
     }
 }
+
+/// <summary>One council lens's outcome in the findings document.</summary>
+/// <param name="Lens">The lens name, as listed in the review lens catalogue.</param>
+/// <param name="Outcome">How the lens ended, such as findings, no findings, or skipped.</param>
+/// <param name="Reason">Why the lens ended that way, when it did not produce findings.</param>
+public sealed record LensCoverage(string Lens, string Outcome, string? Reason);
 
 /// <summary>Reads and writes the review documents that pass between layers.</summary>
 /// <remarks>

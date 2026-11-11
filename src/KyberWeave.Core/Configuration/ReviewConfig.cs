@@ -226,6 +226,9 @@ public sealed class ReviewConfig
     /// </remarks>
     public int MaxConcurrentWorkers { get; init; } = 4;
 
+    /// <summary>Seconds the review council may run its gates before the deadline stops them.</summary>
+    public int CouncilDeadlineSeconds { get; init; } = 600;
+
     /// <summary>The rules the verdict engine may not override.</summary>
     public ReviewPolicy Policy { get; init; } = ReviewPolicy.ProductDefaults;
 

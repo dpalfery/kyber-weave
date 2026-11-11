@@ -90,4 +90,32 @@ public sealed class ReviewVerdictSettings : AnalysisSettings
     [CommandOption("--gates <PATH>")]
     [Description("Path to the gate report JSON produced by 'review gates'.")]
     public string? Gates { get; set; }
+
+    [CommandOption("--seats <DIR>")]
+    [Description("Folder of council seat output files, one <lens>.md per seat.")]
+    public string? Seats { get; set; }
+
+    [CommandOption("--drop <ID=REASON>")]
+    [Description("Drop the finding with this id, giving the reason. Repeat for several.")]
+    // reason: Spectre.Console.Cli binds repeated options to arrays.
+    [SuppressMessage(
+        "Performance", "CA1819:Properties should not return arrays",
+        Justification = "Spectre.Console.Cli binds repeated options to arrays.")]
+    public string[] Drop { get; set; } = [];
+
+    [CommandOption("--not-seated <LENS=REASON>")]
+    [Description("Record that this lens did not run, giving the reason. Repeat for several.")]
+    // reason: Spectre.Console.Cli binds repeated options to arrays.
+    [SuppressMessage(
+        "Performance", "CA1819:Properties should not return arrays",
+        Justification = "Spectre.Console.Cli binds repeated options to arrays.")]
+    public string[] NotSeated { get; set; } = [];
+
+    [CommandOption("--prior <DIR>")]
+    [Description("Folder of the previous council's seat output, used to re-check its findings.")]
+    public string? Prior { get; set; }
+
+    [CommandOption("--out <PATH>")]
+    [Description("Write the verdict to this path as JSON. Defaults to stdout only.")]
+    public string? Out { get; set; }
 }
