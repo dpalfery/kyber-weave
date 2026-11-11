@@ -1246,10 +1246,12 @@ export class Synthesizer {
    * arbitrary, exactly as worker threads finish files out of order), and the
    * results are assembled in submission order — the same contract
    * `parseFilesInOrder` gives upstream's install loop. Deep-equal to
-   * `synthesizeSerial` on the same input by construction, because
-   * `synthesizeCall` reads one call and the only shared state is the ordinal
-   * count, advanced in submission order; this method exists
-   * so that property stays tested rather than assumed (R1.5).
+   * `synthesizeSerial` on the same input when no twin-turn pair straddles a
+   * chunk boundary: `synthesizeCall` reads one call and the ordinal count is
+   * shared and advanced in submission order, but the twin-turn collapse runs
+   * per chunk, so a pair split across two chunks stays two records here and
+   * one on the serial path. This method exists so that property stays tested
+   * rather than assumed (R1.5).
    */
   async synthesizeParallel(parsedCalls: readonly ParsedProviderCall[]): Promise<CanonicalRecord[]> {
     const chunks = chunk(parsedCalls, this.chunkSize)
