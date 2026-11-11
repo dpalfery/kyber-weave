@@ -1,0 +1,543 @@
+using System.Text.Json;
+using KyberWeave.Cli.Commands.Review;
+using KyberWeave.Core.Review;
+using Spectre.Console.Cli;
+using Xunit;
+
+namespace KyberWeave.Tests;
+
+/// <summary>
+/// The <c>review verdict</c> command as a council runs it. Reviewers used to hand-build the findings JSON and
+/// seven of eight calls were refused as KW-REVIEW-023. The <c>--seats</c> folder takes each seat's own output
+/// instead, and the facts here pin the refusals, the repairs and the diagnostics that replace them.
+/// Runs in process against a temporary repository, with no child processes.
+/// </summary>
+public sealed class ReviewVerdictSeatsCommandTests : IDisposable
+{
+    private const string UnreadableInput = "KW-REVIEW-023";
+    private const string SeatUnparseable = "KW-REVIEW-040";
+    private const string LensUnaccounted = "KW-REVIEW-041";
+    private const string DropTarget = "KW-REVIEW-042";
+    private const string LineMoved = "KW-REVIEW-043";
+    private const string DiscoveryMissing = "KW-REVIEW-044";
+    private const string FindingsFlagUsed = "KW-REVIEW-045";
+    private const string AcceptedFindings = "KW-REVIEW-046";
+    private const string IncompleteFinding = "KW-REVIEW-001";
+
+    private static readonly string[] DefaultTrailers =
+    [
+        "Discovery: codegraph 2, docs 0, direct reads 0",
+        "REVIEW.md sections checked: [Ground rules, §3]"
+    ];
+
+    private readonly TempDirectory _temp = new();
+    private readonly string _repo;
+    private readonly string _seats;
+
+    public ReviewVerdictSeatsCommandTests()
+    {
+        _repo = Path.Combine(_temp.Path, "repo");
+        Directory.CreateDirectory(Path.Combine(_repo, ".kyber-weave"));
+        File.WriteAllText(
+            Path.Combine(_repo, ".kyber-weave", "kyber-weave.yml"),
+            "ontology:\n  docs-root: docs\nreview:\n  policy:\n    strictness: balanced\n");
+
+        _seats = Path.Combine(_temp.Path, "seats");
+        Directory.CreateDirectory(_seats);
+    }
+
+    /// <summary>Deletes the temporary repository and seat folders.</summary>
+    public void Dispose()
+    {
+        _temp.Dispose();
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // The four reproductions of today's KW-REVIEW-023 failures. These pass on the current code.
+    // -----------------------------------------------------------------------------------------
+
+    /// <summary>Reproduces cause (a): a findings object with no schema, changedPaths or changedLines.</summary>
+    [Fact]
+    public void FindingsWithoutSchemaOrChangedPathsIsRefusedAsUnreadable()
+    {
+        string findings = WriteFile("findings.json", "{\"findings\": []}");
+
+        CapturedConsoleExecution<int> run = Verdict("--findings", findings);
+
+        Assert.Equal(1, run.Result);
+        Assert.Contains(UnreadableInput, run.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>Reproduces cause (b): a bare JSON array where the document object is required.</summary>
+    [Fact]
+    public void ABareFindingsArrayIsRefusedAsUnreadable()
+    {
+        string findings = WriteFile("findings.json", "[]");
+
+        CapturedConsoleExecution<int> run = Verdict("--findings", findings);
+
+        Assert.Equal(1, run.Result);
+        Assert.Contains(UnreadableInput, run.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>Reproduces cause (c): a finding with no lens, which the engine cannot attribute.</summary>
+    [Fact]
+    public void AFindingWithNoLensIsRefusedAsUnreadable()
+    {
+        string findings = WriteFile("findings.json", """
+            {
+              "schema": "kyber-weave.review-findings/v1",
+              "findings": [
+                {
+                  "id": "correctness/off-by-one",
+                  "severity": "major",
+                  "confidence": 9,
+                  "file": "src/Foo.cs",
+                  "line": 12
+                }
+              ],
+              "changedPaths": ["src/Foo.cs"],
+              "changedLines": 10
+            }
+            """);
+
+        CapturedConsoleExecution<int> run = Verdict("--findings", findings);
+
+        Assert.Equal(1, run.Result);
+        Assert.Contains(UnreadableInput, run.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>Reproduces cause (d): a <c>--findings</c> path that does not exist.</summary>
+    [Fact]
+    public void AMissingFindingsPathIsRefusedAsUnreadable()
+    {
+        string findings = Path.Combine(_temp.Path, "absent.json");
+
+        CapturedConsoleExecution<int> run = Verdict("--findings", findings);
+
+        Assert.Equal(1, run.Result);
+        Assert.Contains(UnreadableInput, run.Output, StringComparison.Ordinal);
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // The seat folder: one <lens>.md per seat, parsed by SeatOutputParser.
+    // -----------------------------------------------------------------------------------------
+
+    [Fact]
+    public void TheSameFindingThroughTheSeatFolderIsAccepted()
+    {
+        WriteSeat("correctness", FindingSeat());
+        string report = Path.Combine(_temp.Path, "report.json");
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, .. NotSeatedExcept("correctness"), "--out", report]);
+
+        Assert.Equal(0, run.Result);
+        Assert.Equal(["correctness/off-by-one"], ReadFindingIds(report));
+    }
+
+    /// <summary>
+    /// Cause (c) on the legacy path: the seat wrote <c>failure_scenario</c>, which the Web JSON reader does not bind.
+    /// The finding must reach the engine with its failure scenario, not be dropped as incomplete.
+    /// </summary>
+    [Fact]
+    public void AFindingsFileWithFailureScenarioKeepsTheFinding()
+    {
+        string findings = WriteFile("findings.json", """
+            {
+              "schema": "kyber-weave.review-findings/v1",
+              "findings": [
+                {
+                  "id": "correctness/off-by-one",
+                  "lens": "correctness",
+                  "severity": "major",
+                  "confidence": 9,
+                  "file": "src/Foo.cs",
+                  "line": 12,
+                  "excerpt": "if (i < count)",
+                  "claim": "The loop bound excludes the final element.",
+                  "evidence": "src/Foo.cs:12",
+                  "failure_scenario": "The last element is never processed.",
+                  "suggestion": "Use <= or count + 1."
+                }
+              ],
+              "changedPaths": ["src/Foo.cs"],
+              "changedLines": 10
+            }
+            """);
+
+        CapturedConsoleExecution<int> run = Verdict("--findings", findings);
+
+        Assert.DoesNotContain(IncompleteFinding, run.Output, StringComparison.Ordinal);
+        Assert.Contains("1 finding(s) accepted", run.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UsingTheFindingsOptionEmitsADeprecationWarning()
+    {
+        string findings = WriteFile("findings.json", """
+            {
+              "schema": "kyber-weave.review-findings/v1",
+              "findings": [],
+              "changedPaths": [],
+              "changedLines": 0
+            }
+            """);
+
+        CapturedConsoleExecution<int> run = Verdict("--findings", findings);
+
+        Assert.Contains(FindingsFlagUsed, run.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ASeatFileThatCannotBeParsedIsRefusedNamingTheFile()
+    {
+        WriteSeat("correctness", "```yaml\n- id: [unclosed\n  lens: correctness\n```\n");
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(1, run.Result);
+        Assert.Contains(SeatUnparseable, run.Output, StringComparison.Ordinal);
+        Assert.Contains("correctness.md", run.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ACatalogueLensWithNoSeatFileOrReasonIsRefusedNamingTheLens()
+    {
+        WriteSeat("correctness", NoFindingsSeat("correctness"));
+
+        CapturedConsoleExecution<int> run = Verdict("--seats", _seats);
+
+        Assert.Equal(1, run.Result);
+        Assert.Contains(LensUnaccounted, run.Output, StringComparison.Ordinal);
+        Assert.Contains("security", run.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// <c>--not-seated</c> is the honest record that a lens did not run. The verdict passes on it and the
+    /// reason is printed, so a reader can see that the lens was accounted for and why it has no seat.
+    /// </summary>
+    [Fact]
+    public void ANotSeatedLensPassesAndItsReasonIsReported()
+    {
+        WriteSeat("correctness", NoFindingsSeat("correctness"));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.Contains(LensUnaccounted, run.Output, StringComparison.Ordinal);
+        Assert.Contains("not run in this test", run.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A lens that an earlier council covered and that this run did not re-seat is counted as covered when the
+    /// previous council's findings document lists it in its coverage.
+    /// </summary>
+    [Fact]
+    public void APriorCouncilThatCoveredALensCountsItAsCovered()
+    {
+        string prior = Path.Combine(_temp.Path, "prior");
+        Directory.CreateDirectory(prior);
+        File.WriteAllText(Path.Combine(prior, "findings.json"), """
+            {
+              "schema": "kyber-weave.review-findings/v1",
+              "findings": [],
+              "changedPaths": [],
+              "changedLines": 0,
+              "coverage": [ { "lens": "security", "outcome": "noFindings", "reason": null } ]
+            }
+            """);
+        WriteSeat("correctness", NoFindingsSeat("correctness"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--prior", prior, .. NotSeatedExcept("correctness", "security")]);
+
+        Assert.Equal(0, run.Result);
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // --drop removes a finding only with a stated reason; no option changes a severity.
+    // -----------------------------------------------------------------------------------------
+
+    [Fact]
+    public void DropRemovesTheFindingAndStatesItsReason()
+    {
+        WriteSeat("correctness", FindingSeat());
+        string report = Path.Combine(_temp.Path, "report.json");
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--drop", "correctness/off-by-one=duplicate of another finding", "--out", report,
+                .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.Contains(DropTarget, run.Output, StringComparison.Ordinal);
+        Assert.Contains("duplicate of another finding", run.Output, StringComparison.Ordinal);
+        Assert.Empty(ReadFindingIds(report));
+    }
+
+    [Fact]
+    public void DropNamingNoFindingIsRefused()
+    {
+        WriteSeat("correctness", FindingSeat());
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--drop", "correctness/missing=no such finding", .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(1, run.Result);
+        Assert.Contains(DropTarget, run.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NoOptionChangesTheSeverityASeatGave()
+    {
+        WriteSeat("correctness", FindingSeat(severity: "major"));
+        string report = Path.Combine(_temp.Path, "report.json");
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, "--out", report, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(report));
+        JsonElement finding = document.RootElement.GetProperty("findings")[0];
+        Assert.Equal("major", finding.GetProperty("severity").GetString());
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // A line the seat gave that does not exist in the file is repaired by its excerpt, or dropped as a warning.
+    // -----------------------------------------------------------------------------------------
+
+    [Fact]
+    public void ALineBeyondTheFileEndMovesToTheUniqueLineHoldingTheExcerpt()
+    {
+        WriteSource("public int Total(int[] items)\n{\n    int total = 0;\n    return total;\n}\n");
+        WriteSeat("correctness", FindingSeat(line: 99, excerpt: "    return total;"));
+        string report = Path.Combine(_temp.Path, "report.json");
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, "--out", report, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.Contains(LineMoved, run.Output, StringComparison.Ordinal);
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(report));
+        Assert.Equal(4, document.RootElement.GetProperty("findings")[0].GetProperty("line").GetInt32());
+    }
+
+    [Fact]
+    public void ALineBeyondTheFileEndWithNoUniqueMatchIsDroppedAsAWarning()
+    {
+        WriteSource("int A()\n{\n    return total;\n}\nint B()\n{\n    return total;\n}\n");
+        WriteSeat("correctness", FindingSeat(line: 99, excerpt: "    return total;"));
+        string report = Path.Combine(_temp.Path, "report.json");
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, "--out", report, .. NotSeatedExcept("correctness")]);
+
+        Assert.Contains(LineMoved, run.Output, StringComparison.Ordinal);
+        Assert.Contains("warning", run.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(ReadFindingIds(report));
+    }
+
+    [Fact]
+    public void ALineInsideTheFileIsLeftWhereItIs()
+    {
+        WriteSource("public int Total(int[] items)\n{\n    int total = 0;\n    return total;\n}\n");
+        WriteSeat("correctness", FindingSeat(line: 3, excerpt: "    return total;"));
+        string report = Path.Combine(_temp.Path, "report.json");
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, "--out", report, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.DoesNotContain(LineMoved, run.Output, StringComparison.Ordinal);
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(report));
+        Assert.Equal(3, document.RootElement.GetProperty("findings")[0].GetProperty("line").GetInt32());
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Discovery evidence: a seat that read files directly without saying why gets a warning, never a refusal.
+    // -----------------------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("Discovery: codegraph 0, docs 0, direct reads 3")]
+    public void AFindingsSeatWithoutIndexEvidenceWarnsAndKeepsTheVerdict(string discoveryLine)
+    {
+        string[] trailers = discoveryLine.Length == 0
+            ? ["REVIEW.md sections checked: [Ground rules, §3]"]
+            : [discoveryLine, "REVIEW.md sections checked: [Ground rules, §3]"];
+        WriteSeat("correctness", FindingSeat(trailers: trailers));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.Contains(DiscoveryMissing, run.Output, StringComparison.Ordinal);
+        Assert.Contains("warning", run.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void AFindingsSeatWithIndexEvidenceDoesNotWarn()
+    {
+        WriteSeat("correctness", FindingSeat());
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.DoesNotContain(DiscoveryMissing, run.Output, StringComparison.Ordinal);
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Accepted findings are listed, unless a blocking gate already failed.
+    // -----------------------------------------------------------------------------------------
+
+    [Fact]
+    public void TheAcceptedCriticalAndMajorIdsAreListedWhenNoBlockingGateFailed()
+    {
+        WriteSeat("correctness", FindingSeat(severity: "critical"));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Contains(AcceptedFindings, run.Output, StringComparison.Ordinal);
+        Assert.Contains("correctness/off-by-one", run.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheAcceptedListIsAbsentWhenABlockingGateFailed()
+    {
+        WriteSeat("correctness", FindingSeat(severity: "critical"));
+        string gates = WriteFile("gates.json", ReviewJson.Write(new GateReport(
+            GateReport.CurrentSchema,
+            [new GateResult("build", true, 1, "2 errors")])));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--gates", gates, .. NotSeatedExcept("correctness")]);
+
+        Assert.DoesNotContain(AcceptedFindings, run.Output, StringComparison.Ordinal);
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // The findings document the verdict writes.
+    // -----------------------------------------------------------------------------------------
+
+    [Fact]
+    public void OutWritesAFindingsReportWithTheSchemaAndACoverageEntryPerLens()
+    {
+        WriteSeat("correctness", NoFindingsSeat("correctness"));
+        string report = Path.Combine(_temp.Path, "report.json");
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, "--out", report, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(report));
+        Assert.Equal(FindingsReport.CurrentSchema, document.RootElement.GetProperty("schema").GetString());
+        string[] lenses = document.RootElement.GetProperty("coverage").EnumerateArray()
+            .Select(entry => entry.GetProperty("lens").GetString() ?? string.Empty)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        Assert.Equal(ReviewLensCatalogue.Names.Order(StringComparer.Ordinal), lenses);
+    }
+
+    /// <summary>
+    /// <c>reviewer.md</c> is the seat that reviews the findings themselves. It is not a catalogue lens, so it
+    /// is accepted under its own name rather than refused as an unknown seat.
+    /// </summary>
+    [Fact]
+    public void AReviewerSeatFileIsAcceptedWithTheReviewerLens()
+    {
+        WriteSeat("reviewer", FindingSeat(lens: "reviewer", id: "reviewer/unclear-contract"));
+        string report = Path.Combine(_temp.Path, "report.json");
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, "--out", report, .. NotSeatedExcept()]);
+
+        Assert.Equal(0, run.Result);
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(report));
+        JsonElement finding = document.RootElement.GetProperty("findings")[0];
+        Assert.Equal("reviewer", finding.GetProperty("lens").GetString());
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Harness.
+    // -----------------------------------------------------------------------------------------
+
+    private CapturedConsoleExecution<int> Verdict(params string[] options)
+    {
+        List<string> arguments = ["review", "verdict", _repo];
+        arguments.AddRange(options);
+        arguments.AddRange(["--format", "json"]);
+        return ProcessConsoleCapture.Run(() => CreateApp().Run([.. arguments]));
+    }
+
+    /// <summary>A <c>--not-seated</c> option for every catalogue lens except the named ones.</summary>
+    private static string[] NotSeatedExcept(params string[] seated)
+    {
+        return [.. ReviewLensCatalogue.Names
+            .Where(name => !seated.Contains(name, StringComparer.Ordinal))
+            .SelectMany(name => new[] { "--not-seated", $"{name}=not run in this test" })];
+    }
+
+    private static string FindingSeat(
+        string lens = "correctness",
+        string id = "correctness/off-by-one",
+        string severity = "major",
+        int line = 12,
+        string excerpt = "if (i < count)",
+        string[]? trailers = null)
+    {
+        List<string> lines =
+        [
+            "```yaml",
+            $"- id: {id}",
+            $"  lens: {lens}",
+            $"  severity: {severity}",
+            "  confidence: 9",
+            "  file: src/Foo.cs",
+            $"  line: {line}",
+            $"  excerpt: \"{excerpt}\"",
+            "  claim: The loop bound excludes the final element.",
+            "  evidence: src/Foo.cs",
+            "  failure_scenario: The last element is never processed.",
+            "  suggestion: Use <= or count + 1.",
+            "```"
+        ];
+        lines.AddRange(trailers ?? DefaultTrailers);
+        return string.Join('\n', lines) + "\n";
+    }
+
+    private static string NoFindingsSeat(string lens) =>
+        $"NO FINDINGS: I checked the {lens} lens and found no defect.\nREVIEW.md sections checked: [Ground rules]\n";
+
+    private void WriteSeat(string lens, string content) => WriteFile($"seats/{lens}.md", content);
+
+    private void WriteSource(string content)
+    {
+        Directory.CreateDirectory(Path.Combine(_repo, "src"));
+        File.WriteAllText(Path.Combine(_repo, "src", "Foo.cs"), content);
+    }
+
+    private string WriteFile(string relativePath, string content)
+    {
+        string path = Path.Combine(_temp.Path, relativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, content);
+        return path;
+    }
+
+    private static string[] ReadFindingIds(string path)
+    {
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
+        return document.RootElement.GetProperty("findings").EnumerateArray()
+            .Select(finding => finding.GetProperty("id").GetString() ?? string.Empty)
+            .ToArray();
+    }
+
+    private static CommandApp CreateApp()
+    {
+        CommandApp app = new();
+        app.Configure(config =>
+        {
+            config.SetApplicationName("kyber-weave");
+            config.AddBranch("review", review =>
+            {
+                review.SetDescription("Run the declared review gates and compute the review verdict.");
+                review.AddCommand<ReviewVerdictCommand>("verdict")
+                    .WithDescription(ReviewVerdictCommand.Description);
+            });
+        });
+        return app;
+    }
+}
