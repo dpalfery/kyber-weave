@@ -51,6 +51,10 @@ someone deleting them later.
 
 ## Test the decision, not the implementation
 
+Parsers fail closed (KW-STD-INPUT-001). Code that parses or converts a value from outside the process refuses any input it does not recognise, with an error or diagnostic that names the input; it never silently drops, defaults or coerces it. The one exception is an unknown field in a format whose specification says to ignore unknown fields, and the code names that specification where it skips the field.
+
+A test of such code has one case for every column after Source in the input-site table that the correctness lens of the code-review skill defines, and asserts the refusal.
+
 The tests that have earned their keep pin behaviour someone would otherwise "simplify"
 back into a defect — that `--force` does not reach operator state, that an unclosed marker
 is reported rather than overwritten.
