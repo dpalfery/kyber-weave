@@ -118,7 +118,9 @@ public sealed class ArbiterTuneCommand : Command<ArbiterSettings>
         List<double> parsed = [];
         foreach (string part in text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
         {
+            // NaN compares false against both bounds, so it needs its own finiteness check.
             if (!double.TryParse(part, NumberStyles.Float, CultureInfo.InvariantCulture, out double value)
+                || !double.IsFinite(value)
                 || value < 0
                 || value > 1)
             {

@@ -490,11 +490,13 @@ public sealed class ArbiterEvaluator
         foreach (Question question in plan.Questions)
         {
             string answer = AnswerFor(question, call);
-            string effect = MapOrNotEvaluated(question.Rule, answer, plan.Family);
+            string mapped = MapOrNotEvaluated(question.Rule, answer, plan.Family);
             ArbiterStep1Score? score = call.Scores is not null && call.Scores.TryGetValue(question.Rule.Id, out ArbiterStep1Score? found)
                 ? found
                 : null;
-            rules.Add(Step1Rule(question, answer, effect, score, shadow: null, wouldEffect: null, evidence: null));
+            (string effect, bool? shadow, string? wouldEffect) = ShadowState(
+                question.Rule, mapped, ArbiterTriggerFamilies.NeutralEffect(plan.Family));
+            rules.Add(Step1Rule(question, answer, effect, score, shadow, wouldEffect, evidence: null));
             if (!string.Equals(answer, ArbiterStep1BatchResult.NotEvaluated, StringComparison.Ordinal))
             {
                 effects.Add(effect);
@@ -580,7 +582,9 @@ public sealed class ArbiterEvaluator
         foreach (ArbiterRuleAnswer answer in step0.RuleAnswers)
         {
             rules.Add(new ArbiterDecisionRule(
-                answer.RuleId, 0, answer.Answer, null, null, null, answer.Effect, [], null));
+                answer.RuleId, 0, answer.Answer, null, null, null, answer.Effect, [], null,
+                shadow: answer.Shadow ? true : null,
+                wouldEffect: answer.WouldEffect));
         }
 
         return rules;
@@ -608,6 +612,16 @@ public sealed class ArbiterEvaluator
             shadow: shadow,
             wouldEffect: wouldEffect,
             candidate: question.Candidate);
+
+    /// <summary>
+    /// A rule's shadow state for one answer: a shadow rule records and contributes the neutral effect,
+    /// and keeps the mapped effect as the would-be effect. Shared by the primary and secondary paths.
+    /// </summary>
+    private static (string Effect, bool? Shadow, string? WouldEffect) ShadowState(
+        ArbiterRule rule,
+        string mapped,
+        string neutral) =>
+        rule.Shadow ? (neutral, true, mapped) : (mapped, null, null);
 
     private static string MapOrNotEvaluated(ArbiterRule rule, string answer, ArbiterTriggerFamily family) =>
         string.Equals(answer, ArbiterStep1BatchResult.NotEvaluated, StringComparison.Ordinal)

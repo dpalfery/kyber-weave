@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Text;
 using KyberWeave.Core.Processes;
 
 namespace KyberWeave.Core.Arbiter.Facts;
@@ -295,17 +296,15 @@ public static class GitFacts
                 return null;
             }
 
-            string[] lines;
-            try
-            {
-                lines = File.ReadAllLines(Path.Combine(root, path));
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+            // An untracked file that is too large, binary, or unreadable makes the whole measurement absent:
+            // a partial measurement would judge a partial change as the whole.
+            List<string>? lines = ReadUntrackedLines(Path.Combine(root, path));
+            if (lines is null)
             {
                 return null;
             }
 
-            hunks.Add(new MeasuredHunk(new ChangedHunk(path, 0, 0, 1, lines.Length), lines));
+            hunks.Add(new MeasuredHunk(new ChangedHunk(path, 0, 0, 1, lines.Count), lines));
         }
 
         if (hunks.Count == 0 && renameOnly.Count == 0)
@@ -631,6 +630,62 @@ public static class GitFacts
             .Select(hunk => new MeasuredHunk(hunk.Hunk, NetChangedLines(hunk.Removed, hunk.Added)))
             .ToList();
         return (hunks, renameOnly);
+    }
+
+    /// <summary>The largest untracked file read for its lines; a bigger one is a generated or vendored blob.</summary>
+    private const long UntrackedFileByteLimit = 1024 * 1024;
+
+    /// <summary>
+    /// Reads an untracked file's lines, or returns null when it cannot be measured: over the byte limit,
+    /// binary (contains a NUL byte), or unreadable. Never throws.
+    /// </summary>
+    /// <remarks>
+    /// The size is checked before any read so a huge file is never loaded. The read itself is bounded
+    /// too, because a file can grow between the size check and the read.
+    /// </remarks>
+    private static List<string>? ReadUntrackedLines(string fullPath)
+    {
+        try
+        {
+            if (new FileInfo(fullPath).Length > UntrackedFileByteLimit)
+            {
+                return null;
+            }
+
+            using FileStream stream = new(fullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using MemoryStream bytes = new();
+            byte[] chunk = new byte[81920];
+            int read;
+            while ((read = stream.Read(chunk, 0, chunk.Length)) > 0)
+            {
+                if (bytes.Length + read > UntrackedFileByteLimit)
+                {
+                    return null;
+                }
+
+                bytes.Write(chunk, 0, read);
+            }
+
+            if (Array.IndexOf(bytes.GetBuffer(), (byte)0, 0, (int)bytes.Length) >= 0)
+            {
+                return null;
+            }
+
+            bytes.Position = 0;
+            List<string> lines = [];
+            using StreamReader reader = new(bytes, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, leaveOpen: true);
+            while (reader.ReadLine() is { } line)
+            {
+                lines.Add(line);
+            }
+
+            return lines;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
+            or NotSupportedException or OutOfMemoryException)
+        {
+            return null;
+        }
     }
 
     /// <summary>

@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace KyberWeave.Core.Arbiter.Facts;
 
 /// <summary>
@@ -14,9 +16,16 @@ namespace KyberWeave.Core.Arbiter.Facts;
 /// </remarks>
 public static class CommentSyntax
 {
+    // A directive line reads as a comment to the table but is an instruction to a tool, so it is code.
+    private static readonly Regex ShebangDirective = new(@"^#!", RegexOptions.CultureInvariant);
+    private static readonly Regex PythonDirective = new(@"^(#!|#\s*(-\*-\s*)?coding[:=])", RegexOptions.CultureInvariant);
+    private static readonly Regex GoDirective = new(@"^(//go:|// \+build)", RegexOptions.CultureInvariant);
+
     private static readonly CommentStyle CStyle = new(["//"], "/*", "*/");
-    private static readonly CommentStyle HashStyle = new(["#"], null, null);
-    private static readonly CommentStyle PowerShellStyle = new(["#"], "<#", "#>");
+    private static readonly CommentStyle GoStyle = new(["//"], "/*", "*/", GoDirective);
+    private static readonly CommentStyle HashStyle = new(["#"], null, null, ShebangDirective);
+    private static readonly CommentStyle PythonStyle = new(["#"], null, null, PythonDirective);
+    private static readonly CommentStyle PowerShellStyle = new(["#"], "<#", "#>", ShebangDirective);
     private static readonly CommentStyle DashStyle = new(["--"], null, null);
     private static readonly CommentStyle MarkupStyle = new([], "<!--", "-->");
 
@@ -28,7 +37,7 @@ public static class CommentSyntax
             [".kt"] = CStyle,
             [".kts"] = CStyle,
             [".swift"] = CStyle,
-            [".go"] = CStyle,
+            [".go"] = GoStyle,
             [".rs"] = CStyle,
             [".ts"] = CStyle,
             [".tsx"] = CStyle,
@@ -44,7 +53,7 @@ public static class CommentSyntax
             [".hpp"] = CStyle,
             [".scala"] = CStyle,
             [".dart"] = CStyle,
-            [".py"] = HashStyle,
+            [".py"] = PythonStyle,
             [".sh"] = HashStyle,
             [".bash"] = HashStyle,
             [".yml"] = HashStyle,
@@ -119,6 +128,11 @@ public static class CommentSyntax
                     continue;
                 }
 
+                if (style.DirectivePattern is not null && style.DirectivePattern.IsMatch(rest))
+                {
+                    return false;
+                }
+
                 if (style.LinePrefixes.Any(prefix => rest.StartsWith(prefix, StringComparison.Ordinal)))
                 {
                     break;
@@ -144,5 +158,13 @@ public static class CommentSyntax
     /// <param name="LinePrefixes">Tokens that open a comment running to the end of the line.</param>
     /// <param name="BlockOpen">The token that opens a block comment, when the language has one.</param>
     /// <param name="BlockClose">The token that closes a block comment, when the language has one.</param>
-    private sealed record CommentStyle(IReadOnlyList<string> LinePrefixes, string? BlockOpen, string? BlockClose);
+    /// <param name="DirectivePattern">
+    /// Lines the compiler, interpreter or tool reads as instructions (a shebang, a Go <c>//go:</c>
+    /// directive, a Python coding cookie). A match is code even though the syntax calls it a comment.
+    /// </param>
+    private sealed record CommentStyle(
+        IReadOnlyList<string> LinePrefixes,
+        string? BlockOpen,
+        string? BlockClose,
+        Regex? DirectivePattern = null);
 }

@@ -136,6 +136,19 @@ public static class ArbiterTriggerFamilies
         _ => new HashSet<string>(StringComparer.Ordinal),
     };
 
+    /// <summary>
+    /// The effect a shadow rule contributes in this family: the one that lets the trigger proceed
+    /// without gating. Gate runs the gate, so it does not skip; shortcut spawns, so it does not answer.
+    /// </summary>
+    public static string NeutralEffect(ArbiterTriggerFamily family) => family switch
+    {
+        ArbiterTriggerFamily.Gate => Rules.RuleEffects.Applies,
+        ArbiterTriggerFamily.Shortcut => Rules.RuleEffects.Spawn,
+        ArbiterTriggerFamily.ModelTarget => Rules.RuleEffects.Keep,
+        ArbiterTriggerFamily.Advice => Rules.RuleEffects.Keep,
+        _ => Rules.RuleEffects.Allow,
+    };
+
     /// <summary>The fixed effect an undecidable answer maps to.</summary>
     public static string UndecidableEffect(ArbiterTriggerFamily family) => family switch
     {

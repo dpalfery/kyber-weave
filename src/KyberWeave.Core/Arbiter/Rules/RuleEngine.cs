@@ -64,8 +64,13 @@ public static class RuleEngine
             }
 
             string answer = Decide(rule, facts);
-            string effect = MapAnswerToEffect(rule, answer, family);
-            answers.Add(new ArbiterRuleAnswer(rule.Id, answer, 0, effect));
+            string mapped = MapAnswerToEffect(rule, answer, family);
+            // A shadow rule is log-only: it contributes the family's neutral effect, and the effect it
+            // would have had stays on the answer. Its neutral effect can never be a red flag, so it
+            // never short-circuits step 1.
+            string effect = rule.Shadow ? ArbiterTriggerFamilies.NeutralEffect(family) : mapped;
+            answers.Add(new ArbiterRuleAnswer(
+                rule.Id, answer, 0, effect, rule.Shadow, rule.Shadow ? mapped : null));
             effects.Add(effect);
         }
 
