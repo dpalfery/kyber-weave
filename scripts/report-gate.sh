@@ -74,6 +74,8 @@ while [ $# -gt 0 ]; do
     --timeout)
       [ $# -ge 2 ] || usage
       timeout="$2"
+      # An empty value is refused here, or `--timeout "$UNSET"` would read as no limit at all.
+      [ -n "${timeout}" ] || usage
       shift 2
       ;;
     --)

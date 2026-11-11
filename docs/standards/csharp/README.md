@@ -165,7 +165,7 @@ The tool logs its finish line after a failed cleanup too, so a log holding `Fail
 The profile rewrites the whole of each included file, not only the changed lines, so revert edits to members you did not touch.
 
 ```bash
-mkdir -p .agent_scratchpad/<task>
+mkdir -p ".agent_scratchpad/<task>"
 scripts/report-gate.sh --report "$PWD/.agent_scratchpad/<task>/cleanupcode.log" --contains "Close solution instance" --grace 5 --timeout 300 -- dotnet jb cleanupcode KyberWeave.sln --profile=KyberWeave --include="<changed files>" --no-build "--LogFile=$PWD/.agent_scratchpad/<task>/cleanupcode.log" --LogLevel=VERBOSE \
   && ! grep -q "Failed to run cleanup" "$PWD/.agent_scratchpad/<task>/cleanupcode.log"
 ```

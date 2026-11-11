@@ -137,7 +137,7 @@ public sealed class ReportGateScriptTests : IDisposable
 
         ProcessResult result = RunContainsScript(
             $"echo $$ > pid; {{ echo before; echo '<Report>{Closing}'; echo after; }} > {Report}; " +
-            "while true; do echo tick >> log; sleep 0.2; done",
+            "while true; do echo tick >> report.xml; sleep 0.2; done",
             grace: 1);
 
         Assert.Equal(0, result.ExitCode);
