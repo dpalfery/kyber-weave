@@ -66,13 +66,16 @@ public sealed class ArbiterSectionAndCommentRuleTests
         Assert.True(comment.Shadow);
     }
 
-    /// <summary>The fail-safe answer is real, so it must be an answer the rule can give and the effects must cover it.</summary>
+    /// <summary>
+    /// The fail-safe answer is real. It must map to the neutral <c>keep</c> effect, not to escalate or deny, so a
+    /// comment the rule cannot classify leaves the decision where the other rules put it.
+    /// </summary>
     [Fact]
-    public void TheCommentRuleHasAnEffectForTheFailSafeAnswer()
+    public void TheCommentRuleKeepsTheDispatchForTheFailSafeRealAnswer()
     {
         ArbiterRule comment = Shipped(CommentRule);
 
-        Assert.Contains("real", comment.Effects.Keys, StringComparer.Ordinal);
+        Assert.Equal(RuleEffects.Keep, comment.Effects["real"]);
     }
 
     /// <summary>The two rules are appended after the existing ids, so no shipped id is renumbered or moved.</summary>
