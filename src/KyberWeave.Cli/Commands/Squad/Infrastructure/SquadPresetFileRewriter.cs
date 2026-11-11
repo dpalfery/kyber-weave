@@ -1,6 +1,9 @@
 using System.Text;
+using System.Text.Json;
+using KyberWeave.Core.Arbiter.ModelTargets;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
+using KyberWeave.Core.Squad.Rendering;
 
 namespace KyberWeave.Cli.Commands.Squad.Infrastructure;
 
@@ -38,13 +41,19 @@ internal static class SquadPresetFileRewriter
     /// <param name="profiles">The effective model profiles (preset-merged for use, bundled for clear).</param>
     /// <param name="agentProfiles">The canonical agent name to profile category map.</param>
     /// <param name="readContent">Reads a receipt file's current bytes, or null when the file is missing.</param>
+    /// <param name="preset">The preset the table names, or null to keep the table's recorded preset.</param>
     /// <returns>The rewritten files and the diff rows for files whose model changed.</returns>
+    /// <remarks>
+    /// The model targets table is a receipt file like any agent file, so it is rewritten in this same
+    /// pass: the caller writes one result, and the table and the agents change together or not at all.
+    /// </remarks>
     public static SquadPresetRewriteResult Rewrite(
         IReadOnlyList<SquadOwnedFile> receiptFiles,
         IReadOnlySet<string> targetTokens,
         SquadModelProfiles profiles,
         IReadOnlyDictionary<string, string> agentProfiles,
-        Func<SquadOwnedFile, byte[]?> readContent)
+        Func<SquadOwnedFile, byte[]?> readContent,
+        ArbiterModelTargetsPreset? preset = null)
     {
         ArgumentNullException.ThrowIfNull(receiptFiles);
         ArgumentNullException.ThrowIfNull(targetTokens);
@@ -62,6 +71,15 @@ internal static class SquadPresetFileRewriter
             {
                 // A deployed file that vanished from disk leaves the receipt rather than failing
                 // the preset operation, exactly as the preset verbs always handled it.
+                continue;
+            }
+
+            if (targetTokens.Contains(file.Target) && IsModelTargetsTable(file))
+            {
+                rewritten.Add(new SquadDeploymentFile(
+                    file.RelativePath,
+                    RewriteModelTargetsTable(file.Target, rawBytes, profiles, agentProfiles, preset),
+                    file.Target));
                 continue;
             }
 
@@ -116,6 +134,45 @@ internal static class SquadPresetFileRewriter
 
         diffs.Sort((a, b) => StringComparer.Ordinal.Compare(a.Agent, b.Agent));
         return new SquadPresetRewriteResult(rewritten, diffs);
+    }
+
+    /// <summary>Reports whether a receipt file is one harness's model targets table at its own scope's path.</summary>
+    private static bool IsModelTargetsTable(SquadOwnedFile file) =>
+        file.RelativePath == ArbiterModelTargetsFile.ProjectRelativePath(file.Target)
+        || file.RelativePath == ArbiterModelTargetsFile.GlobalRelativePath(file.Target);
+
+    /// <summary>
+    ///     Rebuilds a model targets table from the effective profiles and the canonical roster. The
+    ///     preset name, preset digest and bundle digest are kept from the table unless the caller names a
+    ///     preset. A table that does not parse keeps its bytes, so a damaged file is never guessed at.
+    /// </summary>
+    private static byte[] RewriteModelTargetsTable(
+        string harness,
+        byte[] rawBytes,
+        SquadModelProfiles profiles,
+        IReadOnlyDictionary<string, string> agentProfiles,
+        ArbiterModelTargetsPreset? preset)
+    {
+        try
+        {
+            using JsonDocument table = JsonDocument.Parse(rawBytes);
+            JsonElement root = table.RootElement;
+            JsonElement recorded = root.GetProperty("preset");
+            string recordedName = recorded.GetProperty("name").GetString() ?? ArbiterModelTargetsFile.BundledPresetName;
+            string recordedDigest = recorded.GetProperty("digest").GetString() ?? string.Empty;
+            string bundleDigest = root.GetProperty("bundle-digest").GetString() ?? string.Empty;
+            return ArbiterModelTargetsFile.Serialize(
+                harness,
+                preset?.Name ?? recordedName,
+                preset?.Digest ?? recordedDigest,
+                bundleDigest,
+                profiles,
+                agentProfiles);
+        }
+        catch (Exception exception) when (exception is JsonException or KeyNotFoundException or InvalidOperationException)
+        {
+            return rawBytes;
+        }
     }
 
     /// <summary>

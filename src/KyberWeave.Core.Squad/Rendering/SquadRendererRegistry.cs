@@ -103,6 +103,10 @@ public sealed class SquadRendererRegistry : ISquadRenderer
             return new SquadRenderResult(false, files, degradations, warnings, errors, blocks);
         }
 
+        // The model targets table is one file per hooked target, written by the registry because it
+        // reads every target's merged profiles at once rather than one renderer's tree.
+        files.AddRange(ArbiterModelTargetsFile.BuildFiles(request with { PreloadedSource = sharedSource }));
+
         if (SquadOperatorChannel.IsGateOn(request.EnvironmentReader))
         {
             RecordOperatorChannelNotRendered(sharedSource, request, degradations);
