@@ -26,6 +26,7 @@ code-refs:
   - ReviewBlockWriter
   - ReviewCatalogueCommand
   - SeatOutputParser
+  - CitedLineCheck
 sections:
   "#":
     keywords:

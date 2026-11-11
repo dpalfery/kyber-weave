@@ -132,17 +132,13 @@ between your outcome and the attestation are the closing lines below. If the len
 
 ```
 NO FINDINGS: <what artifact you read, and why nothing in it attributes to this change>
-REVIEW.md sections checked: [Ground rules]
-```
-
-On both forms, the closing lines go between the outcome and the attestation, each at the start of
-its own line, in this order — `Index fallback:` only when it applies:
-
-```
-Index fallback: <mode>
 Discovery: codegraph N, docs N, direct reads N
 REVIEW.md sections checked: [Ground rules]
 ```
+
+The findings form closes the same way, after the YAML list. Each closing line starts its own
+line. When you read code directly because the index could not answer, `Index fallback: <mode>`
+goes on the line above `Discovery:`; otherwise leave it out.
 
 Name the artifact in that sentence. It is the only way the reviewer can tell a triage that ran
 from one that had nothing to run on. The attestation line is the same on both forms; `SKIPPED`

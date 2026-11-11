@@ -105,16 +105,11 @@ Return the YAML findings list, then the attestation line as its last line — no
 
 ```
 NO FINDINGS: <one sentence on what you checked and why it is clean>
+Discovery: codegraph N, docs N, direct reads N
 REVIEW.md sections checked: [<rule ids and sections you applied, e.g. R8, §1>]
 ```
 
-On both forms, the closing lines go between the outcome and the attestation, each at the start of its own line, in this order — `Index fallback:` only when it applies:
-
-```
-Index fallback: <mode>
-Discovery: codegraph N, docs N, direct reads N
-REVIEW.md sections checked: [<rule ids and sections you applied>]
-```
+The findings form closes the same way, after the YAML list. Each closing line starts its own line. When you read code directly because the index could not answer, `Index fallback: <mode>` goes on the line above `Discovery:`; otherwise leave it out.
 
 The attestation line is the same on both forms. It shows the guidance was read and applied, not skipped, so a report with no attestation line is recorded as a coverage gap. `SKIPPED` returns no attestation line; its reason stands on its own. The `NO FINDINGS` sentence matters too: it is the difference between a lens that ran and a lens that gave up, and it is the only way the reviewer can tell them apart.
 
