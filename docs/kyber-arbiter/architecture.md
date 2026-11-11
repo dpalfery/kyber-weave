@@ -404,7 +404,10 @@ by setting `shadow: false` under `arbiter.rules`. The rules are `KW-ARB-NITPICK-
   `author`. Every other row is `real` with no provider call. At most 50 rows (`MaxSummaryRows`) are
   classified per call; rows past that are `real` and unasked. A table that cannot be read in full
   (no table, or any malformed data row) yields no items, and the caller keeps the rows `real`. Each
-  classified row records its own decision.
+  classified row records its own decision. An absent `author` is never treated as a bot, so every row
+  is `real`. As built, the per-row fixing-commit check of Requirement 20.5 is not delivered: summary
+  rows reach the rule with no commit, so an `already-fixed` answer for a summary row rests on the model
+  alone.
   `comment-triage.bot-logins` is read by the triage service on both the served tool and the CLI
   ([configuration](../configuration.md#savings-keys)). With no logins configured, no summary row is
   classified.

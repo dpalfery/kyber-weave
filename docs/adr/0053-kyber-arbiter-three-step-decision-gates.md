@@ -34,6 +34,11 @@ stores are implemented under `<arbiter-dir>/stores/`. The triggers `intake.short
 are derived as the phase 1 catalogue set out. The `answer`, `same-failure`, `advise`, `drop` and
 `duplicate` effects are live on their rules once enforced. Nine phase 3 rules ship in shadow.
 
+Amended 2026-11-11 by the arbiter decision-model savings closeout (decision 39 of that
+specification): the rule that an unverified capability is unsupported governs the per-dispatch
+model override only. The hook-capability rule above, that undocumented cells count as supported
+until a defect proves otherwise, is unchanged.
+
 ## Context
 
 The Squad's in-flight decisions were made by the model being governed. Delegation scope was

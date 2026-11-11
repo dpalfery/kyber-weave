@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core.Squad
 owner: dpalfery
-last-reviewed: 2026-11-10
+last-reviewed: 2026-11-11
 status: current
 decided-by:
   - adr/0067-copilot-system-prompt-override-is-machine-wide
@@ -2164,6 +2164,32 @@ when the prompt file is absent, and under `--ensure` it turns each failure into 
 checks, their ids, and the log line they read are in the [runbook](copilot-prompt-runbook.md).
 
 ---
+
+## Arbiter savings in the roles
+
+The Kyber Arbiter's savings rules change how the Squad roles dispatch work. The Arbiter reads a
+marker the role writes into the dispatch; a dispatch without its marker is never shortcut. The rules
+are shipped in shadow until enforced (see the [Arbiter architecture](../kyber-arbiter/architecture.md#phase-3-facts-review-shortcuts-stores-and-comments)).
+
+- **Conductor and bug-crusher.** The planner dispatch that carries `INTAKE:` can be answered with
+  `STATUS: INTAKE_RECOMMENDATION` and `RECOMMENDATION: PLAN` or `SPEC` (`KW-ARB-INTAKE-001`). A
+  triage dispatch can be answered `VERDICT: TRIVIAL` (`KW-ARB-TRIAGE-001`). The impact-review dispatch
+  whose first body line is `DOCS-IMPACT: true` can be answered with a no-change digest
+  (`KW-ARB-DOCIMPACT-001`). The closeout dispatch never carries the marker.
+- **Rework dispatches.** A rework dispatch opens with `FAILURE-CLUSTER: <key>` and a `FAILURE:`
+  section. A repeat the rule judges the same failure gets an advisory to escalate sooner; it never
+  denies the dispatch (`KW-ARB-FAILURE-001`). The cluster key is set in the
+  [delivery-execution](../../products/kyber-squad/skills/delivery-execution/SKILL.md) contract.
+- **Code review.** Every lens and refutation dispatch of one review carries `REVIEW_RUN: <id>`, so the
+  findings of one review share a store and a repeated finding is refuted as a duplicate
+  (`KW-ARB-DUP-001`). A refutation of a finding dropped as a nitpick is skipped (`KW-ARB-NITPICK-002`).
+- **Review loops.** `kilo-review-loop` and `code-review-loop` read bot-authored issue comments and
+  review bodies as well as inline threads. A bot's PR-level summary is classified row by row
+  (`KW-ARB-COMMENT-001`, summary mode). After pushing, the loop posts one PR comment that links the
+  summary and lists **Fixed**, **Already fixed**, **Nitpick** and **Not changed** rows. A summary has
+  no thread, so nothing is resolved; inline threads keep reply-and-resolve.
+- **Known gap.** The fixing-commit check for summary rows (Requirement 20.5) is not delivered. An
+  `already-fixed` answer for a summary row rests on the model alone.
 
 ## Related
 
