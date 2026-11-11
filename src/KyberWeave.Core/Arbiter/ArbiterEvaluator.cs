@@ -394,8 +394,24 @@ public sealed class ArbiterEvaluator
         List<JudgedFinding> judged = judgements
             .Select(judgement => JudgeFinding(judgement, recordId, refutedSlug))
             .ToList();
+        // Log-only notes the record carries: a missing review run, and a return's findings past the question budget.
+        List<ArbiterDecisionRule> notes = [];
+        string neutralOfTrigger = ArbiterTriggerFamilies.NeutralEffect(ArbiterTriggerFamilies.ForTrigger(trigger));
+        bool lensDispatch = string.Equals(trigger, "lens.returned", StringComparison.Ordinal)
+            || string.Equals(trigger, "lens.spawn", StringComparison.Ordinal);
+        if (lensDispatch && reviewRun is null)
+        {
+            notes.Add(NoteRow("review-run", neutralOfTrigger, ReviewRunMissingNote));
+        }
+
+        int notJudged = returned.Count - judgedCount;
+        if (notJudged > 0)
+        {
+            notes.Add(NoteRow("findings-over-cap", neutralOfTrigger, FindingsOverCapNote(notJudged)));
+        }
+
         ArbiterDispatchEvaluation primaryResult = await RecordPrimaryAsync(
-            classification, ev, primaryJudgement, judged, recordId, config, rules, effective, ledgerId, planDigest,
+            classification, ev, primaryJudgement, judged, notes, recordId, config, rules, effective, ledgerId, planDigest,
             elapsed, cancellationToken).ConfigureAwait(false);
         string primaryOutcome = primaryResult.Outcome;
         if (!effective.DryRun && reviewRun is not null && returned.Count > 0)
@@ -839,6 +855,20 @@ public sealed class ArbiterEvaluator
     private static string AnswerFor(Question question, Step1Call call) =>
         call.Answers.TryGetValue(question.Rule.Id, out string? answer) ? answer : RuleEngine.Undecidable;
 
+    /// <summary>The note a lens return or spawn carries when its REVIEW_RUN header is missing.</summary>
+    private const string ReviewRunMissingNote =
+        "review-run-missing: no REVIEW_RUN header, so the findings are judged and not stored";
+
+    /// <summary>The note a return carries for the findings past the question budget that were kept unjudged.</summary>
+    private static string FindingsOverCapNote(int notJudged) =>
+        $"findings-over-cap: {notJudged} finding(s) past the {StateBudget.MaxQuestions}-question budget were not judged and are kept";
+
+    /// <summary>
+    /// A log-only row: a note the record carries that no question asked. It is shadow, so it never joins the combination.
+    /// </summary>
+    private static ArbiterDecisionRule NoteRow(string id, string neutral, string evidence) =>
+        new(id, 0, "note", null, null, null, neutral, [], evidence, shadow: true, wouldEffect: null);
+
     /// <summary>
     /// Records the dispatch's one primary decision: every judged finding's rules and effects, combined into the
     /// outcome. The provider record is the primary call's; a later finding's call is judged but not itemised.
@@ -848,6 +878,7 @@ public sealed class ArbiterEvaluator
         ArbiterEvent ev,
         FindingJudgement primary,
         IReadOnlyList<JudgedFinding> judged,
+        IReadOnlyList<ArbiterDecisionRule> notes,
         string recordId,
         KyberWeaveConfig config,
         IReadOnlyList<ArbiterRule> effectiveRules,
@@ -867,6 +898,8 @@ public sealed class ArbiterEvaluator
 
         // Shadow entries are excluded from the combination here too; CombineGating gives the family's neutral when all are shadow.
         string outcome = CombineGating(primary.Plan.Family, effects, rules);
+        // Notes join the record after the combination: they are log-only and never gate the dispatch.
+        rules.AddRange(notes);
         MarkSuppressedDrops(rules, outcome);
         ArbiterProviderRecord provider = ProviderRecord(
             config, primary.Call, ProviderStatusFor(primary.Plan, primary.Call), elapsed);

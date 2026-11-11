@@ -172,7 +172,8 @@ public sealed partial class HeaderBlock
         "TASK" => PlanTaskIdRegex().IsMatch(value) || SpecTaskIdRegex().IsMatch(value),
         "LENS" => LensNames.Contains(value),
         "REFUTE" => IsValidRefute(value),
-        "REVIEW_RUN" => value.Length > 0 && !value.Any(char.IsWhiteSpace),
+        // Any non-empty value: the store keys it by digest, so its characters and length name no path.
+        "REVIEW_RUN" => value.Length > 0,
         _ => false,
     };
 
