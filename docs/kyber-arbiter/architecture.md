@@ -394,7 +394,8 @@ by setting `shadow: false` under `arbiter.rules`. The rules are `KW-ARB-NITPICK-
 - **Bot review comments (`KW-ARB-COMMENT-001`, `arbiter_classify_bot_review_comment`).** One comment is
   classified as `real`, `nitpick` or `already-fixed` against the code at the cited line as it is now
   (≥ 0.85). Anything unsure, below the floor, or not obtained stays `real`, so the comment is fixed.
-  Each call records a decision and returns its id. The CLI form is
+  Each call records a decision and returns its id. While the rule is in shadow the class handed back is
+  always `real`; the result carries `shadow` and `wouldClass`, the class the model gave (null when it gave none). The CLI form is
   `kyber-weave arbiter comment --path <FILE> --line <N> --body <TEXT> [--commit-sha <SHA>]`.
 - **Bot summary tables (summary mode).** A bot's PR-level summary comment has no inline thread. With
   `summary: true` (CLI `--summary`), `body` is that summary and each row of its first findings table
@@ -404,7 +405,7 @@ by setting `shadow: false` under `arbiter.rules`. The rules are `KW-ARB-NITPICK-
   `author`. Every other row is `real` with no provider call. At most 50 rows (`MaxSummaryRows`) are
   classified per call; rows past that are `real` and unasked. A table that cannot be read in full
   (no table, or any malformed data row) yields no items, and the caller keeps the rows `real`. Each
-  classified row records its own decision. An absent `author` is never treated as a bot, so every row
+  classified row records its own decision, and while the rule is in shadow every row is `real` with `shadow` and `wouldClass` beside it. An absent `author` is never treated as a bot, so every row
   is `real`. As built, the per-row fixing-commit check of Requirement 20.5 is not delivered: summary
   rows reach the rule with no commit, so an `already-fixed` answer for a summary row rests on the model
   alone.
@@ -915,7 +916,7 @@ grant is built from; the executable and its argv are unchanged. Five tools:
 - **`arbiter_select_relevant_document_sections`** — the section selector for one repository markdown
   document (`KW-ARB-TRIM-001`); read-only.
 - **`arbiter_classify_bot_review_comment`** — the bot-comment triage (`KW-ARB-COMMENT-001`), per
-  comment or, with `summary: true`, per summary row. It writes a decision record for each call.
+  comment or, with `summary: true`, per summary row. It writes a decision record for each call, and its JSON carries `shadow` and `wouldClass` beside `class`.
 
 Every response leads with a provenance line naming the root it answered from; the root is
 resolved from `--repo-root`, then `KYBER_WEAVE_REPO_ROOT`, then the working directory. The

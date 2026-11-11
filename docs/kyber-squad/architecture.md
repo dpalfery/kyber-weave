@@ -2186,7 +2186,9 @@ are shipped in shadow until enforced (see the [Arbiter architecture](../kyber-ar
 - **Review loops.** `kilo-review-loop` and `code-review-loop` read bot-authored issue comments and
   review bodies as well as inline threads. A bot's PR-level summary is classified row by row
   (`KW-ARB-COMMENT-001`, summary mode). After pushing, the loop posts one PR comment that links the
-  summary and lists **Fixed**, **Already fixed**, **Nitpick** and **Not changed** rows. A summary has
+  summary and lists **Fixed**, **Already fixed**, **Nitpick** and **Not changed** rows. While
+  `KW-ARB-COMMENT-001` is in shadow the Arbiter hands every summary row back as `real`, so the loop acts
+  on each row as it would without the Arbiter. A summary has
   no thread, so nothing is resolved; inline threads keep reply-and-resolve.
 - **Known gap.** The fixing-commit check for summary rows (Requirement 20.5) is not delivered. An
   `already-fixed` answer for a summary row rests on the model alone.

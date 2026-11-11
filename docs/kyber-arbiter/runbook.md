@@ -395,7 +395,8 @@ Two advisory commands run outside a dispatch:
   a task needs. It fails safe to every section.
 - `kyber-weave arbiter comment --path <FILE> --line <N> --body <TEXT> [--commit-sha <SHA>]` classifies
   one bot review comment as `real`, `nitpick` or `already-fixed`. Each call records a decision, and any
-  unsure answer is `real`.
+  unsure answer is `real`. While the rule is in shadow the class printed is always `real`, and a
+  `shadow: would have been <class>` line says what the model gave.
 - `kyber-weave arbiter comment --summary --body <TEXT> --author <LOGIN>` classifies each row of a bot's
   PR-level summary table (`Severity | File | Line | Issue`); `--path` and `--line` are ignored. Only a
   login listed in `arbiter.comment-triage.bot-logins`, or one ending `[bot]`, is classified. Every
