@@ -317,8 +317,11 @@ the policy below:
   `--not-seated <lens>=<reason>`, or coverage carried from the prior cycle through `--prior`;
   otherwise the command refuses to compute. A file whose name is not a catalogue lens keeps its
   findings but covers no lens, and draws a warning. An unreadable seat file is refused
-  (`KW-REVIEW-040`), and so is one that declares `NO FINDINGS:` or `SKIPPED:` and also holds
-  findings: it is never counted clean.
+  (`KW-REVIEW-040`), and so is one that declares `NO FINDINGS:` or `SKIPPED:` while a seat-schema
+  key followed by a colon (`id:`, `severity:`, `file:` and the rest of the finding schema)
+  appears anywhere else in it, in a list, a flow mapping, a fence or after prose. The check fails
+  closed: such a file is never counted clean. Prose, a Markdown table, the closing lines and plain
+  bullets with no such key are allowed.
 - **Cited lines (`KW-REVIEW-043`, `CitedLineCheck`).** A finding whose cited line lies outside
   its file is moved to the one line that holds its excerpt, or dropped when no single line
   does. A line inside the file is never moved. A finding whose file is missing, outside the

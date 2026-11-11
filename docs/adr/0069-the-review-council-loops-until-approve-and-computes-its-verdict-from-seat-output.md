@@ -87,8 +87,9 @@ lens needs a seat file or a recorded reason for not seating it.
   neither a seat file nor a `--not-seated <lens>=<reason>` (`KW-REVIEW-041`); a verifier cycle
   carries earlier coverage through `--prior`. A seat file must be named for one lens.
 - **The seat parser reads what seats write.** It tries strict YAML first, then the flat schema
-  seats really produce. A file that declares `NO FINDINGS:` or `SKIPPED:` and also holds findings
-  is refused (`KW-REVIEW-040`). A cited line outside its file is moved to the line holding its
+  seats really produce. A file that declares `NO FINDINGS:` or `SKIPPED:` and carries a finding-schema
+  key (`severity:`, `file:` and the rest) anywhere else is refused (`KW-REVIEW-040`): the check
+  fails closed. A cited line outside its file is moved to the line holding its
   excerpt, or dropped (`KW-REVIEW-043`).
 - **Each cycle keeps a record.** `.agent_scratchpad/<task-id>/review/cycle-<n>/` holds the seat
   files, `gates.json`, `findings.json` and `head` until the run ends, because the next verifier
