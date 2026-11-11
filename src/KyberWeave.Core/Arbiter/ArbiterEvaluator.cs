@@ -565,7 +565,7 @@ public sealed class ArbiterEvaluator
                 : null;
             if (string.Equals(answer, ArbiterStep1BatchResult.NotEvaluated, StringComparison.Ordinal))
             {
-                rules.Add(Step1Rule(question, answer, RuleEffects.Allow, score, null, null, null));
+                rules.Add(Step1Rule(question, answer, neutral, score, null, null, null));
                 continue;
             }
 
@@ -645,9 +645,13 @@ public sealed class ArbiterEvaluator
         string neutral) =>
         rule.Shadow ? (neutral, true, mapped) : (mapped, null, null);
 
+    /// <summary>
+    /// A question the provider did not evaluate records its family's neutral effect. It is not counted in
+    /// the combination, and <c>allow</c> is not a legal effect for every family.
+    /// </summary>
     private static string MapOrNotEvaluated(ArbiterRule rule, string answer, ArbiterTriggerFamily family) =>
         string.Equals(answer, ArbiterStep1BatchResult.NotEvaluated, StringComparison.Ordinal)
-            ? RuleEffects.Allow
+            ? ArbiterTriggerFamilies.NeutralEffect(family)
             : MapStep1AnswerToEffect(rule, answer, family);
 
     private static ArbiterProviderRecord ProviderRecord(
