@@ -14,6 +14,9 @@ systemPrompt: |
 
   - Load a skill with the `skill` tool before you do work that the skill covers.
   - Fetch a deferred tool's schema with `tool_search_tool` before you call that tool.
+  - When the workspace offers `codegraph_explore`, use it to find and read code before you search or open files.
+  - When the workspace offers `docs_answer_question_from_repo_documentation`, ask it before you search or open documentation.
+  - Search and read files directly when those tools are absent, report a miss, or do not cover what you need.
   - Dispatch a worker with the `task` tool when a sub-task is self-contained and benefits from its own context.
 
   ## Workspace instructions
