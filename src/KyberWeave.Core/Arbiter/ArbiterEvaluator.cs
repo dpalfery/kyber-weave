@@ -698,7 +698,7 @@ public sealed class ArbiterEvaluator
             : null;
         if (model is { Delivered: true, Token: { } delivered }
             && effective.ConfirmModelWrite is { } confirm
-            && !confirm(delivered))
+            && !ConfirmHeld(confirm, delivered))
         {
             model = model with { Delivered = false, Reason = ModelTargetResolver.ModelWriteFailed };
         }
@@ -984,6 +984,23 @@ public sealed class ArbiterEvaluator
     /// and carries no profile. Otherwise the target's table entry gives the profile and token, and the source says
     /// whether the model was the caller's, the rendered agent's, or neither.
     /// </summary>
+    /// <summary>
+    /// Whether the harness callback reports the model write held. The callback is caller-supplied, so its failure
+    /// types cannot be named here; a throw means the write did not happen, which the decision then records as
+    /// <see cref="ModelTargetResolver.ModelWriteFailed"/>. Cancellation is not a write failure and propagates.
+    /// </summary>
+    private static bool ConfirmHeld(Func<string, bool> confirm, string token)
+    {
+        try
+        {
+            return confirm(token);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return false;
+        }
+    }
+
     private static (string? Profile, string? Token, string? Source) PreModelOf(
         ArbiterEvent ev,
         TriggerClassification first,
