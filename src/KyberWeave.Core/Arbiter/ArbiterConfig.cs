@@ -123,7 +123,7 @@ public sealed record ArbiterConfig
     public ArbiterCommentTriageConfig CommentTriage { get; init; } = ArbiterCommentTriageConfig.Defaults;
 
     /// <summary>
-    /// Product defaults for an unconfigured host: disabled, no provider, all 20
+    /// Product defaults for an unconfigured host: disabled, no provider, all 21
     /// shipped rules enabled.
     /// </summary>
     /// <remarks>

@@ -1,4 +1,4 @@
-# The 20 shipped Arbiter rules. Ids are permanent: suppressions, baselines and
+# The 21 shipped Arbiter rules. Ids are permanent: suppressions, baselines and
 # code-scanning alerts key on them, so a rule is never renumbered or reused.
 #
 #The step-0 predicate set is closed (all, any, not, exists, equals, in, matches,
@@ -236,9 +236,9 @@ rules:
     question: Is the excerpt inside a changed hunk?
     answers: [in-hunk, outside-hunk]
     decide:
-      - when: { all: [{ fact: review.changed-hunks, exists: true }, { fact: finding.line, in: review.changed-hunks }] }
+      - when: { all: [{ fact: finding.changed-lines, exists: true }, { fact: finding.line, in: finding.changed-lines }] }
         answer: in-hunk
-      - when: { all: [{ fact: review.changed-hunks, exists: true }, { not: { fact: finding.line, in: review.changed-hunks } }] }
+      - when: { all: [{ fact: finding.changed-lines, exists: true }, { not: { fact: finding.line, in: finding.changed-lines } }] }
         answer: outside-hunk
     effects: { in-hunk: allow, outside-hunk: annotate }
 
@@ -317,6 +317,23 @@ rules:
       - when: { fact: gate.report.agrees, exists: true }
         answer: disagrees
     effects: { verified: allow, disagrees: escalate, missing: escalate }
+
+  # A change with no code in it has nothing for these six lenses to judge. The skip needs
+  # positive evidence: every changed path must be one the git read marked no-code, and the
+  # set must be non-empty, so an absent or empty set stays undecidable and the lens runs.
+  # Security, documentation-accuracy and blast-radius-revertibility are never listed here.
+  - id: KW-ARB-LENS-002
+    trigger: lens.spawn
+    question: Is this lens one that has nothing to judge in a change with no code in it?
+    answers: [no-code-change]
+    decide:
+      - when:
+          all:
+            - { fact: lens.name, in: [correctness, test-adequacy, performance, di-composition, duplicate-implementation, model-placement] }
+            - { not: { fact: review.changed-paths, count: 0 } }
+            - { fact: review.changed-paths, subset-of: review.no-code-change-paths }
+        answer: no-code-change
+    effects: { no-code-change: skip }
 
 # The OWNER-001 file-kind map, evaluated first match wins. The order is the
 # decision: specific owners precede the documentation and C# catch-alls.
