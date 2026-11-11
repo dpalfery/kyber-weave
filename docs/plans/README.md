@@ -57,7 +57,9 @@ its `tasks.json` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-No plan is open. A plan is listed here while its execution is under way and leaves when it is archived.
+| Plan | Status | Scale | Summary |
+|---|---|---|---|
+| [The review council runs until it passes, and computes its verdict from what its seats said](2026-11-11-council-assessment-fixes.md) | Ready | `extends-component` (ReviewCouncil, KyberSquad, CI Pipelines) | The council re-reviews after each fix round until `APPROVE` under a fixed hard stop; `review verdict` reads seat output directly so the reviewer can only keep or drop; a council deadline makes a timed-out gate NOT RUN instead of blocking; seats report discovery; unseated lenses need a reason; small PRs get a quick review |
 
 ## Archived Plans
 
