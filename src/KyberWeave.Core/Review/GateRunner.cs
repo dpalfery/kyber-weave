@@ -27,6 +27,11 @@ public static class GateRunner
         ArbiterConfig.ProductDefaults.Rules.Single(rule => rule.Id == "KW-ARB-GATE-001");
 
     /// <summary>Runs every declared gate and returns the normalized report.</summary>
+    /// <remarks>
+    /// Gates start in declaration order and each waits for the one before it, except a gate declared
+    /// <c>concurrent</c>: it starts at its place and runs alongside the gates declared after it. The report
+    /// lists results in declaration order either way.
+    /// </remarks>
     /// <param name="config">The host's review configuration.</param>
     /// <param name="workingDirectory">The repository root the gates run against.</param>
     /// <param name="stopOnBlockingFailure">
@@ -52,26 +57,54 @@ public static class GateRunner
         if (!Directory.Exists(workingDirectory))
             throw new DirectoryNotFoundException($"Gate working directory not found: {workingDirectory}");
 
-        List<GateResult> results = new(config.Gates.Count);
+        IReadOnlyList<ReviewGate> gates = config.Gates;
+        GateResult?[] results = new GateResult?[gates.Count];
+        List<(int Index, Task<GateResult?> Run)> alongside = [];
         DateTime startedUtc = DateTime.UtcNow;
+        bool stopped = false;
 
-        foreach (ReviewGate gate in config.Gates)
+        using CancellationTokenSource stop = new();
+        try
         {
-            GateResult result = AppliesWhenReason(gate, changedPaths) is string reason
-                ? NotApplicable(gate, reason)
-                : MissingRequirement(gate, workingDirectory) ?? RunOne(gate, workingDirectory);
-            results.Add(result);
+            for (int index = 0; index < gates.Count && !stopped; index++)
+            {
+                ReviewGate gate = gates[index];
+                GateResult? settled = AppliesWhenReason(gate, changedPaths) is string reason
+                    ? NotApplicable(gate, reason)
+                    : MissingRequirement(gate, workingDirectory);
 
-            if (stopOnBlockingFailure
-                && gate.Blocking
-                && !result.Passed
-                && result.NotApplicableReason is null)
-                break;
+                if (settled is null && gate.Concurrent)
+                {
+                    alongside.Add((index, Task.Run(() => RunUnlessStopped(gate, workingDirectory, stop.Token))));
+                    continue;
+                }
+
+                results[index] = settled ?? RunOne(gate, workingDirectory, CancellationToken.None);
+
+                stopped = stopOnBlockingFailure
+                          && (StopsTheRun(gate, results[index])
+                              || alongside.Exists(run => run.Run.IsCompletedSuccessfully
+                                                         && StopsTheRun(gates[run.Index], run.Run.Result)));
+            }
+        }
+        finally
+        {
+            // A stopped run skips what has not finished, and no run returns with a gate's process still alive.
+            if (stopped)
+                stop.Cancel();
+
+            // Every concurrent gate is waited for before any result is read: reading rethrows a gate's
+            // unexpected fault, and that must not leave another gate's process running behind the run.
+            foreach ((_, Task<GateResult?> run) in alongside)
+                ((IAsyncResult)run).AsyncWaitHandle.WaitOne();
+
+            foreach ((int index, Task<GateResult?> run) in alongside)
+                results[index] = run.GetAwaiter().GetResult();
         }
 
         return new GateReport(
             GateReport.CurrentSchema,
-            results,
+            results.OfType<GateResult>().ToList(),
             CoverageCollector.ReadNewest(workingDirectory, startedUtc),
             CoverageCollector.ReadAll(workingDirectory, startedUtc),
             baseRef);
@@ -212,11 +245,30 @@ public static class GateRunner
             ? "Install the dashboard dependencies with 'npm install --prefix dash', then run the gate again."
             : "Install whatever provides it, then run the gate again.");
 
-    private static GateResult RunOne(ReviewGate gate, string workingDirectory)
+    private static bool StopsTheRun(ReviewGate gate, GateResult? result) =>
+        result is not null && gate.Blocking && !result.Passed && result.NotApplicableReason is null;
+
+    /// <summary>
+    /// Runs a concurrent gate, or returns null when the run was stopped before the gate finished: a stopped
+    /// gate has no result, and is left out of the report like a gate that never started.
+    /// </summary>
+    private static GateResult? RunUnlessStopped(ReviewGate gate, string workingDirectory, CancellationToken stop)
+    {
+        try
+        {
+            return RunOne(gate, workingDirectory, stop);
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+    }
+
+    private static GateResult RunOne(ReviewGate gate, string workingDirectory, CancellationToken stop)
     {
         string gateDirectory = ResolveWorkingDirectory(workingDirectory, gate.WorkingDirectory);
         return RunArgv(
-            gate.Id, gate.Blocking, gate.Run, gate.TimeoutSeconds, gateDirectory, gate.FailOnOutput);
+            gate.Id, gate.Blocking, gate.Run, gate.TimeoutSeconds, gateDirectory, gate.FailOnOutput, stop);
     }
 
     /// <summary>
@@ -237,7 +289,8 @@ public static class GateRunner
         IReadOnlyList<string> argv,
         int timeoutSeconds,
         string workingDirectory,
-        bool failOnOutput)
+        bool failOnOutput,
+        CancellationToken stop = default)
     {
         if (!Directory.Exists(workingDirectory))
         {
@@ -268,7 +321,7 @@ public static class GateRunner
         TimeSpan timeout = TimeSpan.FromSeconds(timeoutSeconds);
         try
         {
-            ProcessResult process = ProcessRunner.Run(startInfo, string.Empty, timeout);
+            ProcessResult process = ProcessRunner.Run(startInfo, string.Empty, timeout, cancellationToken: stop);
 
             // A tool that reports by listing (gofmt -l exits 0 on Go before 1.26 even when files differ) can
             // only fail through its output. The exit code is rewritten to 1 so GateResult.Passed stays the single
