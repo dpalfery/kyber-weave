@@ -40,6 +40,13 @@ canonical checkout on purpose, so an MCP answer describes that checkout unless i
 `branch=` is the branch under review; treat it as evidence about another tree when it is not. A
 review run in a worktree that reads the canonical checkout's index reviews code nobody changed.
 
+**Index that tree first.** `kyber-weave doctor --ensure .` runs in the tree under review before any
+seat or gate starts. It creates the index when the tree has none and syncs it to the change
+otherwise, so no seat reads an index older than the diff. A failure stops the review with
+`STATUS: TOOL_FAILURE` and the doctor's `fix:` line, unless the repository set
+`stop-on-tool-failure: false`. The gate runner repeats the check and reports it as
+`KW-REVIEW-038`: it starts no gate over a tree it cannot index.
+
 **Load the review guidance.** Read the host's review guidance declared as
 **<review-guidance>** in the root `AGENTS.md` registry (`REVIEW.md`) before any lens runs. Its
 ground rules and the sections that match the changed technologies are the host's own standard
@@ -319,6 +326,10 @@ recorded as `SKIPPED`. This section is not optional. It is the difference betwee
 dimension that was reviewed and one that was quietly never looked at. A findings or
 `NO FINDINGS` outcome also carries its attestation line, which lists the review-guidance
 sections it checked. A seat with no attestation line is listed here as a coverage gap.
+The section opens with the index line, `Index: <tree> — <exit> <check ids>`, from the
+`kyber-weave doctor --ensure .` run that preceded the council. A seat that returned an
+`Index fallback: <mode>` line is listed with that line, as a coverage gap: it read code
+directly because the index could not answer for the branch under review.
 
 ### Dropped
 What was reported and removed, with the `KW-REVIEW-*` rule that removed it. A review that

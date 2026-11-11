@@ -1,8 +1,10 @@
 using System.Globalization;
 using System.Text.Json;
+using KyberWeave.Cli.Commands.Doctor;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Doctor;
 using KyberWeave.Core.RunStart;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -48,6 +50,11 @@ public sealed class RunStartCommand : Command<RunStartSettings>
     ///     time; a hung child must not hold the run open, which is why no call here is unbounded.
     /// </summary>
     private static readonly TimeSpan ToolTimeout = TimeSpan.FromSeconds(120);
+
+    /// <summary>The bound on the CodeGraph index run, the same default <c>doctor --ensure</c> uses.</summary>
+    private static readonly TimeSpan IndexTimeout = TimeSpan.FromSeconds(DoctorSettings.DefaultIndexTimeoutSeconds);
+
+    private static readonly TimeSpan McpTimeout = TimeSpan.FromSeconds(DoctorSettings.DefaultMcpTimeoutSeconds);
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
@@ -326,6 +333,30 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         // failing a run that is otherwise ready.
         RecordBase(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), target, startRef);
 
+        // A new worktree has no index of its own, so the index goes where the run works. A failure here does not
+        // undo the branch: the operator repairs the index and continues with --resume.
+        string indexTree = worktreePath ?? repositoryRoot;
+        IProcessExecutor indexExecutor = _executor ?? ProcessExecutor.WithTimeout(IndexTimeout);
+        WorktreeIndexOutcome index = WorktreeIndexGuard.Ensure(
+            indexTree,
+            new DoctorOptions(
+                IndexTimeout,
+                McpTimeout,
+                DoctorCommand.CodeGraphExecutable,
+                DoctorCommand.DefaultMcpExecutable),
+            indexExecutor,
+            Path.GetTempPath());
+        string indexLabel = IndexLabel(index);
+
+        if (index.StopsRun)
+        {
+            ReportIndexStop(settings.Json, indexTree, target, index);
+            return ToolFailure;
+        }
+
+        if (index.Status is WorktreeIndexStatus.Failed or WorktreeIndexStatus.BinaryMissing)
+            ReportIndexWarning(settings.Json, indexTree, index);
+
         if (settings.Json)
         {
             Console.Out.WriteLine(JsonSerializer.Serialize(
@@ -338,6 +369,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
                     location = location == RunStartLocation.InPlace ? "in-place" : "worktree",
                     revision = baseRevision,
                     resumed = resume is not null,
+                    index = indexLabel,
                     completed = completed.Select(task => new { id = task.Id, report = task.Report }),
                     completedWarning,
                     versions = new
@@ -378,9 +410,62 @@ public sealed class RunStartCommand : Command<RunStartSettings>
             behind,
             headRevision,
             completed,
-            completedWarning);
+            completedWarning,
+            indexLabel);
 
         return Ready;
+    }
+
+    /// <summary>The index state as the <c>index</c> JSON field and the report line name it.</summary>
+    private static string IndexLabel(WorktreeIndexOutcome index) => index.Status switch
+    {
+        WorktreeIndexStatus.Ready => index.Created ? "created" : "ready",
+        WorktreeIndexStatus.NotGoverned => "not-governed",
+        _ => "warning",
+    };
+
+    /// <summary>The first failed check's reason, which says what stopped the index.</summary>
+    private static string IndexReason(WorktreeIndexOutcome index) =>
+        index.Checks.FirstOrDefault(check => !check.Passed)?.Reason ?? "no reason was reported";
+
+    /// <summary>
+    ///     Reports an index that stops the run. In <c>--json</c> mode standard output must stay a JSON document, so the
+    ///     text goes to standard error instead.
+    /// </summary>
+    private static void ReportIndexStop(bool json, string tree, string branch, WorktreeIndexOutcome index)
+    {
+        string error =
+            $"the CodeGraph index for '{tree}' is not usable ({IndexReason(index)}), so the run stops here. " +
+            $"The branch '{branch}' is in place.";
+        string remedy =
+            $"run 'kyber-weave doctor --ensure {tree}' to repair the index, then continue with " +
+            $"'kyber-weave run start --resume {branch}'.";
+
+        if (json)
+        {
+            Console.Error.WriteLine($"{CommandName}: error: {error}");
+            Console.Error.WriteLine($"→ {remedy}");
+            return;
+        }
+
+        AnsiConsole.MarkupLine($"[red]{Markup.Escape(CommandName)}: error:[/] {Markup.Escape(error)}");
+        AnsiConsole.MarkupLine($"[grey]→ {Markup.Escape(remedy)}[/]");
+    }
+
+    /// <summary>Reports an index that failed on a repository that continues past tool failures.</summary>
+    private static void ReportIndexWarning(bool json, string tree, WorktreeIndexOutcome index)
+    {
+        string warning =
+            $"the CodeGraph index for '{tree}' could not be prepared ({IndexReason(index)}), so the run continues " +
+            $"without it. Repair it with 'kyber-weave doctor --ensure {tree}'.";
+
+        if (json)
+        {
+            Console.Error.WriteLine($"{CommandName}: warn: {warning}");
+            return;
+        }
+
+        AnsiConsole.MarkupLine($"[yellow]warn[/] {Markup.Escape(warning)}");
     }
 
     /// <summary>
@@ -544,7 +629,8 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         int? behind,
         string? headRevision,
         IReadOnlyList<RunStartCompletedTask> completed,
-        string? completedWarning)
+        string? completedWarning,
+        string indexLabel)
     {
         string where = worktreePath is null ? "in place" : worktreePath;
 
@@ -557,6 +643,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
                 $"  base      {Markup.Escape(baseBranch)} ({Markup.Escape(startRef)})");
             AnsiConsole.MarkupLine($"  branch    {Markup.Escape(branch)}");
             AnsiConsole.MarkupLine($"  where     {Markup.Escape(where)}");
+            AnsiConsole.MarkupLine($"  index     {Markup.Escape(indexLabel)}");
             AnsiConsole.MarkupLine($"  revision  {Markup.Escape(revision ?? "unknown")}");
             AnsiConsole.MarkupLine("  versions");
             AnsiConsole.MarkupLine(

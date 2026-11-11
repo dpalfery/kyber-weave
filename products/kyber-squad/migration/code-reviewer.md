@@ -5,7 +5,7 @@ source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
 selected-baseline: .github/agents/code-reviewer.agent.md
 sources:
   .github/agents/code-reviewer.agent.md: 98440b62230139ae74e4f1a54d15482db338ab34bf912d98afbc629b249ffd14
-final-body-sha256: 896ea2dfb9200415042d41b239c2fbcc1f2821e3fccbbdfdf9f134ce9c9fa379
+final-body-sha256: 267c7e8e71e548d2f51374cf43d54e8304b4c727031ff901a2d9f3cbb7def305
 ---
 # code-reviewer migration
 
@@ -25,6 +25,8 @@ that holds `arbiter_evaluate_agent_dispatch_or_return` instead of a hook (packet
 keeps an Arbiter note distinct from a `STATUS:` line a lens or a tool printed. It now also carries the single-gate re-check
 through the runner's `--gate` option, and the seat handback: a harness that gives the reviewer no way to start its own
 council stops it with `STATUS: COUNCIL_SEATS_NEEDED`, and the session above seats the lenses and re-invokes it.
+It also indexes the tree under review with `kyber-weave doctor --ensure .` before any seat is dispatched, records that
+result and any seat's `Index fallback:` line under Council coverage, and stops on a tree it cannot index.
 `final-body-sha256` covers that evolved body.
 
 ## Canonical projection

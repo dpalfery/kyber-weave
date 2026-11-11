@@ -638,6 +638,16 @@ when at least one gate declares `include`. When git cannot list the changes, eve
 runs unscoped and the report says why (`KW-REVIEW-034`, Info): fetch the full history,
 or name a base that exists with `--base`.
 
+Before any repository gate starts, the runner prepares the CodeGraph index of the tree it was
+pointed at: `codegraph init` when the tree has none, `codegraph sync` otherwise, through the same
+code path as `kyber-weave doctor --ensure`. A git worktree does not share another checkout's index,
+so a review in a fresh worktree would otherwise have none and its lenses would fall back to raw
+file reads or be answered from another branch. The result is `KW-REVIEW-038`: Info when the index was created
+or synced; Error, with no gate started and exit `1`, when it could not be prepared; Warning, with
+the gates still running, when the repository set `stop-on-tool-failure: false`. A repository
+without governed docs is not checked. `--agent` runs are not checked either: a task gate measures
+one worker's change and consults no index.
+
 For whole-repository audits and CI verification, `--all` executes all declared gates matching
 the host OS unconditionally (`changed = null`), bypassing `include:` path filtering. Combining
 `--all` with contradictory scoping options (`--agent`, `--base`, `--paths` or `--gate`) is refused

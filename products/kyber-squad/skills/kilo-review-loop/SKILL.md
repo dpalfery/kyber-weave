@@ -15,6 +15,11 @@ the draft/ready toggle and puts the fix commit hash in every reply.
 
 ## The loop
 
+**Index a worktree before working in it.** When the fixes are made in a git worktree, whether you
+created it or it already existed, run `kyber-weave doctor --ensure .` there first. A worktree does
+not share another checkout's CodeGraph index, and without that run it has none. A failure of
+that command is a stop, not something to work around with direct file reads.
+
 1. **Set the PR to draft.** `gh pr ready <n> --undo`. Do this first, before any fixing, so
    nobody reviews a half-fixed PR. For stacked PRs, do it for every PR in the stack that has
    open comments.

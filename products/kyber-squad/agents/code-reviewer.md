@@ -50,6 +50,8 @@ Establish what is actually under review before spending anything on it: the diff
 
 What falls out of the scope that governs the whole run is **which lenses can possibly apply**. A change touching only Markdown does not need a database-migration lens spun up to tell you so.
 
+**Index the tree under review before anything is dispatched.** Run `kyber-weave doctor --ensure .` in the tree the change is in: the worktree when the change lives in one, the canonical checkout otherwise. It creates the CodeGraph index when the tree has none and syncs it to the change when it has one, so no seat reads an index older than the diff. Finish it before step 2, never in the same batch: a seat that starts during the sync can read the old index. Record the outcome in the report's Council coverage as `Index: <tree> — <exit> <check ids>`, and put that tree's absolute path in every seat's packet as `projectPath: <absolute path>`, the canonical checkout's included: a seat has no shell, and that line is the only way it can ask the index of the tree under review rather than read files one by one. A non-zero exit stops the review: return `STATUS: TOOL_FAILURE` with the doctor's `fix:` line and dispatch no seat. The doctor reads `stop-on-tool-failure` itself, so a repository that set it to `false` gets exit 0 with a warning; record the warning and continue. The gate runner repeats this check on its own (`KW-REVIEW-038`) and starts no gate over a tree it cannot index, so a skipped step is caught rather than silent.
+
 ## 2. Fan out the council and start the gates — together
 
 Issue both in the same batch. They are independent and neither should wait on the other.
@@ -66,6 +68,8 @@ Invoke one seat per applicable lens, all in flight at the same time, each named 
 Two roles fill those seats, and the lens catalogue in the `code-review` skill names which one each lens takes. `review-lens` holds every concern that means reading code and judging it. `review-triage` holds the lenses whose input is a machine artifact — analyzer diagnostics, a manifest diff — where the work is attributing that output to the change rather than forming an opinion about it. That second job is bounded and checkable, so it runs on a faster model. Send a judgement lens to the triage role and you will get shallow findings; send a triage lens to the judgement role and you will pay several times over for attribution you could have had for a fraction.
 
 Three lenses consume gate output — the test-adequacy lens needs the coverage report, the static-analysis lens needs the analyzer results, and the duplicate-implementation lens needs the duplicates report. Issue each when its own gate completes, not before, and not behind a barrier on all gates.
+
+A seat that returns an `Index fallback: <mode>` line read code directly because the index could not answer for the branch under review. Copy that line into Council coverage next to the seat's outcome, as a coverage gap. It is never a verdict input and never a finding against the code.
 
 If a lens comes back `SKIPPED`, record it. A skipped lens is a reviewed dimension with a stated reason, and the report lists every one of them. Silence is what you are guarding against; an explicit skip is the opposite of silence.
 

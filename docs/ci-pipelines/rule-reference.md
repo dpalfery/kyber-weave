@@ -232,6 +232,7 @@ failed gate.
 | `KW-REVIEW-029` | Warning | A task gate's `fix` command failed. The verify command still decides the gate (`--agent --fix`) |
 | `KW-REVIEW-033` | Error / Warning | A gate never started: its program could not start, its working directory does not exist, or a full-suite gate was refused without `--council` outside a terminal (the other gates still run; exit `1`). Error when blocking, warning otherwise. |
 | `KW-REVIEW-034` | Info | The changed set is unknown, so gates with `include` ran unscoped. Fetch the full history, or name a base that exists with `--base`. |
+| `KW-REVIEW-038` | Info / Error / Warning | The CodeGraph index of the tree under review, checked before any gate starts. Info: it was created or synced. Error: it could not be prepared, so no gate started (exit `1`); run `kyber-weave doctor --ensure <tree>`. Warning: the same failure in a repository that set `stop-on-tool-failure: false`; the gates still run. A repository without governed docs is not checked. |
 
 ### Duplicates — `review duplicates`
 

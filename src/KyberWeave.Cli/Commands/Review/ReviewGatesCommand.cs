@@ -1,6 +1,9 @@
 using System.ComponentModel;
+using KyberWeave.Cli.Commands.Doctor;
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Doctor;
 using KyberWeave.Core.Review;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -14,6 +17,7 @@ namespace KyberWeave.Cli.Commands.Review;
 public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
 {
     private const string NoGatesDeclared = "KW-REVIEW-020";
+    private const string IndexState = "KW-REVIEW-038";
     private const string ReportWriteFailed = "KW-REVIEW-025";
     private const string GateSkipped = "KW-REVIEW-026";
     private const string NoGatesForAgent = "KW-REVIEW-027";
@@ -23,6 +27,17 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
     private const string ChangedSetUnknown = "KW-REVIEW-034";
     private const string CouncilDefaultBase = "origin/HEAD";
     private const int ClientInputExitCode = 2;
+
+    /// <summary>The bound on the CodeGraph index run, the same default <c>doctor --ensure</c> uses.</summary>
+    private static readonly TimeSpan IndexTimeout = TimeSpan.FromSeconds(DoctorSettings.DefaultIndexTimeoutSeconds);
+
+    private static readonly TimeSpan McpTimeout = TimeSpan.FromSeconds(DoctorSettings.DefaultMcpTimeoutSeconds);
+
+    /// <summary>
+    ///     The process seam for the CodeGraph child that prepares the index. Null uses a process executor bounded by
+    ///     the index timeout; tests pass a scripted one.
+    /// </summary>
+    internal IProcessExecutor? Executor { get; init; }
 
     /// <inheritdoc />
     public override int Execute(CommandContext context, ReviewGatesSettings settings,
@@ -66,7 +81,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
         return ExecuteAgentGates(settings, settings.Agent);
     }
 
-    private static int ExecuteRepositoryGates(ReviewGatesSettings settings)
+    private int ExecuteRepositoryGates(ReviewGatesSettings settings)
     {
         DiagnosticReport report = new();
         string root = Path.GetFullPath(settings.Path);
@@ -122,6 +137,32 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
                     gateRefusals,
                     "Refused before any gate started. --gate takes the id of a gate declared under review.gates.");
             }
+        }
+
+        // Before any gate process starts, so no gate reads a tree that has no index. A repository without governed
+        // docs has no index to keep and is not checked.
+        WorktreeIndexOutcome index = WorktreeIndexGuard.Ensure(
+            root,
+            new DoctorOptions(
+                IndexTimeout,
+                McpTimeout,
+                DoctorCommand.CodeGraphExecutable,
+                DoctorCommand.DefaultMcpExecutable),
+            Executor ?? ProcessExecutor.WithTimeout(IndexTimeout),
+            Path.GetTempPath());
+        if (index.Status is not WorktreeIndexStatus.NotGoverned)
+            AddIndexDiagnostic(report, root, index);
+
+        if (index.StopsRun)
+        {
+            // Same as the --all refusal: the caller gets an empty gate report and no gate has run.
+            CommandHelpers.TryWriteReport(
+                settings.Out,
+                ReviewJson.Write(new GateReport(GateReport.CurrentSchema, [])),
+                ReportWriteFailed,
+                report);
+            CommandHelpers.Finish(report, settings, "review gates", "Gate");
+            return 1;
         }
 
         // The changed set is only needed when a gate is scoped by include; it is never computed for gates alone.
@@ -375,6 +416,44 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
         CommandHelpers.Finish(report, settings, "review gates", "Gate");
         return 1;
     }
+
+    /// <summary>
+    ///     Reports the index state under <see cref="IndexState" />. A failed index is an error when the repository
+    ///     stops on tool failure, and a warning when it does not.
+    /// </summary>
+    private static void AddIndexDiagnostic(DiagnosticReport report, string root, WorktreeIndexOutcome index)
+    {
+        if (index.StopsRun)
+        {
+            report.Add(new Diagnostic(
+                IndexState,
+                Severity.Error,
+                $"The CodeGraph index for '{root}' is not usable ({IndexReason(index)}), so no gate was started.",
+                "review.gates",
+                Hint: $"kyber-weave doctor --ensure {root}"));
+            return;
+        }
+
+        if (index.Status is WorktreeIndexStatus.Ready)
+        {
+            report.Add(new Diagnostic(
+                IndexState,
+                Severity.Info,
+                $"The CodeGraph index for '{root}' was {(index.Created ? "created" : "synced")}.",
+                "review.gates"));
+            return;
+        }
+
+        report.Add(new Diagnostic(
+            IndexState,
+            Severity.Warning,
+            $"The CodeGraph index for '{root}' could not be prepared ({IndexReason(index)}), so the gates run anyway.",
+            "review.gates",
+            Hint: $"kyber-weave doctor --ensure {root}"));
+    }
+
+    private static string IndexReason(WorktreeIndexOutcome index) =>
+        index.Checks.FirstOrDefault(check => !check.Passed)?.Reason ?? "no reason was reported";
 
     /// <summary>
     ///     The paths the council's include patterns are matched against: the <c>--paths</c> given, else the diff from

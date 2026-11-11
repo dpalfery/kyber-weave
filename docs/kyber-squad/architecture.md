@@ -1875,6 +1875,15 @@ What follows is why it is shaped that way
   is `true` when absent, and the default lives in code rather than in instruction text because
   absence is the common case and a run cannot rely on an agent having read a rule. With it off, a
   failed fetch only warns and the run continues from the base the checkout last fetched.
+- **The tree it lands in is indexed by the command, not by a reminder.** `.codegraph/` is not in git,
+  so a new worktree starts with no CodeGraph index. Indexing used to be a sentence telling the agent to
+  run `kyber-weave doctor --ensure` next, and a worktree whose agent skipped it had no index and no
+  error: workers there fell back to raw file reads or were answered from another branch's index. The step now
+  prepares the index itself, through `WorktreeIndexGuard` and the same code path as the doctor, in the
+  worktree it created or reused, or in the checkout when it branched in place. A tree it cannot index
+  stops the run under `stop-on-tool-failure`. `kyber-weave review gates` applies the same guard before
+  any repository gate starts (`KW-REVIEW-038`), so a worktree made with a plain `git worktree add` is
+  indexed, or refused, when a review reaches it.
 - **Reported, not assumed.** The versions the operator is working between — the failing build,
   `HEAD`, and the base — and the divergence from the server are read *before* anything is switched,
   because that is the state the defect was observed in. The run record carries them, and every later

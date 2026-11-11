@@ -96,7 +96,7 @@ public static class RepositoryDoctor
     /// Read from the repository's own <c>.kyber-weave/kyber-weave.yml</c>. A file that cannot be loaded leaves the
     /// default in place — stop — because a broken configuration must not be the thing that weakens the rule.
     /// </remarks>
-    private static bool StopsOnToolFailure(string repositoryRoot)
+    internal static bool StopsOnToolFailure(string repositoryRoot)
     {
         KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(repositoryRoot);
         return result.Config?.StopsOnToolFailure ?? true;
