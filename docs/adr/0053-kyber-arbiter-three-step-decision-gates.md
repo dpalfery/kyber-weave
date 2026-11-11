@@ -95,7 +95,7 @@ judgement about meaning is made without a confidence attached.
     failed. Older `review-gates/v1` reports still read.
 11. **Reserved paths keep the council (D13).** `always-human` paths still run code-reviewer
     to `NEEDS_HUMAN`; delegation rules still apply first.
-12. **Twenty-one shipped rules with permanent ids (D14).** Phase 2 ships two more, so the count is now twenty-three (`KW-ARB-DIFFICULTY-001`, `KW-ARB-LADDER-001`). Hosts tune shipped rules by id
+12. **Thirty-two shipped rules with permanent ids (D14).** Phase 1 shipped twenty-one. Phase 2 ships two more (`KW-ARB-DIFFICULTY-001`, `KW-ARB-LADDER-001`), and phase 3 ships nine, so the count is now thirty-two. Hosts tune shipped rules by id
     (`enabled`, thresholds, `effects` only) and add their own under non-`KW-ARB-` ids. Ids
     are never reused or renumbered.
 13. **Every non-allow conductor outcome escalates to architect (D15).** The harness blocks

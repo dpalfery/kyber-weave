@@ -621,7 +621,7 @@ reports `kyber-weave-mcp`, `kyber-weave-arbiter` and `kyberdash-analytics`.
 | `docs_status` | `docs_get_source_repository_and_revision` |
 | `agent_coding_standards` | `docs_get_coding_standard_for_technology` |
 
-**kw-arbiter** — three tools:
+**kw-arbiter** — renamed tools (the server now exposes five, listed in the Arbiter architecture):
 
 | Old tool name | New tool name |
 |---|---|

@@ -1068,17 +1068,19 @@ and validates.
 - **`decision.query` grants the Arbiter fallback.** The capability vocabulary carries
   `decision.query`: the `orchestrator` and `reviewer` profiles allow it, and the other
   ten profiles deny it. An `allow` lowers to the `kw-arbiter` server alone on
-  the fallback-only targets `warp` and `zcode` — the three tools
+  the fallback-only targets `warp` and `zcode` — the five tools
   `arbiter_evaluate_agent_dispatch_or_return`,
-  `arbiter_list_effective_rules_by_trigger`, and
-  `arbiter_check_configuration_and_key_readiness`, granted by qualified name where grants are
+  `arbiter_list_effective_rules_by_trigger`,
+  `arbiter_check_configuration_and_key_readiness`,
+  `arbiter_select_relevant_document_sections`, and
+  `arbiter_classify_bot_review_comment`, granted by qualified name where grants are
   enumerated — and to nothing on a hooked target, so no hooked target is widened. A
   separate server name is the only portable grant that excludes the docs tools, because
   MCP grants are whole-server wildcards. ZCode's and Devin's fully qualified generic
   grants exclude the `kw-arbiter` server; the Arbiter tools ride a separate,
   `decision.query`-keyed grant. On the canonical tree the server is declared in
   `products/kyber-squad/mcp.json` under the key `kw-arbiter`
-  (`kyber-weave-arbiter serve --repo-root .`) and `toolchain.yml` lists its three tools under
+  (`kyber-weave-arbiter serve --repo-root .`) and `toolchain.yml` lists its five tools under
   `required-mcp-tools.kw-arbiter`.
   **Three landed grants, each in the form its harness actually reads, and three exclusions by
   citation.** `PiRenderer` derives the overlay for every entitled **subagent**: `extensions:

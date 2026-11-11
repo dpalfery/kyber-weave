@@ -123,7 +123,7 @@ When the Arbiter intercepts a council dispatch, it answers with a note in the Sq
 - **`ARBITER_DROPPED: <id> rule=KW-ARB-NITPICK-001 decision=<id>`** — the nitpick filter set a lens finding aside as a style or preference point. Do not re-raise it in the findings, the verdict or a refutation. Record it in the review as dropped, with the decision id. The note appears only once the rule is enforced; while it is in shadow, the finding stands.
 - **`ARBITER_DUPLICATE: <id> of <earlier id> decision=<id>`** — the deny reason on a refutation spawn: the finding repeats an earlier finding of this review. Do not re-raise it. Record its refutation as a duplicate of the earlier finding, with the decision id. The refutation is denied only once the rule is enforced; while it is in shadow, the refuter still runs.
 
-An internal error that blocks a spawn is none of these. A spawn the Arbiter could not run is reported as **not run**, never as `SKIPPED` — a lens that could not run and a lens that declined to apply are different claims, and the council coverage keeps them apart. The Arbiter never drops a finding: a refutation that did not run leaves the finding standing.
+An internal error that blocks a spawn is none of these. A spawn the Arbiter could not run is reported as **not run**, never as `SKIPPED` — a lens that could not run and a lens that declined to apply are different claims, and the council coverage keeps them apart. The Arbiter drops a finding only through the enforced nitpick filter: a refutation that did not run leaves the finding standing.
 
 ## Arbiter fallback
 
