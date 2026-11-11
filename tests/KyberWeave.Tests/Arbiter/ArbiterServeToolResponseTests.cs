@@ -224,6 +224,32 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
         Assert.Contains("key: found", tools.Status(), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The served tool reports the model retarget the hook would make, as advisory text, so a client
+    /// can see it before dispatching. It names the serve source, it changes nothing: no ledger event
+    /// is written and no model is delivered. Task 2.7 (RED): the serve response carries no retarget line yet.
+    /// </summary>
+    [Fact]
+    public void Evaluate_ReportsTheRetargetItWouldMake_AsAdvisory_AndChangesNothing()
+    {
+        ArbiterTools tools = CreateTools();
+
+        string response = tools.Evaluate(
+            "delegate",
+            new ArbiterFacts
+            {
+                Target = "csharp-dev",
+                PlanFile = "docs/plans/x.md",
+                Task = "T2",
+                Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: T2\n\nImplement T2.",
+            });
+
+        Assert.Contains("advisory", response, StringComparison.Ordinal);
+        Assert.Contains("source: serve", response, StringComparison.Ordinal);
+        Assert.Contains("retarget", response, StringComparison.Ordinal);
+        Assert.Empty(new InFlightLedger(Path.Combine(_repo.Path, "artifacts", "arbiter")).ReadAll());
+    }
+
     private ArbiterTools CreateTools(
         string provider = "    kind: none\n",
         Func<KyberWeaveConfig, bool>? keyResolved = null)
