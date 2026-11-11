@@ -45,6 +45,8 @@ public sealed class ArbiterDefaultRulesTests
         "KW-ARB-PLANREAD-001",
         "KW-ARB-GATE-REPORT-001",
         "KW-ARB-LENS-002",
+        "KW-ARB-DIFFICULTY-001",
+        "KW-ARB-LADDER-001",
     ];
 
     [Fact]
