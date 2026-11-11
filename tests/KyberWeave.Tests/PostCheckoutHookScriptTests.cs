@@ -68,9 +68,11 @@ public sealed class PostCheckoutHookScriptTests : IDisposable
         string worktree = Path.Combine(_git.Root, "after-switch");
         _git.GitOnOk(_git.Repository, WithStub(), "worktree", "add", "-b", "after-switch", worktree);
 
-        string invocations = await WaitForInvocationAsync("doctor --post-checkout .");
-        int doctorRuns = invocations.Split('\n').Count(line => line.StartsWith("args=doctor", StringComparison.Ordinal));
-        Assert.Equal(1, doctorRuns);
+        string leaf = Path.GetFileName(worktree);
+        string invocations = await WaitUntilAsync(text => ParseRecords(text).Any(record => record.Cwd == leaf));
+        IReadOnlyList<InvocationRecord> records = ParseRecords(invocations);
+        Assert.All(records, record => Assert.Equal(leaf, record.Cwd));
+        Assert.Single(records, record => record.Args.StartsWith("doctor --post-checkout .", StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -215,7 +217,13 @@ public sealed class PostCheckoutHookScriptTests : IDisposable
     }
 
     /// <summary>Waits up to ten seconds for the stub's record to name <paramref name="needle"/>, then returns the record.</summary>
-    private async Task<string> WaitForInvocationAsync(string needle)
+    private Task<string> WaitForInvocationAsync(string needle) =>
+        WaitUntilAsync(text => text.Contains(needle, StringComparison.Ordinal));
+
+    /// <summary>
+    /// Waits up to ten seconds for the invocation record to satisfy <paramref name="ready"/>, then returns the record.
+    /// </summary>
+    private async Task<string> WaitUntilAsync(Func<string, bool> ready)
     {
         string record = Path.Combine(_git.Markers, "invocations");
         DateTime deadline = DateTime.UtcNow.Add(ChildWindow);
@@ -224,7 +232,7 @@ public sealed class PostCheckoutHookScriptTests : IDisposable
             if (File.Exists(record))
             {
                 string text = await File.ReadAllTextAsync(record);
-                if (text.Contains(needle, StringComparison.Ordinal))
+                if (ready(text))
                 {
                     return text;
                 }
@@ -233,8 +241,32 @@ public sealed class PostCheckoutHookScriptTests : IDisposable
             await Task.Delay(50);
         }
 
-        Assert.Fail($"No kyber-weave invocation naming '{needle}' appeared within {ChildWindow.TotalSeconds} seconds.");
+        Assert.Fail($"The kyber-weave invocation record did not reach the expected state within {ChildWindow.TotalSeconds} seconds.");
         return string.Empty;
+    }
+
+    /// <summary>One stub invocation: its arguments and the leaf name of the working directory it ran in.</summary>
+    private sealed record InvocationRecord(string Args, string Cwd);
+
+    /// <summary>Pairs each <c>args=</c> line of the record with the <c>cwd=</c> line that follows it.</summary>
+    private static IReadOnlyList<InvocationRecord> ParseRecords(string text)
+    {
+        List<InvocationRecord> records = [];
+        string? args = null;
+        foreach (string line in text.Split('\n'))
+        {
+            if (line.StartsWith("args=", StringComparison.Ordinal))
+            {
+                args = line["args=".Length..];
+            }
+            else if (line.StartsWith("cwd=", StringComparison.Ordinal) && args is not null)
+            {
+                records.Add(new InvocationRecord(args, Path.GetFileName(line["cwd=".Length..].TrimEnd('/'))));
+                args = null;
+            }
+        }
+
+        return records;
     }
 
     private static string CwdOf(string invocations)
