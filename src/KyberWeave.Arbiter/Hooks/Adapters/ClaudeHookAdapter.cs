@@ -39,8 +39,7 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
 
     /// <inheritdoc/>
     /// <remarks>
-    /// Declared only: the adapter does not write a model onto a dispatch yet. Claude sub-agents take
-    /// the model in the <c>model</c> field and accept four aliases.
+    /// Claude sub-agents take the model in the <c>model</c> field and accept four aliases.
     /// </remarks>
     public ModelOverrideCapability ModelOverride { get; } = new(
         true,
@@ -49,6 +48,12 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         SubAgentsDocs);
 
     private readonly IHookDecisionEngine _engine;
+
+    /// <summary>
+    /// A test seam: when set, writing the delivered model throws this exception, so the fallback to a
+    /// strip-only allow can be exercised. Never set in production.
+    /// </summary>
+    internal Exception? ModelWriteFault { get; set; }
 
     /// <summary>
     /// Background-launch links by harness tool-call id. In-memory by design: the hook
@@ -229,10 +234,13 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
             string prompt = GetString(toolInput, "prompt")
                 ?? throw new InvalidOperationException(
                     "Malformed Claude hook event: Agent input carries no prompt.");
-            HookOutcome outcome = DecidePre(payload, caller, target, prompt, config, context);
+            string? dispatchModel = GetString(toolInput, "model");
+            HookOutcome outcome = DecidePre(payload, caller, target, prompt, config, context, dispatchModel);
             return outcome.Kind switch
             {
                 HookOutcomeKind.PassThrough => string.Empty,
+                HookOutcomeKind.Allow when outcome.ModelToken is not null => RenderPreAllowModel(
+                    toolInput, prompt, outcome.ModelToken, context),
                 HookOutcomeKind.Allow => ReadGuard.IsImplementationSpecialist(target)
                     ? RenderPreAllowStrip(toolInput, prompt)
                     : string.Empty,
@@ -434,13 +442,14 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         string? target,
         string prompt,
         KyberWeaveConfig config,
-        HookContext context)
+        HookContext context,
+        string? dispatchModel)
     {
         if (_engine is IContextualHookDecisionEngine contextual)
         {
             return contextual.DecidePreDispatch(
                 Token, caller, target, prompt, config, context,
-                GetString(payload, "tool_use_id"), GetString(payload, "session_id"));
+                GetString(payload, "tool_use_id"), GetString(payload, "session_id"), dispatchModel);
         }
 
         return _engine.DecidePreDispatch(caller, target, prompt, config);
@@ -549,6 +558,67 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
             ?? throw new InvalidOperationException(
                 "Malformed Claude hook event: tool_input is not a JSON object."),
             node => node["prompt"] = HeaderBlock.Strip(prompt));
+
+    /// <summary>
+    /// Renders the allow that writes the delivered model. The write is one <c>updatedInput</c> that keeps
+    /// every field of the tool input, with the header stripped from the prompt. A token the harness does
+    /// not accept, or a write that fails, leaves the model out and logs why: the dispatch still runs.
+    /// </summary>
+    private string RenderPreAllowModel(JsonElement toolInput, string prompt, string token, HookContext context)
+    {
+        JsonObject updated = JsonNode.Parse(toolInput.GetRawText()) as JsonObject
+            ?? throw new InvalidOperationException(
+                "Malformed Claude hook event: tool_input is not a JSON object.");
+        updated["prompt"] = HeaderBlock.Strip(prompt);
+
+        string? alias = AliasFor(token, context);
+        if (alias is not null)
+        {
+            try
+            {
+                if (ModelWriteFault is { } fault)
+                {
+                    throw fault;
+                }
+
+                updated["model"] = alias;
+                context.Log.WriteLine($"model: {alias}; delivered: true");
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                context.Log.WriteLine($"model-write-failed: {OneLine(ex.Message)}; delivered: false");
+            }
+        }
+
+        return RenderPreAllow(updated, _ => { });
+    }
+
+    /// <summary>
+    /// The harness alias a model token writes as. An accepted alias writes as it is; a full model
+    /// identifier whose family is an accepted alias writes that family; anything else is not written.
+    /// </summary>
+    private string? AliasFor(string token, HookContext context)
+    {
+        IReadOnlySet<string> accepted = ModelOverride.AcceptedAliases ?? new HashSet<string>(StringComparer.Ordinal);
+        if (accepted.Contains(token))
+        {
+            return token;
+        }
+
+        string[] parts = token.Split('-');
+        if (parts.Length > 1
+            && string.Equals(parts[0], "claude", StringComparison.Ordinal)
+            && accepted.Contains(parts[1]))
+        {
+            context.Log.WriteLine($"model.reason: alias-derived ({token} -> {parts[1]})");
+            return parts[1];
+        }
+
+        context.Log.WriteLine($"model.reason: token-not-accepted ({OneLine(token)}); delivered: false");
+        return null;
+    }
+
+    private static string OneLine(string text) => text.ReplaceLineEndings(" ");
 
     private static string RenderPreAllowRaw(string rewrittenInputJson)
     {
