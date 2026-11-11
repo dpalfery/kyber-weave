@@ -157,6 +157,19 @@ public sealed class ReportGateScriptTests : IDisposable
         Assert.Contains("no complete report", result.StandardError, StringComparison.Ordinal);
     }
 
+    /// <summary>A command that writes the finish text and exits zero by itself passes: nothing had to be stopped.</summary>
+    [Fact]
+    public void ACommandThatWritesTheFinishTextAndExitsZeroPassesUnderContains()
+    {
+        SkipIfBashUnavailable();
+
+        ProcessResult result = RunContainsScript(
+            $"{{ echo before; echo '<Report>{Closing}'; echo after; }} > {Report}", grace: 1);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.DoesNotContain("did not exit", result.StandardError, StringComparison.Ordinal);
+    }
+
     /// <summary>A command that never finishes is stopped at the time limit, and the stopped command does not outlive it.</summary>
     [Fact]
     public void ACommandThatRunsPastTheTimeoutIsStoppedAndReportedAsTimedOut()

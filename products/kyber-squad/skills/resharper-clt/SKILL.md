@@ -98,6 +98,10 @@ have made for free. Erasing them here is the whole point.
    dotnet jb cleanupcode <solution> --profile="<cleanup profile>" --include="<changed files>" --no-build
    ```
 
+   `--no-build` skips the tool's own restore and build, so the solution must already be restored
+   into its default `obj/`: run `dotnet restore <solution>` first when nothing has. A restore
+   redirected with `BaseIntermediateOutputPath` does not count.
+
    When the host's C# coding standard gives its own cleanupcode command in its `## Completion` section, run that command instead of this line.
 
    `--include` is not optional. Unscoped, these rewrite files the task never touched, and the
@@ -210,6 +214,7 @@ dotnet format Hauling.sln --include 2-Application/Hauling.Application/Dispatch/L
   -p:BaseIntermediateOutputPath=.agent_scratchpad/T3/artifacts/obj/
 dotnet format Hauling.sln analyzers --include 2-Application/Hauling.Application/Dispatch/LoadPlanner.cs \
   -p:BaseIntermediateOutputPath=.agent_scratchpad/T3/artifacts/obj/
+dotnet restore Hauling.sln
 dotnet jb cleanupcode Hauling.sln --profile="<cleanup profile>" --include="2-Application/Hauling.Application/Dispatch/LoadPlanner.cs" --no-build
 ```
 

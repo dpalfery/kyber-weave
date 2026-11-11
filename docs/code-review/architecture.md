@@ -743,7 +743,7 @@ when the report ends with `</Report>` and stops once it has not changed for `--g
 keeps writing after its finish line would otherwise never settle. An optional `--timeout <seconds>` limits
 the whole run: when it elapses before the run counts as done, the wrapper stops the command's whole process
 tree, says so on standard error, and exits 124, while a run already done before the limit still passes. The
-script must stay bash 3.2 compatible, the `/bin/bash` on macOS, and its contract tests run it under that shell.
+script must stay bash 3.2 compatible, the `/bin/bash` on macOS. Its contract tests run it under `/bin/bash`, which is 3.2 only on macOS.
 A hang before the report is complete still runs to `timeout-seconds` and is reported as timed out when no
 `--timeout` is set, and a zero exit with no complete report fails.
 
