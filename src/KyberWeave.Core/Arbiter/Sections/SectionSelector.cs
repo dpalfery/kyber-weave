@@ -10,7 +10,7 @@ public sealed record SectionSelection(IReadOnlyList<DocumentSection> Selected, b
 
 /// <summary>
 /// Asks the provider, through <c>KW-ARB-TRIM-001</c>, which sections of a document a task needs. One question is
-/// batched per candidate section; the first section is the title and is always kept. The selector fails safe: any
+/// batched per candidate section, up to <see cref="StateBudget.MaxQuestions"/>; the first section is the title and is always kept, and candidates past the cap are kept unasked. The selector fails safe: any
 /// answer that is missing, below the rule's floor, or not sent returns every section.
 /// </summary>
 /// <param name="provider">The provider that answers the questions; <c>NoneProvider</c> answers nothing and so keeps every section.</param>
@@ -47,15 +47,19 @@ public sealed class SectionSelector(IArbiterProvider provider)
             return FailSafe(sections);
         }
 
+        // Only the first MaxQuestions candidates are asked, to stay inside the step-1 batch limit. The rest are kept
+        // unasked: unsure keeps, so a section the provider never saw is never dropped.
+        int asked = Math.Min(sections.Count - 1, StateBudget.MaxQuestions);
+
         // Each candidate becomes its own question keyed by rule id plus section id, so one batched call answers all.
         Dictionary<string, ArbiterFact> facts = new(StringComparer.Ordinal)
         {
             [TaskFact] = new ArbiterFact(task, ArbiterFactLabel.Asserted),
-            [CandidatesFact] = new ArbiterFact(sections.Skip(1).Select(section => section.Id).ToList(), ArbiterFactLabel.Derived),
+            [CandidatesFact] = new ArbiterFact(sections.Skip(1).Take(asked).Select(section => section.Id).ToList(), ArbiterFactLabel.Derived),
         };
         List<ArbiterRule> questions = [];
         Dictionary<string, DocumentSection> byKey = new(StringComparer.Ordinal);
-        for (int index = 1; index < sections.Count; index++)
+        for (int index = 1; index <= asked; index++)
         {
             DocumentSection section = sections[index];
             string key = TrimRuleId + "@" + section.Id;
@@ -111,6 +115,11 @@ public sealed class SectionSelector(IArbiterProvider provider)
             {
                 return FailSafe(sections);
             }
+        }
+
+        for (int index = asked + 1; index < sections.Count; index++)
+        {
+            keep.Add(sections[index].Id);
         }
 
         List<DocumentSection> selected = [.. sections.Where(section => keep.Contains(section.Id))];

@@ -25,7 +25,7 @@ public sealed record ReturnedFinding(string Id, string Text, string? Severity)
 
     /// <summary>Splits a lens return into its findings, one per <c>id:</c> line, in order.</summary>
     /// <remarks>
-    /// The same split <c>arbiter_evaluate</c> uses for refutations, so a finding is one block
+    /// The same split <c>arbiter_evaluate_agent_dispatch_or_return</c> uses for refutations, so a finding is one block
     /// everywhere. A return with no <c>id:</c> line has no findings.
     /// </remarks>
     public static IReadOnlyList<ReturnedFinding> ParseAll(string? toolOutput)
