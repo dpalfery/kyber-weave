@@ -218,6 +218,18 @@ public sealed record ArbiterLedgerEvent(
     [JsonPropertyName("decision-id")]
     public string? DecisionId { get; init; }
 
+    /// <summary>The model profile the dispatch was routed to, when a model target answered; omitted otherwise.</summary>
+    [JsonPropertyName("model-profile")]
+    public string? ModelProfile { get; init; }
+
+    /// <summary>The model token the dispatch was routed to, when a model target answered; omitted otherwise.</summary>
+    [JsonPropertyName("model-token")]
+    public string? ModelToken { get; init; }
+
+    /// <summary>Where the model token came from (for example <c>model-targets</c>); omitted otherwise.</summary>
+    [JsonPropertyName("model-source")]
+    public string? ModelSource { get; init; }
+
     /// <summary>The ledger schema id.</summary>
     [JsonPropertyName("schema")]
     public string Schema => SchemaName;

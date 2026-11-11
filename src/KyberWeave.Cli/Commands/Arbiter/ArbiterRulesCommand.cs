@@ -48,7 +48,8 @@ public sealed class ArbiterRulesCommand : Command<ArbiterSettings>
                 string.Equals(rule.Trigger, settings.Trigger, StringComparison.Ordinal))];
         }
 
-        Table table = new Table().Border(TableBorder.Rounded).Expand();
+        // Sized to its content, not expanded: under an unfolded console width, Expand pads the table to the width.
+        Table table = new Table().Border(TableBorder.Rounded);
         table.AddColumn("Id");
         table.AddColumn("Trigger");
         table.AddColumn("Step");
@@ -56,6 +57,8 @@ public sealed class ArbiterRulesCommand : Command<ArbiterSettings>
         table.AddColumn("Answers");
         table.AddColumn("Effects");
         table.AddColumn("Facts");
+        table.AddColumn("Shadow");
+        table.AddColumn("For-each");
         foreach (ArbiterRule rule in rules.OrderBy(r => r.Id, StringComparer.Ordinal).ThenBy(r => r.Trigger, StringComparer.Ordinal))
         {
             table.AddRow(
@@ -65,10 +68,13 @@ public sealed class ArbiterRulesCommand : Command<ArbiterSettings>
                 new Markup(Markup.Escape(rule.Question)),
                 new Markup(Markup.Escape(string.Join(", ", rule.Answers))),
                 new Markup(Markup.Escape(string.Join(", ", rule.Effects.Select(pair => $"{pair.Key} -> {pair.Value}")))),
-                new Markup(Markup.Escape(string.Join(", ", FactsRead(rule)))));
+                new Markup(Markup.Escape(string.Join(", ", FactsRead(rule)))),
+                new Markup(rule.Shadow ? "shadow" : "enforced"),
+                new Markup(Markup.Escape(rule.Ask?.ForEach ?? "—")));
         }
 
-        AnsiConsole.Write(table);
+        // Unfolded so a wide table is not split mid-word, which would break a column name such as "For-each".
+        CommandHelpers.WriteUnfolded(() => AnsiConsole.Write(table));
         AnsiConsole.MarkupLine($"[grey]{rules.Count} rule(s) listed.[/]");
 
         CommandHelpers.Finish(report, settings, "arbiter rules", "Rule");

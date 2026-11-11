@@ -49,9 +49,11 @@ interchangeable.
   is what a client launches; `kw-arbiter` is what it declares the server as. A change to
   one is not a change to the other.
 
-The three tools are `arbiter_evaluate_agent_dispatch_or_return`,
+The three decision tools are `arbiter_evaluate_agent_dispatch_or_return`,
 `arbiter_list_effective_rules_by_trigger`, and
-`arbiter_check_configuration_and_key_readiness`. Their names are client-visible contract —
+`arbiter_check_configuration_and_key_readiness`. Two more ask the provider and answer
+fail-safe: `arbiter_select_relevant_document_sections` and
+`arbiter_classify_bot_review_comment`. Their names are client-visible contract —
 a client registers them by exact name — so a rename has to carry the rendered grants and
 the docs with it, or the fallback stops resolving silently.
 

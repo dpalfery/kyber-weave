@@ -4,6 +4,7 @@ using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
+using KyberWeave.Core.Arbiter.ModelTargets;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -40,6 +41,16 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
     public const string GuardWithoutIndex = "KW-ARB-GUARD-001";
 
     /// <summary>
+    /// Model targeting is on for a hooked target whose model targets file is missing, unreadable, or older
+    /// than the Squad lock. Without a current file the model override is dropped without anyone seeing it.
+    /// </summary>
+    public const string ModelTargetsMissing = "KW-ARB-MODEL-001";
+
+    private const string ModelTargetingOff = "off";
+    private const string EnforcedGlobal = "enforced-global";
+    private const string SquadUpdateHint = "Run kyber-weave squad update to rewrite the model targets.";
+
+    /// <summary>
     /// Runs every check and reports findings. A malformed override (<c>-009</c>)
     /// still leaves the product defaults to diagnose, so one bad file never hides
     /// the remaining checks. Writes nothing. Exits 1 only on error findings.
@@ -73,8 +84,85 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
         CheckBinary(report);
         CheckGuard(config, settings, report);
         CheckProjectHooks(settings.Path, projectEnabled, report);
+        CheckModelTargets(config, home, globalTargets, report);
         CheckAdvisoryPostDispatchTargets();
     }
+
+    /// <summary>
+    /// Warns when model targeting is on and a hooked global target has no current model targets file.
+    /// The file lives under the global Arbiter directory, and it must be at least as new as the global
+    /// Squad lock, because an older one was written before the last squad update.
+    /// </summary>
+    private static void CheckModelTargets(KyberWeaveConfig config, string home, IReadOnlyList<string> globalTargets, DiagnosticReport report)
+    {
+        if (string.Equals(config.Arbiter.ModelTargeting.Mode, ModelTargetingOff, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        string arbiterDirectory = Path.Combine(home, ".kyber-weave", "arbiter");
+        string lockPath = Path.Combine(home, ".kyber-weave", "squad", "global", "squad.lock.yml");
+        foreach (string token in globalTargets)
+        {
+            if (!IsHooked(token))
+            {
+                continue;
+            }
+
+            string targetsPath = Path.Combine(arbiterDirectory, $"model-targets.{token}.json");
+            DateTime targetsWritten = default;
+            bool readable = ArbiterModelTargets.TryRead(arbiterDirectory, token) is not null
+                && TryGetWriteTimeUtc(targetsPath, out targetsWritten);
+            bool stale = readable && TryGetWriteTimeUtc(lockPath, out DateTime lockWritten)
+                && targetsWritten < lockWritten;
+            if (readable && !stale)
+            {
+                continue;
+            }
+
+            string reason = readable ? "is older than the Squad lock" : "is missing or unreadable";
+            AnsiConsole.MarkupLine(
+                $"  [yellow]warn[/] Model targets [bold]{ModelTargetsMissing}[/]: the {Markup.Escape(TargetDisplayName(token))} targets file {reason}. {SquadUpdateHint}");
+            report.Add(new Diagnostic(
+                ModelTargetsMissing,
+                Severity.Warning,
+                $"Model targeting is '{config.Arbiter.ModelTargeting.Mode}' but the {TargetDisplayName(token)} model targets file {reason}.",
+                targetsPath,
+                Hint: SquadUpdateHint));
+        }
+    }
+
+    /// <summary>
+    /// Reads a file's last write time in UTC, or reports that there is none. A missing file reads as the
+    /// file-time epoch rather than an error, and an unreadable one throws, so both come back as false and
+    /// the check degrades to its warning instead of crashing <c>doctor</c>.
+    /// </summary>
+    /// <param name="path">The file to stat.</param>
+    /// <param name="writtenUtc">The last write time in UTC when the file exists and can be stat'ed.</param>
+    /// <returns>True when a real write time was read; false when the file is missing or cannot be stat'ed.</returns>
+    internal static bool TryGetWriteTimeUtc(string path, out DateTime writtenUtc)
+    {
+        writtenUtc = default;
+        try
+        {
+            writtenUtc = File.GetLastWriteTimeUtc(path);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+
+        return writtenUtc != DateTime.FromFileTimeUtc(0);
+    }
+
+    /// <summary>
+    /// A target is hooked when the catalogue knows it and its global reason is the enforced one. A
+    /// fallback-only target carries its own degradation reason and is not hooked, so its missing
+    /// targets file is not a warning: no hook would have honoured the override anyway.
+    /// </summary>
+    private static bool IsHooked(string token) =>
+        SquadTargetCatalog.TryResolve(token, out _)
+        && string.Equals(GlobalReason(token), EnforcedGlobal, StringComparison.Ordinal);
 
     /// <summary>Runs the command without cancellation; the entry point tests use.</summary>
     public int Execute(CommandContext context, ArbiterSettings settings) =>
@@ -126,7 +214,7 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
         IReadOnlyList<SquadDegradationRecord> records = ArbiterHookWiring.TargetDegradations(
             [target],
             SquadDeploymentScope.Global);
-        return records.Count == 0 ? "enforced-global" : (records[0].Details ?? "enforced-global");
+        return records.Count == 0 ? EnforcedGlobal : (records[0].Details ?? EnforcedGlobal);
     }
 
     private static string TargetDisplayName(string token)

@@ -141,14 +141,14 @@ public sealed class ArbiterPlanReadRuleTests
     /// reader checking how many rules ship must not have to count them.
     /// </summary>
     [Fact]
-    public void TheShippedFileDeclaresTheRuleAsTheNineteenth()
+    public void TheShippedFileDeclaresTheRuleAsTheTwentySixth()
     {
         Assert.True(
             File.Exists(ShippedRulesPath),
             $"the shipped rules file must live at '{ShippedRulesPath}'.");
         string[] lines = File.ReadAllLines(ShippedRulesPath);
 
-        Assert.Contains("20 shipped Arbiter rules", lines[0], StringComparison.Ordinal);
+        Assert.Contains("32 shipped Arbiter rules", lines[0], StringComparison.Ordinal);
 
         string[] ids =
         [
@@ -158,9 +158,9 @@ public sealed class ArbiterPlanReadRuleTests
                 .Select(line => line["- id: ".Length..].Trim())
         ];
 
-        Assert.Equal(20, ids.Length);
+        Assert.Equal(32, ids.Length);
         Assert.Contains(PlanReadRule, ids);
-        Assert.Equal("KW-ARB-GATE-REPORT-001", ids[^1]);
+        Assert.Equal("KW-ARB-COMMENT-001", ids[^1]);
         Assert.Equal("delegate", Rule().Trigger);
     }
 }

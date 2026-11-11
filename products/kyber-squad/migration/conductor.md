@@ -6,7 +6,7 @@ selected-baseline: .github/agents/conductor.agent.md
 sources:
   .github/agents/conductor.agent.md: fe8fa326b83780cafb4a9b8aba06312ddb106eb732de1f7a64f3a88b8fe773c6
   .github/agents/conductor-v3.agent.md: 0392bd1e3dd09ab67f45801cb39aac7d016b5ed43733ee2ae65ac6c5668d7204
-final-body-sha256: f4c428e9fff599d6e7025fd747c835f0a44f438eb3f069329e0f141d9cc1179f
+final-body-sha256: 2e0b2083355845d2aa50aa19c00366affc33af89ee7494ae7068ae6cbdc7ce3f
 ---
 # conductor migration
 

@@ -1,3 +1,4 @@
+using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Cli.Commands.Review;
 using Spectre.Console.Cli;
@@ -67,6 +68,9 @@ internal static class CommandAppFixture
     /// </summary>
     public static CommandApp ReviewSuppressions() => Build(strictParsing: true, ReviewSuppressionsBranch);
 
+    /// <summary>The <c>arbiter tune</c> boundary: the <c>arbiter</c> branch with its single <c>tune</c> command.</summary>
+    public static CommandApp ArbiterTune() => Build(strictParsing: true, ArbiterTuneBranch);
+
     /// <summary>
     /// Both branches at once, strict: <c>docs init</c> and the council <c>review gates</c> in one
     /// app, which is what a case needs when it scaffolds a repository and then gates it.
@@ -103,6 +107,9 @@ internal static class CommandAppFixture
 
     private static void ReviewCatalogueBranch(IConfigurator config) =>
         config.AddBranch("review", review => { review.AddCommand<ReviewCatalogueCommand>("catalogue"); });
+
+    private static void ArbiterTuneBranch(IConfigurator config) =>
+        config.AddBranch("arbiter", arbiter => { arbiter.AddCommand<ArbiterTuneCommand>("tune"); });
 
     private static void ReviewSuppressionsBranch(IConfigurator config) =>
         config.AddBranch("review", review => { review.AddCommand<ReviewSuppressionsCommand>("suppressions"); });

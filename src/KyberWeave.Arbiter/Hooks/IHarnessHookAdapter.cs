@@ -1,4 +1,5 @@
 using System.Text.Json;
+using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Configuration;
 
 namespace KyberWeave.Arbiter.Hooks;
@@ -37,10 +38,37 @@ public enum HookOutcomeKind
 /// <param name="Kind">The kind of decision.</param>
 /// <param name="Reason">The block reason (envelope or note), for deny, post, and allow-with-note outcomes.</param>
 /// <param name="RewrittenInputJson">The complete rewritten input, for allow-with-rewrite.</param>
+/// <param name="ModelToken">The model alias the decision sets on a sub-agent dispatch, when the harness
+/// accepts one. Null leaves the dispatch's model as the harness would have chosen it.</param>
+/// <param name="ModelBlock">The delegate.model block the evaluation resolved, delivered or not, when model
+/// targeting is not off. The serve path reads it to report the retarget as advisory; no harness writes from it.</param>
 public sealed record HookOutcome(
     HookOutcomeKind Kind,
     string? Reason = null,
-    string? RewrittenInputJson = null);
+    string? RewrittenInputJson = null,
+    string? ModelToken = null,
+    ArbiterModelBlock? ModelBlock = null);
+
+/// <summary>
+/// Whether a harness lets the Arbiter set the model of a dispatched sub-agent: the field that carries
+/// the model, the model aliases it accepts, and where that declaration was read from.
+/// </summary>
+/// <param name="Supported">True when the harness honours a model override on a sub-agent dispatch.</param>
+/// <param name="Field">The dispatch field that carries the model. Set only when <paramref name="Supported"/> is true.</param>
+/// <param name="AcceptedAliases">The model aliases the harness accepts. Set only when <paramref name="Supported"/> is true.</param>
+/// <param name="Source">The documentation the declaration was read from, so a reviewer can check the aliases against it.</param>
+public sealed record ModelOverrideCapability(
+    bool Supported,
+    string? Field,
+    IReadOnlySet<string>? AcceptedAliases,
+    string Source)
+{
+    /// <summary>
+    /// The declaration of a harness that does not let the Arbiter set a sub-agent's model. A rule that
+    /// asks for an override on such a harness gets none to apply.
+    /// </summary>
+    public static ModelOverrideCapability Unsupported { get; } = new(false, null, null, string.Empty);
+}
 
 /// <summary>What a classified event is evaluated against.</summary>
 /// <param name="RepoRoot">The repository root configuration is loaded from.</param>
@@ -57,13 +85,20 @@ public enum HookScope
     Global,
 }
 
+/// <summary>What a classified event is evaluated against, copied from the serving harness's adapter.</summary>
+/// <param name="ModelOverride">The serving harness's model-override declaration. Null when the caller
+/// supplies none, which a rule reads as unsupported.</param>
+/// <param name="ConfirmModelWrite">Writes an accepted model token into the harness input and reports whether
+/// the write held. The decision asks it before recording a delivered model. Null when the adapter writes later.</param>
 public sealed record HookContext(
     string RepoRoot,
     Func<string> NewDecisionId,
     TextWriter Log,
     bool ObservesReturns = true,
     string? HomeDirectory = null,
-    HookScope Scope = HookScope.Project);
+    HookScope Scope = HookScope.Project,
+    ModelOverrideCapability? ModelOverride = null,
+    Func<string, bool>? ConfirmModelWrite = null);
 
 /// <summary>The dispatch-gating decision behind a hook: later tasks replace the default
 /// allow-all engine with step-0/step-1 evaluation (the <c>serve</c>/<c>eval</c> entry
@@ -93,6 +128,12 @@ public interface IHarnessHookAdapter
     /// (Q17 option (a)): pre-dispatch gating still runs, completion order is advisory.
     /// </summary>
     bool ObservesReturns => true;
+
+    /// <summary>
+    /// Whether the harness lets the Arbiter set a sub-agent's model, and through which field. The default
+    /// declares no override, so a harness only offers one by saying so here.
+    /// </summary>
+    ModelOverrideCapability ModelOverride => ModelOverrideCapability.Unsupported;
 
     /// <summary>True when the event passes untouched. Must not touch configuration:
     /// the host returns before <c>.kyber-weave/kyber-weave.yml</c> is loaded.</summary>

@@ -132,8 +132,8 @@ public static class CodeGraphProvisioner
 
         if (mode == DoctorMode.Ensure)
         {
-            checks.AddRange(Ensure(root, indexDirectory, options, executor, lockDirectory, restore));
-            return new CodeGraphOutcome(checks, BinaryMissing: false);
+            checks.AddRange(Ensure(root, indexDirectory, options, executor, lockDirectory, restore, out bool initialised));
+            return new CodeGraphOutcome(checks, BinaryMissing: false, initialised);
         }
 
         checks.Add(Provision(root, options, executor, lockDirectory, options.IndexTimeout));
@@ -215,9 +215,11 @@ public static class CodeGraphProvisioner
         DoctorOptions options,
         IProcessExecutor executor,
         string lockDirectory,
-        CodeGraphRestore restore)
+        CodeGraphRestore restore,
+        out bool initialised)
     {
         List<DoctorCheck> checks = [];
+        initialised = false;
 
         using FileStream? lockFile = AcquireLock(
             LockPathFor(root, lockDirectory), options.IndexTimeout, out string? lockFailure);
@@ -240,20 +242,23 @@ public static class CodeGraphProvisioner
         // Verb choice follows the directory as it stands inside the lock, for the same reason Provision re-derives it.
         string verb = Directory.Exists(indexDirectory) ? SyncVerb : InitVerb;
         ChildRun prepared = PrepareIndex(root, verb, options, executor);
-        bool onlySynced = prepared.Ok && prepared.Verb == SyncVerb;
+        bool initRan = prepared.Verb == InitVerb;
         if (!prepared.Ok && !prepared.NotInitialised)
         {
             ChildRun repair = RunChild(root, IndexVerb, options, executor, subject: ".");
             prepared = repair.Ok
                 ? PrepareIndex(root, Directory.Exists(indexDirectory) ? SyncVerb : InitVerb, options, executor)
                 : repair;
+            initRan |= prepared.Verb == InitVerb;
         }
 
+        initialised = prepared.Ok && prepared.Verb == InitVerb;
         checks.Add(VerbCheck(prepared, options, IndexCheckId, EnsureFlag));
 
-        // A sync writes no tracked file, so there is nothing of its own to undo. Restoring after one would revert
-        // whatever someone else edited in this tree while it ran, and a review now syncs a tree others may be in.
-        if (!onlySynced && RestoreWritten(root, dirtyBefore, executor, restore) is { } restoreCheck)
+        // Only init rewrites tracked files, so only an init leaves something of this run's own to undo. After a sync
+        // or a repair, passed or failed, a newly dirty file is someone else's edit in this tree, and restoring it
+        // would revert their work: a review syncs a tree others may be in.
+        if (initRan && RestoreWritten(root, dirtyBefore, executor, restore) is { } restoreCheck)
             checks.Add(restoreCheck);
 
         // A repair already ran, and one is the whole budget. Proving an index that could not be prepared would report

@@ -35,6 +35,12 @@ public static class RuleValidator
     /// <summary>A duplicate, retired or reserved-prefix id, or a non-overridable field on a shipped rule.</summary>
     public const string DuplicateOrReservedId = "KW-ARB-CONFIG-005";
 
+    /// <summary>
+    /// The character a for-each question's key puts between the rule id and the item index
+    /// (<c>{rule id}@{index}</c>). Host rule ids may not contain it, so no host id can equal one of those keys.
+    /// </summary>
+    public const char ExpansionSeparator = '@';
+
     /// <summary>Model rules are switched off because the provider is <c>none</c>.</summary>
     public const string ModelRulesSwitchedOff = "KW-ARB-CONFIG-006";
 
@@ -52,6 +58,18 @@ public static class RuleValidator
 
     /// <summary><c>arbiter.global</c> appears in a project-level config; it is valid only in the user config.</summary>
     public const string UserGlobalTargetsForbidden = "KW-ARB-CONFIG-011";
+
+    /// <summary>An unknown <c>model-targeting</c> mode, difficulty key, or difficulty profile. Names the valid values.</summary>
+    public const string ModelTargetingInvalid = "KW-ARB-CONFIG-012";
+
+    /// <summary>An invalid <c>model-targeting.ladder</c>: empty, repeated, or not a profile name. Shows an example ladder.</summary>
+    public const string LadderInvalid = "KW-ARB-CONFIG-013";
+
+    /// <summary><c>shadow</c> set on a rule whose shadow state the model-targeting mode owns.</summary>
+    public const string ShadowOwnedByMode = "KW-ARB-CONFIG-014";
+
+    /// <summary>A savings value out of range or in a forbidden place: a store limit, a bot login, a shipped-only effect or key.</summary>
+    public const string SavingsValueInvalid = "KW-ARB-CONFIG-015";
 
     /// <summary>The CLI scope conflict <c>--global</c> and <c>--project</c> attempted together.</summary>
     public const string InstallScopeConflict = "KW-ARB-INSTALL-001";
@@ -119,6 +137,18 @@ public static class RuleValidator
                     "arbiter.rules has an entry with no id. Every rule needs one.",
                     "arbiter.rules",
                     filePath));
+                continue;
+            }
+
+            if (id.Contains(ExpansionSeparator, StringComparison.Ordinal))
+            {
+                diagnostics.Add(new Diagnostic(
+                    MalformedSection,
+                    Severity.Error,
+                    $"rule '{id}' contains '{ExpansionSeparator}', which names a for-each question. Host rule ids may not contain it.",
+                    id,
+                    filePath,
+                    "Give the rule an id without that character."));
                 continue;
             }
 
@@ -333,6 +363,10 @@ public static class RuleValidator
 
                 continue;
             }
+
+            // A for-each ask binds candidate.* per list item when it expands, so the trigger never supplies it.
+            if (rule.Ask?.ForEach is not null && fact.StartsWith("candidate.", StringComparison.Ordinal))
+                continue;
 
             if (!supplied.Contains(fact))
             {
