@@ -622,6 +622,117 @@ public sealed class SeatOutputParserTests
     }
 
     // -----------------------------------------------------------------------------------------
+    // The Input sites closing line: the correctness seat's count of the input sites it traced.
+    // The count is read through the SeatOutput member named InputSites, by name, so this file
+    // does not depend on a member the parser has not yet written.
+    // -----------------------------------------------------------------------------------------
+
+    [Fact]
+    public void AnInputSitesLineIsReadIntoTheSeatOutput()
+    {
+        string text = Fenced(FindingLines())
+            + "Input sites: 4 traced, 2 files with none\n"
+            + "Discovery: codegraph 1, docs 0, direct reads 0\n";
+
+        SeatOutput seat = SeatOutputParser.Parse("correctness", text);
+
+        Assert.Equal((4, 2), InputSitesOf(seat));
+    }
+
+    /// <summary>A count that is not two numbers is not a count: the line reads as absent and the findings are still read.</summary>
+    [Fact]
+    public void AMalformedInputSitesLineReadsAsAbsent()
+    {
+        string text = Fenced(FindingLines()) + "Input sites: several\n";
+
+        SeatOutput seat = SeatOutputParser.Parse("correctness", text);
+
+        Assert.Null(InputSitesOf(seat));
+        Assert.Single(seat.Findings);
+    }
+
+    /// <summary>
+    /// A Markdown table at column 0 before an unfenced findings list is not YAML. The table is skipped and every finding
+    /// after it is read; a table that stops the list early loses the findings the correctness seat wrote.
+    /// </summary>
+    [Fact]
+    public void AMarkdownTableBeforeAnUnfencedFindingsListDoesNotBreakTheList()
+    {
+        List<string> table =
+        [
+            "| Site | Source | Absent | Empty |",
+            "|---|---|---|---|",
+            "| src/Foo.cs:12 | argument | refused | handled |",
+            ""
+        ];
+        string text = Lines([.. table, .. FindingLines(id: "correctness/a"), .. FindingLines(id: "correctness/b")]);
+
+        SeatOutput seat = SeatOutputParser.Parse("correctness", text);
+
+        Assert.Equal(["correctness/a", "correctness/b"], seat.Findings.Select(finding => finding.Id));
+    }
+
+    /// <summary>A pipe inside a literal block is the field's text, not a table to skip.</summary>
+    [Fact]
+    public void APipeLineInsideABlockScalarIsStillContent()
+    {
+        List<string> body =
+        [
+            "- id: correctness/a",
+            "  lens: correctness",
+            "  severity: minor",
+            "  confidence: 7",
+            "  file: src/Foo.cs",
+            "  line: 3",
+            "  excerpt: |",
+            "    | Site | Source |",
+            "    |---|---|",
+            "  claim: The loop bound excludes the final element."
+        ];
+
+        SeatOutput seat = SeatOutputParser.Parse("correctness", Fenced(body));
+
+        Assert.Equal("| Site | Source |\n|---|---|", Assert.Single(seat.Findings).Excerpt);
+    }
+
+    /// <summary>
+    /// The same block, read on the flat path because a second value strict YAML refuses forces it there: the indented pipe
+    /// lines are still the excerpt.
+    /// </summary>
+    [Fact]
+    public void APipeLineInsideAnIndentedExcerptIsStillContentOnTheFlatPath()
+    {
+        List<string> body =
+        [
+            "- id: correctness/a",
+            "  lens: correctness",
+            "  severity: minor",
+            "  confidence: 7",
+            "  file: src/Foo.cs",
+            "  line: 3",
+            "  excerpt: |",
+            "    | a |",
+            "  claim: The rule says: never drop it."
+        ];
+
+        SeatOutput seat = SeatOutputParser.Parse("correctness", Fenced(body));
+
+        Assert.Equal("| a |", Assert.Single(seat.Findings).Excerpt);
+    }
+
+    /// <summary>Reads the InputSites member by name: null when the member is absent or holds no value, else (Traced, FilesWithNone).</summary>
+    private static (int Traced, int FilesWithNone)? InputSitesOf(SeatOutput seat)
+    {
+        object? sites = typeof(SeatOutput).GetProperty("InputSites")?.GetValue(seat);
+        if (sites is null)
+            return null;
+
+        int traced = (int)sites.GetType().GetProperty("Traced")!.GetValue(sites)!;
+        int filesWithNone = (int)sites.GetType().GetProperty("FilesWithNone")!.GetValue(sites)!;
+        return (traced, filesWithNone);
+    }
+
+    // -----------------------------------------------------------------------------------------
     // Helpers: seat text built from the parts a seat writes.
     // -----------------------------------------------------------------------------------------
 

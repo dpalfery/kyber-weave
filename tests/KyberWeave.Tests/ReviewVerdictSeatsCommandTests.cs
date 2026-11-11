@@ -24,6 +24,7 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
     private const string FindingsFlagUsed = "KW-REVIEW-045";
     private const string AcceptedFindings = "KW-REVIEW-046";
     private const string IncompleteFinding = "KW-REVIEW-001";
+    private const string InputSitesMissing = "KW-REVIEW-047";
 
     private static readonly string[] DefaultTrailers =
     [
@@ -593,6 +594,74 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
 
         Assert.Equal(0, run.Result);
         Assert.DoesNotContain(DiscoveryMissing, run.Output, StringComparison.Ordinal);
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // The correctness seat's Input sites line. A seat that reported findings or NO FINDINGS and
+    // wrote no readable count gets KW-REVIEW-047, a coverage warning that never changes the verdict.
+    // -----------------------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("findings")]
+    [InlineData("no findings")]
+    public void ACorrectnessSeatWithoutInputSitesWarnsUnderKw047(string shape)
+    {
+        WriteSeat("correctness", shape == "findings" ? FindingSeat() : NoFindingsSeat("correctness"));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        AssertDiagnostic(run.Output, InputSitesMissing, "Warning", "correctness");
+    }
+
+    [Fact]
+    public void ACorrectnessSeatWithInputSitesDoesNotWarnUnderKw047()
+    {
+        WriteSeat("correctness", FindingSeat(trailers:
+        [
+            "Input sites: 4 traced, 2 files with none",
+            "Discovery: codegraph 2, docs 0, direct reads 0",
+            "REVIEW.md sections checked: [Ground rules]"
+        ]));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.Empty(MessagesWithCode(run.Output, InputSitesMissing));
+    }
+
+    [Fact]
+    public void ASkippedCorrectnessSeatIsExemptFromKw047()
+    {
+        WriteSeat("correctness", "SKIPPED: the lens could not run in this session.\n");
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.Empty(MessagesWithCode(run.Output, InputSitesMissing));
+    }
+
+    [Fact]
+    public void AnotherLensWithoutInputSitesDoesNotWarnUnderKw047()
+    {
+        WriteSeat("security", FindingSeat(lens: "security", id: "security/unchecked-redirect"));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("security")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.Empty(MessagesWithCode(run.Output, InputSitesMissing));
+    }
+
+    /// <summary>The warning is a coverage note: a critical finding still requests changes, and the warning is there beside it.</summary>
+    [Fact]
+    public void Kw047NeverChangesTheVerdictOrTheExitCode()
+    {
+        WriteSeat("correctness", FindingSeat(severity: "critical"));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(1, run.Result);
+        AssertDiagnostic(run.Output, InputSitesMissing, "Warning", "correctness");
     }
 
     // -----------------------------------------------------------------------------------------

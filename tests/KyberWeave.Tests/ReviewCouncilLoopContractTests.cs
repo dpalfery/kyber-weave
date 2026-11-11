@@ -101,6 +101,18 @@ public sealed class ReviewCouncilLoopContractTests
     [InlineData("S18", "Each cycle writes to .agent_scratchpad/<task-id>/review/cycle-<n>/: the seats folder, gates.json, the findings.json the verdict command writes, and head; keep it until the run ends.", "skills/delivery-execution/SKILL.md")]
     [InlineData("S19", "A verifier cycle reviews the fix delta git diff <prior head>...<head>, re-seats only the lenses that own an outstanding finding or whose predicate the delta newly satisfies, and passes --prior <prior cycle folder>.", "skills/dp-code-reviewer/SKILL.md")]
     [InlineData("S19", "A verifier cycle reviews the fix delta git diff <prior head>...<head>, re-seats only the lenses that own an outstanding finding or whose predicate the delta newly satisfies, and passes --prior <prior cycle folder>.", "skills/code-review/SKILL.md")]
+    [InlineData("S20", "For every changed code file, write \"no input site\" or one row per site where a value from outside the process is parsed, converted, or passed to a file or collection API.", "skills/code-review/references/lenses/correctness.md")]
+    [InlineData("S20", "For every changed code file, write \"no input site\" or one row per site where a value from outside the process is parsed, converted, or passed to a file or collection API.", "agents/review-lens.md")]
+    [InlineData("S21", "Every THROWS or accepted wrong cell is a finding.", "skills/code-review/references/lenses/correctness.md")]
+    [InlineData("S22", "Close a correctness seat with Input sites: N traced, M files with none, directly above the Discovery line.", "skills/code-review/references/lenses/correctness.md")]
+    [InlineData("S22", "Close a correctness seat with Input sites: N traced, M files with none, directly above the Discovery line.", "agents/review-lens.md")]
+    [InlineData("S23", "A finding is FIXED only when the fix refuses its whole class: state the class in one sentence, name at least three other inputs of that class that the original failure scenario did not name, and trace each through the fix.", "skills/dp-code-reviewer/SKILL.md")]
+    [InlineData("S23", "A finding is FIXED only when the fix refuses its whole class: state the class in one sentence, name at least three other inputs of that class that the original failure scenario did not name, and trace each through the fix.", "skills/code-review/SKILL.md")]
+    [InlineData("S23", "A finding is FIXED only when the fix refuses its whole class: state the class in one sentence, name at least three other inputs of that class that the original failure scenario did not name, and trace each through the fix.", "agents/code-reviewer.md")]
+    [InlineData("S24", "The subject of a rule sentence is a claim: for \"a seat\", \"every gate\" or \"any X\", open the call site that decides who the rule applies to.", "skills/code-review/references/lenses/documentation-accuracy.md")]
+    [InlineData("S25", "For each rule id or command the changed prose states, find every document that states it and quote the statements side by side; a different subject, condition or flag list is a finding.", "skills/code-review/references/lenses/documentation-accuracy.md")]
+    [InlineData("S26", "Say what the code does today for each malformed input you name; when you cannot show it is refused, add one test-adequacy/out-of-scope finding naming correctness as the owner.", "skills/code-review/references/lenses/test-adequacy.md")]
+    [InlineData("S27", "Do not add your own list of things to hunt for; when you name focus files, the seat accounts for each one.", "agents/code-reviewer.md")]
     public void SentenceIsStatedInItsFile(string sentenceId, string sentence, string file)
     {
         string path = ResolvePath(file);
@@ -127,6 +139,8 @@ public sealed class ReviewCouncilLoopContractTests
     [InlineData("Discovery reporting is exempt")]
     [InlineData("thirteen lens invocations")]
     [InlineData("kyber-weave review verdict . --findings")]
+    [InlineData("re-check **only that finding**")]
+    [InlineData("leave the defect alone")]
     public void RetiredPhraseIsAbsentFromEveryProductFileAndTheRootAgentsFile(string retiredPhrase)
     {
         List<string> files = ScannedFiles().ToList();
