@@ -227,6 +227,28 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
     }
 
     /// <summary>
+    /// <c>concurrent</c> is opt-in: a gate that omits it keeps holding up the gates declared after it,
+    /// so a host that upgrades without touching its configuration runs its gates in the order it always did.
+    /// </summary>
+    [Fact]
+    public void ConcurrentDefaultsToFalseAndIsReadOnACouncilGateWithoutAWarning()
+    {
+        ReviewConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+            review:
+              gates:
+                - id: build
+                  run: [dotnet, build]
+                - id: analyze
+                  run: [dotnet, jb, inspectcode]
+                  concurrent: true
+            """).Review;
+
+        Assert.False(config.Gates[0].Concurrent);
+        Assert.True(config.Gates[1].Concurrent);
+        Assert.Empty(config.Warnings);
+    }
+
+    /// <summary>
     /// A misspelt key is ignored by the typed reader, so without a warning the operator's
     /// intent vanishes. The load still succeeds: a warning must not break a host.
     /// </summary>

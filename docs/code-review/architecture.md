@@ -596,8 +596,8 @@ a terminal (`KW-REVIEW-033`). Adding or removing a gate is an edit to the config
 the model makes during a review.
 
 `review.gates` entries take `id`, `run`, `blocking` and `timeout-seconds` — and, since the
-shipped catalogue, `include`, `os`, `working-directory`, `fail-on-output`, `full-suite` and
-`requires-paths`:
+shipped catalogue, `include`, `os`, `working-directory`, `fail-on-output`, `full-suite`,
+`requires-paths` and `concurrent`:
 
 | Key | Required | Default | Meaning |
 |---|---|---|---|
@@ -611,6 +611,7 @@ shipped catalogue, `include`, `os`, `working-directory`, `fail-on-output`, `full
 | `fail-on-output` | no | `false` | When `true`, the gate also fails if the command exits zero but writes anything other than whitespace to standard output; a non-zero exit fails as always. For tools that list problems and still exit zero, such as `gofmt -l` |
 | `full-suite` | no | `false` | When `true`, the gate runs the full product suite. It runs only for the review council or CI (`--council`) or from a terminal; otherwise it is refused (`KW-REVIEW-033`) and not run |
 | `requires-paths` | no | `[]`, which requires nothing | Repository-relative paths the gate needs before it can start. When one is absent the gate does not start: it is reported under `KW-REVIEW-033` with `exitCode: -1`, `passed: false` and `outcome: "notStarted"`, at Error when the gate is blocking and at Warning otherwise, and its summary carries the install hint. Never a pass, and never `KW-REVIEW-022` |
+| `concurrent` | no | `false` | When `true`, the gate starts at its place in the declared order and runs alongside the gates declared after it instead of holding them up. Its result keeps its declared place in the report, and it is still stopped at its own `timeout-seconds` and reported as timed out. Only for a gate that neither reads nor writes what later gates produce; the runner does not check that |
 
 `CouncilGateSelection` plans the run against the changed set and the host OS: a gate
 whose `os` does not match is skipped, a gate whose `include` matches no changed file is

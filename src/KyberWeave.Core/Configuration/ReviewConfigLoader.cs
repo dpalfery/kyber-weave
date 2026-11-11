@@ -20,7 +20,7 @@ public static class ReviewConfigLoader
     private static readonly string[] CouncilGateKeys =
     [
         "id", "run", "blocking", "timeout-seconds", "include", "os", "working-directory", "fail-on-output",
-        "applies-when", "full-suite", "requires-paths"
+        "applies-when", "full-suite", "requires-paths", "concurrent"
     ];
 
     /// <summary>Keys the typed reader maps on a <c>review.task-gates</c> entry. Any other key is ignored and reported.</summary>
@@ -119,7 +119,8 @@ public static class ReviewConfigLoader
                 Include = include,
                 FailOnOutput = gate.FailOnOutput ?? false,
                 FullSuite = gate.FullSuite ?? false,
-                RequiresPaths = ParseRequiresPaths(gate.RequiresPaths, gateWhere)
+                RequiresPaths = ParseRequiresPaths(gate.RequiresPaths, gateWhere),
+                Concurrent = gate.Concurrent ?? false
             });
         }
 

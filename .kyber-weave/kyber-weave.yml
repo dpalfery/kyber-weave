@@ -63,6 +63,22 @@ review:
       include: &net-test-paths ["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets", "**/*.sln*", "**/NuGet.config", "**/.editorconfig", "global.json", ".config/dotnet-tools.json", ".kyber-weave/kyber-weave.yml", "apm.yml", ".apm/**", "products/**", "REVIEW.md", "scripts/**"]
       run: [dotnet, build, KyberWeave.sln, -c, Release, --no-incremental, -nr:false, -p:UseSharedCompilation=false]
       blocking: true
+    # ReSharper InspectCode. The `resharper-clt` skill owns how to read this; the
+    # `static-analysis-triage` lens reads the report at the --output path below and
+    # attributes each diagnostic to the diff. InspectCode exits 0 whether or not it finds
+    # anything, so "blocking" here means the analyzer must have *run* — a review that
+    # skipped it silently would read as one that passed it. Scoped to WARNING and above:
+    # the suggestion tier is dominated by style inspections this repository settles in
+    # .editorconfig, and burying 500 real warnings under 1200 of those helps nobody.
+    # Declared here, straight after `build`, and `concurrent`, so it starts on a restored tree
+    # and runs alongside the test run instead of after it: declared last and run in turn, a
+    # review waited for the full suite and then for the analyzer. It is safe beside the gates
+    # below because it builds and reads Debug, and they run the Release binaries `build` made.
+    - id: inspectcode
+      include: *net-source-paths
+      run: [dotnet, jb, inspectcode, KyberWeave.sln, --output=artifacts/inspectcode.xml, --format=Xml, --severity=WARNING, "--caches-home=artifacts/inspectcode-cache"]
+      blocking: true
+      concurrent: true
     # coverlet.MTP writes Cobertura under artifacts/coverage so GateRunner can populate
     # the coverage floor. xUnit 4 uses Microsoft Testing Platform, whose coverage
     # extension uses `--coverlet` instead of VSTest's `--collect` data-collector option.
@@ -192,17 +208,6 @@ review:
     - id: docs-drift
       include: ["docs/**", "**/*.md", ".kyber-weave/kyber-weave.yml", "src/**", "dash/**"]
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, docs, drift, .]
-      blocking: true
-    # ReSharper InspectCode. The `resharper-clt` skill owns how to read this; the
-    # `static-analysis-triage` lens reads the report at the --output path below and
-    # attributes each diagnostic to the diff. InspectCode exits 0 whether or not it finds
-    # anything, so "blocking" here means the analyzer must have *run* — a review that
-    # skipped it silently would read as one that passed it. Scoped to WARNING and above:
-    # the suggestion tier is dominated by style inspections this repository settles in
-    # .editorconfig, and burying 500 real warnings under 1200 of those helps nobody.
-    - id: inspectcode
-      include: *net-source-paths
-      run: [dotnet, jb, inspectcode, KyberWeave.sln, --output=artifacts/inspectcode.xml, --format=Xml, --severity=WARNING, "--caches-home=artifacts/inspectcode-cache"]
       blocking: true
     # Cross-file duplicate bodies, from the CodeGraph index. Nothing else in the chain
     # answers this: JetBrains retired `dupfinder`, and the inspections InspectCode still

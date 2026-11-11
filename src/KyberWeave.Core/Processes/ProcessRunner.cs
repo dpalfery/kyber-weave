@@ -47,11 +47,15 @@ public static class ProcessRunner
     ///     produces more output, its process tree is killed and an <see cref="OutputLimitExceededException" />
     ///     is thrown before the full output is buffered in memory.
     /// </param>
+    /// <param name="cancellationToken">
+    ///     When cancelled, the process tree is killed and an <see cref="OperationCanceledException" /> is thrown.
+    /// </param>
     public static ProcessResult Run(
         ProcessStartInfo startInfo,
         string standardInput,
         TimeSpan? timeout = null,
-        long? maxOutputBytes = null)
+        long? maxOutputBytes = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(startInfo);
         ArgumentNullException.ThrowIfNull(standardInput);
@@ -89,14 +93,18 @@ public static class ProcessRunner
             Task io = Task.WhenAll(inputWrite, standardOutput, standardError);
             if (timeout is { } limit)
             {
-                if (!io.Wait(limit))
+                if (!io.Wait(limit, cancellationToken))
                 {
                     timedOut = true;
                     TryKillTree(process);
-                    io.Wait(TimeSpan.FromSeconds(5));
+                    io.Wait(TimeSpan.FromSeconds(5), CancellationToken.None);
                     throw new TimeoutException(
                         $"The process did not exit within {limit.TotalSeconds.ToString("0", CultureInfo.InvariantCulture)} seconds.");
                 }
+            }
+            else if (cancellationToken.CanBeCanceled)
+            {
+                io.Wait(cancellationToken);
             }
             else
             {
