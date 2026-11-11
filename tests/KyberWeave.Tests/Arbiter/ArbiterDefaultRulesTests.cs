@@ -54,6 +54,8 @@ public sealed class ArbiterDefaultRulesTests
         "KW-ARB-INTAKE-001",
         "KW-ARB-DOCIMPACT-001",
         "KW-ARB-FAILURE-001",
+        "KW-ARB-TRIM-001",
+        "KW-ARB-COMMENT-001",
     ];
 
     [Fact]
@@ -71,6 +73,19 @@ public sealed class ArbiterDefaultRulesTests
     public void TheShortcutAndSameFailureRulesShipInShadow()
     {
         string[] newIds = ["KW-ARB-TRIAGE-001", "KW-ARB-INTAKE-001", "KW-ARB-DOCIMPACT-001", "KW-ARB-FAILURE-001"];
+
+        Assert.All(newIds, id => Assert.True(Shipped(id).Shadow, id));
+    }
+
+    /// <summary>
+    /// The section-trimming (task 3.11) and bot-comment triage (task 3.13) rules ship in shadow: they only log what they
+    /// would have done until calibration is read. Failure this guards: an enforced default trims a worker's context or
+    /// classifies a real review comment as a nitpick before anyone has measured the rule.
+    /// </summary>
+    [Fact]
+    public void TheSectionTrimAndCommentRulesShipInShadow()
+    {
+        string[] newIds = ["KW-ARB-TRIM-001", "KW-ARB-COMMENT-001"];
 
         Assert.All(newIds, id => Assert.True(Shipped(id).Shadow, id));
     }

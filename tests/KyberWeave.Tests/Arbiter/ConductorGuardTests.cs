@@ -33,6 +33,10 @@ public sealed class ConductorGuardTests
     [InlineData("kyber-weave-docs_answer_question_from_repo_documentation")]
     [InlineData("kw-docs-docs_look_up_glossary_term_definition")]
     [InlineData("arbiter_evaluate_agent_dispatch_or_return")]
+    [InlineData("arbiter_select_relevant_document_sections")]
+    [InlineData("arbiter_classify_bot_review_comment")]
+    [InlineData("kw-arbiter-arbiter_select_relevant_document_sections")]
+    [InlineData("kw-arbiter-arbiter_classify_bot_review_comment")]
     public void DelegationAndBookkeepingTools_ArePermittedSilently(string tool)
     {
         Assert.Empty(Run(Event(tool, new { })));
