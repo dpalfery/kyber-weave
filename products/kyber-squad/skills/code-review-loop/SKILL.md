@@ -17,6 +17,8 @@ Before fixing a bot review comment, call `arbiter_classify_bot_review_comment` w
 body and commit. A `real` answer is fixed. A `nitpick` or `already-fixed` answer skips the fix:
 reply with the reason and resolve the thread. An unsure answer is `real`.
 
+In this skill, a comment verified as real is one the session checked against the cited code and found true, and that `arbiter_classify_bot_review_comment` did not classify `nitpick` or `already-fixed`; the session writes the test and the fix itself. A fix for a review finding verified as real ships with a test that fails without the fix, bot review rounds included; a finding classified as a nitpick needs no test.
+
 A bot's PR-level summary comment with a findings table is classified row by row: call
 `arbiter_classify_bot_review_comment` with `summary: true`, the body, and `author` (append `[bot]`
 when the platform reports a Bot author type). Fix the `real` rows; leave the others unchanged, and

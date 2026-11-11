@@ -74,6 +74,16 @@ Changing the verification contract after approval reopens its approval gate.
 
 Every developer worker ends its task by running the deterministic `task-gate` and reports the result in its completion digest. No agent audits a single task, and the conductor does not judge technical correctness.
 
+An implementation worker whose change adds or alters a site where a value from outside the process is parsed, converted, or passed to a file or collection API fills the input-site table for that change before it reports done.
+
+The table's columns and cell values are defined once, in the correctness lens of the code-review skill (references/lenses/correctness.md); the worker uses them unchanged.
+
+Every THROWS or accepted wrong cell is fixed before the worker reports done, and each fixed cell is covered by a test that fails without the fix; a fixed cell that no test covers yet goes on the worker's COVERAGE_GAPS line, and the conductor sends it to test-dev before the task clears its exit gate.
+
+The worker saves the table as `.agent_scratchpad/<task-id>/input-sites.md`, cites it on an Artifact: line, and reports Input sites: N traced, M files with none in the message body beside its digest.
+
+A fix for a reported defect covers the defect's whole class: the worker states the class in one sentence and names at least three other inputs of that class that the original failure scenario did not name, each covered by a test, on one line: `Defect class: <one sentence> — inputs: <input>; <input>; <input>.`
+
 Workers precede the six-field completion digest block with the `Discovery: codegraph N, docs N, direct reads N` header; this header is valid and is not rejected as a 7th digest field, and neither is any other line in the list below. The completion digest itself must follow this exact six-field schema, subject to the phased-rollout scope in the bullets below:
 
 ```text
@@ -87,7 +97,7 @@ TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE — agent
 
 Worktree workers committing locally report their `<commit-sha>`, while uncommitted/unpushed task runs report `NONE` and `UNPUSHED`.
 
-Lines of the explanatory message body that are not digest fields and are never counted or rejected as a seventh field are exactly these shapes: the `Discovery: codegraph N, docs N, direct reads N` header; `COVERAGE_GAPS:` followed by free text; `RED_EVIDENCE:` followed by the runner filter, the failing tests and the reason (test-dev's RED record, not one of the six fields); and `Artifact:` or `Baseline:` followed by one repository-relative or absolute path. A `report=<path>` inside the `TASK_GATE:` line is part of that field, not a separate line.
+Lines that are not one of the six digest fields are never counted or rejected as a seventh field. They are exactly these shapes: the Discovery: codegraph N, docs N, direct reads N header; COVERAGE_GAPS: followed by free text; RED_EVIDENCE: followed by the runner filter, the failing tests and the reason; Input sites: N traced, M files with none; Defect class: followed by one sentence and the inputs it covers; and Artifact: or Baseline: followed by one repository-relative or absolute path. A `report=<path>` inside the `TASK_GATE:` line is part of that field, not a separate line.
 
 - **Missing line or `FAIL`:** reject the digest, except a valid escalation under the circuit-breaker section below. Create a self-contained rework item for the original worker session (use the replacement policy above only when needed) naming the failed gate ids and the report path. The rework counts in the per-cluster tally below, keyed `task-gate/<gate-id>` for each failed gate, or `task-gate/missing` when the line is absent. After 2 rework dispatches for a key, the circuit-breaker trips on it. During the phased rollout only `csharp-dev` and `test-dev` must return the full six-field block; every other developer worker may return its standard completion, meaning the completion report its own agent body specifies, plus a `TASK_GATE:` line; the conductor's requirement for that line overrides the agent body, so a standard completion without it is rejected as `task-gate/missing`, and the `FILES`, `TESTS`, `COMMIT` and `REMOTE_HEAD` fields are not required of it. The missing-or-`FAIL` `TASK_GATE` rejection and its `task-gate/<gate-id>` / `task-gate/missing` tally apply to every developer worker.
 - **`PASS`:** the task's gate is complete. It does not authorize merge.
@@ -126,6 +136,8 @@ The final review runs alone and last, in the foreground of this session, and not
 ### Review loop (critical and major findings, failed blocking gates)
 
 The council re-reviews after every fix round until it returns APPROVE. After `REQUEST_CHANGES`, the conductor sends every critical and major finding, and every failed blocking gate, to the worker session that owns its scope. That fix round is ordinary rework: the same queue and scope rules, the same continuation of the owning session, a count in the per-cluster tally, and a fresh `TASK_GATE:` line against the current tree. Then `code-reviewer` runs again over the new head. A failed blocking gate is fixed inside the same loop: it goes to the worker that owns the failing scope, like a finding. Nothing bypasses the loop, and a blocking-gate failure (the blocking-gate verdict rule: docs validate, docs drift, build, test, and analyzers) is not a separate path. Every review after the first runs in the verifier mode of the dp-code-reviewer skill: it re-checks the prior findings and the fix delta, not a full council.
+
+In this skill, a finding verified as real is one that survived the council's adjudication. A fix for a review finding verified as real ships with a test that fails without the fix, bot review rounds included; a finding classified as a nitpick needs no test. In test-first mode that test is a RED task for test-dev, dispatched before the owning worker's fix, as for any task.
 
 The loop stops after 5 review cycles, or after 3 cycles in a row in which the count of surviving critical and major findings does not fall; the findings still open are then listed in the pull request as pending human review, and delivery continues. A finding whose rework trips the circuit-breaker stays open: it counts toward that stop and is listed with the rest. Minor/Info findings never loop: they are reported in the verdict and the pull request, and no cycle starts for them.
 

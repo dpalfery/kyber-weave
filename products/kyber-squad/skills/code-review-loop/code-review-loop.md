@@ -32,6 +32,8 @@ and commit before changing code. A `real` answer is fixed as below. A `nitpick` 
 `already-fixed` answer is not fixed: reply with the reason and resolve the thread. An unsure
 answer is `real`.
 
+In this skill, a comment verified as real is one the session checked against the cited code and found true, and that `arbiter_classify_bot_review_comment` did not classify `nitpick` or `already-fixed`; the session writes the test and the fix itself. A fix for a review finding verified as real ships with a test that fails without the fix, bot review rounds included; a finding classified as a nitpick needs no test.
+
 For a bot's PR-level summary comment with a findings table (`Severity | File | Line | Issue`),
 call `arbiter_classify_bot_review_comment` with `summary: true`, the summary as `body`, and
 `author`. Always pass `author`, appending `[bot]` when the platform reports the author type as Bot.

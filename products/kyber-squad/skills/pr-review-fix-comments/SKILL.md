@@ -204,6 +204,7 @@ Which option would you like?
 
 ### 3. Implement Changes
 - Make the code changes
+- In this skill, a comment verified as real is one the session checked against the cited code and found true; the session writes the test and the fix itself. A fix for a review finding verified as real ships with a test that fails without the fix, bot review rounds included; a finding classified as a nitpick needs no test.
 
 ### 3.5 Code Review
 - use the code-review.md command workflow to do a code review loops cycle until the code-reviewer agent is satisfied
