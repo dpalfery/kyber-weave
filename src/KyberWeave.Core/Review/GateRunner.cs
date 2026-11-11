@@ -364,7 +364,7 @@ public static class GateRunner
 
         long start = Stopwatch.GetTimestamp();
         TimeSpan ownTimeout = TimeSpan.FromSeconds(timeoutSeconds);
-        bool deadlineFirst = budget?.TimeLeft is { } left && left < ownTimeout;
+        bool deadlineFirst = budget?.TimeLeft is { } left && left <= ownTimeout;
         TimeSpan timeout = deadlineFirst && budget?.TimeLeft is { } remaining ? remaining : ownTimeout;
         try
         {

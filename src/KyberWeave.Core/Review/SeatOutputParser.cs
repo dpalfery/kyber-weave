@@ -81,11 +81,19 @@ public static partial class SeatOutputParser
             else if (line.StartsWith(NoFindingsPrefix, StringComparison.Ordinal)
                      || line.StartsWith(SkippedPrefix, StringComparison.Ordinal))
             {
+                SeatOutputKind outcome = line.StartsWith(NoFindingsPrefix, StringComparison.Ordinal)
+                    ? SeatOutputKind.NoFindings
+                    : SeatOutputKind.Skipped;
+                if (declared is { } earlier && earlier != outcome)
+                {
+                    throw new SeatOutputException(
+                        $"The {lens} seat output declares both '{NoFindingsPrefix}' and '{SkippedPrefix}' (lines " +
+                        $"{declaredLine} and {index + 1}). A seat reports one outcome.");
+                }
+
                 if (declared is null)
                 {
-                    declared = line.StartsWith(NoFindingsPrefix, StringComparison.Ordinal)
-                        ? SeatOutputKind.NoFindings
-                        : SeatOutputKind.Skipped;
+                    declared = outcome;
                     declaredLine = index + 1;
                 }
             }
@@ -179,13 +187,15 @@ public static partial class SeatOutputParser
     private static SeatDiscovery? ReadDiscovery(string line)
     {
         Match match = DiscoveryPattern().Match(line);
-        if (!match.Success)
+        if (!match.Success
+            || !int.TryParse(match.Groups["codegraph"].Value, CultureInfo.InvariantCulture, out int codeGraph)
+            || !int.TryParse(match.Groups["docs"].Value, CultureInfo.InvariantCulture, out int docs)
+            || !int.TryParse(match.Groups["reads"].Value, CultureInfo.InvariantCulture, out int reads))
+        {
             return null;
+        }
 
-        return new SeatDiscovery(
-            int.Parse(match.Groups["codegraph"].Value, CultureInfo.InvariantCulture),
-            int.Parse(match.Groups["docs"].Value, CultureInfo.InvariantCulture),
-            int.Parse(match.Groups["reads"].Value, CultureInfo.InvariantCulture));
+        return new SeatDiscovery(codeGraph, docs, reads);
     }
 
     /// <summary>
@@ -305,7 +315,7 @@ public static partial class SeatOutputParser
             || !Enum.IsDefined(severity)
             || int.TryParse(severityText, CultureInfo.InvariantCulture, out _))
         {
-            throw new SeatOutputException($"{where} has severity '{severityText}'; use critical, major or minor.");
+            throw new SeatOutputException($"{where} has severity '{Clip(severityText)}'; use critical, major or minor.");
         }
 
         int confidence = RequiredNumber(item, "confidence", where);
@@ -345,8 +355,11 @@ public static partial class SeatOutputParser
         string value = Required(item, key, where);
         return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int number)
             ? number
-            : throw new SeatOutputException($"{where} has '{key}: {value}', which is not a whole number.");
+            : throw new SeatOutputException($"{where} has '{key}: {Clip(value)}', which is not a whole number.");
     }
+
+    /// <summary>A value from the seat's text, cut short so a runaway value cannot flood a diagnostic.</summary>
+    private static string Clip(string value) => value.Length <= 200 ? value : value[..200] + "…";
 
     /// <summary>The trimmed text of a scalar field, or null when the field is absent or empty.</summary>
     private static string? Optional(SeatItem item, string key, string where)
@@ -366,9 +379,9 @@ public static partial class SeatOutputParser
         RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture)]
     private static partial Regex DiscoveryPattern();
 
-    /// <summary>A list item that opens a finding with one of the schema's identifying fields.</summary>
+    /// <summary>A list item that opens a finding with any field of the seat schema.</summary>
     [GeneratedRegex(
-        @"^\s*-\s+(id|lens|severity|confidence|file|line):",
+        @"^\s*-\s+(id|lens|severity|confidence|file|line|excerpt|claim|evidence|failure_scenario|suggestion|guidance):",
         RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture)]
     private static partial Regex FindingItemStart();
 }

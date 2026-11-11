@@ -107,8 +107,12 @@ public static class ReviewJson
     public static GateReport ReadGates(string json)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
-        return JsonSerializer.Deserialize<GateReport>(json, Options)
-               ?? throw new JsonException("The gate report is empty.");
+        GateReport report = JsonSerializer.Deserialize<GateReport>(json, Options)
+                            ?? throw new JsonException("The gate report is empty.");
+        if (report.Gates is null || report.Gates.Any(gate => gate is null))
+            throw new JsonException("The gate report's 'gates' must be a list of gate results, with no null entry.");
+
+        return report;
     }
 
     /// <summary>Reads a findings report.</summary>
@@ -127,8 +131,12 @@ public static class ReviewJson
                 BindSnakeCaseFailureScenario(finding);
         }
 
-        return root.Deserialize<FindingsReport>(Options)
-               ?? throw new JsonException("The findings report is empty.");
+        FindingsReport report = root.Deserialize<FindingsReport>(Options)
+                                ?? throw new JsonException("The findings report is empty.");
+        if (report.Findings is null || report.Findings.Any(finding => finding is null))
+            throw new JsonException("The findings report's 'findings' must be a list of findings, with no null entry.");
+
+        return report;
     }
 
     private static void BindSnakeCaseFailureScenario(JsonObject finding)

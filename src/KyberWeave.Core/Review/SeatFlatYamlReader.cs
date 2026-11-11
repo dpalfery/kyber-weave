@@ -55,6 +55,10 @@ internal static partial class SeatFlatYamlReader
                 continue;
             }
 
+            // Outside a block scalar, a line that starts with '#' is a YAML comment.
+            if (text.TrimStart().StartsWith('#'))
+                continue;
+
             if (indent == 0 && text.TrimEnd() is DocumentStart or DocumentEnd)
             {
                 Close(items, ref item, ref field);

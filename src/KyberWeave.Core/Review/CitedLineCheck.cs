@@ -62,14 +62,17 @@ public static class CitedLineCheck
         if (!IsRepositoryRelative(path))
             return new FileLines(null, $"{path} is not a path inside the repository, so it was not read");
 
-        if (!DocsRootPath.IsContainedFile(repositoryRoot, path, []))
-            return new FileLines(null, $"{path} is not a file in the repository, or is reached through a link");
-
         try
         {
+            if (!DocsRootPath.IsContainedFile(repositoryRoot, path, []))
+                return new FileLines(null, $"{path} is not a file in the repository, or is reached through a link");
+
             return new FileLines(File.ReadAllLines(Path.Combine(repositoryRoot, path)), null);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        // ArgumentException and NotSupportedException: a seat can write a path holding a character no file
+        // system accepts, such as a NUL from a quoted "\0".
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
+                                       or NotSupportedException)
         {
             // The exception message can carry the absolute path, which does not belong in a review report.
             return new FileLines(null, $"{path} could not be read ({ex.GetType().Name})");
@@ -78,7 +81,8 @@ public static class CitedLineCheck
 
     private static CitedLineResult CheckLine(ReviewFinding finding, string[] lines)
     {
-        if (finding.Line <= lines.Length)
+        // Line 0 or a negative line can no more exist than one past the end, so it is repaired the same way.
+        if (finding.Line >= 1 && finding.Line <= lines.Length)
             return CitedLineResult.Unchanged(finding);
 
         string? anchor = finding.Excerpt?
@@ -89,7 +93,7 @@ public static class CitedLineCheck
         {
             return CitedLineResult.Unresolved(
                 finding,
-                $"line {finding.Line} is beyond the end of {finding.File} ({lines.Length} lines) and the finding " +
+                $"line {finding.Line} is not a line of {finding.File} ({lines.Length} lines) and the finding " +
                 "has no excerpt to find it by");
         }
 
@@ -101,7 +105,7 @@ public static class CitedLineCheck
             ? CitedLineResult.Relocated(finding with { Line = matches[0] }, finding.Line)
             : CitedLineResult.Unresolved(
                 finding,
-                $"line {finding.Line} is beyond the end of {finding.File} ({lines.Length} lines), and " +
+                $"line {finding.Line} is not a line of {finding.File} ({lines.Length} lines), and " +
                 (matches.Length == 0
                     ? "no line holds the excerpt"
                     : $"{matches.Length} lines hold the excerpt, so which one it means cannot be told"));

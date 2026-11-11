@@ -464,7 +464,7 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
                     report.Add(new Diagnostic(
                         CitedLine,
                         Severity.Info,
-                        $"'{finding.Id}' cited line {result.OriginalLine}, beyond the end of the file; it was moved " +
+                        $"'{finding.Id}' cited line {result.OriginalLine}, which is not a line of the file; it was moved " +
                         $"to line {result.Finding.Line}, the one line holding its excerpt.",
                         finding.Lens,
                         finding.File,
