@@ -727,7 +727,7 @@ What the upgrade does:
 - **Rebuilds the projection.** The records write marker moves, so the next projection rebuilds all sessions and runs. Nothing else needs running.
 - **Runs once.** A second open finds nothing to delete and changes nothing.
 
-Expected cost. On a 5.6 GB store the scan takes about one to two minutes. `dash refresh` waits for it on its first open. `kyberdash web` runs it in steps that yield, so the engine stays responsive. On a copy of the owner's store measured on 2026-11-10, the 0.1.8-rc.25 build ran out of memory during `dash refresh`. The fixed build's first `dash refresh` removed 15,627 duplicate call rows and 6,222 tool rows, exited 0 in 148 seconds, and peaked at 4.1 GB resident. A second refresh changed no row counts.
+Expected cost. On a 5.6 GB store the scan takes about one to two minutes. `dash refresh` waits for it on its first open. `kyberdash web` runs it in steps that yield, so the engine stays responsive. On a copy of the owner's store measured on 2026-11-10, the 0.1.8-rc.25 build ran out of memory during `dash refresh`. The fixed build's first `dash refresh` removed 15,627 duplicate call rows and 6,222 tool rows, exited 0 in 148 seconds, and peaked at 4.1 GB resident. That run had no harness sources readable. With the sources readable and unchanged, the first refresh after the repair took 203 seconds, peaked at 4.8 GB resident and added no rows, and a second refresh changed no row counts.
 
 The file does not shrink. Freed pages are reused for new rows. Reclaiming them on disk is a separate step, not part of the upgrade.
 

@@ -275,7 +275,7 @@ The red tests for T1, T3 and T5 ran in the implementation sessions; their failur
 **Measured 2026-11-10** on an isolated copy of the owner's 5.6 GB store (292,366 records), never the live store:
 
 - The 0.1.8-rc.25 build's `dash refresh` exited 134 with a JavaScript heap out-of-memory, peak 6.3 GB resident.
-- The fixed build's first `dash refresh` (repair plus refresh) exited 0 in 148 seconds, peak 4.1 GB resident. It left 270,517 records: 15,627 duplicate call rows and 6,222 tool rows removed. The worst session went from 15,136 rows to 4,724. A second refresh changed no row counts.
+- The fixed build's first `dash refresh` (repair plus refresh) exited 0 in 148 seconds, peak 4.1 GB resident. It left 270,517 records: 15,627 duplicate call rows and 6,222 tool rows removed. The worst session went from 15,136 rows to 4,724. That run had no harness sources readable. With the sources readable and unchanged, the first refresh after the repair took 203 seconds, peaked at 4.8 GB resident and added no rows, and a second refresh changed no row counts.
 - Orphaned tool rows stayed at 7,577 before and after; the repair added none.
 - The 0.1.8-rc.25 `kyberdash web` died of the same out-of-memory about 105 to 135 seconds after start. The fixed build's engine held about 200 MB resident for four minutes on the repaired copy.
 
