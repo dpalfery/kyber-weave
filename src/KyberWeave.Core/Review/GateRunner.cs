@@ -93,6 +93,11 @@ public static class GateRunner
             if (stopped)
                 stop.Cancel();
 
+            // Every concurrent gate is waited for before any result is read: reading rethrows a gate's
+            // unexpected fault, and that must not leave another gate's process running behind the run.
+            foreach ((_, Task<GateResult?> run) in alongside)
+                ((IAsyncResult)run).AsyncWaitHandle.WaitOne();
+
             foreach ((int index, Task<GateResult?> run) in alongside)
                 results[index] = run.GetAwaiter().GetResult();
         }

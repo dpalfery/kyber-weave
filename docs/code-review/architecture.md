@@ -729,7 +729,9 @@ persisting the AST and project caches across local runs and reducing warm inspec
 The gate is declared straight after `build` and is `concurrent`, so it overlaps the test run. It passes
 `--no-build`, because `build` has already restored and compiled the tree, and `--jobs=4`, to keep load off
 the test run beside it. It declares `requires-paths` on a restore output, so run on its own on an unrestored
-tree it does not start instead of exiting zero having resolved nothing.
+tree it does not start instead of exiting zero having resolved nothing. That check proves a restore
+happened, not that it is current: a run of `--gate inspectcode` alone after package references changed
+needs `--gate build` with it.
 
 Its argv starts with `scripts/report-gate.sh`. On macOS 27.3 Beta the analyzer writes its whole report and
 then never exits, because .NET does not return from closing a listening socket while another thread is

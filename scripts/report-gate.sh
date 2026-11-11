@@ -25,7 +25,7 @@
 # Exit codes:
 #   0    the command exited 0 with a complete report, or was stopped after writing one
 #   1    the command exited 0 but left no complete report
-#   2    usage error
+#   2    usage error, or pgrep is missing
 #   143  this script got SIGINT or SIGTERM; the command's tree was killed first
 #   else the command's own exit code
 
@@ -74,6 +74,13 @@ case "${grace}" in
   '' | *[!0-9]*) usage ;;
 esac
 
+# Stopping the command means killing its whole tree, and the tree is found with pgrep. Without it only
+# the direct child would die and the run would still exit 0, so refuse to start instead.
+if ! command -v pgrep >/dev/null 2>&1; then
+  printf 'report-gate: pgrep is required to stop the command and its children, and it is not on the PATH\n' >&2
+  exit 2
+fi
+
 # Every descendant of a pid, deepest first, so a parent cannot respawn what was just killed.
 descendants_of() {
   local child
@@ -101,7 +108,7 @@ complete_size() {
   esac
 }
 
-rm -f "${report}"
+rm -f -- "${report}"
 
 "$@" &
 pid=$!
