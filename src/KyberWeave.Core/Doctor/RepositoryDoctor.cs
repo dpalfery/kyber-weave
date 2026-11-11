@@ -77,6 +77,14 @@ public static class RepositoryDoctor
         if (!stops)
             checks = [.. checks.Select(AsWarning)];
 
+        // The git post-checkout hook is a shared file, so only the ensure run may write it; check and provision report
+        // on it without touching it. A hook problem is a passing warning, so it never changes the exit code.
+        DoctorCheck? hook = mode == DoctorMode.Ensure
+            ? PostCheckoutHook.Ensure(repositoryRoot, executor)
+            : PostCheckoutHook.Inspect(repositoryRoot, executor);
+        if (hook is not null)
+            checks = [.. checks, hook];
+
         // The Copilot prompt override is opt-in: with no installed prompt file the probe adds nothing. It runs for any
         // repository the user's home contains, because the override is machine-wide and not a per-repository setting.
         if (!string.IsNullOrWhiteSpace(home))
@@ -96,11 +104,74 @@ public static class RepositoryDoctor
     /// Read from the repository's own <c>.kyber-weave/kyber-weave.yml</c>. A file that cannot be loaded leaves the
     /// default in place — stop — because a broken configuration must not be the thing that weakens the rule.
     /// </remarks>
-    private static bool StopsOnToolFailure(string repositoryRoot)
+    internal static bool StopsOnToolFailure(string repositoryRoot)
     {
         KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(repositoryRoot);
         return result.Config?.StopsOnToolFailure ?? true;
     }
+
+    /// <summary>
+    ///     Runs the doctor for the git post-checkout hook: indexes a new worktree without restoring the tracked edits
+    ///     the index run would otherwise revert.
+    /// </summary>
+    /// <remarks>
+    ///     The hook fires on every checkout, including ones where a human has uncommitted work, so this path must not
+    ///     restore files beyond the ones <c>codegraph init</c> writes. It runs the ensure flow with
+    ///     <see cref="CodeGraphRestore.InitConfigFilesOnly"/> and never installs or removes the hook itself.
+    /// </remarks>
+    /// <param name="root">The worktree root the hook was fired in.</param>
+    /// <param name="options">The index budget and executable names.</param>
+    /// <param name="executor">Runs git and CodeGraph children.</param>
+    /// <param name="lockDirectory">Where the index lock file lives. Null uses the OS temp directory.</param>
+    public static DoctorReport RunPostCheckout(
+        string root,
+        DoctorOptions options,
+        IProcessExecutor executor,
+        string? lockDirectory = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(root);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(executor);
+
+        (string? repositoryRoot, string? notRepository) = ResolveRepositoryRoot(root, executor);
+        if (repositoryRoot is null)
+            return Refused(root, DoctorMode.Ensure, new DoctorCheck(
+                "repository.root",
+                false,
+                notRepository,
+                "run kyber-weave doctor from inside a git repository"));
+
+        // The owner's switch: with the hook off, a new worktree gets no index run at all. Exit 0 and one line say so.
+        // A configuration that fails to load counts as on, the same rule the hook install follows.
+        bool hookOff = KyberWeaveConfigLoader.TryLoad(repositoryRoot).Config?.WorktreeIndexHook == false;
+        if (!hookOff)
+        {
+            WorktreeIndexOutcome outcome = WorktreeIndexGuard.Ensure(
+                repositoryRoot,
+                options,
+                executor,
+                lockDirectory ?? Path.GetTempPath(),
+                CodeGraphRestore.InitConfigFilesOnly);
+
+            int exitCode = outcome.Status switch
+            {
+                WorktreeIndexStatus.BinaryMissing => 3,
+                WorktreeIndexStatus.Failed => 1,
+                _ => 0
+            };
+
+            return new DoctorReport(repositoryRoot, DoctorMode.Ensure, exitCode, outcome.Checks);
+        }
+
+        return new DoctorReport(
+            repositoryRoot,
+            DoctorMode.Ensure,
+            0,
+            [new DoctorCheck(WorktreeIndexHookCheckId, true, "skipped: worktree-index-hook is false in the repository configuration", null)]);
+    }
+
+    /// <summary>The check id the post-checkout run reports under when the repository has switched the hook off.</summary>
+    private const string WorktreeIndexHookCheckId = "worktree-index-hook";
 
     /// <summary>The operating system this process runs on, in the terms the VS Code layout is keyed by.</summary>
     private static OSPlatform CurrentPlatform() =>

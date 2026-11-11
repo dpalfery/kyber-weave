@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Mcp
 owner: dpalfery
-last-reviewed: 2026-11-09
+last-reviewed: 2026-11-11
 decided-by:
   - adr/0051-dotnet-cli-spawns-stdio-children-through-one-bounded-session
   - adr/0052-docs-branch-writes-repository-scope-mcp-configuration
@@ -1579,7 +1579,7 @@ so a server that stops answering is killed rather than left behind. The rule and
 | `repository.root` | The path is not in a git repository, git cannot run, or the root is `$HOME` | `run kyber-weave doctor from inside a git repository`, or `cd into a repository and run kyber-weave doctor` |
 | `codegraph.binary` | `codegraph` is not on `PATH`, or `codegraph --version` does not finish | `install the codegraph CLI so that 'codegraph' is on PATH, then run: kyber-weave doctor --check` |
 | `codegraph.index` | No `.codegraph/` in `--check`, the directory is not writable, the index is damaged, `init`, `sync` or `index` fails, the index lock is busy, or the run exceeds `--index-timeout` | Depends on the cause; see [Provisioning rules](#provisioning-rules) |
-| `codegraph.restore` | `--ensure` only, and only when it reports something: the index preparation modified a tracked file that was clean before it ran, and the run reverted that file. Absent when the preparation wrote nothing | The paths it restored. Nothing is wrong with the repository; a file the index itself rewrote is not the operator's work |
+| `codegraph.restore` | `--ensure` and `--post-checkout`, and only when it reports something: the index preparation modified a tracked file that was clean before it ran, and the run reverted that file. Absent when the preparation wrote nothing | The paths it restored. Nothing is wrong with the repository; a file the index itself rewrote is not the operator's work |
 | `codegraph.explore` | `--ensure` only: the one `codegraph explore` proof did not answer, even after a single repair with `codegraph index` | Run `codegraph explore README` from the root for the child's own error, then `kyber-weave doctor --ensure` again |
 | `mcp.start` | `kyber-weave-mcp` cannot be started | `kyber-weave update` |
 | `mcp.handshake` | The server did not answer `initialize` within the MCP budget, or closed its output first | Used up the budget: `kyber-weave doctor --check --mcp-timeout <2 x current>`. Refused because the folder has no `.kyber-weave/kyber-weave.yml`: `kyber-weave docs init "<root>"`, or commit that file to the base branch so new worktrees get it. Any other early exit: run the server directly to read its own error |
@@ -1641,6 +1641,71 @@ default the run's failures are failures and the exit is `1`; under
 `stop-on-tool-failure: false` the same checks are reported as warnings and the exit is `0`,
 except a missing binary, which stays `3` because installing it is the user's decision either
 way. `--check` never applies the setting: a caller that asked for a verdict gets a verdict.
+
+### The worktree index hook
+
+A new `git worktree add` starts with no CodeGraph index, because `.codegraph/` is not tracked. `doctor --ensure`
+installs a git hook that indexes each new worktree in the background, so the index is ready when an agent or a
+person looks. The decision and its alternatives are in [ADR 0068](../adr/0068-doctor-owns-a-marked-block-in-the-shared-post-checkout-hook.md).
+
+**Modes.**
+
+- `doctor --ensure` installs the hook block when it is missing, refreshes it in place when it is out of date, and
+  removes it when `worktree-index-hook: false` is set.
+- `doctor --check` and `doctor --provision` only report the hook. They change nothing.
+
+**Where it lives.** The block sits between two marker lines in `post-checkout`, in the hooks folder git uses for the
+clone (`git rev-parse --git-path hooks`). Linked worktrees share that folder, so one install covers them all. A
+`core.hooksPath` is honoured. If the hooks folder is tracked by git, the doctor reports it and writes nothing, so no
+change is left for you to commit by accident. An existing hook keeps all its other lines: the block goes directly
+after its `#!` line.
+
+**What it does.** The block acts only on the first checkout of a new worktree (previous HEAD all zeros, flag `1`), so
+an ordinary branch switch costs one shell test. It then starts `kyber-weave doctor --post-checkout .` in the
+background, with every stream redirected. It never fails a checkout, and it does nothing when `kyber-weave` is not on
+`PATH`.
+
+**The check: `githook.post-checkout`.** It is reported only for a repository with governed docs. It never changes the
+exit code. A problem is a passing check whose reason starts with `warning:`:
+
+| Reason starts with | Meaning | Fix |
+|---|---|---|
+| `installed and current`, `installed the post-checkout hook`, `installed:`, `not installed:`, `removed` | The hook matches the setting | None |
+| `warning: the post-checkout hook is missing its kyber-weave block` (or out of date) | `--check` or `--provision` found no current block | `kyber-weave doctor --ensure .` |
+| `warning: ... is not a POSIX shell script` | The `#!` names something other than sh, bash, dash, ksh or zsh | Add the block by hand, or remove the hook |
+| `warning: ... has no #! line` | The hook has no shebang | Add a shell `#!` line, then `doctor --ensure` |
+| `warning: ... uses CRLF line endings` | Windows line endings | Convert to LF, then `doctor --ensure` |
+| `warning: ... exists without the executable bit` | Unix only; the hook is disabled, so kyber-weave will not enable it | Add the executable bit or remove the hook, then `doctor --ensure` |
+| (none) | A partial block: a begin marker with no end marker, or the reverse | Nothing to do. `doctor --ensure` removes the stray marker and the block lines after it that are still its own, keeps every other line, and writes one whole block. |
+| `warning: core.hooksPath points at ... which git tracks` | A tracked hooks folder | Point `core.hooksPath` outside the repository, or untrack the folder |
+| `warning: ... still has the kyber-weave block but worktree-index-hook is false` | Switched off, but the block remains | `kyber-weave doctor --ensure .` |
+
+**`--post-checkout` (the hook's own mode).** People do not run it; the hook does. It indexes the tree it is given
+with the same guard and lock as `--ensure`, and it differs in three ways. It skips the docs-server and Copilot
+probes. It restores only the tracked files that `codegraph init` writes. The list is kept in code and is empty today, because
+a measured `codegraph init .` modifies no tracked file. So an edit made in the new tree while the run is going is
+never reverted. Any other newly changed file is
+named in a passing `codegraph.restore` line as left alone. It exits `0` when the index is ready, the repository has
+no governed docs, or `worktree-index-hook: false` is set; `1` when the index failed; `3` when `codegraph` is not on
+`PATH`; and `2` when the path is not inside a git repository. Combined with `--check`, `--provision` or `--ensure` it
+exits `2`.
+
+**The log.** Each background run appends to `kyber-weave-index.log` in the new worktree's own git directory. The file
+is never truncated, so it grows with each run. Read it with:
+
+```bash
+cat "$(git rev-parse --absolute-git-dir)/kyber-weave-index.log"
+```
+
+It holds the `PASS` and `FAIL` lines of the run. If git cannot say where the git directory is, the output is discarded.
+
+**Windows.** Git for Windows runs the same block through its bundled shell. This has not been verified live on
+Windows. If `kyber-weave` is not found on `PATH` there, the block does nothing, which is the safe failure.
+
+**Removing it.** Set `worktree-index-hook: false` in `.kyber-weave/kyber-weave.yml`, then run
+`kyber-weave doctor --ensure .`. The block is taken out and the other lines of the hook are kept; the file is deleted
+when only its `#!` line is left. You can also delete the lines between `# >>> kyber-weave worktree index >>>` and
+`# <<< kyber-weave worktree index <<<` by hand. Doing neither leaves the hook running on every new worktree.
 
 ### Provisioning rules
 

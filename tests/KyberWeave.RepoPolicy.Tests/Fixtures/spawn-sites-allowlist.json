@@ -1274,6 +1274,12 @@
       "bound": "ProcessRunner.Run with the fact-builder timeout kills the child tree; git argv only, self-exiting."
     },
     {
+      "file": "src/KyberWeave.Core/Doctor/PostCheckoutHook.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "Started through the injected IProcessExecutor. The doctor command passes ProcessExecutor.WithTimeout(DoctorOptions.IndexTimeout), 600 s by default, which kills the child tree on expiry; git argv only, in the repository root."
+    },
+    {
       "file": "tests/KyberWeave.RepoPolicy.Tests/ReleaseTests.cs",
       "text": "ProcessStartInfo startInfo = new(\"node\")",
       "count": 1,
@@ -1344,6 +1350,12 @@
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout, maxOutputBytes);",
       "count": 1,
       "bound": "ProcessRunner timeout GitTimeout (60 s) kills the child tree on expiry; output capped at maxOutputBytes to prevent memory exhaustion; git argv only (`diff`, `ls-files`), with stdin closed by ProcessRunner so the child exits at EOF."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/PostCheckoutGitFixture.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "Started by Run through the fixture's IsolatedChildExecutor, which wraps ProcessExecutor.WithTimeout(60 s): ProcessRunner kills the child tree on expiry; git argv only, in a temp repository under the fixture root."
     }
   ]
 }

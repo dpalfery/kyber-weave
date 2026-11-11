@@ -10,6 +10,9 @@ the review URL; pull requests and merge requests are called PRs below.
 - Read the repository instructions, inspect the checkout for existing work, and obtain
   the PR's repository, base, head branch, and current head SHA. Use a separate checkout
   if necessary to preserve unrelated edits. Attach the PR to the chat when supported.
+  A separate checkout that is a git worktree has no CodeGraph index of its own until it is
+  built: run `kyber-weave doctor --ensure .` there before reading or changing code, and treat
+  a failure of that command as a stop.
 - Read all review threads, including replies and resolution state, plus the latest
   top-level review summary. Paginate when necessary. Distinguish actionable feedback
   from summaries and bot onboarding messages; the user's remembered comment count

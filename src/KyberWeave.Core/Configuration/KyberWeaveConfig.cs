@@ -34,6 +34,15 @@ public sealed class KyberWeaveConfig
     /// </remarks>
     public bool StopsOnToolFailure { get; init; } = true;
 
+    /// <summary>
+    /// Whether the git post-checkout hook indexes a new worktree on its first checkout.
+    /// </summary>
+    /// <remarks>
+    /// The repository setting is <c>worktree-index-hook</c>. Absent means on, so a new worktree gets its index
+    /// without a setting. Set to <c>false</c> to keep the hook from starting an index run on checkout.
+    /// </remarks>
+    public bool WorktreeIndexHook { get; init; } = true;
+
     public static KyberWeaveConfig ProductDefaults { get; } = new();
 
     public KyberWeaveConfig WithOntology(OntologyConfig ontology)
@@ -92,6 +101,7 @@ public sealed class KyberWeaveConfig
             Review = review ?? Review,
             Arbiter = arbiter ?? Arbiter,
             Mcp = mcp ?? Mcp,
-            StopsOnToolFailure = stopsOnToolFailure ?? StopsOnToolFailure
+            StopsOnToolFailure = stopsOnToolFailure ?? StopsOnToolFailure,
+            WorktreeIndexHook = WorktreeIndexHook
         };
 }

@@ -6,6 +6,12 @@ namespace KyberWeave.Cli.Commands.Doctor;
 /// <summary>Settings for the <c>doctor</c> verb.</summary>
 public sealed class DoctorSettings : CommandSettings
 {
+    /// <summary>The default bound on one CodeGraph index run, in seconds. Other run-start and review commands reuse it.</summary>
+    public const int DefaultIndexTimeoutSeconds = 600;
+
+    /// <summary>The default total budget of the live MCP session, in seconds.</summary>
+    public const int DefaultMcpTimeoutSeconds = 20;
+
     [CommandArgument(0, "[path]")]
     [Description("A directory inside the repository to check. Defaults to the current directory.")]
     public string Path { get; set; } = ".";
@@ -27,11 +33,17 @@ public sealed class DoctorSettings : CommandSettings
 
     [CommandOption("--index-timeout <SECONDS>")]
     [Description("The bound on one codegraph init, sync or index run, and how long a second doctor waits for the lock. Default 600.")]
-    public int IndexTimeoutSeconds { get; set; } = 600;
+    public int IndexTimeoutSeconds { get; set; } = DefaultIndexTimeoutSeconds;
 
     [CommandOption("--mcp-timeout <SECONDS>")]
     [Description("The total budget of the live MCP session. Default 20.")]
-    public int McpTimeoutSeconds { get; set; } = 20;
+    public int McpTimeoutSeconds { get; set; } = DefaultMcpTimeoutSeconds;
+
+    [CommandOption("--post-checkout")]
+    [Description(
+        "Used by the git post-checkout hook: index a new worktree, restoring only the files codegraph init writes. "
+        + "Starts no MCP server and installs no hook. Cannot be combined with --check, --provision or --ensure.")]
+    public bool PostCheckout { get; set; }
 
     [CommandOption("--json")]
     [Description("Write the report as JSON instead of check lines.")]

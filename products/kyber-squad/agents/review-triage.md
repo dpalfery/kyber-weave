@@ -33,7 +33,7 @@ Use the host's indexes before raw reads. Load the CodeGraph and `kw-docs` docume
 - Code: `codegraph_explore` first, and only when its provenance `branch=` is the branch under review: the server stays bound to the canonical checkout, so otherwise its answer describes a tree you are not reviewing. When your packet carries an absolute worktree path, pass it as `codegraph_explore`'s `projectPath`, which answers from that worktree's own index; with no worktree named, use the server's default project. This role runs no shell, so the CLI form, `codegraph explore "…"`, is not available to it. Read the path directly only when that call cannot answer for the branch under review (an error, a not-indexed reply, or an answer whose provenance `branch=` is another branch), and count each such read as a direct read with the reason, naming the mode: `projectPath: error`, `projectPath: not-indexed` or `projectPath: wrong-branch <got> vs <wanted>`; a lens that can read neither returns `SKIPPED` with the reason.
 - Documentation: `docs_answer_question_from_repo_documentation`, `docs_find_documents_citing_code_symbol`, or `docs_look_up_glossary_term_definition` before searching or opening documentation files.
 - Read or search a file directly only for what an index does not cover (configuration, infrastructure, files the docs index missed), when a tool reports the file stale, or to confirm one detail it did not return. When a tool or index is unavailable, fall back to direct reads and say so.
-- Discovery reporting is exempt for this lens because its machine-consumed output is the fixed findings list, `SKIPPED`, or `NO FINDINGS` schema. Follow the discovery order internally; do not append counts or alter that output schema.
+- Discovery reporting is exempt for this lens because its machine-consumed output is the fixed findings list, `SKIPPED`, or `NO FINDINGS` schema. Follow the discovery order internally; do not append counts or alter that output schema. One line is the exception, because a review that silently read around a missing index looks the same as one that used it: when you read code directly because the index could not answer for the branch under review, add `Index fallback: <mode>` once, immediately before the attestation line, with the mode named above (`projectPath: error`, `projectPath: not-indexed` or `projectPath: wrong-branch <got> vs <wanted>`). The reviewer lists it under Council coverage. Omit the line when the index answered.
 
 # 1. Applicability, then the artifact
 
@@ -123,7 +123,9 @@ whether the diagnostic predates the change. Score that honestly and say so.
 
 # 5. Output
 
-Return the YAML findings list, then the attestation line as its last line, and nothing else. If
+Return the YAML findings list, then the attestation line as its last line, and nothing else. The
+one permitted addition is the `Index fallback: <mode>` line from the discovery order, directly
+above the attestation line on either form. If
 the lens applied, the artifact was present, and nothing in it belongs to this change:
 
 ```

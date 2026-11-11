@@ -87,7 +87,7 @@ Forbidden transitions:
 
 ### Phase 1: Inventory Only
 For the selected PR, do these steps in order:
-1. Read and acknowledge the root `AGENTS.md` file.
+1. Read and acknowledge the root `AGENTS.md` file. When the work happens in a git worktree, run `kyber-weave doctor --ensure .` there first: a worktree has no CodeGraph index of its own until that command builds one, and its failure is a stop.
 2. Resolve the provider and read its sub-file (see Provider Selection).
 3. Read the PR number from `$ARGUMENTS`.
 4. If the PR number is missing, ask for it and stop.
