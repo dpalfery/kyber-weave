@@ -1,4 +1,5 @@
 using KyberWeave.Core.Arbiter;
+using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -17,6 +18,13 @@ public sealed class ArbiterCommentCommand : Command<ArbiterCommentSettings>
     public override int Execute(CommandContext context, ArbiterCommentSettings settings, CancellationToken cancellationToken)
     {
         string root = System.IO.Path.GetFullPath(settings.Root);
+        // The same containment the served tool applies: a cited path that leaves the repository root is refused, not read.
+        if (!settings.Summary && FileTextFacts.ResolveWithinRoot(ArbiterRepoRoot.Find(root), settings.Path) is null)
+        {
+            AnsiConsole.MarkupLine($"[red]The document '{Markup.Escape(settings.Path)}' was not found under the repository root.[/]");
+            return 1;
+        }
+
         DiagnosticReport report = new();
         IArbiterProvider? provider = ProviderFor(root, report);
         if (provider is null)
@@ -30,6 +38,27 @@ public sealed class ArbiterCommentCommand : Command<ArbiterCommentSettings>
         }
 
         using IDisposable? owner = provider as IDisposable;
+        if (settings.Summary)
+        {
+            CommentSummaryResult summary = new CommentTriageService(
+                    provider,
+                    root,
+                    System.IO.Path.Combine(root, "artifacts", "arbiter"),
+                    TimeProvider.System,
+                    null,
+                    BotLoginsFor(root))
+                .ClassifySummaryAsync(new CommentSummaryRequest(settings.Body, settings.Author), cancellationToken)
+                .GetAwaiter()
+                .GetResult();
+            foreach (CommentSummaryItem item in summary.Items)
+            {
+                AnsiConsole.MarkupLine(
+                    $"{Markup.Escape(item.Path)}:{item.Line} [bold]{Markup.Escape(item.Class)}[/] {Markup.Escape(item.Issue)}");
+            }
+
+            return 0;
+        }
+
         CommentTriageResult result = new CommentTriageService(
                 provider,
                 root,
@@ -38,6 +67,7 @@ public sealed class ArbiterCommentCommand : Command<ArbiterCommentSettings>
             .ClassifyAsync(new CommentTriageRequest(settings.Path, settings.Line, settings.Body, settings.CommitSha), cancellationToken)
             .GetAwaiter()
             .GetResult();
+        AnsiConsole.MarkupLine($"body {Markup.Escape(settings.Body)}");
         AnsiConsole.MarkupLine($"class [bold]{Markup.Escape(result.Class)}[/]");
         AnsiConsole.MarkupLine($"decision {Markup.Escape(result.DecisionId)}");
         return 0;
@@ -60,5 +90,15 @@ public sealed class ArbiterCommentCommand : Command<ArbiterCommentSettings>
         }
 
         return ArbiterCommandComposition.CreateProvider(loaded.Config, null, report, out _) ?? (report.HasErrors ? null : new NoneProvider());
+    }
+
+    /// <summary>
+    /// The bot logins the root's <c>arbiter.comment-triage.bot-logins</c> names. A root with no loadable configuration
+    /// has none, so every summary stays real.
+    /// </summary>
+    private static IReadOnlyList<string> BotLoginsFor(string root)
+    {
+        KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(root);
+        return loaded.Success && loaded.Config is not null ? loaded.Config.Arbiter.CommentTriage.BotLogins : [];
     }
 }

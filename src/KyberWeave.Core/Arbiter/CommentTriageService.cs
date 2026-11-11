@@ -17,6 +17,24 @@ public sealed record CommentTriageRequest(string Path, int Line, string Body, st
 /// <param name="DecisionId">The id of the decision record written for this classification.</param>
 public sealed record CommentTriageResult(string Class, double? Confidence, string DecisionId);
 
+/// <summary>A bot's PR-level summary comment to classify row by row.</summary>
+/// <param name="Body">The summary text, which may carry a findings table.</param>
+/// <param name="Author">The login that posted the summary, when known; an absent author is never assumed to be a bot.</param>
+public sealed record CommentSummaryRequest(string Body, string? Author);
+
+/// <summary>One row of a summary's findings table and the class it was given.</summary>
+/// <param name="Path">The path the row cites.</param>
+/// <param name="Line">The start line the row cites.</param>
+/// <param name="Issue">The issue text the row states.</param>
+/// <param name="Class">One of <c>real</c>, <c>nitpick</c> or <c>already-fixed</c>.</param>
+/// <param name="Confidence">The provider's confidence, when the row was sent to it and it reported one.</param>
+/// <param name="DecisionId">The decision record the row was classified under; empty when the row was never sent.</param>
+public sealed record CommentSummaryItem(string Path, int Line, string Issue, string Class, double? Confidence, string DecisionId);
+
+/// <summary>The classified rows of one summary comment, in table order.</summary>
+/// <param name="Items">One item per table row; empty when the comment has no table or a row was malformed.</param>
+public sealed record CommentSummaryResult(IReadOnlyList<CommentSummaryItem> Items);
+
 /// <summary>
 /// Classifies one bot review comment against the code as it is now, through <c>KW-ARB-COMMENT-001</c>. Every call
 /// writes a decision record. The classification fails safe to <c>real</c>: a missing cited file, an answer below the
@@ -33,15 +51,23 @@ public sealed record CommentTriageResult(string Class, double? Confidence, strin
 /// <param name="arbiterDirectory">The directory the decision log is written to.</param>
 /// <param name="clock">Stamps the decision record and allocates its id.</param>
 /// <param name="ruleSet">The rule-set hash the decision records, when the caller has one; empty otherwise.</param>
+/// <param name="botLogins">The logins of review bots whose summaries are classified. Empty means no summary is classified.</param>
 public sealed class CommentTriageService(
     IArbiterProvider provider,
     string repoRoot,
     string arbiterDirectory,
     TimeProvider clock,
-    string? ruleSet = null)
+    string? ruleSet = null,
+    IReadOnlyList<string>? botLogins = null)
 {
     /// <summary>The shipped rule that classifies a comment.</summary>
     public const string CommentRuleId = "KW-ARB-COMMENT-001";
+
+    /// <summary>
+    /// The most summary rows sent to the classifier in one call. Rows past the cap stay real and unasked, so a long
+    /// table costs at most this many provider calls.
+    /// </summary>
+    public const int MaxSummaryRows = 50;
 
     private const string Real = "real";
     private const string Nitpick = "nitpick";
@@ -106,6 +132,53 @@ public sealed class CommentTriageService(
 
         await WriteDecisionAsync(decisionId, now, request, rule, batch, score, given, answer, status, ct).ConfigureAwait(false);
         return new CommentTriageResult(answer, confidence, decisionId);
+    }
+
+    /// <summary>
+    /// Classifies each row of a bot's summary table through <see cref="ClassifyAsync"/>. Only a summary from a
+    /// configured bot is classified; every other summary's rows are returned real without a provider call.
+    /// </summary>
+    /// <param name="request">The summary and the login that posted it.</param>
+    /// <param name="ct">Cancels the provider calls.</param>
+    /// <returns>One item per table row; empty when the comment has no table or any row is malformed.</returns>
+    public async Task<CommentSummaryResult> ClassifySummaryAsync(CommentSummaryRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.Body);
+
+        IReadOnlyList<CommentSummaryRow> rows = CommentSummaryTable.Parse(request.Body) ?? [];
+        bool classify = IsBotAuthor(request.Author);
+        List<CommentSummaryItem> items = [];
+        for (int index = 0; index < rows.Count; index++)
+        {
+            CommentSummaryRow row = rows[index];
+            if (!classify || index >= MaxSummaryRows)
+            {
+                items.Add(new CommentSummaryItem(row.Path, row.Line, row.Issue, Real, null, string.Empty));
+                continue;
+            }
+
+            CommentTriageResult result = await ClassifyAsync(
+                new CommentTriageRequest(row.Path, row.Line, row.Issue, null), ct).ConfigureAwait(false);
+            items.Add(new CommentSummaryItem(row.Path, row.Line, row.Issue, result.Class, result.Confidence, result.DecisionId));
+        }
+
+        return new CommentSummaryResult(items);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="author"/> is a configured bot. With no logins configured nothing is a bot, and an absent
+    /// author is never assumed to be one. A login ending <c>[bot]</c> counts as a bot, as GitHub app logins do.
+    /// </summary>
+    private bool IsBotAuthor(string? author)
+    {
+        if (string.IsNullOrWhiteSpace(author) || botLogins is not { Count: > 0 })
+        {
+            return false;
+        }
+
+        return author.EndsWith("[bot]", StringComparison.OrdinalIgnoreCase)
+            || botLogins.Any(login => string.Equals(login, author, StringComparison.OrdinalIgnoreCase));
     }
 
     private async Task WriteDecisionAsync(

@@ -30,4 +30,14 @@ public sealed class ArbiterCommentSettings : CommandSettings
     [CommandOption("--commit-sha <SHA>")]
     [Description("The commit the comment was made on, when known.")]
     public string? CommitSha { get; set; }
+
+    /// <summary>When set, the body is a bot's PR-level summary and every row of its findings table is classified.</summary>
+    [CommandOption("--summary")]
+    [Description("The body is a PR-level summary. Classifies each row of its findings table; --path and --line are ignored.")]
+    public bool Summary { get; set; }
+
+    /// <summary>The login that posted the summary, when known. Only a configured bot's summary is classified.</summary>
+    [CommandOption("--author <LOGIN>")]
+    [Description("The login that posted the summary, when known. Only a configured bot's summary is classified.")]
+    public string? Author { get; set; }
 }

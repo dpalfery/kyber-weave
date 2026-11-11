@@ -385,9 +385,6 @@ public sealed class ArbiterTools(ArbiterServeContext context)
         return sb.ToString();
     }
 
-    /// <summary>The largest markdown document the section tool reads, in bytes.</summary>
-    private const long MaxDocumentBytes = 1024 * 1024;
-
     /// <summary>
     /// Lists the sections of one repository document a task needs. Returns JSON with <c>sections</c>, <c>failedSafe</c>
     /// and <c>truncated</c>, or an <c>error</c> when the document is missing or outside the root.
@@ -418,9 +415,9 @@ public sealed class ArbiterTools(ArbiterServeContext context)
             return ErrorJson($"The document '{OneLine(path)}' was not found under the repository root.");
         }
 
-        if (new FileInfo(full).Length > MaxDocumentBytes)
+        if (new FileInfo(full).Length > SectionSelector.MaxDocumentBytes)
         {
-            return ErrorJson($"The document is larger than {MaxDocumentBytes} bytes.");
+            return ErrorJson($"The document is larger than {SectionSelector.MaxDocumentBytes} bytes.");
         }
 
         if (maxSections is < 1)
@@ -456,20 +453,60 @@ public sealed class ArbiterTools(ArbiterServeContext context)
     /// <param name="line">The 1-based line the comment cites.</param>
     /// <param name="body">The comment text.</param>
     /// <param name="commitSha">The commit the comment was made on, when known.</param>
+    /// <param name="summary">When true, <paramref name="body"/> is a PR-level summary; <paramref name="path"/> and <paramref name="line"/> are ignored and each table row is classified.</param>
+    /// <param name="author">The login that posted the summary, when known. Only a configured bot's summary is classified.</param>
     [McpServerTool(Name = "arbiter_classify_bot_review_comment", ReadOnly = false, OpenWorld = false)]
     [Description("""
-        Classifies one bot review comment as real, nitpick or already-fixed, judging the code at the cited line as it is now. Use before fixing a bot review comment, to skip one that is already fixed or a nitpick. Fails safe to real: any answer that is unsure, below the floor, or not obtained keeps the comment real. Each call records a decision and returns its id. Returns JSON.
+        Classifies one bot review comment as real, nitpick or already-fixed, judging the code at the cited line as it is now. Use before fixing a bot review comment, to skip one that is already fixed or a nitpick. Fails safe to real: any answer that is unsure, below the floor, or not obtained keeps the comment real. Each call records a decision and returns its id. With summary true, the body is a bot's PR-level summary and each row of its findings table is classified; the answer carries items. Returns JSON.
         """)]
     public string ClassifyBotReviewComment(
-        [Description("The repository-relative path the comment cites.")]
+        [Description("The repository-relative path the comment cites. Ignored when summary is true.")]
         string path,
-        [Description("The 1-based line the comment cites.")]
+        [Description("The 1-based line the comment cites. Ignored when summary is true.")]
         int line,
-        [Description("The comment text.")]
+        [Description("The comment text, or the summary text when summary is true.")]
         string body,
         [Description("The commit the comment was made on, when known.")]
-        string? commitSha = null)
+        string? commitSha = null,
+        [Description("True when the body is a PR-level summary with a findings table.")]
+        bool summary = false,
+        [Description("The login that posted the summary, when known.")]
+        string? author = null)
     {
+        if (body is null)
+        {
+            return ErrorJson("The comment body is missing.");
+        }
+
+        if (body.Length > MaxTextChars)
+        {
+            return ErrorJson($"The comment is larger than {MaxTextChars} characters.");
+        }
+
+        string arbiterDirectory = Path.Combine(context.RepoRoot, "artifacts", "arbiter");
+        string ruleSet = ArbiterProvenance.RuleSetHash(ArbiterConfig.ProductDefaults.Rules);
+        if (summary)
+        {
+            IReadOnlyList<string> botLogins = BotLoginsForRoot();
+            CommentSummaryResult summaryResult = WithProvider(provider =>
+                new CommentTriageService(provider, context.RepoRoot, arbiterDirectory, TimeProvider.System, ruleSet, botLogins)
+                    .ClassifySummaryAsync(new CommentSummaryRequest(body, author))
+                    .GetAwaiter()
+                    .GetResult());
+            return JsonSerializer.Serialize(new
+            {
+                items = summaryResult.Items.Select(item => new
+                {
+                    path = item.Path,
+                    line = item.Line,
+                    issue = item.Issue,
+                    @class = item.Class,
+                    confidence = item.Confidence,
+                    decisionId = item.DecisionId,
+                }),
+            });
+        }
+
         if (string.IsNullOrWhiteSpace(path))
         {
             return ErrorJson("The comment path is empty.");
@@ -480,13 +517,12 @@ public sealed class ArbiterTools(ArbiterServeContext context)
             return ErrorJson("The comment line must be at least 1.");
         }
 
-        if (body.Length > MaxTextChars)
+        // The same containment answer the sections tool gives: a path that leaves the root is an error, not a read.
+        if (FileTextFacts.ResolveWithinRoot(context.RepoRoot, path) is null)
         {
-            return ErrorJson($"The comment is larger than {MaxTextChars} characters.");
+            return ErrorJson($"The document '{OneLine(path)}' was not found under the repository root.");
         }
 
-        string arbiterDirectory = Path.Combine(context.RepoRoot, "artifacts", "arbiter");
-        string ruleSet = ArbiterProvenance.RuleSetHash(ArbiterConfig.ProductDefaults.Rules);
         CommentTriageResult result = WithProvider(provider =>
             new CommentTriageService(provider, context.RepoRoot, arbiterDirectory, TimeProvider.System, ruleSet)
                 .ClassifyAsync(new CommentTriageRequest(path, line, body, commitSha))
@@ -498,6 +534,16 @@ public sealed class ArbiterTools(ArbiterServeContext context)
             confidence = result.Confidence,
             decisionId = result.DecisionId,
         });
+    }
+
+    /// <summary>
+    /// The bot logins from <c>arbiter.comment-triage.bot-logins</c>. A root whose configuration cannot be loaded has
+    /// none, so every summary stays real: the fail-safe answer.
+    /// </summary>
+    private IReadOnlyList<string> BotLoginsForRoot()
+    {
+        (KyberWeaveConfig? config, string? error) = Load();
+        return error is null && config is not null ? config.Arbiter.CommentTriage.BotLogins : [];
     }
 
     /// <summary>
