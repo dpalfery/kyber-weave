@@ -57,7 +57,9 @@ its `tasks.json` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-No plan is open. A plan is listed here while its execution is under way and leaves when it is archived.
+| Plan | Status | Scale | Summary |
+|---|---|---|---|
+| [KyberDash refresh runs out of memory on re-minted duplicate records](2026-11-10-kyberdash-refresh-out-of-memory.md) | Ready | `extends-component` (KyberDash) | Stable record identity across moving history windows, a v24 repair of the duplicate rows already stored, and a one-record-at-a-time bound on the run-outcome step |
 
 ## Archived Plans
 
