@@ -403,7 +403,7 @@ public sealed class ArbiterEvaluator
             // provider keeps one answer per id, so equal items must not share one.
             ArbiterRule expanded = rule with
             {
-                Id = rule.Id + "@" + index,
+                Id = rule.Id + RuleValidator.ExpansionSeparator + index,
                 Ask = ask with { State = state, ForEach = null },
             };
             questions.Add(new Question(rule.Id, item, expanded));

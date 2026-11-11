@@ -35,6 +35,12 @@ public static class RuleValidator
     /// <summary>A duplicate, retired or reserved-prefix id, or a non-overridable field on a shipped rule.</summary>
     public const string DuplicateOrReservedId = "KW-ARB-CONFIG-005";
 
+    /// <summary>
+    /// The character a for-each question's key puts between the rule id and the item index
+    /// (<c>{rule id}@{index}</c>). Host rule ids may not contain it, so no host id can equal one of those keys.
+    /// </summary>
+    public const char ExpansionSeparator = '@';
+
     /// <summary>Model rules are switched off because the provider is <c>none</c>.</summary>
     public const string ModelRulesSwitchedOff = "KW-ARB-CONFIG-006";
 
@@ -131,6 +137,18 @@ public static class RuleValidator
                     "arbiter.rules has an entry with no id. Every rule needs one.",
                     "arbiter.rules",
                     filePath));
+                continue;
+            }
+
+            if (id.Contains(ExpansionSeparator, StringComparison.Ordinal))
+            {
+                diagnostics.Add(new Diagnostic(
+                    MalformedSection,
+                    Severity.Error,
+                    $"rule '{id}' contains '{ExpansionSeparator}', which names a for-each question. Host rule ids may not contain it.",
+                    id,
+                    filePath,
+                    "Give the rule an id without that character."));
                 continue;
             }
 
