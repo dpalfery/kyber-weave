@@ -17,7 +17,7 @@ The base is the branch `run.base-branch` declares, or `origin/HEAD` when the rep
 ## Route by lifecycle
 
 - **Ready, In progress, or Blocked:** treat the approved artifact as execution authority. Resume its ready queue at the first incomplete task whose dependencies and file scope permit work. Do not send it back to `architect` merely because `architect` authored it.
-- **Draft:** send the exact `PLAN_FILE` to `architect`. Relay its decision digests and return the user's answers keyed by question id. Continue until the saved Draft is decision-complete and validated.
+- **Draft:** send the exact `PLAN_FILE` to `architect`. Use the `PLAN_FILE` it returns from then on, exactly as returned: `architect` puts a date in front of a new plan's file name when the name sent had none, so the returned path can differ from the one sent. Relay its decision digests and return the user's answers keyed by question id. Continue until the saved Draft is decision-complete and validated.
 - **Review required, Completed, Superseded, or archived:** do not execute it. Ask the user for an active artifact or route the request through the intake path.
 
 ## Draft and approval protocol
