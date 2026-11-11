@@ -233,6 +233,14 @@ failed gate.
 | `KW-REVIEW-033` | Error / Warning | A gate never started: its program could not start, its working directory does not exist, or a full-suite gate was refused without `--council` outside a terminal (the other gates still run; exit `1`). Error when blocking, warning otherwise. |
 | `KW-REVIEW-034` | Info | The changed set is unknown, so gates with `include` ran unscoped. Fetch the full history, or name a base that exists with `--base`. |
 | `KW-REVIEW-038` | Info / Warning | The CodeGraph index of the tree under review, prepared before any gate starts. Info: it was created or synced. Warning: it could not be prepared; run `kyber-weave doctor --ensure <tree>`. The gates still run, because a review is a read-only run. A repository without governed docs is not checked. |
+| `KW-REVIEW-039` | Warning | A gate was NOT RUN to a result: its own `timeout-seconds` stopped it, or the council deadline (`review.council-deadline-seconds`) stopped it or passed before it started. What it checks is unverified. It is not a failure: it does not fail `review gates`, and `review verdict` neither requests changes nor raises the risk grade for it. Re-run it alone with `--gate <id>` |
+| `KW-REVIEW-040` | Error | A seat output file in the `review verdict --seats` folder could not be read. The file and the reason are named; nothing is computed (exit `1`) |
+| `KW-REVIEW-041` | Error / Warning / Info | Lens coverage. Error: a catalogue lens has no seat file, no `--not-seated <lens>=<reason>` and no `--prior` coverage; the lenses are named (exit `1`). Info: a lens was not seated, with its reason, or was carried from the prior cycle. A warning names a seat file that is not a catalogue lens |
+| `KW-REVIEW-042` | Info / Error | `--drop <id>=<reason>`. Info: the finding was dropped by the reviewer, and the reason is recorded. Error: `--drop` names no finding (exit `1`). No option changes a severity or confidence |
+| `KW-REVIEW-043` | Info / Warning | A finding cites a line beyond the end of its file. Info: it was moved to the one line equal to its excerpt's first non-blank line. Warning: no single line matches, so it was dropped. A line inside the file is never moved |
+| `KW-REVIEW-044` | Warning | A seat that reported findings or no findings wrote no `Discovery:` line, or read files directly with no code index lookup and no `Index fallback:` line. Never a verdict input |
+| `KW-REVIEW-045` | Warning | `review verdict --findings` read a hand-built findings file, which skips the lens coverage check. Use `--seats` |
+| `KW-REVIEW-046` | Info | The accepted critical and major finding ids, the refutation candidates. Listed only when no blocking gate that ran to a result failed |
 
 ### Duplicates — `review duplicates`
 

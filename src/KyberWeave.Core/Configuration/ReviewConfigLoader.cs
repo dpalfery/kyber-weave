@@ -60,6 +60,8 @@ public static class ReviewConfigLoader
             Duplicates = ParseDuplicates(section.Duplicates, defaults.Duplicates),
             MaxConcurrentWorkers =
                 ParseMaxConcurrentWorkers(section.MaxConcurrentWorkers, defaults.MaxConcurrentWorkers),
+            CouncilDeadlineSeconds =
+                ParseCouncilDeadlineSeconds(section.CouncilDeadlineSeconds, defaults.CouncilDeadlineSeconds),
             Policy = ParsePolicy(section.Policy, defaults.Policy),
             Warnings = warnings ?? defaults.Warnings
         };
@@ -765,6 +767,19 @@ public static class ReviewConfigLoader
             throw new YamlException("review.max-concurrent-workers must be greater than zero.");
 
         return workers;
+    }
+
+    private static int ParseCouncilDeadlineSeconds(int? configured, int defaults)
+    {
+        if (configured is not { } seconds)
+            return defaults;
+
+        // A deadline of zero would stop every council gate before it started, which reads as a review that ran
+        // and found nothing to check. It is refused where the operator wrote it instead.
+        if (seconds <= 0)
+            throw new YamlException("review.council-deadline-seconds must be greater than zero.");
+
+        return seconds;
     }
 
     private static ReviewPolicy ParsePolicy(ReviewPolicyYaml? policy, ReviewPolicy defaults)

@@ -599,6 +599,7 @@ concurrency cap (see `ReviewConfig`):
 | Key | Default | Effect |
 |---|---|---|
 | `max-concurrent-workers` | `4` | Maximum concurrent workers the ready-queue dispatcher may run. A positive integer; `0` or a negative value is a configuration error (`KW-CONFIG-001`) |
+| `council-deadline-seconds` | `600` | Wall-clock budget for the full `review gates --council` run. Each gate runs for the shorter of its own `timeout-seconds` and the time left; the gate the deadline cuts and every gate not yet started are reported as not run (`KW-REVIEW-039`, a warning) instead of failed. Never applies to `--gate <id>`, task gates, or a run without `--council`. A positive integer; `0` or a negative value is a configuration error (`KW-CONFIG-001`) |
 | `gates` | `[]` | Repository-wide deterministic gates, in declaration order |
 | `task-gates` | empty | Per-agent gates each developer runs on its own change, keyed by agent slug |
 | `test-map` | empty | Source glob to the fully qualified test classes that cover it. A task gate's `{tests}` token expands from this map first and from the `<Stem>Tests` naming convention second; a change no class covers skips the gate with `KW-REVIEW-026` rather than passing it |
@@ -615,6 +616,7 @@ that names `{task}` refuses the run when no `--task` slug was given.
 ```yaml
 review:
   max-concurrent-workers: 4
+  council-deadline-seconds: 600
 ```
 
 `test-map` is what lets a task gate run tests at all: this repository's single product test project

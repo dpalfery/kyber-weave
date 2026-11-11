@@ -227,6 +227,11 @@ public sealed class ReviewConfig
     public int MaxConcurrentWorkers { get; init; } = 4;
 
     /// <summary>Seconds the review council may run its gates before the deadline stops them.</summary>
+    /// <remarks>
+    /// Read from <c>review.council-deadline-seconds</c>. It bounds only the full <c>review gates --council</c> run:
+    /// a gate the deadline cuts, and every gate after it, is reported as not run (<c>KW-REVIEW-039</c>) rather
+    /// than failed, so the council returns a verdict on the evidence it has instead of waiting on a slow suite.
+    /// </remarks>
     public int CouncilDeadlineSeconds { get; init; } = 600;
 
     /// <summary>The rules the verdict engine may not override.</summary>

@@ -19,6 +19,9 @@ internal sealed class ReviewYamlSection
 
     /// <summary>Maximum concurrent workers the ready-queue dispatcher may run.</summary>
     public int? MaxConcurrentWorkers { get; init; }
+
+    /// <summary>Seconds the full council gate run may take before the deadline stops it.</summary>
+    public int? CouncilDeadlineSeconds { get; init; }
 }
 
 /// <summary>The <c>review.duplicates</c> mapping.</summary>

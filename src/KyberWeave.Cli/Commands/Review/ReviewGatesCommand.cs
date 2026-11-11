@@ -18,6 +18,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
 {
     private const string NoGatesDeclared = "KW-REVIEW-020";
     private const string IndexState = "KW-REVIEW-038";
+    private const string GateNotRun = VerdictEngine.GateNotRun;
     private const string ReportWriteFailed = "KW-REVIEW-025";
     private const string GateSkipped = "KW-REVIEW-026";
     private const string NoGatesForAgent = "KW-REVIEW-027";
@@ -219,19 +220,27 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
         // GateRunner.Run reads only Gates from its configuration, so the selected gates travel in a
         // configuration of their own and the runner itself stays unchanged. The changed set and base
         // are still passed so applies-when is evaluated from the same facts include was selected on.
+        // The council deadline bounds only the full council run: a gate named with --gate is a deliberate
+        // re-check outside the council's budget, and a run without --council is not spending it.
+        TimeSpan? deadline = settings.Council && settings.Gate.Length == 0
+            ? TimeSpan.FromSeconds(config.Review.CouncilDeadlineSeconds)
+            : null;
         GateReport gates = GateRunner.Run(
             new ReviewConfig { Gates = fullSuite.Admitted },
             root,
             settings.StopOnFailure,
             changed,
-            BaseRef(settings.BaseRef));
+            BaseRef(settings.BaseRef),
+            deadline);
 
         foreach (GateResult gate in gates.Gates)
             AddGateDiagnostic(report, gate);
 
         report.AddMetric("gates", gates.Gates.Count);
-        report.AddMetric("failed", gates.Gates.Count(g => !g.Passed && g.NotApplicableReason is null));
+        report.AddMetric("failed", gates.Gates.Count(g => !g.Passed && g.NotApplicableReason is null
+                                                         && !VerdictEngine.IsStoppedForTime(g)));
         report.AddMetric("not-applicable", gates.Gates.Count(g => g.NotApplicableReason is not null));
+        report.AddMetric("not-run", gates.Gates.Count(VerdictEngine.IsStoppedForTime));
 
         CommandHelpers.TryWriteReport(settings.Out, ReviewJson.Write(gates), ReportWriteFailed, report);
 
@@ -344,7 +353,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
                 fix.Id));
 
         report.AddMetric("gates", run.Report.Gates.Count);
-        report.AddMetric("failed", run.Report.Gates.Count(g => !g.Passed));
+        report.AddMetric("failed", run.Report.Gates.Count(g => !g.Passed && !VerdictEngine.IsStoppedForTime(g)));
 
         CommandHelpers.TryWriteReport(settings.Out, ReviewJson.Write(run.Report), ReportWriteFailed, report);
 
@@ -462,6 +471,8 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
     /// <summary>
     ///     Reports one gate. A gate whose program never started is <see cref="GateNotStarted" />, kept apart from a
     ///     check that ran and failed (<see cref="ReviewGateOutcome.Failed" />), because they are fixed in different places.
+    ///     A gate that time stopped is <see cref="GateNotRun" />, a warning: it reached no result, so it neither
+    ///     passed nor failed and does not decide the exit code.
     /// </summary>
     private static void AddGateDiagnostic(DiagnosticReport report, GateResult gate)
     {
@@ -474,6 +485,17 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
                 Severity.Info,
                 detail,
                 gate.Id));
+            return;
+        }
+
+        if (VerdictEngine.IsStoppedForTime(gate))
+        {
+            report.Add(new Diagnostic(
+                GateNotRun,
+                Severity.Warning,
+                $"{detail}. NOT RUN to a result, so what it checks is unverified.",
+                gate.Id,
+                Hint: $"Re-run it alone with 'kyber-weave review gates --gate {gate.Id}', or raise its timeout-seconds."));
             return;
         }
 

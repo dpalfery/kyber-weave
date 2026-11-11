@@ -39,12 +39,22 @@ public static class GateRunner
     /// means <c>applies-when</c> is not evaluated and every gate runs.
     /// </param>
     /// <param name="baseRef">The commit the change was measured against, recorded on the report.</param>
+    /// <param name="deadline">
+    /// The wall-clock budget for the whole run, or null for none. Each gate runs for the shorter of its own
+    /// timeout and the time left; the gate the deadline cuts, and every gate not yet started, is reported as
+    /// <see cref="GateOutcome.DeadlinePassed"/>. Only the full council run passes one.
+    /// </param>
+    /// <remarks>
+    /// The deadline is opt-in rather than read from <paramref name="config"/>, because a single named gate, a task
+    /// gate, and a run outside the council are not spending the council's budget and must never be cut by it.
+    /// </remarks>
     public static GateReport Run(
         ReviewConfig config,
         string workingDirectory,
         bool stopOnBlockingFailure = false,
         IReadOnlyCollection<string>? changedPaths = null,
-        string? baseRef = null)
+        string? baseRef = null,
+        TimeSpan? deadline = null)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
@@ -54,18 +64,25 @@ public static class GateRunner
 
         List<GateResult> results = new(config.Gates.Count);
         DateTime startedUtc = DateTime.UtcNow;
+        long started = Stopwatch.GetTimestamp();
 
         foreach (ReviewGate gate in config.Gates)
         {
-            GateResult result = AppliesWhenReason(gate, changedPaths) is string reason
-                ? NotApplicable(gate, reason)
-                : MissingRequirement(gate, workingDirectory) ?? RunOne(gate, workingDirectory);
+            TimeSpan? timeLeft = deadline - Stopwatch.GetElapsedTime(started);
+            GateResult result;
+            if (AppliesWhenReason(gate, changedPaths) is string reason)
+                result = NotApplicable(gate, reason);
+            else if (deadline is { } budget && timeLeft <= TimeSpan.Zero)
+                result = DeadlinePassedBeforeStart(gate, budget);
+            else
+                result = MissingRequirement(gate, workingDirectory) ?? RunOne(gate, workingDirectory, timeLeft);
             results.Add(result);
 
             if (stopOnBlockingFailure
                 && gate.Blocking
                 && !result.Passed
-                && result.NotApplicableReason is null)
+                && result.NotApplicableReason is null
+                && !VerdictEngine.IsStoppedForTime(result))
                 break;
         }
 
@@ -212,11 +229,24 @@ public static class GateRunner
             ? "Install the dashboard dependencies with 'npm install --prefix dash', then run the gate again."
             : "Install whatever provides it, then run the gate again.");
 
-    private static GateResult RunOne(ReviewGate gate, string workingDirectory)
+    /// <summary>
+    /// Reports a gate the council deadline passed before it could start. It never ran, so it is neither a pass nor
+    /// a failure, and nothing is executed for it.
+    /// </summary>
+    private static GateResult DeadlinePassedBeforeStart(ReviewGate gate, TimeSpan deadline) =>
+        new(
+            gate.Id,
+            gate.Blocking,
+            -1,
+            $"not started: the council deadline of {deadline.TotalSeconds:0} seconds had passed",
+            0,
+            Outcome: GateOutcome.DeadlinePassed);
+
+    private static GateResult RunOne(ReviewGate gate, string workingDirectory, TimeSpan? timeLeft)
     {
         string gateDirectory = ResolveWorkingDirectory(workingDirectory, gate.WorkingDirectory);
         return RunArgv(
-            gate.Id, gate.Blocking, gate.Run, gate.TimeoutSeconds, gateDirectory, gate.FailOnOutput);
+            gate.Id, gate.Blocking, gate.Run, gate.TimeoutSeconds, gateDirectory, gate.FailOnOutput, timeLeft);
     }
 
     /// <summary>
@@ -237,7 +267,8 @@ public static class GateRunner
         IReadOnlyList<string> argv,
         int timeoutSeconds,
         string workingDirectory,
-        bool failOnOutput)
+        bool failOnOutput,
+        TimeSpan? timeLeft = null)
     {
         if (!Directory.Exists(workingDirectory))
         {
@@ -265,7 +296,9 @@ public static class GateRunner
             startInfo.ArgumentList.Add(argument);
 
         long start = Stopwatch.GetTimestamp();
-        TimeSpan timeout = TimeSpan.FromSeconds(timeoutSeconds);
+        TimeSpan ownTimeout = TimeSpan.FromSeconds(timeoutSeconds);
+        bool deadlineFirst = timeLeft is { } left && left < ownTimeout;
+        TimeSpan timeout = timeLeft is { } budget && deadlineFirst ? budget : ownTimeout;
         try
         {
             ProcessResult process = ProcessRunner.Run(startInfo, string.Empty, timeout);
@@ -281,6 +314,16 @@ public static class GateRunner
                 printed ? SummarizeOutput(process.StandardOutput) : Summarize(process),
                 (long)Stopwatch.GetElapsedTime(start).TotalMilliseconds,
                 Outcome: GateOutcome.Completed);
+        }
+        catch (TimeoutException ex) when (deadlineFirst)
+        {
+            return new GateResult(
+                id,
+                blocking,
+                -1,
+                $"stopped by the council deadline after {timeout.TotalSeconds:0} seconds: {ex.Message}",
+                (long)Stopwatch.GetElapsedTime(start).TotalMilliseconds,
+                Outcome: GateOutcome.DeadlinePassed);
         }
         catch (TimeoutException ex)
         {

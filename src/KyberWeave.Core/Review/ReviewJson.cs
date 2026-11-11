@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
 namespace KyberWeave.Core.Review;
@@ -72,6 +73,8 @@ public sealed record LensCoverage(string Lens, string Outcome, string? Reason);
 /// </remarks>
 public static class ReviewJson
 {
+    private const string SnakeCaseFailureScenario = "failure_scenario";
+
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true,
@@ -81,6 +84,13 @@ public static class ReviewJson
 
     /// <summary>Serializes a gate report.</summary>
     public static string Write(GateReport report)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+        return JsonSerializer.Serialize(report, Options);
+    }
+
+    /// <summary>Serializes a findings report.</summary>
+    public static string Write(FindingsReport report)
     {
         ArgumentNullException.ThrowIfNull(report);
         return JsonSerializer.Serialize(report, Options);
@@ -102,11 +112,35 @@ public static class ReviewJson
     }
 
     /// <summary>Reads a findings report.</summary>
+    /// <remarks>
+    /// A seat writes its failure scenario as <c>failure_scenario</c>, the spelling its prompt uses, while the
+    /// document's own spelling is <c>failureScenario</c>. Both are read, so a finding is never dropped as
+    /// incomplete for the spelling of a field it has. The document spelling wins when both are present.
+    /// </remarks>
     public static FindingsReport ReadFindings(string json)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
-        return JsonSerializer.Deserialize<FindingsReport>(json, Options)
+        JsonNode? root = JsonNode.Parse(json);
+        if (root is JsonObject document && document["findings"] is JsonArray findings)
+        {
+            foreach (JsonObject finding in findings.OfType<JsonObject>())
+                BindSnakeCaseFailureScenario(finding);
+        }
+
+        return root.Deserialize<FindingsReport>(Options)
                ?? throw new JsonException("The findings report is empty.");
+    }
+
+    private static void BindSnakeCaseFailureScenario(JsonObject finding)
+    {
+        if (!finding.TryGetPropertyValue(SnakeCaseFailureScenario, out JsonNode? value))
+            return;
+
+        bool documentSpelling = finding.Any(property =>
+            string.Equals(property.Key, nameof(ReviewFinding.FailureScenario), StringComparison.OrdinalIgnoreCase));
+        finding.Remove(SnakeCaseFailureScenario);
+        if (!documentSpelling)
+            finding["failureScenario"] = value;
     }
 
     /// <summary>Reads a duplicates report.</summary>

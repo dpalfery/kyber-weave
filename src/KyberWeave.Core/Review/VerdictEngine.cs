@@ -51,6 +51,9 @@ public static class VerdictEngine
     /// <summary>A coverage floor is declared but no coverage report was produced.</summary>
     public const string CoverageMissing = "KW-REVIEW-012";
 
+    /// <summary>A gate stopped at its time limit or by the council deadline, so it did not run to a result.</summary>
+    public const string GateNotRun = "KW-REVIEW-039";
+
     private const string Subject = "review";
 
     /// <summary>Computes the verdict for one change.</summary>
@@ -216,8 +219,18 @@ public static class VerdictEngine
         // A gate that did not apply is neither passed nor failed: it was never executed,
         // so its result is no evidence either way and the verdict with it equals the
         // verdict without it.
+        foreach (GateResult gate in gates.Where(IsStoppedForTime))
+        {
+            diagnostics.Add(new Diagnostic(
+                GateNotRun,
+                Severity.Warning,
+                $"Gate '{gate.Id}' was NOT RUN to a result ({gate.Summary}), so what it checks is unverified.",
+                gate.Id,
+                Hint: "Re-run the gate on its own with 'review gates --gate <id>', or raise its timeout-seconds."));
+        }
+
         bool failed = false;
-        foreach (GateResult gate in gates.Where(g => g is { Blocking: true, Passed: false, NotApplicableReason: null }))
+        foreach (GateResult gate in gates.Where(BlocksTheChange))
         {
             failed = true;
             diagnostics.Add(new Diagnostic(
@@ -229,6 +242,24 @@ public static class VerdictEngine
         }
 
         return failed ? ReviewVerdict.RequestChanges : null;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="gate"/> is a blocking gate that reached a failing result. A gate that did not
+    /// apply, or that time stopped before it finished, reached no result and says nothing about the change.
+    /// </summary>
+    /// <remarks>
+    /// A gate whose program never started still blocks: the missing tool has to be provided before the gate
+    /// can say anything, and approving past it would read as a gate that ran and passed.
+    /// </remarks>
+    private static bool BlocksTheChange(GateResult gate) =>
+        gate is { Blocking: true, Passed: false, NotApplicableReason: null } && !IsStoppedForTime(gate);
+
+    /// <summary>Whether time stopped <paramref name="gate"/>: its own limit, or the council deadline.</summary>
+    public static bool IsStoppedForTime(GateResult gate)
+    {
+        ArgumentNullException.ThrowIfNull(gate);
+        return gate.Outcome is GateOutcome.TimedOut or GateOutcome.DeadlinePassed;
     }
 
     private static ReviewVerdict? EvaluateFindings(
@@ -314,7 +345,7 @@ public static class VerdictEngine
         IReadOnlyList<GateResult> gates)
     {
         if (accepted.Exists(f => f.Severity == ReviewSeverity.Critical) ||
-            gates.Any(g => g is { Blocking: true, Passed: false, NotApplicableReason: null }))
+            gates.Any(BlocksTheChange))
         {
             return RiskGrade.High;
         }
