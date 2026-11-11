@@ -15,7 +15,7 @@ impact-components: [ReviewCouncil]
 
 # Let the cleanupcode fix pass finish on a machine where the tool never exits
 
-**Status: Ready, 2026-11-11.** Approved for execution under decision AP1 (autonomous approval of gate `approve-and-execute`). Task file: `docs/plans/2026-11-11-cleanupcode-exit-hang.tasks.json`.
+**Status: Ready, 2026-11-11.** Approved for execution under decision AP1 (autonomous approval of gate `approve-and-execute`). Task file: `docs/plans/2026-11-11-cleanupcode-exit-hang.tasks.json`. Revision 1 (findings drain, 2026-11-11) adds T6 before the closeout under decisions D16 to D18, approved under AP2.
 **Development mode:** `test-first` (RED by `test-dev`, GREEN by the implementation specialist, never the same worker).
 **Autonomy:** `autonomous` (every open item decided by recommendation; provenance in `## Decisions`).
 **Scale:** `extends-component`, component `ReviewCouncil`.
@@ -61,6 +61,10 @@ Every open item was decided by recommendation under the autonomous-decisions rul
 | D14 | Which wins when the finish text is seen but `--timeout` elapses inside the grace period? | **The time limit.** `--timeout` is absolute: if the run has not counted as done (D2) when it elapses, the wrapper stops the tree and exits 124. Each one-second tick checks "done" before "time limit". | One predictable rule; the host command's 300 s limit is far longer than the 5 s grace, so the overlap only matters for misconfigured values. | autonomous: recommendation accepted |
 | D15 | What if `Close solution instance` appears before the file is saved, or more than once? | **T3 records every occurrence with its timestamp against the file's save time. More than one occurrence, or one before the save, is the D7 fallback**: the plan returns to Draft. | D2 counts the run done on the first sighting, so an early line would stop the tool before it saved and exit 0 with nothing fixed. The 2026-11-11 measurement saw it in the same second as the save, once. | autonomous: recommendation accepted |
 | D13 | Development mode and test contract. | **`test-first`**, with the Test contract below. | Default mode; no opt-out was supplied. | autonomous: recommendation accepted |
+| D16 | (Finding F1, from T3) The finish line also appears after a failed cleanup: a missing profile logs `Failed to run cleanup. Unable to find the code cleanup profile with 'No Such Profile' name` at 16:45:35.564 and `Close solution instance` at 16:45:35.580, so the standard's command exits 0 for a cleanup that did nothing. What changes? | **In scope, smallest fix in the standard, not the wrapper: revision 1 adds T6, which chains `&& ! grep -q "Failed to run cleanup" "<log>"` onto the wrapped command** and says why in one sentence. The command then exits non-zero when the tool reports a failed cleanup, and still exits 0 for a clean run (the positive log, `.agent_scratchpad/T3/positive.log`, holds no such line). | The owner's constraint is honest failure; a run that finished by failing and reads as passed breaks it, and a misconfigured profile would otherwise pass silently on every run. Rejected: a wrapper `--fail-on <text>` option (a third wrapper feature beyond the two the owner approved, plus a RED and GREEN task, for a check one `grep` in the host command already gives; the wrapper deletes the log before each run, so the grep reads only this run's log); "tell the agent to check the log" in prose (an exit code is the check a worker cannot skip); keyed on any `\|E\|` line (the clean run's log holds unrelated error-level file-watcher traces). Supersedes D10's acceptance for this failure; D10 still holds for failures the tool words differently (R2). | autonomous: recommendation accepted |
+| D17 | (Finding F2, from T1) The `test-dev` task gate's `tests` gate exited 8 (zero tests matched): it always runs `tests/KyberWeave.Tests`, and the class T1 changed lives in `tests/KyberWeave.RepoPolicy.Tests`. In scope? | **Out of scope; recorded as a todo**, `docs/todo/task-gate-tests-gate-misses-repopolicy-project.md`, registered in the todo index. | The defect is in `review.task-gates` and predates this plan; fixing it touches `.kyber-weave/kyber-weave.yml` and the class mapping, which this plan keeps out of scope. The worker's direct targeted run (16 of 16 passing) is the evidence for T1. | autonomous: recommendation accepted |
+| D18 | (Finding F3, from T4's real run) The `KyberWeave` profile also rewrote an untouched member, `ReviewPolicy.ForStrictness`, from an expression body to a block body. What changes? | **One caution sentence in T6's edit** (the profile rewrites whole included files, so revert edits to members you did not touch), **and a todo for the profile itself**, `docs/todo/cleanupcode-profile-expression-bodies.md`. | `--include` scopes files, not members, and nothing in the standard said so. `.editorconfig` declares no expression-body preference, so the rewrite is the profile's opinion, which the `resharper-clt` skill says a profile must not impose; changing `KyberWeave.sln.DotSettings` is outside this workaround's scope. `docs/todo/csharp-formatter-churn-split.md` already asks for formatter-only changes in their own commits. | autonomous: recommendation accepted |
+| AP2 | Is revision 1 (D16 to D18, task T6, the T6 Test-contract row, T5 now depending on T6) approved for execution? | **Approved.** T1 to T4 are complete and unchanged; T6 is one documentation edit with two real runs, and T5 stays last. | Revision made during the findings drain, 2026-11-11. Conductor input `AUTONOMOUS_APPROVAL: AP2` under the repository's resolved autonomy `autonomous`; the task file's execution digest was recomputed for the revised plan. | autonomous: recommendation accepted (AUTONOMOUS_APPROVAL AP2, 2026-11-11) |
 | AP1 | Is the plan approved for execution? | **Approved.** D1 to D15 and the Test contract are accepted as recorded, and the plan is executed as written. | Conductor input `AUTONOMOUS_APPROVAL: approve-and-execute` under the repository's resolved autonomy `autonomous`, 2026-11-11; no human answered the gate. The low-confidence rows D2, D6, D7 and D9 stay flagged for the pull request body. Since the Draft, the base branch's review fix changed `scripts/report-gate.sh` (`rm -f -- "${report}"`, and exit 2 when `pgrep` is not on the PATH); the tasks name the script by function, not line, so none moved, and T2 keeps both. | autonomous: recommendation accepted (AUTONOMOUS_APPROVAL approve-and-execute, 2026-11-11) |
 
 ## Investigation findings
@@ -106,7 +110,7 @@ Every open item was decided by recommendation under the autonomous-decisions rul
 | ID | Design item | Target component | Target doc type | Target location |
 |---|---|---|---|---|
 | H1 | `scripts/report-gate.sh` contract: the two finish modes, the grace rule per mode, `--timeout` and exit 124 | ReviewCouncil | architecture | `docs/code-review/architecture.md`, section "Repository gate scoping and caching in this repository", the paragraph that starts "Its argv starts with `scripts/report-gate.sh`" |
-| H2 | The `cleanupcode` fix pass in this repository runs `--no-build` through the wrapper keyed on its log line, why, and that the C# standard's `## Completion` section holds the command (the command itself is written there by T4) | ReviewCouncil | architecture | `docs/code-review/architecture.md`, same section, one sentence after H1 |
+| H2 | The `cleanupcode` fix pass in this repository runs `--no-build` through the wrapper keyed on its log line, why, and that the C# standard's `## Completion` section holds the command (the command itself is written there by T4), and that the command fails when the log holds `Failed to run cleanup` (T6, D16) | ReviewCouncil | architecture | `docs/code-review/architecture.md`, same section, one sentence after H1 |
 
 ## Test contract (test-first)
 
@@ -117,6 +121,7 @@ All commands run from the worktree root. Build once per task, then run the class
 | T2 | `tests/KyberWeave.RepoPolicy.Tests/ReportGateScriptTests.cs` (class `KyberWeave.Tests.ReportGateScriptTests`, new cases) | `scripts/proc-guard.sh run -- dotnet build tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj -c Release` then `scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~KyberWeave.Tests.ReportGateScriptTests"` | (a) `--contains` with a stand-in that writes the finish text mid-file, keeps appending a line every 0.2 s, and never exits: exit 0, standard error contains `did not exit`, the recorded pid is not running. (b) `--contains` with a stand-in that exits 0 having written a file without the text: exit 1, standard error contains `no complete report`. (c) `--contains` with a hang and no text, `--timeout 2`: exit 124, standard error contains `did not finish within`, the recorded pid is not running, total run under 30 s. (d) `--ends-with` with an incomplete report and a hang, `--timeout 2`: exit 124. (e) `--contains`, finish text written then hang, `--grace 1 --timeout 20`: exit 0. (f) `--ends-with` and `--contains` together: exit 2, and standard error's usage line contains both `--contains` and `--timeout`. (g) `--timeout 0` and `--timeout x`: exit 2, same usage-line assertion. Every existing case still passes unchanged. | All of (a) to (g) fail: today the script rejects `--contains` and `--timeout` as usage errors, so (a) to (e) see exit 2 where 0, 1 or 124 is asserted, and (f) and (g) fail on the usage line, which does not yet name `--contains` or `--timeout`. Failure output in the digest. | Same commands pass with assertions unchanged; `bash -n scripts/report-gate.sh` exits 0. |
 | T3 | No test: measurement task | The probe commands in T3 | `--no-build` is accepted; the `--LogFile` file contains the finish line exactly once, at or after the file's save; the negative probe's behaviour is recorded | n/a (no-test task, replaced by recorded measurements) | Measurements reported in the digest; no `cleanupcode` process started by the task remains; the scratch file is restored |
 | T4 | No test: documentation and product-text task, plus one real run | The four test commands listed under T4 (`WorkerRuleSingleHomeTests`, `SquadCanonicalContentTests`, `StandardsCompletionSectionTests`, each run on its own), then the real run | The C# standard's command, run exactly as written on a deliberately misformatted C# file, returns with exit 0 within 300 s and the file is fixed | n/a (no-test task, replaced by the pinned classes and the real run) | Every test run passes with a non-zero count; the real run's exit code, duration, the file's diff before restore, and an empty leftover-process check are in the digest; `git status` shows the scratch file restored |
+| T6 | No test: documentation task, plus two real runs | `StandardsCompletionSectionTests` and `kyber-weave docs validate .` (commands under T6), then the two real runs | The standard's command exits 0 and fixes a misformatted line; the same command with a profile that does not exist exits non-zero | n/a (no-test task, replaced by the pinned class and the two real runs) | The test run passes with a non-zero count; docs validate reports zero errors; both runs' exit codes and wall times, the positive run's pre-restore diff and an empty leftover check are in the digest; `git status` shows only the standard changed |
 | T5 | No test: documentation task | `kyber-weave docs validate .` and `kyber-weave docs drift .` before the archive move, then `kyber-weave docs validate . --merge-ready` after it, run in the worktree | H1 and H2 written; plan archived with its closeout mapping; task file removed | n/a (no-test task, replaced by the docs gates) | Zero errors on every run; the only warning allowed is `KW-CONFIG-002` on the `concurrent` key, which the installed CLI raises because it predates pull request 594 |
 
 ## Implementation tasks
@@ -202,9 +207,37 @@ Every developer task ends with the worker's own `task-gate` run. Standards to fe
   - `kyber-weave docs validate .`
   - the real-run steps 1 to 5 above
 
+### T6 (docs-dev): fail the host command when the cleanup failed
+
+**Session:** `docs`. **Depends on:** T4. **Required skills:** `docs-dev`, `resharper-clt`.
+
+**Files:**
+- `docs/standards/csharp/README.md` (section `## Completion`, the optional cleanupcode step T4 wrote: the wrapped command gains a trailing failure check, plus two sentences, per D16 and D18. Nothing else in the file changes.)
+
+**Work.** Change the wrapped command so it reads, as one command continued with a backslash:
+
+```bash
+scripts/report-gate.sh --report "$PWD/.agent_scratchpad/<task>/cleanupcode.log" --contains "Close solution instance" --grace 5 --timeout 300 -- dotnet jb cleanupcode KyberWeave.sln --profile=KyberWeave --include="<changed files>" --no-build "--LogFile=$PWD/.agent_scratchpad/<task>/cleanupcode.log" --LogLevel=VERBOSE \
+  && ! grep -q "Failed to run cleanup" "$PWD/.agent_scratchpad/<task>/cleanupcode.log"
+```
+
+Add one sentence that the tool logs its finish line after a failed cleanup too, so a log holding `Failed to run cleanup` fails the command; and one sentence that the profile rewrites the whole of each included file, not only the changed lines, so the agent reverts edits to members it did not touch. Then two real runs from the worktree root, each after `mkdir -p .agent_scratchpad/T6` and `dotnet restore KyberWeave.sln`:
+
+1. Positive: misformat `src/KyberWeave.Core/Configuration/ReviewConfig.cs` (record `ReviewGate`, property `FailOnOutput`) to `public   bool FailOnOutput {get;init;}`, run the standard's command exactly as written with `<task>` = `T6` and `<changed files>` = that file. Exit 0; the line is fixed. Then `git checkout -- src/KyberWeave.Core/Configuration/ReviewConfig.cs`.
+2. Negative: the same command with `--profile="No Such Profile"` in place of `--profile=KyberWeave`, on the unmodified file. The exit status is non-zero.
+3. `pgrep -f "agent_scratchpad/T6[/]"` prints nothing; `git status --short` shows only the standard.
+
+**Acceptance:** the T6 row of the Test contract.
+
+**Commands:**
+  - `scripts/proc-guard.sh run -- dotnet build tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj -c Release`
+  - `scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~KyberWeave.Tests.StandardsCompletionSectionTests"`
+  - `kyber-weave docs validate .`
+  - the real-run steps 1 to 3 above
+
 ### T5 (docs-dev): closeout
 
-**Session:** `docs`. **Depends on:** T2, T4. **Required skills:** `docs-dev`, `kyber-docs-authoring`.
+**Session:** `docs`. **Depends on:** T2, T4, T6. **Required skills:** `docs-dev`, `kyber-docs-authoring`.
 
 **Files:**
 - `docs/code-review/architecture.md` (section "Repository gate scoping and caching in this repository": H1 and H2)
@@ -224,16 +257,16 @@ Every developer task ends with the worker's own `task-gate` run. Standards to fe
 
 ```text
 T1 ──> T2 ──┐
-            ├──> T4 ──> T5
+            ├──> T4 ──> T6 ──> T5
 T3 ─────────┘
 ```
 
-T1 and T3 start at once; T3 runs in its own worktree because T1 and T2 build the same projects. T4 consumes T2's script and T3's measurements. T4 and T5 share the `docs` session.
+T1 and T3 start at once; T3 runs in its own worktree because T1 and T2 build the same projects. T4 consumes T2's script and T3's measurements. T6 (added in revision 1, D16) follows T4 in the same file. T4, T6 and T5 share the `docs` session, and T5 stays last.
 
 ## Risks
 
 - **R1. `--LogFile` does not carry the finish line.** Measured only with `--LogFolder`. T3 checks it before any wording; the fallback returns the plan to Draft (D7).
-- **R2. A finish line after a failed cleanup reads as success.** The tool's exit code is lost when it is stopped. T3's negative probe measures it; the task gate's format verify forms and the council's `inspectcode` still judge the code (D10).
+- **R2. A finish line after a failed cleanup reads as success.** The tool's exit code is lost when it is stopped. T3 measured it: a missing profile logs `Failed to run cleanup` and then the finish line. T6 fails the command on that line (D16). Residual: a failure the tool logs in other words is not caught; the task gate's format verify forms and the council's `inspectcode` still judge the code (D10).
 - **R3. `--no-build` is undocumented.** It works with the pinned 2026.2.1 tool; a later version that drops it fails loudly (D6).
 - **R4. A VERBOSE log is large.** The wrapper searches the whole file once a second. Bounded by the 300-second limit; logs live in the gitignored scratchpad.
 - **R5. The workaround outlives the bug.** When the OS, .NET or JetBrains side is fixed, the tool exits by itself within the grace period and the wrapper passes through its exit code, so the command keeps working; removing it is a one-step edit to the C# standard's `## Completion` section plus the script options.
@@ -244,6 +277,7 @@ T1 and T3 start at once; T3 runs in its own worktree because T1 and T2 build the
 - `products/kyber-squad/agents/**` and `products/kyber-squad/skills/code-review/**` (another session owns them).
 - `products/kyber-squad/skills/task-gate/SKILL.md` (it already defers to `resharper-clt`).
 - The root `AGENTS.md` (D4: the command's home is the C# standard).
+- `KyberWeave.sln.DotSettings` (the cleanup profile's own settings; todo `cleanupcode-profile-expression-bodies`, D18).
 - The `inspectcode` gate in `.kyber-weave/kyber-weave.yml` (its argv is unchanged).
 - Turning the `cleanupcode` pass on by default, or adding it to `review.task-gates`.
 - The `resharper-clt` skill's "MUST run before `READY_FOR_REVIEW`" wording, which disagrees with the optional pass in `task-gate`; flagged for a separate change.
