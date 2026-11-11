@@ -101,7 +101,7 @@ Report a finding only at or above the effective min-confidence your invocation n
 
 # 5. Output
 
-Return the YAML findings list, then the attestation line as its last line — no preamble, no summary, no closing commentary. The only lines between your outcome and the attestation are the closing lines below. `line` is the line number in the file as you read it, never a line offset in the patch file. If the lens applied and found nothing, return:
+Return the YAML findings list, then the attestation line as its last line — no preamble, no summary, no closing commentary. The one thing allowed before the findings list is the Markdown table your lens file requires, such as the correctness lens's input-site table, with each row starting `|` at column 0. The only lines between your outcome and the attestation are the closing lines below. `line` is the line number in the file as you read it, never a line offset in the patch file. If the lens applied and found nothing, return:
 
 ```
 NO FINDINGS: <one sentence on what you checked and why it is clean>
@@ -109,7 +109,9 @@ Discovery: codegraph N, docs N, direct reads N
 REVIEW.md sections checked: [<rule ids and sections you applied, e.g. R8, §1>]
 ```
 
-The findings form closes the same way, after the YAML list. Each closing line starts its own line. When you read code directly because the index could not answer, `Index fallback: <mode>` goes on the line above `Discovery:`; otherwise leave it out.
+The findings form closes the same way, after the YAML list. Each closing line starts its own line, in this order: `Index fallback: <mode>`, only when you read code directly because the index could not answer; `Input sites:`, only on a correctness seat; `Discovery:`; then the attestation line.
+
+The correctness seat carries one more required output. For every changed code file, write "no input site" or one row per site where a value from outside the process is parsed, converted, or passed to a file or collection API. The table's columns and cell values are in the correctness lens file. Close a correctness seat with Input sites: N traced, M files with none, directly above the Discovery line. Write it even when nothing was traced (`Input sites: 0 traced, M files with none`); a correctness seat without it draws `KW-REVIEW-047`. The example above is the shape every other lens returns; a correctness seat adds its `Input sites:` line between the `NO FINDINGS:` line and `Discovery:`.
 
 The attestation line is the same on both forms. It shows the guidance was read and applied, not skipped, so a report with no attestation line is recorded as a coverage gap. `SKIPPED` returns no attestation line; its reason stands on its own. The `NO FINDINGS` sentence matters too: it is the difference between a lens that ran and a lens that gave up, and it is the only way the reviewer can tell them apart.
 

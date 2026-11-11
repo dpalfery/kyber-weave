@@ -97,6 +97,19 @@ lens needs a seat file or a recorded reason for not seating it.
   one batched refutation for about 1.3M tokens in 17 minutes. Cycle 2, a verifier cycle, seated 10
   for about 1.0M tokens in 12 minutes. Cycle 3 seated 6 for about 0.44M tokens in 11 minutes and
   returned `APPROVE`. Majors went 9, then 1, then 0, and no cycle used a hand-written verdict.
+- **An approved council still missed a class of defect, and four mechanisms answer it.** After
+  the council approved this change, the first bot review found nine real defects in the same code.
+  Five were crashes or wrong accepts on malformed input: an overflowing parsed count, a null
+  character in a cited path, a cited line of 0, and a null element in a findings list and in a gates
+  list. Two were contradictory seat files accepted silently, and two were prose statements that
+  disagreed with a sibling document. In seven of the nine a rule covered the defect and the owning
+  seat had read the code, but traced only the inputs it thought of; one fix was confirmed FIXED on
+  the single input its finding named; one file was never opened. The answers are: a required
+  input-site table in the correctness seat, whose absence draws `KW-REVIEW-047`; a verifier rule
+  that a finding is FIXED only when the fix refuses its whole class; two documentation checks (a
+  rule's subject is checked at the call site, and every statement of a rule id or command is
+  compared side by side); and hand-offs, so test-adequacy routes an unproven malformed input to
+  correctness and the reviewer gives seats no hunt list of its own.
 - **What becomes harder.** The reviewer must write seat files to disk, and a reviewer could still
   alter them on the way; capturing seat output in the Arbiter's hook would close that. Each fix
   round costs another council cycle, bounded by the hard stop.

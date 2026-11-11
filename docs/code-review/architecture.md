@@ -218,6 +218,10 @@ The review council enforces explicit contract verification disciplines across it
 - **Contract assertion rigor (`test-adequacy`, `R14`):** Flags bare single-word `Assert.Contains` checks that match common boilerplate, unguarded boolean `||` assertions where one branch matches unrelated text, and non-contiguous `foreach` loops over multi-line schemas; requires contiguous block assertions.
 - **Operational lifecycle state-machine walks (`correctness`, `supportability`):** Walks the complete resource lifecycle from `create` → `execute` → `integrate` → `cleanup`/`remove`/`prune`, and verifies error paths including `conflict` and `rollback` for concurrency primitives, worktrees, locks, and temp-paths.
 - **Literal prompt parsing (`correctness`, `R16`):** Prohibits charitable reading of agent prompt instructions; parses prompt directives literally as executed by language models, flagging any gate deadlock, self-contradiction, or missing recovery step.
+- **Input-site table (`correctness`):** For every changed code file the seat writes "no input site" or one row per site where a value from outside the process is parsed, converted, or passed to a file or collection API, with what the code does today for each hostile input class (absent or null, a null element in a list, empty, wrong type, zero or negative, the largest value, characters the API rejects, repeated or contradictory markers). Every `THROWS` or `accepted wrong` cell is a finding. The seat closes with an `Input sites:` count, and its absence draws `KW-REVIEW-047`.
+- **Rule subjects and side-by-side statements (`documentation-accuracy`):** Who a rule applies to ("a seat", "every gate") is a claim checked at the call site that decides it, and each rule id or command the changed prose states is quoted side by side from every document that states it; a different subject, condition or flag list is a finding.
+- **Hand-off of malformed inputs (`test-adequacy` to `correctness`):** Test-adequacy says what the code does today for each malformed input it names, and hands one it cannot show is refused to correctness as a `test-adequacy/out-of-scope` finding, rather than reporting only the missing test.
+- **No reviewer hunt list:** The reviewer hands each seat its lens file and guidance sections, not a list of its own things to hunt for. A list of areas narrows a seat to those areas, and an area is not an input. Named focus files must each be accounted for by the seat.
 
 ## Why lenses are files, not agents
 
@@ -959,7 +963,11 @@ it keeps doing so until it returns `APPROVE`. Minor findings never start a cycle
 after the first is a `verifier` cycle: it reviews the fix delta `git diff <prior head>...<head>`,
 re-seats only the lenses that own an outstanding finding or whose predicate the delta newly
 satisfies, and passes `--prior <prior cycle folder>` so the lenses it did not re-seat keep their
-coverage. Gates re-run every cycle because their result *is* the evidence.
+coverage. Gates re-run every cycle because their result *is* the evidence. A finding is FIXED only
+when the fix refuses its whole class: the verifier states the class in one sentence, names at
+least three other inputs of that class that the original failure scenario did not name, and
+traces each through the fix. A fix that refuses only the input the finding named leaves the
+finding open.
 
 The loop has a hard stop: 5 review cycles, or 3 cycles in a row in which the count of
 surviving critical and major findings does not fall. The findings still open are then listed in
