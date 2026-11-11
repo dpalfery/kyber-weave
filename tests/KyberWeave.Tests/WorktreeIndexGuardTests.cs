@@ -110,6 +110,11 @@ public sealed class WorktreeIndexGuardTests : IDisposable
         File.SetUnixFileMode(config, UnixFileMode.None);
         try
         {
+            if (CanStillRead(config))
+            {
+                Assert.Skip("File permissions are not enforced for this user, as when the suite runs as root.");
+            }
+
             WorktreeIndexOutcome outcome = Ensure(Codegraph());
 
             Assert.Equal(WorktreeIndexStatus.Failed, outcome.Status);
@@ -212,6 +217,19 @@ public sealed class WorktreeIndexGuardTests : IDisposable
 
         Assert.Equal(WorktreeIndexStatus.NotGoverned, outcome.Status);
         Assert.Empty(executor.CallsTo("codegraph"));
+    }
+
+    private static bool CanStillRead(string path)
+    {
+        try
+        {
+            _ = File.ReadAllText(path);
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private void Govern(string yaml, bool createDocs = true)
