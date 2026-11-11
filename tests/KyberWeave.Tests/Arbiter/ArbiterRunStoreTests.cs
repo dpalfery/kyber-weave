@@ -165,12 +165,14 @@ public sealed class ArbiterRunStoreTests : IDisposable
         string oversize = new('x', 16385);
         Assert.Equal(16385, Encoding.UTF8.GetByteCount(oversize));
         ArbiterRunStore store = Store(Now);
+        ArbiterStoreStatus small = await store.AppendFindingAsync("RUN-BIG", "fits in the store");
+        Assert.Equal(ArbiterStoreStatus.Stored, small);
 
         ArbiterStoreStatus status = await store.AppendFindingAsync("RUN-BIG", oversize);
 
         Assert.Equal(ArbiterStoreStatus.TooLarge, status);
         IReadOnlyList<string> read = store.ReadFindings("RUN-BIG");
-        Assert.Empty(read);
+        Assert.Equal(["fits in the store"], read);
         Assert.DoesNotContain(read, text => text.Contains("xxxx", StringComparison.Ordinal));
     }
 
