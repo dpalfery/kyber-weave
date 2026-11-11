@@ -257,8 +257,10 @@ partial, so repair or remove the line and run again.
 
 Two limits, both known:
 
-- The report pairs a decision with the `RESULT:` line only. The `TASK_GATE:` outcome and, for
-  `delegate.model`, the chosen profile are not shown yet; that pairing ships with model targeting.
+- The report pairs a decision with the `RESULT:` line only. The `TASK_GATE:` outcome is not paired
+  yet; that pairing is not wired.
+- A `delegate.model` row shows the profile, the token and `delivered`. Read them as described in
+  [Switching model targeting to enforce](#switching-model-targeting-to-enforce).
 - Shadow and enforced answers are counted apart, but a threshold's flip count is computed from the
   scores alone, so a shadow answer that would flip is counted the same way as an enforced one.
 
@@ -285,9 +287,67 @@ unreadable, or older than the Squad lock. The remedy is the one the message name
 kyber-weave squad update
 ```
 
-The update rewrites the table from the current presets. In phase 1 no hook reads the table to choose a
-model, so a stale table changes nothing at dispatch yet. The warning is early notice for the model
-phase, which reads the table. A project-scope target is not checked by this diagnostic.
+The update rewrites the table from the current presets. A stale table changes what a retarget is
+pointed at, so refresh it after changing a preset. A project-scope target is not checked by this
+diagnostic.
+
+## Switching model targeting to enforce
+
+`arbiter.model-targeting.mode` has three values. The default is `shadow`.
+
+| Mode | What happens |
+|---|---|
+| `off` | Both model rules are disabled. No `model` block is written. |
+| `shadow` | The rules run and each `delegate.model` decision records a `model` block with `reason: shadow`. Nothing is delivered. |
+| `enforce` | A retarget is written onto the dispatch, unless a reason above holds. |
+
+To move from shadow to enforce:
+
+1. Run `kyber-weave arbiter tune` and check the rows that carry a model block. Each shows the profile
+   the Arbiter chose, its token, and whether it was delivered.
+2. Confirm the table exists for the harness: `kyber-weave arbiter doctor` must not raise
+   `KW-ARB-MODEL-001`.
+3. Set `arbiter.model-targeting.mode: enforce` in the configuration. This is the only switch for the
+   two model rules; a per-rule `shadow` override on either fails `KW-ARB-CONFIG-014`.
+4. Run `kyber-weave arbiter doctor` and `kyber-weave arbiter validate` to check the configuration.
+
+### Reading the `tune` profile column
+
+Each `delegate.model` row reads like this:
+
+```text
+decision <id> score 0.82 profile general token claude-sonnet-5-5 delivered true RESULT: pass
+```
+
+- `profile` is the semantic profile the target chose (`fast`, `general`, `deep-planning` and so on).
+- `token` is the model token the table names for that profile, or `none` when the profile has no token.
+- `delivered` is `true` when the Arbiter recorded no reason that blocks the write. It is not proof the
+  model ran. In `shadow`, `delivered` is always `false`.
+- `RESULT:` is the worker's own report, paired from the ledger.
+
+A row appears only for a scored answer that carries a model block. The text report does not print the
+`reason`; the `--json` report does not carry it either. To see why a dispatch was kept, read its
+`model.reason` in `decisions.jsonl`.
+
+### What `delivered: true` does and does not mean
+
+`delivered: true` means the Arbiter wrote the model field onto the Claude `Agent` dispatch. It does
+not mean the model ran. Two settings can override it after the write:
+
+- An installed mod's `agent.spawn` hook can replace the model.
+- The `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` environment variable forces a model on every sub-agent.
+
+Check the dispatch's own transcript if you need to know which model ran.
+
+### Known gaps in delivery
+
+- `delivered` is recorded in `decisions.jsonl` before the adapter writes the model field. A write that
+  fails is visible only in the hook log, as a line beginning `model-write-failed`, with `delivered:
+  false`. The decision record still says `true`. Search the hook log when a retarget looks wrong.
+- A token that is neither an accepted alias nor a full Claude id of an accepted family is not written.
+  The hook log shows `model.reason: token-not-accepted`, but the decision record can still say `delivered: true`.
+- `arbiter tune` pairs decisions with the `RESULT:` line only. The `TASK_GATE:` outcome is not paired
+  yet.
 
 ## Recording a harness defect
 

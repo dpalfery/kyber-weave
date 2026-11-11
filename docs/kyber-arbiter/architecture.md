@@ -157,7 +157,7 @@ A task counts as complete on its worker's own report: no separate reviewer confi
 
 ## The rules
 
-Twenty-one rules ship with permanent `KW-ARB-*` ids, tuned by id through `enabled`,
+Twenty-three rules ship with permanent `KW-ARB-*` ids, tuned by id through `enabled`,
 thresholds, `shadow` where the rule supports it, and per-answer `effects`. Host rules use the
 same shape under non-`KW-ARB-` ids and may not use an effect that only a shipped rule may use.
 
@@ -184,6 +184,8 @@ same shape under non-`KW-ARB-` ids and may not use an effect that only a shipped
 | `KW-ARB-GATE-CORROBORATED-001` | `refute.spawn` | 0 | Does a failed gate already corroborate the finding? |
 | `KW-ARB-GATE-001` | `gate.select` | 0 | Does any changed path match the gate's `applies-when.paths`? |
 | `KW-ARB-LENS-002` | `lens.spawn` | 0 | Is this lens one that has nothing to judge in a change with no code in it? See [hunk-level lens skipping](../code-review/architecture.md#hunk-level-lens-skipping-kw-arb-lens-002). |
+| `KW-ARB-DIFFICULTY-001` | `delegate.model` | 1 (`choice`, ≥ 0.8) | How hard is this task: `easy`, `standard` or `hard`? Governed by `model-targeting.mode`; see [model targeting](#model-targeting-phase-2). |
+| `KW-ARB-LADDER-001` | `delegate.model` | 0 | Did the previous attempt fail below the top of the ladder? Governed by `model-targeting.mode`; see [model targeting](#model-targeting-phase-2). |
 
 **The plan-read ban is enforced at dispatch (`KW-ARB-PLANREAD-001`).** Workers treat their dispatch
 packet as their whole context and do not open plan or specification files, and until this rule the
@@ -306,10 +308,12 @@ These facts are filled on the hook path. Each is `derived` unless noted.
 - **`harness.model-override`** on `delegate.model`: the field name the harness's adapter declares
   (`model` on Claude), or null where the harness offers no per-dispatch model.
 
-Catalogued but not filled in phase 1, so a rule that reads them answers `undecidable`: `finding.severity`,
-`finding.gate-corroborated`, `delegation.model`, `plan.task.file-kinds`, `review.prior-findings`,
-`ledger.task.prior-attempt`, `model-targeting.ladder.next`, `file.text-at-line` and `gates.report`.
-Their fillers arrive with phases 2 and 3.
+Phase 2 fills the `delegate.model` facts: `delegation.model`, `plan.task.file-kinds`,
+`ledger.task.prior-attempt`, `model-targeting.ladder.next`, `model-targeting.prior-result` and
+`model-targeting.prior-profile` (see [model targeting](#model-targeting-phase-2)). Still catalogued but
+not filled, so a rule that reads them answers `undecidable`: `finding.severity`,
+`finding.gate-corroborated`, `review.prior-findings`, `file.text-at-line` and `gates.report`. Their
+fillers arrive with phase 3.
 
 ### Hunk comment syntax
 
@@ -336,12 +340,10 @@ family's neutral effect (`keep`, `spawn`, `allow`), so no adapter ever sees a sh
 Phase 1 ships no rule in shadow; `KW-ARB-LENS-002` enforces.
 
 **Model-targeting switch.** `arbiter.model-targeting.mode` is `off`, `shadow` (the default) or
-`enforce`. It owns the shadow state of `KW-ARB-DIFFICULTY-001` and `KW-ARB-LADDER-001`, which
-ship in phase 2. A `shadow` override on either one fails `KW-ARB-CONFIG-014`, so there is one switch
-to read.
-
-In phase 1 the switch changes one thing: whether `KW-ARB-MODEL-001` runs at doctor time. `off`
-skips it. No shipped rule reads the mode, no hook chooses a model, and no model field is written.
+`enforce`. It owns the shadow state of `KW-ARB-DIFFICULTY-001` and `KW-ARB-LADDER-001`. A `shadow`
+override on either one fails `KW-ARB-CONFIG-014`, so there is one switch to read. `off` disables both
+rules. `shadow` evaluates and logs them and delivers nothing. `enforce` lets a retarget reach the
+dispatch. The mode also controls the `KW-ARB-MODEL-001` doctor check.
 
 ## Fail-safe points
 
@@ -352,7 +354,7 @@ skips it. No shipped rule reads the mode, no hook chooses a model, and no model 
 | No hook and no `serve` call | Nothing runs, nothing logged | None |
 | `serve` call | Outcome labelled advisory | `source: serve` |
 | Invalid new configuration | **Known gap.** The config loader throws on an invalid `arbiter:` key, so the hook fails closed for the whole hook with `KW-ARB-HOOK-001`. The design intended to skip only the affected rule. | `validate` and `doctor` name `KW-ARB-CONFIG-012` to `-015` |
-| Model targets table missing or unreadable | The reader returns no table. No hook reads it in phase 1, so no model is chosen. | `KW-ARB-MODEL-001` at doctor time |
+| Model targets table missing or unreadable | The dispatch is kept on its model | `model.reason: model-targets-unreadable`; `KW-ARB-MODEL-001` at doctor time |
 | Store unwritable | The rule that needs the store answers `undecidable` | Run stores ship in phase 3 |
 
 ## Model targets
@@ -401,22 +403,102 @@ the supported flag, the field that carries the model, the accepted value forms a
 source. The default is unsupported, so an adapter must declare support from vendor documentation.
 
 Only the Claude adapter declares support: the `model` field on the `Agent` input, with the aliases
-`sonnet`, `opus`, `haiku` and `fable`. That declaration is all phase 1 ships. The Claude adapter
-writes no model onto a dispatch, `HookOutcome.ModelToken` exists, and no path sets it. Full model
-ids are not rewritten to aliases; the alias rule arrives with model targeting in phase 2.
+`sonnet`, `opus`, `haiku` and `fable`. Phase 2 uses that declaration to write the model: see
+[model targeting](#model-targeting-phase-2) for the alias rule and the delivery write.
 
 The declaration is also copied into the `harness.model-override` fact. The
 [harness facts table](#harness-facts) has a "Per-dispatch model" column with each harness's
 verdict and its source.
+
+## Model targeting (phase 2)
+
+The Arbiter can point a `delegate` dispatch at a different model: a cheaper profile for an easy task, or
+one rung up the ladder after a failed attempt. It only retargets. No model call picks the profile, except
+that `KW-ARB-DIFFICULTY-001` is a step-1 rule and asks the decision model its question as every step-1
+rule does.
+
+**Eligibility.** Only an implementation-class target reaches `delegate.model`: the `worker` and
+`publishing-worker` capability profiles, from `ArbiterSquadCatalog`. A planner classifies as
+`delegate.planner`, a reviewer and every other caller as `investigate`, and an unidentified target as
+`not-squad`. So bug-crusher's dispatches to specialists are not retargeted in this version.
+
+**Profile choice.** Each `delegate.model` decision resolves one target in this order:
+
+1. If `KW-ARB-LADDER-001` wants a retarget and `model-targeting.ladder.next` exists, its profile is the
+   target (source `ladder`).
+2. Otherwise, if `KW-ARB-DIFFICULTY-001` wants a retarget, its answer `easy`, `standard` or `hard` maps
+   through `model-targeting.difficulty-profiles` (source `difficulty`).
+3. Otherwise there is no target and no `model` block.
+
+A rule wants a retarget when it is enforced to retarget, or when it is in shadow and its would-be effect
+is a retarget. Shadow therefore still records the choice the enforced mode would make.
+
+The target then passes the reason steps in order. The first step that holds sets `model.reason` and stops
+delivery:
+
+| Reason | Set when |
+|---|---|
+| `caller-named-model` | The dispatch already names a model; the Arbiter does not change it |
+| `model-targets-unreadable` | The harness's model targets table is absent, unreadable or not a valid v1 table |
+| `no-token` | The targeted profile has no token in the table |
+| `same-as-rendered` | The token equals the one the target agent is already rendered with |
+| `unsupported-harness` | The harness declares no model override field |
+| `shadow` | `model-targeting.mode` is `shadow`; the choice is recorded only |
+
+With no reason, the dispatch is delivered. The record's `delivered` is `true` exactly when no reason is set.
+
+**Ladder.** `KW-ARB-LADDER-001` decides from the ledger alone, in this order: `returns-unobservable` when
+the harness cannot observe returns; `first-attempt` when there is no prior attempt or it passed;
+`profile-unrecorded` when the failed attempt's profile was not recorded; `top-of-ladder` when no rung
+is above it; otherwise `step-up`, the only answer that retargets. The ledger's pre events record
+`model-profile`, `model-token` and `model-source`. Two catalogued facts feed the rule from the same
+prior attempt: `model-targeting.prior-result` (`pass` or `fail`) and `model-targeting.prior-profile`.
+No model call is made.
+
+**Delivery (Claude only).** The Claude adapter writes the model in the same `updatedInput` that strips
+the routing header from `prompt`. Every other tool-input field is copied unchanged. The written `model`
+value follows the alias rule:
+
+- An accepted alias (`sonnet`, `opus`, `haiku`, `fable`) is written as it is.
+- A full id whose family is an accepted alias (`^claude-(haiku|sonnet|opus|fable)-`) writes the family
+  alias, and the hook log records `model.reason: alias-derived (<token> -> <family>)`.
+- Any other token is not written. The hook log records `model.reason: token-not-accepted`, and the
+  dispatch runs on the harness's default model.
+
+The hook log then records `model: <alias>; delivered: true` on a write, or `model-write-failed: <message>;
+delivered: false` when the write throws. Other harnesses have no model override in this phase, so a
+retarget there records `unsupported-harness` and nothing is written.
+
+**`delivered` is a claim about the write, not the run.** Claude documents settings that override the
+requested model, such as an installed `agent.spawn` hook and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`. A
+`delivered: true` therefore shows the field was written, not that the model ran.
+
+**Known gaps.**
+
+- The decision record's `delivered` is set when the reason steps clear, before the adapter writes. A
+  failed write (`model-write-failed`) or a `token-not-accepted` token therefore still shows
+  `delivered: true` in `decisions.jsonl`. Only the hook log shows `delivered: false`.
+- The `model` block is written on the decision record. `arbiter tune` reads the profile and delivered
+  flag from it; see the [runbook](runbook.md#tuning-thresholds-arbiter-tune).
+
+**Serve path.** The `serve` call (the MCP evaluation tool used when no hook fires) never writes a model.
+Its outcome is labelled advisory, and a would-be retarget is reported as one line:
+
+```text
+advisory (source: serve): would retarget to profile <profile> token <token> (reason: <reason>). Not written: the serve path changes no model.
+```
+
+Such a decision records `source: serve`.
 
 ## Decision record fields in phase 1
 
 Each decision record in `decisions.jsonl` carries the existing fields plus these phase 1 additions.
 Each is omitted when it has no value.
 
-- `model`: a string, the name of the decision model that answered the step-1 call. It is not the
-  model the dispatch ran on. The design's structured `{profile, token, source, delivered, reason}`
-  object is deferred to phase 2.
+- `model`: an object, `{profile, token, rendered-token, source, delivered, reason}`, written on a
+  `delegate.model` decision that resolved a target. Null fields are omitted. It records what the
+  dispatch was pointed at, not a model that ran. This replaces the phase 1 string, which
+  named the decision model. (Phase 2 introduced this object; it is not a phase 1 field.)
 - `substitute`: a boolean. The design's structured `{kind, digest}` object is deferred. No code
   path writes `substitute` in phase 1.
 - `primary-ledger-id`: on a secondary-trigger record, the ledger id of the primary record. No
