@@ -226,28 +226,107 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
 
     /// <summary>
     /// The served tool reports the model retarget the hook would make, as advisory text, so a client
-    /// can see it before dispatching. It names the serve source, it changes nothing: no ledger event
-    /// is written and no model is delivered. Task 2.7 (RED): the serve response carries no retarget line yet.
+    /// can see it before dispatching. It names the serve source and changes nothing about the dispatch:
+    /// the serve path writes no model field anywhere, so its ledger is exactly what a serve call with no
+    /// retarget writes (the usual pre event), and the retarget exists only as a line in the response.
+    /// Task 2.7 (RED): the serve response carries no retarget line yet.
     /// </summary>
     [Fact]
     public void Evaluate_ReportsTheRetargetItWouldMake_AsAdvisory_AndChangesNothing()
     {
-        ArbiterTools tools = CreateTools();
+        using TempDirectory baseline = new();
 
-        string response = tools.Evaluate(
-            "delegate",
-            new ArbiterFacts
-            {
-                Target = "csharp-dev",
-                PlanFile = "docs/plans/x.md",
-                Task = "T2",
-                Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: T2\n\nImplement T2.",
-            });
+        ArbiterTools tools = CreateRetargetTools(_repo.Path, "enforce");
+        string response = tools.Evaluate("delegate", RetargetFacts());
+
+        // The fixture must reach a retarget, or the advisory assertions below prove nothing.
+        ArbiterDecisionRecord difficulty = Assert.Single(
+            new DecisionLog(ArbiterDirectoryOf(_repo.Path)).ReadAll(),
+            record => record.Trigger == "delegate.model");
+        Assert.NotNull(difficulty.Model);
+        Assert.Equal("deep-planning", difficulty.Model.Profile);
 
         Assert.Contains("advisory", response, StringComparison.Ordinal);
         Assert.Contains("source: serve", response, StringComparison.Ordinal);
         Assert.Contains("retarget", response, StringComparison.Ordinal);
-        Assert.Empty(new InFlightLedger(Path.Combine(_repo.Path, "artifacts", "arbiter")).ReadAll());
+
+        // The same serve call with model-targeting off writes the same ledger events.
+        CreateRetargetTools(baseline.Path, "off").Evaluate("delegate", RetargetFacts());
+        var retargeted = LedgerProjection(_repo.Path);
+        Assert.Equal(LedgerProjection(baseline.Path), retargeted);
+
+        // No model field on the pre event names a retarget: it is rendered, caller or unknown.
+        Assert.All(
+            new InFlightLedger(ArbiterDirectoryOf(_repo.Path)).ReadAll(),
+            record => Assert.NotEqual("retarget", record.ModelSource));
+    }
+
+    private static ArbiterFacts RetargetFacts() => new()
+    {
+        Target = "csharp-dev",
+        PlanFile = "docs/plans/x.md",
+        Task = "T2",
+        Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: T2\n\nImplement T2.",
+    };
+
+    private static string ArbiterDirectoryOf(string repoRoot) => Path.Combine(repoRoot, "artifacts", "arbiter");
+
+    /// <summary>The ledger's decision-relevant fields, without ids and timestamps, in write order.</summary>
+    private static List<(string Phase, string? Trigger, string? Target, string? Caller, string? CallerSource, string? ModelProfile, string? ModelToken, string? ModelSource)> LedgerProjection(string repoRoot) =>
+        new InFlightLedger(ArbiterDirectoryOf(repoRoot)).ReadAll()
+            .Select(record => (record.Phase, record.Trigger, record.Target, record.Caller, record.CallerSource, record.ModelProfile, record.ModelToken, record.ModelSource))
+            .ToList();
+
+    /// <summary>Answers scope within-task and difficulty hard, above the floor, so the primary allows and difficulty retargets.</summary>
+    private sealed class HardProvider : IArbiterProvider
+    {
+        public Task<ArbiterStep1BatchResult> AskStep1Async(
+            IReadOnlyList<ArbiterRule> rules,
+            ArbiterFactSet facts,
+            IReadOnlyDictionary<string, string>? step0Answers = null,
+            CancellationToken cancellationToken = default)
+        {
+            Dictionary<string, string> answers = new(StringComparer.Ordinal)
+            {
+                ["KW-ARB-SCOPE-002"] = "within-task",
+                ["KW-ARB-DIFFICULTY-001"] = "hard",
+            };
+            Dictionary<string, ArbiterStep1Score> scores = new(StringComparer.Ordinal)
+            {
+                ["KW-ARB-DIFFICULTY-001"] = new([0.05, 0.05, 0.9], 0.9, 0.8),
+            };
+            return Task.FromResult(new ArbiterStep1BatchResult(answers, "stub", null, true, scores));
+        }
+    }
+
+    /// <summary>A serve tools instance over its own repository, with the difficulty and scope rules live and the given mode.</summary>
+    private ArbiterTools CreateRetargetTools(string repoRoot, string mode)
+    {
+        Directory.CreateDirectory(Path.Combine(repoRoot, ".kyber-weave"));
+        File.WriteAllText(
+            Path.Combine(repoRoot, ".kyber-weave", "kyber-weave.yml"),
+            "arbiter:\n" +
+            "  enabled: true\n" +
+            "  provider:\n" +
+            "    kind: none\n" +
+            "  model-targeting:\n" +
+            $"    mode: {mode}\n" +
+            "  rules:\n" +
+            string.Join(
+                "\n",
+                ArbiterConfigTests.ExpectedRuleIds
+                    .Where(id => id is not ("KW-ARB-DIFFICULTY-001" or "KW-ARB-SCOPE-002"))
+                    .Select(id => $"    - id: {id}\n      enabled: false")) + "\n");
+
+        ArbiterHookDecisionEngine engine = new(
+            providerFactory: _ => new HardProvider(),
+            homeDirectory: () => _home.Path);
+        return new ArbiterTools(new ArbiterServeContext(
+            repoRoot,
+            engine,
+            TextWriter.Null,
+            Composition.LoadHostConfig,
+            _ => true));
     }
 
     private ArbiterTools CreateTools(
