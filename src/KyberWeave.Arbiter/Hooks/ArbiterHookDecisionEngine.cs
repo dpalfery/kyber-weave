@@ -30,7 +30,7 @@ namespace KyberWeave.Arbiter.Hooks;
 /// Evaluation is synchronous at this boundary because the adapters are; the wait
 /// stays inside the harness's per-hook timeout.
 /// </remarks>
-public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
+public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, IArbiterProviderSource
 {
     private const string ModelTrigger = "delegate.model";
     private const string TriageShortcutTrigger = "triage.shortcut";
@@ -648,6 +648,13 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
         }
 
         return new SecretServiceCredentialStore(new ProcessRunnerCredentialProcessRunner());
+    }
+
+    /// <inheritdoc/>
+    public IArbiterProvider ProviderFor(KyberWeaveConfig config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        return _providerFactory(config);
     }
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage(

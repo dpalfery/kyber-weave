@@ -1,4 +1,4 @@
-# The 30 shipped Arbiter rules. Ids are permanent: suppressions, baselines and
+# The 32 shipped Arbiter rules. Ids are permanent: suppressions, baselines and
 # code-scanning alerts key on them, so a rule is never renumbered or reused.
 #
 #The step-0 predicate set is closed (all, any, not, exists, equals, in, matches,
@@ -515,6 +515,44 @@ rules:
       confidence-at-least: 0.85
       tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
     effects: { same: same-failure, different: allow, first: allow }
+
+  # Section trimming: asks, for each candidate section of a document, whether the task needs it. Only a
+  # confident not-relevant answer trims a section; any unsure answer keeps every section. Shipped in shadow: the
+  # answer is logged until calibration is read.
+  - id: KW-ARB-TRIM-001
+    trigger: sections.select
+    question: "Does this section of the document bear on the task?"
+    answers: [relevant, not-relevant]
+    shadow: true
+    ask:
+      type: choice
+      for-each: section.candidates
+      state: { task: task.text, section: candidate.text }
+      criteria:
+        relevant: "The section describes behaviour, steps or facts the task touches."
+        not-relevant: "The section does not bear on the task, so the worker does not need it to do the task."
+      confidence-at-least: 0.9
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
+    effects: { relevant: keep, not-relevant: advise }
+
+  # Bot review comment triage: classifies one bot comment against the code at the cited line as it is now.
+  # A nitpick or an already-fixed comment is advised; any unsure answer keeps the comment real. Shipped in shadow until
+  # calibration is read.
+  - id: KW-ARB-COMMENT-001
+    trigger: comment.triage
+    question: "Is this bot review comment a real defect, a nitpick, or already fixed in the current code?"
+    answers: [real, nitpick, already-fixed]
+    shadow: true
+    ask:
+      type: choice
+      state: { comment: comment.body, code: file.text-at-line }
+      criteria:
+        real: "The code at the cited line has the defect the comment describes."
+        nitpick: "The comment is a style or preference point that does not change behaviour or correctness."
+        already-fixed: "The code at the cited line no longer has the defect the comment describes."
+      confidence-at-least: 0.85
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
+    effects: { real: keep, nitpick: advise, already-fixed: advise }
 
 # The OWNER-001 file-kind map, evaluated first match wins. The order is the
 # decision: specific owners precede the documentation and C# catch-alls.

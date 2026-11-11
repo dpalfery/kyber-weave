@@ -365,6 +365,14 @@ app.Configure(config =>
             .WithDescription("Evaluate a recorded event offline through the evaluator's dry run.")
             .WithExample("arbiter", "eval", "--trigger", "delegate", "--event", "./event.json", "--provider", "none");
 
+        arbiter.AddCommand<ArbiterSectionsCommand>("sections")
+            .WithDescription("List the sections of a markdown document with their id and line range, for a task.")
+            .WithExample("arbiter", "sections", "--path", "docs/guide.md", "--task", "Change the install steps.");
+
+        arbiter.AddCommand<ArbiterCommentCommand>("comment")
+            .WithDescription("Classify one bot review comment as real, nitpick or already-fixed, and record the decision.")
+            .WithExample("arbiter", "comment", "--path", "src/Widget.cs", "--line", "12", "--body", "Rename this variable.");
+
         arbiter.AddCommand<ArbiterAuditCommand>("audit")
             .WithDescription("Report unpaired, undecided and unmarked dispatches from the ledger.")
             .WithExample("arbiter", "audit", "--plan", "docs/plans/plan.md");

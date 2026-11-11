@@ -454,6 +454,8 @@ Owned by the [Kyber Arbiter runbook](kyber-arbiter/runbook.md), with the engine 
 | [`arbiter eval`](kyber-arbiter/runbook.md#setup-doctor-audit) | `--trigger <t> --event <file> [--provider none]` | Evaluate a recorded event offline; writes nothing. |
 | [`arbiter tune`](kyber-arbiter/runbook.md#tuning-thresholds-arbiter-tune) | `[path] [--rule <id>] [--thresholds <CSV>] [--json]` | Read-only. Score the step-1 answers in the decision log per rule: scored, shadow and enforced counts, a confidence histogram in tenths, and how many answers each candidate threshold would flip. Shows the worker's `RESULT:` beside each score; the `TASK_GATE` pairing is not wired yet. `--thresholds` defaults to `0.5,0.6,0.7,0.8,0.9`. Exits `1` on an invalid `--thresholds` or when the logs cannot be read whole; no scored answers exits `0`. |
 | [`arbiter audit`](kyber-arbiter/runbook.md#setup-doctor-audit) | `[--plan <file>] [--session <id>] [--since <ISO-8601>]` | Report decision-less events, unmarked dispatches, unpaired pre/post events, and implementation packets naming planning paths (`KW-ARB-AUDIT-001`…`-004`). |
+| `arbiter sections` | `--path <FILE> --task <TEXT>` | List a markdown document's sections with id and line range. Uses no provider, so every section is listed. |
+| `arbiter comment` | `[--root <DIR>] --path <FILE> --line <N> --body <TEXT> [--commit-sha <SHA>]` | Classify one bot review comment as `real`, `nitpick` or `already-fixed` against the cited line, and record the decision id. Without a loadable configuration the answer is `real`. |
 
 ### `utilities` — Kyber-owned utility artifacts
 

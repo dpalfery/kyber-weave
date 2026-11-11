@@ -55,6 +55,10 @@ public static partial class ConductorGuard
     {
         "arbiter_evaluate_agent_dispatch_or_return",
         $"{McpServerNames.Arbiter}-arbiter_evaluate_agent_dispatch_or_return",
+        "arbiter_select_relevant_document_sections",
+        $"{McpServerNames.Arbiter}-arbiter_select_relevant_document_sections",
+        "arbiter_classify_bot_review_comment",
+        $"{McpServerNames.Arbiter}-arbiter_classify_bot_review_comment",
     };
 
     private static readonly string[] ContractDirectories = ["plans", "specs", "todo"];
