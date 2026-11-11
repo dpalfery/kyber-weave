@@ -256,11 +256,16 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
                 harness, OneLine(result.ErrorMessage), context.NewDecisionId(), context);
         }
 
+        // One read of the decision log serves every lookup below, so the mapping never reads it twice for one event.
+        IReadOnlyList<ArbiterDecisionRecord> decisions = string.IsNullOrEmpty(result.LedgerId)
+            ? []
+            : new DecisionLog(arbiterDirectory).ReadAll();
+
         if (string.Equals(result.Outcome, RuleEffects.Allow, StringComparison.Ordinal)
             || string.Equals(result.Outcome, RuleEffects.Applies, StringComparison.Ordinal)
             || string.Equals(result.Outcome, RuleEffects.NotApplicable, StringComparison.Ordinal))
         {
-            ArbiterModelBlock? block = ModelBlockFor(result.LedgerId, arbiterDirectory);
+            ArbiterModelBlock? block = ModelBlockFor(decisions, result.LedgerId);
             bool targeting = !string.Equals(config.Arbiter.ModelTargeting.Mode, ModelTargetingOff, StringComparison.Ordinal);
             return new HookOutcome(
                 HookOutcomeKind.Allow,
@@ -271,11 +276,11 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         // A same-failure advisory never denies: the rework proceeds, with the one line naming the prior failure beside it.
         if (string.Equals(result.Outcome, RuleEffects.SameFailure, StringComparison.Ordinal))
         {
-            string? advisory = DecisionWithOutcome(arbiterDirectory, result.LedgerId, RuleEffects.SameFailure)?.Rules
+            string? advisory = DecisionWithOutcome(decisions, result.LedgerId, RuleEffects.SameFailure)?.Rules
                 .FirstOrDefault(rule => string.Equals(rule.Effect, RuleEffects.SameFailure, StringComparison.Ordinal)
                     && rule.Evidence is not null)?.Evidence;
             // The rework proceeds on the resolved model, so the advisory carries the same model block an allow does.
-            ArbiterModelBlock? block = ModelBlockFor(result.LedgerId, arbiterDirectory);
+            ArbiterModelBlock? block = ModelBlockFor(decisions, result.LedgerId);
             bool targeting = !string.Equals(config.Arbiter.ModelTargeting.Mode, ModelTargetingOff, StringComparison.Ordinal);
             return new HookOutcome(
                 HookOutcomeKind.AllowWithNote,
@@ -288,7 +293,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         // report would have carried, so the caller takes that digest as the result.
         if (string.Equals(result.Outcome, RuleEffects.Answer, StringComparison.Ordinal))
         {
-            ArbiterDecisionRecord? answered = DecisionWithOutcome(arbiterDirectory, result.LedgerId, RuleEffects.Answer);
+            ArbiterDecisionRecord? answered = DecisionWithOutcome(decisions, result.LedgerId, RuleEffects.Answer);
             string? digest = answered is null ? null : SubstituteDigestFor(answered, prompt);
             if (answered is null || digest is null)
             {
@@ -305,10 +310,8 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
                 : new HookOutcome(HookOutcomeKind.Deny, digest);
         }
 
-        ArbiterDecisionRecord? record = string.IsNullOrEmpty(result.LedgerId)
-            ? null
-            : new DecisionLog(arbiterDirectory).ReadAll()
-                .LastOrDefault(decision => string.Equals(decision.LedgerId, result.LedgerId, StringComparison.Ordinal));
+        ArbiterDecisionRecord? record = decisions
+            .LastOrDefault(decision => string.Equals(decision.LedgerId, result.LedgerId, StringComparison.Ordinal));
         if (record is null)
         {
             return AllowLoudly(
@@ -379,17 +382,10 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     /// The last decision on the ledger event that carries <paramref name="outcome"/>, or null when none does. A
     /// secondary shares the primary's ledger id, so the record that answered is found by its outcome, not its position.
     /// </summary>
-    private static ArbiterDecisionRecord? DecisionWithOutcome(string arbiterDirectory, string ledgerId, string outcome)
-    {
-        if (string.IsNullOrEmpty(ledgerId))
-        {
-            return null;
-        }
-
-        return new DecisionLog(arbiterDirectory).ReadAll()
-            .LastOrDefault(decision => string.Equals(decision.LedgerId, ledgerId, StringComparison.Ordinal)
-                && string.Equals(decision.Outcome, outcome, StringComparison.Ordinal));
-    }
+    private static ArbiterDecisionRecord? DecisionWithOutcome(
+        IReadOnlyList<ArbiterDecisionRecord> decisions, string ledgerId, string outcome) =>
+        decisions.LastOrDefault(decision => string.Equals(decision.LedgerId, ledgerId, StringComparison.Ordinal)
+            && string.Equals(decision.Outcome, outcome, StringComparison.Ordinal));
 
     /// <summary>
     /// The substitute digest an answered shortcut hands back, named by the decision that answered it, or null when
@@ -437,17 +433,9 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     /// resolved none. The secondary shares the primary's ledger id, so the block is read from the decision
     /// that carries it. Whether the block was delivered is the block's own flag, not decided here.
     /// </summary>
-    private static ArbiterModelBlock? ModelBlockFor(string ledgerId, string arbiterDirectory)
-    {
-        if (string.IsNullOrEmpty(ledgerId))
-        {
-            return null;
-        }
-
-        return new DecisionLog(arbiterDirectory).ReadAll()
-            .LastOrDefault(decision => string.Equals(decision.LedgerId, ledgerId, StringComparison.Ordinal)
-                && string.Equals(decision.Trigger, ModelTrigger, StringComparison.Ordinal))?.Model;
-    }
+    private static ArbiterModelBlock? ModelBlockFor(IReadOnlyList<ArbiterDecisionRecord> decisions, string ledgerId) =>
+        decisions.LastOrDefault(decision => string.Equals(decision.LedgerId, ledgerId, StringComparison.Ordinal)
+            && string.Equals(decision.Trigger, ModelTrigger, StringComparison.Ordinal))?.Model;
 
     private static string RenderReason(
         ArbiterDecisionRecord record,
