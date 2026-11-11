@@ -108,16 +108,18 @@ public sealed class ArbiterReviewContractTests
             StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The verdict is computed from the seat folder of each cycle, not from a hand-written findings
+    /// file. The retired <c>--findings</c> form let a run skip the seat record that KW-REVIEW-041 checks.
+    /// </summary>
     [Fact]
-    public void VerdictCommand_ReadsFindingsFromArtifactsFindingsJson()
+    public void VerdictCommand_ComputesFromTheCycleSeatsFolder()
     {
         string skill = SkillContract;
 
-        Assert.Contains("artifacts/findings.json", skill, StringComparison.Ordinal);
-        Assert.Contains(
-            "kyber-weave review verdict . --findings artifacts/findings.json --gates artifacts/gates.json",
-            skill,
-            StringComparison.Ordinal);
+        Assert.Matches(@"kyber-weave review verdict \. --seats[^\n]*--out", skill);
+        Assert.Contains(".agent_scratchpad/<task-id>/review/cycle-<n>/", skill, StringComparison.Ordinal);
+        Assert.DoesNotContain("kyber-weave review verdict . --findings", skill, StringComparison.Ordinal);
     }
 
     [Fact]
