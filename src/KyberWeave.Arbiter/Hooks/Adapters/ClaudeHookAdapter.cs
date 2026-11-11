@@ -254,6 +254,10 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
                 HookOutcomeKind.PassThrough => string.Empty,
                 HookOutcomeKind.Allow when outcome.ModelToken is not null => RenderPreAllowModel(
                     pending.Input ?? ModelInputOf(toolInput, prompt), outcome.ModelToken, pending.Written, context),
+                // A write the engine asked for that did not hold falls back to today's model allow: the header is
+                // stripped for every target, as the model path always did for a token it was asked to write.
+                HookOutcomeKind.Allow when pending.Written is false => RenderPreAllow(
+                    pending.Input ?? ModelInputOf(toolInput, prompt), _ => { }),
                 HookOutcomeKind.Allow => ReadGuard.IsImplementationSpecialist(target)
                     ? RenderPreAllowStrip(toolInput, prompt)
                     : string.Empty,
