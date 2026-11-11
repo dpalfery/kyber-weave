@@ -512,16 +512,14 @@ public sealed class ArbiterEvaluator
     }
 
     /// <summary>
-    /// Combines the effects of the gating entries only. A shadow entry is log-only and never joins the
-    /// combination; when every entry is shadow, the family's neutral effect stands.
+    /// Combines the entries that take part: not shadow, and evaluated. A shadow or not-evaluated entry
+    /// records its neutral effect but stays out of the combination. When nothing takes part, the family's
+    /// neutral effect is the outcome, the same effect those entries record.
     /// </summary>
-    private static string CombineGating(ArbiterTriggerFamily family, List<string> gating, List<ArbiterDecisionRule> rules)
-    {
-        bool onlyShadow = rules.Count > 0 && rules.All(rule => rule.Shadow == true);
-        return gating.Count == 0 && onlyShadow
+    private static string CombineGating(ArbiterTriggerFamily family, List<string> gating) =>
+        gating.Count == 0
             ? ArbiterTriggerFamilies.NeutralEffect(family)
             : ArbiterTriggerFamilies.Combine(family, gating);
-    }
 
     private static string ProviderStatusFor(TriggerPlan plan, Step1Call call) =>
         plan.ShortCircuits
@@ -565,7 +563,7 @@ public sealed class ArbiterEvaluator
         }
 
         RecordNoCandidates(plan, rules, effects);
-        string outcome = CombineGating(plan.Family, effects, rules);
+        string outcome = CombineGating(plan.Family, effects);
         ArbiterProviderRecord provider = ProviderRecord(config, call, ProviderStatusFor(plan, call), elapsed);
         await AppendRecordAsync(
             classification, ev, plan.Trigger, rules, outcome, provider, call.Model, primaryLedgerId: null,
@@ -640,7 +638,7 @@ public sealed class ArbiterEvaluator
         }
 
         RecordNoCandidates(plan, rules, effects);
-        string outcome = CombineGating(plan.Family, effects, rules);
+        string outcome = CombineGating(plan.Family, effects);
         ArbiterProviderRecord provider = ProviderRecord(config, call, ProviderStatusFor(plan, call), elapsed);
         await AppendRecordAsync(
             classification, ev, plan.Trigger, rules, outcome, provider, call.Model, primaryLedgerId: ledgerId,
