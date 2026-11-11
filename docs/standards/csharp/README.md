@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: csharp
 owner: dpalfery
-last-reviewed: 2026-11-08
+last-reviewed: 2026-11-11
 ---
 
 # C# coding standard
@@ -154,6 +154,17 @@ scripts/proc-guard.sh run -- dotnet build KyberWeave.sln -c Release
 scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~<Class>"
 scripts/proc-guard.sh run -- dotnet format KyberWeave.sln whitespace --verify-no-changes -v minimal
 scripts/proc-guard.sh run -- dotnet format KyberWeave.sln style --verify-no-changes --severity warn -v minimal
+```
+
+The cleanupcode fix pass is optional and off by default. Run it only after the two `dotnet format`
+steps above, which restore the solution that `--no-build` needs. On this machine `dotnet jb
+cleanupcode` never exits, so the command runs under a wrapper that stops it once the log shows its
+finish line, and fails with exit 124 after 300 seconds. Remove the wrapper when the tool exits on its
+own. Replace `<task>` with a scratch folder name and `<changed files>` with the files you changed.
+
+```bash
+mkdir -p .agent_scratchpad/<task>
+scripts/report-gate.sh --report "$PWD/.agent_scratchpad/<task>/cleanupcode.log" --contains "Close solution instance" --grace 5 --timeout 300 -- dotnet jb cleanupcode KyberWeave.sln --profile=KyberWeave --include="<changed files>" --no-build "--LogFile=$PWD/.agent_scratchpad/<task>/cleanupcode.log" --LogLevel=VERBOSE
 ```
 
 - **Build first, and let the later runs reuse it.** The build is where the analyzers run, so a
