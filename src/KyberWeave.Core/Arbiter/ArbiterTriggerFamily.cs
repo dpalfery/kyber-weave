@@ -60,9 +60,16 @@ public static class ArbiterTriggerFamilies
             ["lens.returned"] = ArbiterTriggerFamily.LensReturned,
             ["gate.select"] = ArbiterTriggerFamily.Gate,
             ["model.target"] = ArbiterTriggerFamily.ModelTarget,
+            ["delegate.model"] = ArbiterTriggerFamily.ModelTarget,
             ["shortcut"] = ArbiterTriggerFamily.Shortcut,
+            ["intake.shortcut"] = ArbiterTriggerFamily.Shortcut,
+            ["triage.shortcut"] = ArbiterTriggerFamily.Shortcut,
+            ["docs-impact.shortcut"] = ArbiterTriggerFamily.Shortcut,
             ["failure.cluster"] = ArbiterTriggerFamily.FailureCluster,
+            ["delegate.failure"] = ArbiterTriggerFamily.FailureCluster,
             ["advice"] = ArbiterTriggerFamily.Advice,
+            ["sections.select"] = ArbiterTriggerFamily.Advice,
+            ["comment.triage"] = ArbiterTriggerFamily.Advice,
         };
 
     /// <summary>Every trigger name the Arbiter knows.</summary>

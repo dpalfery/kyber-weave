@@ -45,12 +45,12 @@ public sealed record ArbiterEvaluatorOptions(bool DryRun = false, string Source 
 /// resolver, the ledger, the decision log, git facts, the plan reader and the
 /// clock. Core constructs none of them. The ledger event is appended before
 /// evaluation so a hook killed mid-evaluation still leaves an undecided entry;
-/// one decision record per dispatch is appended after. At most one provider
-/// call runs per trigger, and none once step 0 has produced the family's
-/// strongest effect. A provider failure degrades to <c>undecidable</c> (which
-/// the family maps); any other exception becomes an error result carrying
-/// <c>KW-ARB-HOOK-001</c>, never <c>allow</c>. The key is resolved to prove the
-/// origin is served but is never logged.
+/// one decision record per trigger is appended after, the primary first and
+/// each secondary behind it, all sharing the event's ledger id. A provider
+/// failure degrades to <c>undecidable</c> (which the family maps); any other
+/// exception becomes an error result carrying <c>KW-ARB-HOOK-001</c>, never
+/// <c>allow</c>. The key is resolved to prove the origin is served but is never
+/// logged.
 /// </remarks>
 public sealed class ArbiterEvaluator
 {
@@ -64,8 +64,17 @@ public sealed class ArbiterEvaluator
     private readonly IArbiterGitFacts _gitFacts;
     private readonly IArbiterPlanReader _planReader;
     private readonly TimeProvider _clock;
+    private readonly Func<string, ArbiterEvent, IReadOnlyList<string>> _secondaryTriggers;
 
     /// <summary>Creates an evaluator over already-constructed collaborators.</summary>
+    /// <param name="provider">The step-1 provider.</param>
+    /// <param name="keyResolver">Resolves the provider key for an endpoint; the key is never logged.</param>
+    /// <param name="ledger">The in-flight ledger.</param>
+    /// <param name="decisionLog">The decision log.</param>
+    /// <param name="gitFacts">Git-derived facts.</param>
+    /// <param name="planReader">Plan-derived facts.</param>
+    /// <param name="clock">The evaluation clock.</param>
+    /// <param name="secondaryTriggers">Derives the secondary triggers of a primary dispatch; defaults to none.</param>
     public ArbiterEvaluator(
         IArbiterProvider provider,
         Func<Uri, string?> keyResolver,
@@ -73,7 +82,8 @@ public sealed class ArbiterEvaluator
         DecisionLog decisionLog,
         IArbiterGitFacts gitFacts,
         IArbiterPlanReader planReader,
-        TimeProvider clock)
+        TimeProvider clock,
+        Func<string, ArbiterEvent, IReadOnlyList<string>>? secondaryTriggers = null)
     {
         ArgumentNullException.ThrowIfNull(provider);
         ArgumentNullException.ThrowIfNull(keyResolver);
@@ -89,6 +99,7 @@ public sealed class ArbiterEvaluator
         _gitFacts = gitFacts;
         _planReader = planReader;
         _clock = clock;
+        _secondaryTriggers = secondaryTriggers ?? SecondaryTriggers.For;
     }
 
     /// <summary>Runs the evaluation flow for <paramref name="ev"/> end to end.</summary>
@@ -163,6 +174,29 @@ public sealed class ArbiterEvaluator
         }
     }
 
+    /// <summary>One question put to the provider: the rule it answers and, for a <c>ForEach</c> item, the candidate.</summary>
+    /// <param name="RuleId">The rule's own id, which the decision record keeps.</param>
+    /// <param name="Candidate">The list item, or null for a question asked once.</param>
+    /// <param name="Rule">The rule as sent; an expansion carries a key of its own (rule id plus candidate).</param>
+    private sealed record Question(string RuleId, string? Candidate, ArbiterRule Rule);
+
+    /// <summary>A trigger after step 0: its answers, and the step-1 questions it still needs.</summary>
+    private sealed record TriggerPlan(
+        string Trigger,
+        ArbiterTriggerFamily Family,
+        ArbiterOutcome Step0,
+        IReadOnlyDictionary<string, string> Step0Answers,
+        bool ShortCircuits,
+        List<Question> Questions);
+
+    /// <summary>What one batched provider call returned for a set of questions.</summary>
+    private sealed record Step1Call(
+        IReadOnlyDictionary<string, string> Answers,
+        IReadOnlyDictionary<string, ArbiterStep1Score>? Scores,
+        string? Model,
+        ArbiterStep1Usage? Usage,
+        string Status);
+
     private async Task<ArbiterDispatchEvaluation> EvaluateDispatchAsync(
         TriggerClassification classification,
         string prompt,
@@ -179,7 +213,6 @@ public sealed class ArbiterEvaluator
             return new ArbiterDispatchEvaluation(null, RuleEffects.Allow);
         }
 
-        ArbiterTriggerFamily family = ArbiterTriggerFamilies.ForTrigger(trigger);
         ArbiterFactSet facts = TriggerFactBuilder.Build(classification, prompt, config, ev.ObservesReturns);
         facts = _gitFacts.Enrich(facts, classification, ev);
         facts = _planReader.Enrich(facts, classification);
@@ -195,6 +228,87 @@ public sealed class ArbiterEvaluator
             ? digestFact.Value as string
             : null;
 
+        // Primary and secondary read one fact set and one candidate map, so their questions
+        // can share a single provider call.
+        Dictionary<string, ArbiterFact> candidateFacts = new(StringComparer.Ordinal);
+        TriggerPlan primary = PlanTrigger(trigger, facts, config, candidateFacts);
+
+        // Step 0 of the primary short-circuits: no provider call, and no secondary work.
+        List<TriggerPlan> secondaries = [];
+        if (!primary.ShortCircuits)
+        {
+            foreach (string secondary in _secondaryTriggers(trigger, ev))
+            {
+                if (config.Arbiter.Rules.Any(rule => rule.Enabled
+                    && string.Equals(rule.Trigger, secondary, StringComparison.Ordinal)))
+                {
+                    secondaries.Add(PlanTrigger(secondary, facts, config, candidateFacts));
+                }
+            }
+        }
+
+        ArbiterFactSet batchFacts = candidateFacts.Aggregate(
+            facts,
+            (set, pair) => set.With(pair.Key, pair.Value.Value, pair.Value.Label));
+        Dictionary<string, string> step0Answers = new(StringComparer.Ordinal);
+        foreach (TriggerPlan plan in new List<TriggerPlan> { primary }.Concat(secondaries))
+        {
+            foreach (KeyValuePair<string, string> answer in plan.Step0Answers)
+            {
+                step0Answers[answer.Key] = answer.Value;
+            }
+        }
+
+        List<Question> primaryQuestions = primary.Questions;
+        List<Question> secondaryQuestions = secondaries.SelectMany(plan => plan.Questions).ToList();
+        bool hasSecondary = secondaryQuestions.Count > 0;
+        Step1Call combined = await AskAsync(
+            [.. primaryQuestions, .. secondaryQuestions], batchFacts, step0Answers, hasSecondary, cancellationToken)
+            .ConfigureAwait(false);
+
+        Step1Call primaryCall;
+        Step1Call secondaryCall = combined;
+        if (!hasSecondary)
+        {
+            primaryCall = combined;
+        }
+        else if (combined.Status is ArbiterProviderStatuses.Error or ArbiterProviderStatuses.OverBudget)
+        {
+            // The secondary question failed or did not fit the budget. It answers undecidable,
+            // and the primary goes alone so its own answer is not lost with it.
+            primaryCall = await AskAsync(primaryQuestions, batchFacts, step0Answers, false, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        else
+        {
+            primaryCall = Restrict(combined, primaryQuestions);
+        }
+
+        ArbiterDispatchEvaluation primaryResult = await RecordPrimaryAsync(
+            classification, ev, primary, primaryCall, config, effective, ledgerId, planDigest, elapsed,
+            cancellationToken).ConfigureAwait(false);
+        string primaryOutcome = primaryResult.Outcome;
+
+        List<ArbiterSecondaryEvaluation> secondaryResults = new(secondaries.Count);
+        foreach (TriggerPlan plan in secondaries)
+        {
+            ArbiterSecondaryEvaluation evaluated = await RecordSecondaryAsync(
+                classification, ev, plan, secondaryCall, primaryOutcome, config, effective, ledgerId, planDigest,
+                elapsed, cancellationToken).ConfigureAwait(false);
+            secondaryResults.Add(evaluated);
+        }
+
+        return new ArbiterDispatchEvaluation(trigger, primaryOutcome) { Secondary = secondaryResults };
+    }
+
+    /// <summary>Plans one trigger: its step-0 answers, and the step-1 questions the step-0 answers leave open.</summary>
+    private static TriggerPlan PlanTrigger(
+        string trigger,
+        ArbiterFactSet facts,
+        KyberWeaveConfig config,
+        Dictionary<string, ArbiterFact> candidateFacts)
+    {
+        ArbiterTriggerFamily family = ArbiterTriggerFamilies.ForTrigger(trigger);
         List<ArbiterRule> step0Rules = config.Arbiter.Rules
             .Where(rule => rule.Enabled
                 && string.Equals(rule.Trigger, trigger, StringComparison.Ordinal)
@@ -205,159 +319,334 @@ public sealed class ArbiterEvaluator
         Dictionary<string, string> step0Answers = step0.RuleAnswers
             .ToDictionary(answer => answer.RuleId, answer => answer.Answer, StringComparer.Ordinal);
 
-        List<ArbiterRule> candidates = config.Arbiter.Rules
-            .Where(rule => rule.Enabled
-                && string.Equals(rule.Trigger, trigger, StringComparison.Ordinal)
-                && rule.Ask is not null)
-            .ToList();
-        List<ArbiterRule> selected = new(candidates.Count);
-        foreach (ArbiterRule rule in candidates)
+        List<Question> questions = [];
+        if (!shortCircuits)
         {
-            string decideAnswer = step0Answers.TryGetValue(rule.Id, out string? answered)
-                ? answered
-                : RuleEngine.Undecidable;
-            bool shouldAsk = rule.Decide is null || rule.ShouldAsk(decideAnswer);
-            if (shouldAsk && SystemOneContracts.WhenMatches(rule.Ask!, step0Answers))
+            foreach (ArbiterRule rule in config.Arbiter.Rules)
             {
-                selected.Add(rule);
-            }
-        }
-
-        ArbiterStep1BatchResult? batch = null;
-        List<KeyValuePair<ArbiterRule, string>> step1 = new(selected.Count);
-        string providerStatus;
-        string? model = null;
-        ArbiterStep1Usage? usage = null;
-        if (shortCircuits)
-        {
-            providerStatus = ArbiterProviderStatuses.ShortCircuited;
-        }
-        else if (selected.Count == 0)
-        {
-            providerStatus = ArbiterProviderStatuses.NotEvaluated;
-        }
-        else
-        {
-            DateTimeOffset before = _clock.GetUtcNow();
-            try
-            {
-                batch = await _provider.AskStep1Async(selected, facts, step0Answers, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is HttpRequestException or IOException or System.Text.Json.JsonException
-                || (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested))
-            {
-                // A provider failure is undecidable, not an error result: every
-                // selected rule answers undecidable and the family maps it. Only
-                // transport and parse failures are caught; a provider bug surfaces
-                // as KW-ARB-HOOK-001 instead of silently allowing.
-                foreach (ArbiterRule rule in selected)
+                if (!rule.Enabled || !string.Equals(rule.Trigger, trigger, StringComparison.Ordinal) || rule.Ask is null)
                 {
-                    step1.Add(new KeyValuePair<ArbiterRule, string>(rule, RuleEngine.Undecidable));
+                    continue;
                 }
 
-                providerStatus = ArbiterProviderStatuses.Error;
-                string outcomeAfterError = CombineEffects(family, step0, step1);
-                await AppendDecisionAsync(
-                    classification, ev, config, effective, ledgerId, family, step0, step1,
-                    ProviderKindName(config),
-                    EndpointOrigin(config), model, usage, null, providerStatus, outcomeAfterError,
-                    elapsed, planDigest, cancellationToken)
-                    .ConfigureAwait(false);
-                _ = before;
-                return new ArbiterDispatchEvaluation(trigger, outcomeAfterError);
-            }
-
-            foreach (ArbiterRule rule in selected)
-            {
-                string answer = batch.AnswersByRule.TryGetValue(rule.Id, out string? value)
-                    ? value
+                string decideAnswer = step0Answers.TryGetValue(rule.Id, out string? answered)
+                    ? answered
                     : RuleEngine.Undecidable;
-                step1.Add(new KeyValuePair<ArbiterRule, string>(rule, answer));
+                bool shouldAsk = rule.Decide is null || rule.ShouldAsk(decideAnswer);
+                if (shouldAsk && SystemOneContracts.WhenMatches(rule.Ask, step0Answers))
+                {
+                    AddQuestions(rule, facts, candidateFacts, questions);
+                }
             }
-
-            bool allNotEvaluated = step1.Count > 0
-                && step1.All(entry => string.Equals(entry.Value, ArbiterStep1BatchResult.NotEvaluated, StringComparison.Ordinal));
-            if (allNotEvaluated)
-            {
-                providerStatus = ArbiterProviderStatuses.NotEvaluated;
-            }
-            else if (!batch.RequestSent)
-            {
-                providerStatus = ArbiterProviderStatuses.OverBudget;
-            }
-            else
-            {
-                providerStatus = ArbiterProviderStatuses.Answered;
-            }
-
-            model = batch.Model;
-            usage = batch.Usage;
         }
 
-        string outcome = CombineEffects(family, step0, step1);
-        await AppendDecisionAsync(
-            classification, ev, config, effective, ledgerId, family, step0, step1,
-            ProviderKindName(config),
-            EndpointOrigin(config), model, usage, batch?.ScoresByRule, providerStatus, outcome,
-            elapsed, planDigest, cancellationToken)
-            .ConfigureAwait(false);
-        return new ArbiterDispatchEvaluation(trigger, outcome);
+        return new TriggerPlan(trigger, family, step0, step0Answers, shortCircuits, questions);
     }
 
-    private async Task AppendDecisionAsync(
+    /// <summary>
+    /// Adds a rule's question. A <c>ForEach</c> rule asks once per item of its list fact, each
+    /// keyed by rule id plus candidate, with the item bound to a per-item <c>candidate[i].*</c> fact.
+    /// </summary>
+    private static void AddQuestions(
+        ArbiterRule rule,
+        ArbiterFactSet facts,
+        Dictionary<string, ArbiterFact> candidateFacts,
+        List<Question> questions)
+    {
+        RuleAsk ask = rule.Ask!;
+        if (ask.ForEach is null)
+        {
+            questions.Add(new Question(rule.Id, null, rule));
+            return;
+        }
+
+        if (!facts.TryGet(ask.ForEach, out ArbiterFact? list) || list.Value is not IEnumerable<string> items)
+        {
+            return;
+        }
+
+        int index = 0;
+        foreach (string item in items)
+        {
+            Dictionary<string, string> state = new(StringComparer.Ordinal);
+            foreach (KeyValuePair<string, string> field in ask.State)
+            {
+                if (field.Value.StartsWith("candidate.", StringComparison.Ordinal))
+                {
+                    string scoped = $"candidate[{index}]{field.Value["candidate".Length..]}";
+                    candidateFacts[scoped] = new ArbiterFact(item, ArbiterFactLabel.Derived);
+                    state[field.Key] = scoped;
+                }
+                else
+                {
+                    state[field.Key] = field.Value;
+                }
+            }
+
+            ArbiterRule expanded = rule with
+            {
+                Id = rule.Id + "@" + item,
+                Ask = ask with { State = state, ForEach = null },
+            };
+            questions.Add(new Question(rule.Id, item, expanded));
+            index++;
+        }
+    }
+
+    /// <summary>
+    /// Makes one batched call for the questions. A transport or parse failure is an
+    /// <c>error</c> with every answer undecidable; with <paramref name="guardAll"/> any failure
+    /// is, so a secondary fault never reaches the primary.
+    /// </summary>
+    private async Task<Step1Call> AskAsync(
+        IReadOnlyList<Question> questions,
+        ArbiterFactSet facts,
+        IReadOnlyDictionary<string, string> step0Answers,
+        bool guardAll,
+        CancellationToken cancellationToken)
+    {
+        if (questions.Count == 0)
+        {
+            return new Step1Call(EmptyAnswers(), null, null, null, ArbiterProviderStatuses.NotEvaluated);
+        }
+
+        List<ArbiterRule> rules = new(questions.Count);
+        foreach (Question question in questions)
+        {
+            rules.Add(question.Rule);
+        }
+
+        ArbiterStep1BatchResult batch;
+        try
+        {
+            batch = await _provider.AskStep1Async(rules, facts, step0Answers, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsProviderFailure(ex, guardAll, cancellationToken))
+        {
+            // A provider failure is undecidable, not an error result: every question answers
+            // undecidable and the family maps it. A provider bug with no guard surfaces as
+            // KW-ARB-HOOK-001 instead of silently allowing.
+            return new Step1Call(EmptyAnswers(), null, null, null, ArbiterProviderStatuses.Error);
+        }
+
+        bool allNotEvaluated = questions.All(question =>
+            batch.AnswersByRule.TryGetValue(question.Rule.Id, out string? value)
+            && string.Equals(value, ArbiterStep1BatchResult.NotEvaluated, StringComparison.Ordinal));
+        string status = allNotEvaluated
+            ? ArbiterProviderStatuses.NotEvaluated
+            : batch.RequestSent
+                ? ArbiterProviderStatuses.Answered
+                : ArbiterProviderStatuses.OverBudget;
+        return new Step1Call(batch.AnswersByRule, batch.ScoresByRule, batch.Model, batch.Usage, status);
+    }
+
+    private static bool IsProviderFailure(Exception ex, bool guardAll, CancellationToken cancellationToken) =>
+        ex is HttpRequestException or IOException or System.Text.Json.JsonException
+        || (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested)
+        || (guardAll && ex is not OperationCanceledException);
+
+    private static Dictionary<string, string> EmptyAnswers() => new(StringComparer.Ordinal);
+
+    /// <summary>The part of a combined call that answered one trigger's questions.</summary>
+    private static Step1Call Restrict(Step1Call combined, List<Question> questions)
+    {
+        Dictionary<string, string> answers = new(StringComparer.Ordinal);
+        foreach (Question question in questions)
+        {
+            if (combined.Answers.TryGetValue(question.Rule.Id, out string? answer))
+            {
+                answers[question.Rule.Id] = answer;
+            }
+        }
+
+        return combined with { Answers = answers };
+    }
+
+    private static string ProviderStatusFor(TriggerPlan plan, Step1Call call) =>
+        plan.ShortCircuits
+            ? ArbiterProviderStatuses.ShortCircuited
+            : plan.Questions.Count == 0
+                ? ArbiterProviderStatuses.NotEvaluated
+                : call.Status;
+
+    private static string AnswerFor(Question question, Step1Call call) =>
+        call.Answers.TryGetValue(question.Rule.Id, out string? answer) ? answer : RuleEngine.Undecidable;
+
+    private async Task<ArbiterDispatchEvaluation> RecordPrimaryAsync(
         TriggerClassification classification,
         ArbiterEvent ev,
+        TriggerPlan plan,
+        Step1Call call,
         KyberWeaveConfig config,
         ArbiterEvaluatorOptions effective,
         string ledgerId,
-        ArbiterTriggerFamily family,
-        ArbiterOutcome step0,
-        List<KeyValuePair<ArbiterRule, string>> step1,
-        string providerKind,
-        string? endpointOrigin,
-        string? model,
-        ArbiterStep1Usage? usage,
-        IReadOnlyDictionary<string, ArbiterStep1Score>? scores,
-        string providerStatus,
-        string outcome,
-        Stopwatch elapsed,
         string? planDigest,
+        Stopwatch elapsed,
         CancellationToken cancellationToken)
     {
-        string trigger = classification.Trigger ?? string.Empty;
-        DateTimeOffset now = _clock.GetUtcNow();
-        List<ArbiterDecisionRule> rules = new(step0.RuleAnswers.Count + step1.Count);
+        List<ArbiterDecisionRule> rules = Step0Rules(plan.Step0);
+        List<string> effects = new(plan.Step0.RuleAnswers.Select(answer => answer.Effect));
+        foreach (Question question in plan.Questions)
+        {
+            string answer = AnswerFor(question, call);
+            string effect = MapOrNotEvaluated(question.Rule, answer, plan.Family);
+            ArbiterStep1Score? score = call.Scores is not null && call.Scores.TryGetValue(question.Rule.Id, out ArbiterStep1Score? found)
+                ? found
+                : null;
+            rules.Add(Step1Rule(question, answer, effect, score, shadow: null, wouldEffect: null, evidence: null));
+            if (!string.Equals(answer, ArbiterStep1BatchResult.NotEvaluated, StringComparison.Ordinal))
+            {
+                effects.Add(effect);
+            }
+        }
+
+        string outcome = ArbiterTriggerFamilies.Combine(plan.Family, effects);
+        ArbiterProviderRecord provider = ProviderRecord(config, call, ProviderStatusFor(plan, call), elapsed);
+        await AppendRecordAsync(
+            classification, ev, plan.Trigger, rules, outcome, provider, call.Model, primaryLedgerId: null,
+            effective, ledgerId, planDigest, config, elapsed, cancellationToken).ConfigureAwait(false);
+        return new ArbiterDispatchEvaluation(plan.Trigger, outcome);
+    }
+
+    /// <summary>
+    /// Records one secondary trigger behind the primary. Its rules shadow or suppress to the
+    /// family's neutral effect, keeping the would-be effect on the record; its combined outcome is
+    /// reported on the dispatch and the record shares the primary's ledger id.
+    /// </summary>
+    private async Task<ArbiterSecondaryEvaluation> RecordSecondaryAsync(
+        TriggerClassification classification,
+        ArbiterEvent ev,
+        TriggerPlan plan,
+        Step1Call call,
+        string primaryOutcome,
+        KyberWeaveConfig config,
+        ArbiterEvaluatorOptions effective,
+        string ledgerId,
+        string? planDigest,
+        Stopwatch elapsed,
+        CancellationToken cancellationToken)
+    {
+        string neutral = SecondaryTriggers.NeutralEffect();
+        bool primaryAllows = string.Equals(primaryOutcome, RuleEffects.Allow, StringComparison.Ordinal);
+        List<ArbiterDecisionRule> rules = Step0Rules(plan.Step0);
+        List<string> effects = new(plan.Step0.RuleAnswers.Select(answer => answer.Effect));
+        List<string> payload = [];
+        foreach (Question question in plan.Questions)
+        {
+            string answer = AnswerFor(question, call);
+            string mapped = MapOrNotEvaluated(question.Rule, answer, plan.Family);
+            ArbiterStep1Score? score = call.Scores is not null && call.Scores.TryGetValue(question.Rule.Id, out ArbiterStep1Score? found)
+                ? found
+                : null;
+            if (string.Equals(answer, ArbiterStep1BatchResult.NotEvaluated, StringComparison.Ordinal))
+            {
+                rules.Add(Step1Rule(question, answer, RuleEffects.Allow, score, null, null, null));
+                continue;
+            }
+
+            if (!string.Equals(answer, RuleEngine.Undecidable, StringComparison.Ordinal))
+            {
+                payload.Add(answer);
+            }
+
+            bool shadow = question.Rule.Shadow;
+            bool suppressed = !shadow && !primaryAllows;
+            if (shadow || suppressed)
+            {
+                string? evidence = suppressed ? "suppressed: primary " + primaryOutcome : null;
+                rules.Add(Step1Rule(question, answer, neutral, score, shadow ? true : null, mapped, evidence));
+                effects.Add(neutral);
+            }
+            else
+            {
+                rules.Add(Step1Rule(question, answer, mapped, score, null, null, null));
+                effects.Add(mapped);
+            }
+        }
+
+        string outcome = ArbiterTriggerFamilies.Combine(plan.Family, effects);
+        ArbiterProviderRecord provider = ProviderRecord(config, call, ProviderStatusFor(plan, call), elapsed);
+        await AppendRecordAsync(
+            classification, ev, plan.Trigger, rules, outcome, provider, call.Model, primaryLedgerId: ledgerId,
+            effective, ledgerId, planDigest, config, elapsed, cancellationToken).ConfigureAwait(false);
+        string? answered = payload.Count == 0 ? null : string.Join(",", payload);
+        return new ArbiterSecondaryEvaluation(plan.Trigger, outcome, answered);
+    }
+
+    private static List<ArbiterDecisionRule> Step0Rules(ArbiterOutcome step0)
+    {
+        List<ArbiterDecisionRule> rules = new(step0.RuleAnswers.Count);
         foreach (ArbiterRuleAnswer answer in step0.RuleAnswers)
         {
             rules.Add(new ArbiterDecisionRule(
                 answer.RuleId, 0, answer.Answer, null, null, null, answer.Effect, [], null));
         }
 
-        foreach (KeyValuePair<ArbiterRule, string> entry in step1)
-        {
-            ArbiterRule rule = entry.Key;
-            string answer = entry.Value;
-            string effect = string.Equals(answer, ArbiterStep1BatchResult.NotEvaluated, StringComparison.Ordinal)
-                ? RuleEffects.Allow
-                : MapStep1AnswerToEffect(rule, answer, family);
-            ArbiterStep1Score? score = null;
-            scores?.TryGetValue(rule.Id, out score);
-            rules.Add(new ArbiterDecisionRule(
-                rule.Id, 1, answer, score?.Probabilities, score?.Confidence, score?.Threshold, effect, [], null));
-        }
+        return rules;
+    }
 
+    /// <summary>One step-1 rule's decision entry: its answer, its effect, and the score when it was scored.</summary>
+    private static ArbiterDecisionRule Step1Rule(
+        Question question,
+        string answer,
+        string effect,
+        ArbiterStep1Score? score,
+        bool? shadow,
+        string? wouldEffect,
+        string? evidence) =>
+        new(
+            question.RuleId,
+            1,
+            answer,
+            score?.Probabilities,
+            score?.Confidence,
+            score?.Threshold,
+            effect,
+            [],
+            evidence,
+            shadow: shadow,
+            wouldEffect: wouldEffect,
+            candidate: question.Candidate);
+
+    private static string MapOrNotEvaluated(ArbiterRule rule, string answer, ArbiterTriggerFamily family) =>
+        string.Equals(answer, ArbiterStep1BatchResult.NotEvaluated, StringComparison.Ordinal)
+            ? RuleEffects.Allow
+            : MapStep1AnswerToEffect(rule, answer, family);
+
+    private static ArbiterProviderRecord ProviderRecord(
+        KyberWeaveConfig config,
+        Step1Call call,
+        string status,
+        Stopwatch elapsed) =>
+        new(
+            ProviderKindName(config),
+            EndpointOrigin(config),
+            call.Model,
+            call.Usage is null ? null : new ArbiterProviderUsage(call.Usage.InputTokens, call.Usage.OutputTokens),
+            (int)Math.Min(int.MaxValue, elapsed.ElapsedMilliseconds),
+            status);
+
+    private async Task AppendRecordAsync(
+        TriggerClassification classification,
+        ArbiterEvent ev,
+        string trigger,
+        List<ArbiterDecisionRule> rules,
+        string outcome,
+        ArbiterProviderRecord provider,
+        string? model,
+        string? primaryLedgerId,
+        ArbiterEvaluatorOptions effective,
+        string ledgerId,
+        string? planDigest,
+        KyberWeaveConfig config,
+        Stopwatch elapsed,
+        CancellationToken cancellationToken)
+    {
+        DateTimeOffset now = _clock.GetUtcNow();
         classification.Headers.TryGetValue("PLAN_FILE", out string? planFile);
         classification.Headers.TryGetValue("TASK", out string? task);
         string repeatKey = rules.Count > 0 ? rules[0].Id : trigger;
         int repeat = _decisionLog.Repeat(repeatKey, planFile, planDigest, task, ev.Session);
-        ArbiterProviderRecord provider = new(
-            providerKind,
-            endpointOrigin,
-            model,
-            usage is null ? null : new ArbiterProviderUsage(usage.InputTokens, usage.OutputTokens),
-            (int)Math.Min(int.MaxValue, elapsed.ElapsedMilliseconds),
-            providerStatus);
         ArbiterDecisionRecord record = new(
             ArbiterRecordId.New(now),
             now,
@@ -377,7 +666,9 @@ public sealed class ArbiterEvaluator
             provider,
             outcome,
             repeat,
-            (int)Math.Min(int.MaxValue, elapsed.ElapsedMilliseconds));
+            (int)Math.Min(int.MaxValue, elapsed.ElapsedMilliseconds),
+            primaryLedgerId: primaryLedgerId,
+            model: model);
         if (!effective.DryRun)
         {
             await _decisionLog.AppendAsync(record, cancellationToken).ConfigureAwait(false);
@@ -411,30 +702,6 @@ public sealed class ArbiterEvaluator
         {
             return null;
         }
-    }
-
-    private static string CombineEffects(
-        ArbiterTriggerFamily family,
-        ArbiterOutcome step0,
-        List<KeyValuePair<ArbiterRule, string>> step1)
-    {
-        List<string> effects = new(step0.RuleAnswers.Count + step1.Count);
-        foreach (ArbiterRuleAnswer answer in step0.RuleAnswers)
-        {
-            effects.Add(answer.Effect);
-        }
-
-        foreach (KeyValuePair<ArbiterRule, string> entry in step1)
-        {
-            if (string.Equals(entry.Value, ArbiterStep1BatchResult.NotEvaluated, StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            effects.Add(MapStep1AnswerToEffect(entry.Key, entry.Value, family));
-        }
-
-        return ArbiterTriggerFamilies.Combine(family, effects);
     }
 
     private static string MapStep1AnswerToEffect(ArbiterRule rule, string answer, ArbiterTriggerFamily family)
