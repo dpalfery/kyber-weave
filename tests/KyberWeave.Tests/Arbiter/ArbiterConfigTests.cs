@@ -42,6 +42,10 @@ public sealed class ArbiterConfigTests
         "KW-ARB-NITPICK-001",
         "KW-ARB-NITPICK-002",
         "KW-ARB-DUP-001",
+        "KW-ARB-TRIAGE-001",
+        "KW-ARB-INTAKE-001",
+        "KW-ARB-DOCIMPACT-001",
+        "KW-ARB-FAILURE-001",
     ];
 
     [Fact]
