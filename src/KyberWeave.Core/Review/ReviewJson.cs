@@ -112,6 +112,12 @@ public static class ReviewJson
         if (report.Gates is null || report.Gates.Any(gate => gate is null))
             throw new JsonException("The gate report's 'gates' must be a list of gate results, with no null entry.");
 
+        if (report.Gates.FirstOrDefault(gate => string.IsNullOrWhiteSpace(gate.Id) || gate.Summary is null) is { } bad)
+        {
+            throw new JsonException(
+                $"Gate result {report.Gates.ToList().IndexOf(bad) + 1} in the gate report has no 'id' or no 'summary'.");
+        }
+
         return report;
     }
 
@@ -135,6 +141,20 @@ public static class ReviewJson
                                 ?? throw new JsonException("The findings report is empty.");
         if (report.Findings is null || report.Findings.Any(finding => finding is null))
             throw new JsonException("The findings report's 'findings' must be a list of findings, with no null entry.");
+
+        // The serializer fills a JSON null into a string without complaint, so a finding with no id, lens or file
+        // would reach the engine with no identity. Every required text field is checked here, in one place.
+        for (int index = 0; index < report.Findings.Count; index++)
+        {
+            ReviewFinding finding = report.Findings[index];
+            (string Name, string? Value)[] required =
+                [("id", finding.Id), ("lens", finding.Lens), ("file", finding.File)];
+            if (required.FirstOrDefault(field => string.IsNullOrWhiteSpace(field.Value)) is { Name: { } missing })
+            {
+                throw new JsonException(
+                    $"Finding {index + 1} in the findings report has no '{missing}'; id, lens and file are required.");
+            }
+        }
 
         return report;
     }

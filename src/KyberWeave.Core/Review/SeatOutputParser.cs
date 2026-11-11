@@ -72,8 +72,8 @@ public static partial class SeatOutputParser
 
         string? attestation = null;
         string? indexFallback = null;
-        SeatDiscovery? discovery = null;
-        SeatInputSites? inputSites = null;
+        List<SeatDiscovery?> discoveries = [];
+        List<SeatInputSites?> inputSiteLines = [];
         SeatOutputKind? declared = null;
         int declaredLine = 0;
         List<SeatLine> body = [];
@@ -89,9 +89,9 @@ public static partial class SeatOutputParser
             else if (line.StartsWith(IndexFallbackPrefix, StringComparison.Ordinal))
                 indexFallback = trimmed[IndexFallbackPrefix.Length..].Trim();
             else if (line.StartsWith(DiscoveryPrefix, StringComparison.Ordinal))
-                discovery = ReadDiscovery(trimmed);
+                discoveries.Add(ReadDiscovery(trimmed));
             else if (line.StartsWith(InputSitesPrefix, StringComparison.Ordinal))
-                inputSites = ReadInputSites(trimmed);
+                inputSiteLines.Add(ReadInputSites(trimmed));
             else if (line.StartsWith(NoFindingsPrefix, StringComparison.Ordinal)
                      || line.StartsWith(SkippedPrefix, StringComparison.Ordinal))
             {
@@ -115,6 +115,8 @@ public static partial class SeatOutputParser
                 body.Add(new SeatLine(line, index + 1));
         }
 
+        SeatDiscovery? discovery = SumDiscovery(discoveries);
+        SeatInputSites? inputSites = SumInputSites(inputSiteLines);
         List<SeatLine> yaml = YamlLines(body);
 
         // A seat that says it found nothing, or did not run, writes prose after that line, not YAML. A file that
@@ -122,14 +124,13 @@ public static partial class SeatOutputParser
         // findings, so it is refused.
         if (declared is { } kind)
         {
-            if (yaml.Find(line => FindingItemStart.IsMatch(line.Text)) is { } item)
+            if (ListItemPosition(yaml) is { } item)
             {
                 string outcome = kind == SeatOutputKind.NoFindings ? NoFindingsPrefix : SkippedPrefix;
-                int column = item.Text.IndexOf('-', StringComparison.Ordinal) + 1;
                 throw new SeatOutputException(
                     $"The {lens} seat output declares '{outcome}' (line {declaredLine}, column 1) but also holds a " +
-                    $"finding (line {item.Number}, column {column}). A seat reports findings or an outcome line, " +
-                    "not both.");
+                    $"list item (line {item.Line}, column {item.Column}). A seat reports findings or an outcome " +
+                    "line, not both.");
             }
 
             return new SeatOutput(lens, kind, [], attestation, indexFallback, discovery, inputSites);
@@ -214,6 +215,80 @@ public static partial class SeatOutputParser
         }
 
         return new SeatDiscovery(codeGraph, docs, reads);
+    }
+
+    /// <summary>
+    /// Where the body under a declared outcome holds a list item, or null when it holds none. Two readings, so that
+    /// no shape slips past: a line that opens a list item with a field the seat schema defines, wherever it sits
+    /// in prose, and any body that YAML itself reads as a list (a flow item, a flow list, a quoted or unknown first
+    /// key, a plain bullet). A Markdown bullet that opens with emphasis (<c>- **Note:**</c>) is not YAML, so the
+    /// prose a seat writes after <c>NO FINDINGS:</c> stays allowed.
+    /// </summary>
+    private static (int Line, int Column)? ListItemPosition(List<SeatLine> yaml)
+    {
+        if (yaml.Find(line => FindingItemStart.IsMatch(line.Text)) is { } item)
+            return (item.Number, item.Text.IndexOf('-', StringComparison.Ordinal) + 1);
+
+        YamlStream stream = new();
+        try
+        {
+            stream.Load(new StringReader(string.Join('\n', yaml.Select(line => line.Text))));
+        }
+        catch (Exception ex) when (ex is YamlException or InvalidOperationException)
+        {
+            return null;
+        }
+
+        return stream.Documents
+            .Select(document => document.RootNode)
+            .OfType<YamlSequenceNode>()
+            .Select(sequence => ((int, int)?)SourcePosition(yaml, sequence.Start))
+            .FirstOrDefault();
+    }
+
+    /// <summary>
+    /// The sum of every <c>Discovery:</c> line, counter by counter: a lens split across two spawns is saved as one
+    /// file with two closing blocks. Null when there is none, when any is malformed, or when a sum overflows,
+    /// because a partial count would read as evidence the seat did not give.
+    /// </summary>
+    private static SeatDiscovery? SumDiscovery(List<SeatDiscovery?> lines)
+    {
+        if (lines.Count == 0 || lines.Exists(line => line is null))
+            return null;
+
+        try
+        {
+            return lines.OfType<SeatDiscovery>().Aggregate(
+                new SeatDiscovery(0, 0, 0),
+                (sum, line) => new SeatDiscovery(
+                    checked(sum.CodeGraph + line.CodeGraph),
+                    checked(sum.Docs + line.Docs),
+                    checked(sum.DirectReads + line.DirectReads)));
+        }
+        catch (OverflowException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The sum of every <c>Input sites:</c> line, on the same terms as <see cref="SumDiscovery"/>.</summary>
+    private static SeatInputSites? SumInputSites(List<SeatInputSites?> lines)
+    {
+        if (lines.Count == 0 || lines.Exists(line => line is null))
+            return null;
+
+        try
+        {
+            return lines.OfType<SeatInputSites>().Aggregate(
+                new SeatInputSites(0, 0),
+                (sum, line) => new SeatInputSites(
+                    checked(sum.Traced + line.Traced),
+                    checked(sum.FilesWithNone + line.FilesWithNone)));
+        }
+        catch (OverflowException)
+        {
+            return null;
+        }
     }
 
     /// <summary>The counts on an <c>Input sites:</c> line, or null when the line is not in the agreed shape.</summary>
@@ -343,9 +418,11 @@ public static partial class SeatOutputParser
             : LensFromId(id, seatLens);
 
         string severityText = Required(item, "severity", where);
-        if (!Enum.TryParse(severityText, ignoreCase: true, out ReviewSeverity severity)
-            || !Enum.IsDefined(severity)
-            || int.TryParse(severityText, CultureInfo.InvariantCulture, out _))
+        // Exactly one severity name. Enum.TryParse would also take a number, and a comma list such as
+        // "major, minor" as a combination of flags, so the text is matched against the names themselves.
+        if (Enum.GetNames<ReviewSeverity>().FirstOrDefault(name =>
+                string.Equals(name, severityText, StringComparison.OrdinalIgnoreCase)) is not { } severityName
+            || !Enum.TryParse(severityName, out ReviewSeverity severity))
         {
             throw new SeatOutputException($"{where} has severity '{Clip(severityText)}'; use critical, major or minor.");
         }

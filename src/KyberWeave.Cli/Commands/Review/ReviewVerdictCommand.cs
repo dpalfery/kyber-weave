@@ -51,6 +51,12 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
         ArgumentNullException.ThrowIfNull(settings);
 
         DiagnosticReport report = new();
+
+        // An option given an empty value names nothing. Read as "absent" it would fall back silently, and as a path
+        // it resolves to the current directory (`--prior ""` read ./findings.json), so every one is refused first.
+        if (RefuseEmptyValues(settings, report))
+            return Fail(report, settings);
+
         string root = Path.GetFullPath(settings.Path);
 
         if (!CommandHelpers.TryLoadConfig(root, settings.Config, report, out KyberWeaveConfig config))
@@ -133,6 +139,30 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
             verdict,
             "The review verdict is not a defined value.")
     };
+
+    /// <summary>Reports every path-taking argument given an empty or blank value; true when there was one.</summary>
+    private static bool RefuseEmptyValues(ReviewVerdictSettings settings, DiagnosticReport report)
+    {
+        (string Option, string? Value)[] values =
+        [
+            ("[path]", settings.Path), ("--config", settings.Config), ("--seats", settings.Seats),
+            ("--findings", settings.Findings), ("--gates", settings.Gates), ("--prior", settings.Prior),
+            ("--out", settings.Out)
+        ];
+
+        bool refused = false;
+        foreach ((string option, string? value) in values.Where(entry => entry.Value is { } given && string.IsNullOrWhiteSpace(given)))
+        {
+            refused = true;
+            report.Add(new Diagnostic(
+                UnreadableInput,
+                Severity.Error,
+                $"{option} was given an empty value. Name a path, or leave the option out.",
+                Subject));
+        }
+
+        return refused;
+    }
 
     private static int Fail(DiagnosticReport report, ReviewVerdictSettings settings)
     {
@@ -606,7 +636,10 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
             value = read(File.ReadAllText(full));
             return true;
         }
-        catch (Exception ex) when (ex is System.Text.Json.JsonException or IOException or UnauthorizedAccessException)
+        // An empty or malformed document can surface as a JSON error, an argument error (a blank document), or an
+        // unsupported-shape error from the serializer; each is the document being unreadable, never a crash.
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or ArgumentException or NotSupportedException
+                                       or InvalidOperationException or IOException or UnauthorizedAccessException)
         {
             report.Add(new Diagnostic(
                 UnreadableInput,

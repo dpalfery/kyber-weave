@@ -330,6 +330,8 @@ warning (`KW-REVIEW-044`); it is never a verdict input.
 The `correctness` seat also closes with `Input sites: N traced, M files with none`, above its
 `Discovery:` line, after a Markdown input-site table that the parser skips; a correctness seat that
 ran and wrote no readable `Input sites:` line draws a warning (`KW-REVIEW-047`), never a verdict input.
+A seat file that repeats its `Discovery:` or `Input sites:` line, as a lens split across two spawns
+does, is read as the sum of the lines; a malformed or overflowing line makes the count unreadable.
 
 ```mermaid
 flowchart TD

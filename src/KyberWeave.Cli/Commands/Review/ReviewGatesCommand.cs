@@ -47,6 +47,24 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
     {
         ArgumentNullException.ThrowIfNull(settings);
 
+        // An option given an empty value names nothing: as a path it resolves to the current directory, and as
+        // --agent or --config it would fall back silently. Refused before anything runs.
+        string[] empty = new (string Option, string? Value)[]
+            {
+                ("[path]", settings.Path), ("--config", settings.Config), ("--out", settings.Out),
+                ("--agent", settings.Agent)
+            }
+            .Where(entry => entry.Value is { } given && string.IsNullOrWhiteSpace(given))
+            .Select(entry => entry.Option)
+            .ToArray();
+        if (empty.Length > 0)
+        {
+            WriteClientInputError(
+                $"{InvalidInput}: {string.Join(", ", empty)} was given an empty value. Name a value, or leave the " +
+                "option out.");
+            return ClientInputExitCode;
+        }
+
         bool scopesTheRun = settings.Agent is not null || settings.BaseRef is not null
                             || settings.Paths.Length > 0 || settings.Gate.Length > 0;
         if (settings.All && scopesTheRun)
