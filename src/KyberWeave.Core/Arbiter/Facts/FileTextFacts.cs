@@ -50,6 +50,24 @@ public static class FileTextFacts
             return null;
         }
 
+        // A cited file that exists but cannot be opened or read is absent evidence, not a failure of the caller: the
+        // comment stays real and the classification never throws on an I/O error.
+        try
+        {
+            return ReadWindow(full, path, line);
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static FileExcerpt? ReadWindow(string full, string path, int line)
+    {
         int first = Math.Max(1, line - Radius);
         int last = line + Radius;
         StringBuilder text = new();

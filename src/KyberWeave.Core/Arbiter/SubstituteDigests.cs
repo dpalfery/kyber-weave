@@ -36,12 +36,25 @@ public static class SubstituteDigests
         return string.Join(
             "\n",
             "STATUS: INTAKE_RECOMMENDATION",
-            $"INPUT: {input}",
+            $"INPUT: {OneField(input)}",
             $"RECOMMENDATION: {recommendation}",
             $"RATIONALE: Arbiter shortcut (decision {decisionId})",
             "GAPS: none",
             "OPEN_QUESTIONS: none",
             $"ARBITER_DECISION: {decisionId}");
+    }
+
+    /// <summary>The most characters one digest field carries from operator or caller text.</summary>
+    private const int MaxFieldCharacters = 500;
+
+    /// <summary>
+    /// Flattens caller text to one line for a single digest field: CR and LF become spaces, so the text cannot forge a
+    /// field of its own, and the text is capped so a long intake cannot swamp the digest.
+    /// </summary>
+    private static string OneField(string text)
+    {
+        string flat = text.Replace('\r', ' ').Replace('\n', ' ');
+        return flat.Length <= MaxFieldCharacters ? flat : flat[..MaxFieldCharacters];
     }
 
     /// <summary>The substitute report for a docs-dev dispatch whose change needs no documentation.</summary>

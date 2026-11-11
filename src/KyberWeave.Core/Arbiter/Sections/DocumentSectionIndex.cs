@@ -15,6 +15,12 @@ public static class DocumentSectionIndex
     /// <summary>The most sections one document is split into.</summary>
     public const int MaxSections = 200;
 
+    /// <summary>The most lines the split scans. A longer document is scanned to this line and its last section is marked truncated.</summary>
+    public const int MaxScannedLines = 50_000;
+
+    /// <summary>The most characters one section's text carries. A longer section is cut and marked truncated.</summary>
+    public const int MaxSectionCharacters = 16_000;
+
     private const string FrontMatterTitle = "Front matter";
 
     /// <summary>Splits <paramref name="markdown"/> into sections, in document order.</summary>
@@ -28,6 +34,12 @@ public static class DocumentSectionIndex
         if (lines.Count == 0)
         {
             return [];
+        }
+
+        bool scanCut = lines.Count > MaxScannedLines;
+        if (scanCut)
+        {
+            lines = lines.GetRange(0, MaxScannedLines);
         }
 
         int bodyStart = FrontMatterEnd(lines);
@@ -96,12 +108,16 @@ public static class DocumentSectionIndex
                 end = lines.Count;
             }
 
+            string text = string.Join('\n', lines.GetRange(start - 1, end - start + 1));
+            bool cut = text.Length > MaxSectionCharacters;
+            bool scanEnded = scanCut && i == count - 1;
             sections.Add(new DocumentSection(
                 starts[i].Id,
                 starts[i].Title,
                 start,
                 end,
-                string.Join('\n', lines.GetRange(start - 1, end - start + 1))));
+                cut ? text[..MaxSectionCharacters] : text,
+                cut || scanEnded));
         }
 
         return sections;

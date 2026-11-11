@@ -19,6 +19,9 @@ public sealed class SectionSelector(IArbiterProvider provider)
     /// <summary>The shipped rule that asks whether a section is relevant.</summary>
     public const string TrimRuleId = "KW-ARB-TRIM-001";
 
+    /// <summary>The largest document the selector reads, in bytes. A larger one fails safe rather than being read whole.</summary>
+    public const long MaxDocumentBytes = 1024 * 1024;
+
     private const string Relevant = "relevant";
     private const string NotRelevant = "not-relevant";
     private const string TaskFact = "task.text";
@@ -34,7 +37,24 @@ public sealed class SectionSelector(IArbiterProvider provider)
         ArgumentException.ThrowIfNullOrWhiteSpace(documentPath);
         ArgumentNullException.ThrowIfNull(task);
 
-        IReadOnlyList<DocumentSection> sections = DocumentSectionIndex.Split(await File.ReadAllTextAsync(documentPath, ct).ConfigureAwait(false));
+        // A document that cannot be read or is over the size cap yields no sections to choose from. The selection then
+        // fails safe with nothing selected, and the caller falls back to the whole document it already holds.
+        string text;
+        try
+        {
+            if (new FileInfo(documentPath).Length > MaxDocumentBytes)
+            {
+                return new SectionSelection([], FailedSafe: true);
+            }
+
+            text = await File.ReadAllTextAsync(documentPath, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return new SectionSelection([], FailedSafe: true);
+        }
+
+        IReadOnlyList<DocumentSection> sections = DocumentSectionIndex.Split(text);
         if (sections.Count <= 1)
         {
             return new SectionSelection(sections, FailedSafe: false);

@@ -369,8 +369,11 @@ public sealed class ArbiterEvaluator
         // A lens return judges every finding it carries. The first rides the batch above; each later one is asked
         // alone on its own fact bag, so its step-0 gates and its step-1 answer read its own id, text and severity.
         FindingJudgement primaryJudgement = new(returned.Count > 0 ? returned[0].Id : null, primary, primaryCall);
+        // Findings past the question budget are kept unjudged: they stay real and are never asked, so a long return
+        // costs at most MaxQuestions questions and no finding is dropped on no answer.
+        int judgedCount = Math.Min(returned.Count, StateBudget.MaxQuestions);
         List<FindingJudgement> judgements = [primaryJudgement];
-        for (int index = 1; index < returned.Count; index++)
+        for (int index = 1; index < judgedCount; index++)
         {
             ArbiterFactSet findingFacts = TriggerFactBuilder.WithReturnedFinding(baseFacts, returned[index], gateCorroborated);
             Dictionary<string, ArbiterFact> findingCandidates = new(StringComparer.Ordinal);
@@ -392,9 +395,10 @@ public sealed class ArbiterEvaluator
         string primaryOutcome = primaryResult.Outcome;
         if (!effective.DryRun && reviewRun is not null && returned.Count > 0)
         {
-            bool[] dropped = judged
-                .Select(finding => string.Equals(
-                    ArbiterTriggerFamilies.Combine(primary.Family, finding.Effects), RuleEffects.Drop, StringComparison.Ordinal))
+            // One flag per returned finding; a finding past the budget was never judged, so it is kept (not dropped).
+            bool[] dropped = Enumerable.Range(0, returned.Count)
+                .Select(index => index < judged.Count && string.Equals(
+                    ArbiterTriggerFamilies.Combine(primary.Family, judged[index].Effects), RuleEffects.Drop, StringComparison.Ordinal))
                 .ToArray();
             await RecordReturnedFindingsAsync(ReviewStore(config), reviewRun, returned, dropped)
                 .ConfigureAwait(false);
