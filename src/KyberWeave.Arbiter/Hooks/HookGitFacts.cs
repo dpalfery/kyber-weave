@@ -120,9 +120,12 @@ internal sealed class HookGitFacts(
             }
         }
 
-        if (needsReviewChangedPaths)
+        // Resolved once and reused: a fetch or branch switch between two resolutions would measure the
+        // changed paths and the hunks from different bases.
+        string? baseRef = needsReviewChangedPaths || needsChangeSet ? ResolveBase(cwd) : null;
+
+        if (needsReviewChangedPaths && baseRef is not null)
         {
-            string baseRef = ResolveBase(cwd);
             IReadOnlyList<string> changed = [.. GitFacts.GetChangedPathsSinceBase(cwd, baseRef)];
             facts = facts.With("review.changed-paths", changed, ArbiterFactLabel.Derived);
             facts = facts.With("review.base-ref", baseRef, ArbiterFactLabel.Derived);
@@ -133,9 +136,9 @@ internal sealed class HookGitFacts(
             }
         }
 
-        if (needsChangeSet)
+        if (needsChangeSet && baseRef is not null)
         {
-            facts = WithChangeFacts(facts, GitFacts.GetChangeSet(cwd, ResolveBase(cwd)));
+            facts = WithChangeFacts(facts, GitFacts.GetChangeSet(cwd, baseRef));
         }
 
         return facts;
