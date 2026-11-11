@@ -158,9 +158,9 @@ public sealed class ArbiterPlanReadRuleTests
                 .Select(line => line["- id: ".Length..].Trim())
         ];
 
-        Assert.Equal(23, ids.Length);
+        Assert.Equal(25, ids.Length);
         Assert.Contains(PlanReadRule, ids);
-        Assert.Equal("KW-ARB-LADDER-001", ids[^1]);
+        Assert.Equal("KW-ARB-NITPICK-002", ids[^1]);
         Assert.Equal("delegate", Rule().Trigger);
     }
 }
