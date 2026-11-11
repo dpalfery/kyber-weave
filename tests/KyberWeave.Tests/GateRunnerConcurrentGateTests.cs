@@ -90,7 +90,25 @@ public sealed class GateRunnerConcurrentGateTests : IDisposable
         Assert.False(IsRunning(ReadRecordedPid()), "The stopped gate's process must not outlive the run.");
     }
 
-    /// <summary>A concurrent blocking gate that fails stops the run too, once its result is in.</summary>
+    /// <summary>
+    /// A concurrent blocking gate that has already failed stops the run at the next gate boundary, like any
+    /// other blocking failure.
+    /// </summary>
+    [Fact]
+    public void StoppingOnABlockingFailureCountsAConcurrentGateThatHasAlreadyFailed()
+    {
+        ReviewGate failing = new("fails-at-once", ["git", "kw-no-such-subcommand"], TimeoutSeconds: 30) { Concurrent = true };
+        ReviewGate slower = new("slower", Sleep3(), TimeoutSeconds: 30);
+        ReviewGate never = new("never-started", ["git", "--version"], TimeoutSeconds: 30);
+
+        GateReport report = GateRunner.Run(
+            new ReviewConfig { Gates = [failing, slower, never] }, _root.Path, stopOnBlockingFailure: true);
+
+        Assert.Equal(["fails-at-once", "slower"], report.Gates.Select(gate => gate.Id));
+        Assert.False(report.Gates[0].Passed);
+    }
+
+    /// <summary>The report waits for a concurrent gate that outlasts every gate declared after it.</summary>
     [Fact]
     public void AConcurrentGateIsAlwaysJoinedBeforeTheReportIsReturned()
     {
@@ -115,7 +133,7 @@ public sealed class GateRunnerConcurrentGateTests : IDisposable
             ?
             [
                 "powershell", "-NoProfile", "-Command",
-                $"while (-not (Test-Path {name})) {{ Start-Sleep -Milliseconds 100 }}; exit {exitCode.ToString(CultureInfo.InvariantCulture)}"
+                $"while (-not ((Test-Path {name}) -and ((Get-Item {name}).Length -gt 0))) {{ Start-Sleep -Milliseconds 100 }}; exit {exitCode.ToString(CultureInfo.InvariantCulture)}"
             ]
             :
             [
@@ -130,6 +148,9 @@ public sealed class GateRunnerConcurrentGateTests : IDisposable
 
     private static string[] Sleep30() =>
         OperatingSystem.IsWindows() ? ["ping", "-n", "30", "127.0.0.1"] : ["sleep", "30"];
+
+    private static string[] Sleep3() =>
+        OperatingSystem.IsWindows() ? ["ping", "-n", "4", "127.0.0.1"] : ["sleep", "3"];
 
     private static string[] RecordPidThenSleep30() =>
         OperatingSystem.IsWindows()

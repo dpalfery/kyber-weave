@@ -897,9 +897,9 @@
     },
     {
       "file": "src/KyberWeave.Core/Review/GateRunner.cs",
-      "text": "ProcessResult process = ProcessRunner.Run(startInfo, string.Empty, timeout);",
+      "text": "ProcessResult process = ProcessRunner.Run(startInfo, string.Empty, timeout, cancellationToken: stop);",
       "count": 1,
-      "bound": "ProcessRunner.Run with the gate's timeout-seconds (review.gates; ReviewConfigLoader defaults it to 900 s and rejects values <= 0). The process tree is killed on expiry and the TimeoutException is reported as TimedOut (GateRunner.cs:185)."
+      "bound": "ProcessRunner.Run with the gate's timeout-seconds (review.gates; ReviewConfigLoader defaults it to 900 s and rejects values <= 0). The process tree is killed on expiry and the TimeoutException is reported as TimedOut. A concurrent gate's tree is also killed when a run given --stop-on-failure cancels it."
     },
     {
       "file": "src/KyberWeave.Core/RunStart/RunStartRunner.cs",

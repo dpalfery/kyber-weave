@@ -72,11 +72,14 @@ review:
     # .editorconfig, and burying 500 real warnings under 1200 of those helps nobody.
     # Declared here, straight after `build`, and `concurrent`, so it starts on a restored tree
     # and runs alongside the test run instead of after it: declared last and run in turn, a
-    # review waited for the full suite and then for the analyzer. It is safe beside the gates
-    # below because it builds and reads Debug, and they run the Release binaries `build` made.
+    # review waited for the full suite and then for the analyzer. It builds and reads Debug,
+    # and the gates below run the Release binaries `build` made, so they share no output.
+    # `--jobs=4` because the full test run beside it is load-sensitive: on an 18-core machine
+    # four analysis threads took 108 seconds against 91 unbounded, with the same findings.
+    # Not measured: this gate beside the full test run. A dev agent may not run that suite.
     - id: inspectcode
       include: *net-source-paths
-      run: [dotnet, jb, inspectcode, KyberWeave.sln, --output=artifacts/inspectcode.xml, --format=Xml, --severity=WARNING, "--caches-home=artifacts/inspectcode-cache"]
+      run: [dotnet, jb, inspectcode, KyberWeave.sln, --output=artifacts/inspectcode.xml, --format=Xml, --severity=WARNING, "--caches-home=artifacts/inspectcode-cache", "--jobs=4"]
       blocking: true
       concurrent: true
     # coverlet.MTP writes Cobertura under artifacts/coverage so GateRunner can populate

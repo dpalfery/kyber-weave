@@ -32,6 +32,19 @@ public sealed class InspectCodeGateConcurrencyTests
         Assert.True(ids.IndexOf("inspectcode") < ids.IndexOf("test"), "inspectcode must start before the full test run, not after it.");
     }
 
+    /// <summary>
+    /// The analyzer's thread count is capped, because the gate it overlaps is the load-sensitive full test run.
+    /// </summary>
+    [Fact]
+    public void TheInspectCodeGateCapsItsAnalysisThreads()
+    {
+        YamlMappingNode gate = Gates().Single(candidate => Scalar(candidate, "id") == "inspectcode");
+        IEnumerable<string?> argv = ((YamlSequenceNode)gate.Children[new YamlScalarNode("run")]).Children
+            .Select(item => ((YamlScalarNode)item).Value);
+
+        Assert.Contains("--jobs=4", argv);
+    }
+
     /// <summary>No other gate is concurrent: the rest share the Release binaries and run in turn.</summary>
     [Fact]
     public void OnlyTheInspectCodeGateIsConcurrent()
