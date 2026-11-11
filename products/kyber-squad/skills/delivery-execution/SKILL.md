@@ -146,6 +146,7 @@ Before closeout completes, run the documentation-impact review step:
 
 - Keep a run record of asked/decided+why/files changed; no transcripts.
 - Dispatch docs-dev with that run record.
+- Make the impact-review dispatch's first body line `DOCS-IMPACT: true`, after the routing headers. The Arbiter reads only that line to decide its docs-impact shortcut, so without it the shortcut never fires. Do not send it on the closeout dispatch.
 - Require DOCS_REVIEW rows in the closeout evidence before proceeding.
 
 ### Closeout completion
