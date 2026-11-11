@@ -76,6 +76,60 @@ public sealed class PostCheckoutHookTextTests
         Assert.Equal(after, text[(text.LastIndexOf(end, StringComparison.Ordinal) + end.Length)..]);
     }
 
+    [Fact]
+    public void AHookThatOnlyMentionsTheMarkerTextKeepsEveryLineOfItsOwn()
+    {
+        const string begin = "# >>> kyber-weave worktree index >>>";
+        const string end = "# <<< kyber-weave worktree index <<<";
+        string existing = $"#!/bin/sh\necho \"{begin}\"\nkeep-me\necho \"{end}\"\n";
+
+        HookTextEdit edit = PostCheckoutHookText.Install(existing);
+
+        Assert.Equal(HookTextOutcome.Inserted, edit.Outcome);
+        Assert.Equal("#!/bin/sh\n" + PostCheckoutHookText.Block + existing["#!/bin/sh\n".Length..], edit.Text);
+    }
+
+    [Fact]
+    public void InstallOverTwoCopiesOfTheBlockLeavesOne()
+    {
+        string existing = "#!/bin/sh\n" + PostCheckoutHookText.Block + "own-line\n" + PostCheckoutHookText.Block;
+
+        HookTextEdit edit = PostCheckoutHookText.Install(existing);
+
+        Assert.Equal(HookTextOutcome.Updated, edit.Outcome);
+        Assert.Equal("#!/bin/sh\n" + PostCheckoutHookText.Block + "own-line\n", edit.Text);
+    }
+
+    [Fact]
+    public void AStrayEndMarkerIsClearedSoALaterInstallIsUnchanged()
+    {
+        const string end = "# <<< kyber-weave worktree index <<<";
+        string existing = $"#!/bin/sh\nown-line\n{end}\n";
+
+        HookTextEdit first = PostCheckoutHookText.Install(existing);
+        HookTextEdit second = PostCheckoutHookText.Install(first.Text!);
+
+        Assert.Equal("#!/bin/sh\n" + PostCheckoutHookText.Block + "own-line\n", first.Text);
+        Assert.Equal(HookTextOutcome.Unchanged, second.Outcome);
+    }
+
+    [Theory]
+    [InlineData("#!/usr/bin/env FOO=bar bash\necho hi\n")]
+    [InlineData("#!/bin/sh.exe\necho hi\n")]
+    public void InstallAcceptsAShellNamedThroughEnvAssignmentsOrWithAnExeSuffix(string existing)
+    {
+        Assert.Equal(HookTextOutcome.Inserted, PostCheckoutHookText.Install(existing).Outcome);
+    }
+
+    [Fact]
+    public void InstallOnAnEmptyHookWritesItLikeAMissingOne()
+    {
+        HookTextEdit edit = PostCheckoutHookText.Install(string.Empty);
+
+        Assert.Equal(HookTextOutcome.Created, edit.Outcome);
+        Assert.Equal("#!/bin/sh\n" + PostCheckoutHookText.Block, edit.Text);
+    }
+
     [Theory]
     [InlineData("#!/usr/bin/env python3\nprint('hi')\n", HookTextOutcome.RefusedNotPosixShell)]
     [InlineData("echo no shebang\n", HookTextOutcome.RefusedNoShebang)]

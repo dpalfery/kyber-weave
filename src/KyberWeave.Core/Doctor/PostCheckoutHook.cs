@@ -332,7 +332,8 @@ public static class PostCheckoutHookText
     /// </remarks>
     public static HookTextEdit Install(string? existing)
     {
-        if (existing is null)
+        // An empty file carries nothing to keep, so it is written the same way as a missing one.
+        if (string.IsNullOrWhiteSpace(existing))
             return new HookTextEdit(HookTextOutcome.Created, "#!/bin/sh\n" + Block);
 
         // CRLF is refused first: a shebang with a carriage return would not name its interpreter, and an edit
@@ -340,35 +341,27 @@ public static class PostCheckoutHookText
         if (existing.Contains("\r\n", StringComparison.Ordinal))
             return new HookTextEdit(HookTextOutcome.RefusedCrlf, null);
 
-        int newline = existing.IndexOf('\n', StringComparison.Ordinal);
-        string shebang = newline < 0 ? existing : existing[..newline];
-        if (!shebang.StartsWith("#!", StringComparison.Ordinal))
+        List<string> lines = [.. existing.Split('\n')];
+        if (!lines[0].StartsWith("#!", StringComparison.Ordinal))
             return new HookTextEdit(HookTextOutcome.RefusedNoShebang, null);
 
-        if (!IsPosixShell(shebang))
+        if (!IsPosixShell(lines[0]))
             return new HookTextEdit(HookTextOutcome.RefusedNotPosixShell, null);
 
-        int begin = existing.IndexOf(BeginMarker, StringComparison.Ordinal);
-        if (begin < 0)
-        {
-            return newline < 0
-                ? new HookTextEdit(HookTextOutcome.Inserted, existing + "\n" + Block)
-                : new HookTextEdit(HookTextOutcome.Inserted, existing[..(newline + 1)] + Block + existing[(newline + 1)..]);
-        }
-
-        int end = existing.IndexOf(EndMarker, begin, StringComparison.Ordinal);
-        if (end < 0)
+        if (!TryStripOwnedLines(lines, out int firstBlock))
             return new HookTextEdit(HookTextOutcome.RefusedUnmatchedBlock, null);
 
-        // The block's own final newline is not part of the replaced span, so the line break after the end marker stays.
-        int finish = end + EndMarker.Length;
-        string blockWithoutNewline = Block[..^1];
-        if (string.Equals(existing[begin..finish], blockWithoutNewline, StringComparison.Ordinal))
+        // A one-line hook has no line break after its shebang; the block needs one before it and one after.
+        if (lines.Count == 1)
+            lines.Add(string.Empty);
+
+        // A block already there keeps its place; a new one goes directly after the shebang, before the owner's body.
+        lines.InsertRange(firstBlock < 0 ? 1 : firstBlock, Block[..^1].Split('\n'));
+        string updated = string.Join('\n', lines);
+        if (string.Equals(updated, existing, StringComparison.Ordinal))
             return new HookTextEdit(HookTextOutcome.Unchanged, null);
 
-        return new HookTextEdit(
-            HookTextOutcome.Updated,
-            existing[..begin] + blockWithoutNewline + existing[finish..]);
+        return new HookTextEdit(firstBlock < 0 ? HookTextOutcome.Inserted : HookTextOutcome.Updated, updated);
     }
 
     /// <summary>
@@ -380,26 +373,63 @@ public static class PostCheckoutHookText
     {
         ArgumentNullException.ThrowIfNull(existing);
 
-        int begin = existing.IndexOf(BeginMarker, StringComparison.Ordinal);
-        if (begin < 0)
-            return new HookTextEdit(HookTextOutcome.Unchanged, null);
-
-        int end = existing.IndexOf(EndMarker, begin, StringComparison.Ordinal);
-        if (end < 0)
+        List<string> lines = [.. existing.Split('\n')];
+        int before = lines.Count;
+        if (!TryStripOwnedLines(lines, out _))
             return new HookTextEdit(HookTextOutcome.RefusedUnmatchedBlock, null);
 
-        int finish = end + EndMarker.Length;
-        if (finish < existing.Length && existing[finish] == '\n')
-            finish++;
+        if (lines.Count == before)
+            return new HookTextEdit(HookTextOutcome.Unchanged, null);
 
-        string remaining = existing[..begin] + existing[finish..];
+        string remaining = string.Join('\n', lines);
         return IsOnlyShebangOrEmpty(remaining)
             ? new HookTextEdit(HookTextOutcome.DeleteFile, null)
             : new HookTextEdit(HookTextOutcome.Removed, remaining);
     }
 
     /// <summary>
-    ///     Whether the shebang names a POSIX shell, directly or through <c>/usr/bin/env</c>. Flags on either word are skipped.
+    ///     Removes every owned block and every stray end marker from <paramref name="lines"/>.
+    /// </summary>
+    /// <remarks>
+    ///     A marker is a whole line, never a fragment of one, so a hook that merely mentions the marker text inside its
+    ///     own command is not mistaken for a block. Every copy of the block goes, so a hook that ended up with two is
+    ///     left with one after the next install. An end marker with no begin marker before it is a leftover of ours.
+    /// </remarks>
+    /// <param name="lines">The hook's lines, edited in place.</param>
+    /// <param name="firstBlock">The index the first removed block started at, or -1 when there was none.</param>
+    /// <returns>False when a begin marker has no end marker after it, in which case nothing is safe to remove.</returns>
+    private static bool TryStripOwnedLines(List<string> lines, out int firstBlock)
+    {
+        firstBlock = -1;
+        for (int index = 0; index < lines.Count;)
+        {
+            if (lines[index] == EndMarker)
+            {
+                lines.RemoveAt(index);
+                continue;
+            }
+
+            if (lines[index] != BeginMarker)
+            {
+                index++;
+                continue;
+            }
+
+            int end = lines.IndexOf(EndMarker, index + 1);
+            if (end < 0)
+                return false;
+
+            lines.RemoveRange(index, end - index + 1);
+            if (firstBlock < 0)
+                firstBlock = index;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    ///     Whether the shebang names a POSIX shell, directly or through <c>/usr/bin/env</c>. Flags and
+    ///     <c>NAME=value</c> assignments after <c>env</c> are skipped.
     /// </summary>
     private static bool IsPosixShell(string shebang)
     {
@@ -410,7 +440,8 @@ public static class PostCheckoutHookText
         string interpreter = BaseName(words[0]);
         if (interpreter == "env")
         {
-            string? named = words.Skip(1).FirstOrDefault(word => !word.StartsWith('-'));
+            string? named = words.Skip(1).FirstOrDefault(
+                word => !word.StartsWith('-') && !word.Contains('=', StringComparison.Ordinal));
             if (named is null)
                 return false;
 
@@ -420,8 +451,12 @@ public static class PostCheckoutHookText
         return interpreter is "sh" or "bash" or "dash" or "ksh" or "zsh";
     }
 
-    private static string BaseName(string path) =>
-        path[(path.LastIndexOf('/') + 1)..];
+    /// <summary>The program name without its folder, and without the <c>.exe</c> Git for Windows writes.</summary>
+    private static string BaseName(string path)
+    {
+        string name = path[(path.LastIndexOf('/') + 1)..];
+        return name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? name[..^4] : name;
+    }
 
     /// <summary>Whether nothing remains but a shebang line, so the hook carries no behaviour of its own.</summary>
     private static bool IsOnlyShebangOrEmpty(string text)

@@ -69,7 +69,11 @@ public sealed class PostCheckoutHookScriptTests : IDisposable
         _git.GitOnOk(_git.Repository, WithStub(), "worktree", "add", "-b", "after-switch", worktree);
 
         string leaf = Path.GetFileName(worktree);
-        string invocations = await WaitUntilAsync(text => ParseRecords(text).Any(record => record.Cwd == leaf));
+        await WaitUntilAsync(text => ParseRecords(text).Any(record => record.Cwd == leaf));
+
+        // A run the switch started would be in flight by now. Give it time to write before reading the record.
+        await Task.Delay(TimeSpan.FromSeconds(1));
+        string invocations = await File.ReadAllTextAsync(Path.Combine(_git.Markers, "invocations"));
         IReadOnlyList<InvocationRecord> records = ParseRecords(invocations);
         Assert.All(records, record => Assert.Equal(leaf, record.Cwd));
         Assert.Single(records, record => record.Args.StartsWith("doctor --post-checkout .", StringComparison.Ordinal));
