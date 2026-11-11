@@ -369,6 +369,10 @@ app.Configure(config =>
             .WithDescription("Report unpaired, undecided and unmarked dispatches from the ledger.")
             .WithExample("arbiter", "audit", "--plan", "docs/plans/plan.md");
 
+        arbiter.AddCommand<ArbiterTuneCommand>("tune")
+            .WithDescription("Score the step-1 answers in the decision log and show what each threshold would flip.")
+            .WithExample("arbiter", "tune", ".", "--thresholds", "0.5,0.6,0.7", "--json");
+
         arbiter.AddCommand<ArbiterSetupCommand>("setup")
             .WithDescription("Choose the provider and store the TypeSafe key for the endpoint origin.")
             .WithExample("arbiter", "setup", "--provider", "systemone", "--key-stdin");
