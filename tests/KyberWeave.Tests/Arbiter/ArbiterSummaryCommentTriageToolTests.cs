@@ -87,6 +87,7 @@ public sealed class ArbiterSummaryCommentTriageToolTests : IDisposable
             {
                 Arbiter = ArbiterConfig.ProductDefaults with
                 {
+                    Enabled = true,
                     CommentTriage = new ArbiterCommentTriageConfig(botLogins),
                 },
             },
