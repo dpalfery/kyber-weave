@@ -2,7 +2,7 @@
 id: plans/2026-11-11-cleanupcode-exit-hang
 title: Let the cleanupcode fix pass finish on a machine where the tool never exits
 doc-type: plan
-status: draft
+status: current
 component: ReviewCouncil
 owner: dpalfery
 created: 2026-11-11
@@ -15,7 +15,7 @@ impact-components: [ReviewCouncil]
 
 # Let the cleanupcode fix pass finish on a machine where the tool never exits
 
-**Status: Draft, 2026-11-11.** Decision-complete under autonomous mode; awaiting the approve-and-execute gate.
+**Status: Ready, 2026-11-11.** Approved for execution under decision AP1 (autonomous approval of gate `approve-and-execute`). Task file: `docs/plans/2026-11-11-cleanupcode-exit-hang.tasks.json`.
 **Development mode:** `test-first` (RED by `test-dev`, GREEN by the implementation specialist, never the same worker).
 **Autonomy:** `autonomous` (every open item decided by recommendation; provenance in `## Decisions`).
 **Scale:** `extends-component`, component `ReviewCouncil`.
@@ -61,6 +61,7 @@ Every open item was decided by recommendation under the autonomous-decisions rul
 | D14 | Which wins when the finish text is seen but `--timeout` elapses inside the grace period? | **The time limit.** `--timeout` is absolute: if the run has not counted as done (D2) when it elapses, the wrapper stops the tree and exits 124. Each one-second tick checks "done" before "time limit". | One predictable rule; the host command's 300 s limit is far longer than the 5 s grace, so the overlap only matters for misconfigured values. | autonomous: recommendation accepted |
 | D15 | What if `Close solution instance` appears before the file is saved, or more than once? | **T3 records every occurrence with its timestamp against the file's save time. More than one occurrence, or one before the save, is the D7 fallback**: the plan returns to Draft. | D2 counts the run done on the first sighting, so an early line would stop the tool before it saved and exit 0 with nothing fixed. The 2026-11-11 measurement saw it in the same second as the save, once. | autonomous: recommendation accepted |
 | D13 | Development mode and test contract. | **`test-first`**, with the Test contract below. | Default mode; no opt-out was supplied. | autonomous: recommendation accepted |
+| AP1 | Is the plan approved for execution? | **Approved.** D1 to D15 and the Test contract are accepted as recorded, and the plan is executed as written. | Conductor input `AUTONOMOUS_APPROVAL: approve-and-execute` under the repository's resolved autonomy `autonomous`, 2026-11-11; no human answered the gate. The low-confidence rows D2, D6, D7 and D9 stay flagged for the pull request body. Since the Draft, the base branch's review fix changed `scripts/report-gate.sh` (`rm -f -- "${report}"`, and exit 2 when `pgrep` is not on the PATH); the tasks name the script by function, not line, so none moved, and T2 keeps both. | autonomous: recommendation accepted (AUTONOMOUS_APPROVAL approve-and-execute, 2026-11-11) |
 
 ## Investigation findings
 
@@ -144,7 +145,7 @@ Every developer task ends with the worker's own `task-gate` run. Standards to fe
 **Files:**
 - `scripts/report-gate.sh` (header comment: usage, both modes, exit 124; function `usage`; the option-parsing `while`/`case`; validation after it; function `complete_size`; the main `while kill -0` loop)
 
-**Work.** Design items 1 to 5. Bash 3.2 compatible (D12). Keep the `--ends-with` path's behaviour identical, so the `inspectcode` gate in `.kyber-weave/kyber-weave.yml` needs no change.
+**Work.** Design items 1 to 5. Bash 3.2 compatible (D12). Keep the base branch's `rm -f -- "${report}"` and its refusal to start (exit 2) when `pgrep` is not on the PATH; the header's exit-code list keeps that meaning for 2 and adds 124. Keep the `--ends-with` path's behaviour identical, so the `inspectcode` gate in `.kyber-weave/kyber-weave.yml` needs no change.
 
 **Acceptance:** T1's tests pass with assertions unchanged; every pre-existing `ReportGateScriptTests` case passes; `bash -n scripts/report-gate.sh` exits 0; no test leaves a process behind. Your task gate's `shellcheck` gate cannot run here (`shellcheck` is not installed): report it as skipped for a missing tool, never as passed or failed.
 
@@ -180,7 +181,7 @@ Every developer task ends with the worker's own `task-gate` run. Standards to fe
 
 **Files:**
 - `docs/standards/csharp/README.md` (section `## Completion`: after the code block and before the bullets, one optional step giving Design item 6's command, the restore precondition (D11), that the pass stays optional and off by default, and that the wrapper exists because the tool does not exit on this machine and can be removed when it does. Keep the section the last in the file and keep its build, test and format lines, which `StandardsCompletionSectionTests` pins. Update `last-reviewed` in the frontmatter.)
-- `products/kyber-squad/skills/resharper-clt/SKILL.md` (section "Running the fix pass before you claim work is complete", step 2: `--no-build` on the `cleanupcode` line and one sentence that, when the host's C# coding standard gives its own `cleanupcode` command in its `## Completion` section, that command replaces this line; the worked-example block containing `Hauling.sln`: `--no-build` on the `cleanupcode` line. Nothing else in the skill changes.)
+- `products/kyber-squad/skills/resharper-clt/SKILL.md` (section "Running the fix pass before you claim work is complete", step 2: `--no-build` on the `cleanupcode` line and one sentence that, when the host's C# coding standard gives its own `cleanupcode` command in its `## Completion` section, that command replaces this line; the worked-example block (the one that cleans the Hauling solution): `--no-build` on the `cleanupcode` line. Nothing else in the skill changes.)
 
 **Work.** Use the finish text and log option T3 confirmed (from `{prior_results}`). If T3 reported that `--LogFile` lacks the finish line, or that D15's fallback applies, stop and report `BLOCKED: D7 fallback` without editing. Then the real run, on this machine:
 
