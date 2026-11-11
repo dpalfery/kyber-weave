@@ -4,7 +4,7 @@ title: Todos
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-08
+last-reviewed: 2026-11-10
 ---
 
 # Todos
@@ -120,6 +120,7 @@ last-reviewed: YYYY-MM-DD
 | [kyberdash-engine-failure-skips-hook-refresh.md](kyberdash-engine-failure-skips-hook-refresh.md) | Distribution | draft | A failed KyberDash engine step ends the self-update before the arbiter hook refresh runs, so the hooks stay on the previous release's source although the binaries are installed. |
 | [factory-native-metrics-projection.md](factory-native-metrics-projection.md) | KyberDash | draft | Droid's native OpenTelemetry metrics (lines and files modified, commits, pull requests, MCP tool and skill invocations) are stored but never projected or shown: `CanonStore.getMetricPoints` has no production caller. Slice 2 of the Droid data-completeness work. |
 | [factory-plugin-contract-2.md](factory-plugin-contract-2.md) | KyberDash | draft | Factory plugin contract 2: the tool-span anchor collapse, the `Stop` and `SessionEnd` timings the plugin does not record, 21 quarantined plugin spans, and capture status reporting native export as not configured while metrics arrive. Slice 3 of the Droid data-completeness work. |
+| [kyberdash-tray-supervisor-restart-loop.md](kyberdash-tray-supervisor-restart-loop.md) | KyberDash | draft | The tray runs one engine start attempt per call and nothing guarantees the next, so a dead `kyberdash web` stayed down about 55 minutes on 2026-11-10 until restarted by hand; decide who owns the restart schedule. |
 
 Nine earlier open todos moved to GitHub issues #125–#133. The four that those issues
 left listed here while pull requests were open are closed below.

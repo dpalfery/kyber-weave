@@ -2,7 +2,7 @@
 id: plans/2026-11-10-kyberdash-refresh-out-of-memory
 title: KyberDash refresh runs out of memory on re-minted duplicate records
 doc-type: plan
-status: current
+status: archived
 component: KyberDash
 owner: dpalfery
 created: 2026-11-10
@@ -15,7 +15,7 @@ impact-components: [KyberDash]
 
 # KyberDash refresh runs out of memory on re-minted duplicate records
 
-**Status: Ready, 2026-11-10.** Approved for execution under decision D13 (autonomous approval of gate `approve-and-execute-2026-11-10-kyberdash-refresh-oom`). Task file: `docs/plans/2026-11-10-kyberdash-refresh-out-of-memory.tasks.json`.
+**Status: Archived, 2026-11-10.** Approved for execution under decision D13 (autonomous approval of gate `approve-and-execute-2026-11-10-kyberdash-refresh-oom`). The task file was removed at archive; the Test contract and Implementation tasks below hold its content.
 **Development mode:** `test-first` (RED by `test-dev`, GREEN by the implementation specialist, never the same worker).
 **Autonomy:** `autonomous` (every open item decided by recommendation; provenance in `## Decisions`).
 **Scale:** `extends-component`, component `KyberDash`.
@@ -261,3 +261,61 @@ T1, T3 and T5 run in one `test-dev` session in that order. T2 starts when T1 lan
 - Each developer task runs its own commands above and its `task-gate`.
 - The end-of-run review council runs under the `code-review` skill over the whole branch; CI runs the full KyberDash suite on the draft pull request.
 - The pull request body lists the low-confidence rows D4, D5 and D7, and states that installing the build runs the v24 repair on the owner's store once.
+
+## Completion summary
+
+**Delivered.** Three code commits on `claude/fix/kyberdash-refresh-out-of-memory`, each with its own test change:
+
+- `39201705`: window-independent record identity and the Kilo child-session fix (T2).
+- `fc70192c`: supersede-on-commit for hash-backed rows and the schema 23 to 24 repair (T4).
+- `7aa1c1c6`: one-record-at-a-time run-outcome step (T6).
+
+The red tests for T1, T3 and T5 ran in the implementation sessions; their failure output is in those workers' completion digests and is not repeated here. This closeout did not re-run them.
+
+**Measured 2026-11-10** on an isolated copy of the owner's 5.6 GB store (292,366 records), never the live store:
+
+- The 0.1.8-rc.25 build's `dash refresh` exited 134 with a JavaScript heap out-of-memory, peak 6.3 GB resident.
+- The fixed build's first `dash refresh` (repair plus refresh) exited 0 in 148 seconds, peak 4.1 GB resident. It left 270,517 records: 15,627 duplicate call rows and 6,222 tool rows removed. The worst session went from 15,136 rows to 4,724. A second refresh changed no row counts.
+- Orphaned tool rows stayed at 7,577 before and after; the repair added none.
+- The 0.1.8-rc.25 `kyberdash web` died of the same out-of-memory about 105 to 135 seconds after start. The fixed build's engine held about 200 MB resident for four minutes on the repaired copy.
+
+**Deviations and gaps.**
+
+- The tray type is `Supervisor`, not `ServerSupervisor` as the plan's Design harvest named it. The todo uses the real name.
+- The tray restart gap (about 55 minutes on 2026-11-10) is not fixed here; it is the [tray todo](../../todo/kyberdash-tray-supervisor-restart-loop.md) (D10).
+- The session projection (`buildSessions`) still holds a whole session for its twin collapse (R3). It is not bounded by this change.
+- Reclaiming freed file space is not part of the upgrade.
+- Decisions D4, D5 and D7 are low-confidence, and remain flagged for the pull request body.
+- Installing this build runs the v24 repair on the owner's live store once. No task in this run touched that store (D11).
+
+## Closeout mapping
+
+Each row gives the destination of one decision or harvest item, its documentation impact, impact components, last-reviewed date and archive status.
+
+**Decisions**
+
+| ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| D1 | [architecture, Record identity and the window-independent ordinal](../../dash/architecture.md#record-identity-and-the-window-independent-ordinal) (Kilo child-session cause) | extends-component | KyberDash | 2026-11-10 | archived |
+| D2 | [architecture, Record identity](../../dash/architecture.md#record-identity-and-the-window-independent-ordinal) (hash fallback is shared across harnesses); no ADR — ADR waiver: identity detail within [ADR 0016](../../adr/0016-kyberdash-harness-source-refresh.md) decision 7 | extends-component | KyberDash | 2026-11-10 | archived |
+| D3 | [architecture, Record identity](../../dash/architecture.md#record-identity-and-the-window-independent-ordinal) (identity order, `recordIdentity`); no ADR — ADR waiver: a field-level refinement of ADR 0016 decision 7 | extends-component | KyberDash | 2026-11-10 | archived |
+| D4 | [architecture, Record identity](../../dash/architecture.md#record-identity-and-the-window-independent-ordinal); [ADR 0016 amendment, window-independent hash identity](../../adr/0016-kyberdash-harness-source-refresh.md) | extends-component | KyberDash | 2026-11-10 | archived |
+| D5 | [ADR 0016 amendment, supersede on commit](../../adr/0016-kyberdash-harness-source-refresh.md) | extends-component | KyberDash | 2026-11-10 | archived |
+| D6 | [ADR 0016 amendment, window-independent hash identity](../../adr/0016-kyberdash-harness-source-refresh.md) (no parser contract version change); no ADR — ADR waiver: follows the existing re-read rule in ADR 0016 decision 6 | extends-component | KyberDash | 2026-11-10 | archived |
+| D7 | [ADR 0016 amendment, schema 24 repair](../../adr/0016-kyberdash-harness-source-refresh.md); [runbook §2e.1](../../dash/runbook.md#2e1-upgrading-the-store-to-schema-24-duplicate-record-repair); [architecture, store schema list](../../dash/architecture.md#store) | extends-component | KyberDash | 2026-11-10 | archived |
+| D8 | [architecture, Run-outcome step memory bound](../../dash/architecture.md#run-outcome-step-memory-bound) | extends-component | KyberDash | 2026-11-10 | archived |
+| D9 | [ADR 0016](../../adr/0016-kyberdash-harness-source-refresh.md), amended in place; no new ADR | extends-component | KyberDash | 2026-11-10 | archived |
+| D10 | [todo: tray does not restart a dead engine](../../todo/kyberdash-tray-supervisor-restart-loop.md), registered in the [todo index](../../todo/README.md) | extends-component | KyberDash | 2026-11-10 | archived |
+| D11 | Documentation waiver: the constraint that no task opens the owner's live store governed this run only and leaves no invariant for future engineers; no ADR — ADR waiver: process constraint | extends-component | KyberDash | 2026-11-10 | archived |
+| D12 | Documentation waiver: the development mode of this run is transient process; no ADR — ADR waiver: process decision | extends-component | KyberDash | 2026-11-10 | archived |
+| D13 | Documentation waiver: the approval record is kept in this archived plan's Decisions table; no ADR — ADR waiver: process decision | extends-component | KyberDash | 2026-11-10 | archived |
+
+**Design harvest**
+
+| ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| H1 | [architecture, Record identity and the window-independent ordinal](../../dash/architecture.md#record-identity-and-the-window-independent-ordinal) | extends-component | KyberDash | 2026-11-10 | archived |
+| H2 | [ADR 0016, dated amendment 2026-11-10](../../adr/0016-kyberdash-harness-source-refresh.md) | extends-component | KyberDash | 2026-11-10 | archived |
+| H3 | [architecture, Run-outcome step memory bound](../../dash/architecture.md#run-outcome-step-memory-bound) | extends-component | KyberDash | 2026-11-10 | archived |
+| H4 | [runbook §2e.1, upgrading the store to schema 24](../../dash/runbook.md#2e1-upgrading-the-store-to-schema-24-duplicate-record-repair) | extends-component | KyberDash | 2026-11-10 | archived |
+| H5 | [todo: tray does not restart a dead engine](../../todo/kyberdash-tray-supervisor-restart-loop.md) | extends-component | KyberDash | 2026-11-10 | archived |
