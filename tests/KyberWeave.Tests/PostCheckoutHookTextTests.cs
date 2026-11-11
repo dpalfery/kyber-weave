@@ -117,6 +117,9 @@ public sealed class PostCheckoutHookTextTests
     [InlineData("#!/usr/bin/env FOO=bar bash\necho hi\n")]
     [InlineData("#!/bin/sh.exe\necho hi\n")]
     [InlineData("#!/usr/bin/env -u FOO bash\necho hi\n")]
+    [InlineData("#!/usr/bin/env -a name bash\necho hi\n")]
+    [InlineData("#!/usr/bin/env -iu FOO bash\necho hi\n")]
+    [InlineData("#!/usr/bin/env -S bash -e\necho hi\n")]
     public void InstallAcceptsAShellNamedThroughEnvAssignmentsOrWithAnExeSuffix(string existing)
     {
         Assert.Equal(HookTextOutcome.Inserted, PostCheckoutHookText.Install(existing).Outcome);
@@ -135,6 +138,19 @@ public sealed class PostCheckoutHookTextTests
         Assert.Equal("#!/bin/sh\n" + PostCheckoutHookText.Block + "own-line\n", installed.Text);
         Assert.Equal(HookTextOutcome.Unchanged, PostCheckoutHookText.Install(installed.Text!).Outcome);
         Assert.Equal("#!/bin/sh\nown-line\n", removed.Text);
+    }
+
+    [Fact]
+    public void AnIndentedLineThatReadsLikeAMarkerIsTheOwnersAndStays()
+    {
+        const string begin = "# >>> kyber-weave worktree index >>>";
+        const string end = "# <<< kyber-weave worktree index <<<";
+        string existing = $"#!/bin/sh\ncat <<EOF\n  {begin}\n  keep-me\n  {end}\nEOF\n";
+
+        HookTextEdit installed = PostCheckoutHookText.Install(existing);
+
+        Assert.Equal("#!/bin/sh\n" + PostCheckoutHookText.Block + existing["#!/bin/sh\n".Length..], installed.Text);
+        Assert.Equal(HookTextOutcome.Unchanged, PostCheckoutHookText.Remove(existing).Outcome);
     }
 
     [Fact]

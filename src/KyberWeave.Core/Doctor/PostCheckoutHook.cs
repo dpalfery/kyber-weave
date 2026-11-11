@@ -377,8 +377,9 @@ public static class PostCheckoutHookText
     /// </summary>
     /// <remarks>
     ///     A marker is a whole line, never a fragment of one, so a hook that merely mentions the marker text inside its
-    ///     own command is not mistaken for a block; whitespace around it is ignored, because an editor that trims or
-    ///     pads lines must not make the block look absent. Every copy of the block goes, so a hook that ended up with
+    ///     own command is not mistaken for a block; whitespace after it is ignored, because an editor that pads or
+    ///     trims line ends must not make the block look absent, and whitespace before it is not, because an indented
+    ///     copy is the owner's own text. Every copy of the block goes, so a hook that ended up with
     ///     two is left with one after the next install. An end marker with no begin marker before it is a leftover of
     ///     ours. So is a begin marker with no end marker after it: it goes together with the lines after it that are
     ///     still the block's own, and anything else is the owner's and stays.
@@ -416,7 +417,7 @@ public static class PostCheckoutHookText
                 count = 1;
                 while (count < block.Length - 1
                        && index + count < lines.Count
-                       && lines[index + count].Trim() == block[count].Trim())
+                       && lines[index + count].TrimEnd() == block[count])
                 {
                     count++;
                 }
@@ -428,8 +429,10 @@ public static class PostCheckoutHookText
         }
     }
 
+    // Only trailing whitespace is ignored. An indented line that reads like a marker sits inside the owner's own
+    // code, a here-document for one, and the block is always written at the start of a line.
     private static bool IsMarker(string line, string marker) =>
-        line.AsSpan().Trim().SequenceEqual(marker);
+        line.AsSpan().TrimEnd().SequenceEqual(marker);
 
     /// <summary>
     ///     Whether the shebang names a POSIX shell, directly or through <c>/usr/bin/env</c>. After <c>env</c>, flags,
@@ -448,7 +451,11 @@ public static class PostCheckoutHookText
         for (int index = 1; index < words.Length; index++)
         {
             string word = words[index];
-            if (word is "-u" or "-C" or "--unset" or "--chdir")
+            // These flags take their value as the next word. Short flags can be bundled, with the one that takes a
+            // value last, as in -iu NAME. -S and the signal flags carry their value in the same word, if at all.
+            bool takesNextWord = word is "--unset" or "--chdir" or "--argv0"
+                || (word.Length > 1 && word[0] == '-' && word[1] != '-' && word[^1] is 'u' or 'C' or 'a');
+            if (takesNextWord)
             {
                 index++;
                 continue;
