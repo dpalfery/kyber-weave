@@ -25,7 +25,6 @@ namespace KyberWeave.Tests.Arbiter;
 public sealed class ModelTargetResolverTests : IDisposable
 {
     private const string DifficultyRule = "KW-ARB-DIFFICULTY-001";
-    private const string LadderRule = "KW-ARB-LADDER-001";
     private const string Plan = "docs/plans/x.md";
     private const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: T2\n\nImplement T2.";
     private const string Harness = "claude";
@@ -114,19 +113,19 @@ public sealed class ModelTargetResolverTests : IDisposable
         string? model = null,
         string? renderedToken = Model,
         string? modelOverrideField = "model") => new()
-    {
-        Harness = Harness,
-        Phase = "pre",
-        Target = "csharp-dev",
-        Prompt = Prompt,
-        HarnessCaller = "conductor",
-        Session = "s1",
-        Cwd = _repo.Path,
-        ModelOverrideField = modelOverrideField,
-        Model = model,
-        RenderedModelToken = renderedToken,
-        IsDispatch = true,
-    };
+        {
+            Harness = Harness,
+            Phase = "pre",
+            Target = "csharp-dev",
+            Prompt = Prompt,
+            HarnessCaller = "conductor",
+            Session = "s1",
+            Cwd = _repo.Path,
+            ModelOverrideField = modelOverrideField,
+            Model = model,
+            RenderedModelToken = renderedToken,
+            IsDispatch = true,
+        };
 
     private async Task<(ArbiterDecisionRecord Record, ArbiterDispatchEvaluation Result)> RunAsync(
         ArbiterEvent ev,

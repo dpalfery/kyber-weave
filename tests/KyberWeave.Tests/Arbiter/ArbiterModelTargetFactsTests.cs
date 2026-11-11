@@ -1,5 +1,6 @@
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using Xunit;
 
@@ -18,7 +19,7 @@ namespace KyberWeave.Tests.Arbiter;
 /// <c>plan.task.files</c>, <c>plan.task.file-kinds</c> is a list of <c>ArbiterFileKind(Extension, Kind)</c>,
 /// and <c>ledger.task.prior-attempt</c> holds an <c>ArbiterPriorAttempt(Result, Profile, Token)</c>.
 /// </remarks>
-public sealed class ArbiterModelTargetFactsTests
+public sealed class ArbiterModelTargetFactsTests : IDisposable
 {
     private const string Plan = "docs/plans/x.md";
     private const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: T2\n\nImplement T2.";
@@ -104,7 +105,7 @@ public sealed class ArbiterModelTargetFactsTests
     private static ArbiterModelBlock Block(string profile, string? token, bool delivered) =>
         new(profile, token, token, "ladder", delivered, null);
 
-    private static ArbiterFactSet Enrich(ArbiterFactSet bag) =>
+    private ArbiterFactSet Enrich(ArbiterFactSet bag) =>
         ModelTargetFacts.Enrich(
             bag,
             new InFlightLedger(ArbiterDirectory),

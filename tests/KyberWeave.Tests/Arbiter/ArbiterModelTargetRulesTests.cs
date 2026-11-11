@@ -46,6 +46,9 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
 
         public int CallCount { get; private set; }
 
+        /// <summary>Every rule id the provider was asked a question about, across all calls.</summary>
+        public List<string> AskedRuleIds { get; } = [];
+
         public Task<ArbiterStep1BatchResult> AskStep1Async(
             IReadOnlyList<ArbiterRule> rules,
             ArbiterFactSet facts,
@@ -53,6 +56,7 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
             CancellationToken cancellationToken = default)
         {
             CallCount++;
+            AskedRuleIds.AddRange(rules.Select(rule => rule.Id));
             if (Fault is not null)
             {
                 throw Fault;
@@ -270,7 +274,7 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
         ArbiterDecisionRule rule = RuleOf(record, LadderRule);
         Assert.Equal("returns-unobservable", rule.Answer);
         Assert.Equal(RuleEffects.Keep, rule.Effect);
-        Assert.Equal(0, provider.CallCount);
+        Assert.DoesNotContain(LadderRule, provider.AskedRuleIds);
     }
 
     [Fact]
@@ -281,7 +285,7 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
         ArbiterDecisionRecord record = await EvaluateAndReadSecondaryAsync(provider, mode: "enforce");
 
         Assert.Equal("first-attempt", RuleOf(record, LadderRule).Answer);
-        Assert.Equal(0, provider.CallCount);
+        Assert.DoesNotContain(LadderRule, provider.AskedRuleIds);
     }
 
     [Fact]
