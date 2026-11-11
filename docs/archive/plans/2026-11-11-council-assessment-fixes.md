@@ -517,6 +517,7 @@ The targeted contract and engine test classes passed on each task, and the counc
 - Whether the security lens's floor of 8 should follow strictness is undecided (F-6).
 - The plan-read check misreads `review`, and other read verbs, inside a plan file name (F-7).
 - The reviewer's write permission comment in `products/kyber-squad/profiles/capabilities.yml` still describes a single findings file.
+- A findings JSON file read through `--findings` or `--prior` is taken as given: the verdict command does not check that its severities and confidences are in range.
 - The flat seat reader duplicates the Arbiter's reader for refutation findings.
 - Three minor findings from cycle 3 stay open:
   - the strict-to-flat re-read is decided per seat, not per field (`SeatOutputParser.cs:211`);

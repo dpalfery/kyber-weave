@@ -315,8 +315,11 @@ the policy below:
 
 - **Lens coverage (`KW-REVIEW-041`).** Every catalogue lens needs a seat file, a
   `--not-seated <lens>=<reason>`, or coverage carried from the prior cycle through `--prior`;
-  otherwise the command refuses to compute. A file whose name is not a catalogue lens keeps its
-  findings but covers no lens, and draws a warning. An unreadable seat file is refused
+  otherwise the command refuses to compute. An entry that cannot be a seat (a directory, a
+  file named only `.md`, a dotfile, or a name that is not a lowercase lens id) is named under a
+  `KW-REVIEW-041` warning and skipped, never parsed. A file with a lowercase lens-id name that is
+  not a catalogue lens (such as `prior-art-performance.md`) keeps its findings but covers no
+  lens, and draws the same warning. An unreadable seat file is refused
   (`KW-REVIEW-040`), and so is one that declares `NO FINDINGS:` or `SKIPPED:` while a seat-schema
   key followed by a colon (`id:`, `severity:`, `file:` and the rest of the finding schema)
   appears anywhere else in it, in a list, a flow mapping, a fence or after prose. The check fails
@@ -327,8 +330,14 @@ the policy below:
   does. A line inside the file is never moved. A finding whose file is missing, outside the
   repository or unreadable is left as written and reported as unverified, one info line per file.
 
+A seat file's `severity` must be one of the three names and its `confidence` a number from 1 to
+10, or the seat is refused (`KW-REVIEW-040`). A findings JSON file read through `--findings` or
+`--prior` is taken as given: the verdict command does not check that its severities and
+confidences are in range. That is a known gap, listed as a follow-up.
+
 A findings or `NO FINDINGS` seat that wrote no `Discovery:` line, read files directly with no index lookup and no
-`Index fallback:` line, or wrote an `Index fallback:` value outside the three modes, draws a
+`Index fallback:` line, wrote an `Index fallback:` value outside the three modes, or wrote two
+different `Index fallback:` lines (the first is kept), draws a
 warning (`KW-REVIEW-044`); a `SKIPPED` seat is exempt, and the warning is never a verdict input.
 The `correctness` seat also closes with `Input sites: N traced, M files with none`, above its
 `Discovery:` line, after a Markdown input-site table that the parser skips; a correctness seat that
