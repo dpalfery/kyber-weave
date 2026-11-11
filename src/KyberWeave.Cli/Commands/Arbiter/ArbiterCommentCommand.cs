@@ -17,6 +17,13 @@ public sealed class ArbiterCommentCommand : Command<ArbiterCommentSettings>
     /// <summary>Prints the class and the decision id. Exits 1 when the configured provider cannot be built.</summary>
     public override int Execute(CommandContext context, ArbiterCommentSettings settings, CancellationToken cancellationToken)
     {
+        // The same size limit the MCP tool applies, checked before any read, provider call or ledger append.
+        if (settings.Body.Length > ArbiterTextLimits.MaxTextChars)
+        {
+            AnsiConsole.MarkupLine($"[red]The comment is larger than {ArbiterTextLimits.MaxTextChars} characters.[/]");
+            return 1;
+        }
+
         string root = System.IO.Path.GetFullPath(settings.Root);
         // The same containment the served tool applies: a cited path that leaves the repository root is refused, not read.
         if (!settings.Summary && FileTextFacts.ResolveWithinRoot(ArbiterRepoRoot.Find(root), settings.Path) is null)

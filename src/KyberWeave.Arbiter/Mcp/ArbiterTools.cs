@@ -106,8 +106,8 @@ public sealed class ArbiterTools(ArbiterServeContext context)
     /// <summary>The most evaluations one MCP call may fan out to.</summary>
     private const int MaxFanOutUnits = 64;
 
-    /// <summary>The largest client text one MCP call may embed, in characters.</summary>
-    private const int MaxTextChars = 256 * 1024;
+    /// <summary>The largest client text one MCP call may embed, in characters: the shared Arbiter limit.</summary>
+    private const int MaxTextChars = ArbiterTextLimits.MaxTextChars;
 
     [McpServerTool(Name = "arbiter_evaluate_agent_dispatch_or_return", ReadOnly = false, OpenWorld = false)]
     [Description("""
