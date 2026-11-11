@@ -234,7 +234,8 @@ public sealed class ArbiterEvaluator
         }
 
         // Derived once: the bag declares the facts of every secondary, and the loop below plans them.
-        IReadOnlyList<string> secondaryNames = _secondaryTriggers(trigger, ev);
+        // Derived from this dispatch's own target: a multi-dispatch event carries a target per dispatch, not on the event.
+        IReadOnlyList<string> secondaryNames = _secondaryTriggers(trigger, ev with { Target = classification.Target });
         ArbiterFactSet facts = TriggerFactBuilder.Build(
             classification, prompt, config, ev.ObservesReturns, ev.ModelOverrideField, ev.Model, secondaryNames);
         facts = _gitFacts.Enrich(facts, classification, ev);
