@@ -615,14 +615,17 @@ public sealed class ArbiterEvaluator
                 ? ArbiterProviderStatuses.Answered
                 : ArbiterProviderStatuses.OverBudget;
         return new Step1Call(
-            FloorAnswers(batch.AnswersByRule, batch.ScoresByRule), batch.ScoresByRule, batch.Model, batch.Usage, status);
+            FloorAnswers(rules, batch.AnswersByRule, batch.ScoresByRule), batch.ScoresByRule, batch.Model, batch.Usage, status);
     }
 
     /// <summary>
-    /// An answer whose confidence is below its own floor is undecidable. The provider client applies the
-    /// floor itself; the evaluator applies it again so no provider can gate a dispatch on a score under its floor.
+    /// An answer whose confidence is missing or below its rule's own <c>confidence-at-least</c> floor is undecidable.
+    /// The provider client applies the floor itself; the evaluator applies it again so no provider can gate a dispatch
+    /// on a score it never proved above its floor. The floor is the rule's, not the score's threshold: a <c>noul</c>
+    /// score carries a probability ceiling and no confidence, and its answer stands.
     /// </summary>
     private static IReadOnlyDictionary<string, string> FloorAnswers(
+        IReadOnlyList<ArbiterRule> rules,
         IReadOnlyDictionary<string, string> answers,
         IReadOnlyDictionary<string, ArbiterStep1Score>? scores)
     {
@@ -632,15 +635,15 @@ public sealed class ArbiterEvaluator
         }
 
         Dictionary<string, string> floored = new(answers, StringComparer.Ordinal);
-        foreach (KeyValuePair<string, ArbiterStep1Score> pair in scores)
+        foreach (ArbiterRule rule in rules)
         {
-            if (pair.Value.Threshold is double floor
-                && pair.Value.Confidence is double confidence
-                && confidence < floor
-                && floored.TryGetValue(pair.Key, out string? answer)
+            if (rule.Ask?.ConfidenceAtLeast is double floor
+                && scores.TryGetValue(rule.Id, out ArbiterStep1Score? score)
+                && (score.Confidence is null || score.Confidence < floor)
+                && floored.TryGetValue(rule.Id, out string? answer)
                 && !string.Equals(answer, ArbiterStep1BatchResult.NotEvaluated, StringComparison.Ordinal))
             {
-                floored[pair.Key] = RuleEngine.Undecidable;
+                floored[rule.Id] = RuleEngine.Undecidable;
             }
         }
 
