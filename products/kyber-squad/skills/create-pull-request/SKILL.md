@@ -54,6 +54,11 @@ All inputs are optional; each has a resolution rule below.
 
 ## Before opening
 
+A change of at most 300 changed lines (added plus removed, from `git diff --numstat <base>...HEAD`)
+gets the quick review before its pull request is opened; a larger change gets the full pre-push
+council. Both are in the `code-review` skill, and the quick review's one-line result goes in the
+description.
+
 Verify each item, and fix or report anything that fails before creating the pull request:
 
 - [ ] **The source branch is pushed** and up to date with its remote.

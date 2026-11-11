@@ -36,7 +36,7 @@ Use the host's indexes before raw reads. Load the CodeGraph and `kw-docs` docume
 - Code: `codegraph_explore` first, and only when its provenance `branch=` is the branch under review: the server stays bound to the canonical checkout, so otherwise its answer describes a tree you are not reviewing. When your packet carries an absolute worktree path, pass it as `codegraph_explore`'s `projectPath`, which answers from that worktree's own index; with no worktree named, use the server's default project. This role runs no shell, so the CLI form, `codegraph explore "…"`, is not available to it. Read the path directly only when that call cannot answer for the branch under review (an error, a not-indexed reply, or an answer whose provenance `branch=` is another branch), and count each such read as a direct read with the reason, naming the mode: `projectPath: error`, `projectPath: not-indexed` or `projectPath: wrong-branch <got> vs <wanted>`; a lens that can read neither returns `SKIPPED` with the reason.
 - Documentation: `docs_answer_question_from_repo_documentation`, `docs_find_documents_citing_code_symbol`, or `docs_look_up_glossary_term_definition` before searching or opening documentation files.
 - Read or search a file directly only for what an index does not cover (configuration, infrastructure, files the docs index missed), when a tool reports the file stale, or to confirm one detail it did not return. When a tool or index is unavailable, fall back to direct reads and say so.
-- Discovery reporting is exempt for this lens because its machine-consumed output is the fixed findings list, `SKIPPED`, or `NO FINDINGS` schema. Follow the discovery order internally; do not append counts or alter that output schema. One line is the exception, because a review that silently read around a missing index looks the same as one that used it: when you read code directly because the index could not answer for the branch under review, add `Index fallback: <mode>` once, immediately before the attestation line, with the mode named above (`projectPath: error`, `projectPath: not-indexed` or `projectPath: wrong-branch <got> vs <wanted>`). The reviewer lists it under Council coverage. Omit the line when the index answered.
+- Report discovery on your findings and `NO FINDINGS` forms. Put `Discovery: codegraph N, docs N, direct reads N` directly above the attestation line, below any `Index fallback` line. Name a reason for each direct read of indexed code. A review that silently read around a missing index looks the same as one that used it, so one more line applies: when you read code directly because the index could not answer for the branch under review, add `Index fallback: <mode>` once, above the `Discovery:` line, with the mode named above (`projectPath: error`, `projectPath: not-indexed` or `projectPath: wrong-branch <got> vs <wanted>`). The reviewer lists it under Council coverage. Omit the line when the index answered. Each of these closing lines is read only at the start of a line.
 
 # 2. Read the code, not just the diff
 
@@ -58,7 +58,7 @@ Every finding is one block in this exact shape:
   severity: critical | major | minor
   confidence: <1-10>
   file: <repository-relative path>
-  line: <line number>
+  line: <line number in the file>
   excerpt: |
     <the verbatim source line or lines the finding is about>
   claim: <one sentence: what is wrong>
@@ -86,10 +86,10 @@ Score honestly against what you actually verified:
 
 - **9-10** — you read the code, traced the path, and can name the exact failing input.
 - **7-8** — you read the code and the failure follows from it, but you did not trace every branch.
-- **4-6** — the shape looks wrong but you could not confirm it. **Do not report.**
-- **1-3** — pattern-matched from the diff alone. **Do not report.**
+- **4-6** — the shape looks wrong but you could not confirm it.
+- **1-3** — pattern-matched from the diff alone.
 
-Findings below 7 are noise. Suppressing them is part of the job, not a lapse in thoroughness.
+Report a finding only at or above the effective min-confidence your invocation names; when none is named, the floor is 7. Leaving out what falls below it is part of the job, not a lapse in thoroughness.
 
 # 4. Boundaries
 
@@ -101,11 +101,19 @@ Findings below 7 are noise. Suppressing them is part of the job, not a lapse in 
 
 # 5. Output
 
-Return the YAML findings list, then the attestation line as its last line, and nothing else — no preamble, no summary, no closing commentary. The one permitted addition is the `Index fallback: <mode>` line from the discovery order, directly above the attestation line on either form. If the lens applied and found nothing, return:
+Return the YAML findings list, then the attestation line as its last line — no preamble, no summary, no closing commentary. The only lines between your outcome and the attestation are the closing lines below. `line` is the line number in the file as you read it, never a line offset in the patch file. If the lens applied and found nothing, return:
 
 ```
 NO FINDINGS: <one sentence on what you checked and why it is clean>
 REVIEW.md sections checked: [<rule ids and sections you applied, e.g. R8, §1>]
+```
+
+On both forms, the closing lines go between the outcome and the attestation, each at the start of its own line, in this order — `Index fallback:` only when it applies:
+
+```
+Index fallback: <mode>
+Discovery: codegraph N, docs N, direct reads N
+REVIEW.md sections checked: [<rule ids and sections you applied>]
 ```
 
 The attestation line is the same on both forms. It shows the guidance was read and applied, not skipped, so a report with no attestation line is recorded as a coverage gap. `SKIPPED` returns no attestation line; its reason stands on its own. The `NO FINDINGS` sentence matters too: it is the difference between a lens that ran and a lens that gave up, and it is the only way the reviewer can tell them apart.

@@ -71,11 +71,15 @@ kyber-weave review duplicates . --out artifacts/duplicates.json
 
 The end-of-run council (`code-reviewer`) runs the second form: `--council` admits the full-suite gates, and only the council and CI may pass it. Anyone else running this procedure, including the pre-push self-review gate, uses the first form and never adds it.
 
+The council stops waiting for its gates at `review.council-deadline-seconds` (default 600). The deadline bounds only the full `--council` run: the gate it cuts, and every gate after it, is reported as not run (`KW-REVIEW-039`), and the council goes on to a verdict with the evidence it has. A gate that times out, or that the council deadline stops, is NOT RUN: it is listed as unverified, and it is never a blocking failure. A single-gate re-check with `--gate` and a run without `--council` have no deadline.
+
 The third form is the single-gate re-check. After fixing one failed gate, `--gate <gate-id>` re-runs only that gate, so confirming one fix does not pay for the whole declared suite again. The id is one the host declares under `review.gates`; an id that names no declared gate is refused before any gate starts, rather than reported as a suite that ran and passed.
 
 Write both under `artifacts/`. The CLI subprocess writes them via `process.execute`, so a
-denied write tool on the reviewer does not block the run. If the files cannot be persisted,
-keep the JSON from the command's response and pass it to `review verdict`.
+denied write tool on the reviewer does not block the run. Copy the gate report into the
+cycle folder as `gates.json` (step 5), which is the file the verdict command reads. If the
+files cannot be persisted, keep the JSON from the command's response and pass it to
+`review verdict`.
 
 `--base <ref>` names the commit the change is reviewed against — the branch or head the run
 started from. The gate runner measures the paths that changed since it, and the report
@@ -112,6 +116,10 @@ report records that as a coverage gap under Council coverage. `SKIPPED` seats re
 attestation, and a missing attestation is never a verdict input. Where the harness cannot start
 separate seats, the reviewer applies each lens in turn with the same guidance sections and
 returns the same attestation line.
+
+Seat one lens per spawn. Save each seat's output unchanged as `<lens>.md` in the cycle's `seats` folder before you adjudicate. The verdict command matches a seat file to a lens by its name alone, so a file named for two lenses at once (`prior-art-performance.md`) keeps its findings but covers no lens and draws a `KW-REVIEW-041` warning; one spawn per lens and one file per lens avoids it. A finding you raise yourself, such as a claim with no gate behind it, goes in `reviewer.md` in the same folder.
+
+Every finding cites a file and a `line`, and `line` is the line number in the file as you read it, never a line offset in the patch file. The verdict command checks each cited line against the file (`KW-REVIEW-043`) and drops a finding whose line does not exist.
 
 The **Runner** column is not advisory. `review-lens` reads code and judges it. `review-triage`
 takes a machine artifact — analyzer diagnostics, a manifest diff — and attributes it to the
@@ -172,13 +180,15 @@ evidence like any other.
 
 ### 3. Confirm before believing
 
-For every `major` or `critical` finding, spend one more `review-lens` invocation trying to
-**refute** it. Unless you hold `arbiter_evaluate_agent_dispatch_or_return` (see Arbiter fallback), open the invocation
+Run the verdict command in step 5 once the seats are saved: it lists the accepted `major`
+and `critical` findings as refutation candidates. Refute in one batched review-lens spawn, and only the findings the verdict command lists as refutation candidates (KW-REVIEW-046).
+That spawn tries to **refute** each one. Unless you hold `arbiter_evaluate_agent_dispatch_or_return` (see Arbiter fallback), open the invocation
 with the routing header block — `KYBER-ARBITER: true`, then `REFUTE: <lens>/<slug>` with the
 finding's id — and give the finding's YAML after the header block unchanged. Say so explicitly in
 the invocation: the confirming instance argues the finding is wrong and defaults to refuted when it
 cannot establish otherwise. Pass it the same review-guidance sections, and have it test the
 finding's `guidance:` rule id against them: a finding that misapplies the rule it names is refuted.
+Each refuted finding is dropped on the next verdict run with `--drop <id>=refuted: <reason>`.
 
 This is the adversarial pass the `security-review` skill already applies to vulnerability
 candidates, generalized to every lens and for the same reason — a confident wrong finding
@@ -197,23 +207,27 @@ The reviewer applies the checks no individual lens can, because no lens sees the
 
 - **Drop anything missing `excerpt`, `evidence`, or `failure_scenario`.** No charitable
   reconstruction — a finding you complete on the reporter's behalf is one you are inventing.
-- **Drop anything whose `confidence` is below `review.policy.min-confidence`.** Equal to
-  the threshold is kept; above it is kept. Below it is noise.
+- **Leave confidence to the engine.** The verdict engine drops findings below the effective min-confidence; you never drop a finding for confidence yourself.
+- **Keep the severity the seat gave.** You never change a finding's severity: you keep it, or drop it with a reason through `--drop <id>=<reason>`.
 - **Verify the quote.** Open the file and confirm the excerpt is really there. A finding
   quoting code that does not exist invalidates that lens's whole run, and the report says so.
-- **Reconcile duplicates** — keep the most concrete, and note the corroboration.
+- **Reconcile duplicates** — keep the most concrete, note the corroboration, and drop the
+  others with `--drop <id>=duplicate of <kept id>`.
 - **Reconcile contradictions** — read the code and resolve, or escalate as unresolved.
 - **Check the claims against the gates.** Any assertion that something was built, tested, or
-  verified, with no corresponding gate result, is a `critical` finding.
+  verified, with no corresponding gate result, is a `critical` finding, written in
+  `reviewer.md` in the seats folder.
 
 ### 5. Compute the verdict
 
-Write the surviving findings to `artifacts/findings.json`, beside the gate report — the
-findings artifact the reviewer names, so a later audit reads what the verdict read.
+Each cycle writes to `.agent_scratchpad/<task-id>/review/cycle-<n>/`: the `seats` folder, `gates.json`, the `findings.json` the verdict command writes, and `head`; keep it until the run ends. `head` holds the commit the cycle reviewed, which is where the next cycle's fix delta starts. This is the only place the verdict command is written down:
 
 ```bash
-kyber-weave review verdict . --findings artifacts/findings.json --gates artifacts/gates.json
+kyber-weave review verdict . --seats <cycle>/seats --gates <cycle>/gates.json --out <cycle>/findings.json [--drop <id>=<reason>]... [--not-seated <lens>=<reason>]... [--prior <prior cycle>]
 ```
+
+The command reads the findings from the seat files and writes the surviving findings to
+`findings.json`, so a later audit reads what the verdict read. Record every lens you do not seat with `--not-seated <lens>=<reason>`; the verdict refuses to compute while a lens has neither a seat file nor a reason (KW-REVIEW-041). A lens that needs gate input the run never produced is not seated, for example `--not-seated static-analysis-triage=no analyzer output: inspectcode not run`. A verifier cycle passes `--prior`, and a lens the prior cycle covered is carried from it.
 
 Rules, in evaluation order. The first that fires decides:
 
@@ -236,7 +250,7 @@ number. Minor findings never block at any level. Pass the strictness and the eff
 `min-confidence` to **every seat** in its invocation, so a strict host hears lower-confidence
 findings instead of having them dropped at the source and a lenient host is not flooded.
 
-**Remediation pass note.** A `REQUEST_CHANGES` verdict on actionable Critical/Major findings earns one bounded remediation pass through the conductor (same session, same file scope, fresh task-gate re-run) before any park flag; Unactionable or second-failure findings park immediately with their finding ids (stop reworking each and list the ids in the PR; park never holds back delivery). Minor/Info findings never trigger a remediation loop and are reported without blocking: the `major-count-blocks` threshold and the table above still decide the verdict, and the fixed rules are not rewritten by this note.
+**Review loop.** The council re-reviews after every fix round until it returns APPROVE. Every review after the first runs in the verifier mode of the dp-code-reviewer skill: it re-checks the prior findings and the fix delta, not a full council. A verifier cycle reviews the fix delta `git diff <prior head>...<head>`, re-seats only the lenses that own an outstanding finding or whose predicate the delta newly satisfies, and passes `--prior <prior cycle folder>`. Minor/Info findings never start a cycle and never block: the `major-count-blocks` threshold and the table above still decide the verdict, and the loop does not rewrite those rules. The `delivery-execution` skill owns the loop's hard stop.
 
 **Risk** (`LOW` / `MEDIUM` / `HIGH`) is graded from what was found and what was touched,
 never from diff size. A twelve-line migration dropping a column outranks a three-thousand-line
@@ -247,6 +261,23 @@ padding the number, which is exactly what the `test-adequacy` lens is there to c
 
 Report the verdict the engine returned. You may not override it. If you believe it is wrong,
 say so alongside it with the finding that should have changed it.
+
+## Quick review
+
+A change of at most 300 changed lines (added plus removed, from `git diff --numstat <base>...HEAD`) gets the quick review before its pull request is opened; a larger change gets the full pre-push council.
+
+The quick review is one pass by the session that made the change. It starts no seats and no
+spawns, runs no gates beyond what the root `AGENTS.md` requires before a pull request, and does
+not run the verdict engine. Walk the whole diff against this checklist:
+
+1. **Intent.** Does the diff do what its description says, and nothing it does not say?
+2. **Correctness of the changed lines.** Boundaries, absent values, error paths, and state.
+3. **Siblings.** When the diff changes a rule's wording in one file, list every other file that carries the same rule text, check each one, and report each sibling the diff left stale.
+4. **Contract-assertion strength.** A test or contract check that would pass with the fix reverted is a finding (`REVIEW.md` R14).
+5. **Defect classes.** The defect-class checklist of the pre-push gate below, step 3.
+
+Fix every major-or-worse finding before the pull request is opened. The pull request
+description carries one line: `Quick review: <n> findings, <m> fixed, open: <ids or none>`.
 
 ## Pre-push self-review gate
 
@@ -264,8 +295,8 @@ Procedure above and the host's declared gates.
    request before the council runs, so the council reviews a pull request that already
    exists. Then run full Procedure steps 1–5 over the whole accumulated diff against its
    base, not just the last files touched. Fix major-or-worse findings where a bounded fix
-   exists, re-run steps 1–5 over the updated diff, and use that second verdict in the pull
-   request description. A verdict computed before a fix is void. List any major-or-worse
+   exists, re-review the fix as a verifier cycle (see **Review loop** above), and use that
+   later verdict in the pull request description. A verdict computed before a fix is void. List any major-or-worse
    finding still open by id in the pull request description. Minor/Info findings never
    block. Required CI decides readiness; the verdict does not gate the push or the ready step.
    Run the gates command without `--council`. The CLI refuses the full-suite gates, and each refusal is a blocking failure that names the targeted alternatives; report those as "not run here, CI runs them", and do not count a refusal as a code finding in the verdict.

@@ -28,6 +28,7 @@ Do not read the prose for sense; verify it. For each changed document or doc com
 3. Run the reverse pass: for each behaviour, name, count or default the diff **changes** in
    code, search the documentation for the old value and for descriptions of it. A document the
    diff did not touch can be the one that is now false.
+4. Run the sibling sweep. When the diff changes a rule's wording in one file, list every other file that carries the same rule text, check each one, and report each sibling the diff left stale. Find the siblings with Grep on a distinctive phrase of the old wording and with `docs_find_duplicates_conflicts_ambiguous_terms`, which lists duplicated and conflicting statements across the docs. When nothing is stale, name the siblings you checked in the `NO FINDINGS` sentence, so the reviewer can tell a sweep that ran from one that did not.
 
 ## What to look for
 
