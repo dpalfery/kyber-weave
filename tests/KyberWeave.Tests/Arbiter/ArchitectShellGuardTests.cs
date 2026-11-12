@@ -87,6 +87,10 @@ public sealed class ArchitectShellGuardTests
     [InlineData("codegraph explore \"-x\"")]
     [InlineData("codegraph explore \"x y\"")]
     [InlineData("git status || git log")]
+    [InlineData("uniq -f 1 file")]
+    [InlineData("uniq -s 2 file")]
+    [InlineData("uniq -w 3 file")]
+    [InlineData("uniq file")]
     public void Bash_ListedCommand_IsAllowed(string command)
     {
         ShellGuardResult result = CheckBash(command);
@@ -100,6 +104,7 @@ public sealed class ArchitectShellGuardTests
     [InlineData("git status; git log -1")]
     [InlineData("git status 2>&1")]
     [InlineData("git status || git log")]
+    [InlineData("cd C:\\w; touch docs/plans/x.md")]
     public void PowerShell_ListedCommand_IsAllowed(string command)
     {
         ShellGuardResult result = Check("PowerShell", command);
@@ -147,6 +152,8 @@ public sealed class ArchitectShellGuardTests
     [InlineData("touch -r a docs/plans/x.md", "touch -r a docs/plans/x.md")]
     [InlineData("cd -", "cd -")]
     [InlineData("git log \"x", "git log \"x")]
+    [InlineData("uniq -- in -out", "uniq -- in -out")]
+    [InlineData("git log | uniq -- - -b", "uniq -- - -b")]
     [InlineData("sort --ou=out1.txt in.txt", "sort --ou=out1.txt in.txt")]
     [InlineData("sort --out=f x", "sort --out=f x")]
     [InlineData("sort --comp=gzip x", "sort --comp=gzip x")]
@@ -226,6 +233,52 @@ public sealed class ArchitectShellGuardTests
 
         Assert.False(result.Allowed, "A command ending in a separator is not on the architect's list and must be denied.");
         Assert.Contains(RuleId, result.Reason ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Commands denied for a reason that is not a single offending segment: an unquoted control or Unicode
+    /// separator the tokenizer must not read as a word, a cd whose directory is not tracked, or a cd with no
+    /// chained command. These pin the denial and the rule id only.
+    /// </summary>
+    [Theory]
+    [InlineData("Bash", "ls .\rrm x")]
+    [InlineData("Bash", "ls . || cd docs/plans && touch x.json")]
+    [InlineData("Bash", "ls | cd docs/plans && touch x.json")]
+    [InlineData("Bash", "cd ~ && touch docs/plans/x.md")]
+    [InlineData("Bash", "cd ~/docs && ls")]
+    [InlineData("Bash", "cd /w; touch docs/plans/x.md")]
+    [InlineData("PowerShell", "ls .\rRemove-Item x")]
+    [InlineData("PowerShell", "ls 'a\u2019; Remove-Item x \u2018b'")]
+    [InlineData("PowerShell", "ls a\u2018b")]
+    [InlineData("PowerShell", "ls a\u2019b")]
+    [InlineData("PowerShell", "ls a\u201Ab")]
+    [InlineData("PowerShell", "ls a\u201Bb")]
+    [InlineData("PowerShell", "ls a\u201Cb")]
+    [InlineData("PowerShell", "ls a\u201Db")]
+    [InlineData("PowerShell", "ls a\u201Eb")]
+    [InlineData("PowerShell", "ls x\u0085Remove-Item y")]
+    [InlineData("PowerShell", "ls x\u2028Remove-Item y")]
+    [InlineData("PowerShell", "ls x\u2029Remove-Item y")]
+    [InlineData("PowerShell", "ls . || cd docs/plans; touch x.json")]
+    public void CommandWithAnUntrackedSeparatorOrDirectory_IsDeniedUnderTheRule(string tool, string command)
+    {
+        ShellGuardResult result = Check(tool, command);
+
+        Assert.False(result.Allowed, $"'{command}' ({tool}) must be denied.");
+        Assert.Contains(RuleId, result.Reason ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Bash_TouchPlanFileUnderAGitBashStyleWorkingDirectory_IsAllowed()
+    {
+        // Git Bash reports the worktree as /c/w; the same planning-folder touch resolves beneath it.
+        ShellGuardResult result = ArchitectShellGuard.Check(
+            "Bash",
+            CommandInput("touch docs/plans/x.md"),
+            "/c/w",
+            PlanningDirectories.Value);
+
+        Assert.True(result.Allowed, $"A planning-folder touch under /c/w must be allowed. Reason: {result.Reason}");
     }
 
     [Fact]

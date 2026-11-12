@@ -47,6 +47,10 @@ public sealed class ArchitectShellGuardSyncTests
             .ToHashSet(StringComparer.Ordinal);
         HashSet<string> forms = ArchitectShellGuard.DocumentedForms.Keys.ToHashSet(StringComparer.Ordinal);
 
+        // A clause that parsed to nothing would make the set comparison below pass vacuously.
+        Assert.NotEmpty(documented);
+        Assert.Equal(27, documented.Count);
+
         string[] extra = documented.Except(forms, StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
         string[] missing = forms.Except(documented, StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
 
@@ -58,9 +62,12 @@ public sealed class ArchitectShellGuardSyncTests
     }
 
     [Fact]
-    public void DocumentedKeys_IsNotEmpty()
+    public void DocumentedKeys_IsNotEmptyAndHoldsTheTwentySevenForms()
     {
+        // The member data the per-key theory runs over must be the whole table, not an empty or partial set.
         Assert.NotEmpty(DocumentedKeys());
+        Assert.Equal(27, DocumentedKeys().Count());
+        Assert.Equal(ArchitectShellGuard.DocumentedForms.Count, DocumentedKeys().Count());
     }
 
     [Theory]
