@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Core.Arbiter.Plans;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -175,6 +176,64 @@ public sealed class ArbiterCliCommandTests : IDisposable
             new ArbiterSettings { Path = plan }));
 
         Assert.Contains("KW-ARB-PARSE-001", execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The execution digest is the value a task file records. The plan command has to report it
+    /// where a script can read it, or a reader can only reproduce it by reaching into the parser,
+    /// and cannot confirm that a task file was written from this plan.
+    /// </summary>
+    [Fact]
+    public void Plan_JsonReportsTheExecutionDigest()
+    {
+        string text = DigestPlan(frontmatterStatus: "current", bodyStatus: "Ready");
+        string plan = WriteFile("arbiter-plan-digest-json.md", text);
+
+        ArbiterPlanCommand command = new();
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new ArbiterSettings { Path = plan, Format = "json" }));
+
+        string expected = PlanDocumentParser.ExecutionDigest(PlanDocumentParser.Parse(text));
+        string reported = ReportedExecutionDigest(execution.Output);
+        Assert.Equal(expected, reported);
+        Assert.Matches("^[0-9a-f]{64}$", reported);
+    }
+
+    /// <summary>
+    /// The digest is also printed in the default table, on one line: a folded table cell would
+    /// split the 64 characters across rows, and a reader could no longer copy it whole.
+    /// </summary>
+    [Fact]
+    public void Plan_TableShowsTheExecutionDigest()
+    {
+        string text = DigestPlan(frontmatterStatus: "current", bodyStatus: "Ready");
+        string plan = WriteFile("arbiter-plan-digest-table.md", text);
+
+        ArbiterPlanCommand command = new();
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new ArbiterSettings { Path = plan }));
+
+        string expected = PlanDocumentParser.ExecutionDigest(PlanDocumentParser.Parse(text));
+        Assert.Matches("(?m)^[^\\r\\n]*" + expected + "[^\\r\\n]*\\r?$", execution.Output);
+    }
+
+    /// <summary>
+    /// A status change is bookkeeping, not a plan edit, so it must not stale a task file. The
+    /// digest covers the tasks, the contract and the out-of-scope list, and not the status
+    /// fields, which the plan's owner moves without touching what a worker is asked to do.
+    /// </summary>
+    [Fact]
+    public void Plan_DigestIgnoresAStatusFlip()
+    {
+        string draft = WriteFile("arbiter-plan-digest-draft.md", DigestPlan(frontmatterStatus: "draft", bodyStatus: "Draft"));
+        string ready = WriteFile("arbiter-plan-digest-ready.md", DigestPlan(frontmatterStatus: "current", bodyStatus: "Ready"));
+
+        string draftDigest = ReportedDigestOf(draft);
+        string readyDigest = ReportedDigestOf(ready);
+
+        Assert.Equal(draftDigest, readyDigest);
     }
 
     [Fact]
@@ -434,6 +493,105 @@ public sealed class ArbiterCliCommandTests : IDisposable
             new ArbiterSettings { Path = host }));
 
         Assert.Contains("KW-ARB-AUDIT-001", execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The plan the digest tests write: a file scope on each task, one contract row and an
+    /// out-of-scope path, so every field the digest covers has a value an edit could move.
+    /// </summary>
+    private static string DigestPlan(string frontmatterStatus, string bodyStatus) =>
+        $$"""
+        ---
+        id: plans/2026-11-12-digest-plan
+        title: Digest plan
+        doc-type: plan
+        status: {{frontmatterStatus}}
+        component: KyberWeave
+        owner: Maintainers
+        last-reviewed: 2026-11-12
+        development-mode: test-first
+        ---
+
+        # Digest plan
+
+        **Status: {{bodyStatus}}.** This plan is approved for execution.
+
+        ## Test contract
+
+        | Task | Test project or file | Runner filter | Observable behaviour | RED evidence required | GREEN acceptance |
+        |---|---|---|---|---|---|
+        | T1 | `tests/KyberWeave.Tests/ArbiterCliCommandTests.cs` | `dotnet test --filter FullyQualifiedName~ArbiterCliCommandTests` | The digest is reported. | Fails: the digest is absent. | Passes. |
+
+        ## Tasks
+
+        ### T1: First task
+
+        - **Files:** `src/KyberWeave.Cli/Commands/Arbiter/ArbiterPlanCommand.cs`
+        - **Depends on:** none
+        - **Required skills:** `csharp-dev`
+
+        ### T2: Second task
+
+        - **Files:** `src/KyberWeave.Core/Arbiter/Plans/PlanDocumentParser.cs`
+        - **Depends on:** T1
+        - **Required skills:** `csharp-dev`
+
+        ## Out of scope
+
+        - `docs/archive/**`
+        """;
+
+    /// <summary>
+    /// The execution digest the plan command reports for a plan file. Shared with the task-file
+    /// tests, which record the same digest in a task file they then validate.
+    /// </summary>
+    internal static string ReportedDigestOf(string planPath)
+    {
+        ArbiterPlanCommand command = new();
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new ArbiterSettings { Path = planPath, Format = "json" }));
+
+        return ReportedExecutionDigest(execution.Output);
+    }
+
+    /// <summary>
+    /// Reads the <c>execution-digest</c> metric from the output, which must be one JSON document
+    /// with a <c>metrics</c> object. Each shape check fails the test with the output named rather
+    /// than throwing from the reader.
+    /// </summary>
+    private static string ReportedExecutionDigest(string output)
+    {
+        using JsonDocument document = ParseWholeOutput(output);
+        JsonElement root = document.RootElement;
+
+        JsonElement metrics = default;
+        bool hasMetrics = root.ValueKind == JsonValueKind.Object
+            && root.TryGetProperty("metrics", out metrics)
+            && metrics.ValueKind == JsonValueKind.Object;
+        Assert.True(hasMetrics, $"expected a 'metrics' object at the root of the plan command's JSON output. Output:{Environment.NewLine}{output}");
+
+        JsonElement digest = default;
+        bool hasDigest = metrics.TryGetProperty("execution-digest", out digest)
+            && digest.ValueKind == JsonValueKind.String;
+        Assert.True(hasDigest, $"expected a string 'execution-digest' metric in the plan command's JSON output. Output:{Environment.NewLine}{output}");
+
+        return digest.GetString()!;
+    }
+
+    private static JsonDocument ParseWholeOutput(string output)
+    {
+        try
+        {
+            return JsonDocument.Parse(output);
+        }
+        catch (JsonException exception)
+        {
+            Assert.Fail(
+                $"expected the plan command's whole output to be one JSON document, but it did not parse " +
+                $"({exception.Message}). Output:{Environment.NewLine}{output}");
+            throw;
+        }
     }
 
     private string SeedLedger(string name, Action<InFlightLedger> seed)

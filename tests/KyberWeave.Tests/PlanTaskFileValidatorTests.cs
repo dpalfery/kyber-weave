@@ -324,6 +324,44 @@ public sealed class PlanTaskFileValidatorTests
                 "KyberWeave.Tests, so that command would run zero tests and exit zero.");
         }
     }
+
+    /// <summary>
+    /// The digest a task file records is the one the plan command reports, so the conductor can
+    /// copy it from the command rather than recompute it. A reported digest validates clean; a
+    /// wrong one is stale, which proves the check is live rather than passing every file.
+    /// </summary>
+    [Fact]
+    public void ADigestReportedByArbiterPlanPassesKWDOCTASKS003()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        string reported = ArbiterCliCommandTests.ReportedDigestOf(
+            Path.Combine(fixture.Root, PlanTaskFileProbe.PlanPath.Replace('/', Path.DirectorySeparatorChar)));
+        fixture.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile(digest: reported));
+
+        AssertDoesNotReport(Validate(fixture), StaleDigest);
+
+        using DocFixture control = PlanTaskFileProbe.Corpus();
+        control.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile(digest: new string('0', 64)));
+
+        AssertReports(Validate(control), StaleDigest);
+    }
+
+    /// <summary>
+    /// A stale digest names the command that shows the plan's digest and the plan it belongs to,
+    /// so the operator has something to run rather than a bare hash mismatch.
+    /// </summary>
+    [Fact]
+    public void AStaleDigestHintNamesTheDigestCommand()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        fixture.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile(digest: new string('0', 64)));
+
+        ReportedFindings run = Validate(fixture);
+
+        AssertReports(run, StaleDigest);
+        Assert.Contains("kyber-weave arbiter plan", run.Output, StringComparison.Ordinal);
+        Assert.Contains(PlanTaskFileProbe.PlanPath, run.Output, StringComparison.Ordinal);
+    }
 }
 
 /// <summary>
@@ -539,12 +577,14 @@ internal static class PlanTaskFileProbe
     /// </param>
     /// <param name="missingPromptPart">Removes the prompt's <c>command</c> or its <c>acceptance</c> criteria.</param>
     /// <param name="promptPrefix">Text placed before every prompt.</param>
+    /// <param name="digest">The execution digest to record; defaults to the digest of the plan.</param>
     internal static string TaskFile(
         string? planMarkdown = null,
         int schemaVersion = SchemaVersion,
         string? edit = null,
         string? missingPromptPart = null,
-        string? promptPrefix = null)
+        string? promptPrefix = null,
+        string? digest = null)
     {
         string plan = planMarkdown ?? PlanMarkdown();
         List<Dictionary<string, object?>> tasks =
@@ -572,7 +612,7 @@ internal static class PlanTaskFileProbe
         {
             ["schema-version"] = schemaVersion,
             ["plan"] = PlanPath,
-            ["execution-digest"] = ExecutionDigest(plan),
+            ["execution-digest"] = digest ?? ExecutionDigest(plan),
             ["tasks"] = tasks
         };
 
