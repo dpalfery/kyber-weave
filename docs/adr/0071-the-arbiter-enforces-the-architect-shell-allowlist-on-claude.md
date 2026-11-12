@@ -116,3 +116,5 @@ precedence rules above. Viable alternatives were rejected, and the rejection is 
   found in the harness hook log.
 - The worker read guard does not cover the `PowerShell` tool, because `ClaudeHookAdapter.IsReadTool` and
   `ClaudeRenderer.ReadGuardMatcher` name `Bash` only. This is a known gap and a follow-up.
+- The path checks are textual, so a symlink, Bash `CDPATH` or a PowerShell backslash on a POSIX host can move the
+  real target of a `touch`. The residual is an empty `.md` or `.json` file, tracked in issue #605.

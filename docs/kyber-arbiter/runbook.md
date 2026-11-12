@@ -153,17 +153,19 @@ match a documented form. Anything else is denied before it runs, including:
 - git global options other than `--no-pager` and `-C` (for example `git -c`), and `git … --output`. Long-option abbreviations of denied git options (`--output`, `--ext-diff`, `--textconv`) are refused too;
 - `find -exec`, `-ok` or `-delete`, and `tail -f`;
 - `sort` with any flag that is not on its allowlist (so `sort -o` is denied), and `rg` with a denylisted flag such as `--pre`;
-- `touch` on anything other than a `.md` or `.json` file under the plan, spec and todo directories. A relative `touch` path
-  must resolve under the plan, spec or todo folder of the payload's working directory, not of a directory reached by
-  `cd`. A `cd` out of the tree makes a later `touch` denied, and a blank working directory fails closed, so every
-  `touch` is denied then. An absolute path is allowed only when it resolves inside the working tree's planning directories, and a `..` escape is denied.
+- `touch` on anything other than a `.md` or `.json` file under the plan, spec and todo directories. The guard allows at most one `cd` per call, on both tools, and checks each `touch` operand against both the
+  directory the call started in and the directory after that `cd`. A relative operand must resolve under the plan,
+  spec or todo folder in both readings. A `cd` out of the tree makes a later `touch` denied, and a blank working
+  directory fails closed, so every `touch` is denied then. An operand with an unquoted `*`, `?` or `[` is refused, so
+  quote patterns. An absolute path is allowed only when it resolves inside the working tree's planning directories,
+  and a `..` escape is denied.
 - a structural pre-filter runs before any form is matched and refuses non-ASCII characters on both tools, control characters, a line feed inside quotes, an unquoted `#` comment, and any backslash in Bash. A backslash is literal in PowerShell.
 - `uniq` counts every word after `--` as an operand, so a second file after `--` is refused.
 
 A command the guard cannot parse is denied, so a wrongly denied command costs one `STATUS: BLOCKED` round trip.
 
 **Forms that look unusual but are allowed.** The Bash tool resets its directory on every call, so `cd <dir> &&`
-runs a command in the worktree, and `git -C <dir>` does the same for git. `cd` counts only as the first segment or after `&&` (after `;` in PowerShell), and a `cd` to `~` is denied. The docs commands take a path operand
+runs a command in the worktree, and `git -C <dir>` does the same for git. `cd` counts only as the first segment or after `&&` (after `;` in PowerShell), at most one `cd` is allowed per call, and a `cd` to `~` is denied. The docs commands take a path operand
 in place of `.`. `sort` accepts only the flags on its allowlist, and `rg` accepts any flag except the ones on its
 denylist. `touch` operands resolve as described in the list above. `codegraph explore` takes exactly one query, and `doctor --ensure` takes no operand. `rg` refuses `--pre`, `--pre-glob`, `-z`, `--search-zip`, `--hostname-bin` and `--hyperlink-format`, and abbreviations of them; `--pretty` is allowed. `kyber-weave arbiter plan <plan file> -f json` is read-only
 and is the architect's one way to read a task file's execution digest; it is on the architect's command list and in
@@ -204,6 +206,10 @@ The user-scope copy runs without that trust step while the architect sub-agent i
 from `Read`, `Grep`, `Glob` and `Bash` only. `ClaudeHookAdapter.IsReadTool` and `ClaudeRenderer.ReadGuardMatcher`
 name `Bash` and not `PowerShell`, so a worker's `PowerShell` read of a plan or specification is not guarded. This
 is a follow-up, tracked in [issue #604](https://github.com/dpalfery/kyber-weave/issues/604).
+
+**Known residuals.** The path checks are textual, so a symlink, Bash `CDPATH`, or a PowerShell backslash on a POSIX
+host can move the real target of a `touch`. The residual is an empty `.md` or `.json` file, and it is written only
+where the guard would have allowed a planning-folder path. Tracked in [issue #605](https://github.com/dpalfery/kyber-weave/issues/605).
 
 ## Trust steps
 
