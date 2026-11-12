@@ -61,7 +61,7 @@ Three facts shape the choice of mechanism:
    `find -exec`, `-ok` and `-delete`, and `tail -f`. `sort` is matched against an allowlist of flags, so
    `sort -o` is denied. `rg` is matched against a denylist of flags, so `rg --pre` is denied. `touch` is
    allowed only for a `.md` or `.json` file under the plan, spec and todo directories, with the operand resolved
-   under the plan, spec and todo folders of the payload's working directory, not of a directory reached by `cd`.
+   under the plan, spec and todo folders in both readings: the payload's working directory, and the directory after the call's one allowed `cd`. An unquoted glob character is refused, and so is a quoted one, because `touch` takes literal operands only.
 3. **Claude only, for the `Bash` and `PowerShell` tools, at project and user scope.** `ClaudeRenderer.BuildArbiterHooks`
    renders a `PreToolUse` entry with matcher `^(Bash|PowerShell)$` into the architect's agent file at project scope
    and at user scope. The hook command is the Arbiter's `ArbiterHookWiring` command line.

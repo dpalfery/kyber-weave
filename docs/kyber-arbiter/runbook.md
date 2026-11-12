@@ -156,8 +156,7 @@ match a documented form. Anything else is denied before it runs, including:
 - `touch` on anything other than a `.md` or `.json` file under the plan, spec and todo directories. The guard allows at most one `cd` per call, on both tools, and checks each `touch` operand against both the
   directory the call started in and the directory after that `cd`. A relative operand must resolve under the plan,
   spec or todo folder in both readings. A `cd` out of the tree makes a later `touch` denied, and a blank working
-  directory fails closed, so every `touch` is denied then. An operand with an unquoted `*`, `?` or `[` is refused, so
-  quote patterns. An absolute path is allowed only when it resolves inside the working tree's planning directories,
+  directory fails closed, so every `touch` is denied then. An operand with an unquoted `*`, `?` or `[` is refused. `touch` takes literal operands only, so a quoted glob is refused too. An absolute path is allowed only when it resolves inside the working tree's planning directories,
   and a `..` escape is denied.
 - a structural pre-filter runs before any form is matched and refuses non-ASCII characters on both tools, control characters, a line feed inside quotes, an unquoted `#` comment, and any backslash in Bash. A backslash is literal in PowerShell.
 - `uniq` counts every word after `--` as an operand, so a second file after `--` is refused.
