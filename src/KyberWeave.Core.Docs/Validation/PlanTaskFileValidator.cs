@@ -142,54 +142,75 @@ public sealed partial class PlanTaskFileValidator
             return;
         }
 
-        HashSet<string> seen = new(DocsRootPath.PathComparer);
-        foreach (string root in _config.Ontology.DocsRoots)
+        string start = Path.Combine(_repoRoot, planFolder.Replace('/', Path.DirectorySeparatorChar));
+        if (Directory.Exists(start))
         {
-            string docsRoot = Path.Combine(_repoRoot, root.Replace('/', Path.DirectorySeparatorChar));
-            if (!Directory.Exists(docsRoot))
+            WalkForSidecars(start, planFolder, report);
+        }
+    }
+
+    /// <summary>
+    /// Lists one directory of the plans folder, reports its sidecars and recurses, following no
+    /// symbolic link and skipping any <c>archive</c> folder.
+    /// </summary>
+    /// <remarks>
+    /// Each directory is read on its own, so one that cannot be read is reported and the walk goes
+    /// on with its siblings: a single locked folder must not hide a sidecar beside it.
+    /// </remarks>
+    private void WalkForSidecars(string directory, string relativeDirectory, DiagnosticReport report)
+    {
+        List<FileSystemInfo> entries;
+        try
+        {
+            entries = [.. new DirectoryInfo(directory).EnumerateFileSystemInfos(
+                "*",
+                new EnumerationOptions { IgnoreInaccessible = false, AttributesToSkip = 0 })];
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // A folder the walk cannot read is a state the run reports: aborting would hide every
+            // other finding, and skipping silently would read as "no sidecars".
+            report.Add(new Diagnostic(
+                SidecarTaskFile,
+                Severity.Warning,
+                $"'{relativeDirectory}' could not be read ({exception.Message}), so copies of a task file " +
+                "left in it are not checked.",
+                relativeDirectory,
+                Hint: "Fix the folder's permissions or remove it, then run the check again."));
+            return;
+        }
+
+        foreach (FileSystemInfo entry in entries.OrderBy(e => e.Name, StringComparer.Ordinal))
+        {
+            if (entry.LinkTarget is not null)
             {
                 continue;
             }
 
-            try
+            string relative = relativeDirectory + "/" + entry.Name;
+            if (entry is DirectoryInfo subdirectory)
             {
-                foreach (string file in DocsRootPath.EnumerateContainedFiles(docsRoot, "*"))
+                if (!InventoryReachability.IsArchived(relative))
                 {
-                    ReportIfSidecar(file, planFolder, seen, report);
+                    WalkForSidecars(subdirectory.FullName, relative, report);
                 }
             }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            else
             {
-                // A folder the walk cannot read is a state the run reports: aborting here would
-                // hide every other finding, and skipping silently would read as "no sidecars".
-                report.Add(new Diagnostic(
-                    SidecarTaskFile,
-                    Severity.Warning,
-                    $"A folder under '{root}' could not be read ({exception.Message}), so copies of a " +
-                    "task file left beside a plan are not fully checked.",
-                    root,
-                    Hint: "Fix the folder's permissions or remove it, then run the check again."));
+                ReportIfSidecar(entry.FullName, relative, report);
             }
         }
     }
 
-    /// <summary>Reports <paramref name="file"/> when it is a copy of a task file in the plans folder.</summary>
-    private void ReportIfSidecar(string file, string planFolder, HashSet<string> seen, DiagnosticReport report)
+    /// <summary>Reports <paramref name="file"/> when it is a copy of a task file.</summary>
+    private static void ReportIfSidecar(string file, string relative, DiagnosticReport report)
     {
-        string relative = Path.GetRelativePath(_repoRoot, file).Replace('\\', '/');
-        if (!InventoryReachability.IsWithin(relative, planFolder)
-            || InventoryReachability.IsArchived(relative))
-        {
-            return;
-        }
-
         // A name that ends in the task file's suffix is the task file itself, or a file
         // KW-DOC-LIFECYCLE-005 already reports; this rule takes only what that one leaves.
         string name = Path.GetFileName(file);
         if (!name.Contains(TaskFileSuffix, StringComparison.OrdinalIgnoreCase)
             || name.EndsWith(TaskFileSuffix, StringComparison.OrdinalIgnoreCase)
-            || !LooksLikeTaskFile(file)
-            || !seen.Add(relative))
+            || !LooksLikeTaskFile(file))
         {
             return;
         }
@@ -206,29 +227,56 @@ public sealed partial class PlanTaskFileValidator
     }
 
     /// <summary>
-    /// True when the file's content is the task file's schema, or cannot be read to prove otherwise.
+    /// True when the file's own top-level keys are the task file schema's, or it cannot be read to
+    /// prove otherwise; false when it is gone or holds something else.
     /// </summary>
     /// <remarks>
-    /// The name narrows the search and the content decides. A copy is the schema's own keys, so a
-    /// file that merely carries the suffix in its name is left alone. Only the head of the file is
-    /// read: the keys open the document, and a copy cut short by an interrupted write still has them.
-    /// A file that cannot be read is reported, because it cannot be shown to be unrelated.
+    /// The name narrows the search and the content decides. The head of the file is read as JSON
+    /// and only the keys of its top-level object count, so a note that merely quotes a schema key is
+    /// left alone, and a copy cut short by an interrupted write still has the keys it opened with.
+    /// A file that cannot be read is reported, because it cannot be shown to be unrelated; one that
+    /// has been deleted since the listing is not, because there is nothing left to report.
     /// </remarks>
     private static bool LooksLikeTaskFile(string file)
     {
         try
         {
-            using StreamReader reader = new(file);
-            char[] head = new char[SniffLength];
-            int read = reader.ReadBlock(head, 0, head.Length);
-            string text = new(head, 0, read);
-            return text.Contains("\"execution-digest\"", StringComparison.Ordinal)
-                || text.Contains("\"schema-version\"", StringComparison.Ordinal);
+            using FileStream stream = File.OpenRead(file);
+            byte[] head = new byte[SniffLength];
+            int read = stream.Read(head, 0, head.Length);
+            return HasSchemaKey(head.AsSpan(0, read));
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return false;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             return true;
         }
+    }
+
+    private static bool HasSchemaKey(ReadOnlySpan<byte> head)
+    {
+        Utf8JsonReader reader = new(head, isFinalBlock: false, state: default);
+        try
+        {
+            while (reader.Read())
+            {
+                if (reader.TokenType == JsonTokenType.PropertyName
+                    && reader.CurrentDepth == 1
+                    && (reader.ValueTextEquals("schema-version") || reader.ValueTextEquals("execution-digest")))
+                {
+                    return true;
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // Not JSON, or broken before a schema key: it is not shown to be a task file.
+        }
+
+        return false;
     }
 
     /// <summary>

@@ -446,20 +446,23 @@ public sealed class PlanTaskFileValidatorTests
 
     /// <summary>
     /// A plans folder the sidecar walk cannot read is a reported state, not a crash that hides every
-    /// other finding. The document loader walks the same folders first, so the loader reads the
-    /// corpus while it is still readable and the folder is locked before the validator walks it,
-    /// which is the race this guards: a folder that changes between the two walks.
+    /// other finding, and it does not stop the walk: a sidecar beside the unreadable folder is still
+    /// found. The document loader walks the same folders first, so the loader reads the corpus while
+    /// it is still readable and the folder is locked before the validator walks it, which is the
+    /// race this guards: a folder that changes between the two walks.
     /// </summary>
     [Fact]
-    public void AnUnreadablePlansSubfolderIsReportedNotACrash()
+    public void AnUnreadablePlansSubfolderIsReportedAndTheWalkContinues()
     {
         if (OperatingSystem.IsWindows())
         {
+            Assert.Skip("Unix file modes are the only way to make a folder unreadable here.");
             return;
         }
 
         using DocFixture fixture = new();
         fixture.Write("6-Docs/plans/locked/placeholder.txt", "x");
+        fixture.Write("6-Docs/plans/zz-later.tasks.json.new", PlanTaskFileProbe.TaskFile());
         OntologyConfig ontology = OntologyConfig.ProductDefaults;
         DocumentSet set = new DocumentLoader(fixture.Root, ontology).Load();
         KyberWeaveConfig config = KyberWeaveConfig.ProductDefaults.WithOntology(ontology);
@@ -467,16 +470,49 @@ public sealed class PlanTaskFileValidatorTests
         File.SetUnixFileMode(locked, UnixFileMode.None);
         try
         {
+            Assert.SkipWhen(CanList(locked), "Running with privileges that ignore file modes (such as root), so the folder stays readable.");
+
             DiagnosticReport report = new PlanTaskFileValidator(fixture.Root, config).Validate(set);
 
-            Diagnostic finding = Assert.Single(report.Items, item => item.Code == SidecarTaskFile);
-            Assert.Equal(Severity.Warning, finding.Severity);
-            Assert.Contains("could not be read", finding.Message, StringComparison.OrdinalIgnoreCase);
+            Diagnostic warning = Assert.Single(report.Items, item => item.Code == SidecarTaskFile && item.Severity == Severity.Warning);
+            Assert.Contains("could not be read", warning.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(
+                report.Items,
+                item => item.Code == SidecarTaskFile && item.Severity == Severity.Error
+                        && item.Message.Contains("zz-later.tasks.json.new", StringComparison.Ordinal));
         }
         finally
         {
             File.SetUnixFileMode(locked, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         }
+    }
+
+    private static bool CanList(string directory)
+    {
+        try
+        {
+            _ = Directory.GetFileSystemEntries(directory);
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The content check reads the file's own top-level keys, not any text that mentions them. A
+    /// note that quotes a schema key is not a task file.
+    /// </summary>
+    [Fact]
+    public void AFileThatOnlyMentionsASchemaKeyInTextIsNotKWDOCTASKS007()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        fixture.Write(
+            "6-Docs/plans/notes.tasks.json.bak",
+            "Scratch note: the task file's \"execution-digest\" and \"schema-version\" keys are documented.\n");
+
+        AssertDoesNotReport(Validate(fixture), SidecarTaskFile);
     }
 
     /// <summary>
