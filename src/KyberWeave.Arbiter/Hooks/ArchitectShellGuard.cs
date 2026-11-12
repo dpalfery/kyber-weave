@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Core.Arbiter;
@@ -245,6 +246,15 @@ public static class ArchitectShellGuard
                 "Send the command as a string in the command field"));
         }
 
+        // Structure first, before any splitting or tokenising: a construct whose meaning depends on characters the
+        // list does not model (a non-ASCII character, a control character, a comment, a quoted line break, a
+        // backslash in Bash) refuses the whole call, so no later stage can read it differently.
+        StructuralFault? fault = FindStructuralFault(command, bash);
+        if (fault is not null)
+        {
+            return Deny(toolName, VisibleLineAt(command, fault.Index), fault.Refusal);
+        }
+
         // The payload's directory is the origin: touch creates files only beneath the planning directories of
         // this tree, however far a cd has moved the effective directory. A blank or unrooted origin is null, and
         // touch then fails closed rather than anchoring to the file-system root.
@@ -285,6 +295,108 @@ public static class ArchitectShellGuard
             ? value.GetString()
             : null;
     }
+
+    /// <summary>
+    /// Finds the first construct in the whole call that the list cannot account for, before any split. The checks are
+    /// classes, not spellings: any non-ASCII character, any control character other than tab and line feed, a line
+    /// feed inside a quoted word, an unquoted <c>#</c> that starts a word (a comment that hides the rest of its
+    /// line), and in Bash any backslash.
+    /// </summary>
+    private static StructuralFault? FindStructuralFault(string command, bool bash)
+    {
+        Quote quote = Quote.None;
+        for (int i = 0; i < command.Length; i++)
+        {
+            char c = command[i];
+            if (c > 0x7F)
+            {
+                return new StructuralFault(
+                    new Refusal(
+                        $"contains U+{(int)c:X4}, which is not an ASCII character this guard reads",
+                        "Use plain ASCII characters, with ordinary spaces between arguments"),
+                    i);
+            }
+
+            if ((c < 0x20 && c != '\t' && c != '\n') || c == 0x7F)
+            {
+                return new StructuralFault(
+                    new Refusal(
+                        $"contains the control character U+{(int)c:X4}, which the list does not read",
+                        "Remove the control character, and separate commands with ; or line breaks"),
+                    i);
+            }
+
+            if (bash && c == '\\')
+            {
+                return new StructuralFault(
+                    new Refusal(
+                        "uses a backslash, which Bash reads as an escape the list does not model",
+                        "Quote the argument instead of escaping it"),
+                    i);
+            }
+
+            if (quote != Quote.None)
+            {
+                if (c == '\n')
+                {
+                    return new StructuralFault(
+                        new Refusal(
+                            "breaks a line inside a quoted word, which the list does not model",
+                            "Keep each quoted word on one line"),
+                        i);
+                }
+
+                if (c == (quote == Quote.Single ? '\'' : '"'))
+                {
+                    quote = Quote.None;
+                }
+
+                continue;
+            }
+
+            if (c == '\'' || c == '"')
+            {
+                quote = c == '\'' ? Quote.Single : Quote.Double;
+                continue;
+            }
+
+            if (c == '#' && (i == 0 || char.IsWhiteSpace(command[i - 1]) || command[i - 1] is ';' or '|' or '&' or '<' or '>' or '(' or ')'))
+            {
+                return new StructuralFault(
+                    new Refusal(
+                        "starts a comment, which hides the rest of its line from the list",
+                        "Remove the comment, and put the command on its own line"),
+                    i);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>The line of <paramref name="command"/> that holds <paramref name="index"/>, with control characters made visible.</summary>
+    private static string VisibleLineAt(string command, int index)
+    {
+        int start = index == 0 ? 0 : command.LastIndexOf('\n', Math.Max(0, index - 1)) + 1;
+        int end = command.IndexOf('\n', index);
+        string line = command[start..(end < 0 ? command.Length : end)];
+        StringBuilder visible = new();
+        foreach (char c in line)
+        {
+            if (c < 0x20 || c == 0x7F)
+            {
+                visible.Append("\\u").Append(((int)c).ToString("X4", CultureInfo.InvariantCulture));
+            }
+            else
+            {
+                visible.Append(c);
+            }
+        }
+
+        return visible.ToString();
+    }
+
+    /// <summary>A structural fault: the refusal, and where in the call it was found.</summary>
+    private sealed record StructuralFault(Refusal Refusal, int Index);
 
     // ---- Splitting ---------------------------------------------------------------------------------
 
@@ -1186,19 +1298,26 @@ public static class ArchitectShellGuard
                 return new Refusal("uses a glob pattern, which is not allowed", "Name each file literally");
             }
 
-            string? path = Resolve(directory, operand);
-            if (path is null)
+            // The operand must be valid under both readings of where the call runs: the cd'd directory, and the origin.
+            // A cd whose target does not exist fails and leaves the call in the origin, and a separator after a cd
+            // does not say whether the cd ran. Checking both closes that gap without tracking which cd succeeded.
+            string? fromDirectory = Resolve(directory, operand);
+            string? fromOrigin = Resolve(origin, operand);
+            if (fromDirectory is null || fromOrigin is null)
             {
                 return UnresolvableRefusal;
             }
 
-            if (operand.StartsWith('~') || !IsBeneathPlanningDirectory(path, origin, planningDirectories))
+            if (operand.StartsWith('~')
+                || !IsBeneathPlanningDirectory(fromDirectory, origin, planningDirectories)
+                || !IsBeneathPlanningDirectory(fromOrigin, origin, planningDirectories))
             {
                 return new Refusal(
                     "names a file outside the plan, specification and todo directories",
                     "Create files only beneath the directories the index properties name");
             }
 
+            string path = fromOrigin;
             if (!path.EndsWith(".md", StringComparison.OrdinalIgnoreCase)
                 && !path.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
             {
