@@ -2,7 +2,7 @@
 id: plans/2026-11-12-spec-task-file-digest
 title: Validate specification task files and give the product owner a digest route
 doc-type: plan
-status: current
+status: archived
 component: KyberSquad
 owner: dpalfery
 created: 2026-11-12
@@ -15,7 +15,7 @@ impact-components: [KyberSquad, KyberArbiter, CI Pipelines]
 
 # Validate specification task files and give the product owner a digest route
 
-**Status: Ready.** Approved for execution under decision AP1 (autonomous approval of gate `approve-and-execute`). Authored on branch `claude/feat/spec-task-file-digest`, stacked on the unmerged branch `claude/fix/issue-599` (pull request 600), base revision `09cd971e`.
+**Status: Archived, 2026-11-12.** Approved for execution under decision AP1 (autonomous approval of gate `approve-and-execute`). Authored on branch `claude/feat/spec-task-file-digest`, stacked on the unmerged branch `claude/fix/issue-599` (pull request 600), base revision `09cd971e`.
 **Development mode:** `test-first` (RED by `test-dev`, GREEN by the implementation specialist, never the same worker).
 **Autonomy:** `autonomous` (every open item decided by recommendation; provenance in `## Decisions`).
 **Scale:** `extends-component`, components `KyberSquad` (the product-owner and conductor contracts), `KyberArbiter` (the `arbiter plan` command and the task parser) and `CI Pipelines` (the `KW-DOC-TASKS-*` rule reference).
@@ -222,3 +222,56 @@ T1, then T2. T3 runs beside them. T4 needs T2 and T3. T3 and T4 share the `docs`
 ## Verification gates and review
 
 Each developer task ends with its own `task-gate` run. The end-of-run review council reviews the whole change under the `code-review` skill. `docs-dev` closes out under T4.
+
+## Completion summary
+
+**Completed 2026-11-12.** Every task is delivered and the plan is archived. Its task file, `docs/plans/2026-11-12-spec-task-file-digest.tasks.json`, is removed in the archiving commit.
+
+- **Implementation.** T1 RED (commit `273cac18`): the new contract tests fail on assertions, 12 of them, and the regression guard `NestedBulletsStillCount` passes, as the Test contract requires. T2 GREEN (commit `80f5f4ce`): 69 of 69 tests in the four named classes pass unchanged, the build has no warnings, and the task gate reports PASS.
+- **Contracts and documentation.** T3 (commits `87c712ad` and `c2e3a6bf`) writes H1 to H6. The five pinned contract classes pass, 185 of 185, and the docs drift check is clean. The task gate reports NONE_APPLICABLE. Three minor documentation findings from review were fixed in `c2e3a6bf`.
+- **Council.** The final review council on draft pull request 601 returned APPROVE, with 9 gates passed, including the full test suite.
+- **Digest.** The parser fix did not change the plan's execution digest, so the task file written at authoring time stayed valid until its removal.
+- **Acceptance criteria.** The T1 to T3 criteria are met on the evidence above. The T4 criteria are checked by both documentation gates run after the archive move; their results are in the closeout report, not in this plan.
+- **Known limit.** The checks ran from this branch's source through `dotnet run`. A released CLI carries the validator and parser changes only after its next release.
+- **Harvest placement.** H3 (the parser's spec-grammar boundaries) landed in the Kyber-Squad architecture bullet, not in the Kyber-Arbiter architecture document that its Design harvest named. The Kyber-Arbiter architecture does not yet describe those boundaries; this is recorded rather than claimed as harvested there.
+
+**Follow-up, not in this plan.**
+
+- Retire or regenerate the legacy `.claude/skills/product-owner/` copy. It predates the task file, is not generated from `products/kyber-squad/`, and no test pins it (D12).
+
+**Delivered order.** D8 lists the approval rows first. The delivered finalization order in `tasks-phase.md` puts the digest check first, so a `BLOCKED` return writes nothing. The order is otherwise the same: approval rows and the spec Ready line, then `tasks.json`, then `SPEC_FINALIZED` with `TASK_FILE:`.
+
+## Closeout mapping
+
+Every decision and harvest item maps to its destination. Each row states its documentation impact, impact components, last-reviewed date and archive status. The plan-level ADR waiver is: no ADR — ADR waiver: applies ADR 0063 and the task-file digest producer to the specification form.
+
+**Decisions**
+
+| ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| D1 | [runbook, arbiter plan line](../../kyber-arbiter/runbook.md#setup-doctor-audit) (the digest the command reports); [architecture, the execution digest bullet](../../kyber-squad/architecture.md#the-tracked-task-file-and-the-paste-and-fill-dispatch) (a specification's digest is over its `tasks.md`); [rule reference, Plan task files](../../ci-pipelines/rule-reference.md#plan-task-files--docs-validate-and-the-docs-mcp-validate-tool) | extends-component | KyberArbiter | 2026-11-12 | archived |
+| D2 | [rule reference, Plan task files](../../ci-pipelines/rule-reference.md#plan-task-files--docs-validate-and-the-docs-mcp-validate-tool) (the six rules apply to a specification's task file) | extends-component | CI Pipelines | 2026-11-12 | archived |
+| D3 | [rule reference, Plan task files](../../ci-pipelines/rule-reference.md#plan-task-files--docs-validate-and-the-docs-mcp-validate-tool) (`<spec-folder>/tasks.json` checked against its `tasks.md`) | extends-component | CI Pipelines | 2026-11-12 | archived |
+| D4 | [product-owner tasks phase, Task file](../../../products/kyber-squad/skills/product-owner/references/tasks-phase.md) (the `plan` field holds the `tasks.md` path); [rule reference, Plan task files](../../ci-pipelines/rule-reference.md#plan-task-files--docs-validate-and-the-docs-mcp-validate-tool) | extends-component | KyberSquad | 2026-11-12 | archived |
+| D5 | [rule reference, Plan task files](../../ci-pipelines/rule-reference.md#plan-task-files--docs-validate-and-the-docs-mcp-validate-tool) (the spec Ready line for `-006`); [product-owner tasks phase, Task file](../../../products/kyber-squad/skills/product-owner/references/tasks-phase.md) (step 2 writes it) | extends-component | CI Pipelines | 2026-11-12 | archived |
+| D6 | [CLI command surface, arbiter plan row](../../cli-command-surface.md#arbiter--kyber-arbiter-decision-gates) and [runbook, arbiter plan line](../../kyber-arbiter/runbook.md#setup-doctor-audit) (the command takes a plan or a specification's `tasks.md`) | extends-component | KyberArbiter | 2026-11-12 | archived |
+| D7 | [conductor spec path, the task file paragraph](../../../products/kyber-squad/agents/conductor/references/spec-path.md) (the conductor runs the producer and passes `SPEC_DIGEST`); [product-owner SKILL.md, status list](../../../products/kyber-squad/skills/product-owner/SKILL.md) (`STATUS: BLOCKED`); [architecture, the execution digest bullet](../../kyber-squad/architecture.md#the-tracked-task-file-and-the-paste-and-fill-dispatch) | extends-component | KyberSquad | 2026-11-12 | archived |
+| D8 | [product-owner tasks phase, Task file](../../../products/kyber-squad/skills/product-owner/references/tasks-phase.md) (finalization order, written in place at the final path); [architecture, the execution digest bullet](../../kyber-squad/architecture.md#the-tracked-task-file-and-the-paste-and-fill-dispatch). The delivered order adds the digest check as step 1, as stated in the Completion summary | extends-component | KyberSquad | 2026-11-12 | archived |
+| D9 | [architecture, the execution digest bullet](../../kyber-squad/architecture.md#the-tracked-task-file-and-the-paste-and-fill-dispatch) (the Depends and Files boundaries of the spec grammar; recorded here, not in the Kyber-Arbiter architecture) | extends-component | KyberSquad | 2026-11-12 | archived |
+| D10 | [product-owner tasks phase, Work](../../../products/kyber-squad/skills/product-owner/references/tasks-phase.md) (`###` groups; checkbox items only for dispatchable tasks); [rule reference, Plan task files](../../ci-pipelines/rule-reference.md#plan-task-files--docs-validate-and-the-docs-mcp-validate-tool) (`KW-DOC-TASKS-002`: a checkbox task with no entry disagrees with `tasks.md`, so a parent item needs one) | extends-component | KyberSquad | 2026-11-12 | archived |
+| D11 | [rule reference, Plan task files](../../ci-pipelines/rule-reference.md#plan-task-files--docs-validate-and-the-docs-mcp-validate-tool) (the rule ids' home; the routing choice itself is transient) | extends-component | CI Pipelines | 2026-11-12 | archived |
+| D12 | Documentation waiver: a scope decision that leaves a legacy copy untouched. No canonical document is changed for it. The follow-up is listed in the Completion summary. Flagged for the orchestrator's review. | extends-component | KyberSquad | 2026-11-12 | archived |
+| D13 | [plan inventory, task file paragraph](../../plans/README.md#plan-decisions-and-closeout-policy) (the digest route for a plan with a task file); [plan-authoring, shell-less route](../../../products/kyber-squad/agents/architect/references/plan-authoring.md) (the route this plan used for its own task file). Documentation waiver for the plan's own bootstrap step, which has no surviving invariant beyond those routes | extends-component | KyberSquad | 2026-11-12 | archived |
+| D14 | [ADR 0063](../../adr/0063-the-task-file-is-tracked-and-the-plan-stays-authoritative.md) (applied, not amended). no ADR — ADR waiver: applies ADR 0063 and the task-file digest producer to the specification form | extends-component | KyberSquad | 2026-11-12 | archived |
+| AP1 | Documentation waiver: owner approval record for this plan, transient, with no surviving invariant. no ADR — ADR waiver: process decision | extends-component | KyberSquad | 2026-11-12 | archived |
+
+**Design harvest**
+
+| ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| H1 | [rule reference, Plan task files](../../ci-pipelines/rule-reference.md#plan-task-files--docs-validate-and-the-docs-mcp-validate-tool) (the opening paragraph and the `KW-DOC-TASKS-003` row) | extends-component | CI Pipelines | 2026-11-12 | archived |
+| H2 | [CLI command surface, arbiter plan row](../../cli-command-surface.md#arbiter--kyber-arbiter-decision-gates) and [runbook, arbiter plan line](../../kyber-arbiter/runbook.md#setup-doctor-audit) | extends-component | KyberArbiter | 2026-11-12 | archived |
+| H3 | [architecture, the execution digest bullet](../../kyber-squad/architecture.md#the-tracked-task-file-and-the-paste-and-fill-dispatch) (the spec-grammar parse boundaries). The Design harvest named the Kyber-Arbiter architecture; this row records where the text landed | extends-component | KyberSquad | 2026-11-12 | archived |
+| H4 | [architecture, the execution digest bullet](../../kyber-squad/architecture.md#the-tracked-task-file-and-the-paste-and-fill-dispatch) (the finalization order and the `SPEC_DIGEST` hand-off) | extends-component | KyberSquad | 2026-11-12 | archived |
+| H5 | [specification index, task file paragraph](../../specs/README.md) | extends-component | KyberSquad | 2026-11-12 | archived |
+| H6 | Three contracts: [product-owner tasks phase](../../../products/kyber-squad/skills/product-owner/references/tasks-phase.md), [product-owner SKILL.md](../../../products/kyber-squad/skills/product-owner/SKILL.md) and [conductor spec path](../../../products/kyber-squad/agents/conductor/references/spec-path.md); the finalization contract is also stated in [architecture, the execution digest bullet](../../kyber-squad/architecture.md#the-tracked-task-file-and-the-paste-and-fill-dispatch) | extends-component | KyberSquad | 2026-11-12 | archived |

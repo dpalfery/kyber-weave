@@ -58,9 +58,7 @@ its `tasks.json` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-| Plan | Status | Date | Goal |
-|---|---|---|---|
-| [2026-11-12-spec-task-file-digest.md](2026-11-12-spec-task-file-digest.md) | Ready — approved 2026-11-12 (AP1, autonomous) | 2026-11-12 | Validate specification task files with the `KW-DOC-TASKS-*` rules and give the product owner a supported route to their execution digest |
+No plans are open.
 
 ## Archived Plans
 
