@@ -113,13 +113,13 @@ public sealed class ReviewCouncilLoopContractTests
     [InlineData("S25", "For each rule id or command the changed prose states, find every document that states it and quote the statements side by side; a different subject, condition or flag list is a finding.", "skills/code-review/references/lenses/documentation-accuracy.md")]
     [InlineData("S26", "Say what the code does today for each malformed input you name; when you cannot show it is refused, add one test-adequacy/out-of-scope finding naming correctness as the owner.", "skills/code-review/references/lenses/test-adequacy.md")]
     [InlineData("S27", "Do not add your own list of things to hunt for; when you name focus files, the seat accounts for each one.", "agents/code-reviewer.md")]
-    [InlineData("S11", "A fix for a review finding verified as real ships with a test that fails without the fix, bot review rounds included; a finding classified as a nitpick needs no test.", "skills/delivery-execution/SKILL.md")]
-    [InlineData("S11", "A fix for a review finding verified as real ships with a test that fails without the fix, bot review rounds included; a finding classified as a nitpick needs no test.", "skills/kilo-review-loop/SKILL.md")]
-    [InlineData("S11", "A fix for a review finding verified as real ships with a test that fails without the fix, bot review rounds included; a finding classified as a nitpick needs no test.", "skills/code-review-loop/SKILL.md")]
-    [InlineData("S11", "A fix for a review finding verified as real ships with a test that fails without the fix, bot review rounds included; a finding classified as a nitpick needs no test.", "skills/code-review-loop/code-review-loop.md")]
-    [InlineData("S11", "A fix for a review finding verified as real ships with a test that fails without the fix, bot review rounds included; a finding classified as a nitpick needs no test.", "skills/pr-review-fix-comments/SKILL.md")]
-    [InlineData("S11", "A fix for a review finding verified as real ships with a test that fails without the fix, bot review rounds included; a finding classified as a nitpick needs no test.", "skills/code-review/SKILL.md")]
-    [InlineData("S12", "In test-first mode that test is a RED task for test-dev, dispatched before the owning worker's fix, as for any task.", "skills/delivery-execution/SKILL.md")]
+    [InlineData("S28", "A fix for a review finding verified as real ships with a test that fails without the fix, bot review rounds included; a finding classified as a nitpick needs no test.", "skills/delivery-execution/SKILL.md")]
+    [InlineData("S28", "A fix for a review finding verified as real ships with a test that fails without the fix, bot review rounds included; a finding classified as a nitpick needs no test.", "skills/kilo-review-loop/SKILL.md")]
+    [InlineData("S28", "A fix for a review finding verified as real ships with a test that fails without the fix, bot review rounds included; a finding classified as a nitpick needs no test.", "skills/code-review-loop/SKILL.md")]
+    [InlineData("S28", "A fix for a review finding verified as real ships with a test that fails without the fix, bot review rounds included; a finding classified as a nitpick needs no test.", "skills/code-review-loop/code-review-loop.md")]
+    [InlineData("S28", "A fix for a review finding verified as real ships with a test that fails without the fix, bot review rounds included; a finding classified as a nitpick needs no test.", "skills/pr-review-fix-comments/SKILL.md")]
+    [InlineData("S28", "A fix for a review finding verified as real ships with a test that fails without the fix, bot review rounds included; a finding classified as a nitpick needs no test.", "skills/code-review/SKILL.md")]
+    [InlineData("S29", "In test-first mode that test is a RED task for test-dev, dispatched before the owning worker's fix, as for any task.", "skills/delivery-execution/SKILL.md")]
     public void SentenceIsStatedInItsFile(string sentenceId, string sentence, string file)
     {
         string path = ResolvePath(file);
