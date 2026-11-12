@@ -8,37 +8,46 @@
 # review read a finished analysis as one that never ran. This wrapper counts that run as done.
 #
 # Usage:
-#   scripts/report-gate.sh --report <path> --ends-with <text> [--grace <seconds>] -- <cmd...>
+#   scripts/report-gate.sh --report <path> (--ends-with <text> | --contains <text>)
+#                          [--grace <seconds>] [--timeout <seconds>] -- <cmd...>
 #
-# What counts as done:
+# What counts as done (exactly one of --ends-with and --contains is required):
 #   - <path> is removed before the command starts, so only this run can have written it.
-#   - The report is complete when its last non-blank text is --ends-with (for InspectCode's XML,
-#     "</Report>") and its size has not changed for --grace seconds (default 20).
+#   - --ends-with: the report is complete when its last non-blank text is <text> (for InspectCode's
+#     XML, "</Report>") and its size has not changed for --grace seconds (default 20).
+#   - --contains: the report is complete when <text> appears anywhere in it (searched as a fixed
+#     string), and --grace seconds (default 20) have passed since it was first seen.
 #   - A command still running after that is stopped, with its whole process tree, and the run
 #     exits 0. Standard error says so.
 #
 # What does not:
-#   - A command that hangs before its report is complete. This script keeps waiting, so the
-#     caller's own time limit reports the hang.
+#   - A command that hangs before its report is complete. Without --timeout this script keeps
+#     waiting, so the caller's own time limit reports the hang.
 #   - A command that exits 0 without a complete report. That exits 1.
+#
+# --timeout <seconds> (optional) is a limit on the whole run. A command that is not done when it is
+# reached is stopped, with its whole process tree, and the run exits 124.
 #
 # Exit codes:
 #   0    the command exited 0 with a complete report, or was stopped after writing one
 #   1    the command exited 0 but left no complete report
 #   2    usage error, or pgrep is missing
+#   124  --timeout was reached before the run was done; the command's tree was killed
 #   143  this script got SIGINT or SIGTERM; the command's tree was killed first
 #   else the command's own exit code
 
 set -u
 
 usage() {
-  printf 'usage: report-gate.sh --report <path> --ends-with <text> [--grace <seconds>] -- <cmd...>\n' >&2
+  printf 'usage: report-gate.sh --report <path> (--ends-with <text> | --contains <text>) [--grace <seconds>] [--timeout <seconds>] -- <cmd...>\n' >&2
   exit 2
 }
 
 report=""
 ends_with=""
+contains=""
 grace=20
+timeout=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -52,9 +61,21 @@ while [ $# -gt 0 ]; do
       ends_with="$2"
       shift 2
       ;;
+    --contains)
+      [ $# -ge 2 ] || usage
+      contains="$2"
+      shift 2
+      ;;
     --grace)
       [ $# -ge 2 ] || usage
       grace="$2"
+      shift 2
+      ;;
+    --timeout)
+      [ $# -ge 2 ] || usage
+      timeout="$2"
+      # An empty value is refused here, or `--timeout "$UNSET"` would read as no limit at all.
+      [ -n "${timeout}" ] || usage
       shift 2
       ;;
     --)
@@ -67,12 +88,22 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-if [ -z "${report}" ] || [ -z "${ends_with}" ] || [ $# -eq 0 ]; then
+if [ -z "${report}" ] || [ $# -eq 0 ]; then
+  usage
+fi
+# Exactly one of the two finish signals.
+if { [ -z "${ends_with}" ] && [ -z "${contains}" ]; } || { [ -n "${ends_with}" ] && [ -n "${contains}" ]; }; then
   usage
 fi
 case "${grace}" in
   '' | *[!0-9]*) usage ;;
 esac
+if [ -n "${timeout}" ]; then
+  case "${timeout}" in
+    *[!0-9]*) usage ;;
+  esac
+  [ "${timeout}" -gt 0 ] || usage
+fi
 
 # Stopping the command means killing its whole tree, and the tree is found with pgrep. Without it only
 # the direct child would die and the run would still exit 0, so refuse to start instead.
@@ -108,6 +139,15 @@ complete_size() {
   esac
 }
 
+# Succeeds when the report shows a finished run, in whichever mode was asked for.
+report_finished() {
+  if [ -n "${contains}" ]; then
+    grep -F -q -- "${contains}" "${report}" 2>/dev/null
+  else
+    [ -n "$(complete_size)" ]
+  fi
+}
+
 rm -f -- "${report}"
 
 "$@" &
@@ -116,23 +156,45 @@ trap 'kill_tree "${pid}"; exit 143' INT TERM
 
 settled_size=""
 settled_for=0
+seen_at=""
+start=${SECONDS}
 
 while kill -0 "${pid}" 2>/dev/null; do
   sleep 1
-  size="$(complete_size)"
-  if [ -n "${size}" ] && [ "${size}" = "${settled_size}" ]; then
-    settled_for=$((settled_for + 1))
+  done_now=0
+  if [ -n "${contains}" ]; then
+    if grep -F -q -- "${contains}" "${report}" 2>/dev/null; then
+      [ -n "${seen_at}" ] || seen_at=${SECONDS}
+      [ $((SECONDS - seen_at)) -ge "${grace}" ] && done_now=1
+      size="$(wc -c < "${report}" 2>/dev/null | tr -d '[:space:]')"
+    else
+      seen_at=""
+      size=""
+    fi
   else
-    settled_size="${size}"
-    settled_for=0
+    size="$(complete_size)"
+    if [ -n "${size}" ] && [ "${size}" = "${settled_size}" ]; then
+      settled_for=$((settled_for + 1))
+    else
+      settled_size="${size}"
+      settled_for=0
+    fi
+    [ -n "${size}" ] && [ "${settled_for}" -ge "${grace}" ] && done_now=1
   fi
 
-  if [ -n "${size}" ] && [ "${settled_for}" -ge "${grace}" ] && kill -0 "${pid}" 2>/dev/null; then
+  if [ "${done_now}" -eq 1 ] && kill -0 "${pid}" 2>/dev/null; then
     printf 'report-gate: the command wrote a complete report (%s, %s bytes) but did not exit within %s seconds; stopping it and counting the run as done\n' \
       "${report}" "${size}" "${grace}" >&2
     kill_tree "${pid}"
     trap - INT TERM
     exit 0
+  fi
+
+  if [ -n "${timeout}" ] && [ $((SECONDS - start)) -ge "${timeout}" ] && kill -0 "${pid}" 2>/dev/null; then
+    printf 'report-gate: the command did not finish within %s seconds; stopping it\n' "${timeout}" >&2
+    kill_tree "${pid}"
+    trap - INT TERM
+    exit 124
   fi
 done
 
@@ -140,7 +202,7 @@ wait "${pid}"
 status=$?
 trap - INT TERM
 
-if [ "${status}" -eq 0 ] && [ -z "$(complete_size)" ]; then
+if [ "${status}" -eq 0 ] && ! report_finished; then
   printf 'report-gate: the command exited 0 but left no complete report at %s\n' "${report}" >&2
   exit 1
 fi

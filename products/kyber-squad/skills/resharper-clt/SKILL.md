@@ -95,8 +95,14 @@ have made for free. Erasing them here is the whole point.
    ```bash
    dotnet format <solution> --include <changed files>
    dotnet format <solution> analyzers --include <changed files>
-   dotnet jb cleanupcode <solution> --profile="<cleanup profile>" --include="<changed files>"
+   dotnet jb cleanupcode <solution> --profile="<cleanup profile>" --include="<changed files>" --no-build
    ```
+
+   `--no-build` skips the tool's own restore and build, so the solution must already be restored
+   into its default `obj/`: run `dotnet restore <solution>` first when nothing has. A restore
+   redirected with `BaseIntermediateOutputPath` does not count.
+
+   When the host's C# coding standard gives its own cleanupcode command in its `## Completion` section, run that command instead of this line.
 
    `--include` is not optional. Unscoped, these rewrite files the task never touched, and the
    change under review stops being the change you made. The pass is idempotent: running it twice
@@ -208,7 +214,8 @@ dotnet format Hauling.sln --include 2-Application/Hauling.Application/Dispatch/L
   -p:BaseIntermediateOutputPath=.agent_scratchpad/T3/artifacts/obj/
 dotnet format Hauling.sln analyzers --include 2-Application/Hauling.Application/Dispatch/LoadPlanner.cs \
   -p:BaseIntermediateOutputPath=.agent_scratchpad/T3/artifacts/obj/
-dotnet jb cleanupcode Hauling.sln --profile="<cleanup profile>" --include="2-Application/Hauling.Application/Dispatch/LoadPlanner.cs"
+dotnet restore Hauling.sln
+dotnet jb cleanupcode Hauling.sln --profile="<cleanup profile>" --include="2-Application/Hauling.Application/Dispatch/LoadPlanner.cs" --no-build
 ```
 
 Formatting, redundant qualifiers, and unused usings are gone. The multiple enumeration is not —
