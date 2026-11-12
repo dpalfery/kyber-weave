@@ -3,8 +3,8 @@ using System.Text.Json.Serialization;
 namespace KyberWeave.Core.Docs.Validation;
 
 /// <summary>
-/// The task file beside a plan — <c>&lt;plan&gt;.tasks.json</c> — as the architect writes it and
-/// <c>docs validate</c> reads it.
+/// The task file beside a plan — <c>&lt;plan&gt;.tasks.json</c> — or beside a specification's
+/// <c>tasks.md</c> as <c>tasks.json</c>, as the architect writes it and <c>docs validate</c> reads it.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -12,7 +12,8 @@ namespace KyberWeave.Core.Docs.Validation;
 /// are restated so the conductor can dispatch without reading the plan, and the plan stays the
 /// authority the file is checked against. The duplication is what
 /// <see cref="PlanTaskFileValidator" /> checks, because a file that has drifted hands a worker
-/// work the plan does not describe.
+/// work the plan does not describe. In a specification folder the file is checked against that
+/// folder's <c>tasks.md</c>, and its <see cref="Plan"/> field then holds that <c>tasks.md</c> path.
 /// </para>
 /// <para>
 /// The names are kebab-case to match the rest of this repository's configuration vocabulary, and
@@ -24,7 +25,10 @@ namespace KyberWeave.Core.Docs.Validation;
 /// The version of this file's shape. A version this build does not read is malformed rather than
 /// silently valid, because the version decides which fields exist.
 /// </param>
-/// <param name="Plan">The plan this file was written from, repository-relative.</param>
+/// <param name="Plan">
+/// The plan this file was written from, repository-relative. For a specification's <c>tasks.json</c>,
+/// the specification's <c>tasks.md</c> path.
+/// </param>
 /// <param name="ExecutionDigest">
 /// The <c>ExecutionDigest</c> of the plan as parsed when the file was written, from
 /// <see cref="KyberWeave.Core.Arbiter.Plans.PlanDocumentParser" />.
