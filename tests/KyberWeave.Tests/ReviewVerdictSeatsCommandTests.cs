@@ -540,6 +540,7 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
     [InlineData("confidence", "true")]
     [InlineData("confidence", "null")]
     [InlineData("severity", "null")]
+    [InlineData("severity", "true")]
     [InlineData("Severity", "7")]
     [InlineData("CONFIDENCE", "999")]
     public void APriorFindingOutsideTheSeatRangesIsRefusedNamingTheFileAndPath(string field, string rawValue)
@@ -607,6 +608,7 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
 
         Assert.Equal(1, run.Result);
         AssertDiagnostic(run.Output, UnreadableInput, "Error", "findings.json");
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", $"$.{ReviewVerdictInputTests.Spell(key, kind)}[1]");
     }
 
     [Theory]
@@ -627,6 +629,84 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
 
         Assert.Equal(0, run.Result);
         Assert.Empty(MessagesWithCode(run.Output, UnreadableInput));
+    }
+
+    [Theory]
+    [MemberData(nameof(ReviewVerdictInputTests.DuplicateFindingsKeys), MemberType = typeof(ReviewVerdictInputTests))]
+    public void ATwoSpellingObjectInAPriorDocumentIsRefusedNamingTheFilePathAndBothSpellings(
+        string caseName, string path, string first, string second)
+    {
+        Directory.CreateDirectory(PriorFolder);
+        File.WriteAllText(Path.Combine(PriorFolder, "findings.json"), ReviewVerdictInputTests.DuplicateFindingsDocument(caseName));
+        WriteSeat("correctness", NoFindingsSeat("correctness"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--prior", PriorFolder, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(1, run.Result);
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", "findings.json");
+        Assert.Contains(MessagesWithCode(run.Output, UnreadableInput), message =>
+            message.Contains(path, StringComparison.Ordinal)
+            && message.Contains(first, StringComparison.Ordinal)
+            && message.Contains(second, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AnExactlyRepeatedNameInAPriorDocumentIsRefusedNamingTheFile()
+    {
+        Directory.CreateDirectory(PriorFolder);
+        File.WriteAllText(
+            Path.Combine(PriorFolder, "findings.json"),
+            "{\"schema\":\"kyber-weave.review-findings/v1\",\"findings\":[],\"changedPaths\":[],\"changedLines\":0,\"changedLines\":1}");
+        WriteSeat("correctness", NoFindingsSeat("correctness"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--prior", PriorFolder, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(1, run.Result);
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", "findings.json");
+    }
+
+    [Fact]
+    public void ATwoSpellingObjectInsideAnUnknownPriorPropertyIsTolerated()
+    {
+        Directory.CreateDirectory(PriorFolder);
+        JsonObject document = JsonNode.Parse(ReviewVerdictInputTests.DuplicateFindingsDocument("coverage-entry"))!.AsObject();
+        document["coverage"] = new JsonArray(new JsonObject
+        {
+            ["lens"] = "security",
+            ["outcome"] = "noFindings",
+            ["reason"] = null,
+            ["meta"] = JsonNode.Parse("{\"x\":1,\"X\":2}")
+        });
+        document["findings"] = new JsonArray();
+        document["extra"] = JsonNode.Parse("{\"a\":1,\"A\":2}");
+        File.WriteAllText(Path.Combine(PriorFolder, "findings.json"), document.ToJsonString());
+        WriteSeat("correctness", NoFindingsSeat("correctness"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--prior", PriorFolder, .. NotSeatedExcept("correctness", "security")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.Empty(MessagesWithCode(run.Output, UnreadableInput));
+    }
+
+    /// <summary>A prior document written in one spelling, and a severity name in any case, still reads: the rule refuses a repeat, not a spelling.</summary>
+    [Theory]
+    [InlineData("lower", "minor")]
+    [InlineData("Pascal", "MAJOR")]
+    [InlineData("UPPER", "Major")]
+    public void APriorDocumentWrittenInOneSpellingIsStillRead(string kind, string severity)
+    {
+        Directory.CreateDirectory(PriorFolder);
+        File.WriteAllText(Path.Combine(PriorFolder, "findings.json"), ReviewVerdictInputTests.SpelledFindingsDocument(kind, severity));
+        WriteSeat("correctness", NoFindingsSeat("correctness"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--prior", PriorFolder, .. NotSeatedExcept("correctness")]);
+
+        Assert.Empty(MessagesWithCode(run.Output, UnreadableInput));
+        Assert.NotEmpty(MessagesWithCode(run.Output, "KW-REVIEW-024"));
     }
 
     private string PriorFolder => Path.Combine(_temp.Path, "prior");

@@ -366,8 +366,7 @@ public sealed class ReviewVerdictInputTests : IDisposable
 
         Assert.Equal(Refused, run.Result);
         AssertDiagnostic(run.Output, UnreadableInput, "Error", "findings.json");
-        Assert.Contains(MessagesWithCode(run.Output, UnreadableInput), message =>
-            message.Contains($"{key}[", StringComparison.OrdinalIgnoreCase) || message.Contains("null", StringComparison.OrdinalIgnoreCase));
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", $"$.{Spell(key, kind)}[1]");
     }
 
     [Theory]
@@ -384,6 +383,7 @@ public sealed class ReviewVerdictInputTests : IDisposable
 
         Assert.Equal(Refused, run.Result);
         AssertDiagnostic(run.Output, UnreadableInput, "Error", "gates.json");
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", $"$.{Spell(key, kind)}[0]");
     }
 
     /// <summary>
@@ -408,6 +408,246 @@ public sealed class ReviewVerdictInputTests : IDisposable
         Assert.Empty(MessagesWithCode(run.Output, UnreadableInput));
         using JsonDocument written = JsonDocument.Parse(File.ReadAllText(report));
         Assert.Equal(1, written.RootElement.GetProperty("findings").GetArrayLength());
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Two property names equal ignoring case in one object: the serializer binds names ignoring case, so which value wins
+    // is an accident of order. Refused naming the file, the object's JSON path and both spellings.
+    // -----------------------------------------------------------------------------------------
+
+    public static TheoryData<string, string, string, string> DuplicateFindingsKeys() => new()
+    {
+        { "document-list", "$", "findings", "FINDINGS" },
+        { "document-scalar", "$", "changedLines", "ChangedLines" },
+        { "finding-severity", "$.findings[0]", "severity", "Severity" },
+        { "finding-snake", "$.findings[0]", "failure_scenario", "FAILURE_SCENARIO" },
+        { "finding-camel", "$.findings[0]", "failureScenario", "FailureScenario" },
+        { "coverage-entry", "$.coverage[0]", "lens", "LENS" }
+    };
+
+    public static TheoryData<string, string, string, string> DuplicateGateKeys() => new()
+    {
+        { "gate-document", "$", "gates", "GATES" },
+        { "gate-result", "$.gates[0]", "id", "ID" },
+        { "coverage-report", "$.coverageReports[0]", "path", "Path" },
+        { "coverage-result", "$.coverageReports[0].coverage", "fileLinePercent", "FILELINEPERCENT" }
+    };
+
+    /// <summary>A valid findings document with one finding and one coverage entry, then one object given a second spelling of a name.</summary>
+    internal static string DuplicateFindingsDocument(string caseName)
+    {
+        JsonObject finding = FindingObject("severity", "\"minor\"");
+        JsonObject coverage = new() { ["lens"] = "correctness", ["outcome"] = "findings", ["reason"] = null };
+        JsonObject document = new()
+        {
+            ["schema"] = "kyber-weave.review-findings/v1",
+            ["findings"] = new JsonArray(finding),
+            ["changedPaths"] = new JsonArray(),
+            ["changedLines"] = 0,
+            ["coverage"] = new JsonArray(coverage)
+        };
+        switch (caseName)
+        {
+            case "document-list": document["FINDINGS"] = new JsonArray(); break;
+            case "document-scalar": document["ChangedLines"] = 1; break;
+            case "finding-severity": finding["Severity"] = "critical"; break;
+            case "finding-snake":
+                finding.Remove("failureScenario");
+                finding["failure_scenario"] = "a";
+                finding["FAILURE_SCENARIO"] = "b";
+                break;
+            case "finding-camel": finding["FailureScenario"] = "b"; break;
+            case "coverage-entry": coverage["LENS"] = "security"; break;
+            default: throw new ArgumentOutOfRangeException(nameof(caseName), caseName, null);
+        }
+
+        return document.ToJsonString();
+    }
+
+    /// <summary>A valid gate report with one gate and one coverage report, then one object given a second spelling of a name.</summary>
+    internal static string DuplicateGateDocument(string caseName)
+    {
+        JsonObject gate = new() { ["id"] = "build", ["blocking"] = true, ["exitCode"] = 0, ["summary"] = "ok" };
+        JsonObject result = new() { ["fileLinePercent"] = 80, ["classLinePercent"] = 80 };
+        JsonObject report = new() { ["path"] = "a.xml", ["coverage"] = result };
+        JsonObject document = new()
+        {
+            ["schema"] = "kyber-weave.review-gates/v1",
+            ["gates"] = new JsonArray(gate),
+            ["coverageReports"] = new JsonArray(report)
+        };
+        switch (caseName)
+        {
+            case "gate-document": document["GATES"] = new JsonArray(); break;
+            case "gate-result": gate["ID"] = "other"; break;
+            case "coverage-report": report["Path"] = "b.xml"; break;
+            case "coverage-result": result["FILELINEPERCENT"] = 10; break;
+            default: throw new ArgumentOutOfRangeException(nameof(caseName), caseName, null);
+        }
+
+        return document.ToJsonString();
+    }
+
+    [Theory]
+    [MemberData(nameof(DuplicateFindingsKeys))]
+    public void ATwoSpellingObjectInAFindingsDocumentIsRefusedNamingTheFilePathAndBothSpellings(
+        string caseName, string path, string first, string second)
+    {
+        string findings = Write("findings.json", DuplicateFindingsDocument(caseName));
+
+        CapturedConsoleExecution<int> run = Verdict("--findings", findings);
+
+        AssertRefusedForDuplicate(run, "findings.json", path, first, second);
+    }
+
+    [Theory]
+    [MemberData(nameof(DuplicateGateKeys))]
+    public void ATwoSpellingObjectInAGateReportIsRefusedNamingTheFilePathAndBothSpellings(
+        string caseName, string path, string first, string second)
+    {
+        string findings = WriteFindingDocument("id", "correctness/off-by-one");
+        string gates = Write("gates.json", DuplicateGateDocument(caseName));
+
+        CapturedConsoleExecution<int> run = Verdict("--findings", findings, "--gates", gates);
+
+        AssertRefusedForDuplicate(run, "gates.json", path, first, second);
+    }
+
+    /// <summary>A name written twice with exactly the same spelling is the same defect, wherever the JSON reader lets it through.</summary>
+    [Theory]
+    [InlineData("{\"schema\":\"kyber-weave.review-findings/v1\",\"findings\":[],\"changedPaths\":[],\"changedLines\":0,\"changedLines\":1}")]
+    [InlineData("{\"schema\":\"kyber-weave.review-findings/v1\",\"findings\":[{\"id\":\"a/b\",\"lens\":\"a\",\"severity\":\"major\",\"severity\":\"critical\",\"confidence\":9,\"file\":\"f\",\"line\":1}],\"changedPaths\":[],\"changedLines\":0}")]
+    public void AnExactlyRepeatedNameIsRefusedNamingTheFile(string document)
+    {
+        string findings = Write("findings.json", document);
+
+        CapturedConsoleExecution<int> run = Verdict("--findings", findings);
+
+        Assert.Equal(Refused, run.Result);
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", "findings.json");
+    }
+
+    /// <summary>Objects inside an unknown extension property are not walked: two spellings there are tolerated, as nulls are.</summary>
+    [Fact]
+    public void ATwoSpellingObjectInsideAnUnknownPropertyIsTolerated()
+    {
+        JsonObject finding = FindingObject("severity", "\"minor\"");
+        finding["tags"] = JsonNode.Parse("{\"x\":1,\"X\":2}");
+        JsonObject document = JsonNode.Parse(FindingsObject("findings", "lower", new JsonArray(finding)))!.AsObject();
+        document["extra"] = JsonNode.Parse("{\"a\":{\"b\":1,\"B\":2},\"A\":3}");
+        string findings = Write("findings.json", document.ToJsonString());
+        JsonObject gate = JsonNode.Parse(DuplicateGateDocument("gate-document"))!.AsObject();
+        gate.Remove("GATES");
+        gate["meta"] = JsonNode.Parse("{\"x\":1,\"X\":2}");
+        string gates = Write("gates.json", gate.ToJsonString());
+        string report = Path.Combine(_temp.Path, "report.json");
+
+        CapturedConsoleExecution<int> run = Verdict("--findings", findings, "--gates", gates, "--out", report);
+
+        Assert.Empty(MessagesWithCode(run.Output, UnreadableInput));
+        using JsonDocument written = JsonDocument.Parse(File.ReadAllText(report));
+        Assert.Equal(1, written.RootElement.GetProperty("findings").GetArrayLength());
+    }
+
+    /// <summary>One spelling of every name, in any case, is read as it always was: the rule refuses a repeat, not a spelling.</summary>
+    [Theory]
+    [InlineData("lower")]
+    [InlineData("Pascal")]
+    [InlineData("UPPER")]
+    public void AFindingsDocumentWrittenEntirelyInOneSpellingIsStillRead(string kind)
+    {
+        string findings = Write("findings.json", SpelledFindingsDocument(kind, "minor"));
+        JsonObject gate = new() { ["id"] = "build", ["blocking"] = true, ["exitCode"] = 0, ["summary"] = "ok" };
+        string gates = Write("gates.json", SpellKeys(new JsonObject
+        {
+            ["schema"] = "kyber-weave.review-gates/v1",
+            ["gates"] = new JsonArray(SpellKeys(gate, kind))
+        }, kind).ToJsonString());
+        string report = Path.Combine(_temp.Path, "report.json");
+
+        CapturedConsoleExecution<int> run = Verdict("--findings", findings, "--gates", gates, "--out", report);
+
+        Assert.Empty(MessagesWithCode(run.Output, UnreadableInput));
+        Assert.NotEmpty(MessagesWithCode(run.Output, "KW-REVIEW-024"));
+        using JsonDocument written = JsonDocument.Parse(File.ReadAllText(report));
+        Assert.Equal(
+            "correctness/off-by-one",
+            written.RootElement.GetProperty("findings")[0].GetProperty("id").GetString());
+    }
+
+    /// <summary>A severity value is matched by name ignoring case, as the seat path matches it.</summary>
+    [Theory]
+    [InlineData("MAJOR")]
+    [InlineData("Major")]
+    [InlineData("CRITICAL")]
+    public void ASeverityNameInAnyCaseIsStillRead(string severity)
+    {
+        string findings = Write("findings.json", SpelledFindingsDocument("lower", severity));
+        string report = Path.Combine(_temp.Path, "report.json");
+
+        CapturedConsoleExecution<int> run = Verdict("--findings", findings, "--out", report);
+
+        Assert.Empty(MessagesWithCode(run.Output, UnreadableInput));
+        using JsonDocument written = JsonDocument.Parse(File.ReadAllText(report));
+        Assert.Equal(1, written.RootElement.GetProperty("findings").GetArrayLength());
+    }
+
+    /// <summary>
+    /// A seat's <c>failure_scenario</c> is read in any case, so a finding is never dropped as incomplete for the spelling of a
+    /// field it has.
+    /// </summary>
+    [Theory]
+    [InlineData("failure_scenario")]
+    [InlineData("FAILURE_SCENARIO")]
+    [InlineData("Failure_Scenario")]
+    public void ASnakeCaseFailureScenarioInAnyCaseIsReadAsTheFailureScenario(string key)
+    {
+        JsonObject finding = FindingObject("severity", "\"minor\"");
+        finding.Remove("failureScenario");
+        finding[key] = "It breaks on the last element.";
+        string findings = Write("findings.json", FindingsObject("findings", "lower", new JsonArray(finding)));
+        string report = Path.Combine(_temp.Path, "report.json");
+
+        CapturedConsoleExecution<int> run = Verdict("--findings", findings, "--out", report);
+
+        Assert.Empty(MessagesWithCode(run.Output, UnreadableInput));
+        using JsonDocument written = JsonDocument.Parse(File.ReadAllText(report));
+        Assert.Equal(
+            "It breaks on the last element.",
+            written.RootElement.GetProperty("findings")[0].GetProperty("failureScenario").GetString());
+    }
+
+    internal static string SpelledFindingsDocument(string kind, string severity)
+    {
+        JsonObject finding = FindingObject("severity", JsonValue.Create(severity)!.ToJsonString());
+        JsonObject document = new()
+        {
+            ["schema"] = "kyber-weave.review-findings/v1",
+            ["findings"] = new JsonArray(SpellKeys(finding, kind)),
+            ["changedPaths"] = new JsonArray(),
+            ["changedLines"] = 0
+        };
+        return SpellKeys(document, kind).ToJsonString();
+    }
+
+    /// <summary>The same object with every property name in the spelling <paramref name="kind"/> names (the values are untouched).</summary>
+    internal static JsonObject SpellKeys(JsonObject node, string kind)
+    {
+        JsonObject spelled = [];
+        foreach (KeyValuePair<string, JsonNode?> property in node)
+            spelled[Spell(property.Key, kind)] = property.Value?.DeepClone();
+        return spelled;
+    }
+
+    private static void AssertRefusedForDuplicate(
+        CapturedConsoleExecution<int> run, string file, string path, string first, string second)
+    {
+        Assert.Equal(Refused, run.Result);
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", file);
+        Assert.Contains(MessagesWithCode(run.Output, UnreadableInput), message =>
+            message.Contains(path, StringComparison.Ordinal)
+            && message.Contains(first, StringComparison.Ordinal)
+            && message.Contains(second, StringComparison.Ordinal));
     }
 
     /// <summary>The spelling of <paramref name="key"/> a test names: all lowercase, PascalCase, or all uppercase.</summary>
