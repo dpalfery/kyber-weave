@@ -9,16 +9,16 @@ using KyberWeave.Core.Processes;
 namespace KyberWeave.Core.Docs.Validation;
 
 /// <summary>
-/// Checks each plan's task file against the plan it was written from, and rules on the prompts
-/// it carries.
+/// Checks each plan's task file, and each specification's task file, against the task list it was
+/// written from, and rules on the prompts it carries.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The task file exists so the conductor can dispatch without reading the plan. The plan stays
-/// the authority, so the file has a shelf life of one plan and is valid only while it still
-/// describes it: this validator is what stops a conductor pasting a prompt the plan has moved
-/// past, or a prompt that sends the worker back into the plan the whole arrangement exists to
-/// keep out of the conductor's context.
+/// The task file exists so the conductor can dispatch without reading the plan or the specification
+/// task list. That source stays the authority, so the file has a shelf life of one source and is
+/// valid only while it still describes it: this validator is what stops a conductor pasting a prompt
+/// the source has moved past, or a prompt that sends the worker back into the plan the whole
+/// arrangement exists to keep out of the conductor's context.
 /// </para>
 /// <para>
 /// It runs in <c>docs validate</c> and in the docs MCP validate tool, not behind a flag, because
@@ -68,6 +68,13 @@ public sealed partial class PlanTaskFileValidator
     private const string PlanExtension = ".md";
     private const string TaskFileSuffix = ".tasks.json";
 
+    /// <summary>A specification's task list is the file named <c>tasks.md</c>; its task file is <c>tasks.json</c> beside it.</summary>
+    private const string SpecTaskListFileName = "tasks.md";
+    private const string SpecTaskFileName = "tasks.json";
+
+    private const string PlanKind = "plan";
+    private const string SpecTaskListKind = "specification task list";
+
     private static readonly char[] WhitespaceSeparators = [' ', '\t', '\n', '\r'];
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -94,8 +101,11 @@ public sealed partial class PlanTaskFileValidator
         _config = config;
     }
 
-    /// <summary>One finding per disagreement between a plan and its task file, and per bad prompt.</summary>
-    /// <param name="set">The loaded documents; the plans among them are the ones checked.</param>
+    /// <summary>
+    /// One finding per disagreement between a plan or specification task list and its task file, and
+    /// per bad prompt.
+    /// </summary>
+    /// <param name="set">The loaded documents; the plans and specification task lists among them are the ones checked.</param>
     public DiagnosticReport Validate(DocumentSet set)
     {
         ArgumentNullException.ThrowIfNull(set);
@@ -104,17 +114,28 @@ public sealed partial class PlanTaskFileValidator
         IReadOnlyList<ConfigRegEntry> registry = _config.ConfigReg.Resolve(_config.Ontology);
         IReadOnlyList<string> planningDirectories = PlanningDirectories(registry);
 
-        foreach (DocumentModel plan in set.Documents.Where(document =>
-                     document.DocType == DocType.Plan
+        foreach (DocumentModel artifact in set.Documents.Where(document =>
+                     (document.DocType == DocType.Plan || IsSpecTaskList(document))
                      && !InventoryReachability.IsArchived(document.RelativePath)))
         {
-            ValidatePlan(plan, planningDirectories, report);
+            ValidateArtifact(artifact, KindOf(artifact), planningDirectories, report);
         }
 
         ReportSidecarTaskFiles(registry, report);
 
         return report;
     }
+
+    /// <summary>Whether the document is a specification's <c>tasks.md</c>, the task list its <c>tasks.json</c> is checked against.</summary>
+    private static bool IsSpecTaskList(DocumentModel document) =>
+        document.DocType == DocType.Spec
+        && string.Equals(FileNameOf(document.RelativePath), SpecTaskListFileName, StringComparison.OrdinalIgnoreCase);
+
+    private static string KindOf(DocumentModel artifact) =>
+        IsSpecTaskList(artifact) ? SpecTaskListKind : PlanKind;
+
+    private static string FileNameOf(string relativePath) =>
+        relativePath[(relativePath.LastIndexOfAny(['/', '\\']) + 1)..];
 
     /// <summary>
     /// Reports each file in the plans folder whose name is a copy of the task file, such as
@@ -341,26 +362,31 @@ public sealed partial class PlanTaskFileValidator
         return separator > 0 ? normalized[..separator] : null;
     }
 
-    private void ValidatePlan(
-        DocumentModel plan,
+    /// <summary>
+    /// Checks one plan or specification task list against the task file beside it. <paramref name="kind"/>
+    /// names the artifact in messages: <c>plan</c>, or <c>specification task list</c>.
+    /// </summary>
+    private void ValidateArtifact(
+        DocumentModel artifact,
+        string kind,
         IReadOnlyList<string> planningDirectories,
         DiagnosticReport report)
     {
-        PlanDocument parsed = PlanDocumentParser.Parse(plan.RawMarkdown);
-        string taskFile = TaskFilePath(plan.RelativePath);
+        PlanDocument parsed = PlanDocumentParser.Parse(artifact.RawMarkdown);
+        string taskFile = TaskFilePath(artifact);
 
         if (!DocsRootPath.IsContainedFile(_repoRoot, taskFile, _config.Ontology.DocsRoots))
         {
-            if (IsReady(plan))
+            if (IsReady(artifact))
             {
                 report.Add(new Diagnostic(
                     MissingTaskFile,
                     Severity.Warning,
-                    $"Plan '{plan.RelativePath}' is Ready and has no task file: the conductor has no prompt " +
+                    $"The {kind} '{artifact.RelativePath}' is Ready and has no task file: the conductor has no prompt " +
                     $"to dispatch from {taskFile}.",
-                    plan.RelativePath,
-                    plan.RelativePath,
-                    Hint: "Write the task file at finalization, with one prompt per task, or move the plan's " +
+                    artifact.RelativePath,
+                    artifact.RelativePath,
+                    Hint: "Write the task file at finalization, with one prompt per task, or move the " +
                     "status back until it is written."));
             }
 
@@ -379,7 +405,7 @@ public sealed partial class PlanTaskFileValidator
                 Severity.Error,
                 $"Task file '{taskFile}' declares schema version {file.SchemaVersion}; this build reads " +
                 $"version {SchemaVersion}.",
-                plan.RelativePath,
+                artifact.RelativePath,
                 taskFile,
                 Hint: "Regenerate the file with an architect that writes this schema version, rather than " +
                 "reading a newer file as if its fields were this one's."));
@@ -391,26 +417,26 @@ public sealed partial class PlanTaskFileValidator
             report.Add(new Diagnostic(
                 Malformed,
                 Severity.Error,
-                $"Task file '{taskFile}' declares no plan, so nothing can tell which plan it was written from.",
-                plan.RelativePath,
+                $"Task file '{taskFile}' declares no plan, so nothing can tell which {kind} it was written from.",
+                artifact.RelativePath,
                 taskFile,
-                Hint: $"Add \"plan\": \"{plan.RelativePath}\"."));
+                Hint: $"Add \"plan\": \"{artifact.RelativePath}\"."));
             return;
         }
 
-        if (!IsSamePath(file.Plan, plan.RelativePath))
+        if (!IsSamePath(file.Plan, artifact.RelativePath))
         {
             report.Add(new Diagnostic(
                 DiffersFromPlan,
                 Severity.Error,
-                $"Task file '{taskFile}' names plan '{file.Plan}' and sits beside '{plan.RelativePath}'.",
-                plan.RelativePath,
+                $"Task file '{taskFile}' names plan '{file.Plan}' and sits beside '{artifact.RelativePath}'.",
+                artifact.RelativePath,
                 taskFile,
-                Hint: "A task file belongs to the plan it sits beside; correct the plan path or move the file."));
+                Hint: $"A task file belongs to the {kind} it sits beside; correct the {kind} path or move the file."));
         }
 
         CheckTasks(parsed, file, taskFile, report);
-        CheckDigest(parsed, plan.RelativePath, file, taskFile, report);
+        CheckDigest(parsed, artifact.RelativePath, kind, file, taskFile, report);
 
         foreach (PlanTaskFileEntry? entry in file.Tasks ?? [])
         {
@@ -568,15 +594,16 @@ public sealed partial class PlanTaskFileValidator
         }
     }
 
-    /// <summary>Reports a digest that no longer describes the plan the file sits beside.</summary>
+    /// <summary>Reports a digest that no longer describes the plan or specification task list the file sits beside.</summary>
     private static void CheckDigest(
-        PlanDocument plan,
-        string planPath,
+        PlanDocument parsed,
+        string artifactPath,
+        string kind,
         PlanTaskFile file,
         string taskFile,
         DiagnosticReport report)
     {
-        string expected = PlanDocumentParser.ExecutionDigest(plan);
+        string expected = PlanDocumentParser.ExecutionDigest(parsed);
         if (string.Equals(file.ExecutionDigest, expected, StringComparison.OrdinalIgnoreCase))
         {
             return;
@@ -588,12 +615,12 @@ public sealed partial class PlanTaskFileValidator
             StaleDigest,
             Severity.Error,
             string.IsNullOrWhiteSpace(file.ExecutionDigest)
-                ? $"Task file '{taskFile}' records no execution digest, so nothing shows it was written from this plan."
-                : $"Task file '{taskFile}' records a stale execution digest: the plan moved after the file was written.",
+                ? $"Task file '{taskFile}' records no execution digest, so nothing shows it was written from this {kind}."
+                : $"Task file '{taskFile}' records a stale execution digest: the {kind} moved after the file was written.",
             taskFile,
             taskFile,
-            Hint: $"Regenerate the file's prompts from the plan as it now stands: run " +
-            $"kyber-weave arbiter plan {ShellQuote.Quote(planPath)} -f json and copy its execution-digest into the file. " +
+            Hint: $"Regenerate the file's prompts from the {kind} as it now stands: run " +
+            $"kyber-weave arbiter plan {ShellQuote.Quote(artifactPath)} -f json and copy its execution-digest into the file. " +
             "The digest covers the tasks, their text, files, dependencies and skills, the test contract rows, " +
             "the out-of-scope paths and the mode, so a status or decisions-row edit is not what moved it."));
     }
@@ -737,19 +764,33 @@ public sealed partial class PlanTaskFileValidator
     }
 
     /// <summary>
-    /// True when the plan declares itself Ready, which is the state its task file is written in.
+    /// True when the plan or specification <c>tasks.md</c> declares itself Ready, which is the state its
+    /// task file is written in.
     /// </summary>
     /// <remarks>
-    /// Read from the body rather than the frontmatter, because this repository's plan vocabulary
-    /// has no Ready status: an approved plan stays <c>status: current</c> and says
-    /// <c>**Status: Ready**</c> in its opening paragraph.
+    /// Read from the body rather than the frontmatter, because this repository's vocabulary has no Ready
+    /// status: an approved plan stays <c>status: current</c> and says <c>**Status: Ready**</c> in its
+    /// opening paragraph, and an approved specification's <c>tasks.md</c> says <c>**Status:** Ready</c>
+    /// with the colon inside the bold label. <see cref="ReadyStatusRegex"/> accepts both forms.
     /// </remarks>
-    private static bool IsReady(DocumentModel plan) => ReadyStatusRegex().IsMatch(plan.Body);
+    private static bool IsReady(DocumentModel artifact) => ReadyStatusRegex().IsMatch(artifact.Body);
 
-    private static string TaskFilePath(string planRelativePath) =>
-        planRelativePath.EndsWith(PlanExtension, StringComparison.OrdinalIgnoreCase)
-            ? planRelativePath[..^PlanExtension.Length] + TaskFileSuffix
-            : planRelativePath + TaskFileSuffix;
+    /// <summary>
+    /// The task file beside an artifact: <c>&lt;plan&gt;.tasks.json</c> for a plan, and the folder's
+    /// <c>tasks.json</c> beside a specification's <c>tasks.md</c>.
+    /// </summary>
+    private static string TaskFilePath(DocumentModel artifact)
+    {
+        string path = artifact.RelativePath;
+        if (IsSpecTaskList(artifact))
+        {
+            return path[..(path.LastIndexOf('/') + 1)] + SpecTaskFileName;
+        }
+
+        return path.EndsWith(PlanExtension, StringComparison.OrdinalIgnoreCase)
+            ? path[..^PlanExtension.Length] + TaskFileSuffix
+            : path + TaskFileSuffix;
+    }
 
     private string FullPath(string relativePath) =>
         Path.Combine(_repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
@@ -793,6 +834,8 @@ public sealed partial class PlanTaskFileValidator
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex AcceptanceLabelRegex();
 
-    [GeneratedRegex(@"\*\*Status:\s*Ready\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    // The plan form puts the colon inside the bold, `**Status: Ready**`; the spec form closes the
+    // bold after the colon, `**Status:** Ready`. Both name the same state.
+    [GeneratedRegex(@"\*\*Status:(?:\*\*)?\s*Ready(?![\w-])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ReadyStatusRegex();
 }
