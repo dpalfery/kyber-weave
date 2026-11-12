@@ -606,7 +606,7 @@ public sealed class SquadPerformanceContractTests
     {
         string content = ReadRepoFile(relativePath);
         Assert.Matches(@"(?i)\bonly the test classes (?:its|your|the) task touched\b", content);
-        Assert.Matches(@"(?i)\bonce per review cycle\b", content);
+        Assert.Matches(@"(?i)\bin the first full review\b", content);
         string[] fullSuiteSentences = CouncilFullSuiteSentences(content).ToArray();
         Assert.NotEmpty(fullSuiteSentences);
         foreach (string sentence in fullSuiteSentences)

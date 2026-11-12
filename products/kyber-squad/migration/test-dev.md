@@ -5,7 +5,7 @@ source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
 selected-baseline: .github/agents/test-dev.agent.md
 sources:
   .github/agents/test-dev.agent.md: b461f218e0645748eb5beec7675c3d5908191d6facf2cb19ac0338fdc638e548
-final-body-sha256: 128e310b0e59640d263aad2f56ab5c21fc33f5c93e27b2bf9517600ba1a71bf9
+final-body-sha256: b0d105c9eae1088770281176b34d6a5c78f4019d8e0b362f6d88e8a5b588757e
 ---
 # test-dev migration
 
@@ -19,7 +19,7 @@ YAML frontmatter is removed.
 The body has since evolved: test execution with `--no-build` and `dotnet test`, the task-gate
 exit gate, `path.agent_scratchpad` worktree isolation, and the completion digest carrying a
 machine-readable `RED_EVIDENCE:` line the in-flight ledger parses for the `KW-ARB-MODE-001`
-fact `ledger.red-evidence` (packet 7.4). Its full-suite sentence now says the council runs the suite once per review cycle, since the review loop re-runs the gates each cycle. `final-body-sha256` covers that evolved body. Its Hard rules also now carry the RED input-case rule and the defect-class rule, which the Developer exit gate in the delivery-execution skill defines.
+fact `ledger.red-evidence` (packet 7.4). Its full-suite sentence now says the council runs the suite in the first full review, and a review-fix round re-runs only the gates the fix touched. `final-body-sha256` covers that evolved body. Its Hard rules also now carry the RED input-case rule and the defect-class rule, which the Developer exit gate in the delivery-execution skill defines.
 
 ## Canonical projection
 
