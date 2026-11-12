@@ -57,7 +57,7 @@ public sealed partial class PlanTaskFileValidator
     public const string MissingTaskFile = "KW-DOC-TASKS-006";
 
     /// <summary>How much of a candidate sidecar is read to see whether it holds the task file schema.</summary>
-    private const int SniffLength = 4096;
+    private const int SniffLength = 65536;
 
     /// <summary>A copy of a task file left beside it under another name, such as <c>&lt;plan&gt;.tasks.json.new</c>.</summary>
     public const string SidecarTaskFile = "KW-DOC-TASKS-007";
@@ -121,8 +121,8 @@ public sealed partial class PlanTaskFileValidator
     /// <c>&lt;plan&gt;.tasks.json.new</c>.
     /// </summary>
     /// <remarks>
-    /// The walk runs over the folder rather than per plan. A sidecar is found by its name alone, so
-    /// it is reported whether its plan is live, archived, or never existed, which is the state an
+    /// The walk runs over the folder rather than per plan. A sidecar is picked by its name and confirmed
+    /// by its content, so it is reported whether its plan is live, archived, or never existed, which is the state an
     /// abandoned copy is usually in. The file system is read rather than git, so untracked and
     /// ignored files count: a copy that was never committed still reaches the merge's working tree.
     /// </remarks>
@@ -144,6 +144,8 @@ public sealed partial class PlanTaskFileValidator
         }
 
         string start = Path.Combine(_repoRoot, planFolder.Replace('/', Path.DirectorySeparatorChar));
+        // A resolved folder that does not exist holds no sidecars, so a clean result is true here;
+        // KW-CONFIG-REG-001 already reports a registry index path that points at nothing.
         if (Directory.Exists(start))
         {
             WalkForSidecars(start, planFolder, report);
@@ -257,27 +259,40 @@ public sealed partial class PlanTaskFileValidator
         }
     }
 
+    /// <summary>
+    /// True when the top-level keys are the task file's: its <c>execution-digest</c>, or its
+    /// <c>schema-version</c> beside its <c>plan</c> or <c>tasks</c>. A bare <c>schema-version</c>
+    /// is a common key in unrelated JSON and proves nothing.
+    /// </summary>
     private static bool HasSchemaKey(ReadOnlySpan<byte> head)
     {
         Utf8JsonReader reader = new(head, isFinalBlock: false, state: default);
+        bool schemaVersion = false;
+        bool planOrTasks = false;
         try
         {
             while (reader.Read())
             {
-                if (reader.TokenType == JsonTokenType.PropertyName
-                    && reader.CurrentDepth == 1
-                    && (reader.ValueTextEquals("schema-version") || reader.ValueTextEquals("execution-digest")))
+                if (reader.TokenType != JsonTokenType.PropertyName || reader.CurrentDepth != 1)
+                {
+                    continue;
+                }
+
+                if (reader.ValueTextEquals("execution-digest"))
                 {
                     return true;
                 }
+
+                schemaVersion |= reader.ValueTextEquals("schema-version");
+                planOrTasks |= reader.ValueTextEquals("plan") || reader.ValueTextEquals("tasks");
             }
         }
         catch (JsonException)
         {
-            // Not JSON, or broken before a schema key: it is not shown to be a task file.
+            // Not JSON, or broken before enough keys: judge by the keys read so far.
         }
 
-        return false;
+        return schemaVersion && planOrTasks;
     }
 
     /// <summary>

@@ -495,7 +495,7 @@ public sealed class PlanTaskFileValidatorTests
             _ = Directory.GetFileSystemEntries(directory);
             return true;
         }
-        catch (UnauthorizedAccessException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             return false;
         }
@@ -514,6 +514,35 @@ public sealed class PlanTaskFileValidatorTests
             "Scratch note: the task file's \"execution-digest\" and \"schema-version\" keys are documented.\n");
 
         AssertDoesNotReport(Validate(fixture), SidecarTaskFile);
+    }
+
+    /// <summary>
+    /// <c>schema-version</c> alone is a common key in unrelated JSON, so it does not make a file a
+    /// task file; it counts only beside another key of the task file's schema.
+    /// </summary>
+    [Fact]
+    public void UnrelatedJsonWithOnlyASchemaVersionKeyIsNotKWDOCTASKS007()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        fixture.Write("6-Docs/plans/other.tasks.json.bak", "{\n  \"schema-version\": 3,\n  \"name\": \"unrelated\"\n}\n");
+
+        AssertDoesNotReport(Validate(fixture), SidecarTaskFile);
+    }
+
+    /// <summary>
+    /// A copy whose schema key sits past the first few kilobytes is still a copy: the head that is
+    /// read is large enough for a real task file's opening keys.
+    /// </summary>
+    [Fact]
+    public void ASidecarWhoseDigestKeyFollowsALongPlanValueIsKWDOCTASKS007()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        string padding = new('x', 20000);
+        fixture.Write(
+            "6-Docs/plans/long.tasks.json.new",
+            "{\n  \"plan\": \"" + padding + "\",\n  \"execution-digest\": \"abc\"\n}\n");
+
+        AssertReports(Validate(fixture), SidecarTaskFile);
     }
 
     /// <summary>
