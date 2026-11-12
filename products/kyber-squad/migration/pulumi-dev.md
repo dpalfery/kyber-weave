@@ -5,7 +5,7 @@ source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
 selected-baseline: .github/agents/pulumi-dev.agent.md
 sources:
   .github/agents/pulumi-dev.agent.md: 968b2999eb8f998b8fc9863389ddca445661c8c444cecf079b3257dac9ae0040
-final-body-sha256: 1f7bdfd78c87f0dca9369acdf25e6537a11c6f1ac92fd30bfbf3833adb2c777d
+final-body-sha256: 373f5a57467ca7926dd12c00b97af02f28d1977f8f64b4ee8851ad5e7ca74ac3
 ---
 # pulumi-dev migration
 

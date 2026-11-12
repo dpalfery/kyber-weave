@@ -5,7 +5,7 @@ source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
 selected-baseline: .github/agents/sql-database-architect.agent.md
 sources:
   .github/agents/sql-database-architect.agent.md: 7310fbcad5e1d87b90c9c1d95a031931a028f9a486f8235e52347721e8f74ee6
-final-body-sha256: 9fef7a9ce9d6cb7d6a4bee021332cd82b142fd56766864cd7231e7410ef423e7
+final-body-sha256: 24c1e4d5d12372e18a58fa1fa6c63e98dbdd4da94f91501399f0111770363326
 ---
 # sql-database-architect migration
 

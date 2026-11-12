@@ -30,11 +30,11 @@ Use the repository root `AGENTS.md` Config Reg to resolve **<docs-root>**, **<pl
 
 ## Discovery order
 
-Before reading or searching repository code or documentation, load the CodeGraph and `kw-docs` documentation tools through the harness tool search.
+Before reading or searching repository code or documentation, call the CodeGraph and `kw-docs` tools directly; use the harness tool search only when it lists them as deferred.
 
 - Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned. Trust it only when its provenance `rev=` and `branch=` are the revision and branch you were given in `RUN_BASE` and `RUN_BRANCH`: the server stays bound to the canonical checkout, so otherwise it answers about another tree. Your packet names `WORKTREE: <absolute path>` when the run uses a worktree; then ask that worktree's own index, either with `codegraph explore "…"` in your own shell or by passing the path as `codegraph_explore`'s `projectPath`, and state in the plan's findings which revision you read. `kyber-weave doctor --ensure` gives the worktree its own index. Read and search the path directly only when neither can answer for `RUN_BRANCH` (an error, a not-indexed reply, or an answer whose provenance `branch=` is another branch), and count each such read as a direct read with the reason, naming the route tried and the mode: for example `cli: not-indexed` or `projectPath: wrong-branch <got> vs <wanted>`.
 - Documentation: `docs_answer_question_from_repo_documentation`, `docs_find_documents_citing_code_symbol`, or `docs_look_up_glossary_term_definition` before searching or opening documentation files.
-- Read or search a file directly only for what an index does not cover, when a tool reports it stale, or to confirm one detail. When a tool or index is unavailable, report the failure and use only the narrow fallback permitted by the host.
+- Read or search a file directly only for what an index does not cover, when a tool reports it stale, or to confirm one detail. When a call errors, report the failure with the error text you got and use only the narrow fallback permitted by the host; a tool you did not call is not tried, never unavailable.
 - Include `Discovery: codegraph N, docs N, direct reads N`, with a reason for each direct read of indexed code, in the final digest. For plan work, also record it in the plan's investigation findings; intake returns it in its read-only routing or recommendation digest.
 
 Delegate broad sweeps or external sources to `research-agent`, and live Azure state to `azure-reader`. Every delegated request is self-contained.
