@@ -65,7 +65,7 @@ behind a flag, because the orchestrator has the docs tools and no shell. The sam
 | `KW-DOC-TASKS-003` | Error | The execution digest is stale: the plan moved after the file was written. A status or Decisions edit does not move it; a task edit does. Produce the digest with `kyber-weave arbiter plan <plan> -f json` after the last plan edit (or `<spec-folder>/tasks.md` for a specification) |
 | `KW-DOC-TASKS-004` | Error | A prompt carries no command, or no acceptance criteria |
 | `KW-DOC-TASKS-005` | Error | A prompt tells the worker to open a plan, specification or todo — the authoring-time half of `KW-ARB-PLANREAD-001` |
-| `KW-DOC-TASKS-006` | Warning | A Ready plan or specification task list has no task file beside it. Advisory: it never fails a merge, because every plan sits in that state until its architect writes one |
+| `KW-DOC-TASKS-006` | Warning | A Ready plan or specification task list has no task file beside it. Advisory: it never fails a merge, because every plan or specification task list sits in that state until its architect or product-owner writes one |
 
 `KW-DOC-LIFECYCLE-005` in the table above is the merge-time half: the commit that archives a plan
 removes the file, and the walk looks under the archive too, so a specification folder that carried

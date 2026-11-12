@@ -662,7 +662,7 @@ public static partial class PlanDocumentParser
 
     /// <summary>
     /// The width of the spaces and tabs that open the line starting at <paramref name="lineStart"/>,
-    /// with a tab counted as four columns so a tab-indented line and a space-indented one compare.
+    /// with a tab advancing to the next multiple of four columns so a tab-indented line and a space-indented one compare.
     /// </summary>
     private static int LeadingWhitespace(string plain, int lineStart)
     {
@@ -670,7 +670,7 @@ public static partial class PlanDocumentParser
         int width = 0;
         while (index < plain.Length && (plain[index] == ' ' || plain[index] == '\t'))
         {
-            width += plain[index] == '\t' ? 4 : 1;
+            width += plain[index] == '\t' ? 4 - (width % 4) : 1;
             index++;
         }
 
