@@ -256,8 +256,8 @@ and `KW-ARB-HOOK-001` for a fail-closed hook error. See the
 `ArchitectShellGuard` (`KW-ARB-SHELL-001`) joins them: it denies an architect `Bash` or `PowerShell` call
 outside the command set `architect.md` documents, before the call runs. It is not a shipped rule, because the
 rule engine evaluates dispatch triggers only, every decision becomes a ledger event, and a shell call has no
-claim key, so a global and a project hook could both record one call. Hosts cannot tune or disable a guard.
-The rule-engine count above is unchanged. See the [runbook](runbook.md#the-architect-shell-guard) and
+claim key, so a global and a project hook could both record one call. Hosts cannot tune or disable a guard by id; the only off switch is `arbiter.enabled: false`, which turns the whole
+Arbiter off, and with it the guard. The rule-engine count above is unchanged. See the [runbook](runbook.md#the-architect-shell-guard) and
 [ADR 0071](../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md).
 
 ## Secondary triggers, families and effects

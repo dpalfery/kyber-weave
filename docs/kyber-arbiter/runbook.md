@@ -151,10 +151,17 @@ match a documented form. Anything else is denied before it runs, including:
 - redirects other than `2>&1` and `2>/dev/null`, and environment-prefix assignments;
 - shell keywords such as loops and conditionals, and wrapper commands such as `bash`, `sh`, `eval`, `xargs`, `env` and `sudo`;
 - git global options other than `--no-pager` and `-C` (for example `git -c`), and `git … --output`;
-- `find -exec`, `-ok` or `-delete`, `rg --pre`, and `sort -o`;
-- `touch` on anything other than a `.md` or `.json` file under the plan, spec and todo directories.
+- `find -exec`, `-ok` or `-delete`, and `tail -f`;
+- `sort` with any flag that is not on its allowlist (so `sort -o` is denied), and `rg` with a denylisted flag such as `--pre`;
+- `touch` on anything other than a `.md` or `.json` file under the plan, spec and todo directories. `touch` paths
+  are anchored to the working tree, so an absolute path or a `..` escape is denied.
 
 A command the guard cannot parse is denied, so a wrongly denied command costs one `STATUS: BLOCKED` round trip.
+
+**Forms that look unusual but are allowed.** The Bash tool resets its directory on every call, so `cd <dir> &&`
+runs a command in the worktree, and `git -C <dir>` does the same for git. The docs commands take a path operand
+in place of `.`. `sort` accepts only the flags on its allowlist, and `rg` accepts any flag except the ones on its
+denylist. `touch` paths are anchored to the working tree.
 
 **Reading a denial.** A denial names the command the architect tried. The architect is told to return
 `STATUS: BLOCKED` with that command rather than work around it, so a denial is the list working. Find
@@ -177,8 +184,9 @@ re-render with `kyber-weave squad update` (add `--global` for the user-scope cop
 user scope. Every other harness keeps the list as instruction only, and the architect keeps it by its own
 discipline there: Copilot in VS Code (the terminal tool name in its payload is undocumented), Copilot CLI (its
 hooks gate only `task`), Codex, Cursor, OpenCode, Kilo, Pi, Factory, Devin and Antigravity. Warp and ZCode have
-no hooks. These are follow-ups. The guard is enforced at once, with no shadow mode and no configuration, like
-`ReadGuard` and `ConductorGuard`.
+no hooks. These are follow-ups. The guard is enforced at once, with no shadow mode and no setting of its own, like
+`ReadGuard` and `ConductorGuard`. The only off switch is `arbiter.enabled: false` in the project configuration,
+which turns the whole Arbiter off, and with it this guard.
 
 **Confirming it fires.** After an architect run that used the shell, search the hook log for `KW-ARB-SHELL-001`.
 A denied architect `ls -la | sed` call is the expected line: `sed` is not in the list, so the whole pipeline

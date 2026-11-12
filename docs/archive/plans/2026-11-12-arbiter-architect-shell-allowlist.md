@@ -2,7 +2,7 @@
 id: plans/2026-11-12-arbiter-architect-shell-allowlist
 title: Arbiter enforces the architect's shell allowlist
 doc-type: plan
-status: current
+status: archived
 component: KyberArbiter
 owner: dpalfery
 created: 2026-11-12
@@ -17,7 +17,7 @@ impact-components:
 
 # Arbiter enforces the architect's shell allowlist
 
-**Status: Ready, 2026-11-12.** Approved for execution (D13); task file `2026-11-12-arbiter-architect-shell-allowlist.tasks.json` beside this plan.
+**Status: Archived — complete 2026-11-12.** Approved for execution (D13). The task file was removed at archival; the decisions, tasks and test contract above are the record.
 Development mode `test-first`; autonomy `autonomous`; scale `extends-component` on `KyberArbiter` and `KyberSquad`.
 
 **Bottom line.** `products/kyber-squad/agents/architect.md` lists the only shell commands the architect may run, and
@@ -81,14 +81,14 @@ with a sync test.
 
 ## Design harvest
 
-| Item | Target component | Target doc type | Destination |
-|---|---|---|---|
-| D1, D2, D3, D4, D8, D9, D10: guard id, matching contract, allowed forms, enforcement | KyberArbiter | reference | `docs/ci-pipelines/rule-reference.md`, new subsection **Hook guards** |
-| Operating the guard: reading a denial, widening the list, the harness matrix (D6) | KyberArbiter | runbook | `docs/kyber-arbiter/runbook.md`, new section **The architect shell guard** |
-| Guard placement beside the Read guard; user-scope agent-file hook (D7); harness matrix | KyberArbiter | architecture | `docs/kyber-arbiter/architecture.md`, **The rules** (guard paragraph) and **The user-level Claude hook** |
-| Agent-file shell matcher rendered at both scopes for `architect`-profile agents | KyberSquad | architecture | `docs/kyber-squad/architecture.md`, Arbiter hook rendering section (docs-dev locates it with `docs_find_documents_citing_code_symbol` for `ArbiterHookWiring`) |
-| D1, D6, D7, D11 | KyberArbiter | adr | `docs/adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md` and `docs/adr/README.md` row |
-| The agent-body command set and its enforcement sentence (D4, D5) | KyberSquad | agent body (product source) | `products/kyber-squad/agents/architect.md` and the `capabilities.yml` comment |
+| ID | Item | Target component | Target doc type | Destination |
+|---|---|---|---|---|
+| H1 | D1, D2, D3, D4, D8, D9, D10: guard id, matching contract, allowed forms, enforcement | KyberArbiter | reference | `docs/ci-pipelines/rule-reference.md`, new subsection **Hook guards** |
+| H2 | Operating the guard: reading a denial, widening the list, the harness matrix (D6) | KyberArbiter | runbook | `docs/kyber-arbiter/runbook.md`, new section **The architect shell guard** |
+| H3 | Guard placement beside the Read guard; user-scope agent-file hook (D7); harness matrix | KyberArbiter | architecture | `docs/kyber-arbiter/architecture.md`, **The rules** (guard paragraph) and **The user-level Claude hook** |
+| H4 | Agent-file shell matcher rendered at both scopes for `architect`-profile agents | KyberSquad | architecture | `docs/kyber-squad/architecture.md`, Arbiter hook rendering section (docs-dev locates it with `docs_find_documents_citing_code_symbol` for `ArbiterHookWiring`) |
+| H5 | D1, D6, D7, D11 | KyberArbiter | adr | `docs/adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md` and `docs/adr/README.md` row |
+| H6 | The agent-body command set and its enforcement sentence (D4, D5) | KyberSquad | agent body (product source) | `products/kyber-squad/agents/architect.md` and the `capabilities.yml` comment |
 
 ## Investigation findings
 
@@ -330,3 +330,38 @@ graph TD
 - **Review:** the end-of-run review council, governed by the `code-review` skill.
 - **docs-dev closeout:** harvest per the Design harvest table, archive this plan to `docs/archive/plans/`, remove the
   task file with `git rm`, and move the index row to the archived inventory.
+
+## Closeout mapping
+
+**Acceptance verification.** Every acceptance criterion holds on the committed tree:
+
+- T1 (RED contract tests), T2 (guard and Claude wiring) and T3 (agent body, docs, ADR, digest) are committed. T3 is `479232ef`; the conductor reports T1 as `48455f0a` and T2 as `e553c624`.
+- `ArchitectShellGuardSyncTests`: 27 of 27 pass against the T3 clause.
+- `SquadCanonicalContentTests`: 130 of 130 pass, with `final-body-sha256` set to the architect body digest.
+- `docs validate . --merge-ready` and `docs drift .` report no finding except the lifecycle findings this archive commit removes.
+
+Every durable decision (D1 to D13) and every Design harvest item (H1 to H6, in the order of the Design harvest table) maps to its canonical destination. Documentation impact is `update` for each row unless the row says otherwise; impact components are `KyberArbiter` and `KyberSquad`; last reviewed 2026-11-12.
+
+| ID | Destination | ADR or waiver |
+|---|---|---|
+| D1 | [ADR 0071](../../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md) decision 1; [rule reference, Hook guards](../../ci-pipelines/rule-reference.md#hook-guards); [Arbiter architecture, The rules](../../kyber-arbiter/architecture.md#the-rules) | [ADR 0071](../../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md) |
+| D2 | [Arbiter runbook, The architect shell guard](../../kyber-arbiter/runbook.md#the-architect-shell-guard); [ADR 0071](../../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md) decision 2 | [ADR 0071](../../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md) |
+| D3 | [Arbiter runbook, forms that look unusual](../../kyber-arbiter/runbook.md#the-architect-shell-guard) | no ADR — ADR waiver: operator-facing description of an existing matching rule decided in D2 |
+| D4 | `architect.md` command-set clause, sync-tested; [Arbiter runbook, widening the list](../../kyber-arbiter/runbook.md#the-architect-shell-guard) | no ADR — ADR waiver: the command list is product source, bound by a test, not an architectural record |
+| D5 | [Arbiter runbook, widening the list](../../kyber-arbiter/runbook.md#the-architect-shell-guard); [ADR 0071](../../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md) decision 1 | [ADR 0071](../../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md) |
+| D6 | [Arbiter runbook, harness matrix](../../kyber-arbiter/runbook.md#the-architect-shell-guard); [ADR 0071](../../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md) decision 3; `capabilities.yml` comment | [ADR 0071](../../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md) |
+| D7 | [ADR 0071](../../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md) decision 4; [Arbiter architecture, The user-level Claude hook](../../kyber-arbiter/architecture.md#the-user-level-claude-hook); [Squad architecture, Arbiter hook wiring](../../kyber-squad/architecture.md) | [ADR 0071](../../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md) |
+| D8 | [Arbiter runbook, the architect shell guard](../../kyber-arbiter/runbook.md#the-architect-shell-guard); [ADR 0071](../../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md) decision 5 | [ADR 0071](../../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md) |
+| D9 | [Arbiter runbook, what the guard denies](../../kyber-arbiter/runbook.md#the-architect-shell-guard); [ADR 0071](../../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md) decision 2 | [ADR 0071](../../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md) |
+| D10 | [Arbiter runbook, what the guard denies](../../kyber-arbiter/runbook.md#the-architect-shell-guard); [ADR 0071](../../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md) decision 2 | [ADR 0071](../../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md) |
+| D11 | [ADR 0071](../../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md) and its [index row](../../adr/README.md) | [ADR 0071](../../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md) |
+| D12 | [Plan inventory, plan decisions and closeout policy](../../plans/README.md#plan-decisions-and-closeout-policy), where scale is declared; the plan frontmatter and archive row carry the value | no ADR — ADR waiver: a scale declaration, not a decision; no canonical record needed |
+| D13 | [Plan inventory, plan decisions and closeout policy](../../plans/README.md#plan-decisions-and-closeout-policy); this plan's Decisions table keeps the provenance | documentation waiver: approval provenance is historical, with no surviving operational invariant |
+| H1 | [rule reference, Hook guards](../../ci-pipelines/rule-reference.md#hook-guards); [Arbiter runbook, The architect shell guard](../../kyber-arbiter/runbook.md#the-architect-shell-guard) | [ADR 0071](../../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md) |
+| H2 | [Arbiter runbook, The architect shell guard](../../kyber-arbiter/runbook.md#the-architect-shell-guard) | no ADR — ADR waiver: operator guidance; the decision is in ADR 0071 |
+| H3 | [Arbiter architecture, The rules](../../kyber-arbiter/architecture.md#the-rules) and [The user-level Claude hook](../../kyber-arbiter/architecture.md#the-user-level-claude-hook) | [ADR 0071](../../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md) |
+| H4 | [Squad architecture, Arbiter hook wiring](../../kyber-squad/architecture.md) | [ADR 0071](../../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md) |
+| H5 | [ADR 0071](../../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md) and its [index row](../../adr/README.md) | [ADR 0071](../../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md) |
+| H6 | [Arbiter runbook, widening the list](../../kyber-arbiter/runbook.md#the-architect-shell-guard) (the clause itself is `products/kyber-squad/agents/architect.md`, sync-tested; the `capabilities.yml` comment is permission-neutral) | no ADR — ADR waiver: product source bound by the sync test; no separate architectural record |
+
+**Follow-ups, recorded and not delivered by this plan.** Shell enforcement on the other harnesses (D6). The worker read guard's `PowerShell` gap, named in the runbook. Adding `kyber-weave arbiter plan` to the guard when PR 600 lands (D5).

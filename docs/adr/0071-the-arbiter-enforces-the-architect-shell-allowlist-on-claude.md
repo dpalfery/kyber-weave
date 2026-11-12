@@ -55,8 +55,10 @@ Three facts shape the choice of mechanism:
    other than `2>&1` and `2>/dev/null`, environment-prefix assignments, shell keywords such as loops and
    conditionals, and wrapper commands (`bash`, `sh`, `eval`, `xargs`, `env`, `sudo` and similar) are denied.
    So are `git -c` and any git global option other than `--no-pager` and `-C`, `git … --output`,
-   `find -exec`, `-ok` and `-delete`, `rg --pre`, and `sort -o`. `touch` is allowed only for a `.md` or
-   `.json` file under the plan, spec and todo directories.
+   `find -exec`, `-ok` and `-delete`, and `tail -f`. `sort` is matched against an allowlist of flags, so
+   `sort -o` is denied. `rg` is matched against a denylist of flags, so `rg --pre` is denied. `touch` is
+   allowed only for a `.md` or `.json` file under the plan, spec and todo directories, with the path anchored
+   to the working tree.
 3. **Claude only, for the `Bash` and `PowerShell` tools, at project and user scope.** `ClaudeRenderer.BuildArbiterHooks`
    renders a `PreToolUse` entry with matcher `^(Bash|PowerShell)$` into the architect's agent file at project scope
    and at user scope. The hook command is the Arbiter's `ArbiterHookWiring` command line.
@@ -67,8 +69,10 @@ Three facts shape the choice of mechanism:
    file's hooks fire. At user scope the event is evaluated under the project configuration when the project
    enables Arbiter, under the user configuration when the project has none, and passed when the project sets
    `arbiter.enabled: false`.
-5. **Enforced at once.** There is no shadow mode and no configuration, like `ReadGuard` and `ConductorGuard`.
-   A wrongly denied command costs one `STATUS: BLOCKED` round trip, which is the accepted cost.
+5. **Enforced at once.** There is no shadow mode and no setting of the guard's own, like `ReadGuard` and
+   `ConductorGuard`. The only off switch is `arbiter.enabled: false` in the project configuration, which turns the
+   whole Arbiter off, and with it this guard. A wrongly denied command costs one `STATUS: BLOCKED` round trip,
+   which is the accepted cost.
 6. **The other harnesses stay instruction-only.** Copilot in VS Code (the terminal tool name in its payload is
    undocumented), Copilot CLI (its hooks gate only `task`), Codex, Cursor, OpenCode, Kilo, Pi, Factory, Devin
    and Antigravity have no verified shell-tool hook here. They are follow-ups. On them the architect's list stays

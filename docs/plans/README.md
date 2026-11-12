@@ -57,9 +57,7 @@ its `tasks.json` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-| Plan | Status | Summary |
-|---|---|---|
-| [Arbiter enforces the architect's shell allowlist](2026-11-12-arbiter-architect-shell-allowlist.md) | Ready | Denies architect shell commands outside its documented list on Claude (`KW-ARB-SHELL-001`), at project and user scope. |
+No plan is open.
 
 ## Archived Plans
 
