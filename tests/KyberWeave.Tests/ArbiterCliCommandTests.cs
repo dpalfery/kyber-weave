@@ -271,6 +271,74 @@ public sealed class ArbiterCliCommandTests : IDisposable
     }
 
     /// <summary>
+    /// A <c>## Tasks</c> section with no task heading parses to zero tasks. Its digest would describe
+    /// an empty execution, so no digest is reported in either format.
+    /// </summary>
+    [Fact]
+    public void Plan_EmptyTasksSection_ReportsNoDigest()
+    {
+        string plan = WriteFile("arbiter-plan-digest-empty-tasks.md", """
+            # Packet with an empty Tasks section
+
+            ## Tasks
+
+            Nothing is listed yet.
+            """);
+
+        ArbiterPlanCommand command = new();
+        CommandExecution json = Capture(() => command.Execute(
+            null!,
+            new ArbiterSettings { Path = plan, Format = "json" }));
+        CommandExecution table = Capture(() => command.Execute(
+            null!,
+            new ArbiterSettings { Path = plan }));
+
+        Assert.False(ReportsMetric(json.Output, "execution-digest"));
+        Assert.DoesNotContain("Execution digest:", table.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A plan with a parse finding does not parse cleanly, so the digest of what was parsed is not
+    /// offered: a task file copied from it would record a view that dropped the broken line. The
+    /// finding itself is still reported.
+    /// </summary>
+    [Fact]
+    public void Plan_WithParseFinding_ReportsNoDigestButStillReportsTheFinding()
+    {
+        string plan = WriteFile("arbiter-plan-digest-parse-finding.md", """
+            # Packet 3.1
+
+            ## Tasks
+
+            ### T1: First task
+
+            **Files:** `src/KyberWeave.Cli/Commands/Arbiter/ArbiterSettings.cs`
+
+            **Depends on:** T9
+            """);
+
+        ArbiterPlanCommand command = new();
+        CommandExecution json = Capture(() => command.Execute(
+            null!,
+            new ArbiterSettings { Path = plan, Format = "json" }));
+        CommandExecution table = Capture(() => command.Execute(
+            null!,
+            new ArbiterSettings { Path = plan }));
+
+        Assert.Contains("KW-ARB-PARSE-001", json.Output, StringComparison.Ordinal);
+        Assert.False(ReportsMetric(json.Output, "execution-digest"));
+        Assert.DoesNotContain("Execution digest:", table.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>Whether the json report's <c>metrics</c> object carries <paramref name="key"/>.</summary>
+    private static bool ReportsMetric(string output, string key)
+    {
+        using JsonDocument document = ParseWholeOutput(output);
+        return document.RootElement.TryGetProperty("metrics", out JsonElement metrics)
+            && metrics.TryGetProperty(key, out _);
+    }
+
+    /// <summary>
     /// A status change is bookkeeping, not a plan edit, so it must not stale a task file. The
     /// digest covers the tasks, the contract and the out-of-scope list, and not the status
     /// fields, which the plan's owner moves without touching what a worker is asked to do.
