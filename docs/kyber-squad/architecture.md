@@ -541,14 +541,16 @@ document, and an existing user file at a block path is not an unmanaged collisio
 
 | Target | File | Owned containers | An entry is Squad's when | Written fields |
 |---|---|---|---|---|
+| `claude` | `~/.claude/settings.json` (global scope only; at project scope Claude's hooks sit in agent and skill frontmatter) | `/hooks/PreToolUse`, `/hooks/PostToolUse` (always PascalCase; a legacy `preToolUse` or `postToolUse` Squad entry is removed when the block is next rendered, and a lower-case container left empty by that removal is deleted) | its `command` starts with `kyber-weave-arbiter hook --harness claude` | `command`, `matcher`, `timeout`; drift is re-anchored across both spellings of each container, so a receipt recorded before the migration reads as moved, not missing |
 | `cursor` | `.cursor/hooks.json` | `/hooks/preToolUse`, `/hooks/postToolUse` (a new file starts `{"version":1,"hooks":{}}`) | its `command` starts with `kyber-weave-arbiter hook --harness cursor` | `command`, `matcher`, `timeout`, `failClosed` |
 | `codex` | `.codex/hooks.json` | `/hooks/PreToolUse`, `/hooks/PostToolUse` | every `hooks[].command` in the matcher group starts with `kyber-weave-arbiter hook --harness codex` — a group mixing Squad and user hooks stays user content | `matcher`, `hooks:[{type, command, timeout}]` |
 | `factory` | `.factory/hooks.json` | `/PreToolUse`, `/PostToolUse`, and `/SubagentStop` (matcher-less group, Factory only) — the groups sit at the top level of the file, with no `hooks` wrapper | every `hooks[].command` in the matcher group starts with `kyber-weave-arbiter hook --harness factory` | `matcher`, `hooks:[{type, command, timeout}]` |
 | `devin` | `.devin/hooks.v1.json` | `/PreToolUse`, `/PostToolUse` — the whole file is the hooks object in the Claude Code format | every `hooks[].command` in the matcher group starts with `kyber-weave-arbiter hook --harness devin` | `matcher`, `hooks:[{type, command, timeout}]` |
 | `antigravity` | `.agents/hooks.json` | the top-level `kyber-arbiter` group, owned by key — top-level keys there are group names, so any unknown key would be read as another group | the whole group: ownership is by key, not by signature | matcher groups matching `^invoke_subagent$`, each holding `{type, command, timeout}` hooks |
 
-All five blocks render when the Arbiter is enabled, at project scope and at global scope —
-this replaces the earlier "at project scope" alone. The table gives the project-scope path;
+The five shared-file blocks below the Claude row render when the Arbiter is enabled, at project scope and at
+global scope — this replaces the earlier "at project scope" alone. The Claude row is the global user-level
+block only. The table gives the project-scope path;
 at global scope the file sits directly beneath the harness's global root, so Antigravity's
 group lands in `~/.gemini/config/hooks.json`, the only file it reads globally, never in
 `.agents/hooks.json` there. An install made before that fix recorded the group at

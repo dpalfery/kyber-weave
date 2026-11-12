@@ -47,8 +47,10 @@ public sealed class ArbiterStatusCommand : Command<ArbiterSettings>
         bool remote = provider.Kind != ArbiterProviderKind.None
             && !ArbiterKeyResolver.IsLoopbackEndpoint(provider.Endpoint);
         string? key = remote ? ArbiterCommandComposition.TryResolveKey(config, provider.Endpoint) : null;
-        IReadOnlyList<string> globalTargets = UserHostConfig.ReadGlobalTargets(ArbiterCommandComposition.HomeDirectory());
-        bool projectEnabled = config.Arbiter.Enabled;
+        string home = ArbiterCommandComposition.HomeDirectory();
+        IReadOnlyList<string> globalTargets = UserHostConfig.ReadGlobalTargets(home);
+        string root = ArbiterCommandComposition.ResolveRepositoryRoot(settings.Path);
+        HarnessGatingReport gating = ArbiterHarnessGating.Build(root, home, config, globalTargets);
 
         AnsiConsole.MarkupLine("[bold]Arbiter status[/]");
         AnsiConsole.MarkupLine($"  Provider: [bold]{Markup.Escape(KindName(provider.Kind))}[/]");
@@ -75,8 +77,7 @@ public sealed class ArbiterStatusCommand : Command<ArbiterSettings>
         }
 
         WriteGlobalScope(globalTargets);
-        WriteProjectScope(projectEnabled, globalTargets.Count > 0);
-
+        WriteProjectScope(gating);
     }
 
     /// <summary>Runs the command without cancellation; the entry point tests use.</summary>
@@ -100,23 +101,10 @@ public sealed class ArbiterStatusCommand : Command<ArbiterSettings>
         }
     }
 
-    private static void WriteProjectScope(bool enabled, bool projectOverridesGlobal)
+    private static void WriteProjectScope(HarnessGatingReport gating)
     {
         AnsiConsole.MarkupLine("[bold]PROJECT scope[/]");
-        if (enabled)
-        {
-            AnsiConsole.MarkupLine("  project overrides global");
-            AnsiConsole.MarkupLine("  arbiter.enabled: true");
-            return;
-        }
-
-        if (projectOverridesGlobal)
-        {
-            AnsiConsole.MarkupLine("  project does not override global");
-            return;
-        }
-
-        AnsiConsole.MarkupLine("  no project override");
+        ArbiterHarnessGating.WriteRows(gating, TargetDisplayName);
     }
 
     private static string GlobalReason(string token)

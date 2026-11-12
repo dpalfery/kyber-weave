@@ -214,6 +214,19 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
                             })
                     }),
                 new SquadRenderedBlockEntry(
+                    "PreToolUse",
+                    new JsonObject
+                    {
+                        ["matcher"] = HandbackMatcher,
+                        ["hooks"] = new JsonArray(
+                            new JsonObject
+                            {
+                                ["type"] = "command",
+                                ["command"] = ArbiterHookWiring.HookCommandLine(SquadTarget.Claude, context.Scope),
+                                ["timeout"] = arbiter.HookTimeoutSeconds
+                            })
+                    }),
+                new SquadRenderedBlockEntry(
                     "PostToolUse",
                     new JsonObject
                     {

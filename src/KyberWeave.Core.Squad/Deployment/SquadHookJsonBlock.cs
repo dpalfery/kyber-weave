@@ -56,6 +56,9 @@ public static class SquadHookJsonBlock
 
     private static readonly string[] AllContainers = [PreToolUseContainer, PostToolUseContainer, SubagentStopContainer];
 
+    // The lower-case spellings a Claude settings file held before the PascalCase fix.
+    private static readonly string[] LegacyClaudeContainers = ["preToolUse", "postToolUse"];
+
     private const string MissingReason = "missing";
 
     private const string ModifiedReason = "modified";
@@ -347,13 +350,8 @@ public static class SquadHookJsonBlock
         // from ever refreshing them.
         foreach (UnanchoredEntry entry in unanchored)
         {
-            HashSet<int> taken = ClaimedIn(claimed, entry.ContainerPointer);
-            int found = ResolvePointer(root, entry.ContainerPointer) is JsonArray container
-                ? IndexOfUnclaimedDigest(container, entry.Digest, taken)
-                : -1;
-            if (found >= 0)
+            if (TryReanchor(format, root, claimed, entry))
             {
-                taken.Add(found);
                 continue;
             }
 
@@ -361,6 +359,53 @@ public static class SquadHookJsonBlock
         }
 
         return drift;
+    }
+
+    /// <summary>
+    /// Re-anchors one unanchored entry to an unclaimed index of its container, trying each spelling
+    /// of that container, and claims the index it lands on. A receipt recorded before the PascalCase
+    /// migration names a lower-case container that now sits under its PascalCase name, so it reads
+    /// as moved rather than missing.
+    /// </summary>
+    private static bool TryReanchor(
+        SquadHookBlockFormat format,
+        JsonObject root,
+        Dictionary<string, HashSet<int>> claimed,
+        UnanchoredEntry entry)
+    {
+        foreach (string spelling in ContainerSpellings(format, entry.ContainerPointer))
+        {
+            if (ResolvePointer(root, spelling) is not JsonArray container)
+            {
+                continue;
+            }
+
+            HashSet<int> taken = ClaimedIn(claimed, spelling);
+            int found = IndexOfUnclaimedDigest(container, entry.Digest, taken);
+            if (found >= 0)
+            {
+                taken.Add(found);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>The spellings one container pointer may be written under. Only Claude has two.</summary>
+    private static string[] ContainerSpellings(SquadHookBlockFormat format, string containerPointer)
+    {
+        if (format != SquadHookBlockFormat.Claude)
+        {
+            return [containerPointer];
+        }
+
+        return containerPointer switch
+        {
+            "/hooks/PreToolUse" or "/hooks/preToolUse" => ["/hooks/PreToolUse", "/hooks/preToolUse"],
+            "/hooks/PostToolUse" or "/hooks/postToolUse" => ["/hooks/PostToolUse", "/hooks/postToolUse"],
+            _ => [containerPointer],
+        };
     }
 
     /// <summary>A recorded entry whose digest did not match the index it was recorded at.</summary>
@@ -469,6 +514,11 @@ public static class SquadHookJsonBlock
             // Only Factory's SubagentStop container is optional: a file without it gets one only
             // when there is a stop entry to write, so a Factory file that never had one gains no key.
             bool hadStopContainer = root.ContainsKey(SubagentStopContainer);
+            if (format == SquadHookBlockFormat.Claude)
+            {
+                RemoveSquadFromLegacyClaudeContainers(root, dropEmptied: true);
+            }
+
             var containers = OwnedArrays(format, root, create: true);
             // Positional with the containers OwnedArrays returns: create: true yields every
             // container the format holds, in the order listed in RootContainerNames.
@@ -478,13 +528,7 @@ public static class SquadHookJsonBlock
             for (int i = 0; i < containers.Count; i++)
             {
                 (string pointer, JsonArray array) = containers[i];
-                for (int index = array.Count - 1; index >= 0; index--)
-                {
-                    if (IsSquadEntry(format, array[index]))
-                    {
-                        array.RemoveAt(index);
-                    }
-                }
+                RemoveSquadEntries(format, array);
 
                 foreach (JsonNode entry in managed[i])
                 {
@@ -525,19 +569,61 @@ public static class SquadHookJsonBlock
         }
         else
         {
+            if (format == SquadHookBlockFormat.Claude)
+            {
+                RemoveSquadFromLegacyClaudeContainers(root, dropEmptied: false);
+            }
+
             foreach ((_, JsonArray array) in OwnedArrays(format, root, create: false))
             {
-                for (int index = array.Count - 1; index >= 0; index--)
-                {
-                    if (IsSquadEntry(format, array[index]))
-                    {
-                        array.RemoveAt(index);
-                    }
-                }
+                RemoveSquadEntries(format, array);
             }
         }
 
         return Serialize(root);
+    }
+
+    /// <summary>
+    /// Removes Squad's entries from a container's array, keeping every user entry in its place.
+    /// </summary>
+    private static void RemoveSquadEntries(SquadHookBlockFormat format, JsonArray array)
+    {
+        for (int index = array.Count - 1; index >= 0; index--)
+        {
+            if (IsSquadEntry(format, array[index]))
+            {
+                array.RemoveAt(index);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Removes Squad's entries from the lower-case <c>preToolUse</c> and <c>postToolUse</c> containers
+    /// a file written before the PascalCase fix holds. Claude Code never reads those, so they are
+    /// retired here. When <paramref name="dropEmptied"/> is set, a container this removal leaves
+    /// empty is deleted; one still holding user entries stays as the user wrote it.
+    /// </summary>
+    private static void RemoveSquadFromLegacyClaudeContainers(JsonObject root, bool dropEmptied)
+    {
+        if (root["hooks"] is not JsonObject hooks)
+        {
+            return;
+        }
+
+        foreach (string name in LegacyClaudeContainers)
+        {
+            if (hooks[name] is not JsonArray array)
+            {
+                continue;
+            }
+
+            bool hadEntries = array.Count > 0;
+            RemoveSquadEntries(SquadHookBlockFormat.Claude, array);
+            if (dropEmptied && hadEntries && array.Count == 0)
+            {
+                hooks.Remove(name);
+            }
+        }
     }
 
     private static void CollectOwned(JsonObject group, string prefix, List<SquadHookOwnedEntry> owned)
@@ -561,7 +647,8 @@ public static class SquadHookJsonBlock
     {
         return format switch
         {
-            SquadHookBlockFormat.Cursor or SquadHookBlockFormat.Claude => CursorArrays(root, create),
+            SquadHookBlockFormat.Cursor => CursorArrays(root, create),
+            SquadHookBlockFormat.Claude => ClaudeArrays(root, create),
             SquadHookBlockFormat.Codex => PrefixedArrays(root, "/hooks", create),
             SquadHookBlockFormat.Factory or SquadHookBlockFormat.Devin => RootArrays(format, root, create),
             _ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unknown hook block format."),
@@ -634,6 +721,15 @@ public static class SquadHookJsonBlock
 
         return containers;
     }
+
+    /// <summary>
+    /// Claude Code reads only the PascalCase containers under <c>hooks</c>, so those are the only
+    /// containers this shape owns: always the <c>hooks</c> object, always <c>PreToolUse</c> and
+    /// <c>PostToolUse</c>, created when missing. A lower-case spelling a file already holds is
+    /// retired by the callers, not read here.
+    /// </summary>
+    private static List<(string Pointer, JsonArray Array)> ClaudeArrays(JsonObject root, bool create) =>
+        PrefixedArrays(root, "/hooks", create);
 
     private static List<(string Pointer, JsonArray Array)> PrefixedArrays(JsonObject root, string prefix, bool create)
     {

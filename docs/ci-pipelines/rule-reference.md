@@ -326,6 +326,8 @@ receipts and logs key on them, so an id is never reused or renumbered.
 | `KW-ARB-MODEL-001` | Warning | Model targeting is not `off`, a hooked global target is installed, and its `model-targets.<harness>.json` is missing, unreadable, or older than the Squad lock. Remedy: `kyber-weave squad update`. Reported by `arbiter doctor` |
 | `KW-ARB-INSTALL-001` | Error | `--global` and `--project` were used together, or the target-scope input is otherwise invalid for the CLI; the install defaults to global and project scope is opt-in |
 | `KW-ARB-KEY-001` | Warning | Remote provider configured and no key resolves for its origin |
+| `KW-ARB-PROJECT-001` | Warning | The project enables Arbiter but a harness is not gated: no project hook, and no live global hook that evaluates under the project. Raised once per ungated harness, naming it; hint is its fix command (`kyber-weave arbiter install --project --target <token>`, or `kyber-weave arbiter install --target claude` for Claude). Reported by `arbiter doctor` |
+| `KW-ARB-GLOBAL-001` | Warning | The global Squad receipt owns a hook block, or a harness's own shim hook file, for a harness missing from `arbiter.global.targets`, so `kyber-weave update` never refreshes it. Agent and skill files do not count. Hint: `kyber-weave arbiter install --target <token>`. Reported by `arbiter doctor` |
 | `KW-ARB-LOG-001` | Warning | `artifacts/arbiter/` is not ignored by git |
 | `KW-ARB-BIN-001` | Warning | `kyber-weave-arbiter` missing from `PATH`, or version differs from the CLI's |
 | `KW-ARB-GUARD-001` | Warning | No plan, spec, or todo index declared, so the Read guard protects nothing |

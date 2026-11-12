@@ -358,6 +358,18 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
                                 ["command"] = commandLine,
                                 ["timeout"] = timeoutSeconds,
                             })
+                    },
+                    new JsonObject
+                    {
+                        // A background sub-agent returns through SubagentHandback, not the dispatcher's PostToolUse.
+                        ["matcher"] = "^SubagentHandback$",
+                        ["hooks"] = new JsonArray(
+                            new JsonObject
+                            {
+                                ["type"] = "command",
+                                ["command"] = commandLine,
+                                ["timeout"] = timeoutSeconds,
+                            })
                     }
                 ];
                 postToolUse =

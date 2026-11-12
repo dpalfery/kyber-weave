@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Core.Configuration;
 using Xunit;
@@ -50,13 +51,29 @@ public sealed class ArbiterStatusCommandTests : IDisposable
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("GLOBAL scope", execution.Output, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("PROJECT scope", execution.Output, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("project overrides global", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("project overrides global", execution.Output, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Warp", execution.Output, StringComparison.Ordinal);
         Assert.Contains("fallback-only", execution.Output, StringComparison.Ordinal);
         Assert.Contains("Pi", execution.Output, StringComparison.Ordinal);
         Assert.Contains("partial", execution.Output, StringComparison.Ordinal);
         Assert.Contains("OpenCode", execution.Output, StringComparison.Ordinal);
         Assert.Contains("dispatch-unconfirmed", execution.Output, StringComparison.Ordinal);
+        AssertHarnessLine(execution.Output, "Pi", "ungated", "kyber-weave arbiter install --project --target pi");
+        AssertHarnessLine(execution.Output, "OpenCode", "ungated", "kyber-weave arbiter install --project --target opencode");
+    }
+
+    /// <summary>
+    /// Asserts that one output line names <paramref name="harness"/> and carries every fragment, so a
+    /// per-harness gating line is checked as a unit rather than as separate words elsewhere in the output.
+    /// </summary>
+    private static void AssertHarnessLine(string output, string harness, params string[] fragments)
+    {
+        IEnumerable<string> named = output.Split('\n')
+            .Where(line => Regex.IsMatch(line, $@"\b{harness}\b"));
+        bool found = named.Any(line => fragments.All(fragment => line.Contains(fragment, StringComparison.Ordinal)));
+        Assert.True(
+            found,
+            $"Expected a line naming '{harness}' with [{string.Join(", ", fragments)}]. Output:\n{output}");
     }
 
     private void WriteProjectConfig(string yaml)
