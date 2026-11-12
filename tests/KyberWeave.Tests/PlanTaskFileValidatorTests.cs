@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text.Json;
+using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Arbiter.Plans;
 using Xunit;
@@ -362,6 +363,236 @@ public sealed class PlanTaskFileValidatorTests
         Assert.Contains("kyber-weave arbiter plan", run.Output, StringComparison.Ordinal);
         Assert.Contains(PlanTaskFileProbe.PlanPath, run.Output, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// A specification's task file is checked like a plan's: the digest the Arbiter's plan command
+    /// reports for the spec's tasks.md validates clean. The control is what makes this a test of
+    /// the rule rather than of silence: a validator that skips specifications reports nothing for
+    /// either file, so only the stale control proves the spec file is read at all.
+    /// </summary>
+    [Fact]
+    public void ASpecTaskFileWithTheDigestArbiterPlanReportsPasses()
+    {
+        using DocFixture fixture = SpecTaskFileProbe.Corpus();
+        string reported = SpecTaskFileProbe.ReportedDigest(fixture);
+        fixture.Write(SpecTaskFileProbe.TaskFilePath, SpecTaskFileProbe.TaskFile(digest: reported));
+
+        AssertNoTaskFileFinding(Validate(fixture));
+
+        using DocFixture control = SpecTaskFileProbe.Corpus();
+        control.Write(SpecTaskFileProbe.TaskFilePath, SpecTaskFileProbe.TaskFile(digest: new string('0', 64)));
+
+        AssertReports(Validate(control), StaleDigest);
+    }
+
+    /// <summary>
+    /// A specification's digest that no longer matches its tasks.md is stale, and the finding names
+    /// the command that shows the right digest and the spec task list it belongs to.
+    /// </summary>
+    [Fact]
+    public void ASpecTaskFileWithAStaleDigestIsKWDOCTASKS003()
+    {
+        using DocFixture fixture = SpecTaskFileProbe.Corpus();
+        fixture.Write(SpecTaskFileProbe.TaskFilePath, SpecTaskFileProbe.TaskFile(digest: new string('0', 64)));
+
+        ReportedFindings run = Validate(fixture);
+
+        AssertReports(run, StaleDigest);
+        Assert.Contains("kyber-weave arbiter plan", run.Output, StringComparison.Ordinal);
+        Assert.Contains(SpecTaskFileProbe.TasksPath, run.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A spec task the file leaves out cannot be dispatched, so it is the same drift a plan's task
+    /// file is checked for.
+    /// </summary>
+    [Fact]
+    public void ASpecTaskFileMissingATaskIsKWDOCTASKS002()
+    {
+        using DocFixture accepted = SpecTaskFileProbe.Corpus();
+        accepted.Write(SpecTaskFileProbe.TaskFilePath, SpecTaskFileProbe.TaskFile());
+        AssertDoesNotReport(Validate(accepted), DiffersFromPlan);
+
+        using DocFixture missing = SpecTaskFileProbe.Corpus();
+        missing.Write(
+            SpecTaskFileProbe.TaskFilePath,
+            SpecTaskFileProbe.TaskFile(edit: tasks => tasks.RemoveAt(1)));
+
+        AssertReports(Validate(missing), DiffersFromPlan);
+    }
+
+    /// <summary>
+    /// A task file whose <c>plan</c> field names another artifact of the same specification, here
+    /// its design, does not belong to the tasks it sits beside.
+    /// </summary>
+    [Fact]
+    public void ASpecTaskFileNamingAnotherArtifactIsKWDOCTASKS002()
+    {
+        using DocFixture accepted = SpecTaskFileProbe.Corpus();
+        accepted.Write(SpecTaskFileProbe.TaskFilePath, SpecTaskFileProbe.TaskFile());
+        AssertDoesNotReport(Validate(accepted), DiffersFromPlan);
+
+        using DocFixture drifted = SpecTaskFileProbe.Corpus();
+        drifted.Write(
+            SpecTaskFileProbe.TaskFilePath,
+            SpecTaskFileProbe.TaskFile(planField: SpecTaskFileProbe.DesignPath));
+
+        AssertReports(Validate(drifted), DiffersFromPlan);
+    }
+
+    /// <summary>
+    /// A specification's task file that is not JSON is malformed, the same as a plan's.
+    /// </summary>
+    [Fact]
+    public void AMalformedSpecTaskFileIsKWDOCTASKS001()
+    {
+        using DocFixture fixture = SpecTaskFileProbe.Corpus();
+        fixture.Write(SpecTaskFileProbe.TaskFilePath, "{");
+
+        AssertReports(Validate(fixture), Malformed);
+    }
+
+    /// <summary>
+    /// A specification prompt with no runnable command is incomplete for the same reason a plan
+    /// prompt is: the worker has nothing to verify its change with.
+    /// </summary>
+    [Fact]
+    public void ASpecPromptWithoutACommandIsKWDOCTASKS004()
+    {
+        using DocFixture accepted = SpecTaskFileProbe.Corpus();
+        accepted.Write(SpecTaskFileProbe.TaskFilePath, SpecTaskFileProbe.TaskFile());
+        AssertDoesNotReport(Validate(accepted), IncompletePrompt);
+
+        using DocFixture incomplete = SpecTaskFileProbe.Corpus();
+        incomplete.Write(
+            SpecTaskFileProbe.TaskFilePath,
+            SpecTaskFileProbe.TaskFile(edit: tasks => tasks[0]["prompt"] =
+                "Implement task 1.1 in the files it names.\n\n" +
+                "Acceptance criteria: the class reports a non-zero total, with no failures.\n"));
+
+        AssertReports(Validate(incomplete), IncompletePrompt);
+    }
+
+    /// <summary>
+    /// A specification prompt that sends the worker to read a spec file is the plan-read defect in
+    /// the spec's own folder, so the rule that catches it for plans must cover specs too.
+    /// </summary>
+    [Fact]
+    public void ASpecPromptThatOpensTheSpecIsKWDOCTASKS005()
+    {
+        using DocFixture accepted = SpecTaskFileProbe.Corpus();
+        accepted.Write(SpecTaskFileProbe.TaskFilePath, SpecTaskFileProbe.TaskFile());
+        AssertDoesNotReport(Validate(accepted), PlanReadInstruction);
+
+        using DocFixture readsTheSpec = SpecTaskFileProbe.Corpus();
+        readsTheSpec.Write(
+            SpecTaskFileProbe.TaskFilePath,
+            SpecTaskFileProbe.TaskFile(edit: tasks => tasks[0]["prompt"] =
+                "Read 6-Docs/specs/ready-feature/design.md first.\n\n" + SpecTaskFileProbe.Prompt(SpecTaskFileProbe.FirstTask)));
+
+        AssertReports(Validate(readsTheSpec), PlanReadInstruction);
+    }
+
+    /// <summary>
+    /// A Ready specification with no task file beside its tasks.md is advised, as a Ready plan is.
+    /// The spec's requirements and design are Ready too in this corpus, and they never need a task
+    /// file of their own, so no warning may name them.
+    /// </summary>
+    [Fact]
+    public void AReadySpecWithNoTaskFileWarnsKWDOCTASKS006()
+    {
+        using DocFixture fixture = SpecTaskFileProbe.Corpus();
+
+        ReportedFindings run = Validate(fixture);
+
+        AssertReports(run, MissingTaskFile);
+        AssertNoMissingTaskFileNames(run, "requirements.md", "design.md");
+    }
+
+    /// <summary>
+    /// The spec Ready line puts the colon inside the bold label, which the plan's Ready regex did
+    /// not match. A plan written that way is Ready too, so it is advised when it has no task file.
+    /// </summary>
+    [Fact]
+    public void APlanWithTheStatusColonOutsideTheBoldIsReady()
+    {
+        const string PlanReadyLine = "**Status: Ready.**";
+        const string SpecReadyLine = "**Status:** Ready.";
+        string plan = PlanTaskFileProbe.PlanMarkdown();
+        Assert.Contains(PlanReadyLine, plan, StringComparison.Ordinal);
+        string rewritten = plan.Replace(PlanReadyLine, SpecReadyLine, StringComparison.Ordinal);
+        Assert.Contains(SpecReadyLine, rewritten, StringComparison.Ordinal);
+
+        using DocFixture fixture = PlanTaskFileProbe.Corpus(rewritten);
+
+        AssertReports(Validate(fixture), MissingTaskFile);
+    }
+
+    /// <summary>Asserts no task-file rule fired: the run's output carries no <c>KW-DOC-TASKS-*</c> code.</summary>
+    private static void AssertNoTaskFileFinding(ReportedFindings run)
+    {
+        Assert.False(
+            run.Output.Contains("KW-DOC-TASKS-", StringComparison.Ordinal),
+            $"expected no KW-DOC-TASKS-* finding from 'docs validate'; it reported {run.Describe()}.");
+    }
+
+    /// <summary>
+    /// Asserts no <c>KW-DOC-TASKS-006</c> finding names any of the given documents. It reads the
+    /// JSON the command printed and checks each finding object, so a finding that names the spec's
+    /// requirements or design in any field fails with the offending text.
+    /// </summary>
+    private static void AssertNoMissingTaskFileNames(ReportedFindings run, params string[] documentNames)
+    {
+        using JsonDocument document = ParseRunOutput(run.Output);
+        Stack<JsonElement> pending = new();
+        pending.Push(document.RootElement);
+        while (pending.Count > 0)
+        {
+            JsonElement element = pending.Pop();
+            if (element.ValueKind == JsonValueKind.Array)
+            {
+                foreach (JsonElement item in element.EnumerateArray())
+                {
+                    pending.Push(item);
+                }
+            }
+            else if (element.ValueKind == JsonValueKind.Object)
+            {
+                bool isMissingTaskFile = element.EnumerateObject().Any(property =>
+                    property.Value.ValueKind == JsonValueKind.String
+                    && string.Equals(property.Value.GetString(), MissingTaskFile, StringComparison.Ordinal));
+                foreach (JsonProperty property in element.EnumerateObject())
+                {
+                    if (isMissingTaskFile && property.Value.ValueKind == JsonValueKind.String)
+                    {
+                        string value = property.Value.GetString() ?? string.Empty;
+                        foreach (string name in documentNames)
+                        {
+                            Assert.False(
+                                value.Contains(name, StringComparison.Ordinal),
+                                $"did not expect {MissingTaskFile} to name '{name}'; the finding was: {value}.");
+                        }
+                    }
+
+                    pending.Push(property.Value);
+                }
+            }
+        }
+    }
+
+    /// <summary>Parses the command's output, failing the test with the output named rather than throwing.</summary>
+    private static JsonDocument ParseRunOutput(string output)
+    {
+        try
+        {
+            return JsonDocument.Parse(output);
+        }
+        catch (JsonException exception)
+        {
+            Assert.Fail($"'docs validate -f json' did not print one JSON document ({exception.Message}); output: {output}");
+            throw;
+        }
+    }
 }
 
 /// <summary>
@@ -699,4 +930,264 @@ internal static class PlanTaskFileProbe
 
         return (promptPrefix ?? string.Empty) + body + "\n";
     }
+}
+
+/// <summary>
+/// The specification task-file contract: a spec folder holding <c>tasks.md</c>, the file a
+/// specification's task list is written in, and the <c>tasks.json</c> beside it that the
+/// validator must read. The spec's requirements and design are present so the rules can be shown
+/// to ignore them.
+/// </summary>
+/// <remarks>
+/// The author's files and dependencies are hard-coded here rather than read back from the parser,
+/// so a task file never inherits a parse defect: the digest is the only value computed from the
+/// parser, and the tests that need it compute it from the same parser the validator uses.
+/// </remarks>
+internal static class SpecTaskFileProbe
+{
+    internal const string SpecFolder = "6-Docs/specs/ready-feature";
+    internal const string SpecIndexPath = "6-Docs/specs/README.md";
+    internal const string TasksPath = SpecFolder + "/tasks.md";
+    internal const string TaskFilePath = SpecFolder + "/tasks.json";
+    internal const string DesignPath = SpecFolder + "/design.md";
+
+    /// <summary>This fixture's two spec tasks, the second depending on the first.</summary>
+    internal const string FirstTask = "1.1";
+    internal const string SecondTask = "1.2";
+
+    /// <summary>Each task's file scope, as both the task list and the task file declare it.</summary>
+    internal const string FirstTaskFile = "tests/KyberWeave.Tests/PlanTaskFileValidatorTests.cs";
+    internal const string SecondTaskFile = "src/KyberWeave.Core.Docs/Validation/PlanTaskFileValidator.cs";
+
+    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+
+    /// <summary>A corpus holding the specification index, the spec folder and its four files.</summary>
+    internal static DocFixture Corpus(string? tasksMarkdown = null)
+    {
+        return new DocFixture().WithCatalog()
+            .Write(
+                SpecIndexPath,
+                """
+                ---
+                id: specs/index
+                title: Specifications
+                doc-type: index
+                status: current
+                owner: Maintainers
+                last-reviewed: 2026-11-12
+                ---
+
+                # Specifications
+
+                - [Ready feature](ready-feature/README.md)
+                """)
+            .Write(
+                SpecFolder + "/README.md",
+                """
+                ---
+                id: specs/ready-feature/index
+                title: Ready feature
+                doc-type: index
+                status: current
+                owner: Maintainers
+                last-reviewed: 2026-11-12
+                ---
+
+                # Ready feature
+
+                - [Requirements](requirements.md)
+                - [Design](design.md)
+                - [Tasks](tasks.md)
+                """)
+            .Write(SpecFolder + "/requirements.md", SpecDocument("requirements", "**Status:** Ready. The requirements are approved."))
+            .Write(DesignPath, SpecDocument("design", "**Status:** Ready. The design is approved."))
+            .Write(TasksPath, tasksMarkdown ?? TasksMarkdown());
+    }
+
+    /// <summary>
+    /// The specification task list: frontmatter, the spec Ready line, a Phase status label, and two
+    /// checkbox tasks in the spec grammar, each with its objective, files, acceptance criteria,
+    /// skills, dependencies and requirement references.
+    /// </summary>
+    internal static string TasksMarkdown() =>
+        """
+        ---
+        id: specs/ready-feature/tasks
+        title: Ready feature tasks
+        doc-type: spec
+        status: current
+        component: MotorcycleRAG API
+        owner: Maintainers
+        last-reviewed: 2026-11-12
+        development-mode: test-first
+        ---
+
+        # Ready feature tasks
+
+        **Status:** Ready. This specification is approved for execution.
+
+        **Phase status:** Approved
+
+        ## Test contract
+
+        | Task | Test project or file | Runner filter | Observable behaviour | RED evidence required | GREEN acceptance |
+        |---|---|---|---|---|---|
+        | 1.1 | `tests/KyberWeave.Tests/PlanTaskFileValidatorTests.cs` | `dotnet test --filter FullyQualifiedName~PlanTaskFileValidatorTests` | The task file is validated. | Fails: the validator is absent. | Passes. |
+        | 1.2 | `tests/KyberWeave.Tests/PlanTaskFileValidatorTests.cs` | `dotnet test --filter FullyQualifiedName~PlanTaskFileValidatorTests` | The file is checked against its task list. | Fails: the drift check is absent. | Passes. |
+
+        ## Tasks
+
+        ### Phase 1
+
+        - [ ] 1.1 RED: Pin the specification task file rules
+          - **Objective:** Pin the rules a specification task file is checked against.
+          - **Files:**
+            - `tests/KyberWeave.Tests/PlanTaskFileValidatorTests.cs`
+          - **Acceptance:**
+            - `Widget.Flag` is reported when the digest is stale.
+          - **Skills:** `test-dev`
+          - **Depends on:** none
+          - _Requirements: 1.1, 1.2_
+        - [ ] 1.2 GREEN: Check the specification task file against its task list
+          - **Objective:** Make the validator read the specification task file.
+          - **Files:**
+            - `src/KyberWeave.Core.Docs/Validation/PlanTaskFileValidator.cs`
+          - **Acceptance:**
+            - `Widget.Flag` is reported when a task is missing.
+          - **Skills:** `csharp-dev`
+          - **Depends on:** 1.1
+          - _Requirements: 1.1, 1.2_
+        """;
+
+    /// <summary>
+    /// The prompt for one spec task: it names the runner command with its class and the acceptance
+    /// criteria line, as the plan fixture's prompts do, and it sends the worker to no planning file.
+    /// </summary>
+    internal static string Prompt(string taskId) =>
+        $"Implement task {taskId} in the files this task names.\n\n" +
+        $"Run `{PlanTaskFileProbe.RunnerCommand}` and report the total it prints.\n\n" +
+        "Acceptance criteria: the class named in the command reports a non-zero total, with no failures.\n";
+
+    /// <summary>
+    /// The task file built from the spec's task list. <paramref name="digest"/> defaults to the
+    /// digest the parser computes for <paramref name="tasksMarkdown"/>, and <paramref name="planField"/>
+    /// defaults to <see cref="TasksPath"/>.
+    /// </summary>
+    /// <param name="tasksMarkdown">The task list the digest is computed from; defaults to the fixture task list.</param>
+    /// <param name="digest">The execution digest to record.</param>
+    /// <param name="planField">The <c>plan</c> field to record; defaults to the task list's path.</param>
+    /// <param name="edit">A change to the task entries before the file is written, to break one thing.</param>
+    internal static string TaskFile(
+        string? tasksMarkdown = null,
+        string? digest = null,
+        string? planField = null,
+        Action<List<Dictionary<string, object?>>>? edit = null)
+    {
+        List<Dictionary<string, object?>> tasks =
+        [
+            Row(FirstTask, "test-dev", [FirstTaskFile], [], Prompt(FirstTask)),
+            Row(SecondTask, "csharp-dev", [SecondTaskFile], [FirstTask], Prompt(SecondTask))
+        ];
+
+        edit?.Invoke(tasks);
+
+        Dictionary<string, object?> file = new(StringComparer.Ordinal)
+        {
+            ["schema-version"] = PlanTaskFileProbe.SchemaVersion,
+            ["plan"] = planField ?? TasksPath,
+            ["execution-digest"] = digest
+                ?? PlanDocumentParser.ExecutionDigest(PlanDocumentParser.Parse(tasksMarkdown ?? TasksMarkdown())),
+            ["tasks"] = tasks
+        };
+
+        return JsonSerializer.Serialize(file, JsonOptions);
+    }
+
+    /// <summary>
+    /// The digest the Arbiter's plan command prints for the spec's <c>tasks.md</c>, read from the
+    /// command's own JSON output, so the task file records the value a conductor would copy.
+    /// </summary>
+    internal static string ReportedDigest(DocFixture fixture)
+    {
+        ArgumentNullException.ThrowIfNull(fixture);
+
+        string path = Path.Combine(fixture.Root, TasksPath.Replace('/', Path.DirectorySeparatorChar));
+        ArbiterPlanCommand command = new();
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
+            () => command.Execute(null!, new ArbiterSettings { Path = path, Format = "json" }));
+
+        return ExecutionDigestFrom(execution.Output);
+    }
+
+    /// <summary>
+    /// Reads <c>metrics.execution-digest</c> from the plan command's JSON. Each shape check fails the
+    /// test with the output named, rather than throwing from the reader.
+    /// </summary>
+    private static string ExecutionDigestFrom(string output)
+    {
+        JsonDocument document;
+        try
+        {
+            document = JsonDocument.Parse(output);
+        }
+        catch (JsonException exception)
+        {
+            Assert.Fail($"'arbiter plan -f json' did not print one JSON document ({exception.Message}); output: {output}");
+            throw;
+        }
+
+        using (document)
+        {
+            JsonElement root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || !root.TryGetProperty("metrics", out JsonElement metrics)
+                || metrics.ValueKind != JsonValueKind.Object)
+            {
+                Assert.Fail($"'arbiter plan -f json' printed no 'metrics' object; output: {output}");
+                return string.Empty;
+            }
+
+            if (!metrics.TryGetProperty("execution-digest", out JsonElement digest)
+                || digest.ValueKind != JsonValueKind.String)
+            {
+                Assert.Fail($"'arbiter plan -f json' printed no string 'metrics.execution-digest'; output: {output}");
+                return string.Empty;
+            }
+
+            return digest.GetString() ?? string.Empty;
+        }
+    }
+
+    private static string SpecDocument(string name, string body) =>
+        $"""
+        ---
+        id: specs/ready-feature/{name}
+        title: Ready feature {name}
+        doc-type: spec
+        status: current
+        component: MotorcycleRAG API
+        owner: Maintainers
+        last-reviewed: 2026-11-12
+        ---
+
+        # Ready feature {name}
+
+        {body}
+        """;
+
+    private static Dictionary<string, object?> Row(
+        string id,
+        string role,
+        IReadOnlyList<string> files,
+        IReadOnlyList<string> dependsOn,
+        string prompt) =>
+        new(StringComparer.Ordinal)
+        {
+            ["id"] = id,
+            ["role"] = role,
+            ["depends-on"] = dependsOn,
+            ["files"] = files,
+            ["session"] = id,
+            ["prompt"] = prompt
+        };
 }
