@@ -157,7 +157,7 @@ public sealed class ArbiterFix1ContractTests : IDisposable
         string[] matchers = pre.Children.OfType<YamlMappingNode>()
             .Select(MatcherOf).ToArray();
         Assert.Contains("^(Agent|Task)$", matchers);
-        Assert.Contains("^(Read|Grep|Glob|Bash)$", matchers);
+        Assert.Contains("^(Read|Grep|Glob|Bash|PowerShell)$", matchers);
         Assert.Contains("^SubagentHandback$", matchers);
     }
 

@@ -611,7 +611,7 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         string.Equals(tool, "Read", StringComparison.Ordinal)
         || string.Equals(tool, "Grep", StringComparison.Ordinal)
         || string.Equals(tool, "Glob", StringComparison.Ordinal)
-        || string.Equals(tool, "Bash", StringComparison.Ordinal);
+        || IsShellTool(tool);
 
     private static bool IsHandbackTool(string? tool) =>
         string.Equals(tool, "SubagentHandback", StringComparison.Ordinal);

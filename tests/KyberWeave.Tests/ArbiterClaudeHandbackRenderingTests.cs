@@ -18,7 +18,7 @@ public sealed class ArbiterClaudeHandbackRenderingTests : IDisposable
 {
     private const string HandbackMatcher = "^SubagentHandback$";
     private const string DispatchMatcher = "^(Agent|Task)$";
-    private const string ReadGuardMatcher = "^(Read|Grep|Glob|Bash)$";
+    private const string ReadGuardMatcher = "^(Read|Grep|Glob|Bash|PowerShell)$";
     private const string ShellMatcher = "^(Bash|PowerShell)$";
 
     private static readonly string[] DispatchTargets =

@@ -594,6 +594,35 @@ public sealed class ClaudeHookAdapterTests
     }
 
     [Fact]
+    public void ReadGuard_CsharpDevPowerShellCall_DeniesAPlanningPathRead()
+    {
+        string planningDirectory = ReadGuard.ProtectedDirectories(new KyberWeaveConfig())[0];
+
+        (int exit, string stdout) = Run(
+            ShellPayload("PowerShell", $"Get-Content {planningDirectory}/plan.md", "csharp-dev"),
+            "conductor",
+            new ScriptedEngine());
+
+        Assert.Equal(0, exit);
+        using JsonDocument doc = JsonDocument.Parse(stdout);
+        JsonElement output = doc.RootElement.GetProperty("hookSpecificOutput");
+        Assert.Equal("deny", output.GetProperty("permissionDecision").GetString());
+        Assert.Contains("Req 25", output.GetProperty("permissionDecisionReason").GetString() ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReadGuard_CsharpDevPowerShellCall_AllowsAnOrdinaryCommand()
+    {
+        (int exit, string stdout) = Run(
+            ShellPayload("PowerShell", "Get-ChildItem src", "csharp-dev"),
+            "conductor",
+            new ScriptedEngine());
+
+        Assert.Equal(0, exit);
+        Assert.Equal(string.Empty, stdout);
+    }
+
+    [Fact]
     public void ShellGuard_CsharpDevBashCall_KeepsTheWorkerPlanningPathDeny()
     {
         // grep is on the architect's list, so an allow here would mean the shell guard reached csharp-dev.

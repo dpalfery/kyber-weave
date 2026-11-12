@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -101,16 +100,6 @@ public static class ArchitectShellGuard
     private static readonly char[] GlobCharacters = ['*', '?', '[', '{'];
 
     /// <summary>
-    /// The characters PowerShell reads as a quote or a statement break beyond ASCII: the typographic single and
-    /// double quotes (U+2018 to U+201F), the carriage return, and the next-line, line- and paragraph-separator
-    /// characters (U+0085, U+2028, U+2029). A PowerShell call that holds one is refused.
-    /// </summary>
-    private static readonly SearchValues<char> PowerShellQuoteAndBreakCharacters = SearchValues.Create(
-    [
-        '\u2018', '\u2019', '\u201A', '\u201B', '\u201C', '\u201D', '\u201E', '\u201F', '\r', '\u0085', '\u2028', '\u2029',
-    ]);
-
-    /// <summary>
     /// The uniq options that take a value as the next word (<c>-f N</c>, <c>-s N</c>, <c>-w N</c>), named in long form.
     /// </summary>
     private static readonly IReadOnlySet<string> UniqValueLongOptions = new HashSet<string>(StringComparer.Ordinal)
@@ -125,10 +114,6 @@ public static class ArchitectShellGuard
     private static readonly Refusal BackslashPathRefusal = new(
         "has a backslash in a path operand, which is not allowed in Bash",
         "Name the path with forward slashes, inside single quotes if it needs them");
-
-    private static readonly Refusal CarriageReturnRefusal = new(
-        "contains a carriage return outside quotes, which ends a command in PowerShell and is not allowed",
-        "Put each command in its own call, without line breaks");
 
     private static readonly Refusal SubstitutionRefusal = new(
         "uses a variable or command substitution, which is not allowed",
@@ -631,10 +616,6 @@ public static class ArchitectShellGuard
 
             switch (c)
             {
-                case '\r':
-                    // Bash reads a bare carriage return as a word character, and PowerShell as a statement break;
-                    // neither reading is one the list can account for.
-                    return new Tokens(words, CarriageReturnRefusal);
                 case '\'':
                     quote = Quote.Single;
                     inWord = true;
@@ -733,19 +714,6 @@ public static class ArchitectShellGuard
         if (segment.Text.Length == 0)
         {
             return new Refusal("is empty between separators", "Remove the stray separator");
-        }
-
-        // PowerShell reads these as quotes or statement breaks, and the tokeniser reads them as ordinary characters,
-        // so a segment holding one could mean something the list never saw. They are refused before tokenising.
-        if (!bash)
-        {
-            int at = segment.Text.AsSpan().IndexOfAny(PowerShellQuoteAndBreakCharacters);
-            if (at >= 0)
-            {
-                return new Refusal(
-                    $"contains U+{(int)segment.Text[at]:X4}, which PowerShell reads as a quote or a statement break",
-                    "Use ASCII quotes, and one command per line separated by ;");
-            }
         }
 
         Tokens tokens = Tokenize(segment.Text, bash);

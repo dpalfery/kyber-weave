@@ -201,11 +201,6 @@ is denied. If no such line appears, check that the architect's agent file carrie
 matcher `^(Bash|PowerShell)$`, and that the Claude workspace trust dialog has been accepted for the project.
 The user-scope copy runs without that trust step while the architect sub-agent is active.
 
-**Known gap: the worker read guard does not cover PowerShell.** The worker read guard protects planning paths
-from `Read`, `Grep`, `Glob` and `Bash` only. `ClaudeHookAdapter.IsReadTool` and `ClaudeRenderer.ReadGuardMatcher`
-name `Bash` and not `PowerShell`, so a worker's `PowerShell` read of a plan or specification is not guarded. This
-is a follow-up, tracked in [issue #604](https://github.com/dpalfery/kyber-weave/issues/604).
-
 **Known residuals.** The path checks are textual, so a symlink, Bash `CDPATH`, or a PowerShell backslash on a POSIX
 host can move the real target of a `touch`. The residual is an empty `.md` or `.json` file, and it is written only
 where the guard would have allowed a planning-folder path. Tracked in [issue #605](https://github.com/dpalfery/kyber-weave/issues/605).

@@ -11,7 +11,7 @@ namespace KyberWeave.Tests;
 /// Pins the Arbiter Claude hook rendering contract: dispatcher agents and the
 /// <c>/conductor</c> entry-point skill carry Pre/Post dispatch hooks with the anchored
 /// <c>^(Agent|Task)$</c> matcher, guarded implementation specialists carry the Read guard
-/// hook with <c>^(Read|Grep|Glob|Bash)$</c>, and nothing is rendered when the wiring is
+/// hook with <c>^(Read|Grep|Glob|Bash|PowerShell)$</c>, and nothing is rendered when the wiring is
 /// null, disabled, or the scope is Global.
 /// </summary>
 public sealed class ArbiterClaudeRenderingTests : IDisposable
@@ -35,7 +35,7 @@ public sealed class ArbiterClaudeRenderingTests : IDisposable
     ];
 
     private const string DispatchMatcher = "^(Agent|Task)$";
-    private const string ReadGuardMatcher = "^(Read|Grep|Glob|Bash)$";
+    private const string ReadGuardMatcher = "^(Read|Grep|Glob|Bash|PowerShell)$";
     private const string HandbackMatcher = "^SubagentHandback$";
     private const string ShellMatcher = "^(Bash|PowerShell)$";
 

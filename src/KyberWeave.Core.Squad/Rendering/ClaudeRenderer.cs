@@ -79,7 +79,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// scope, dispatcher agents (non-empty <c>delegates-to</c>) gain frontmatter <c>hooks</c>
 /// with <c>PreToolUse</c> and <c>PostToolUse</c> entries matched on <c>^(Agent|Task)$</c>,
 /// and guarded implementation specialists (<c>worker</c> / <c>publishing-worker</c> profiles)
-/// gain a <c>PreToolUse</c> entry matched on <c>^(Read|Grep|Glob|Bash)$</c>. Each entry runs
+/// gain a <c>PreToolUse</c> entry matched on <c>^(Read|Grep|Glob|Bash|PowerShell)$</c>. Each entry runs
 /// <c>kyber-weave-arbiter hook --harness claude --caller &lt;agent&gt;</c> with the wiring's
 /// timeout. The conductor's entry-point skill carries the same dispatch hooks as its agent.
 /// Per-agent hooks make the caller trusted without a new agent field, which
@@ -118,7 +118,7 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
     /// <c>tool_input.message</c> [F1].
     /// </remarks>
     private const string DispatchMatcher = "^(Agent|Task)$";
-    private const string ReadGuardMatcher = "^(Read|Grep|Glob|Bash)$";
+    private const string ReadGuardMatcher = "^(Read|Grep|Glob|Bash|PowerShell)$";
     private const string HandbackMatcher = "^SubagentHandback$";
 
     /// <summary>

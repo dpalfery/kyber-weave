@@ -17,7 +17,7 @@ public sealed class ArbiterGlobalHookCoverageTests
 {
     private const string ToolUseId = "toolu-global-coverage-1";
     private const string DispatchMatcher = "^(Agent|Task)$";
-    private const string ReadMatcher = "^(Read|Grep|Glob|Bash)$";
+    private const string ReadMatcher = "^(Read|Grep|Glob|Bash|PowerShell)$";
 
     private static readonly string AgentFile = Path.Combine(".claude", "agents", "csharp-dev.md");
     private static readonly string ConductorAgentFile = Path.Combine(".claude", "agents", "conductor.md");
