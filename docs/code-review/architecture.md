@@ -340,7 +340,11 @@ values, checked on the raw JSON: a severity that is a number or not one of the n
 any letter case, so `"MAJOR"` is accepted), or a confidence that is not a JSON whole number from 1
 to 10 (a float such as `9.0` or `1e1`, or a numeric string such as `"9"`, is refused), refuses the
 file (`KW-REVIEW-023`). So does a `null` element in any list the command binds, in a findings or
-a gates document; a `null` inside a property the command does not know is tolerated.
+a gates document; a `null` inside a property the command does not know is tolerated. Two spellings
+of one name in an object the verdict reads are refused too (`KW-REVIEW-023`), because the reader
+would otherwise bind whichever came last: names match ignoring case, and a seat's
+`failure_scenario` and the document's `failureScenario` count as one name. Objects inside
+properties the command does not know are not walked.
 
 A findings or `NO FINDINGS` seat that wrote no `Discovery:` line, read files directly with no index lookup and no
 `Index fallback:` line, wrote an `Index fallback:` value outside the three modes, or wrote two
