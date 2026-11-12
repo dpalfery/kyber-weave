@@ -2,7 +2,7 @@
 id: plans/2026-11-12-review-wait-command
 title: Wait for a review gate run without polling the process list
 doc-type: plan
-status: current
+status: archived
 component: ReviewCouncil
 owner: dpalfery
 created: 2026-11-12
@@ -15,7 +15,7 @@ impact-components: [ReviewCouncil, KyberSquad, CI Pipelines]
 
 # Wait for a review gate run without polling the process list
 
-**Status: Ready** — approved for execution under decision AP1 (autonomous approval of gate `approve-and-execute`), 2026-11-12.
+**Status: Archived 2026-11-12 — abandoned before completion.** Only the command skeleton and the no-polling rule text landed; the implementation was not finished. The task file was removed at archival.
 **Development mode:** `test-first` (RED by `test-dev`, GREEN by the implementation specialist, never the same worker).
 **Autonomy:** `autonomous` (every open item decided by recommendation; provenance in `## Decisions`).
 **Scale:** `extends-component`, components `ReviewCouncil` (the `review gates` command and a new `review wait` verb), `KyberSquad` (the code-review skill and the code-reviewer and conductor bodies) and `CI Pipelines` (two new rule ids in the rule reference).
