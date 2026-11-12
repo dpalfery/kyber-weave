@@ -4,11 +4,12 @@ title: Kyber Arbiter runbook
 doc-type: runbook
 component: KyberArbiter
 owner: dpalfery
-last-reviewed: 2026-11-11
+last-reviewed: 2026-11-12
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
   - adr/0054-squad-owned-blocks-in-shared-hook-files
+  - adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude
 ---
 
 # Kyber Arbiter runbook
@@ -132,6 +133,63 @@ never spawning with a possibly-wrong cwd.
 When the Arbiter is enabled, the Copilot conductor's agent file runs `kyber-weave-arbiter guard` on `preToolUse` and `userPromptTransformed`. It denies the conductor's own project work and restates the workflow on every model-facing message, because VS Code requires the conductor to hold tools its workers need. See [ADR 0066](../adr/0066-the-copilot-conductor-holds-tools-a-hook-denies-it.md).
 
 A denial names the blocked tool. If the conductor genuinely needs a new Copilot tool, add it to `ConductorGuard`. The guard is rendered only when the Arbiter is enabled at install. Once rendered it reads no configuration, so setting `arbiter.enabled: false` later does not remove it until the agents are rendered again.
+
+## The architect shell guard
+
+On Claude, the Arbiter denies an architect `Bash` or `PowerShell` call that falls outside the command set
+`architect.md` documents (`KW-ARB-SHELL-001`). The check is `ArchitectShellGuard`, a stateless hook guard
+beside `ReadGuard` and `ConductorGuard`; it is not a rule, so no decision or ledger event is written. The
+hook is a `PreToolUse` entry with matcher `^(Bash|PowerShell)$` in the architect's agent file, at project
+scope and at user scope. The user-scope copy is an exception to the rule that user-level agents carry no
+per-agent hooks: a matcher in the user-level `settings.json` would start the hook for every shell call of
+every agent on the machine. See [ADR 0071](../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md).
+
+**What it denies.** The command is split on unquoted `&&`, `||`, `;`, `|` and newline, and each part must
+match a documented form. Anything else is denied before it runs, including:
+
+- substitutions (`$(…)`, backticks, `$`), process substitution, subshells, braces, heredocs and background `&`;
+- redirects other than `2>&1` and `2>/dev/null`, and environment-prefix assignments;
+- shell keywords such as loops and conditionals, and wrapper commands such as `bash`, `sh`, `eval`, `xargs`, `env` and `sudo`;
+- git global options other than `--no-pager` and `-C` (for example `git -c`), and `git … --output`;
+- `find -exec`, `-ok` or `-delete`, `rg --pre`, and `sort -o`;
+- `touch` on anything other than a `.md` or `.json` file under the plan, spec and todo directories.
+
+A command the guard cannot parse is denied, so a wrongly denied command costs one `STATUS: BLOCKED` round trip.
+
+**Reading a denial.** A denial names the command the architect tried. The architect is told to return
+`STATUS: BLOCKED` with that command rather than work around it, so a denial is the list working. Find
+the `KW-ARB-SHELL-001` line in the hook log. If the command is one the planner really needs, widen the list
+(next section) rather than asking the architect to route around it.
+
+**Widening the list.** Change three things together, in one change:
+
+1. one row in the guard's `DocumentedForms` table, which is the set of documented forms the guard allows;
+2. the architect command-set clause in `products/kyber-squad/agents/architect.md`, where every backticked span
+   between `Your shell is limited to this command set:` and the first `before you edit it.` must match a
+   `DocumentedForms` key;
+3. the sync test `KyberWeave.Tests.Arbiter.ArchitectShellGuardSyncTests`, which binds those spans to the keys.
+
+Changing `architect.md` also changes its body digest, so update `final-body-sha256` in
+`products/kyber-squad/migration/architect.md` from the value `SquadCanonicalContentTests` prints, then
+re-render with `kyber-weave squad update` (add `--global` for the user-scope copy).
+
+**Harness matrix.** The guard is enforced on Claude only, for the `Bash` and `PowerShell` tools at project and
+user scope. Every other harness keeps the list as instruction only, and the architect keeps it by its own
+discipline there: Copilot in VS Code (the terminal tool name in its payload is undocumented), Copilot CLI (its
+hooks gate only `task`), Codex, Cursor, OpenCode, Kilo, Pi, Factory, Devin and Antigravity. Warp and ZCode have
+no hooks. These are follow-ups. The guard is enforced at once, with no shadow mode and no configuration, like
+`ReadGuard` and `ConductorGuard`.
+
+**Confirming it fires.** After an architect run that used the shell, search the hook log for `KW-ARB-SHELL-001`.
+A denied architect `ls -la | sed` call is the expected line: `sed` is not in the list, so the whole pipeline
+is denied. If no such line appears, check that the architect's agent file carries the `PreToolUse` hook with
+matcher `^(Bash|PowerShell)$`, and that the Claude workspace trust dialog has been accepted for the project.
+The user-scope copy runs without that trust step while the architect sub-agent is active.
+
+**Known gap: the worker read guard does not cover PowerShell.** The worker read guard protects planning paths
+from `Read`, `Grep`, `Glob` and `Bash` only. `ClaudeHookAdapter.IsReadTool` and `ClaudeRenderer.ReadGuardMatcher`
+name `Bash` and not `PowerShell`, so a worker's `PowerShell` read of a plan or specification is not guarded. This
+is a follow-up.
 
 ## Trust steps
 

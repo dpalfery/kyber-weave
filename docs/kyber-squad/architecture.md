@@ -5,9 +5,10 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core.Squad
 owner: dpalfery
-last-reviewed: 2026-11-11
+last-reviewed: 2026-11-12
 status: current
 decided-by:
+  - adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude
   - adr/0068-doctor-owns-a-marked-block-in-the-shared-post-checkout-hook
   - adr/0067-copilot-system-prompt-override-is-machine-wide
   - adr/0060-runs-start-from-the-fetched-remote-and-carry-the-harness-name
@@ -1244,7 +1245,8 @@ and validates.
   [ADR 0054](../adr/0054-squad-owned-blocks-in-shared-hook-files.md))**:
   `ArbiterHookWiring` renders decision-gate hooks for the
   [Kyber Arbiter](../kyber-arbiter/architecture.md) beside the agent deployment, in project
-  scope only and only when the project's `arbiter.enabled` is true. Ten targets are
+  scope only and only when the project's `arbiter.enabled` is true. The architect shell guard
+  below is the one hook that renders at both scopes. Ten targets are
   hooked: per-agent frontmatter hooks on `claude` (each dispatching agent plus the
   `/conductor` entry-point skill, with `--caller <agent>`, and a `^SubagentHandback$`
   pre-call hook on every agent a governed dispatcher can target, so a background return is
@@ -1269,8 +1271,19 @@ and validates.
   `kw-arbiter` server, launched as `kyber-weave-arbiter serve --repo-root <root>`, in the
   harness's own MCP configuration —
   until which only the advisory marker fallback enforces there. A global install renders no
-  hooks. The `arbiter-not-enforced` records these targets produce, and their details codes,
+  hooks except the architect shell guard described below. The `arbiter-not-enforced` records these targets produce, and their details codes,
   are listed once in the [degradation taxonomy](requirements.md#degradation-taxonomy).
+
+- **Architect shell guard ([ADR 0071](../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md))**:
+  on `claude`, `ClaudeRenderer.BuildArbiterHooks` writes one `PreToolUse` entry with matcher
+  `^(Bash|PowerShell)$` into the agent file of each `architect`-profile agent. It renders at project
+  scope and at user scope, and it is the only per-agent hook the user-scope agent file carries. That is
+  an exception to Req 22.2 (nothing is rendered per agent at user scope): a matcher in the user-level
+  `settings.json` would start the hook process for every shell call of every agent on the machine, and
+  would fire twice beside a project agent-file hook. The hook command is the Arbiter's `ArbiterHookWiring`
+  command line, and its deny is `KW-ARB-SHELL-001`. On the other targets no shell hook is rendered, and the
+  architect's command list stays instruction-only there. The operator steps are in the
+  [runbook](../kyber-arbiter/runbook.md#the-architect-shell-guard).
 
 ### MCP server keys are defined once
 

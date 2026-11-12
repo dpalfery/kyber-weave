@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-11-11
+last-reviewed: 2026-11-12
 ---
 
 # Rule reference
@@ -303,6 +303,17 @@ receipts and logs key on them, so an id is never reused or renumbered.
 | `KW-ARB-FAILURE-001` | `delegate.failure` | 0, then 1 | Is this rework failure the same failure as the previous attempt of its cluster (≥ 0.85). The first failure of a cluster is only recorded; `same` returns the advisory `ARBITER_SAME_FAILURE` and never denies. Shipped in shadow |
 | `KW-ARB-TRIM-001` | `sections.select` | 1 | Does this section bear on the task (≥ 0.9). Only a confident `not-relevant` trims the section (`advise`); any unsure answer keeps every section. Shipped in shadow |
 | `KW-ARB-COMMENT-001` | `comment.triage` | 1 | Is this bot review comment `real`, a `nitpick`, or `already-fixed` in the current code (≥ 0.85). Only `real` keeps the comment as a fix target; `nitpick` and `already-fixed` are advised. Summary-table rows from a configured bot are classified one by one, at most 50 per call, and every other row stays `real`. Shipped in shadow, so the caller is handed `real` and the class the model gave is reported as `wouldClass`. |
+
+### Hook guards
+
+A hook guard is a stateless check that runs in the harness hook before a tool call, beside the
+shipped rules. It is not a rule.
+
+| Id | Harness and tool | Caller | Effect | Meaning |
+|---|---|---|---|---|
+| `KW-ARB-SHELL-001` | Claude `Bash` and `PowerShell`, project and user scope | `architect` | Deny before the command runs | A shell command outside the architect's documented command set: a command not on the list, a substitution, a redirect other than `2>&1` or `2>/dev/null`, a heredoc, a subshell, a loop, or a `touch` outside the plan, spec and todo directories |
+
+Hook guards are not rules: hosts cannot tune or disable them, and they write no ledger event.
 
 ### Configuration, key, log, binary, guard, parse — `arbiter validate`, `setup`, `status`, `doctor`, `plan`
 
