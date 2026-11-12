@@ -1758,7 +1758,7 @@ what makes resuming a run somewhere else possible at all.
   title, text, files, dependencies, skills), the test contract rows, the out-of-scope paths and the
   development mode. A status flip or an edit to a Decisions row is therefore not stale; any task
   edit is. Stale means the conductor refuses the file until the architect regenerates it. The
-  architect takes the digest from `kyber-weave arbiter plan -f json` after its last plan edit, only when the command exits 0 with no `KW-ARB-PARSE-*` or `KW-ARB-PLAN-001` finding, writes
+  architect takes the digest from `kyber-weave arbiter plan -f json` after its last plan edit, only when the command exits 0 with no `KW-ARB-PARSE-001` and no `KW-ARB-PLAN-001` finding, writes
   the task file, then validates, and returns `PLAN_FINALIZED` only with no `KW-DOC-TASKS-*` finding;
   a shell-less architect gets the digest from the conductor as `PLAN_DIGEST`. The task file is written in place at its final path, never through a sibling or temporary file such as a `.new` or `.tmp` copy. A specification's digest is over its `tasks.md`: the conductor runs `kyber-weave arbiter plan` and passes the digest to `product-owner` as `SPEC_DIGEST` before finalization. The parser ends a Depends value at the next bullet at the same or a shallower indent (deeper sub-bullets stay in the value), and ends a Files bullet list at the next bold-labelled bullet, so a spec item's `_Requirements:_` line and `**Acceptance:**` bullet are not taken as dependencies or files.
 - **Each finished task commits with a `Task:` line.** The worker commits on the feature branch with

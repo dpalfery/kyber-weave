@@ -288,7 +288,7 @@ Read-only inspection:
 ```bash
 kyber-weave arbiter validate [path]  # arbiter: section, user override, and shipped rules
 kyber-weave arbiter rules [--trigger <t>]
-kyber-weave arbiter plan <file>      # what the parser understood, with KW-ARB-PLAN-001 / KW-ARB-PARSE-00x; the file is a plan or a spec's tasks.md; also reports the execution digest for a plan that parses without findings and has parsed tasks (-f json: metrics.execution-digest)
+kyber-weave arbiter plan <file>      # what the parser understood, with KW-ARB-PLAN-001 / KW-ARB-PARSE-00x; the file is a plan or a spec's tasks.md; also reports the execution digest for a plan with parsed tasks that drops no dependency token (KW-ARB-PARSE-001) (-f json: metrics.execution-digest)
 kyber-weave arbiter eval --trigger <t> --event <file> [--provider none]  # offline dry run; writes nothing
 kyber-weave arbiter audit [--plan <file>] [--session <id>] [--since <ISO-8601>]
 kyber-weave arbiter tune [path] [--rule <id>] [--thresholds 0.5,0.6,0.7] [--json]  # read-only score report; see below

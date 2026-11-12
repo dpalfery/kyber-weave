@@ -4,6 +4,7 @@ using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Model;
+using KyberWeave.Core.Processes;
 
 namespace KyberWeave.Core.Docs.Validation;
 
@@ -422,7 +423,7 @@ public sealed partial class PlanTaskFileValidator
             taskFile,
             taskFile,
             Hint: $"Regenerate the file's prompts from the {kind} as it now stands: run " +
-            $"'kyber-weave arbiter plan \"{artifactPath}\" -f json' and copy its execution-digest into the file. " +
+            $"kyber-weave arbiter plan {ShellQuote.Quote(artifactPath)} -f json and copy its execution-digest into the file. " +
             "The digest covers the tasks, their text, files, dependencies and skills, the test contract rows, " +
             "the out-of-scope paths and the mode, so a status or decisions-row edit is not what moved it."));
     }

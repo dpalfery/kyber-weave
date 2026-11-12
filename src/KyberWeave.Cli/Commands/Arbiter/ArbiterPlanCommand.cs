@@ -19,9 +19,10 @@ public sealed class ArbiterPlanCommand : Command<ArbiterSettings>
     /// Parses the plan file named by the positional path and prints its tasks,
     /// files, dependencies, contract rows and out-of-scope paths, plus
     /// <c>KW-ARB-PARSE-00x</c> diagnostics. The execution digest is reported only for a plan with tasks
-    /// and no parser findings, as the <c>execution-digest</c> metric in json and once on its own line in
-    /// the table, so a task file can record the digest it was written from. Any finding withholds it,
-    /// since a task without a Files line is an incomplete execution. A plan with no parsed task reports
+    /// and no dropped content, as the <c>execution-digest</c> metric in json and once on its own line in
+    /// the table, so a task file can record the digest it was written from. An unknown dependency token
+    /// (<c>KW-ARB-PARSE-001</c>) withholds it, since the parser drops that token; a task with no Files
+    /// line (<c>KW-ARB-PARSE-002</c>) does not. A plan with no parsed task reports
     /// <c>KW-ARB-PLAN-001</c>; a missing or unreadable file reports
     /// <c>KW-ARB-PLAN-002</c> and exits 1.
     /// </summary>
@@ -60,13 +61,14 @@ public sealed class ArbiterPlanCommand : Command<ArbiterSettings>
         PlanDocument document = PlanDocumentParser.Parse(text);
         report.AddRange(document.Diagnostics);
 
-        // Fail closed: a digest is offered only for a plan with tasks and no parser findings. Any finding
-        // withholds it, not only the ones that alter a line: a task with no Files line (KW-ARB-PARSE-002)
-        // is an incomplete execution, and its digest would present it as complete. The findings are
-        // warnings, so HasErrors does not catch them; the finding count does. An empty Tasks section has
+        // Fail closed: a digest is withheld when the parser dropped content. KW-ARB-PARSE-001 (an unknown
+        // dependency token) is removed from the parse, so a digest over it would describe a plan that does
+        // not say what it says. KW-ARB-PARSE-002 (a task with no Files line) is a completeness finding: the
+        // task keeps its text, dependencies and contract, so its digest is offered. The findings are
+        // warnings, so HasErrors does not catch them; the code check does. An empty Tasks section has
         // HasTasks but no task to digest.
-        bool parsedWithoutFindings = document.Diagnostics.Count == 0;
-        string? digest = parsedWithoutFindings && document.HasTasks && document.Tasks.Count > 0
+        bool droppedContent = document.Diagnostics.Any(finding => finding.Code == PlanDocumentParser.UnknownDependencyRule);
+        string? digest = !droppedContent && document.HasTasks && document.Tasks.Count > 0
             ? PlanDocumentParser.ExecutionDigest(document)
             : null;
 
@@ -88,7 +90,7 @@ public sealed class ArbiterPlanCommand : Command<ArbiterSettings>
                     ? $"Plan '{resolved}' has a Tasks section, but no task in it parsed."
                     : $"Plan '{resolved}' carries no Tasks section.",
                 settings.Path,
-                Hint: "Add a '## Tasks' section with T1, T2, ... headings, or a spec-grammar checklist; without one, readiness answers no-tasks."));
+                Hint: "Add T1, T2, ... headings under '## Tasks' (adding the section if missing), or a spec-grammar checklist; without one, readiness answers no-tasks."));
         }
 
         // The prose lines are for a person reading the table. Json, sarif and markdown must
