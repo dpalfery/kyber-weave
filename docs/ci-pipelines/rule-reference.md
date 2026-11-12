@@ -56,13 +56,13 @@ dispatch without reading the plan: `docs/plans/<plan>.tasks.json` beside the pla
 `KW-DOC-LIFECYCLE-005` also covers `<spec-folder>/tasks.json` inside a specification.) The plan stays the
 authority, so every rule here is a disagreement between the file and the plan it sits beside, or a prompt
 that cannot be acted on. All six run in `docs validate` and in `docs_validate_governed_document_schema`, not
-behind a flag, because the orchestrator has the docs tools and no shell.
+behind a flag, because the orchestrator has the docs tools and no shell. The same six rules check a specification's `<spec-folder>/tasks.json` against its `tasks.md`; its `plan` field holds that path, and a specification is Ready for `-006` when `tasks.md` carries the spec Ready line.
 
 | Id | Severity | Meaning |
 |---|---|---|
 | `KW-DOC-TASKS-001` | Error | The file is not the JSON this build reads, or declares a schema version it does not read |
 | `KW-DOC-TASKS-002` | Error | The file's plan, tasks, files or dependencies disagree with the plan's |
-| `KW-DOC-TASKS-003` | Error | The execution digest is stale: the plan moved after the file was written. A status or Decisions edit does not move it; a task edit does. Produce the digest with `kyber-weave arbiter plan <plan> -f json` after the last plan edit |
+| `KW-DOC-TASKS-003` | Error | The execution digest is stale: the plan moved after the file was written. A status or Decisions edit does not move it; a task edit does. Produce the digest with `kyber-weave arbiter plan <plan> -f json` after the last plan edit (or `<spec-folder>/tasks.md` for a specification) |
 | `KW-DOC-TASKS-004` | Error | A prompt carries no command, or no acceptance criteria |
 | `KW-DOC-TASKS-005` | Error | A prompt tells the worker to open a plan, specification or todo — the authoring-time half of `KW-ARB-PLANREAD-001` |
 | `KW-DOC-TASKS-006` | Warning | A Ready plan has no task file beside it. Advisory: it never fails a merge, because every plan sits in that state until its architect writes one |

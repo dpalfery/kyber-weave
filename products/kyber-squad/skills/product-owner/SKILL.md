@@ -41,6 +41,7 @@ Normal phase work returns one of these exact status markers:
 - `STATUS: SPEC_READY`
 - `STATUS: SPEC_FINALIZED`
 - `STATUS: SPEC_WRITE_ERROR`
+- `STATUS: BLOCKED`, used only for the task-file digest hand-back
 
 Every review or gap digest includes:
 

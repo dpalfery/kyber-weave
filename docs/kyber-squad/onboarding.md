@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core.Squad
 owner: dpalfery
-last-reviewed: 2026-11-11
+last-reviewed: 2026-11-12
 status: current
 decided-by:
   - adr/0067-copilot-system-prompt-override-is-machine-wide
@@ -1341,7 +1341,7 @@ of `architect` with the gate id, not an edit by the orchestrating session.
 
 Conductor task packets are self-contained, and the conductor no longer writes them. `architect` saves
 one prompt per task in the plan's tracked task file at finalization — `docs/plans/<plan>.tasks.json`
-beside a plan, `<spec-folder>/tasks.json` inside a specification — and commits it with the plan, so
+beside a plan — and `product-owner` writes a specification's to `<spec-folder>/tasks.json`, committed with its artifact, so
 a push carries it to whichever machine resumes the run
 ([ADR 0063](../adr/0063-the-task-file-is-tracked-and-the-plan-stays-authoritative.md)). At dispatch
 the conductor validates that file, **pastes each prompt unchanged**, and fills exactly two slots:
