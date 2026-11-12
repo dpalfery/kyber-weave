@@ -201,7 +201,7 @@ The user-scope copy runs without that trust step while the architect sub-agent i
 **Known gap: the worker read guard does not cover PowerShell.** The worker read guard protects planning paths
 from `Read`, `Grep`, `Glob` and `Bash` only. `ClaudeHookAdapter.IsReadTool` and `ClaudeRenderer.ReadGuardMatcher`
 name `Bash` and not `PowerShell`, so a worker's `PowerShell` read of a plan or specification is not guarded. This
-is a follow-up.
+is a follow-up, tracked in [issue #604](https://github.com/dpalfery/kyber-weave/issues/604).
 
 ## Trust steps
 
