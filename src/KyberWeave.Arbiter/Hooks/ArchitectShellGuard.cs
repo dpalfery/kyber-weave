@@ -268,7 +268,7 @@ public static class ArchitectShellGuard
         string? departure = null;
         string? previous = null;
         int changes = 0;
-        foreach (Segment segment in Split(command, bash))
+        foreach (Segment segment in Split(WithoutTrailingSeparator(command), bash))
         {
             Refusal? refusal = CheckSegment(segment, bash, previous, ref directory, ref departure, ref changes, origin, planningDirectories);
             if (refusal is not null)
@@ -331,12 +331,14 @@ public static class ArchitectShellGuard
                     i);
             }
 
-            if (bash && c == '\\')
+            // In Bash a backslash is literal only inside single quotes, so a pattern such as 'foo\.bar' stays allowed.
+            // Anywhere else it is an escape the list does not model.
+            if (bash && c == '\\' && quote != Quote.Single)
             {
                 return new StructuralFault(
                     new Refusal(
-                        "uses a backslash, which Bash reads as an escape the list does not model",
-                        "Quote the argument instead of escaping it"),
+                        "uses a backslash, and a backslash is not allowed outside single quotes",
+                        "Write the pattern inside single quotes, where a backslash is literal"),
                     i);
             }
 
@@ -404,6 +406,23 @@ public static class ArchitectShellGuard
     private sealed record StructuralFault(Refusal Refusal, int Index);
 
     // ---- Splitting ---------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Drops the blank lines and blanks at the end of a call, and one <c>;</c> that ends it. A call ends with a newline
+    /// or a separator as often as not, and that end is not a command. A separator anywhere else is unchanged, so an
+    /// empty segment between two separators (<c>a ;; b</c>, <c>&amp;&amp; &amp;&amp;</c>) is still refused.
+    /// </summary>
+    private static string WithoutTrailingSeparator(string command)
+    {
+        string body = command.TrimEnd(' ', '\t', '\n');
+        if (body.EndsWith(';') && !body[..^1].TrimEnd(' ', '\t').EndsWith("{}", StringComparison.Ordinal))
+        {
+            // A ; that ends find's own {} terminator is part of that call, not a trailing separator.
+            body = body[..^1].TrimEnd(' ', '\t', '\n');
+        }
+
+        return body;
+    }
 
     /// <summary>
     /// Splits the call on unquoted <c>&amp;&amp;</c>, <c>||</c>, <c>;</c>, <c>|</c> and newline. A backslash
@@ -1503,7 +1522,6 @@ public static class ArchitectShellGuard
     /// <summary>One simple command as written, with the separator that follows it (null for the last).</summary>
     private sealed record Segment(string Text, string? Separator);
 
-    /// <summary>The words of one segment, and the refusal that stopped the read, if any.</summary>
     /// <summary>
     /// The words of one segment, the refusal that stopped the read if any, and for each word whether any part of it
     /// was quoted. The quoting matters where a dash-leading word is an operand rather than a flag: a quoted
