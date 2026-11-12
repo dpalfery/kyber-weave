@@ -380,6 +380,19 @@ public sealed class PlanTaskFileValidatorTests
     }
 
     /// <summary>
+    /// An archived plan folder is out of scope for the sidecar rule, so a copy of a task file under
+    /// the archive is not reported; only the live plans folder is policed.
+    /// </summary>
+    [Fact]
+    public void AnArchivedSidecarIsNotKWDOCTASKS007()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        fixture.Write("6-Docs/archive/plans/2026-11-05-archived-plan.tasks.json.new", "{}\n");
+
+        AssertDoesNotReport(Validate(fixture), SidecarTaskFile);
+    }
+
+    /// <summary>
     /// The prompt fixture is the contract an architect copies, so its command has to run. This
     /// programme shipped prompts naming test classes that matched nothing — a filter that
     /// matches nothing exits zero and proves nothing — so the class is resolved from the prompt

@@ -168,8 +168,8 @@ public sealed partial class PlanTaskFileValidator
                     "'<plan>.tasks.json', so this file is dead weight that the merge would carry.",
                     relative,
                     relative,
-                    Hint: "Delete it. Write the task file in place at '<plan>.tasks.json', never through a " +
-                    "temporary sibling."));
+                    Hint: "Delete it. If a live plan still needs its task file, write it in place at " +
+                    "'<plan>.tasks.json', never through a temporary sibling."));
             }
         }
     }
