@@ -4,6 +4,7 @@ using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Model;
+using KyberWeave.Core.Processes;
 
 namespace KyberWeave.Core.Docs.Validation;
 
@@ -394,7 +395,7 @@ public sealed partial class PlanTaskFileValidator
         }
 
         CheckTasks(parsed, file, taskFile, report);
-        CheckDigest(parsed, file, taskFile, report);
+        CheckDigest(parsed, plan.RelativePath, file, taskFile, report);
 
         foreach (PlanTaskFileEntry? entry in file.Tasks ?? [])
         {
@@ -555,6 +556,7 @@ public sealed partial class PlanTaskFileValidator
     /// <summary>Reports a digest that no longer describes the plan the file sits beside.</summary>
     private static void CheckDigest(
         PlanDocument plan,
+        string planPath,
         PlanTaskFile file,
         string taskFile,
         DiagnosticReport report)
@@ -565,6 +567,8 @@ public sealed partial class PlanTaskFileValidator
             return;
         }
 
+        // The hint names the command that prints the digest rather than the digest itself: a
+        // printed value would let someone repair a stale file without regenerating its prompts.
         report.Add(new Diagnostic(
             StaleDigest,
             Severity.Error,
@@ -573,9 +577,10 @@ public sealed partial class PlanTaskFileValidator
                 : $"Task file '{taskFile}' records a stale execution digest: the plan moved after the file was written.",
             taskFile,
             taskFile,
-            Hint: "Regenerate the file from the plan as it now stands. The digest covers the tasks, their text, " +
-            "files, dependencies and skills, the test contract rows, the out-of-scope paths and the mode, so a " +
-            "status or decisions-row edit is not what moved it."));
+            Hint: $"Regenerate the file's prompts from the plan as it now stands: run " +
+            $"kyber-weave arbiter plan {ShellQuote.Quote(planPath)} -f json and copy its execution-digest into the file. " +
+            "The digest covers the tasks, their text, files, dependencies and skills, the test contract rows, " +
+            "the out-of-scope paths and the mode, so a status or decisions-row edit is not what moved it."));
     }
 
     /// <summary>Reports a prompt with no command, no acceptance criteria, or a plan read in it.</summary>
