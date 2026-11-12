@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core.Squad
 owner: dpalfery
-last-reviewed: 2026-11-11
+last-reviewed: 2026-11-12
 status: current
 decided-by:
   - adr/0068-doctor-owns-a-marked-block-in-the-shared-post-checkout-hook
@@ -1750,8 +1750,9 @@ what makes resuming a run somewhere else possible at all.
   and the Arbiter reads task ids, files, dependencies, skills, task text, test rows and out-of-scope
   items from it. Only the conductor stops reading it — 68 KB in the measured run.
 - **The duplication is checked, not trusted.** A file that disagrees with its plan, a stale digest, a
-  prompt with no command or acceptance criteria, and a prompt that sends a worker into a plan each
-  fail validation; a Ready plan with no file warns. The ids are `KW-DOC-TASKS-001` to `-006`, and
+  prompt with no command or acceptance criteria, a prompt that sends a worker into a plan, and a copy
+  of the file left beside it under another name each fail validation; a Ready plan with no file warns.
+  The ids are `KW-DOC-TASKS-001` to `-007`, and
   `KW-DOC-LIFECYCLE-005` fails the merge when a file is left behind
   ([rule reference](../ci-pipelines/rule-reference.md)). The check runs in `docs validate` and in the
   docs MCP validate tool, because the orchestrator holds the docs tools and no shell.

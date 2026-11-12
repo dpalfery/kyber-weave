@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-11-11
+last-reviewed: 2026-11-12
 ---
 
 # Rule reference
@@ -55,7 +55,7 @@ A plan's task file is the tracked file the architect writes at finalization so t
 dispatch without reading the plan: `docs/plans/<plan>.tasks.json` beside the plan. (The merge-time rule
 `KW-DOC-LIFECYCLE-005` also covers `<spec-folder>/tasks.json` inside a specification.) The plan stays the
 authority, so every rule here is a disagreement between the file and the plan it sits beside, or a prompt
-that cannot be acted on. All six run in `docs validate` and in `docs_validate_governed_document_schema`, not
+that cannot be acted on, or a leftover copy of the file. All seven run in `docs validate` and in `docs_validate_governed_document_schema`, not
 behind a flag, because the orchestrator has the docs tools and no shell.
 
 | Id | Severity | Meaning |
@@ -66,6 +66,7 @@ behind a flag, because the orchestrator has the docs tools and no shell.
 | `KW-DOC-TASKS-004` | Error | A prompt carries no command, or no acceptance criteria |
 | `KW-DOC-TASKS-005` | Error | A prompt tells the worker to open a plan, specification or todo — the authoring-time half of `KW-ARB-PLANREAD-001` |
 | `KW-DOC-TASKS-006` | Warning | A Ready plan has no task file beside it. Advisory: it never fails a merge, because every plan sits in that state until its architect writes one |
+| `KW-DOC-TASKS-007` | Error | A copy of a task file left in the plans folder under another name, such as `<plan>.tasks.json.new` or `.tmp`, with or without its plan beside it. Names ending in `.tasks.json` are `KW-DOC-LIFECYCLE-005`'s |
 
 `KW-DOC-LIFECYCLE-005` in the table above is the merge-time half: the commit that archives a plan
 removes the file, and the walk looks under the archive too, so a specification folder that carried

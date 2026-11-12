@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core.Squad
 owner: dpalfery
-last-reviewed: 2026-11-11
+last-reviewed: 2026-11-12
 status: current
 decided-by:
   - adr/0067-copilot-system-prompt-override-is-machine-wide
@@ -1362,7 +1362,7 @@ essential items:
 `docs validate` and the docs MCP validate tool check the file before a run relies on it: it must
 agree with its plan (`KW-DOC-TASKS-002`), carry a digest that still describes the plan (`-003`), hold
 a command and acceptance criteria in every prompt (`-004`), and send no worker into a plan
-(`-005`). A Ready plan with no task file warns (`-006`), and `docs validate --merge-ready` fails when
+(`-005`). A Ready plan with no task file warns (`-006`), a copy of the file left beside it under another name fails (`-007`), and `docs validate --merge-ready` fails when
 a file is left behind (`KW-DOC-LIFECYCLE-005`) — which is why closeout removes it with `git rm` in
 the commit that archives the plan. The plan stays the authority: it is what the owner approved, and
 the Arbiter reads its tasks.
