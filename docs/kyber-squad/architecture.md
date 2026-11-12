@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core.Squad
 owner: dpalfery
-last-reviewed: 2026-11-11
+last-reviewed: 2026-11-12
 status: current
 decided-by:
   - adr/0068-doctor-owns-a-marked-block-in-the-shared-post-checkout-hook
@@ -1761,7 +1761,7 @@ what makes resuming a run somewhere else possible at all.
   edit is. Stale means the conductor refuses the file until the architect regenerates it. The
   architect takes the digest from `kyber-weave arbiter plan -f json` after its last plan edit, writes
   the task file, then validates, and returns `PLAN_FINALIZED` only with no `KW-DOC-TASKS-*` finding;
-  a shell-less architect gets the digest from the conductor as `PLAN_DIGEST`.
+  a shell-less architect gets the digest from the conductor as `PLAN_DIGEST`. The task file is written in place at its final path, never through a sibling or temporary file such as a `.new` or `.tmp` copy.
 - **Each finished task commits with a `Task:` line.** The worker commits on the feature branch with
   `Task: <id>` and its report in the commit body, and the branch is pushed after each integrated
   task, so `run start --resume` can read the completed tasks and their results from the commits

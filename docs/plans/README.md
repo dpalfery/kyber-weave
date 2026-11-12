@@ -58,9 +58,7 @@ its `tasks.json` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-| Plan | Status | Date | Goal |
-|---|---|---|---|
-| [2026-11-12-plan-task-file-digest-producer.md](2026-11-12-plan-task-file-digest-producer.md) | Ready — approved 2026-11-12 (AP1, autonomous); no task file per D11 | 2026-11-12 | Give the architect a supported command for the task file's execution digest, so approved plans can finalize (issue 599) |
+No plans are open.
 
 ## Archived Plans
 
