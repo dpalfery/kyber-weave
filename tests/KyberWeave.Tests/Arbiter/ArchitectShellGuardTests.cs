@@ -69,6 +69,9 @@ public sealed class ArchitectShellGuardTests
     [InlineData("grep -c x f | sort | uniq")]
     [InlineData("touch /w/docs/plans/2026-11-12-x.md")]
     [InlineData("cd /w && touch docs/plans/x.tasks.json")]
+    [InlineData("sort f")]
+    [InlineData("sort -r f")]
+    [InlineData("tail -5 f")]
     public void Bash_ListedCommand_IsAllowed(string command)
     {
         ShellGuardResult result = CheckBash(command);
@@ -126,6 +129,17 @@ public sealed class ArchitectShellGuardTests
     [InlineData("touch -r a docs/plans/x.md", "touch -r a docs/plans/x.md")]
     [InlineData("cd -", "cd -")]
     [InlineData("git log \"x", "git log \"x")]
+    [InlineData("sort --ou=out1.txt in.txt", "sort --ou=out1.txt in.txt")]
+    [InlineData("sort --out=f x", "sort --out=f x")]
+    [InlineData("sort --comp=gzip x", "sort --comp=gzip x")]
+    [InlineData("sort -ofile x", "sort -ofile x")]
+    [InlineData("rg --hostname-bin=/tmp/x --hyperlink-format=default --color=always p", "rg --hostname-bin=/tmp/x --hyperlink-format=default --color=always p")]
+    [InlineData("rg --hyperlink-format=default p", "rg --hyperlink-format=default p")]
+    [InlineData("tail -f f", "tail -f f")]
+    [InlineData("tail -F f", "tail -F f")]
+    [InlineData("tail --follow f", "tail --follow f")]
+    [InlineData("touch ../other/docs/plans/x.md", "touch ../other/docs/plans/x.md")]
+    [InlineData("touch ~/docs/plans/x.md", "touch ~/docs/plans/x.md")]
     public void Bash_CommandOutsideTheList_IsDeniedNamingTheOffendingSegment(string command, string offendingSegment)
     {
         ShellGuardResult result = CheckBash(command);

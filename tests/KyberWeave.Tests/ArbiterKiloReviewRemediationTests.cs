@@ -105,6 +105,17 @@ public sealed class ArbiterKiloReviewRemediationTests
         foreach (SquadDeploymentFile file in result.Files.Where(f => f.RelativePath.EndsWith(".md", StringComparison.Ordinal)))
         {
             string text = Encoding.UTF8.GetString(file.Content.Span);
+
+            // The architect is the one agent that keeps a frontmatter hook: its shell-guard entry (KW-ARB-SHELL-001),
+            // which is the only hook it carries at global scope. Every other agent file stays hook-free.
+            if (file.RelativePath == "agents/architect.md")
+            {
+                Assert.Contains("hooks:", text, StringComparison.Ordinal);
+                Assert.Contains("^(Bash|PowerShell)$", text, StringComparison.Ordinal);
+                Assert.DoesNotContain("^(Agent|Task)$", text, StringComparison.Ordinal);
+                continue;
+            }
+
             Assert.DoesNotContain("hooks:", text, StringComparison.Ordinal);
         }
 

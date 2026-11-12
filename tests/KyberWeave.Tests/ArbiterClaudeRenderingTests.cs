@@ -37,6 +37,7 @@ public sealed class ArbiterClaudeRenderingTests : IDisposable
     private const string DispatchMatcher = "^(Agent|Task)$";
     private const string ReadGuardMatcher = "^(Read|Grep|Glob|Bash)$";
     private const string HandbackMatcher = "^SubagentHandback$";
+    private const string ShellMatcher = "^(Bash|PowerShell)$";
 
     private readonly ArbiterSquadFixture _fixture = ArbiterSquadFixture.Create();
 
@@ -257,8 +258,18 @@ public sealed class ArbiterClaudeRenderingTests : IDisposable
         string otherPrimary = string.Equals(primaryMatcher, DispatchMatcher, StringComparison.Ordinal)
             ? ReadGuardMatcher
             : DispatchMatcher;
+
+        // The architect alone carries the shell-guard entry (KW-ARB-SHELL-001) beside its dispatch entry;
+        // every other agent must carry none.
+        int shellEntries = entries.Children.OfType<YamlMappingNode>()
+            .Count(e => string.Equals(RequireScalar(e, "matcher", agent), ShellMatcher, StringComparison.Ordinal));
+        Assert.Equal(
+            string.Equals(agent, ArbiterSquadFixture.Architect, StringComparison.Ordinal) ? 1 : 0,
+            shellEntries);
+
         YamlMappingNode[] others = entries.Children.OfType<YamlMappingNode>()
-            .Where(e => !string.Equals(RequireScalar(e, "matcher", agent), primaryMatcher, StringComparison.Ordinal))
+            .Where(e => !string.Equals(RequireScalar(e, "matcher", agent), primaryMatcher, StringComparison.Ordinal)
+                        && !string.Equals(RequireScalar(e, "matcher", agent), ShellMatcher, StringComparison.Ordinal))
             .ToArray();
 
         YamlMappingNode[] handback = others

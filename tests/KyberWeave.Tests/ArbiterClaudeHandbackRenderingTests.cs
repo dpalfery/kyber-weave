@@ -19,6 +19,7 @@ public sealed class ArbiterClaudeHandbackRenderingTests : IDisposable
     private const string HandbackMatcher = "^SubagentHandback$";
     private const string DispatchMatcher = "^(Agent|Task)$";
     private const string ReadGuardMatcher = "^(Read|Grep|Glob|Bash)$";
+    private const string ShellMatcher = "^(Bash|PowerShell)$";
 
     private static readonly string[] DispatchTargets =
     [
@@ -77,7 +78,8 @@ public sealed class ArbiterClaudeHandbackRenderingTests : IDisposable
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         // architect is a dispatcher and a dispatch target: PreToolUse keeps the dispatch
-        // entry and gains the hand-back entry; PostToolUse keeps the dispatch entry.
+        // entry, gains the hand-back entry, and carries the shell-guard entry (KW-ARB-SHELL-001);
+        // PostToolUse keeps the dispatch entry.
         YamlMappingNode architectFrontmatter = SplitFrontmatter(
             Encoding.UTF8.GetString(Assert.Single(
                 result.Files,
@@ -85,9 +87,10 @@ public sealed class ArbiterClaudeHandbackRenderingTests : IDisposable
             ArbiterSquadFixture.Architect);
         YamlMappingNode architectHooks = RequireMapping(architectFrontmatter, "hooks", ArbiterSquadFixture.Architect);
         YamlSequenceNode architectPre = RequireSequence(architectHooks, "PreToolUse", ArbiterSquadFixture.Architect);
-        Assert.Equal(2, architectPre.Children.Count);
+        Assert.Equal(3, architectPre.Children.Count);
         Assert.Contains(architectPre.Children.OfType<YamlMappingNode>(), e => MatcherOf(e) == DispatchMatcher);
         Assert.Contains(architectPre.Children.OfType<YamlMappingNode>(), e => MatcherOf(e) == HandbackMatcher);
+        Assert.Contains(architectPre.Children.OfType<YamlMappingNode>(), e => MatcherOf(e) == ShellMatcher);
         YamlSequenceNode architectPost = RequireSequence(architectHooks, "PostToolUse", ArbiterSquadFixture.Architect);
         YamlMappingNode architectPostEntry = Assert.Single(architectPost.Children.OfType<YamlMappingNode>());
         Assert.Equal(DispatchMatcher, MatcherOf(architectPostEntry));
