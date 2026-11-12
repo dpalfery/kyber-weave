@@ -315,17 +315,40 @@ the policy below:
 
 - **Lens coverage (`KW-REVIEW-041`).** Every catalogue lens needs a seat file, a
   `--not-seated <lens>=<reason>`, or coverage carried from the prior cycle through `--prior`;
-  otherwise the command refuses to compute. A file whose name is not a catalogue lens keeps its
-  findings but covers no lens, and draws a warning. An unreadable seat file is refused
-  (`KW-REVIEW-040`), and so is one that declares `NO FINDINGS:` or `SKIPPED:` and also holds
-  findings: it is never counted clean.
+  otherwise the command refuses to compute. An entry that cannot be a seat (a directory, a
+  file named only `.md`, a dotfile, or a name that is not a lowercase lens id) is named under a
+  `KW-REVIEW-041` warning and skipped, never parsed. A `--seats` path that is missing, a file, or a symlink loop is
+  refused as "Seat folder not found" (`KW-REVIEW-023`); a seats folder that exists but cannot be
+  listed is refused (`KW-REVIEW-040`). A file with a lowercase lens-id name that is not a catalogue lens
+  (such as `prior-art-performance.md`) keeps its findings but covers no lens, and draws the same
+  warning; `reviewer.md`, the reviewer's own seat, is exempt. An unreadable seat file is refused
+  (`KW-REVIEW-040`), and so is one that declares `NO FINDINGS:` or `SKIPPED:` while a seat-schema
+  key followed by a colon (`id:`, `severity:`, `file:` and the rest of the finding schema)
+  appears anywhere else in it, in any letter case: in a list, a flow mapping, a fence, after
+  prose or after a table's `|`. The check fails
+  closed: such a file is never counted clean. Prose, a Markdown table, the closing lines and plain
+  bullets with no such key are allowed.
 - **Cited lines (`KW-REVIEW-043`, `CitedLineCheck`).** A finding whose cited line lies outside
   its file is moved to the one line that holds its excerpt, or dropped when no single line
   does. A line inside the file is never moved. A finding whose file is missing, outside the
   repository or unreadable is left as written and reported as unverified, one info line per file.
 
+A seat file's `severity` must be one of the three names (`critical`, `major`, `minor`, in any
+letter case) and its `confidence` a whole number from 1 to 10, or the seat is refused
+(`KW-REVIEW-040`). A findings JSON file read through `--findings` or `--prior` is held to the same
+values, checked on the raw JSON: a severity that is a number or not one of the names (matched in
+any letter case, so `"MAJOR"` is accepted), or a confidence that is not a JSON whole number from 1
+to 10 (a float such as `9.0` or `1e1`, or a numeric string such as `"9"`, is refused), refuses the
+file (`KW-REVIEW-023`). So does a `null` element in any list the command binds, in a findings or
+a gates document; a `null` inside a property the command does not know is tolerated. Two spellings
+of one name in an object the verdict reads are refused too (`KW-REVIEW-023`), because the reader
+would otherwise bind whichever came last: names match ignoring case, and a seat's
+`failure_scenario` and the document's `failureScenario` count as one name. Objects inside
+properties the command does not know are not walked.
+
 A findings or `NO FINDINGS` seat that wrote no `Discovery:` line, read files directly with no index lookup and no
-`Index fallback:` line, or wrote an `Index fallback:` value outside the three modes, draws a
+`Index fallback:` line, wrote an `Index fallback:` value outside the three modes, or wrote two
+different `Index fallback:` lines (the first is kept), draws a
 warning (`KW-REVIEW-044`); a `SKIPPED` seat is exempt, and the warning is never a verdict input.
 The `correctness` seat also closes with `Input sites: N traced, M files with none`, above its
 `Discovery:` line, after a Markdown input-site table that the parser skips; a correctness seat that

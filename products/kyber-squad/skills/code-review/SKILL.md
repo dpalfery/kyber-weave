@@ -98,7 +98,7 @@ finish, the runner collects Coverlet Cobertura from `artifacts/coverage` or `Tes
 and attaches it to the gate report — that is the coverage evidence `test-adequacy` consumes.
 Never substitute an ad-hoc command for a declared gate, and never skip a blocking gate
 because you expect it to pass — the output is cited as evidence, and evidence you produced
-by hand is not evidence.
+by hand is not evidence. A failed blocking gate caused by the change under review is recorded as a reviewer-raised finding in `reviewer.md` that names the failing tests or checks, so the fix round knows what failed.
 
 If the host has declared no gates, the command says so. Record that: a review with no
 executed evidence is a weaker review, and the report must not read as though everything
@@ -117,7 +117,7 @@ attestation, and a missing attestation is never a verdict input. Where the harne
 separate seats, the reviewer applies each lens in turn with the same guidance sections and
 returns the same attestation line.
 
-Seat one lens per spawn. Save each seat's output unchanged as `<lens>.md` in the cycle's `seats` folder before you adjudicate. The verdict command matches a seat file to a lens by its name alone, so a file named for two lenses at once (`prior-art-performance.md`) keeps its findings but covers no lens and draws a `KW-REVIEW-041` warning; one spawn per lens and one file per lens avoids it. When one lens is split by file across two or more spawns, save their outputs unchanged, one after another, as that lens's one `<lens>.md`; the verdict command sums the repeated `Input sites:` and `Discovery:` lines per counter, and one malformed repeated line makes that count unreadable (`KW-REVIEW-044` or `KW-REVIEW-047`). A finding you raise yourself, such as a claim with no gate behind it, goes in `reviewer.md` in the same folder.
+Seat one lens per spawn. Save each seat's output unchanged as `<lens>.md` in the cycle's `seats` folder before you adjudicate. The verdict command matches a seat file to a lens by its name alone, so a file named for two lenses at once (`prior-art-performance.md`) keeps its findings but covers no lens and draws a `KW-REVIEW-041` warning; one spawn per lens and one file per lens avoids it. When one lens is split by file across two or more spawns, save their outputs unchanged, one after another, as that lens's one `<lens>.md`; the verdict command sums the repeated `Input sites:` and `Discovery:` lines per counter, and one malformed repeated line makes that count unreadable (`KW-REVIEW-044` or `KW-REVIEW-047`). `Index fallback:` lines are not summed: a repeated identical line is fine, but two different ones draw `KW-REVIEW-044` and only the first is kept. When the parts fell back in different modes, merge them into one line naming each mode, separated by a semicolon (`Index fallback: projectPath: error; projectPath: not-indexed`), so no evidence is discarded. A finding you raise yourself, such as a claim with no gate behind it, goes in `reviewer.md` in the same folder.
 
 Every finding cites a file and a `line`, and `line` is the line number in the file as you read it, never a line offset in the patch file. The verdict command checks each cited line against the file (`KW-REVIEW-043`): a line outside the file is moved to the one line that holds the excerpt, and the finding is dropped when no single line does.
 

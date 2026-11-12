@@ -153,8 +153,9 @@ order and the plan-read ban, and whose fourth is the batched-read line.
 The two review seats report discovery too. `review-lens` and `review-triage` put
 `Discovery: codegraph N, docs N, direct reads N` directly above their attestation line, below any
 `Index fallback:` line, and the verdict engine flags a findings or `NO FINDINGS` seat that wrote
-none, that read files directly with no index lookup and no fallback line, or that wrote an
-`Index fallback:` value outside the three modes, as `KW-REVIEW-044`. A `SKIPPED` seat is exempt. The
+none, that read files directly with no index lookup and no fallback line, that wrote an
+`Index fallback:` value outside the three modes, or that wrote two different `Index fallback:`
+lines (the first is kept), as `KW-REVIEW-044`. A `SKIPPED` seat is exempt. The
 correctness seat adds one closing line, `Input sites: N traced, M files with none`, directly
 above its `Discovery:` line; a correctness seat that reported findings or `NO FINDINGS` without
 it draws `KW-REVIEW-047`, and a `SKIPPED` correctness seat is exempt. The closing-line order and the input-site table live in `review-lens`

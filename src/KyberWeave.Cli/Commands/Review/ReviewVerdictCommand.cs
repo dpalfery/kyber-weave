@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Review;
@@ -20,7 +21,7 @@ namespace KyberWeave.Cli.Commands.Review;
 /// through untouched to <see cref="VerdictEngine"/>, which stays the only judge.
 /// </para>
 /// </remarks>
-public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
+public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings>
 {
     /// <summary>The command description shared by the real registration and the help tests.</summary>
     public const string Description = "Compute approve / request-changes from findings and gates.";
@@ -250,11 +251,48 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
             return false;
         }
 
-        FileInfo[] files = new DirectoryInfo(full)
-            .GetFiles("*.md", new EnumerationOptions { RecurseSubdirectories = false, AttributesToSkip = 0 });
-        foreach (FileInfo file in files.OrderBy(file => file.Name, StringComparer.Ordinal))
+        // IgnoreInaccessible is off: a folder the process cannot list must be refused, not read as an empty folder
+        // whose every lens then looks unaccounted for, or whose seats silently vanish.
+        FileSystemInfo[] entries;
+        try
         {
-            string lens = Path.GetFileNameWithoutExtension(file.Name);
+            entries = new DirectoryInfo(full).GetFileSystemInfos(
+                "*.md",
+                new EnumerationOptions { RecurseSubdirectories = false, AttributesToSkip = 0, IgnoreInaccessible = false });
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            report.Add(new Diagnostic(
+                SeatUnreadable,
+                Severity.Error,
+                $"The seat folder {full} could not be listed ({ex.GetType().Name}).",
+                Subject,
+                full,
+                Hint: "Give the process read and list access to the seat folder, then compute the verdict again."));
+            return false;
+        }
+
+        foreach (FileSystemInfo entry in entries.OrderBy(entry => entry.Name, StringComparer.Ordinal))
+        {
+            // An entry that cannot be a seat (a directory, an empty or dotted stem, a name that is not a lens id)
+            // is named and left out, never parsed: its name is not a lens to attribute findings to.
+            string lens = Path.GetFileNameWithoutExtension(entry.Name);
+            string? notASeat = entry is not FileInfo ? "is a directory, not a seat file"
+                : !LensId().IsMatch(lens) ? "is not named <lens>.md with a lowercase lens id"
+                : null;
+            if (notASeat is not null)
+            {
+                report.Add(new Diagnostic(
+                    LensCoverageCode,
+                    Severity.Warning,
+                    $"{entry.Name} {notASeat}; it was ignored.",
+                    Subject,
+                    entry.FullName,
+                    Hint: "Name each seat file after its lens, as listed by the code-review skill."));
+                continue;
+            }
+
+            FileInfo file = (FileInfo)entry;
             if (!ReviewLensCatalogue.Names.Contains(lens, StringComparer.Ordinal)
                 && !string.Equals(lens, ReviewerSeat, StringComparison.Ordinal))
             {
@@ -299,6 +337,20 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
     /// </summary>
     private static void ReportDiscoveryGap(SeatOutput seat, DiagnosticReport report)
     {
+        // Two different reasons are a contradiction the reader should see; the verdict keeps the first.
+        string[] fallbacks = [.. (seat.IndexFallbacks ?? []).Distinct(StringComparer.Ordinal)];
+        if (fallbacks.Length > 1)
+        {
+            report.Add(new Diagnostic(
+                DiscoveryGap,
+                Severity.Warning,
+                $"{seat.Lens}.md wrote {fallbacks.Length} different 'Index fallback:' lines " +
+                $"({string.Join("; ", fallbacks.Select(value => $"'{value}'"))}); the first is kept. " +
+                "The verdict does not depend on it.",
+                seat.Lens,
+                Hint: "Write one 'Index fallback:' line, naming the mode that applied."));
+        }
+
         if (seat.IndexFallback is { } mode && !KnownIndexFallbackModes.Any(known =>
                 mode.StartsWith(known, StringComparison.Ordinal)))
         {
@@ -333,11 +385,12 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
     }
 
     /// <summary>
-    /// Warns when the correctness seat ran and wrote no readable <c>Input sites:</c> line, so a reader can see that
-    /// no one recorded tracing the hostile inputs of each parse site. Never a verdict input.
+    /// Warns when the correctness seat reported findings or <c>NO FINDINGS</c> and wrote no readable <c>Input sites:</c>
+    /// line, so a reader can see that no one recorded tracing the hostile inputs of each parse site. Never a verdict
+    /// input; a <c>SKIPPED</c> seat is exempt.
     /// </summary>
     /// <remarks>
-    /// Raised whenever the correctness seat ran, not only when a code file changed: the seat folder carries no
+    /// Raised whenever the correctness seat reported findings or <c>NO FINDINGS</c>, not only when a code file changed: the seat folder carries no
     /// changed paths, and a seat with no input site in any file still says so as <c>0 traced, N files with none</c>.
     /// </remarks>
     private static void ReportInputSitesGap(SeatOutput seat, DiagnosticReport report)
@@ -650,4 +703,8 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
             return false;
         }
     }
+
+    /// <summary>A lens id as the catalogue writes them: lowercase words joined by single hyphens.</summary>
+    [GeneratedRegex("^[a-z0-9]+(-[a-z0-9]+)*$", RegexOptions.CultureInvariant)]
+    private static partial Regex LensId();
 }

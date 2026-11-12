@@ -720,26 +720,119 @@ public sealed class SeatOutputParserTests
     }
 
     /// <summary>
-    /// A seat that declares an outcome contradicts itself if its body holds any YAML list item, whatever its shape. The
-    /// seat contract is one sentence after the outcome line and closing lines, so a flow item, a flow list, an item that
-    /// does not open with a schema field, a quoted key and a prose bullet are all refused, not only block findings.
+    /// A seat that declares an outcome is refused if anywhere else in its file there is a seat-schema key: in a list item or a
+    /// flow collection, or on a line of its own, at any indent, inside a fence or outside one. A false refusal is acceptable;
+    /// a finding dropped without a word is not.
     /// </summary>
     [Theory]
     [InlineData("NO FINDINGS: nothing wrong.", "- {id: correctness/a, lens: correctness, severity: minor, confidence: 7, file: src/Foo.cs, line: 3, claim: x}")]
     [InlineData("NO FINDINGS: nothing wrong.", "[ {id: correctness/a, claim: x} ]")]
-    [InlineData("NO FINDINGS: nothing wrong.", "- note: the loop bound looks wrong.")]
     [InlineData("NO FINDINGS: nothing wrong.", "- \"id\": correctness/a")]
-    [InlineData("NO FINDINGS: nothing wrong.", "- Note the following about the loop bound.")]
+    [InlineData("NO FINDINGS: nothing wrong.", "- 'lens': correctness")]
+    [InlineData("NO FINDINGS: nothing wrong.", "claim: The loop bound excludes the final element.")]
+    [InlineData("NO FINDINGS: nothing wrong.", "    evidence: src/Foo.cs:12")]
+    [InlineData("NO FINDINGS: nothing wrong.", "- {note: x, severity: minor}")]
+    [InlineData("NO FINDINGS: nothing wrong.", "- failureScenario: x")]
+    [InlineData("NO FINDINGS: nothing wrong.", "- guidance: [§3]")]
+    [InlineData("NO FINDINGS: nothing wrong.", "\"claim\": x")]
     [InlineData("SKIPPED: the lens did not run.", "- {id: correctness/a, lens: correctness, severity: minor, confidence: 7, file: src/Foo.cs, line: 3, claim: x}")]
     [InlineData("SKIPPED: the lens did not run.", "[ {id: correctness/a, claim: x} ]")]
-    [InlineData("SKIPPED: the lens did not run.", "- note: the loop bound looks wrong.")]
     [InlineData("SKIPPED: the lens did not run.", "- \"id\": correctness/a")]
-    [InlineData("SKIPPED: the lens did not run.", "- Note the following about the loop bound.")]
-    public void AnyListItemUnderADeclaredOutcomeIsRefused(string declared, string item)
+    [InlineData("SKIPPED: the lens did not run.", "claim: The loop bound excludes the final element.")]
+    public void ASchemaKeyUnderADeclaredOutcomeIsRefused(string declared, string item)
     {
         string text = Lines(declared, item);
 
         Assert.Throws<SeatOutputException>(() => SeatOutputParser.Parse("correctness", text));
+    }
+
+    /// <summary>
+    /// The key rule has three more ways in: a key after a table's pipe (<c>| claim: x |</c>), a key written in any case
+    /// (<c>ID:</c>, <c>Claim:</c>), and a key after a flow collection's comma. Each is refused, naming a seat field.
+    /// </summary>
+    [Theory]
+    [InlineData("NO FINDINGS: nothing wrong.", "| claim: x |")]
+    [InlineData("NO FINDINGS: nothing wrong.", "| Site | claim: x |")]
+    [InlineData("SKIPPED: the lens did not run.", "| Site | severity : minor |")]
+    [InlineData("NO FINDINGS: nothing wrong.", "ID: correctness/a")]
+    [InlineData("NO FINDINGS: nothing wrong.", "Claim: The loop bound excludes the final element.")]
+    [InlineData("NO FINDINGS: nothing wrong.", "- SEVERITY: minor")]
+    [InlineData("SKIPPED: the lens did not run.", "- Failure_Scenario: x")]
+    [InlineData("SKIPPED: the lens did not run.", "see {x: 1, ID: a}")]
+    public void AKeyAfterAPipeOrInAnyCaseUnderADeclaredOutcomeIsRefused(string declared, string item)
+    {
+        SeatOutputException error = Assert.Throws<SeatOutputException>(
+            () => SeatOutputParser.Parse("correctness", Lines(declared, item)));
+
+        Assert.Contains("seat field (line 2, column", error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The cycle-8 bypasses: a schema key still refuses the seat after one prose line, after a bullet, after an unparsable
+    /// line, before or after a fence, or inside one.
+    /// </summary>
+    [Theory]
+    [InlineData("Some prose before the list.\n- title: x\n  id: a/b")]
+    [InlineData("Checked: the parser\n- looked at a.cs\n- {id: correctness/a, claim: x}")]
+    [InlineData("{{ an unparsable line\n- {id: correctness/a, claim: x}")]
+    [InlineData("- looked at a.cs\n```yaml\n- id: correctness/a\n```")]
+    [InlineData("```yaml\n- title: x\n  id: a/b\n```")]
+    public void ABypassOfTheOutcomeRuleIsRefused(string body)
+    {
+        string text = "NO FINDINGS: nothing wrong.\n" + body + "\n";
+
+        Assert.Throws<SeatOutputException>(() => SeatOutputParser.Parse("correctness", text));
+    }
+
+    /// <summary>
+    /// Prose, a Markdown table at column 0, the closing lines and bullets that carry no schema key stay allowed under a
+    /// declared outcome. The bold bullet and the table are the shapes the seat contract writes after an outcome line.
+    /// </summary>
+    [Theory]
+    [InlineData("- **Checked:** the parser")]
+    [InlineData("- Note the following")]
+    [InlineData("- note: x")]
+    [InlineData("- **Checked:** the parser\n- looked at a.cs")]
+    [InlineData("| Site | Source |\n|---|---|\n| src/Foo.cs:12 | argument |")]
+    [InlineData("Some prose before the list.")]
+    [InlineData("Discovery: codegraph 1, docs 0, direct reads 0")]
+    [InlineData("REVIEW.md sections checked: [Ground rules]")]
+    public void ProseAndNonSchemaBulletsAreStillAllowedUnderADeclaredOutcome(string body)
+    {
+        string text = "NO FINDINGS: nothing wrong.\n" + body + "\n";
+
+        SeatOutput seat = SeatOutputParser.Parse("correctness", text);
+
+        Assert.Equal(SeatOutputKind.NoFindings, seat.Kind);
+        Assert.Empty(seat.Findings);
+    }
+
+    /// <summary>A SKIPPED seat with a bold bullet and a table is allowed the same way.</summary>
+    [Fact]
+    public void ABoldBulletAndATableUnderASkippedOutcomeAreAllowed()
+    {
+        string text = Lines(
+            "SKIPPED: the lens did not run.",
+            "- **Checked:** the parser",
+            "| Site | Source |",
+            "|---|---|");
+
+        SeatOutput seat = SeatOutputParser.Parse("correctness", text);
+
+        Assert.Equal(SeatOutputKind.Skipped, seat.Kind);
+    }
+
+    /// <summary>
+    /// The real security seat that declared NO FINDINGS, with bold bullets of checked paths and its attestation, parses as
+    /// the no-findings seat it is. It is the shape the seat contract allows after the outcome line.
+    /// </summary>
+    [Fact]
+    public void TheRealSecuritySeatWithBoldBulletsParsesAsNoFindings()
+    {
+        SeatOutput seat = SeatOutputParser.Parse("security", Fixture("591-security.md"));
+
+        Assert.Equal(SeatOutputKind.NoFindings, seat.Kind);
+        Assert.Empty(seat.Findings);
     }
 
     /// <summary>A severity written as a list is not one severity: it is refused and the field is named.</summary>
@@ -798,6 +891,21 @@ public sealed class SeatOutputParserTests
 
         Assert.NotNull(seat.Attestation);
         Assert.Contains(seat.Attestation, Attestations);
+    }
+
+    /// <summary>
+    /// Two different Index fallback lines keep the first as the seat's reason: the later line does not overwrite it.
+    /// </summary>
+    [Fact]
+    public void TheFirstOfTwoDifferentIndexFallbackLinesIsKept()
+    {
+        string text = Fenced(FindingLines())
+            + "Index fallback: projectPath: not-indexed\n"
+            + "Index fallback: projectPath: error\n";
+
+        SeatOutput seat = SeatOutputParser.Parse("correctness", text);
+
+        Assert.Equal("projectPath: not-indexed", seat.IndexFallback);
     }
 
     /// <summary>Two different outcome lines are refused, and the message names both.</summary>
@@ -888,6 +996,61 @@ public sealed class SeatOutputParserTests
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// A malformed repeated Input sites line makes the whole count unreadable, wherever it sits among the valid ones. A last-
+    /// wins reading would report the valid line and hide the malformed one.
+    /// </summary>
+    [Fact]
+    public void AMalformedRepeatedInputSitesLineMakesTheCountUnreadable()
+    {
+        string text = Fenced(FindingLines())
+            + "Input sites: several\n"
+            + "Input sites: 3 traced, 1 files with none\n";
+
+        SeatOutput seat = SeatOutputParser.Parse("correctness", text);
+
+        Assert.Null(InputSitesOf(seat));
+    }
+
+    /// <summary>A repeated Input sites sum that overflows an int makes the count unreadable, not a wrapped number.</summary>
+    [Fact]
+    public void AnOverflowingInputSitesSumMakesTheCountUnreadable()
+    {
+        string text = Fenced(FindingLines())
+            + "Input sites: 2147483647 traced, 0 files with none\n"
+            + "Input sites: 1 traced, 0 files with none\n";
+
+        SeatOutput seat = SeatOutputParser.Parse("correctness", text);
+
+        Assert.Null(InputSitesOf(seat));
+    }
+
+    /// <summary>A malformed repeated Discovery line makes the discovery counts unreadable, wherever it sits.</summary>
+    [Fact]
+    public void AMalformedRepeatedDiscoveryLineMakesTheCountUnreadable()
+    {
+        string text = Fenced(FindingLines())
+            + "Discovery: several\n"
+            + "Discovery: codegraph 1, docs 0, direct reads 0\n";
+
+        SeatOutput seat = SeatOutputParser.Parse("correctness", text);
+
+        Assert.Null(seat.Discovery);
+    }
+
+    /// <summary>A repeated Discovery sum that overflows an int makes the discovery counts unreadable.</summary>
+    [Fact]
+    public void AnOverflowingDiscoverySumMakesTheCountUnreadable()
+    {
+        string text = Fenced(FindingLines())
+            + "Discovery: codegraph 2147483647, docs 0, direct reads 0\n"
+            + "Discovery: codegraph 1, docs 0, direct reads 0\n";
+
+        SeatOutput seat = SeatOutputParser.Parse("correctness", text);
+
+        Assert.Null(seat.Discovery);
     }
 
     /// <summary>The seat's Input sites counts, or null when the seat wrote no readable line.</summary>

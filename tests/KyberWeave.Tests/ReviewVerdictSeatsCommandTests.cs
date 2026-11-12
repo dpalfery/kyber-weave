@@ -1,4 +1,6 @@
+using System.Runtime.Versioning;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Core.Review;
 using Spectre.Console.Cli;
@@ -477,6 +479,259 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
         AssertDiagnostic(run.Output, UnreadableInput, "Error", "Seat folder not found");
     }
 
+    /// <summary>
+    /// A seats folder the process cannot list is a seat folder that cannot be read: KW-REVIEW-040 naming the folder, not
+    /// an unhandled UnauthorizedAccessException out of the command.
+    /// </summary>
+    [Fact]
+    [UnsupportedOSPlatform("windows")]
+    public void ASeatFolderThatCannotBeListedIsRefusedUnderKw040NamingTheFolder()
+    {
+        if (OperatingSystem.IsWindows() || Environment.UserName == "root")
+        {
+            // Windows and root ignore the directory mode, so the denied listing cannot be produced here.
+            Assert.Skip("Directory listing permission is not enforced for this user on this platform.");
+        }
+
+        string locked = Path.Combine(_temp.Path, "locked-seats");
+        Directory.CreateDirectory(locked);
+        File.SetUnixFileMode(locked, UnixFileMode.None);
+        try
+        {
+            CapturedConsoleExecution<int> run = Verdict("--seats", locked);
+
+            Assert.Equal(1, run.Result);
+            AssertDiagnostic(run.Output, SeatUnparseable, "Error", locked);
+        }
+        finally
+        {
+            File.SetUnixFileMode(locked, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    /// <summary>A <c>--seats</c> path that is a file is not a folder of seats: refused naming the path, never a crash.</summary>
+    [Fact]
+    public void ASeatsPathThatIsAFileIsRefusedNamingThePath()
+    {
+        string file = WriteFile("not-a-folder.md", NoFindingsSeat("correctness"));
+
+        CapturedConsoleExecution<int> run = Verdict("--seats", file);
+
+        Assert.Equal(1, run.Result);
+        Assert.Contains(file, run.Output, StringComparison.Ordinal);
+        AssertDiagnostic(run.Output, UnreadableInput, "Error");
+        Assert.Empty(MessagesWithCode(run.Output, SeatUnparseable));
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // --prior is read as JSON, not as a seat, so it needs the range checks the seat parser applies.
+    // -----------------------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("severity", "\"nit\"")]
+    [InlineData("severity", "7")]
+    [InlineData("confidence", "999")]
+    [InlineData("confidence", "-3")]
+    [InlineData("confidence", "0")]
+    [InlineData("confidence", "1.5")]
+    [InlineData("confidence", "\"9\"")]
+    [InlineData("confidence", "9.0")]
+    [InlineData("confidence", "1e1")]
+    [InlineData("confidence", "true")]
+    [InlineData("confidence", "null")]
+    [InlineData("severity", "null")]
+    [InlineData("severity", "true")]
+    [InlineData("Severity", "7")]
+    [InlineData("CONFIDENCE", "999")]
+    public void APriorFindingOutsideTheSeatRangesIsRefusedNamingTheFileAndPath(string field, string rawValue)
+    {
+        string prior = Path.Combine(_temp.Path, "prior");
+        Directory.CreateDirectory(prior);
+        JsonObject finding = new()
+        {
+            ["id"] = "correctness/off-by-one",
+            ["lens"] = "correctness",
+            ["severity"] = "major",
+            ["confidence"] = 9,
+            ["file"] = "src/Foo.cs",
+            ["line"] = 12
+        };
+        finding[field] = JsonNode.Parse(rawValue);
+        File.WriteAllText(
+            Path.Combine(prior, "findings.json"),
+            "{\"schema\":\"kyber-weave.review-findings/v1\",\"findings\":[" + finding.ToJsonString() +
+            "],\"changedPaths\":[],\"changedLines\":0}");
+        WriteSeat("correctness", NoFindingsSeat("correctness"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--prior", prior, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(1, run.Result);
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", "findings.json");
+        Assert.Contains(MessagesWithCode(run.Output, UnreadableInput), message =>
+            message.Contains($"findings[0].{field}", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// The reader binds names ignoring case, so the prior document's checks do too: an out-of-range finding is refused
+    /// under any spelling of the list key and of the field key.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ReviewVerdictInputTests.RangeSpellings), MemberType = typeof(ReviewVerdictInputTests))]
+    public void AnOutOfRangePriorFindingIsRefusedWhateverTheCaseOfTheListAndFieldKeys(
+        string listKind, string fieldKind, string field, string rawValue)
+    {
+        JsonObject finding = PriorFinding();
+        finding.Remove(field);
+        finding[ReviewVerdictInputTests.Spell(field, fieldKind)] = JsonNode.Parse(rawValue);
+        WritePrior("findings", listKind, new JsonArray(finding));
+        WriteSeat("correctness", NoFindingsSeat("correctness"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--prior", PriorFolder, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(1, run.Result);
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", "findings.json");
+        Assert.Contains(MessagesWithCode(run.Output, UnreadableInput), message =>
+            message.Contains($"findings[0].{field}", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [MemberData(nameof(ReviewVerdictInputTests.KnownFindingsLists), MemberType = typeof(ReviewVerdictInputTests))]
+    public void ANullElementInAKnownPriorListIsRefusedWhateverTheCaseOfItsKey(string key, string kind)
+    {
+        WritePrior(key, kind, new JsonArray("a", null));
+        WriteSeat("correctness", NoFindingsSeat("correctness"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--prior", PriorFolder, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(1, run.Result);
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", "findings.json");
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", $"$.{ReviewVerdictInputTests.Spell(key, kind)}[1]");
+    }
+
+    [Theory]
+    [InlineData("lower")]
+    [InlineData("Pascal")]
+    [InlineData("UPPER")]
+    public void ANullElementInAnUnknownPriorPropertyIsToleratedWhateverTheCaseOfTheKeys(string kind)
+    {
+        WritePrior("findings", kind, new JsonArray());
+        string path = Path.Combine(PriorFolder, "findings.json");
+        JsonObject document = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        document[ReviewVerdictInputTests.Spell("extra", kind)] = new JsonArray(1, null);
+        File.WriteAllText(path, document.ToJsonString());
+        WriteSeat("correctness", NoFindingsSeat("correctness"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--prior", PriorFolder, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.Empty(MessagesWithCode(run.Output, UnreadableInput));
+    }
+
+    [Theory]
+    [MemberData(nameof(ReviewVerdictInputTests.DuplicateFindingsKeys), MemberType = typeof(ReviewVerdictInputTests))]
+    public void ATwoSpellingObjectInAPriorDocumentIsRefusedNamingTheFilePathAndBothSpellings(
+        string caseName, string path, string first, string second)
+    {
+        Directory.CreateDirectory(PriorFolder);
+        File.WriteAllText(Path.Combine(PriorFolder, "findings.json"), ReviewVerdictInputTests.DuplicateFindingsDocument(caseName));
+        WriteSeat("correctness", NoFindingsSeat("correctness"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--prior", PriorFolder, .. NotSeatedExcept("correctness")]);
+
+        ReviewVerdictInputTests.AssertRefusedForDuplicate(run, "findings.json", path, first, second);
+    }
+
+    [Fact]
+    public void AnExactlyRepeatedNameInAPriorDocumentIsRefusedNamingTheFile()
+    {
+        Directory.CreateDirectory(PriorFolder);
+        File.WriteAllText(
+            Path.Combine(PriorFolder, "findings.json"),
+            "{\"schema\":\"kyber-weave.review-findings/v1\",\"findings\":[],\"changedPaths\":[],\"changedLines\":0,\"changedLines\":1}");
+        WriteSeat("correctness", NoFindingsSeat("correctness"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--prior", PriorFolder, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(1, run.Result);
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", "findings.json");
+    }
+
+    [Fact]
+    public void ATwoSpellingObjectInsideAnUnknownPriorPropertyIsTolerated()
+    {
+        Directory.CreateDirectory(PriorFolder);
+        JsonObject document = JsonNode.Parse(ReviewVerdictInputTests.DuplicateFindingsDocument("coverage-entry"))!.AsObject();
+        document["coverage"] = new JsonArray(new JsonObject
+        {
+            ["lens"] = "security",
+            ["outcome"] = "noFindings",
+            ["reason"] = null,
+            ["meta"] = JsonNode.Parse("{\"x\":1,\"X\":2}")
+        });
+        document["findings"] = new JsonArray();
+        document["extra"] = JsonNode.Parse("{\"a\":1,\"A\":2}");
+        File.WriteAllText(Path.Combine(PriorFolder, "findings.json"), document.ToJsonString());
+        WriteSeat("correctness", NoFindingsSeat("correctness"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--prior", PriorFolder, .. NotSeatedExcept("correctness", "security")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.Empty(MessagesWithCode(run.Output, UnreadableInput));
+    }
+
+    /// <summary>A prior document written in one spelling, and a severity name in any case, still reads: the rule refuses a repeat, not a spelling.</summary>
+    [Theory]
+    [InlineData("lower", "minor")]
+    [InlineData("Pascal", "MAJOR")]
+    [InlineData("UPPER", "Major")]
+    public void APriorDocumentWrittenInOneSpellingIsStillRead(string kind, string severity)
+    {
+        Directory.CreateDirectory(PriorFolder);
+        File.WriteAllText(Path.Combine(PriorFolder, "findings.json"), ReviewVerdictInputTests.SpelledFindingsDocument(kind, severity));
+        WriteSeat("correctness", NoFindingsSeat("correctness"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--prior", PriorFolder, .. NotSeatedExcept("correctness")]);
+
+        Assert.Empty(MessagesWithCode(run.Output, UnreadableInput));
+        Assert.NotEmpty(MessagesWithCode(run.Output, "KW-REVIEW-024"));
+    }
+
+    private string PriorFolder => Path.Combine(_temp.Path, "prior");
+
+    private static JsonObject PriorFinding() => new()
+    {
+        ["id"] = "correctness/off-by-one",
+        ["lens"] = "correctness",
+        ["severity"] = "major",
+        ["confidence"] = 9,
+        ["file"] = "src/Foo.cs",
+        ["line"] = 12
+    };
+
+    /// <summary>Writes the prior folder's findings document with <paramref name="key"/> holding <paramref name="value"/> under the spelling <paramref name="kind"/> names.</summary>
+    private void WritePrior(string key, string kind, JsonNode value)
+    {
+        Directory.CreateDirectory(PriorFolder);
+        JsonObject document = new()
+        {
+            ["schema"] = "kyber-weave.review-findings/v1",
+            ["findings"] = new JsonArray(),
+            ["changedPaths"] = new JsonArray(),
+            ["changedLines"] = 0
+        };
+        document.Remove(key);
+        document[ReviewVerdictInputTests.Spell(key, kind)] = value;
+        File.WriteAllText(Path.Combine(PriorFolder, "findings.json"), document.ToJsonString());
+    }
+
     [Fact]
     public void AMalformedNotSeatedValueIsRefusedNamingTheArgument()
     {
@@ -829,6 +1084,172 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
 
         Assert.Equal(0, run.Result);
         AssertDiagnostic(run.Output, DiscoveryMissing, "Warning");
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Seat folder entries that are not a lens: named, never a crash, never read as a seat.
+    // -----------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A file in the seat folder that cannot be a seat (its stem is empty, dotted or not a lowercase lens id) is warned
+    /// about under KW-REVIEW-041, saying it was ignored, and is never parsed. The body is a contradictory seat that
+    /// would be refused under KW-REVIEW-040 if anything read it, so a stray 040 proves the entry was parsed.
+    /// </summary>
+    [Theory]
+    [InlineData(".md")]
+    [InlineData(".hidden.md")]
+    [InlineData("Bad Name.md")]
+    public void ASeatFolderFileThatIsNotALensIsIgnoredWithAWarningAndNeverParsed(string entry)
+    {
+        File.WriteAllText(Path.Combine(_seats, entry), "NO FINDINGS: I found nothing.\n" + FindingSeat());
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept()]);
+
+        AssertEntryIgnoredAndNeverParsed(run, entry, "is not named <lens>.md with a lowercase lens id");
+    }
+
+    /// <summary>
+    /// A directory named like a seat file is ignored too, with a warning saying so. A readable seat inside it is not
+    /// reached: the folder is not searched below its own level.
+    /// </summary>
+    [Fact]
+    public void ADirectoryNamedAsASeatFileIsIgnoredWithAWarningAndNeverParsed()
+    {
+        string directory = Path.Combine(_seats, "correctness.md");
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, "correctness.md"), "NO FINDINGS: I found nothing.\n" + FindingSeat());
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept()]);
+
+        AssertEntryIgnoredAndNeverParsed(run, "correctness.md", "is a directory, not a seat file");
+    }
+
+    /// <summary>
+    /// The verdict exits 0 (the entry is a warning, not a refusal), names the entry in exactly one KW-REVIEW-041
+    /// warning that says why and that it was ignored, and raises no KW-REVIEW-040: nothing parsed the entry.
+    /// </summary>
+    private static void AssertEntryIgnoredAndNeverParsed(CapturedConsoleExecution<int> run, string entry, string reason)
+    {
+        Assert.True(run.Result == 0, $"Expected exit 0, got {run.Result}. Output:{Environment.NewLine}{run.Output}");
+        List<string> named = [.. MessagesWithCode(run.Output, LensUnaccounted)
+            .Where(message => message.Contains(entry, StringComparison.Ordinal))];
+        string message = Assert.Single(named);
+        Assert.Contains(reason, message, StringComparison.Ordinal);
+        Assert.Contains("it was ignored", message, StringComparison.Ordinal);
+        AssertDiagnostic(run.Output, LensUnaccounted, "Warning", "it was ignored");
+        Assert.Empty(MessagesWithCode(run.Output, SeatUnparseable));
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Repeated closing lines the sum cannot read, and a repeated Index fallback line.
+    // -----------------------------------------------------------------------------------------
+
+    [Fact]
+    public void AMalformedRepeatedInputSitesLineRaisesKw047()
+    {
+        WriteSeat("correctness", FindingSeat(trailers:
+        [
+            "Input sites: several",
+            "Input sites: 3 traced, 1 files with none",
+            "Discovery: codegraph 2, docs 0, direct reads 0",
+            "REVIEW.md sections checked: [Ground rules]"
+        ]));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        AssertDiagnostic(run.Output, InputSitesMissing, "Warning", "correctness");
+    }
+
+    [Fact]
+    public void AnOverflowingInputSitesSumRaisesKw047()
+    {
+        WriteSeat("correctness", FindingSeat(trailers:
+        [
+            "Input sites: 2147483647 traced, 0 files with none",
+            "Input sites: 1 traced, 0 files with none",
+            "Discovery: codegraph 2, docs 0, direct reads 0",
+            "REVIEW.md sections checked: [Ground rules]"
+        ]));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        AssertDiagnostic(run.Output, InputSitesMissing, "Warning", "correctness");
+    }
+
+    [Fact]
+    public void AMalformedRepeatedDiscoveryLineRaisesKw044()
+    {
+        WriteSeat("correctness", FindingSeat(trailers:
+        [
+            "Discovery: several",
+            "Discovery: codegraph 2, docs 0, direct reads 0",
+            "REVIEW.md sections checked: [Ground rules]"
+        ]));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        AssertDiagnostic(run.Output, DiscoveryMissing, "Warning");
+    }
+
+    [Fact]
+    public void AnOverflowingDiscoverySumRaisesKw044()
+    {
+        WriteSeat("correctness", FindingSeat(trailers:
+        [
+            "Discovery: codegraph 2147483647, docs 0, direct reads 0",
+            "Discovery: codegraph 1, docs 0, direct reads 0",
+            "REVIEW.md sections checked: [Ground rules]"
+        ]));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        AssertDiagnostic(run.Output, DiscoveryMissing, "Warning");
+    }
+
+    /// <summary>
+    /// Two different Index fallback lines are not silently overwritten: the verdict warns under KW-REVIEW-044 that the
+    /// closing line repeated, so the reader knows the seat gave two reasons and the verdict kept one of them.
+    /// </summary>
+    [Fact]
+    public void ARepeatedIndexFallbackLineIsNotSilentlyOverwritten()
+    {
+        WriteSeat("correctness", FindingSeat(trailers:
+        [
+            "Index fallback: projectPath: not-indexed",
+            "Index fallback: projectPath: error",
+            "Discovery: codegraph 0, docs 0, direct reads 6",
+            "REVIEW.md sections checked: [Ground rules]"
+        ]));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        string message = Assert.Single(MessagesWithCode(run.Output, DiscoveryMissing), text => text.Contains("different 'Index fallback:' lines", StringComparison.Ordinal));
+        Assert.Contains("'projectPath: not-indexed'", message, StringComparison.Ordinal);
+        Assert.Contains("'projectPath: error'", message, StringComparison.Ordinal);
+        Assert.Contains("the first is kept", message, StringComparison.Ordinal);
+    }
+
+    /// <summary>The same Index fallback line written twice is one reason, not a contradiction, so it draws no repeat warning.</summary>
+    [Fact]
+    public void ARepeatedIdenticalIndexFallbackLineDrawsNoRepeatWarning()
+    {
+        WriteSeat("correctness", FindingSeat(trailers:
+        [
+            "Index fallback: projectPath: not-indexed",
+            "Index fallback: projectPath: not-indexed",
+            "Discovery: codegraph 0, docs 0, direct reads 6",
+            "REVIEW.md sections checked: [Ground rules]"
+        ]));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.DoesNotContain(MessagesWithCode(run.Output, DiscoveryMissing), text => text.Contains("different 'Index fallback:' lines", StringComparison.Ordinal));
     }
 
     // -----------------------------------------------------------------------------------------

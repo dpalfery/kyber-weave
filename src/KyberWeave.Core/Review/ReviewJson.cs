@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
@@ -75,6 +76,9 @@ public static class ReviewJson
 {
     private const string SnakeCaseFailureScenario = "failure_scenario";
 
+    /// <summary>A name repeated with exactly the same spelling is refused by the parser itself.</summary>
+    private static readonly JsonDocumentOptions ParseOptions = new() { AllowDuplicateProperties = false };
+
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true,
@@ -107,10 +111,12 @@ public static class ReviewJson
     public static GateReport ReadGates(string json)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
-        GateReport report = JsonSerializer.Deserialize<GateReport>(json, Options)
+        JsonNode? root = JsonNode.Parse(json, documentOptions: ParseOptions);
+        RejectNullListEntries(root, typeof(GateReport), "$");
+        GateReport report = root.Deserialize<GateReport>(Options)
                             ?? throw new JsonException("The gate report is empty.");
-        if (report.Gates is null || report.Gates.Any(gate => gate is null))
-            throw new JsonException("The gate report's 'gates' must be a list of gate results, with no null entry.");
+        if (report.Gates is null)
+            throw new JsonException("The gate report's 'gates' must be a list of gate results.");
 
         if (report.Gates.FirstOrDefault(gate => string.IsNullOrWhiteSpace(gate.Id) || gate.Summary is null) is { } bad)
         {
@@ -125,22 +131,37 @@ public static class ReviewJson
     /// <remarks>
     /// A seat writes its failure scenario as <c>failure_scenario</c>, the spelling its prompt uses, while the
     /// document's own spelling is <c>failureScenario</c>. Both are read, so a finding is never dropped as
-    /// incomplete for the spelling of a field it has. The document spelling wins when both are present.
+    /// incomplete for the spelling of a field it has. A finding that writes both is refused: two values for one
+    /// field, like any two spellings of one name.
     /// </remarks>
     public static FindingsReport ReadFindings(string json)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
-        JsonNode? root = JsonNode.Parse(json);
-        if (root is JsonObject document && document["findings"] is JsonArray findings)
+        JsonNode? root = JsonNode.Parse(json, documentOptions: ParseOptions);
+        RejectNullListEntries(root, typeof(FindingsReport), "$");
+        if (root is JsonObject document)
         {
-            foreach (JsonObject finding in findings.OfType<JsonObject>())
-                BindSnakeCaseFailureScenario(finding);
+            // Every spelling of the key: the serializer binds "Findings" and "FINDINGS" as the findings list too.
+            foreach ((string key, JsonNode? list) in Members(document, nameof(FindingsReport.Findings)))
+            {
+                if (list is not JsonArray findings)
+                    continue;
+
+                for (int index = 0; index < findings.Count; index++)
+                {
+                    if (findings[index] is not JsonObject finding)
+                        continue;
+
+                    CheckRanges(finding, $"$.{key}[{index}]");
+                    BindSnakeCaseFailureScenario(finding);
+                }
+            }
         }
 
         FindingsReport report = root.Deserialize<FindingsReport>(Options)
                                 ?? throw new JsonException("The findings report is empty.");
-        if (report.Findings is null || report.Findings.Any(finding => finding is null))
-            throw new JsonException("The findings report's 'findings' must be a list of findings, with no null entry.");
+        if (report.Findings is null)
+            throw new JsonException("The findings report's 'findings' must be a list of findings.");
 
         // The serializer fills a JSON null into a string without complaint, so a finding with no id, lens or file
         // would reach the engine with no identity. Every required text field is checked here, in one place.
@@ -159,16 +180,160 @@ public static class ReviewJson
         return report;
     }
 
+    /// <summary>
+    /// Refuses a <c>null</c> element in any list the reader binds, at any depth, naming its JSON path.
+    /// </summary>
+    /// <remarks>
+    /// The lists are found from the model types themselves (<see cref="FindingsReport"/>, <see cref="GateReport"/> and
+    /// the records they hold), so a list the model gains is covered without a name list to keep in step. A null in an
+    /// unknown property is left alone: unknown properties are tolerated on read, and nothing binds that list.
+    /// </remarks>
+    /// <param name="node">The node to walk.</param>
+    /// <param name="type">The model type the node binds to.</param>
+    /// <param name="path">The node's JSON path, named in the refusal.</param>
+    private static void RejectNullListEntries(JsonNode? node, Type type, string path)
+    {
+        type = Nullable.GetUnderlyingType(type) ?? type;
+        switch (node)
+        {
+            case JsonArray array when ListElementType(type) is { } element:
+                for (int index = 0; index < array.Count; index++)
+                {
+                    string entry = $"{path}[{index}]";
+                    if (array[index] is null)
+                        throw new JsonException($"The list at '{path}' has a null entry at '{entry}'.");
+
+                    RejectNullListEntries(array[index], element, entry);
+                }
+
+                break;
+            case JsonObject obj when IsModel(type):
+                RejectTwoSpellings(obj, path);
+                foreach (PropertyInfo bound in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+                {
+                    foreach ((string key, JsonNode? value) in Members(obj, bound.Name))
+                        RejectNullListEntries(value, bound.PropertyType, $"{path}.{key}");
+                }
+
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Refuses an object the model binds that holds two names equal ignoring case, naming the object's path and both
+    /// spellings. The serializer reads names ignoring case, so which value binds would be an accident of order. The
+    /// snake-case <c>failure_scenario</c> is the same field as <c>failureScenario</c>, so it is grouped with it.
+    /// </summary>
+    private static void RejectTwoSpellings(JsonObject obj, string path)
+    {
+        Dictionary<string, string> seen = new(StringComparer.OrdinalIgnoreCase);
+        foreach (KeyValuePair<string, JsonNode?> property in obj)
+        {
+            string name = string.Equals(property.Key, SnakeCaseFailureScenario, StringComparison.OrdinalIgnoreCase)
+                ? nameof(ReviewFinding.FailureScenario)
+                : property.Key;
+
+            if (seen.TryGetValue(name, out string? first))
+            {
+                throw new JsonException(
+                    $"'{path}.{property.Key}' names the same field as '{path}.{first}' (the object at '{path}' " +
+                    "spells one name twice). Keep one spelling.");
+            }
+
+            seen[name] = property.Key;
+        }
+    }
+
+    /// <summary>The element type when <paramref name="type"/> is a list (not a string or a dictionary), else null.</summary>
+    private static Type? ListElementType(Type type)
+    {
+        if (type == typeof(string) || type.IsAssignableTo(typeof(System.Collections.IDictionary)))
+            return null;
+
+        if (type.IsArray)
+            return type.GetElementType();
+
+        Type? enumerable = type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IEnumerable<>)
+            ? type
+            : type.GetInterfaces().FirstOrDefault(candidate =>
+                candidate.IsGenericType && candidate.GetGenericTypeDefinition() == typeof(IEnumerable<>));
+        if (enumerable is null)
+            return null;
+
+        Type element = enumerable.GetGenericArguments()[0];
+        bool isDictionary = element.IsGenericType && element.GetGenericTypeDefinition() == typeof(KeyValuePair<,>);
+        return isDictionary ? null : element;
+    }
+
+    /// <summary>Whether <paramref name="type"/> is one of the review model records, whose properties are walked.</summary>
+    private static bool IsModel(Type type) =>
+        type.IsClass && type != typeof(string) && type.Namespace == typeof(ReviewJson).Namespace;
+
+    /// <summary>
+    /// Holds a finding read from JSON to the ranges a seat's finding is held to. The serializer would bind a number as
+    /// a severity (any integer becomes an enum value) and any integer as a confidence, so both are checked on the raw
+    /// value: severity must be one of the severity names, confidence a whole number from 1 to 10.
+    /// </summary>
+    /// <remarks>
+    /// Every property whose name matches ignoring case is checked, not only the first: the serializer reads names
+    /// case-insensitively, so a second <c>"Severity": 7</c> beside a valid <c>"severity"</c> would otherwise be the
+    /// value that binds.
+    /// </remarks>
+    private static void CheckRanges(JsonObject finding, string path)
+    {
+        foreach ((string key, JsonNode? value) in Members(finding, nameof(ReviewFinding.Severity)))
+        {
+            bool named = value is JsonValue text
+                         && text.GetValueKind() == JsonValueKind.String
+                         && Enum.GetNames<ReviewSeverity>().Any(name =>
+                             string.Equals(name, text.GetValue<string>(), StringComparison.OrdinalIgnoreCase));
+            if (!named)
+                throw new JsonException($"'{path}.{key}' is {Describe(value)}; it must be \"critical\", \"major\" or \"minor\".");
+        }
+
+        foreach ((string key, JsonNode? value) in Members(finding, nameof(ReviewFinding.Confidence)))
+        {
+            bool inRange = value is JsonValue number
+                           && number.GetValueKind() == JsonValueKind.Number
+                           && number.TryGetValue(out int confidence)
+                           && confidence is >= 1 and <= 10;
+            if (!inRange)
+                throw new JsonException($"'{path}.{key}' is {Describe(value)}; it must be a whole number from 1 to 10.");
+        }
+    }
+
+    /// <summary>
+    /// Every member of <paramref name="obj"/> whose name is <paramref name="name"/> ignoring case. The one way this
+    /// reader finds a property by name: the serializer binds names ignoring case, so a check that compared names
+    /// exactly would miss the spelling that binds.
+    /// </summary>
+    private static List<(string Key, JsonNode? Value)> Members(JsonObject obj, string name) =>
+        [.. obj.Where(property => string.Equals(property.Key, name, StringComparison.OrdinalIgnoreCase))
+            .Select(property => (property.Key, property.Value))];
+
+    private static string Describe(JsonNode? node)
+    {
+        const int limit = 60;
+        string text = node?.ToJsonString() ?? "null";
+        if (text.Length <= limit)
+            return text;
+
+        // Back off one character rather than split a surrogate pair at the cut.
+        return text[..(char.IsHighSurrogate(text[limit - 1]) ? limit - 1 : limit)] + "…";
+    }
+
     private static void BindSnakeCaseFailureScenario(JsonObject finding)
     {
-        if (!finding.TryGetPropertyValue(SnakeCaseFailureScenario, out JsonNode? value))
+        List<(string Key, JsonNode? Value)> snakeCase = Members(finding, SnakeCaseFailureScenario);
+        if (snakeCase.Count == 0)
             return;
 
-        bool documentSpelling = finding.Any(property =>
-            string.Equals(property.Key, nameof(ReviewFinding.FailureScenario), StringComparison.OrdinalIgnoreCase));
-        finding.Remove(SnakeCaseFailureScenario);
+        bool documentSpelling = Members(finding, nameof(ReviewFinding.FailureScenario)).Count > 0;
+        foreach ((string key, _) in snakeCase)
+            finding.Remove(key);
+
         if (!documentSpelling)
-            finding["failureScenario"] = value;
+            finding["failureScenario"] = snakeCase[0].Value;
     }
 
     /// <summary>Reads a duplicates report.</summary>
