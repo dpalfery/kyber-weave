@@ -58,7 +58,7 @@ its `tasks.json` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-No plan is open.
+No plans are open.
 
 ## Archived Plans
 

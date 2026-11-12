@@ -157,7 +157,7 @@ match a documented form. Anything else is denied before it runs, including:
   must resolve under the plan, spec or todo folder of the payload's working directory, not of a directory reached by
   `cd`. A `cd` out of the tree makes a later `touch` denied, and a blank working directory fails closed, so every
   `touch` is denied then. An absolute path is allowed only when it resolves inside the working tree's planning directories, and a `..` escape is denied.
-- PowerShell calls that contain non-ASCII quote-like characters, or a lone CR, U+0085, U+2028 or U+2029, are refused.
+- a structural pre-filter runs before any form is matched and refuses non-ASCII characters on both tools, control characters, a line feed inside quotes, an unquoted `#` comment, and any backslash in Bash. A backslash is literal in PowerShell.
 - `uniq` counts every word after `--` as an operand, so a second file after `--` is refused.
 
 A command the guard cannot parse is denied, so a wrongly denied command costs one `STATUS: BLOCKED` round trip.
@@ -165,7 +165,7 @@ A command the guard cannot parse is denied, so a wrongly denied command costs on
 **Forms that look unusual but are allowed.** The Bash tool resets its directory on every call, so `cd <dir> &&`
 runs a command in the worktree, and `git -C <dir>` does the same for git. `cd` counts only as the first segment or after `&&` (after `;` in PowerShell), and a `cd` to `~` is denied. The docs commands take a path operand
 in place of `.`. `sort` accepts only the flags on its allowlist, and `rg` accepts any flag except the ones on its
-denylist. `touch` operands resolve as described in the list above. `codegraph explore` takes exactly one query, and `doctor --ensure` takes no operand. `rg` refuses `--pre`, `--pre-glob`, `-z` and `--search-zip`. `kyber-weave arbiter plan <plan file> -f json` is read-only
+denylist. `touch` operands resolve as described in the list above. `codegraph explore` takes exactly one query, and `doctor --ensure` takes no operand. `rg` refuses `--pre`, `--pre-glob`, `-z`, `--search-zip`, `--hostname-bin` and `--hyperlink-format`, and abbreviations of them; `--pretty` is allowed. `kyber-weave arbiter plan <plan file> -f json` is read-only
 and is the architect's one way to read a task file's execution digest; it is on the architect's command list and in
 the guard. The command list itself lives in `architect.md`, which the sync test binds to the guard.
 

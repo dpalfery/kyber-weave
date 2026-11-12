@@ -51,7 +51,9 @@ Three facts shape the choice of mechanism:
    `arbiter.enabled: false` turns the whole Arbiter off, and with it this guard. Each decision writes a hook-log
    line, not a ledger event.
 2. **Matching is whole-command, anchored, allow by documented form, and deny on anything it cannot parse.**
-   A command is split on unquoted `&&`, `||`, `;`, `|` and newline. Each part must match a documented form.
+   A command is split on unquoted `&&`, `||`, `;`, `|` and newline. Each part must match a documented form. A
+   structural pre-filter runs first and refuses non-ASCII characters on both tools, control characters, a line feed
+   inside quotes, an unquoted `#` comment, and any backslash in Bash; a backslash is literal in PowerShell.
    Substitution, backticks, `$`, process substitution, subshells, braces, heredocs, background `&`, redirects
    other than `2>&1` and `2>/dev/null` (the latter in Bash only), environment-prefix assignments, shell keywords such as loops and
    conditionals, and wrapper commands (`bash`, `sh`, `eval`, `xargs`, `env`, `sudo` and similar) are denied.
