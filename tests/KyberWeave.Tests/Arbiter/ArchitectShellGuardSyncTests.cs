@@ -57,6 +57,12 @@ public sealed class ArchitectShellGuardSyncTests
             $"Missing from architect.md (in the guard, not documented): [{string.Join(", ", missing)}].");
     }
 
+    [Fact]
+    public void DocumentedKeys_IsNotEmpty()
+    {
+        Assert.NotEmpty(DocumentedKeys());
+    }
+
     [Theory]
     [MemberData(nameof(DocumentedKeys))]
     public void DocumentedSample_ReceivesTheDocumentedVerdict(string key)

@@ -74,6 +74,14 @@ public sealed class ArchitectShellGuardTests
     [InlineData("tail -5 f")]
     [InlineData("kyber-weave arbiter plan docs/plans/x.md -f json")]
     [InlineData("cd /w && kyber-weave arbiter plan docs/plans/x.md -f json")]
+    [InlineData("git log --oneline -5")]
+    [InlineData("git diff --stat --name-only main...HEAD")]
+    [InlineData("rg -n --glob '*.md' Foo docs")]
+    [InlineData("rg --files-with-matches Foo docs")]
+    [InlineData("cd /w && touch docs/plans/x.md")]
+    [InlineData("touch docs/./plans/x.md")]
+    [InlineData("codegraph explore \"x\"")]
+    [InlineData("ls docs 2>/dev/null")]
     public void Bash_ListedCommand_IsAllowed(string command)
     {
         ShellGuardResult result = CheckBash(command);
@@ -146,6 +154,34 @@ public sealed class ArchitectShellGuardTests
     [InlineData("kyber-weave arbiter eval -f json", "kyber-weave arbiter eval -f json")]
     [InlineData("kyber-weave arbiter install", "kyber-weave arbiter install")]
     [InlineData("kyber-weave arbiter plan a b -f json", "kyber-weave arbiter plan a b -f json")]
+    [InlineData("cd /tmp && touch docs/plans/x.md", "cd /tmp")]
+    [InlineData("git diff --out=f", "git diff --out=f")]
+    [InlineData("git diff --ou=f", "git diff --ou=f")]
+    [InlineData("git diff --o=f", "git diff --o=f")]
+    [InlineData("git diff --ext-diff", "git diff --ext-diff")]
+    [InlineData("git diff --textconv", "git diff --textconv")]
+    [InlineData("git log --ext=x", "git log --ext=x")]
+    [InlineData("rg --hos=x p", "rg --hos=x p")]
+    [InlineData("rg --hyp=x p", "rg --hyp=x p")]
+    [InlineData("rg --pr=cat p", "rg --pr=cat p")]
+    [InlineData("rg --search p", "rg --search p")]
+    [InlineData("rg --pre-g=x p", "rg --pre-g=x p")]
+    [InlineData("codegraph explore \"a\" b", "codegraph explore \"a\" b")]
+    [InlineData("codegraph explore --x \"a\"", "codegraph explore --x \"a\"")]
+    [InlineData("kyber-weave doctor --ensure /etc/passwd", "kyber-weave doctor --ensure /etc/passwd")]
+    [InlineData("find . -execdir ls {} +", "find . -execdir ls {} +")]
+    [InlineData("find . -okdir ls {} ;", "find . -okdir ls {} ;")]
+    [InlineData("find . -fprint f", "find . -fprint f")]
+    [InlineData("rg --pre-glob x p", "rg --pre-glob x p")]
+    [InlineData("rg -z p", "rg -z p")]
+    [InlineData("git --git-dir=x log", "git --git-dir=x log")]
+    [InlineData("git --work-tree=x log", "git --work-tree=x log")]
+    [InlineData("sh -c x", "sh -c x")]
+    [InlineData("sudo ls", "sudo ls")]
+    [InlineData("env ls", "env ls")]
+    [InlineData("node x", "node x")]
+    [InlineData("ls $HOME", "ls $HOME")]
+    [InlineData("ls ${HOME}", "ls ${HOME}")]
     public void Bash_CommandOutsideTheList_IsDeniedNamingTheOffendingSegment(string command, string offendingSegment)
     {
         ShellGuardResult result = CheckBash(command);
@@ -203,6 +239,27 @@ public sealed class ArchitectShellGuardTests
     public void IsShellGuarded_TheArchitect_IsGuarded()
     {
         Assert.True(ArchitectShellGuard.IsShellGuarded("architect"));
+        Assert.True(ArchitectShellGuard.IsShellGuarded("Architect"));
+    }
+
+    [Fact]
+    public void Bash_TouchPlanFileWithAnEmptyWorkingDirectory_IsDenied()
+    {
+        // With no working directory the guard cannot resolve the touch target beneath a planning folder.
+        ShellGuardResult result = ArchitectShellGuard.Check(
+            "Bash",
+            CommandInput("touch docs/plans/x.md"),
+            string.Empty,
+            PlanningDirectories.Value);
+
+        Assert.False(result.Allowed, "A touch with no working directory must be denied.");
+        Assert.Contains(RuleId, result.Reason ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AllowedDocumentedSamples_IsNotEmpty()
+    {
+        Assert.NotEmpty(AllowedDocumentedSamples());
     }
 
     [Theory]
