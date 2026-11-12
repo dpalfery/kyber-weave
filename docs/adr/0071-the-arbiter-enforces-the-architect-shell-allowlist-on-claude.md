@@ -47,18 +47,19 @@ Three facts shape the choice of mechanism:
 
 1. **A guard, not a rule.** `ArchitectShellGuard`, permanent id `KW-ARB-SHELL-001`, is a stateless hook
    guard beside `ReadGuard` and `ConductorGuard`. It denies an architect `Bash` or `PowerShell` call outside
-   the documented command set before the call runs. A hook guard is not a rule: hosts cannot tune or disable
-   it, and it writes no ledger event.
+   the documented command set before the call runs. A hook guard is not a rule: hosts cannot tune it by id.
+   `arbiter.enabled: false` turns the whole Arbiter off, and with it this guard. Each decision writes a hook-log
+   line, not a ledger event.
 2. **Matching is whole-command, anchored, allow by documented form, and deny on anything it cannot parse.**
    A command is split on unquoted `&&`, `||`, `;`, `|` and newline. Each part must match a documented form.
    Substitution, backticks, `$`, process substitution, subshells, braces, heredocs, background `&`, redirects
-   other than `2>&1` and `2>/dev/null`, environment-prefix assignments, shell keywords such as loops and
+   other than `2>&1` and `2>/dev/null` (the latter in Bash only), environment-prefix assignments, shell keywords such as loops and
    conditionals, and wrapper commands (`bash`, `sh`, `eval`, `xargs`, `env`, `sudo` and similar) are denied.
    So are `git -c` and any git global option other than `--no-pager` and `-C`, `git … --output`,
    `find -exec`, `-ok` and `-delete`, and `tail -f`. `sort` is matched against an allowlist of flags, so
    `sort -o` is denied. `rg` is matched against a denylist of flags, so `rg --pre` is denied. `touch` is
-   allowed only for a `.md` or `.json` file under the plan, spec and todo directories, with the path anchored
-   to the working tree.
+   allowed only for a `.md` or `.json` file under the plan, spec and todo directories, with the operand resolved
+   under the plan, spec and todo folders of the payload's working directory, not of a directory reached by `cd`.
 3. **Claude only, for the `Bash` and `PowerShell` tools, at project and user scope.** `ClaudeRenderer.BuildArbiterHooks`
    renders a `PreToolUse` entry with matcher `^(Bash|PowerShell)$` into the architect's agent file at project scope
    and at user scope. The hook command is the Arbiter's `ArbiterHookWiring` command line.

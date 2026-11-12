@@ -316,7 +316,7 @@ shipped rules. It is not a rule.
 |---|---|---|---|---|
 | `KW-ARB-SHELL-001` | Claude `Bash` and `PowerShell`, project and user scope | `architect` | Deny before the command runs | A shell command outside the architect's documented command set: a command not on the list, a substitution, a redirect other than `2>&1` or `2>/dev/null`, a heredoc, a subshell, a loop, or a `touch` outside the plan, spec and todo directories |
 
-Hook guards are not rules: hosts cannot tune or disable them, and they write no ledger event.
+Hook guards are not rules: hosts cannot tune a guard by id, but `arbiter.enabled: false` turns the whole Arbiter off, and with it the guard. Each guard decision writes a hook-log line, not a ledger event.
 
 ### Configuration, key, log, binary, guard, parse — `arbiter validate`, `setup`, `status`, `doctor`, `plan`
 

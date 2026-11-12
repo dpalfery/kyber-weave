@@ -148,20 +148,22 @@ every agent on the machine. See [ADR 0071](../adr/0071-the-arbiter-enforces-the-
 match a documented form. Anything else is denied before it runs, including:
 
 - substitutions (`$(…)`, backticks, `$`), process substitution, subshells, braces, heredocs and background `&`;
-- redirects other than `2>&1` and `2>/dev/null`, and environment-prefix assignments;
+- redirects other than `2>&1` and `2>/dev/null`, and environment-prefix assignments. `2>/dev/null` is allowed in Bash only; PowerShell allows `2>&1` alone;
 - shell keywords such as loops and conditionals, and wrapper commands such as `bash`, `sh`, `eval`, `xargs`, `env` and `sudo`;
-- git global options other than `--no-pager` and `-C` (for example `git -c`), and `git … --output`;
+- git global options other than `--no-pager` and `-C` (for example `git -c`), and `git … --output`. Long-option abbreviations of denied git options (`--output`, `--ext-diff`, `--textconv`) are refused too;
 - `find -exec`, `-ok` or `-delete`, and `tail -f`;
 - `sort` with any flag that is not on its allowlist (so `sort -o` is denied), and `rg` with a denylisted flag such as `--pre`;
 - `touch` on anything other than a `.md` or `.json` file under the plan, spec and todo directories. `touch` paths
-  are anchored to the working tree, so an absolute path or a `..` escape is denied.
+  must resolve under the plan, spec or todo folder of the payload's working directory, not of a directory reached by
+  `cd`. A `cd` out of the tree makes a later `touch` denied, and a blank working directory fails closed, so every
+  `touch` is denied then. An absolute path or a `..` escape is denied.
 
 A command the guard cannot parse is denied, so a wrongly denied command costs one `STATUS: BLOCKED` round trip.
 
 **Forms that look unusual but are allowed.** The Bash tool resets its directory on every call, so `cd <dir> &&`
 runs a command in the worktree, and `git -C <dir>` does the same for git. The docs commands take a path operand
 in place of `.`. `sort` accepts only the flags on its allowlist, and `rg` accepts any flag except the ones on its
-denylist. `touch` paths are anchored to the working tree. `kyber-weave arbiter plan <plan file> -f json` is read-only
+denylist. `touch` operands resolve as described in the list above. `codegraph explore` takes exactly one query, and `doctor --ensure` takes no operand. `rg` refuses `--pre`, `--pre-glob`, `-z` and `--search-zip`. `kyber-weave arbiter plan <plan file> -f json` is read-only
 and is the architect's one way to read a task file's execution digest; it is on the architect's command list and in
 the guard. The command list itself lives in `architect.md`, which the sync test binds to the guard.
 
