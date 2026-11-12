@@ -88,6 +88,8 @@ When a digest contains `GAPS` or `OPEN_QUESTIONS`, relay those items without ans
 
 Report queue changes as dispatching, running, blocked, and accumulated change. Re-evaluate eligibility whenever a worker completes, and launch newly ready work within file-scope constraints, up to `review.max-concurrent-workers` (default 4, host-configurable). (Q4 reversal, issue #386.)
 
+Wait for a long-running command or agent through its completion notification, or for a gate run through `kyber-weave review wait <report>`; never poll for it with `pgrep -f` or `ps | grep`, because the polling command's own command line matches the pattern and the wait never ends.
+
 ## Completion
 
 Report the objective complete only when the queue and findings collection are empty, all required task contracts have current passing evidence, `code-reviewer` returned `APPROVE` or the review loop reached its hard stop with the open findings listed in the pull request, and `docs-dev` completed the applicable plan or specification closeout. This holds because every completed change received its docs-dev review and, where plan/spec-backed, closeout. The council re-reviews after every fix round until it returns APPROVE. The `delivery-execution` skill owns that loop and its stop. Report outcomes and evidence; do not independently re-interpret technical correctness.
