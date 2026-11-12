@@ -97,7 +97,8 @@ public sealed partial class PlanTaskFileValidator
         ArgumentNullException.ThrowIfNull(set);
 
         DiagnosticReport report = new();
-        IReadOnlyList<string> planningDirectories = PlanningDirectories();
+        IReadOnlyList<ConfigRegEntry> registry = _config.ConfigReg.Resolve(_config.Ontology);
+        IReadOnlyList<string> planningDirectories = PlanningDirectories(registry);
 
         foreach (DocumentModel plan in set.Documents.Where(document =>
                      document.DocType == DocType.Plan
@@ -106,7 +107,7 @@ public sealed partial class PlanTaskFileValidator
             ValidatePlan(plan, planningDirectories, report);
         }
 
-        ReportSidecarTaskFiles(report);
+        ReportSidecarTaskFiles(registry, report);
 
         return report;
     }
@@ -121,9 +122,9 @@ public sealed partial class PlanTaskFileValidator
     /// abandoned copy is usually in. The file system is read rather than git, so untracked and
     /// ignored files count: a copy that was never committed still reaches the merge's working tree.
     /// </remarks>
-    private void ReportSidecarTaskFiles(DiagnosticReport report)
+    private void ReportSidecarTaskFiles(IReadOnlyList<ConfigRegEntry> registry, DiagnosticReport report)
     {
-        string? planFolder = PlanFolder();
+        string? planFolder = FolderOf(registry, ConfigRegConfig.PlanIndexProperty);
         if (planFolder is null)
         {
             // No folder to scope the walk to: say so, because a clean result here would read as
@@ -192,7 +193,7 @@ public sealed partial class PlanTaskFileValidator
     /// against the folder it actually uses. These are the same directories the Arbiter publishes
     /// as <c>config.planning-dirs</c>, which is what lets one detector answer both rules.
     /// </remarks>
-    private IReadOnlyList<string> PlanningDirectories()
+    private static IReadOnlyList<string> PlanningDirectories(IReadOnlyList<ConfigRegEntry> registry)
     {
         string[] properties =
         [
@@ -201,7 +202,6 @@ public sealed partial class PlanTaskFileValidator
             ConfigRegConfig.TodoIndexProperty
         ];
 
-        IReadOnlyList<ConfigRegEntry> registry = _config.ConfigReg.Resolve(_config.Ontology);
         List<string> directories = [];
         foreach (string property in properties)
         {
@@ -213,10 +213,6 @@ public sealed partial class PlanTaskFileValidator
 
         return directories;
     }
-
-    /// <summary>The repository-relative folder holding plans, or null when the registry does not set one.</summary>
-    private string? PlanFolder() =>
-        FolderOf(_config.ConfigReg.Resolve(_config.Ontology), ConfigRegConfig.PlanIndexProperty);
 
     /// <summary>The folder of a registry property's index file, or null when the property is unset.</summary>
     private static string? FolderOf(IReadOnlyList<ConfigRegEntry> registry, string property)
