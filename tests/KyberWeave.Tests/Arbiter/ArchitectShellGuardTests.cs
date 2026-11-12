@@ -374,6 +374,22 @@ public sealed class ArchitectShellGuardTests
         Assert.True(result.Allowed, $"A literal-backslash planning-folder touch under C:\\w must be allowed. Reason: {result.Reason}");
     }
 
+    /// <summary>
+    /// A backslash in a Bash path operand, in a spot where the planning-folder check would allow the path. The
+    /// touch stays beneath <c>docs/plans</c> and the cd stays inside the tree, so only the backslash check denies
+    /// them: removing that check turns both rows green. The reason must name the backslash, not the rule alone.
+    /// </summary>
+    [Theory]
+    [InlineData("touch 'docs/plans/x\\.md'")]
+    [InlineData("cd 'docs/plans\\x' && ls")]
+    public void Bash_BackslashInAPathOperandWhereThePlanningCheckWouldAllow_IsDeniedNamingTheBackslash(string command)
+    {
+        ShellGuardResult result = CheckBash(command);
+
+        Assert.False(result.Allowed, $"'{command}' carries a backslash in a path operand and must be denied.");
+        Assert.Contains("backslash in a path operand", result.Reason ?? string.Empty, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Bash_TrailingSeparator_IsAllowed()
     {
