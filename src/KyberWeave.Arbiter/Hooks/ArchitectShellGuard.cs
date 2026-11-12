@@ -415,6 +415,9 @@ public static class ArchitectShellGuard
     /// Drops the blank lines and blanks at the end of a call, and one <c>;</c> that ends it. A call ends with a newline
     /// or a separator as often as not, and that end is not a command. A separator anywhere else is unchanged, so an
     /// empty segment between two separators (<c>a ;; b</c>, <c>&amp;&amp; &amp;&amp;</c>) is still refused.
+    /// A <c>;</c> alone on the last line, or one that ends find's <c>{}</c> terminator, is kept rather than dropped:
+    /// <see cref="Split"/> then refuses it as an empty or unterminated segment, so no trailing character is
+    /// ever silently accepted.
     /// </summary>
     private static string WithoutTrailingSeparator(string command)
     {
