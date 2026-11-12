@@ -126,11 +126,155 @@ public sealed class ReportGateScriptTests : IDisposable
         Assert.Equal(2, result.ExitCode);
     }
 
+    /// <summary>
+    /// The finish text can sit in the middle of a report that keeps growing. The run is done once the text has
+    /// been seen for the grace period, and the command is stopped rather than left to run to its time limit.
+    /// </summary>
+    [Fact]
+    public void ACommandThatKeepsRunningAfterTheFinishTextIsStoppedAndPasses()
+    {
+        SkipIfBashUnavailable();
+
+        ProcessResult result = RunContainsScript(
+            $"echo $$ > pid; {{ echo before; echo '<Report>{Closing}'; echo after; }} > {Report}; " +
+            "while true; do echo tick >> report.xml; sleep 0.2; done",
+            grace: 1);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("did not exit", result.StandardError, StringComparison.Ordinal);
+        Assert.False(IsRunning(ReadRecordedPid()), "The stopped command must not outlive the script.");
+    }
+
+    /// <summary>A command that exits zero without the finish text has not finished its analysis.</summary>
+    [Fact]
+    public void ACommandThatExitsZeroWithoutTheFinishTextFailsUnderContains()
+    {
+        SkipIfBashUnavailable();
+
+        ProcessResult result = RunContainsScript($"echo '<Report><Issue />' > {Report}", grace: 1);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("no complete report", result.StandardError, StringComparison.Ordinal);
+    }
+
+    /// <summary>A command that writes the finish text and exits zero by itself passes: nothing had to be stopped.</summary>
+    [Fact]
+    public void ACommandThatWritesTheFinishTextAndExitsZeroPassesUnderContains()
+    {
+        SkipIfBashUnavailable();
+
+        ProcessResult result = RunContainsScript(
+            $"{{ echo before; echo '<Report>{Closing}'; echo after; }} > {Report}", grace: 1);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.DoesNotContain("did not exit", result.StandardError, StringComparison.Ordinal);
+    }
+
+    /// <summary>A command that never finishes is stopped at the time limit, and the stopped command does not outlive it.</summary>
+    [Fact]
+    public void ACommandThatRunsPastTheTimeoutIsStoppedAndReportedAsTimedOut()
+    {
+        SkipIfBashUnavailable();
+
+        ProcessResult result = RunContainsScript("echo $$ > pid; sleep 300", grace: 1, timeoutSeconds: 2);
+
+        Assert.Equal(124, result.ExitCode);
+        Assert.Contains("did not finish within", result.StandardError, StringComparison.Ordinal);
+        Assert.False(IsRunning(ReadRecordedPid()), "The timed-out command must not outlive the script.");
+    }
+
+    /// <summary>The time limit applies to the ends-with mode too: an incomplete report never counts as done.</summary>
+    [Fact]
+    public void AnIncompleteReportIsStoppedAtTheTimeoutUnderEndsWith()
+    {
+        SkipIfBashUnavailable();
+
+        ProcessResult result = RunScriptArguments(
+            [
+                "--report", Report, "--ends-with", Closing, "--grace", "1", "--timeout", "2", "--",
+                "sh", "-c", $"echo '<Report><Issue />' > {Report}; sleep 300"
+            ],
+            ScriptTimeout);
+
+        Assert.Equal(124, result.ExitCode);
+    }
+
+    /// <summary>A finished report is passed as soon as the grace period ends, well before the time limit.</summary>
+    [Fact]
+    public void AFinishedReportPassesBeforeTheTimeoutUnderContains()
+    {
+        SkipIfBashUnavailable();
+
+        ProcessResult result = RunContainsScript(
+            $"echo '<Report>{Closing}' > {Report}; sleep 300", grace: 1, timeoutSeconds: 20);
+
+        Assert.Equal(0, result.ExitCode);
+    }
+
+    /// <summary>The two finish modes are alternatives, so naming both is a usage error that shows the usage line.</summary>
+    [Fact]
+    public void EndsWithAndContainsTogetherAreAUsageError()
+    {
+        SkipIfBashUnavailable();
+
+        ProcessResult result = RunScriptArguments(
+            ["--report", Report, "--ends-with", Closing, "--contains", Closing, "--grace", "1", "--", "true"],
+            ScriptTimeout);
+
+        Assert.Equal(2, result.ExitCode);
+        Assert.Contains("--contains", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains("--timeout", result.StandardError, StringComparison.Ordinal);
+    }
+
+    /// <summary>A timeout must be a positive whole number of seconds; zero is a usage error.</summary>
+    [Fact]
+    public void ATimeoutOfZeroIsAUsageError()
+    {
+        SkipIfBashUnavailable();
+
+        AssertTimeoutIsAUsageError("0");
+    }
+
+    /// <summary>A timeout that is not a number is a usage error.</summary>
+    [Fact]
+    public void ANonNumericTimeoutIsAUsageError()
+    {
+        SkipIfBashUnavailable();
+
+        AssertTimeoutIsAUsageError("x");
+    }
+
+    private void AssertTimeoutIsAUsageError(string timeout)
+    {
+        ProcessResult result = RunScriptArguments(
+            ["--report", Report, "--contains", Closing, "--timeout", timeout, "--", "true"],
+            ScriptTimeout);
+
+        Assert.Equal(2, result.ExitCode);
+        Assert.Contains("--contains", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains("--timeout", result.StandardError, StringComparison.Ordinal);
+    }
+
     private ProcessResult RunScript(string standIn) => RunScript(standIn, ScriptTimeout);
 
     private ProcessResult RunScript(string standIn, TimeSpan timeout) =>
         RunScriptArguments(
             ["--report", Report, "--ends-with", Closing, "--grace", "1", "--", "sh", "-c", standIn], timeout);
+
+    /// <summary>Runs the script in <c>--contains</c> mode, with an optional <c>--timeout</c>, around a <c>sh -c</c> stand-in.</summary>
+    private ProcessResult RunContainsScript(string standIn, int grace, int? timeoutSeconds = null)
+    {
+        List<string> arguments =
+            ["--report", Report, "--contains", Closing, "--grace", grace.ToString(CultureInfo.InvariantCulture)];
+        if (timeoutSeconds is { } seconds)
+        {
+            arguments.Add("--timeout");
+            arguments.Add(seconds.ToString(CultureInfo.InvariantCulture));
+        }
+
+        arguments.AddRange(["--", "sh", "-c", standIn]);
+        return RunScriptArguments(arguments.ToArray(), ScriptTimeout);
+    }
 
     private ProcessResult RunScriptArguments(string[] arguments, TimeSpan timeout)
     {
