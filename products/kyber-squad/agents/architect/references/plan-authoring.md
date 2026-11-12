@@ -6,11 +6,13 @@ The plan file is durable state. A live agent instance is disposable.
 
 1. Resolve the plans directory and **<plan-index>** through Config Reg, then read the index.
 2. Use a prompt-supplied `PLAN_FILE` only when its canonical path remains beneath the plans directory. If none is supplied, create a date-prefixed Draft plan and its index row before broad discovery. Every new plan file name starts with today's date as `yyyy-MM-dd-`, even when the name was handed to you: if a supplied `PLAN_FILE` names a plan that does not exist yet and lacks the date, add the date in front, create that file, and return the dated path as `PLAN_FILE`. Never rename a plan that already exists. Change an existing file with an in-place edit, never a whole-file rewrite, whenever the harness gives you an edit tool. On harnesses where file editing requires an existing destination file (such as Devin), initialize the file via shell (for example, `touch <file>`) before editing. A note or excuse for why the process was not followed is not a resolution. The process exists to ensure quality; going around it signals bad quality. Do not put such a note in **Active Plans**. A pull request that does will not be approved.
-3. Reconcile body status, frontmatter lifecycle, and index status in the same save. The body status is authoritative when they disagree. Frontmatter `status` is `draft` while the plan is Draft and `current` from Ready on, from the closed set `current`, `draft`, `needs-review`, `superseded`; `status: ready` is invalid and fails `KW-DOC-SPEC-002`. The bold body status line and the index row carry Draft, Ready and later states.
+3. Reconcile body status, frontmatter lifecycle, and index status in the same save. The body status is authoritative when they disagree. The status vocabulary is stated under Status vocabulary below.
 4. Reconcile conductor-supplied answers against the decision ledger before more discovery.
 5. Save after every discovery batch and before every status handoff.
 
 Open only active Draft, Ready, In progress, or Blocked plans. Draft supports planning only. Review required, Completed, Superseded, and archived artifacts are not implementation authority.
+
+**Status vocabulary.** Frontmatter `status` is `draft` while the plan is Draft and `current` from Ready on. Its closed set is `current`, `draft`, `needs-review`, `superseded`; `status: ready` is invalid and fails `KW-DOC-SPEC-002`. The bold body status line and the index row carry Draft, Ready and later states.
 
 ## Required plan contract
 
