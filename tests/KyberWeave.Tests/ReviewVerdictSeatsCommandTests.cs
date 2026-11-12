@@ -519,9 +519,8 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
 
         Assert.Equal(1, run.Result);
         Assert.Contains(file, run.Output, StringComparison.Ordinal);
-        Assert.True(
-            MessagesWithCode(run.Output, UnreadableInput).Count + MessagesWithCode(run.Output, SeatUnparseable).Count > 0,
-            $"Expected KW-REVIEW-023 or KW-REVIEW-040. Output:{Environment.NewLine}{run.Output}");
+        AssertDiagnostic(run.Output, UnreadableInput, "Error");
+        Assert.Empty(MessagesWithCode(run.Output, SeatUnparseable));
     }
 
     // -----------------------------------------------------------------------------------------
@@ -535,6 +534,14 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
     [InlineData("confidence", "-3")]
     [InlineData("confidence", "0")]
     [InlineData("confidence", "1.5")]
+    [InlineData("confidence", "\"9\"")]
+    [InlineData("confidence", "9.0")]
+    [InlineData("confidence", "1e1")]
+    [InlineData("confidence", "true")]
+    [InlineData("confidence", "null")]
+    [InlineData("severity", "null")]
+    [InlineData("Severity", "7")]
+    [InlineData("CONFIDENCE", "999")]
     public void APriorFindingOutsideTheSeatRangesIsRefusedNamingTheFileAndPath(string field, string rawValue)
     {
         string prior = Path.Combine(_temp.Path, "prior");
@@ -560,7 +567,94 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
 
         Assert.Equal(1, run.Result);
         AssertDiagnostic(run.Output, UnreadableInput, "Error", "findings.json");
-        AssertDiagnostic(run.Output, UnreadableInput, "Error", $"$.findings[0].{field}");
+        Assert.Contains(MessagesWithCode(run.Output, UnreadableInput), message =>
+            message.Contains($"findings[0].{field}", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// The reader binds names ignoring case, so the prior document's checks do too: an out-of-range finding is refused
+    /// under any spelling of the list key and of the field key.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ReviewVerdictInputTests.RangeSpellings), MemberType = typeof(ReviewVerdictInputTests))]
+    public void AnOutOfRangePriorFindingIsRefusedWhateverTheCaseOfTheListAndFieldKeys(
+        string listKind, string fieldKind, string field, string rawValue)
+    {
+        JsonObject finding = PriorFinding();
+        finding.Remove(field);
+        finding[ReviewVerdictInputTests.Spell(field, fieldKind)] = JsonNode.Parse(rawValue);
+        WritePrior("findings", listKind, new JsonArray(finding));
+        WriteSeat("correctness", NoFindingsSeat("correctness"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--prior", PriorFolder, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(1, run.Result);
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", "findings.json");
+        Assert.Contains(MessagesWithCode(run.Output, UnreadableInput), message =>
+            message.Contains($"findings[0].{field}", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [MemberData(nameof(ReviewVerdictInputTests.KnownFindingsLists), MemberType = typeof(ReviewVerdictInputTests))]
+    public void ANullElementInAKnownPriorListIsRefusedWhateverTheCaseOfItsKey(string key, string kind)
+    {
+        WritePrior(key, kind, new JsonArray("a", null));
+        WriteSeat("correctness", NoFindingsSeat("correctness"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--prior", PriorFolder, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(1, run.Result);
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", "findings.json");
+    }
+
+    [Theory]
+    [InlineData("lower")]
+    [InlineData("Pascal")]
+    [InlineData("UPPER")]
+    public void ANullElementInAnUnknownPriorPropertyIsToleratedWhateverTheCaseOfTheKeys(string kind)
+    {
+        WritePrior("findings", kind, new JsonArray());
+        string path = Path.Combine(PriorFolder, "findings.json");
+        JsonObject document = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        document[ReviewVerdictInputTests.Spell("extra", kind)] = new JsonArray(1, null);
+        File.WriteAllText(path, document.ToJsonString());
+        WriteSeat("correctness", NoFindingsSeat("correctness"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--prior", PriorFolder, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.Empty(MessagesWithCode(run.Output, UnreadableInput));
+    }
+
+    private string PriorFolder => Path.Combine(_temp.Path, "prior");
+
+    private static JsonObject PriorFinding() => new()
+    {
+        ["id"] = "correctness/off-by-one",
+        ["lens"] = "correctness",
+        ["severity"] = "major",
+        ["confidence"] = 9,
+        ["file"] = "src/Foo.cs",
+        ["line"] = 12
+    };
+
+    /// <summary>Writes the prior folder's findings document with <paramref name="key"/> holding <paramref name="value"/> under the spelling <paramref name="kind"/> names.</summary>
+    private void WritePrior(string key, string kind, JsonNode value)
+    {
+        Directory.CreateDirectory(PriorFolder);
+        JsonObject document = new()
+        {
+            ["schema"] = "kyber-weave.review-findings/v1",
+            ["findings"] = new JsonArray(),
+            ["changedPaths"] = new JsonArray(),
+            ["changedLines"] = 0
+        };
+        document.Remove(key);
+        document[ReviewVerdictInputTests.Spell(key, kind)] = value;
+        File.WriteAllText(Path.Combine(PriorFolder, "findings.json"), document.ToJsonString());
     }
 
     [Fact]

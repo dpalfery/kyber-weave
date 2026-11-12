@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Core.Review;
@@ -220,6 +221,8 @@ public sealed class ReviewVerdictInputTests : IDisposable
     [InlineData("\"\"")]
     [InlineData("7")]
     [InlineData("-1")]
+    [InlineData("null")]
+    [InlineData("true")]
     public void AFindingWithASeverityOutsideTheEnginesNamesIsRefusedNamingTheFileAndPath(string severity)
     {
         string findings = Write("findings.json", FindingsDocument(findings: FindingJson("severity", severity)));
@@ -237,6 +240,11 @@ public sealed class ReviewVerdictInputTests : IDisposable
     [InlineData("0")]
     [InlineData("11")]
     [InlineData("1.5")]
+    [InlineData("\"9\"")]
+    [InlineData("9.0")]
+    [InlineData("1e1")]
+    [InlineData("true")]
+    [InlineData("null")]
     public void AFindingWithAConfidenceOutsideOneToTenIsRefusedNamingTheFileAndPath(string confidence)
     {
         string findings = Write("findings.json", FindingsDocument(findings: FindingJson("confidence", confidence)));
@@ -248,20 +256,191 @@ public sealed class ReviewVerdictInputTests : IDisposable
         AssertDiagnostic(run.Output, UnreadableInput, "Error", "$.findings[0].confidence");
     }
 
-    /// <summary>The range is a boundary, not a ban: the lowest and highest confidence and every severity name still read, whatever verdict they reach.</summary>
+    /// <summary>
+    /// The range is a boundary, not a ban: the lowest and highest confidence and every severity name still read, whatever
+    /// verdict they reach. The finding must come out the other side of the reader with its values intact.
+    /// </summary>
     [Theory]
-    [InlineData("confidence", "1")]
-    [InlineData("confidence", "10")]
-    [InlineData("severity", "\"critical\"")]
-    [InlineData("severity", "\"minor\"")]
-    public void AFindingAtTheEdgeOfTheRangeIsStillAccepted(string field, string value)
+    [InlineData("confidence", "1", "major", 1, "APPROVE — risk LOW, 0 finding(s) accepted, 1 dropped")]
+    [InlineData("confidence", "10", "major", 10, "APPROVE — risk MEDIUM, 1 finding(s) accepted, 0 dropped")]
+    [InlineData("severity", "\"critical\"", "critical", 9, "REQUEST CHANGES — risk HIGH, 1 finding(s) accepted")]
+    [InlineData("severity", "\"minor\"", "minor", 9, "APPROVE — risk")]
+    public void AFindingAtTheEdgeOfTheRangeIsStillAccepted(
+        string field, string value, string severity, int confidence, string verdictStart)
     {
         string findings = Write("findings.json", FindingsDocument(findings: FindingJson(field, value)));
+        string report = Path.Combine(_temp.Path, "report.json");
+
+        CapturedConsoleExecution<int> run = Verdict("--findings", findings, "--out", report);
+
+        Assert.Empty(MessagesWithCode(run.Output, UnreadableInput));
+        Assert.Contains(MessagesWithCode(run.Output, "KW-REVIEW-024"), message =>
+            message.StartsWith(verdictStart, StringComparison.Ordinal));
+        using JsonDocument written = JsonDocument.Parse(File.ReadAllText(report));
+        JsonElement finding = written.RootElement.GetProperty("findings")[0];
+        Assert.Equal("correctness/off-by-one", finding.GetProperty("id").GetString());
+        Assert.Equal(severity, finding.GetProperty("severity").GetString(), ignoreCase: true);
+        Assert.Equal(confidence, finding.GetProperty("confidence").GetInt32());
+    }
+
+    /// <summary>
+    /// A second spelling of the severity beside a valid one is still a severity: the serializer reads names ignoring case, so
+    /// a <c>"Severity": 7</c> next to <c>"severity": "major"</c> is the value that would bind.
+    /// </summary>
+    [Theory]
+    [InlineData("Severity", "7")]
+    [InlineData("SEVERITY", "\"nit\"")]
+    [InlineData("Confidence", "999")]
+    [InlineData("CONFIDENCE", "0")]
+    public void ADuplicateSpellingOfASeverityOrConfidenceIsHeldToTheRangeToo(string field, string rawValue)
+    {
+        string findings = Write("findings.json", FindingsDocument(findings: FindingJson(field, rawValue)));
 
         CapturedConsoleExecution<int> run = Verdict("--findings", findings);
 
-        // Critical findings request changes (exit 1); what matters is that the document was read.
+        Assert.Equal(Refused, run.Result);
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", "findings.json");
+        Assert.Contains(MessagesWithCode(run.Output, UnreadableInput), message =>
+            message.Contains($"[0].{field}", StringComparison.OrdinalIgnoreCase));
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // The reader binds property names ignoring case, so every check that keys on a name must too. Each key the range check
+    // or the null walk visits is run in lowercase, PascalCase and UPPERCASE spellings.
+    // -----------------------------------------------------------------------------------------
+
+    public static TheoryData<string, string, string, string> RangeSpellings()
+    {
+        TheoryData<string, string, string, string> data = [];
+        foreach (string listKind in Spellings)
+        foreach (string fieldKind in Spellings)
+        foreach ((string field, string value) in new[] { ("severity", "7"), ("confidence", "999") })
+            data.Add(listKind, fieldKind, field, value);
+        return data;
+    }
+
+    public static TheoryData<string, string> KnownFindingsLists()
+    {
+        TheoryData<string, string> data = [];
+        foreach (string kind in Spellings)
+        foreach (string key in new[] { "findings", "changedPaths", "coverage" })
+            data.Add(key, kind);
+        return data;
+    }
+
+    public static TheoryData<string, string> KnownGateLists()
+    {
+        TheoryData<string, string> data = [];
+        foreach (string kind in Spellings)
+        foreach (string key in new[] { "gates", "coverageReports" })
+            data.Add(key, kind);
+        return data;
+    }
+
+    private static readonly string[] Spellings = ["lower", "Pascal", "UPPER"];
+
+    [Theory]
+    [MemberData(nameof(RangeSpellings))]
+    public void AnOutOfRangeFindingIsRefusedWhateverTheCaseOfTheListAndFieldKeys(
+        string listKind, string fieldKind, string field, string rawValue)
+    {
+        JsonObject finding = FindingObject(field, rawValue);
+        RenameKey(finding, field, Spell(field, fieldKind));
+        string findings = Write("findings.json", FindingsObject("findings", listKind, new JsonArray(finding)));
+
+        CapturedConsoleExecution<int> run = Verdict("--findings", findings);
+
+        Assert.Equal(Refused, run.Result);
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", "findings.json");
+        Assert.Contains(MessagesWithCode(run.Output, UnreadableInput), message =>
+            message.Contains($"findings[0].{field}", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [MemberData(nameof(KnownFindingsLists))]
+    public void ANullElementInAKnownFindingsListIsRefusedWhateverTheCaseOfItsKey(string key, string kind)
+    {
+        string findings = Write("findings.json", FindingsObject(key, kind, new JsonArray("a", null)));
+
+        CapturedConsoleExecution<int> run = Verdict("--findings", findings);
+
+        Assert.Equal(Refused, run.Result);
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", "findings.json");
+        Assert.Contains(MessagesWithCode(run.Output, UnreadableInput), message =>
+            message.Contains($"{key}[", StringComparison.OrdinalIgnoreCase) || message.Contains("null", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [MemberData(nameof(KnownGateLists))]
+    public void ANullElementInAKnownGateListIsRefusedWhateverTheCaseOfItsKey(string key, string kind)
+    {
+        string findings = WriteFindingDocument("id", "correctness/off-by-one");
+        JsonObject gates = new() { ["schema"] = "kyber-weave.review-gates/v1", ["gates"] = new JsonArray() };
+        gates.Remove(key);
+        gates[Spell(key, kind)] = new JsonArray(null, null);
+        string path = Write("gates.json", gates.ToJsonString());
+
+        CapturedConsoleExecution<int> run = Verdict("--findings", findings, "--gates", path);
+
+        Assert.Equal(Refused, run.Result);
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", "gates.json");
+    }
+
+    /// <summary>
+    /// An unknown property stays unknown in any spelling: a null inside it does not refuse the document, and the finding
+    /// beside it is read.
+    /// </summary>
+    [Theory]
+    [InlineData("lower")]
+    [InlineData("Pascal")]
+    [InlineData("UPPER")]
+    public void ANullElementInAnUnknownPropertyIsToleratedWhateverTheCaseOfTheKeys(string kind)
+    {
+        JsonObject finding = FindingObject("severity", "\"minor\"");
+        finding[Spell("tags", kind)] = new JsonArray(1, null);
+        JsonObject document = JsonNode.Parse(FindingsObject("findings", kind, new JsonArray(finding)))!.AsObject();
+        document[Spell("extra", kind)] = new JsonArray(1, null);
+        string findings = Write("findings.json", document.ToJsonString());
+        string report = Path.Combine(_temp.Path, "report.json");
+
+        CapturedConsoleExecution<int> run = Verdict("--findings", findings, "--out", report);
+
         Assert.Empty(MessagesWithCode(run.Output, UnreadableInput));
+        using JsonDocument written = JsonDocument.Parse(File.ReadAllText(report));
+        Assert.Equal(1, written.RootElement.GetProperty("findings").GetArrayLength());
+    }
+
+    /// <summary>The spelling of <paramref name="key"/> a test names: all lowercase, PascalCase, or all uppercase.</summary>
+    internal static string Spell(string key, string kind) => kind switch
+    {
+        "lower" => string.Concat(key.Select(char.ToLowerInvariant)),
+        "Pascal" => char.ToUpperInvariant(key[0]) + key[1..],
+        _ => key.ToUpperInvariant()
+    };
+
+    private static void RenameKey(JsonObject node, string from, string to)
+    {
+        JsonNode? value = node[from];
+        node.Remove(from);
+        node[to] = value;
+    }
+
+    /// <summary>
+    /// A findings document as JSON text whose <paramref name="key"/> holds <paramref name="value"/> under the spelling
+    /// <paramref name="kind"/> names; the other required members are present in their document spelling.
+    /// </summary>
+    private static string FindingsObject(string key, string kind, JsonNode value)
+    {
+        JsonObject document = new()
+        {
+            ["schema"] = "kyber-weave.review-findings/v1",
+            ["findings"] = new JsonArray(),
+            ["changedPaths"] = new JsonArray(),
+            ["changedLines"] = 0
+        };
+        document.Remove(key);
+        document[Spell(key, kind)] = value;
+        return document.ToJsonString();
     }
 
     // -----------------------------------------------------------------------------------------
@@ -299,7 +478,10 @@ public sealed class ReviewVerdictInputTests : IDisposable
     // -----------------------------------------------------------------------------------------
 
     /// <summary>One otherwise-valid finding as JSON text, with <paramref name="field"/> set to the raw JSON <paramref name="rawValue"/>.</summary>
-    private static string FindingJson(string field, string rawValue)
+    private static string FindingJson(string field, string rawValue) => FindingObject(field, rawValue).ToJsonString();
+
+    /// <summary>One otherwise-valid finding, with <paramref name="field"/> set to the raw JSON <paramref name="rawValue"/>.</summary>
+    private static JsonObject FindingObject(string field, string rawValue)
     {
         JsonObject finding = new()
         {
@@ -316,7 +498,7 @@ public sealed class ReviewVerdictInputTests : IDisposable
             ["suggestion"] = "Use <= or count + 1."
         };
         finding[field] = JsonNode.Parse(rawValue);
-        return finding.ToJsonString();
+        return finding;
     }
 
     /// <summary>
