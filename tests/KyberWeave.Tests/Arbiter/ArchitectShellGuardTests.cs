@@ -102,6 +102,7 @@ public sealed class ArchitectShellGuardTests
     [InlineData("uniq --skip-fields 1 f")]
     [InlineData("rg 'foo\\.bar' src")]
     [InlineData("git status\n")]
+    [InlineData("git status ;")]
     public void Bash_ListedCommand_IsAllowed(string command)
     {
         ShellGuardResult result = CheckBash(command);
@@ -167,6 +168,9 @@ public sealed class ArchitectShellGuardTests
     [InlineData("tail -nf 5 f", "tail -nf 5 f")]
     [InlineData("rg -nz p", "rg -nz p")]
     [InlineData("touch \"docs/plans/*.md\"", "touch \"docs/plans/*.md\"")]
+    [InlineData("touch 'docs\\plans\\x.md'", "docs\\plans\\x.md")]
+    [InlineData("touch 'docs/plans\\x.md'", "docs/plans\\x.md")]
+    [InlineData("grep \"a\\.b\" src", "backslash")]
     [InlineData("uniq -- in -out", "uniq -- in -out")]
     [InlineData("git log | uniq -- - -b", "uniq -- - -b")]
     [InlineData("sort --ou=out1.txt in.txt", "sort --ou=out1.txt in.txt")]
@@ -343,6 +347,11 @@ public sealed class ArchitectShellGuardTests
     [InlineData("Bash", "grep -rn x docs/p?ans")]
     [InlineData("Bash", "head -5 docs/[a]*.md")]
     [InlineData("Bash", "git status ;; git log")]
+    [InlineData("Bash", "git status\n;")]
+    [InlineData("Bash", "git status ;;")]
+    [InlineData("Bash", "git status &&")]
+    [InlineData("Bash", "cd /w;")]
+    [InlineData("Bash", "cd 'docs\\plans' && touch x.md")]
     [InlineData("Bash", "wc -l *")]
     public void CommandWithAChainedCdOrUnquotedGlob_IsDeniedUnderTheRule(string tool, string command)
     {
@@ -350,6 +359,19 @@ public sealed class ArchitectShellGuardTests
 
         Assert.False(result.Allowed, $"'{command}' ({tool}) must be denied.");
         Assert.Contains(RuleId, result.Reason ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PowerShell_TouchLiteralBackslashPlanPath_IsAllowed()
+    {
+        // PowerShell keeps the backslash literal, so a backslash-separated planning path resolves as written.
+        ShellGuardResult result = ArchitectShellGuard.Check(
+            "PowerShell",
+            CommandInput("touch docs\\plans\\x.md"),
+            "C:\\w",
+            PlanningDirectories.Value);
+
+        Assert.True(result.Allowed, $"A literal-backslash planning-folder touch under C:\\w must be allowed. Reason: {result.Reason}");
     }
 
     [Fact]
