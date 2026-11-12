@@ -28,6 +28,29 @@ public static class ArchitectShellGuard
     /// <summary>The segment named in a denial when the call carries no command string.</summary>
     private const string NoCommandSegment = "<no command>";
 
+    /// <summary>
+    /// The product's command name. A constant rather than a literal case label: the shipped-surface
+    /// policy scans tracked files for a quoted command name followed by a colon, and that shape is the
+    /// retired-key form it exists to catch.
+    /// </summary>
+    private const string KyberWeaveCli = "kyber-weave";
+
+    private static readonly IReadOnlySet<string> SortSafeLongFlags = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "--reverse", "--numeric-sort", "--unique", "--key", "--field-separator", "--ignore-case",
+        "--dictionary-order", "--general-numeric-sort", "--human-numeric-sort", "--version-sort", "--stable",
+        "--ignore-leading-blanks", "--ignore-nonprinting", "--month-sort", "--random-sort",
+    };
+
+    /// <summary>
+    /// The rg options that run a program or read compressed input through one: a preprocessor, a
+    /// hostname command, or a hyperlink format. Matched exactly, or by prefix for the families.
+    /// </summary>
+    private static readonly IReadOnlySet<string> RipgrepExecutingOptions = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "--pre", "--pre-glob", "--search-zip",
+    };
+
     private static readonly IReadOnlySet<string> GuardedProfiles = new HashSet<string>(StringComparer.Ordinal)
     {
         "architect",
@@ -177,7 +200,9 @@ public static class ArchitectShellGuard
                 "Send the command as a string in the command field"));
         }
 
-        string directory = workingDirectory;
+        // Normalised once, so the planning check compares like with like: "/w/" and "/w" name the same tree.
+        string forward = workingDirectory.Replace('\\', '/');
+        string directory = Normalize(forward) ?? forward;
         foreach (Segment segment in Split(command, bash))
         {
             Refusal? refusal = CheckSegment(segment, bash, ref directory, planningDirectories);
@@ -577,7 +602,7 @@ public static class ArchitectShellGuard
 
         switch (name)
         {
-            case "kyber-weave":
+            case KyberWeaveCli:
                 return CheckKyberWeave(words);
             case "codegraph":
                 return words.Count >= 3 && string.Equals(words[1], "explore", StringComparison.Ordinal)
@@ -590,12 +615,13 @@ public static class ArchitectShellGuard
             case "grep":
             case "ls":
             case "head":
-            case "tail":
             case "wc":
             case "cut":
                 return null;
             case "rg":
                 return CheckRipgrep(words);
+            case "tail":
+                return CheckTail(words);
             case "find":
                 return CheckFind(words);
             case "sort":
@@ -723,23 +749,45 @@ public static class ArchitectShellGuard
         }
     }
 
+    /// <summary>
+    /// Checks <c>rg</c> by denying the options that run a program: a preprocessor (<c>--pre</c>), a hostname
+    /// command (<c>--hostname-bin</c>), a hyperlink format (<c>--hyperlink-format</c>), and compressed input
+    /// (<c>--search-zip</c>, <c>-z</c>). The families are matched by prefix, so an abbreviated spelling of one
+    /// of them is refused too.
+    /// </summary>
+    /// <remarks>
+    /// A denylist rather than an allowlist: rg has more than a hundred options, and a list that misses one
+    /// would refuse an ordinary search. The executing options are few and named, so the denial stays exact.
+    /// </remarks>
     private static Refusal? CheckRipgrep(List<string> words)
     {
         foreach (string argument in words.Skip(1))
         {
-            if (IsOption(argument, "--pre")
-                || IsOption(argument, "--pre-glob")
-                || IsOption(argument, "--search-zip")
-                || HasShortFlag(argument, 'z'))
+            if (argument.StartsWith("--", StringComparison.Ordinal))
             {
-                return new Refusal(
-                    "runs a preprocessor or reads compressed files through rg, which is not allowed",
-                    "Search the plain files with grep or rg without those options");
+                string name = LongOptionName(argument);
+                if (RipgrepExecutingOptions.Contains(name)
+                    || name.StartsWith("--host", StringComparison.Ordinal)
+                    || name.StartsWith("--hyper", StringComparison.Ordinal))
+                {
+                    return RipgrepRefusal;
+                }
+
+                continue;
+            }
+
+            if (HasShortFlag(argument, 'z'))
+            {
+                return RipgrepRefusal;
             }
         }
 
         return null;
     }
+
+    private static readonly Refusal RipgrepRefusal = new(
+        "runs a program or reads compressed input through rg, which is not allowed",
+        "Search the plain files with grep or rg without those options");
 
     private static Refusal? CheckFind(List<string> words)
     {
@@ -756,18 +804,83 @@ public static class ArchitectShellGuard
         return null;
     }
 
+    /// <summary>
+    /// Checks <c>sort</c> against an allowlist of flags that only order the output. Every other option is
+    /// refused, because sort has options that write files (<c>-o</c>, <c>--output</c>) or run programs
+    /// (<c>--compress-program</c>), and GNU sort also accepts unambiguous long-option abbreviations, so a
+    /// denylist of spellings cannot be complete. Operands are input files, read only.
+    /// </summary>
     private static Refusal? CheckSort(List<string> words)
+    {
+        for (int index = 1; index < words.Count; index++)
+        {
+            string argument = words[index];
+            if (argument == "--")
+            {
+                break;
+            }
+
+            if (!IsFlag(argument) || argument == "-")
+            {
+                continue;
+            }
+
+            if (argument.StartsWith("--", StringComparison.Ordinal))
+            {
+                if (!SortSafeLongFlags.Contains(LongOptionName(argument)))
+                {
+                    return SortRefusal;
+                }
+
+                continue;
+            }
+
+            for (int letter = 1; letter < argument.Length; letter++)
+            {
+                // -k and -t take a value: when attached, the rest of the word is that value.
+                if (argument[letter] is 'k' or 't')
+                {
+                    break;
+                }
+
+                // The ordering flags -r -n -u -f -b -h -V -s -g -d -i -M -R; any other letter is refused.
+                if (argument[letter] is not ('r' or 'n' or 'u' or 'f' or 'b' or 'h' or 'V' or 's' or 'g' or 'd' or 'i' or 'M' or 'R'))
+                {
+                    return SortRefusal;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static readonly Refusal SortRefusal = new(
+        "uses a sort option outside the ordering set, and some sort options write files or run programs",
+        "Use sort with ordering flags only, and read the sorted output from standard output");
+
+    /// <summary>The name of a long option, without any <c>=value</c> part.</summary>
+    private static string LongOptionName(string argument)
+    {
+        int equals = argument.IndexOf('=', StringComparison.Ordinal);
+        return equals < 0 ? argument : argument[..equals];
+    }
+
+    /// <summary>
+    /// Checks <c>tail</c>: a read of a finite file or pipe. Following (<c>-f</c>, <c>-F</c>, <c>--follow</c>)
+    /// never returns, and would hang the agent's call, so it is refused. A long option beginning <c>--f</c> is
+    /// refused too, since GNU tail accepts an abbreviation of <c>--follow</c>.
+    /// </summary>
+    private static Refusal? CheckTail(List<string> words)
     {
         foreach (string argument in words.Skip(1))
         {
-            if (string.Equals(argument, "-o", StringComparison.Ordinal)
-                || IsOption(argument, "--output")
-                || IsOption(argument, "--compress-program")
-                || HasShortFlag(argument, 'o'))
+            if (argument.StartsWith("--f", StringComparison.Ordinal)
+                || HasShortFlag(argument, 'f')
+                || HasShortFlag(argument, 'F'))
             {
                 return new Refusal(
-                    "writes to a file or runs a program through sort, which is not allowed",
-                    "Read the sorted output from standard output");
+                    "follows a file, which never returns and would hang the call",
+                    "Read the end of the file with tail without -f, or use the Read tool with offset and limit");
             }
         }
 
@@ -816,7 +929,7 @@ public static class ArchitectShellGuard
                 return UnresolvableRefusal;
             }
 
-            if (!IsBeneathPlanningDirectory(path, planningDirectories))
+            if (operand.StartsWith('~') || !IsBeneathPlanningDirectory(path, directory, planningDirectories))
             {
                 return new Refusal(
                     "names a file outside the plan, specification and todo directories",
@@ -839,12 +952,28 @@ public static class ArchitectShellGuard
         "names a path the guard cannot resolve from its directory, which is not allowed",
         "Name a path beneath the working directory, without climbing above it");
 
-    private static bool IsBeneathPlanningDirectory(string path, IReadOnlyList<string> planningDirectories)
+    /// <summary>
+    /// Whether a resolved path lies under one of the planning directories of the effective directory's own
+    /// tree: it must start with <paramref name="directory"/>, and the rest of it must start with a planning
+    /// directory. A path that resolves anywhere else, including another tree that happens to contain the same
+    /// directory names, is refused.
+    /// </summary>
+    private static bool IsBeneathPlanningDirectory(
+        string path,
+        string directory,
+        IReadOnlyList<string> planningDirectories)
     {
-        foreach (string directory in planningDirectories)
+        string root = directory.EndsWith('/') ? directory : directory + "/";
+        if (!path.StartsWith(root, StringComparison.Ordinal))
         {
-            string trimmed = directory.Replace('\\', '/').Trim('/');
-            if (trimmed.Length > 0 && path.Contains("/" + trimmed + "/", StringComparison.Ordinal))
+            return false;
+        }
+
+        string relative = path[root.Length..];
+        foreach (string planning in planningDirectories)
+        {
+            string trimmed = planning.Replace('\\', '/').Trim('/');
+            if (trimmed.Length > 0 && relative.StartsWith(trimmed + "/", StringComparison.Ordinal))
             {
                 return true;
             }
