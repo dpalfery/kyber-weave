@@ -13,10 +13,14 @@ namespace KyberWeave.Arbiter.Hooks.Adapters;
 /// <c>Agent</c> (alias <c>Task</c>) for dispatch gating, the planning-path Read guard
 /// on <c>Read</c>/<c>Grep</c>/<c>Glob</c>/<c>Bash</c> for implementation specialists,
 /// <c>PostToolUse</c> on <c>Agent</c> for return events, and <c>PreToolUse</c> on
-/// <c>SubagentHandback</c> for background-dispatch returns (Q15 decision, option (a)).
+/// <c>SubagentHandback</c> for background-dispatch returns (Q15 decision, option (a)), and the
+/// architect shell guard (<c>KW-ARB-SHELL-001</c>) on <c>Bash</c>/<c>PowerShell</c>.
 /// </summary>
 /// <remarks>
-/// The payload's <c>agent_type</c> outranks the rendered <c>--caller</c>. An
+/// The architect's shell calls are checked against its documented command list before they run,
+/// by <see cref="ArchitectShellGuard"/>. This adapter does not check other callers' shell calls
+/// with it; for an implementation specialist, a shell call still reaches the planning-path Read
+/// guard, which is unchanged, and any other caller's shell call passes through. The payload's <c>agent_type</c> outranks the rendered <c>--caller</c>. An
 /// <c>Agent</c> input without <c>subagent_type</c> is not a dispatch and passes through
 /// before configuration loads. <c>updatedInput</c> replaces the entire input, so the
 /// strip path copies every <c>tool_input</c> field and only rewrites <c>prompt</c>.
@@ -106,6 +110,11 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         }
 
         if (IsHandbackTool(tool))
+        {
+            return false;
+        }
+
+        if (IsShellTool(tool) && ArchitectShellGuard.IsShellGuarded(ResolveCaller(payload, renderedCaller)))
         {
             return false;
         }
@@ -306,6 +315,20 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
                 _ => throw new InvalidOperationException(
                     $"Hook engine returned post-dispatch outcome '{outcome.Kind}' for a pre-dispatch event."),
             };
+        }
+
+        if (IsShellTool(tool) && ArchitectShellGuard.IsShellGuarded(caller))
+        {
+            // A missing tool_input is not an exception here: the guard reads it as a call with no command and denies it.
+            JsonElement toolInput = payload.TryGetProperty("tool_input", out JsonElement shellInput) ? shellInput : default;
+            ShellGuardResult shell = ArchitectShellGuard.Check(
+                tool!, toolInput, RepoRootOf(payload), ReadGuard.ProtectedDirectories(config));
+            context.Log.WriteLine(OneLine(
+                $"{ArchitectShellGuard.RuleId}: {tool} call by {caller} " +
+                (shell.Allowed ? "allowed" : $"denied: {shell.Reason}")));
+            return shell.Allowed
+                ? string.Empty
+                : RenderPreDeny(shell.Reason ?? $"Denied by the shell guard ({ArchitectShellGuard.RuleId}).");
         }
 
         if (IsReadTool(tool))
@@ -588,10 +611,14 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         string.Equals(tool, "Read", StringComparison.Ordinal)
         || string.Equals(tool, "Grep", StringComparison.Ordinal)
         || string.Equals(tool, "Glob", StringComparison.Ordinal)
-        || string.Equals(tool, "Bash", StringComparison.Ordinal);
+        || IsShellTool(tool);
 
     private static bool IsHandbackTool(string? tool) =>
         string.Equals(tool, "SubagentHandback", StringComparison.Ordinal);
+
+    private static bool IsShellTool(string? tool) =>
+        string.Equals(tool, "Bash", StringComparison.Ordinal)
+        || string.Equals(tool, "PowerShell", StringComparison.Ordinal);
 
     private static string RenderPreAllowNote(JsonElement toolInput, string prompt, string note)
     {

@@ -77,6 +77,10 @@ public static class ArbiterHookWiring
     private static readonly HashSet<string> GuardedCapabilityProfiles =
         new(StringComparer.Ordinal) { "worker", "publishing-worker" };
 
+    /// <summary>The capability profiles whose agents' Bash and PowerShell calls the architect shell guard checks.</summary>
+    private static readonly HashSet<string> ShellGuardedCapabilityProfiles =
+        new(StringComparer.Ordinal) { KyberWeave.Core.Arbiter.ArbiterSquadCatalog.ArchitectCapabilityProfile };
+
     /// <summary>The targets on which Arbiter hooks are produced today.</summary>
     /// <remarks>
     /// Claude and Copilot in VS Code take per-agent hooks; OpenCode is gated through the
@@ -178,6 +182,31 @@ public static class ArbiterHookWiring
         }
 
         return guarded;
+    }
+
+    /// <summary>
+    /// Names the shell-guarded agents: the agents in the <c>architect</c> capability profile, whose Bash and
+    /// PowerShell calls the architect shell guard (<c>KW-ARB-SHELL-001</c>) checks against the documented list.
+    /// </summary>
+    /// <remarks>
+    /// Shell-guarded is a separate set from <see cref="GuardedAgents"/>: the read guard covers the
+    /// planning-path reads of implementation specialists, and the shell guard covers the architect's
+    /// command boundary. The two sets do not overlap in the shipped roster.
+    /// </remarks>
+    public static IReadOnlySet<string> ShellGuardedAgents(SquadSource source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        HashSet<string> shellGuarded = new(StringComparer.Ordinal);
+        foreach (SquadAgent agent in source.Agents)
+        {
+            if (ShellGuardedCapabilityProfiles.Contains(agent.CapabilityProfile))
+            {
+                shellGuarded.Add(agent.Name);
+            }
+        }
+
+        return shellGuarded;
     }
 
     /// <summary>Builds the hook command line that gates one agent's dispatches on one target.</summary>

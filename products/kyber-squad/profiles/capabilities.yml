@@ -33,8 +33,11 @@ profiles:
       # outside the plan, spec and todo directories. The compensating controls are the agent
       # body's enumerated command list and write boundary, the Arbiter's planning-only
       # classification of the role, and the code-review gates over the resulting diff; none is
-      # enforced by the lattice. allow rather than ask because ask narrows to deny on Claude,
-      # Pi and ZCode. The architect-copilot and architect-devin envelopes below equal this.
+      # enforced by the lattice. On Claude the Arbiter's hook guard `KW-ARB-SHELL-001`
+      # (`ArchitectShellGuard`) enforces the enumerated command list before each command runs;
+      # other harnesses remain instruction-only. Permissions are unchanged. allow rather than ask
+      # because ask narrows to deny on Claude, Pi and ZCode. The architect-copilot and
+      # architect-devin envelopes below equal this.
       process.execute: allow
       network.read: allow
       network.publish: deny

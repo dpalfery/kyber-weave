@@ -946,6 +946,205 @@ public sealed class ClaudeRendererContractTests : IDisposable
         Assert.DoesNotContain("mcp__kw-docs__", record.Details, StringComparison.Ordinal);
     }
 
+    // Shell guard wiring (KW-ARB-SHELL-001). The architect's agent file carries a PreToolUse entry on
+    // Bash and PowerShell at Project and Global scope. No other file carries that matcher.
+
+    private const string ShellMatcher = "^(Bash|PowerShell)$";
+    private const string TaskDispatchMatcher = "^(Agent|Task)$";
+    private const string SubagentHandbackMatcher = "^SubagentHandback$";
+    private const int ShellHookTimeoutSeconds = 5;
+
+    private static async Task<SquadRenderResult> RenderClaudeArbiterAsync(
+        string sourceDirectory,
+        SquadDeploymentScope scope,
+        SquadArbiterWiring? wiring)
+    {
+        using TempDirectory home = new();
+        return await new ClaudeRenderer().RenderAsync(new SquadRenderRequest(
+            SourceDirectory: sourceDirectory,
+            Targets: [SquadTarget.Claude],
+            Scope: scope,
+            GlobalRoots: new SquadGlobalRoots(_ => null, home.Path),
+            Arbiter: wiring));
+    }
+
+    private static YamlMappingNode ArchitectFrontmatter(SquadRenderResult result, string relativePath)
+    {
+        SquadDeploymentFile file = Assert.Single(result.Files, f => f.RelativePath == relativePath);
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(Encoding.UTF8.GetString(file.Content.Span), "architect");
+        return frontmatter;
+    }
+
+    private static YamlMappingNode HooksOf(YamlMappingNode frontmatter)
+    {
+        Assert.True(
+            frontmatter.Children.TryGetValue(new YamlScalarNode("hooks"), out YamlNode? hooks),
+            "The agent file carries no hooks mapping.");
+        return Assert.IsType<YamlMappingNode>(hooks);
+    }
+
+    private static YamlSequenceNode EventEntries(YamlMappingNode hooks, string phase)
+    {
+        Assert.True(
+            hooks.Children.TryGetValue(new YamlScalarNode(phase), out YamlNode? entries),
+            $"The hooks mapping carries no {phase} entries.");
+        return Assert.IsType<YamlSequenceNode>(entries);
+    }
+
+    /// <summary>Asserts one hook entry is the shell matcher with the single expected command, typed and timed like every Arbiter hook.</summary>
+    private static void AssertShellHook(YamlMappingNode entry, string command)
+    {
+        Assert.Equal(ShellMatcher, RequireScalar(entry, "matcher", "architect"));
+        YamlSequenceNode inner = Assert.IsType<YamlSequenceNode>(entry.Children[new YamlScalarNode("hooks")]);
+        YamlMappingNode hook = Assert.Single(inner.Children.OfType<YamlMappingNode>());
+        Assert.Equal("command", RequireScalar(hook, "type", "architect"));
+        Assert.Equal(command, RequireScalar(hook, "command", "architect"));
+        Assert.Equal(
+            ShellHookTimeoutSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            RequireScalar(hook, "timeout", "architect"));
+    }
+
+    /// <summary>
+    /// Whether a rendered Markdown file carries YAML frontmatter. Reference documents an agent ships beside its
+    /// definition (for example under <c>agents/architect/references/</c>) are plain Markdown with no frontmatter,
+    /// so the hook scans read only the files that can hold hooks and every other file is left out.
+    /// </summary>
+    private static bool HasFrontmatter(SquadDeploymentFile file) =>
+        file.RelativePath.EndsWith(".md", StringComparison.Ordinal)
+        && Encoding.UTF8.GetString(file.Content.Span).StartsWith("---\n", StringComparison.Ordinal);
+
+    private static bool CarriesShellMatcher(YamlMappingNode frontmatter)
+    {
+        if (!frontmatter.Children.TryGetValue(new YamlScalarNode("hooks"), out YamlNode? hooks)
+            || hooks is not YamlMappingNode hookMap
+            || !hookMap.Children.TryGetValue(new YamlScalarNode("PreToolUse"), out YamlNode? preToolUse)
+            || preToolUse is not YamlSequenceNode entries)
+        {
+            return false;
+        }
+
+        return entries.Children.OfType<YamlMappingNode>().Any(entry =>
+            entry.Children.TryGetValue(new YamlScalarNode("matcher"), out YamlNode? matcher)
+            && matcher is YamlScalarNode { Value: ShellMatcher });
+    }
+
+    [Fact]
+    public async Task RenderAsync_ProjectArchitectAgentFile_CarriesTheShellGuardBesideItsDispatchHooks()
+    {
+        SquadRenderResult result = await RenderClaudeArbiterAsync(
+            ProductRoot,
+            SquadDeploymentScope.Project,
+            new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: ShellHookTimeoutSeconds));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        YamlMappingNode hooks = HooksOf(ArchitectFrontmatter(result, ".claude/agents/architect.md"));
+
+        YamlSequenceNode preToolUse = EventEntries(hooks, "PreToolUse");
+        YamlMappingNode shell = Assert.Single(
+            preToolUse.Children.OfType<YamlMappingNode>(),
+            entry => string.Equals(RequireScalar(entry, "matcher", "architect"), ShellMatcher, StringComparison.Ordinal));
+        AssertShellHook(shell, "kyber-weave-arbiter hook --harness claude --caller architect");
+
+        Assert.Contains(
+            preToolUse.Children.OfType<YamlMappingNode>(),
+            entry => string.Equals(RequireScalar(entry, "matcher", "architect"), TaskDispatchMatcher, StringComparison.Ordinal));
+        YamlSequenceNode postToolUse = EventEntries(hooks, "PostToolUse");
+        Assert.Contains(
+            postToolUse.Children.OfType<YamlMappingNode>(),
+            entry => string.Equals(RequireScalar(entry, "matcher", "architect"), TaskDispatchMatcher, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RenderAsync_GlobalArchitectAgentFile_CarriesExactlyOneShellGuardHook()
+    {
+        SquadRenderResult result = await RenderClaudeArbiterAsync(
+            ProductRoot,
+            SquadDeploymentScope.Global,
+            new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: ShellHookTimeoutSeconds));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        YamlMappingNode hooks = HooksOf(ArchitectFrontmatter(result, "agents/architect.md"));
+
+        Assert.Single(hooks.Children);
+        YamlMappingNode shell = Assert.Single(EventEntries(hooks, "PreToolUse").Children.OfType<YamlMappingNode>());
+        AssertShellHook(shell, ArbiterHookWiring.HookCommandLine(SquadTarget.Claude, "architect", SquadDeploymentScope.Global));
+    }
+
+    [Theory]
+    [InlineData(SquadDeploymentScope.Project)]
+    [InlineData(SquadDeploymentScope.Global)]
+    public async Task RenderAsync_ShellMatcher_ReachesOnlyTheArchitectFile(SquadDeploymentScope scope)
+    {
+        SquadRenderResult result = await RenderClaudeArbiterAsync(
+            ProductRoot,
+            scope,
+            new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: ShellHookTimeoutSeconds));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        string expected = scope == SquadDeploymentScope.Global ? "agents/architect.md" : ".claude/agents/architect.md";
+
+        List<string> carriers = [];
+        foreach (SquadDeploymentFile file in result.Files.Where(HasFrontmatter))
+        {
+            (YamlMappingNode frontmatter, _) = SplitFrontmatter(Encoding.UTF8.GetString(file.Content.Span), file.RelativePath);
+            if (CarriesShellMatcher(frontmatter))
+            {
+                carriers.Add(file.RelativePath);
+            }
+        }
+
+        Assert.Equal(new[] { expected }, carriers.ToArray());
+    }
+
+    [Theory]
+    [InlineData(SquadDeploymentScope.Project)]
+    [InlineData(SquadDeploymentScope.Global)]
+    public async Task RenderAsync_ArbiterDisabled_NoAgentFileCarriesHooks(SquadDeploymentScope scope)
+    {
+        SquadRenderResult result = await RenderClaudeArbiterAsync(
+            ProductRoot,
+            scope,
+            new SquadArbiterWiring(Enabled: false, HookTimeoutSeconds: ShellHookTimeoutSeconds));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        foreach (SquadDeploymentFile file in result.Files.Where(HasFrontmatter))
+        {
+            (YamlMappingNode frontmatter, _) = SplitFrontmatter(Encoding.UTF8.GetString(file.Content.Span), file.RelativePath);
+            Assert.False(
+                frontmatter.Children.ContainsKey(new YamlScalarNode("hooks")),
+                $"Agent file '{file.RelativePath}' must not carry hooks when Arbiter is disabled at {scope} scope.");
+        }
+    }
+
+    [Fact]
+    public async Task RenderAsync_GlobalSettingsArbiterBlock_IsByteIdenticalToItsPreShellGuardRender()
+    {
+        // The shell guard lives in the agent file alone. The user-level settings block keeps the three entries it
+        // carried before, byte for byte, so the Agent|Task and handback hooks are not re-rendered by this change.
+        SquadRenderResult result = await RenderClaudeArbiterAsync(
+            ProductRoot,
+            SquadDeploymentScope.Global,
+            new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: ShellHookTimeoutSeconds));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        Assert.NotNull(result.Blocks);
+        SquadRenderedBlock block = Assert.Single(
+            result.Blocks!,
+            candidate => candidate.Target == "claude" && candidate.RelativePath == "settings.json");
+
+        const string hooks = "[{\"type\":\"command\",\"command\":\"kyber-weave-arbiter hook --harness claude --scope global\",\"timeout\":5}]";
+        string[] expected =
+        [
+            "PreToolUse {\"matcher\":\"^(Agent|Task)$\",\"hooks\":" + hooks + "}",
+            "PreToolUse {\"matcher\":\"" + SubagentHandbackMatcher + "\",\"hooks\":" + hooks + "}",
+            "PostToolUse {\"matcher\":\"^(Agent|Task)$\",\"hooks\":" + hooks + "}",
+        ];
+
+        Assert.Equal(
+            expected,
+            block.Entries.Select(entry => $"{entry.Container} {entry.Entry.ToJsonString()}").ToArray());
+    }
+
     private static bool IsDocumentedClaudeTool(string tool) =>
         DocumentedClaudeTools.Contains(tool, StringComparer.Ordinal) ||
         (tool.StartsWith("Agent(", StringComparison.Ordinal) && tool.EndsWith(')'));

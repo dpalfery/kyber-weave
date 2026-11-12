@@ -79,13 +79,17 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// scope, dispatcher agents (non-empty <c>delegates-to</c>) gain frontmatter <c>hooks</c>
 /// with <c>PreToolUse</c> and <c>PostToolUse</c> entries matched on <c>^(Agent|Task)$</c>,
 /// and guarded implementation specialists (<c>worker</c> / <c>publishing-worker</c> profiles)
-/// gain a <c>PreToolUse</c> entry matched on <c>^(Read|Grep|Glob|Bash)$</c>. Each entry runs
+/// gain a <c>PreToolUse</c> entry matched on <c>^(Read|Grep|Glob|Bash|PowerShell)$</c>. Each entry runs
 /// <c>kyber-weave-arbiter hook --harness claude --caller &lt;agent&gt;</c> with the wiring's
 /// timeout. The conductor's entry-point skill carries the same dispatch hooks as its agent.
 /// Per-agent hooks make the caller trusted without a new agent field, which
 /// <c>agent.schema.json</c> (<c>additionalProperties: false</c>) would refuse. Nothing is
 /// rendered when the wiring is null or disabled, or the scope is Global (Req 22.2), so a
-/// render without Arbiter is byte-identical to before the field existed.
+/// render without Arbiter is byte-identical to before the field existed. The one exception is
+/// the architect shell guard (<c>KW-ARB-SHELL-001</c>): a shell-guarded agent (the <c>architect</c>
+/// profile) gains a <c>PreToolUse</c> entry matched on <c>^(Bash|PowerShell)$</c> at Project scope,
+/// beside its other hooks, and at Global scope that entry is the only hook its agent file carries.
+/// No other agent gets a hook at Global scope.
 /// </para>
 /// <para>
 /// <strong>Arbiter hand-back hooks (Req 21.3):</strong> Every agent named in any
@@ -114,8 +118,14 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
     /// <c>tool_input.message</c> [F1].
     /// </remarks>
     private const string DispatchMatcher = "^(Agent|Task)$";
-    private const string ReadGuardMatcher = "^(Read|Grep|Glob|Bash)$";
+    private const string ReadGuardMatcher = "^(Read|Grep|Glob|Bash|PowerShell)$";
     private const string HandbackMatcher = "^SubagentHandback$";
+
+    /// <summary>
+    /// The architect shell guard's matcher (<c>KW-ARB-SHELL-001</c>): the two shell tools a shell-guarded
+    /// agent may call, anchored like the others.
+    /// </summary>
+    private const string ShellGuardMatcher = "^(Bash|PowerShell)$";
 
     /// <summary>
     /// The MCP wildcard every read-entitled subagent carries, the pure orchestrator included.
@@ -276,7 +286,8 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
             context.Scope,
             arbiter.Dispatchers,
             arbiter.Guarded,
-            arbiter.DispatchTargets);
+            arbiter.DispatchTargets,
+            arbiter.ShellGuarded);
         return context.RenderSkillDocument(
             agent.Name,
             agent.Description,
@@ -311,7 +322,8 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
             context.Scope,
             arbiter.Dispatchers,
             arbiter.Guarded,
-            arbiter.DispatchTargets);
+            arbiter.DispatchTargets,
+            arbiter.ShellGuarded);
         if (hooks is not null)
         {
             frontmatter["hooks"] = hooks;
@@ -327,12 +339,15 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
     /// applies. Dispatchers (non-empty <c>delegates-to</c>) gate their <c>Agent</c>/<c>Task</c>
     /// dispatches pre- and post-call; guarded implementation specialists gate their
     /// planning-path reads pre-call; every agent named in any dispatcher's
-    /// <c>delegates-to</c> roster gates its hand-back pre-call on <c>SubagentHandback</c>.
+    /// <c>delegates-to</c> roster gates its hand-back pre-call on <c>SubagentHandback</c>;
+    /// a shell-guarded agent (the architect) gates its <c>Bash</c>/<c>PowerShell</c> calls pre-call
+    /// (<c>KW-ARB-SHELL-001</c>).
     /// A dispatcher that is also guarded keeps both the dispatch hooks and the read
     /// guard: the guard applies whenever a guarded agent runs, so the dispatch gate
     /// observing delegations does not cover planning-path reads. The hand-back entry sits alongside whichever dispatch or guard entry
     /// the target already has. Returns null when the wiring is null or disabled so the
-    /// render stays byte-identical to before the field existed.
+    /// render stays byte-identical to before the field existed. At Global scope the shell guard is
+    /// the only hook rendered: a shell-guarded agent gets that one entry and every other agent gets none.
     /// </summary>
     private static Dictionary<string, object?>? BuildArbiterHooks(
         SquadAgent agent,
@@ -340,24 +355,18 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
         SquadDeploymentScope scope,
         IReadOnlySet<string> dispatcherAgents,
         IReadOnlySet<string> guardedAgents,
-        IReadOnlySet<string> dispatchTargets)
+        IReadOnlySet<string> dispatchTargets,
+        IReadOnlySet<string> shellGuardedAgents)
     {
-        if (arbiter is null || !arbiter.Enabled || scope == SquadDeploymentScope.Global)
+        if (arbiter is null || !arbiter.Enabled)
         {
             return null;
         }
 
-        bool isDispatcher = dispatcherAgents.Contains(agent.Name);
-        bool isGuarded = guardedAgents.Contains(agent.Name);
-        bool isDispatchTarget = dispatchTargets.Contains(agent.Name);
+        bool isShellGuarded = shellGuardedAgents.Contains(agent.Name);
 
-        if (!isDispatcher && !isGuarded && !isDispatchTarget)
-        {
-            return null;
-        }
-
-        string command = ArbiterHookWiring.HookCommandLine(SquadTarget.Claude, agent.Name, scope);
-
+        // The command is built only for an entry that will be written. HookCommandLine rejects a name that is not a
+        // plain agent name, so building it for an agent that gets no hook would fail a render that needs no hook.
         Dictionary<string, object?> HookEntry(string matcher) => new(StringComparer.Ordinal)
         {
             ["matcher"] = matcher,
@@ -366,11 +375,30 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
                 new Dictionary<string, object?>(StringComparer.Ordinal)
                 {
                     ["type"] = "command",
-                    ["command"] = command,
+                    ["command"] = ArbiterHookWiring.HookCommandLine(SquadTarget.Claude, agent.Name, scope),
                     ["timeout"] = arbiter.HookTimeoutSeconds
                 }
             }
         };
+
+        if (scope == SquadDeploymentScope.Global)
+        {
+            return isShellGuarded
+                ? new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["PreToolUse"] = new List<object?> { HookEntry(ShellGuardMatcher) }
+                }
+                : null;
+        }
+
+        bool isDispatcher = dispatcherAgents.Contains(agent.Name);
+        bool isGuarded = guardedAgents.Contains(agent.Name);
+        bool isDispatchTarget = dispatchTargets.Contains(agent.Name);
+
+        if (!isDispatcher && !isGuarded && !isDispatchTarget && !isShellGuarded)
+        {
+            return null;
+        }
 
         List<object?> preToolUse = [];
         if (isDispatcher)
@@ -386,6 +414,11 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
         if (isDispatchTarget)
         {
             preToolUse.Add(HookEntry(HandbackMatcher));
+        }
+
+        if (isShellGuarded)
+        {
+            preToolUse.Add(HookEntry(ShellGuardMatcher));
         }
 
         if (isDispatcher)
@@ -721,22 +754,28 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
         }
     }
 
-    /// <summary>The agents each Arbiter hook attaches to, empty unless Arbiter is enabled at project scope.</summary>
+    /// <summary>
+    /// The agents each Arbiter hook attaches to, empty unless Arbiter is enabled. The dispatch, read-guard and
+    /// hand-back sets take effect at Project scope only; the shell-guarded set also takes effect at Global scope.
+    /// </summary>
     private sealed record ArbiterPlan(
         IReadOnlySet<string> Dispatchers,
         IReadOnlySet<string> Guarded,
-        IReadOnlySet<string> DispatchTargets)
+        IReadOnlySet<string> DispatchTargets,
+        IReadOnlySet<string> ShellGuarded)
     {
         public static ArbiterPlan Create(SquadHarnessRenderContext context) =>
             context.EnabledArbiter is null
                 ? new ArbiterPlan(
                     new HashSet<string>(StringComparer.Ordinal),
                     new HashSet<string>(StringComparer.Ordinal),
+                    new HashSet<string>(StringComparer.Ordinal),
                     new HashSet<string>(StringComparer.Ordinal))
                 : new ArbiterPlan(
                     ArbiterHookWiring.Dispatchers(context.Source),
                     ArbiterHookWiring.GuardedAgents(context.Source),
-                    ClaudeRenderer.DispatchTargets(context.Source));
+                    ClaudeRenderer.DispatchTargets(context.Source),
+                    ArbiterHookWiring.ShellGuardedAgents(context.Source));
     }
 
     /// <summary>

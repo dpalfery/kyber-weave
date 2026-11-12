@@ -37,6 +37,9 @@ public sealed class ArbiterHookWiringTests : IDisposable
 
     private const string DegradationCode = "arbiter-not-enforced";
 
+    private static readonly string ShippedProductRoot =
+        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+
     private readonly ArbiterSquadFixture _fixture = ArbiterSquadFixture.Create();
 
     public void Dispose() => _fixture.Dispose();
@@ -464,5 +467,16 @@ public sealed class ArbiterHookWiringTests : IDisposable
                 $"Rendered bytes differ for {actual.Target}/{actual.RelativePath} when the " +
                 "Arbiter wiring is disabled; a disabled wiring must not change today's render.");
         }
+    }
+
+    [Fact]
+    public void ShellGuardedAgents_ShippedSource_IsExactlyTheArchitect()
+    {
+        // The architect is the only agent whose Bash and PowerShell calls are checked against its documented list.
+        SquadSource source = SquadSourceLoader.Load(ShippedProductRoot);
+
+        Assert.Equal(
+            new HashSet<string>(["architect"], StringComparer.Ordinal),
+            ArbiterHookWiring.ShellGuardedAgents(source));
     }
 }

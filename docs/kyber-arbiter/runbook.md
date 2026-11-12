@@ -9,6 +9,7 @@ status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
   - adr/0054-squad-owned-blocks-in-shared-hook-files
+  - adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude
 ---
 
 # Kyber Arbiter runbook
@@ -132,6 +133,77 @@ never spawning with a possibly-wrong cwd.
 When the Arbiter is enabled, the Copilot conductor's agent file runs `kyber-weave-arbiter guard` on `preToolUse` and `userPromptTransformed`. It denies the conductor's own project work and restates the workflow on every model-facing message, because VS Code requires the conductor to hold tools its workers need. See [ADR 0066](../adr/0066-the-copilot-conductor-holds-tools-a-hook-denies-it.md).
 
 A denial names the blocked tool. If the conductor genuinely needs a new Copilot tool, add it to `ConductorGuard`. The guard is rendered only when the Arbiter is enabled at install. Once rendered it reads no configuration, so setting `arbiter.enabled: false` later does not remove it until the agents are rendered again.
+
+## The architect shell guard
+
+On Claude, the Arbiter denies an architect `Bash` or `PowerShell` call that falls outside the command set
+`architect.md` documents (`KW-ARB-SHELL-001`). The check is `ArchitectShellGuard`, a stateless hook guard
+beside `ReadGuard` and `ConductorGuard`; it is not a rule, so no decision or ledger event is written. The
+hook is a `PreToolUse` entry with matcher `^(Bash|PowerShell)$` in the architect's agent file, at project
+scope and at user scope. The user-scope copy is an exception to the rule that user-level agents carry no
+per-agent hooks: a matcher in the user-level `settings.json` would start the hook for every shell call of
+every agent on the machine. See [ADR 0071](../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md).
+
+**What it denies.** The command is split on unquoted `&&`, `||`, `;`, `|` and newline, and each part must
+match a documented form. Anything else is denied before it runs, including:
+
+- substitutions (`$(…)`, backticks, `$`), process substitution, subshells, braces, heredocs and background `&`;
+- redirects other than `2>&1` and `2>/dev/null`, and environment-prefix assignments. `2>/dev/null` is allowed in Bash only; PowerShell allows `2>&1` alone;
+- shell keywords such as loops and conditionals, and wrapper commands such as `bash`, `sh`, `eval`, `xargs`, `env` and `sudo`;
+- git global options other than `--no-pager` and `-C` (for example `git -c`), and `git … --output`. Long-option abbreviations of denied git options (`--output`, `--ext-diff`, `--textconv`) are refused too;
+- `find -exec`, `-ok` or `-delete`, and `tail -f`;
+- `sort` with any flag that is not on its allowlist (so `sort -o` is denied), and `rg` with a denylisted flag such as `--pre`;
+- `touch` on anything other than a `.md` or `.json` file under the plan, spec and todo directories. The guard allows at most one `cd` per call, on both tools, and checks each `touch` operand against both the
+  directory the call started in and the directory after that `cd`. A relative operand must resolve under the plan,
+  spec or todo folder in both readings. A `cd` out of the tree makes a later `touch` denied, and a blank working
+  directory fails closed, so every `touch` is denied then. An operand with an unquoted `*`, `?` or `[` is refused. `touch` takes literal operands only, so a quoted glob is refused too. An absolute path is allowed only when it resolves inside the working tree's planning directories,
+  and a `..` escape is denied.
+- a structural pre-filter runs before any form is matched and refuses non-ASCII characters on both tools, control characters, a line feed inside quotes, an unquoted `#` comment, and any backslash in Bash outside single quotes; inside single quotes a Bash backslash is literal. A backslash is literal in PowerShell, and PowerShell path checks convert it to `/`. A Bash path operand for `touch` or `cd` that contains a backslash is refused. A trailing newline, blank lines and a `;` ending the last line are tolerated. A `;` that starts its own line is refused as an empty statement, and an empty segment between separators is still denied.
+- `uniq` counts every word after `--` as an operand, so a second file after `--` is refused.
+
+A command the guard cannot parse is denied, so a wrongly denied command costs one `STATUS: BLOCKED` round trip.
+
+**Forms that look unusual but are allowed.** The Bash tool resets its directory on every call, so `cd <dir> &&`
+runs a command in the worktree, and `git -C <dir>` does the same for git. `cd` counts only as the first segment or after `&&` (after `;` in PowerShell), at most one `cd` is allowed per call, and a `cd` to `~` is denied. The docs commands take a path operand
+in place of `.`. `sort` accepts only the flags on its allowlist, and `rg` accepts any flag except the ones on its
+denylist. `touch` operands resolve as described in the list above. `codegraph explore` takes exactly one query, and `doctor --ensure` takes no operand. `rg` refuses `--pre`, `--pre-glob`, `-z`, `--search-zip`, `--hostname-bin` and `--hyperlink-format`, and abbreviations of them; `--pretty` is allowed. `kyber-weave arbiter plan <plan file> -f json` is read-only
+and is the architect's one way to read a task file's execution digest; it is on the architect's command list and in
+the guard. The command list itself lives in `architect.md`, which the sync test binds to the guard.
+
+**Reading a denial.** A denial names the command the architect tried. The architect is told to return
+`STATUS: BLOCKED` with that command rather than work around it, so a denial is the list working. Find
+the `KW-ARB-SHELL-001` line in the hook log. If the command is one the planner really needs, widen the list
+(next section) rather than asking the architect to route around it.
+
+**Widening the list.** Change three things together, in one change:
+
+1. one row in the guard's `DocumentedForms` table, which is the set of documented forms the guard allows;
+2. the architect command-set clause in `products/kyber-squad/agents/architect.md`, where every backticked span
+   between `Your shell is limited to this command set:` and the first `before you edit it.` must match a
+   `DocumentedForms` key;
+3. the sync test `KyberWeave.Tests.Arbiter.ArchitectShellGuardSyncTests`, which binds those spans to the keys.
+
+Changing `architect.md` also changes its body digest, so update `final-body-sha256` in
+`products/kyber-squad/migration/architect.md` from the value `SquadCanonicalContentTests` prints, then
+re-render with `kyber-weave squad update` (add `--global` for the user-scope copy).
+
+**Harness matrix.** The guard is enforced on Claude only, for the `Bash` and `PowerShell` tools at project and
+user scope. Every other harness keeps the list as instruction only, and the architect keeps it by its own
+discipline there: Copilot in VS Code (the terminal tool name in its payload is undocumented), Copilot CLI (its
+hooks gate only `task`), Codex, Cursor, OpenCode, Kilo, Pi, Factory, Devin and Antigravity. Warp and ZCode have
+no hooks. These are follow-ups. The guard is enforced at once, with no shadow mode and no setting of its own, like
+`ReadGuard` and `ConductorGuard`. The only off switch is `arbiter.enabled: false` in the project configuration,
+which turns the whole Arbiter off, and with it this guard.
+
+**Confirming it fires.** After an architect run that used the shell, search the hook log for `KW-ARB-SHELL-001`.
+A denied architect `ls -la | sed` call is the expected line: `sed` is not in the list, so the whole pipeline
+is denied. If no such line appears, check that the architect's agent file carries the `PreToolUse` hook with
+matcher `^(Bash|PowerShell)$`, and that the Claude workspace trust dialog has been accepted for the project.
+The user-scope copy runs without that trust step while the architect sub-agent is active.
+
+**Known residuals.** The path checks are textual, so a symlink, Bash `CDPATH`, or a PowerShell backslash on a POSIX
+host can move the real target of a `touch`. The residual is an empty `.md` or `.json` file, and it is written only
+where the guard would have allowed a planning-folder path. Tracked in [issue #605](https://github.com/dpalfery/kyber-weave/issues/605).
 
 ## Trust steps
 
