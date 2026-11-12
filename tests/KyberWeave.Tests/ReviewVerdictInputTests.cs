@@ -422,6 +422,9 @@ public sealed class ReviewVerdictInputTests : IDisposable
         { "finding-severity", "$.findings[0]", "severity", "Severity" },
         { "finding-snake", "$.findings[0]", "failure_scenario", "FAILURE_SCENARIO" },
         { "finding-camel", "$.findings[0]", "failureScenario", "FailureScenario" },
+        { "finding-snake-and-camel", "$.findings[0]", "failure_scenario", "failureScenario" },
+        { "finding-snake-and-pascal", "$.findings[0]", "failure_scenario", "FailureScenario" },
+        { "finding-upper-snake-and-camel", "$.findings[0]", "FAILURE_SCENARIO", "failureScenario" },
         { "coverage-entry", "$.coverage[0]", "lens", "LENS" }
     };
 
@@ -457,6 +460,13 @@ public sealed class ReviewVerdictInputTests : IDisposable
                 finding["FAILURE_SCENARIO"] = "b";
                 break;
             case "finding-camel": finding["FailureScenario"] = "b"; break;
+            case "finding-snake-and-camel": finding["failure_scenario"] = "a"; break;
+            case "finding-snake-and-pascal":
+                finding.Remove("failureScenario");
+                finding["failure_scenario"] = "a";
+                finding["FailureScenario"] = "b";
+                break;
+            case "finding-upper-snake-and-camel": finding["FAILURE_SCENARIO"] = "a"; break;
             case "coverage-entry": coverage["LENS"] = "security"; break;
             default: throw new ArgumentOutOfRangeException(nameof(caseName), caseName, null);
         }
@@ -639,15 +649,50 @@ public sealed class ReviewVerdictInputTests : IDisposable
         return spelled;
     }
 
-    private static void AssertRefusedForDuplicate(
+    /// <summary>
+    /// Asserts the one refusal names the file, the object's path and both spellings, each path-qualified
+    /// (<c>$.findings[0].severity</c>), so a message that merely contains <c>$</c> or the file name does not pass.
+    /// </summary>
+    internal static void AssertRefusedForDuplicate(
         CapturedConsoleExecution<int> run, string file, string path, string first, string second)
     {
         Assert.Equal(Refused, run.Result);
-        AssertDiagnostic(run.Output, UnreadableInput, "Error", file);
         Assert.Contains(MessagesWithCode(run.Output, UnreadableInput), message =>
-            message.Contains(path, StringComparison.Ordinal)
-            && message.Contains(first, StringComparison.Ordinal)
-            && message.Contains(second, StringComparison.Ordinal));
+            message.Contains(file, StringComparison.Ordinal)
+            && message.Contains($"{path}.{first}", StringComparison.Ordinal)
+            && message.Contains($"{path}.{second}", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Pins what the rule leaves alone. A dictionary's keys are data, not field names, so two that differ only in case are
+    /// both kept; and names inside an unknown extension property are not walked, so a collision there is tolerated.
+    /// </summary>
+    [Fact]
+    public void DictionaryKeysDifferingOnlyInCaseAreAcceptedAndKept()
+    {
+        string findings = Write("findings.json", FindingsDocument("\"pathLineCounts\":{\"src/a.cs\":1,\"SRC/A.CS\":2}"));
+        string report = Path.Combine(_temp.Path, "report.json");
+
+        CapturedConsoleExecution<int> run = Verdict("--findings", findings, "--out", report);
+
+        Assert.Empty(MessagesWithCode(run.Output, UnreadableInput));
+        using JsonDocument written = JsonDocument.Parse(File.ReadAllText(report));
+        Assert.Equal(2, written.RootElement.GetProperty("pathLineCounts").EnumerateObject().Count());
+    }
+
+    [Theory]
+    [InlineData("\"extra\":{\"a\":1,\"A\":2}")]
+    [InlineData("\"extra\":[{\"a\":1,\"A\":2}]")]
+    [InlineData("\"extra\":{\"inner\":{\"b\":1,\"B\":2}}")]
+    [InlineData("\"Extra\":{\"a\":1,\"A\":2}")]
+    public void NamesCollidingInsideAnUnknownExtensionPropertyAreTolerated(string member)
+    {
+        string findings = Write("findings.json", FindingsDocument(member));
+
+        CapturedConsoleExecution<int> run = Verdict("--findings", findings);
+
+        Assert.Equal(0, run.Result);
+        Assert.Empty(MessagesWithCode(run.Output, UnreadableInput));
     }
 
     /// <summary>The spelling of <paramref name="key"/> a test names: all lowercase, PascalCase, or all uppercase.</summary>

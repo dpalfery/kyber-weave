@@ -643,12 +643,7 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
         CapturedConsoleExecution<int> run = Verdict(
             ["--seats", _seats, "--prior", PriorFolder, .. NotSeatedExcept("correctness")]);
 
-        Assert.Equal(1, run.Result);
-        AssertDiagnostic(run.Output, UnreadableInput, "Error", "findings.json");
-        Assert.Contains(MessagesWithCode(run.Output, UnreadableInput), message =>
-            message.Contains(path, StringComparison.Ordinal)
-            && message.Contains(first, StringComparison.Ordinal)
-            && message.Contains(second, StringComparison.Ordinal));
+        ReviewVerdictInputTests.AssertRefusedForDuplicate(run, "findings.json", path, first, second);
     }
 
     [Fact]
