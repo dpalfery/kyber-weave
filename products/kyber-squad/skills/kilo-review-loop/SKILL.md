@@ -36,8 +36,10 @@ that command is a stop, not something to work around with direct file reads.
    Outcomes: `fixed` or `declined` (false, already fixed one level up, or deliberately designed
    that way — cite the evidence, such as the spec line or vendor-doc fact).
    Call `arbiter_classify_bot_review_comment` with the comment's path, line, body and commit before
-   fixing it. `real` is fixed. `nitpick` and `already-fixed` are not fixed: they get a reply and are
-   resolved (step 8). An unsure answer is `real`.
+   fixing it. Issue the calls for all comments together, in one batch of parallel calls. `real` is
+   fixed. `nitpick` and `already-fixed` are not fixed: they get a reply and are resolved (step 8).
+   An unsure answer is `real`. A classify error or timeout means treat that comment as `real` and
+   continue; it never stops the round.
    **PR-level summary comments.** A bot's summary comment has no inline thread. When it carries a
    findings table (`Severity | File | Line | Issue`), call `arbiter_classify_bot_review_comment` with
    `summary: true`, the summary as `body`, and `author`. Always pass `author`, appending `[bot]` when
@@ -110,6 +112,7 @@ Always run it without `--apply` first and read the output.
 - Do not poll CI. The harness reports CI changes; use its pull-request status tool rather than
   repeated `gh pr checks`.
 - A stale or empty log is not progress. If a delegated worker's output has not appeared within
-  a couple of minutes, treat it as a hung start, kill it, and relaunch.
+  2 minutes, treat it as a hung start, kill it, and relaunch it once. If the relaunch also shows
+  nothing within 2 minutes, do the work inline and say so in the report.
 - Say when something was not verified. A bot summary comment can list items that have no inline
   thread; list those in the report instead of dropping them.

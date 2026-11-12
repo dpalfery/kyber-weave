@@ -100,12 +100,14 @@ A posted request is not a completed review or an approval. If a reviewer require
 account linking or onboarding, report that required user action and stop retrying.
 Do not repeatedly request the same review while it is pending.
 
-For a request for one re-review, stop after confirming the request was posted. If the
-user explicitly asks to continue until clean, wait for a review of the current head
-and repeat for new actionable findings. Stop and report remaining work after three
-fix-and-review rounds without convergence, on an external access blocker, or when
-feedback needs a user decision. Report which head was reviewed and avoid treating
-an older review as approval of a newer commit.
+Request the re-review once, then make at most one bounded check for it: 10 minutes in
+total, checked without a busy loop. If a review of the current head has arrived, handle
+its new actionable findings. If none has, stop, leave the PR in its current state, and
+report "re-review requested, not yet received". Never wait on a bot in an autonomous run.
+A request for one re-review stops after confirming the request was posted. Stop and
+report remaining work after three fix-and-review rounds without convergence, on an
+external access blocker, or when feedback needs a user decision. Report which head was
+reviewed and avoid treating an older review as approval of a newer commit.
 
 Finish with the PR link, fix commit references, thread results, check results, and
 whether re-review was requested, completed, or blocked. Include the saved skill path

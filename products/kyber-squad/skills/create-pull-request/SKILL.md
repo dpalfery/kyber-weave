@@ -190,7 +190,9 @@ reviewers, and before enabling automatic completion or merge.
 ## CI checks
 
 Checks run on the pull request as the host configured them. Use the provider file's "Check CI
-status" step and wait for the result before requesting review.
+status" step and wait for the result before requesting review. The wait is capped at 15
+minutes (the conductor's delivery step sets 60). If checks are still pending at the cap, leave
+the pull request draft and report what is still pending; do not wait again.
 
 When a check fails:
 
@@ -209,7 +211,7 @@ When a check fails:
 - Answer every review comment, with a change or with the reason the current approach stands. Use
   the `pr-review-fix-comments` skill to work through them.
 - Request review again after pushing changes. Do not merge while a conversation is unresolved or a
-  required check is failing.
+  required check is failing: stop and report it instead of waiting for it to clear.
 
 ## After merge
 
