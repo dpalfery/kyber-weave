@@ -135,15 +135,22 @@ public static class ReviewJson
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
         JsonNode? root = JsonNode.Parse(json);
         RejectNullListEntries(root, typeof(FindingsReport), "$");
-        if (root is JsonObject document && document["findings"] is JsonArray findings)
+        if (root is JsonObject document)
         {
-            for (int index = 0; index < findings.Count; index++)
+            // Every spelling of the key: the serializer binds "Findings" and "FINDINGS" as the findings list too.
+            foreach ((string key, JsonNode? list) in Members(document, nameof(FindingsReport.Findings)))
             {
-                if (findings[index] is not JsonObject finding)
+                if (list is not JsonArray findings)
                     continue;
 
-                CheckRanges(finding, $"$.findings[{index}]");
-                BindSnakeCaseFailureScenario(finding);
+                for (int index = 0; index < findings.Count; index++)
+                {
+                    if (findings[index] is not JsonObject finding)
+                        continue;
+
+                    CheckRanges(finding, $"$.{key}[{index}]");
+                    BindSnakeCaseFailureScenario(finding);
+                }
             }
         }
 
@@ -197,13 +204,10 @@ public static class ReviewJson
 
                 break;
             case JsonObject obj when IsModel(type):
-                foreach (KeyValuePair<string, JsonNode?> property in obj)
+                foreach (PropertyInfo bound in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
                 {
-                    // Web defaults read property names case-insensitively, so the match here does too.
-                    PropertyInfo? bound = type.GetProperty(
-                        property.Key, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-                    if (bound is not null)
-                        RejectNullListEntries(property.Value, bound.PropertyType, $"{path}.{property.Key}");
+                    foreach ((string key, JsonNode? value) in Members(obj, bound.Name))
+                        RejectNullListEntries(value, bound.PropertyType, $"{path}.{key}");
                 }
 
                 break;
@@ -247,35 +251,35 @@ public static class ReviewJson
     /// </remarks>
     private static void CheckRanges(JsonObject finding, string path)
     {
-        foreach (KeyValuePair<string, JsonNode?> property in finding)
+        foreach ((string key, JsonNode? value) in Members(finding, nameof(ReviewFinding.Severity)))
         {
-            if (string.Equals(property.Key, "severity", StringComparison.OrdinalIgnoreCase))
-            {
-                bool named = property.Value is JsonValue text
-                             && text.GetValueKind() == JsonValueKind.String
-                             && Enum.GetNames<ReviewSeverity>().Any(name =>
-                                 string.Equals(name, text.GetValue<string>(), StringComparison.OrdinalIgnoreCase));
-                if (!named)
-                {
-                    throw new JsonException(
-                        $"'{path}.{property.Key}' is {Describe(property.Value)}; it must be \"critical\", \"major\" or " +
-                        "\"minor\".");
-                }
-            }
-            else if (string.Equals(property.Key, "confidence", StringComparison.OrdinalIgnoreCase))
-            {
-                bool inRange = property.Value is JsonValue number
-                               && number.GetValueKind() == JsonValueKind.Number
-                               && number.TryGetValue(out int value)
-                               && value is >= 1 and <= 10;
-                if (!inRange)
-                {
-                    throw new JsonException(
-                        $"'{path}.{property.Key}' is {Describe(property.Value)}; it must be a whole number from 1 to 10.");
-                }
-            }
+            bool named = value is JsonValue text
+                         && text.GetValueKind() == JsonValueKind.String
+                         && Enum.GetNames<ReviewSeverity>().Any(name =>
+                             string.Equals(name, text.GetValue<string>(), StringComparison.OrdinalIgnoreCase));
+            if (!named)
+                throw new JsonException($"'{path}.{key}' is {Describe(value)}; it must be \"critical\", \"major\" or \"minor\".");
+        }
+
+        foreach ((string key, JsonNode? value) in Members(finding, nameof(ReviewFinding.Confidence)))
+        {
+            bool inRange = value is JsonValue number
+                           && number.GetValueKind() == JsonValueKind.Number
+                           && number.TryGetValue(out int confidence)
+                           && confidence is >= 1 and <= 10;
+            if (!inRange)
+                throw new JsonException($"'{path}.{key}' is {Describe(value)}; it must be a whole number from 1 to 10.");
         }
     }
+
+    /// <summary>
+    /// Every member of <paramref name="obj"/> whose name is <paramref name="name"/> ignoring case. The one way this
+    /// reader finds a property by name: the serializer binds names ignoring case, so a check that compared names
+    /// exactly would miss the spelling that binds.
+    /// </summary>
+    private static List<(string Key, JsonNode? Value)> Members(JsonObject obj, string name) =>
+        [.. obj.Where(property => string.Equals(property.Key, name, StringComparison.OrdinalIgnoreCase))
+            .Select(property => (property.Key, property.Value))];
 
     private static string Describe(JsonNode? node)
     {
@@ -290,14 +294,16 @@ public static class ReviewJson
 
     private static void BindSnakeCaseFailureScenario(JsonObject finding)
     {
-        if (!finding.TryGetPropertyValue(SnakeCaseFailureScenario, out JsonNode? value))
+        List<(string Key, JsonNode? Value)> snakeCase = Members(finding, SnakeCaseFailureScenario);
+        if (snakeCase.Count == 0)
             return;
 
-        bool documentSpelling = finding.Any(property =>
-            string.Equals(property.Key, nameof(ReviewFinding.FailureScenario), StringComparison.OrdinalIgnoreCase));
-        finding.Remove(SnakeCaseFailureScenario);
+        bool documentSpelling = Members(finding, nameof(ReviewFinding.FailureScenario)).Count > 0;
+        foreach ((string key, _) in snakeCase)
+            finding.Remove(key);
+
         if (!documentSpelling)
-            finding["failureScenario"] = value;
+            finding["failureScenario"] = snakeCase[0].Value;
     }
 
     /// <summary>Reads a duplicates report.</summary>
