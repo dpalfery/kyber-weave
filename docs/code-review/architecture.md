@@ -1004,7 +1004,7 @@ it keeps doing so until it returns `APPROVE`. Minor findings never start a cycle
 after the first is a `verifier` cycle: it reviews the fix delta `git diff <prior head>...<head>`,
 re-seats only the lenses that own an outstanding finding or whose predicate the delta newly
 satisfies, and passes `--prior <prior cycle folder>` so the lenses it did not re-seat keep their
-coverage. Gates re-run every cycle because their result *is* the evidence. A finding is FIXED only
+coverage. A fix round re-runs only the gates whose inputs the fix touched (`--gate <id>`), because their result *is* the evidence; a gate the fix did not touch keeps the prior cycle's result, and CI is the full re-check. A finding is FIXED only
 when the fix refuses its whole class: the verifier states the class in one sentence, names at
 least three other inputs of that class that the original failure scenario did not name, and
 traces each through the fix. A fix that refuses only the input the finding named leaves the

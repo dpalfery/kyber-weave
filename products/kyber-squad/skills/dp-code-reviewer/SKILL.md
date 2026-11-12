@@ -46,8 +46,11 @@ passes `--prior <prior cycle folder>`.
    that file and line; do not trust the fix description. A finding is FIXED only when the fix refuses its whole class: state the class in one sentence, name at least three other inputs of that class that the original failure scenario did not name, and trace each through the fix. A fix that
    refuses the named input and lets another input of the class through is not FIXED: the
    finding stays open, with the input that still gets through named in it. Seats cannot run anything, so the reviewer does: when the code is reachable from a command, run the class inputs against the built CLI, and record each input and what the command did in a `reviewer.md` seat file: in a finding's `evidence` when an input still gets through, or in its `NO FINDINGS:` sentence when every input was refused. A finding the reviewer raises itself goes in `reviewer.md` too.
-3. Re-run the gates. Gates are cheap relative to the council and their result is the
-   evidence, so they run every time — never carry a gate result forward from an earlier run.
+3. Re-run only the gates whose inputs the fix delta touched, one `review gates --gate <id>` per
+   gate; that result is the evidence. A gate whose inputs the fix did not touch keeps the prior
+   cycle's result, cited from that cycle's `gates.json`. Never re-run the full suite or the full
+   council for a review-fix round, whoever raised the findings (a bot or the council): CI is the
+   full re-check. The first full review of a change still runs every gate.
 4. Re-seat **only** the lenses that own a finding still outstanding, plus any lens whose
    applicability predicate the fix delta newly satisfies. Every other lens is carried from
    the prior cycle by `--prior`; a lens the prior cycle did not cover either is recorded with
@@ -102,7 +105,8 @@ major findings, and failed blocking gates, start a fix round; minor findings nev
   reports it. There is no path by which iterating produces an approval the engine did not.
 - **Never suppress a finding to end a cycle.** A suppression is a configuration change to
   `review.policy.suppressions`, with a stated reason and an expiry date, made by a person.
-- **Never carry a stale gate result forward.** Gates are re-run every cycle.
+- **Never carry a gate result forward over a changed input.** A gate the fix delta touched is
+  re-run with `--gate <id>`; a gate it did not touch keeps the prior cycle's result.
 - **Never let the count of cycles substitute for the count of findings.** "Third iteration"
   is not progress; a smaller set of surviving findings is.
 

@@ -75,6 +75,8 @@ The end-of-run council (`code-reviewer`) runs the second form in every review cy
 
 The third form is the single-gate re-check. After fixing one failed gate, `--gate <gate-id>` re-runs only that gate, so confirming one fix does not pay for the whole declared suite again. The id is one the host declares under `review.gates`; an id that names no declared gate is refused before any gate starts, rather than reported as a suite that ran and passed.
 
+A review-fix round (fixing findings already raised, by a bot or the council) uses this form: re-check only the prior findings and re-run only the gates whose inputs the fix touched, each with `--gate <gate-id>`. It never re-runs the full council or the full test suite; CI is the full re-check. This does not weaken the first full review of a change, which runs every gate.
+
 The other forms write under `artifacts/`; the council's form writes `gates.json` into the
 cycle folder (step 5), which is the file the verdict command reads. The CLI subprocess writes
 them via `process.execute`, so a denied write tool on the reviewer does not block the run. If
