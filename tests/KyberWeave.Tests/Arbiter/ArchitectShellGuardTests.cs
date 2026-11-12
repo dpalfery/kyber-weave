@@ -91,6 +91,9 @@ public sealed class ArchitectShellGuardTests
     [InlineData("uniq -s 2 file")]
     [InlineData("uniq -w 3 file")]
     [InlineData("uniq file")]
+    [InlineData("grep -rn \"a b\" src")]
+    [InlineData("rg -n '#include' src")]
+    [InlineData("grep -c x#y f")]
     public void Bash_ListedCommand_IsAllowed(string command)
     {
         ShellGuardResult result = CheckBash(command);
@@ -104,6 +107,7 @@ public sealed class ArchitectShellGuardTests
     [InlineData("git status; git log -1")]
     [InlineData("git status 2>&1")]
     [InlineData("git status || git log")]
+    [InlineData("ls docs\\plans")]
     public void PowerShell_ListedCommand_IsAllowed(string command)
     {
         ShellGuardResult result = Check("PowerShell", command);
@@ -224,17 +228,55 @@ public sealed class ArchitectShellGuardTests
         Assert.Contains(offendingSegment, reason, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void PowerShell_TouchPlanFileUnderADriveWorkingDirectory_IsAllowed()
+    /// <summary>
+    /// Structural hazards the pre-filter refuses before any segment is judged: a comment, a line feed inside a
+    /// quoted word, a backslash or line feed that a quoted word escapes, a non-ASCII or control character used as
+    /// a separator or inside a word, and a cd whose directory is not tracked followed by a touch. Each is denied
+    /// under the rule id, whatever the rest of the command would have allowed.
+    /// </summary>
+    [Theory]
+    [InlineData("Bash", "ls #'\nrm -rf x\n#'")]
+    [InlineData("Bash", "ls # comment")]
+    [InlineData("Bash", "find d \"\\\n-delete\"")]
+    [InlineData("Bash", "sort \"\\\n-o\"")]
+    [InlineData("Bash", "git log \"--out\\\nput=f\"")]
+    [InlineData("Bash", "touch \"docs/plans/\\\n../x.md\"")]
+    [InlineData("Bash", "ls \"a\nb\"")]
+    [InlineData("Bash", "cd docs/plans/nope && git status || touch ../x.md")]
+    [InlineData("Bash", "cd docs/plans/nope; touch x.md")]
+    [InlineData("Bash", "ls .")]
+    [InlineData("Bash", "ls​.")]
+    [InlineData("Bash", "ls﻿.")]
+    [InlineData("Bash", "ls\u0000.")]
+    [InlineData("Bash", "ls\u000B.")]
+    [InlineData("Bash", "ls\u000C.")]
+    [InlineData("Bash", "ls a\\b")]
+    [InlineData("PowerShell", "rg x  --pre=cat")]
+    [InlineData("PowerShell", "find .  -delete")]
+    [InlineData("PowerShell", "ls a\u000Bb")]
+    [InlineData("PowerShell", "ls a\u000Cb")]
+    [InlineData("PowerShell", "ls a b")]
+    [InlineData("PowerShell", "cd docs/plans/nope; touch x.md")]
+    [InlineData("PowerShell", "# comment")]
+    public void CommandWithAStructuralHazard_IsDeniedUnderTheRule(string tool, string command)
     {
-        // The worktree reported as a drive path: the cd to the same drive path is tracked, and the touch resolves beneath it.
+        ShellGuardResult result = Check(tool, command);
+
+        Assert.False(result.Allowed, $"'{command}' ({tool}) carries a structural hazard and must be denied.");
+        Assert.Contains(RuleId, result.Reason ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PowerShell_CdAndTouchUnderADriveWorkingDirectoryWithBackslashes_IsAllowed()
+    {
+        // PowerShell keeps the backslash literal, so the drive path and the cd target both resolve as written.
         ShellGuardResult result = ArchitectShellGuard.Check(
             "PowerShell",
             CommandInput("cd C:\\w; touch docs/plans/x.md"),
             "C:\\w",
             PlanningDirectories.Value);
 
-        Assert.True(result.Allowed, $"A planning-folder touch after cd to the working drive path must be allowed. Reason: {result.Reason}");
+        Assert.True(result.Allowed, $"A planning-folder touch after cd C:\\w under a C:\\w working directory must be allowed. Reason: {result.Reason}");
     }
 
     [Fact]
