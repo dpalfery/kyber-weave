@@ -796,7 +796,7 @@ The probe reads Claude Code's documented precedence (project sub-agents outrank 
 skills outrank project skills). Two points are not documented and are the design's assumptions: that
 `agent_type` is present for a sub-agent and under `--agent`, and that a skill's hooks are active only once it is
 invoked. The claim keeps one evaluation whichever way those points fall. The rationale and rejected
-alternatives are in [ADR 0069](../adr/0069-the-user-level-claude-hook-evaluates-unless-a-project-hook-covers-it.md).
+alternatives are in [ADR 0070](../adr/0070-the-user-level-claude-hook-evaluates-unless-a-project-hook-covers-it.md).
 
 Claude's user-level block is written only under `hooks.PreToolUse` and `hooks.PostToolUse`. See
 [Squad architecture](../kyber-squad/architecture.md) for the owned-block rule.

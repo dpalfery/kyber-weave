@@ -44,10 +44,25 @@ not report theoretical races you cannot construct.
 **Inverted or dropped conditions.** Negation errors, a short-circuit that skips a necessary
 side effect, an `else` attached to the wrong branch, a condition that can never be true.
 
-**Malformed and null input.** For every input the change parses, reads, or accepts from another
-component, trace what happens when it is null, empty, truncated, of the wrong type, or shaped
-differently from the happy path. Name the input and the wrong result it produces; a parser that
-throws on a missing field where the caller expects an absent value is a finding.
+**Malformed and null input: the input-site table.** This is required output, not a reading
+habit, because a seat that traces only the inputs it happens to think of misses the rest. For every changed code file, write "no input site" or one row per site where a value from outside the process is parsed, converted, or passed to a file or collection API. That covers `Parse` and
+`TryParse`, a regex capture turned into a number, `Deserialize`, a path passed to `File.*`, and a
+number used as an index or a line. Write the table in Markdown, before your findings list, with every row starting `|` at column 0 so the verdict command skips it:
+
+| Site | Source | Absent or null | Null element in a list | Empty | Wrong type | Zero or negative | Largest value | Characters the API rejects | Repeated or contradictory markers |
+|---|---|---|---|---|---|---|---|---|---|
+| `path/File.cs:120` | seat file | refused | handled | refused | THROWS | handled | THROWS | handled | accepted wrong |
+
+Each cell says what the code does today for that input: `refused`, `handled`, `THROWS` or
+`accepted wrong`. Trace each one through the code; a cell you did not trace is not `handled`. Fill the repeated or contradictory markers column by tracing at least two different marker
+pairs (for example two outcome lines that disagree, and an outcome line followed by a list), not
+one: a cell marked `refused` after one pair can hide every other pair the code lets through.
+Every THROWS or accepted wrong cell is a finding. A file with no such site gets one line,
+`path/File.cs: no input site`, so the table shows that every changed file was looked at.
+
+Close a correctness seat with Input sites: N traced, M files with none, directly above the Discovery line. N counts the table's rows and M the files you marked "no input site". Write the line
+even when nothing was traced, as `Input sites: 0 traced, M files with none`: the verdict command
+does not know which files changed, so a correctness seat that reported findings or `NO FINDINGS` and wrote no readable `Input sites:` line draws `KW-REVIEW-047`; a `SKIPPED` correctness seat is exempt.
 
 **Non-finite numbers.** Where arithmetic or comparison touches a number that can arrive as
 `NaN`, `Infinity`, `-Infinity`, or a negative zero, check what each comparison, sum, and
@@ -70,6 +85,7 @@ of instants.
   lens owns cost.
 - Security consequences — the security and authz lenses own those, and duplicate reporting
   costs the reviewer real reconciliation work.
-- Missing tests. The test-adequacy lens owns coverage; you own whether the code is right.
+- Missing tests. The test-adequacy lens owns coverage; you own whether the code is right,
+  including every malformed input test-adequacy hands you as `test-adequacy/out-of-scope`.
 - Hypothetical misuse by a caller that does not exist and could not exist given the
   visibility of the code.

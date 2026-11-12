@@ -163,18 +163,21 @@ public sealed class ReviewGuidanceCouncilContractTests
 
     /// <summary>
     /// Prevents a clean <c>NO FINDINGS</c> report from passing without proof the guidance was read.
-    /// The attestation must sit on the line directly after the report-form <c>NO FINDINGS</c> line,
-    /// so a stray mention elsewhere in the file cannot satisfy it.
+    /// The discovery line and then the attestation must sit on the two lines directly after the
+    /// report-form <c>NO FINDINGS</c> line, so a stray mention elsewhere in the file cannot satisfy
+    /// it. Without the discovery line in the example, a seat copying the example omits it and the
+    /// verdict engine flags the report (KW-REVIEW-044).
     /// </summary>
     [Fact]
     public void ReviewLensNoFindingsReportCarriesTheAttestationLine()
     {
         string text = ReadProduct("agents/review-lens.md");
 
-        AssertAttestationFollows(
+        AssertClosingLinesFollow(
             text,
             "agents/review-lens.md",
             "NO FINDINGS: <one sentence",
+            "Discovery: codegraph N, docs N, direct reads N",
             "REVIEW.md sections checked: [");
     }
 
@@ -197,18 +200,19 @@ public sealed class ReviewGuidanceCouncilContractTests
 
     /// <summary>
     /// Prevents a triage seat's clean report from passing without its attestation. Triage seats apply
-    /// the ground rules only, so the attestation must name <c>[Ground rules]</c> on the line directly
-    /// after the report-form <c>NO FINDINGS</c> line.
+    /// the ground rules only, so the discovery line must sit directly after the report-form
+    /// <c>NO FINDINGS</c> line, and the attestation must name <c>[Ground rules]</c> directly after it.
     /// </summary>
     [Fact]
     public void ReviewTriageNoFindingsReportAttestsItsGroundRules()
     {
         string text = ReadProduct("agents/review-triage.md");
 
-        AssertAttestationFollows(
+        AssertClosingLinesFollow(
             text,
             "agents/review-triage.md",
             "NO FINDINGS: <what artifact",
+            "Discovery: codegraph N, docs N, direct reads N",
             "REVIEW.md sections checked: [Ground rules]");
     }
 
@@ -454,14 +458,16 @@ public sealed class ReviewGuidanceCouncilContractTests
         return File.ReadAllText(Path.Combine(ProductRoot, relativePath));
     }
 
-    private static void AssertAttestationFollows(string text, string source, string anchor, string attestation)
+    private static void AssertClosingLinesFollow(string text, string source, string anchor, string discovery, string attestation)
     {
         string[] lines = text.Split('\n');
         int index = Array.FindIndex(lines, line => line.TrimEnd('\r').StartsWith(anchor, StringComparison.Ordinal));
         Assert.True(index >= 0, $"'{source}' must keep its report line starting '{anchor}'.");
         Assert.True(
-            index + 1 < lines.Length && lines[index + 1].Trim().StartsWith(attestation, StringComparison.Ordinal),
-            $"'{source}' must put '{attestation}' on the line directly after '{anchor}'.");
+            index + 2 < lines.Length
+                && lines[index + 1].Trim().StartsWith(discovery, StringComparison.Ordinal)
+                && lines[index + 2].Trim().StartsWith(attestation, StringComparison.Ordinal),
+            $"'{source}' must put '{discovery}' on the line directly after '{anchor}' and '{attestation}' on the line directly after that.");
     }
 
     private static void AssertContainsAll(string text, string source, params string[] tokens)

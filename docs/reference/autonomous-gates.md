@@ -4,7 +4,7 @@ title: Autonomous gates inventory
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-02
+last-reviewed: 2026-11-11
 ---
 
 # Autonomous gates inventory
@@ -47,9 +47,11 @@ Each row names:
     `AUTONOMOUS_APPROVAL: <gate id>`; the owner records the approval in
     `## Decisions` with `autonomous: recommendation accepted`. The conductor
     never writes the row itself.
-  - `park` — stop reworking that one finding and list its id in the draft
-    pull request. Park never holds back delivery; the run continues with
-    unaffected work.
+  - `park` — stop reworking that one item (a circuit-breaker cluster, or a
+    gap whose recommendation was accepted) and list its id in the draft pull
+    request. Park never holds back delivery; the run continues with
+    unaffected work. Review council findings are not parked: they follow the
+    review loop in §5 until `APPROVE` or its hard stop.
   - `hard-stop` — the run relays to the user and stops; nothing proceeds
     past the gate without a human answer.
 - **Disposition** — `keep` (stays human), `reduce` (stays but fires less
@@ -114,14 +116,14 @@ flowchart LR
 
 | Gate id / trigger | Owning specialist | Autonomous behavior | Disposition | Notes / irreversible-action justification |
 |---|---|---|---|---|
-| Whole-change `council` — `code-reviewer` once over the accumulated diff (procedure steps 1–5, adversarial confirm, adjudication, `review verdict`) | `code-reviewer` (orchestrator and adjudicator), `review-lens` / `review-triage` seats | `auto-approve with provenance` on `APPROVE`; exhausted `REQUEST_CHANGES` is reported in the PR description, and delivery continues | reduce | The draft pull request is pushed before this runs. The verdict goes in the PR description and does not gate ready-for-review; required CI does. `REQUEST_CHANGES` follows the bounded remediation loop, and any finding still open is listed by id in the PR. Council findings are reported rather than stopping delivery. |
+| Whole-change `council` — `code-reviewer` over the accumulated diff at the end of the run, then again after each fix round (procedure steps 1–5, adversarial confirm, adjudication, `review verdict`) | `code-reviewer` (orchestrator and adjudicator), `review-lens` / `review-triage` seats | `auto-approve with provenance` on `APPROVE`; at the loop's hard stop the open findings are listed in the PR description as pending human review, and delivery continues | reduce | The draft pull request is pushed before this runs. The verdict goes in the PR description and does not gate ready-for-review; required CI does. `REQUEST_CHANGES` starts the review loop: every critical and major finding and every failed blocking gate goes to its owning worker, and the council re-reviews in verifier mode until `APPROVE`. The hard stop is 5 cycles, or 3 in a row without the critical and major count falling. Each cycle's gates run as `review gates . --base <base> --council --deadline --out <cycle>/gates.json`: `--deadline` bounds the run at `review.council-deadline-seconds` (default 600), and a gate that times out or that the deadline stops is NOT RUN, never a blocking failure. Without `--deadline` nothing changes for CI, task gates or `--gate` re-checks: a timed-out blocking gate still fails there. Council findings are reported rather than stopping delivery. |
 | Per-task council invocation (without a human asking) | — | Refused: the reviewer says the routing is wrong rather than proceeding | keep (as a ban) | Per-task LLM review was removed by #424 and is not reinstated; the `task-gate` owns per-task evidence. Running fifteen lenses per task is cost without coverage gain. |
 
 ## 6. Pre-push self-review gate
 
 | Gate id / trigger | Owning specialist | Autonomous behavior | Disposition | Notes / irreversible-action justification |
 |---|---|---|---|---|
-| Pre-push `self-review` — sync + whole-change council re-run over the final diff + defect-class checklist + evidence | `code-reviewer` skill procedure run by the delivery agent | `report` — the re-run verdict and any open major-or-worse finding go in the PR description; the push is not stopped | reduce | The gate still fixes what has a bounded fix, re-runs steps 1–5, and uses the second verdict. A verdict computed before a fix is void. It no longer blocks the push: the draft pull request is pushed and required CI decides readiness. |
+| Pre-push `self-review` — sync + whole-change council re-run over the final diff + defect-class checklist + evidence | `code-reviewer` skill procedure run by the delivery agent | `report` — the latest verdict and any open major-or-worse finding go in the PR description; the push is not stopped | reduce | The gate still fixes what has a bounded fix, re-reviews the fix as a verifier cycle, and uses that later verdict. A verdict computed before a fix is void. It no longer blocks the push: the draft pull request is pushed and required CI decides readiness. |
 
 "Pre-push" is the name of this gate, kept for its heading and its references. It does not mean the
 gate runs before the push. The draft pull request is pushed first, and a draft push never waits for
@@ -144,9 +146,9 @@ before rules 2–3; coverage is reported, never decisive.
 |---|---|---|---|---|
 | — | `KW-REVIEW-008` (formerly `always-human` reserved paths) | Retired | Retired by 2026-11-02 owner directive; Review Council verdict is binary (`APPROVE` or `REQUEST_CHANGES`) | Retired |
 | — | `KW-REVIEW-009` (formerly `max-reviewable-lines` size ceiling) | Retired | Retired by 2026-11-02 owner directive; Review Council verdict is binary (`APPROVE` or `REQUEST_CHANGES`) | Retired |
-| 1 | A blocking gate failed → `KW-REVIEW-005` (includes `docs validate`, `docs drift`, build, test, analyzers, and every other `blocking: true` gate) | `REQUEST_CHANGES` | `hard-stop` — cannot be approved past; fix, re-run, second verdict governs | keep — **irreversible-action justification:** a failing blocking gate is failed evidence; approving past it would ship unverified claims |
-| 2 | Any surviving `critical` finding → `KW-REVIEW-006` | `REQUEST_CHANGES` | Bounded remediation before park (plan item B); Minor/Info never block here | reduce — gate only on Critical and Major per owner decision Q3; Minor/Info are reported, never blocking |
-| 3 | Surviving `major` findings reach `major-count-blocks` (`3`) → `KW-REVIEW-007` | `REQUEST_CHANGES` | Same remediation loop as rule 2 | reduce — same Q3 scope as rule 2 |
+| 1 | A blocking gate failed → `KW-REVIEW-005` (includes `docs validate`, `docs drift`, build, test, analyzers, and every other `blocking: true` gate) | `REQUEST_CHANGES` | `hard-stop` — cannot be approved past; the owning worker fixes it inside the review loop, and the next cycle's verdict governs | keep — **irreversible-action justification:** a failing blocking gate is failed evidence; approving past it would ship unverified claims |
+| 2 | Any surviving `critical` finding → `KW-REVIEW-006` | `REQUEST_CHANGES` | Review loop until `APPROVE` or its hard stop (5 cycles, or 3 without the critical and major count falling; open findings listed in the PR, delivery continues); Minor/Info never block here | reduce — gate only on Critical and Major per owner decision Q3; Minor/Info are reported, never blocking |
+| 3 | Surviving `major` findings reach `major-count-blocks` (`3`) → `KW-REVIEW-007` | `REQUEST_CHANGES` | Same review loop as rule 2 | reduce — same Q3 scope as rule 2 |
 | 4 | Otherwise | `APPROVE` | `auto-approve with provenance` — deliver per §11 | keep |
 
 `KW-REVIEW-001` (dropped, missing evidence), `KW-REVIEW-002` (below
@@ -216,8 +218,9 @@ replaces the earlier rule that held an unapproved change back from the remote.
 
 Before the push, sync the remote head and base branch (merge, never rebase,
 never force-push). After the push, run the self-review council over the whole
-accumulated diff, fix what has a bounded fix, re-run, and use the second
-verdict in the PR description. A pre-fix verdict is void.
+accumulated diff, fix what has a bounded fix, re-review the fix as a verifier
+cycle, and use that later verdict in the PR description. A pre-fix verdict is
+void.
 
 ## 12. Removed by #424 — not reinstated
 
@@ -228,8 +231,8 @@ inventory.
 - Per-task LLM audits — replaced by the deterministic `task-gate` exit gate
   per ADR 0005 and the 2026-10-20 task-gate plan. Removed by #424 — not
   reinstated.
-- Per-task `inspectcode` runs — the analyzer now runs once in the whole-change
-  gate suite, not per task. Removed by #424 — not reinstated.
+- Per-task `inspectcode` runs — the analyzer now runs in the whole-change
+  gate suite, once per review cycle, not per task. Removed by #424 — not reinstated.
 - Duplicate per-phase re-approvals collapsed by #424 — the remaining phase
   gates above are the post-#424 baseline. Removed by #424 — not reinstated.
 
@@ -244,7 +247,7 @@ inventory.
   gate, the run would execute, publish, or approve past missing evidence or
   failed blocking gates.
 - **reduce** — verdict rules 2–3: gate only on Critical and Major findings;
-  Minor/Info are reported but never block, never force remediation loops, and
+  Minor/Info are reported but never block, never start a review-loop cycle, and
   never force `REQUEST_CHANGES`. Unresolved circuit-breakers are reported in the
   draft pull request and no longer hold back delivery. Circuit-breaker items,
   the whole-change council, and pre-push self-review report into the PR

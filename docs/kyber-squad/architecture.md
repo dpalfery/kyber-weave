@@ -1935,6 +1935,18 @@ description and does not gate readiness. Review that follows is ordinary post-re
 not a conductor gate. The conductor never merges. Unresolved circuit-breakers are listed as pending human review, not held back
 ([ADR 0045](../adr/0045-conductor-operator-channel-opt-in.md)).
 
+The end-of-run council is a loop, not a single pass. After `REQUEST_CHANGES`, every critical and
+major finding and every failed blocking gate goes to the worker that owns its scope, and the
+council re-reviews until it returns `APPROVE`; every cycle after the first is a verifier cycle over
+the fix delta. The hard stop is 5 cycles, or 3 cycles in a row in which the count of surviving
+critical and major findings does not fall: the findings still open are then listed in the pull
+request as pending human review, and delivery continues. Each cycle keeps its seat files,
+`gates.json`, the `findings.json` the verdict command writes, and `head` in
+`.agent_scratchpad/<task-id>/review/cycle-<n>/` until the run ends, and the conductor passes the
+prior cycle folder to the next review. The loop runs on the open pull request, so ready stays
+decided by required CI alone. The procedure is in
+[the review council architecture](../code-review/architecture.md#modes).
+
 ### Host documentation side
 
 The plans index policy section and the specifications index carry the same

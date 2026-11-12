@@ -42,6 +42,31 @@ public sealed class ReviewVerdictCliCommandTests
     }
 
     /// <summary>
+    /// The one example the <c>review verdict</c> help shows must use the seat folder. The deprecated <c>--findings</c>
+    /// form is taught by no example, so a reader copies the form the council now uses.
+    /// </summary>
+    [Fact]
+    public void ProgramVerdictExampleShowsTheSeatFolderNotTheDeprecatedFindingsFlag()
+    {
+        string program = File.ReadAllText(Path.Combine(
+            KyberWeaveTestPaths.ToolRoot,
+            "src",
+            "KyberWeave.Cli",
+            "Program.cs"));
+
+        int verdictIndex = program.IndexOf("AddCommand<ReviewVerdictCommand>(\"verdict\")", StringComparison.Ordinal);
+        Assert.True(verdictIndex >= 0, "Program.cs must register the review verdict command.");
+
+        int nextCommandIndex = program.IndexOf(".AddCommand", verdictIndex + 1, StringComparison.Ordinal);
+        string verdictRegistration = nextCommandIndex >= 0
+            ? program[verdictIndex..nextCommandIndex]
+            : program[verdictIndex..];
+
+        Assert.Contains("\"--seats\"", verdictRegistration, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"--findings\"", verdictRegistration, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// An undefined verdict must produce a readable summary so the command can finish and return the
     /// defensive exit code instead of throwing out of <c>Execute</c>.
     /// </summary>

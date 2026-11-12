@@ -1,5 +1,5 @@
 ---
-id: adr/0069-the-user-level-claude-hook-evaluates-unless-a-project-hook-covers-it
+id: adr/0070-the-user-level-claude-hook-evaluates-unless-a-project-hook-covers-it
 title: The user-level Claude Arbiter hook evaluates a dispatch under the project unless the project opts out or a project hook covers it
 doc-type: adr
 status: current
@@ -14,7 +14,7 @@ code-refs:
   - ArbiterHookDecisionEngine
 ---
 
-# ADR 0069: The user-level Claude Arbiter hook evaluates a dispatch under the project unless the project opts out or a project hook covers it
+# ADR 0070: The user-level Claude Arbiter hook evaluates a dispatch under the project unless the project opts out or a project hook covers it
 
 ## Status
 

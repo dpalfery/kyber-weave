@@ -117,7 +117,10 @@ public enum GateOutcome
     TimedOut,
 
     /// <summary>The program could not be started, for example because it is not on the PATH.</summary>
-    NotStarted
+    NotStarted,
+
+    /// <summary>The council deadline stopped the gate, or the gate never started before the deadline.</summary>
+    DeadlinePassed
 }
 
 /// <summary>Measured line coverage, as reported by the coverage gate.</summary>

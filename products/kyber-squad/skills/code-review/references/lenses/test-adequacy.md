@@ -65,5 +65,5 @@ finding, named by path.
   what is unprotected and why it matters.
 - Test naming, structure, or framework preferences.
 - Requests for tests on code the change did not touch.
-- Correctness defects in the production code — the correctness lens owns those. If a test is
-  missing *because* the code is wrong, report the missing test and leave the defect alone.
+- Correctness defects in the production code — the correctness lens owns those, and you hand
+  them over rather than drop them. Say what the code does today for each malformed input you name; when you cannot show it is refused, add one test-adequacy/out-of-scope finding naming correctness as the owner. Report the missing test as well.

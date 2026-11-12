@@ -2376,8 +2376,8 @@ public sealed class SquadCanonicalContentTests
         Assert.Contains("docs_look_up_glossary_term_definition", discovery, StringComparison.Ordinal);
         if (agentName is "review-lens" or "review-triage")
         {
-            Assert.Contains("Discovery reporting is exempt", discovery, StringComparison.Ordinal);
-            Assert.Contains("machine-consumed", discovery, StringComparison.Ordinal);
+            Assert.Contains("Discovery: codegraph N, docs N, direct reads N", discovery, StringComparison.Ordinal);
+            Assert.DoesNotContain("Discovery reporting is exempt", discovery, StringComparison.Ordinal);
         }
         else
         {

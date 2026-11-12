@@ -25,9 +25,12 @@ Do not read the prose for sense; verify it. For each changed document or doc com
    flag, a default, an ordering, an absolute ("once", "only", "never", "always", "all", "no
    other"), a described side effect (what is committed, copied, excluded, written).
 2. Open the code that implements each claim and compare. Quote both sides in the finding.
+   The subject of a rule sentence is a claim: for "a seat", "every gate" or "any X", open the call site that decides who the rule applies to. A rule stated for "a seat" when the
+   code exempts skipped seats is as wrong as a wrong number.
 3. Run the reverse pass: for each behaviour, name, count or default the diff **changes** in
    code, search the documentation for the old value and for descriptions of it. A document the
    diff did not touch can be the one that is now false.
+4. Run the sibling sweep. When the diff changes a rule's wording in one file, list every other file that carries the same rule text, check each one, and report each sibling the diff left stale. Find the siblings with Grep on a distinctive phrase of the old wording and with `docs_find_duplicates_conflicts_ambiguous_terms`, which lists duplicated and conflicting statements across the docs. When nothing is stale, name the siblings you checked in the `NO FINDINGS` sentence, so the reviewer can tell a sweep that ran from one that did not.
 
 ## What to look for
 
@@ -60,7 +63,7 @@ a finding.
 nothing enforces it (report the claim here, and leave the missing enforcement to
 `test-infrastructure` or `correctness`).
 
-**Cross-document and prompt-to-prompt contract parity.** Ensure cross-document and prompt-to-prompt contract parity across modified markdown instructions, runbooks, and reference contracts. Invariants, schemas, and rejection rules must agree across modified documents, not only doc-vs-code. When an agent instruction, prompt schema, or runbook updates a rejection rule, digest schema, or state transition, every sibling document and prompt must reflect identical requirements with zero contradiction.
+**Cross-document and prompt-to-prompt contract parity.** Ensure cross-document and prompt-to-prompt contract parity across modified markdown instructions, runbooks, and reference contracts. Invariants, schemas, and rejection rules must agree across modified documents, not only doc-vs-code. When an agent instruction, prompt schema, or runbook updates a rejection rule, digest schema, or state transition, every sibling document and prompt must reflect identical requirements with zero contradiction. For each rule id or command the changed prose states, find every document that states it and quote the statements side by side; a different subject, condition or flag list is a finding. A paraphrase that drops a flag the command needs, or a condition the rule carries, counts.
 
 **Links and identifiers.** A relative link, anchor, rule id, or section number that no longer
 resolves after a move, rename, or renumbering.

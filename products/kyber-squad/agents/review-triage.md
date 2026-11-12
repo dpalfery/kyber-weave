@@ -33,7 +33,7 @@ Use the host's indexes before raw reads. Load the CodeGraph and `kw-docs` docume
 - Code: `codegraph_explore` first, and only when its provenance `branch=` is the branch under review: the server stays bound to the canonical checkout, so otherwise its answer describes a tree you are not reviewing. When your packet carries an absolute worktree path, pass it as `codegraph_explore`'s `projectPath`, which answers from that worktree's own index; with no worktree named, use the server's default project. This role runs no shell, so the CLI form, `codegraph explore "…"`, is not available to it. Read the path directly only when that call cannot answer for the branch under review (an error, a not-indexed reply, or an answer whose provenance `branch=` is another branch), and count each such read as a direct read with the reason, naming the mode: `projectPath: error`, `projectPath: not-indexed` or `projectPath: wrong-branch <got> vs <wanted>`; a lens that can read neither returns `SKIPPED` with the reason.
 - Documentation: `docs_answer_question_from_repo_documentation`, `docs_find_documents_citing_code_symbol`, or `docs_look_up_glossary_term_definition` before searching or opening documentation files.
 - Read or search a file directly only for what an index does not cover (configuration, infrastructure, files the docs index missed), when a tool reports the file stale, or to confirm one detail it did not return. When a tool or index is unavailable, fall back to direct reads and say so.
-- Discovery reporting is exempt for this lens because its machine-consumed output is the fixed findings list, `SKIPPED`, or `NO FINDINGS` schema. Follow the discovery order internally; do not append counts or alter that output schema. One line is the exception, because a review that silently read around a missing index looks the same as one that used it: when you read code directly because the index could not answer for the branch under review, add `Index fallback: <mode>` once, immediately before the attestation line, with the mode named above (`projectPath: error`, `projectPath: not-indexed` or `projectPath: wrong-branch <got> vs <wanted>`). The reviewer lists it under Council coverage. Omit the line when the index answered.
+- Report discovery on your findings and `NO FINDINGS` forms. Put `Discovery: codegraph N, docs N, direct reads N` directly above the attestation line, below any `Index fallback` line. Name a reason for each direct read of indexed code. A review that silently read around a missing index looks the same as one that used it, so one more line applies: when you read code directly because the index could not answer for the branch under review, add `Index fallback: <mode>` once, above the `Discovery:` line (two different fallback lines draw a `KW-REVIEW-044` warning and only the first is kept, so when your reads fell back in more than one mode, write one line naming each mode separated by a semicolon, such as `Index fallback: projectPath: error; projectPath: not-indexed`), with the mode named above (`projectPath: error`, `projectPath: not-indexed` or `projectPath: wrong-branch <got> vs <wanted>`). The reviewer lists it under Council coverage. When no fallback happened, omit the line entirely: never write `Index fallback: none` or any other value outside those three modes, which draws a `KW-REVIEW-044` warning. A findings or `NO FINDINGS` seat that wrote no `Discovery:` line, or that made direct reads with no index lookup and no `Index fallback:` line, draws `KW-REVIEW-044` too; a `SKIPPED` seat is exempt. Each of these closing lines is read only at the start of a line.
 
 # 1. Applicability, then the artifact
 
@@ -90,7 +90,7 @@ Identical to every other seat on the council:
   severity: critical | major | minor
   confidence: <1-10>
   file: <repository-relative path>
-  line: <line number>
+  line: <line number in the file>
   excerpt: |
     <the verbatim line the tool flagged>
   claim: <one sentence: what the tool reported>
@@ -110,7 +110,11 @@ where in its output the entry sits.
 
 Your `confidence` is normally high — you are reporting what a deterministic tool found, not
 inferring. Where it is not, the reason is almost always attribution: you could not establish
-whether the diagnostic predates the change. Score that honestly and say so.
+whether the diagnostic predates the change. Score that honestly and say so. Report a finding only at or above the effective min-confidence your invocation names; when none is named, the floor is 7.
+
+`line` is the line number in the file as you read it, never a line offset in the patch file.
+Where the tool reports a line, it already is one; where you located the entry through the
+diff, open the file and use its line.
 
 # 4. Boundaries
 
@@ -123,16 +127,21 @@ whether the diagnostic predates the change. Score that honestly and say so.
 
 # 5. Output
 
-Return the YAML findings list, then the attestation line as its last line, and nothing else. The
-one permitted addition is the `Index fallback: <mode>` line from the discovery order, directly
-above the attestation line on either form. If
-the lens applied, the artifact was present, and nothing in it belongs to this change:
+Return the YAML findings list, then the attestation line as its last line. The only lines
+between your outcome and the attestation are the closing lines below. If the lens applied, the artifact was present, and nothing in it belongs to this change:
 
 ```
 NO FINDINGS: <what artifact you read, and why nothing in it attributes to this change>
+Discovery: codegraph N, docs N, direct reads N
 REVIEW.md sections checked: [Ground rules]
 ```
+
+The findings form closes the same way, after the YAML list. Each closing line starts its own
+line. When you read code directly because the index could not answer, `Index fallback: <mode>`
+goes on the line above `Discovery:`; otherwise leave it out.
 
 Name the artifact in that sentence. It is the only way the reviewer can tell a triage that ran
 from one that had nothing to run on. The attestation line is the same on both forms; `SKIPPED`
 returns no attestation line.
+
+**A declared outcome holds no finding key.** A seat file that declares `NO FINDINGS:` or `SKIPPED:` is refused (`KW-REVIEW-040`) if any seat-schema key followed by a colon — `id`, `lens`, `severity`, `confidence`, `file`, `line`, `claim`, `evidence`, `excerpt`, `failure_scenario` (or `failureScenario`), `suggestion` or `guidance` — appears anywhere else in the file, in any letter case: in a list, a flow mapping, a fence, after prose, or after a table's `|`. The reviewer cannot tell which of the two you meant, so the check fails closed. Prose, a table your lens file requires (such as the correctness seat's input-site table, before the outcome line), the closing lines and plain Markdown bullets with no such key are allowed. In practice: after declaring an outcome, do not write `severity:`, `file:` or any other finding key, even in an explanation. If you found something, return the findings form instead.

@@ -45,7 +45,9 @@ Both modes deliver the same way. When the work is ready to leave the machine (wi
 
 The draft is marked ready once required CI passes. The `create-pull-request` skill, run by `github-devops`, waits at most 60 minutes for CI. If CI fails or is not done in that time, the pull request stays draft and the report says what it is waiting for. No review or human approval is needed before ready.
 
-The council verdict goes in the PR description. It does not gate ready: required CI does. Human and bot review happens after the pull request is ready. A reviewer asking for changes at that point is ordinary PR review (`kilo-review-loop` or `pr-review-fix-comments`), not a conductor gate.
+The council verdict goes in the PR description. It does not gate ready: required CI does. The council re-reviews after every fix round until it returns APPROVE. The loop runs on the open pull request: delivery never waits for it, and required CI alone decides ready. The loop stops after 5 review cycles, or after 3 cycles in a row in which the count of surviving critical and major findings does not fall; the findings still open are then listed in the pull request as pending human review, and delivery continues. The `delivery-execution` skill owns the loop itself.
+
+Human and bot review happens after the pull request is ready. A reviewer asking for changes at that point is ordinary PR review (`kilo-review-loop` or `pr-review-fix-comments`), not a conductor gate.
 
 Delivery requires DOCS_REVIEW: rows and, for plan/spec-backed work, CLOSEOUT_COMPLETE evidence; the draft PR carries both. Assign the PR to the invoking user, and request reviewers when the repository names them, so it is notified. CI minutes triggered by the push are expected cost, not the "spend" hard stop. Never merge.
 
@@ -66,7 +68,7 @@ When a developer task trips a circuit-breaker (`ESCALATION: circuit-breaker`), i
 
 A circuit-breaker that `architect` mediation cannot resolve keeps rework on that cluster halted. It is listed in the PR as an open finding, and delivery continues. A failing cluster normally keeps required CI red, so the PR stays draft.
 
-Finish every unaffected queued task and the closeout, then deliver as above. "Park" applies only to an individual remediation-loop finding: it means stop reworking that finding and list its id in the PR. It never holds back delivery.
+Finish every unaffected queued task and the closeout, then deliver as above. A review finding still open when the review loop stops is handled the same way: it is listed in the PR as pending human review, and it never holds back delivery.
 
 Supervised behaviour is unchanged: an unresolved circuit-breaker finding escalates to the user and blocks completion until the user resolves it.
 
@@ -76,7 +78,7 @@ Add to the completion report:
 
 - every `autonomous: low-confidence` decision: ID, decision, and why no source answered, so the user can overturn it without opening the plan;
 - the count of auto-approved gates;
-- every open circuit-breaker finding, listed as pending human review;
+- every open circuit-breaker finding, and every review finding still open when the review loop stopped, listed as pending human review;
 - the draft pull request link and its CI state (ready, or what it is waiting for).
 
 A run-start `doctor --ensure` failure is not a final-report item: under `stop-on-tool-failure` it ends the run with `STATUS: TOOL_FAILURE` before any delivery, and a repository that sets the setting to `false` carries its warning line in the run record.

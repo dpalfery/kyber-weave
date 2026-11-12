@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-11-09
+last-reviewed: 2026-11-11
 ---
 
 # Rule reference
@@ -223,7 +223,7 @@ failed gate.
 | `KW-REVIEW-020` | Warning | No gates are declared, so the review has no executed evidence |
 | `KW-REVIEW-021` | Info | A gate passed |
 | `KW-REVIEW-022` | Error / Warning | A gate failed. Error when blocking, warning otherwise. |
-| `KW-REVIEW-023` | Error | A findings or gate document could not be read |
+| `KW-REVIEW-023` | Error | A findings or gate document could not be read: missing, empty or blank, malformed, an object the command reads that spells one name twice ignoring case (`severity` and `Severity`, or `failure_scenario` and `failureScenario`) or repeats a name exactly (the object's path and both spellings are named; an exact repeat is refused by the JSON parser, which names the file only), a `null` element in any list at any depth (a `null` inside a property the command does not know is tolerated), a finding whose `severity` is a number or not one of the severity names (matched in any letter case, so `"MAJOR"` is accepted) or whose `confidence` is not a JSON whole number from 1 to 10 (a float such as `9.0` or `1e1`, or a numeric string such as `"9"`, is refused), or a finding with no `id`, `lens` or `file` (or a gate result with no `id` or `summary`); the file is named. `review verdict` also reports here a path-taking argument given an empty value (`[path]`, `--config`, `--seats`, `--findings`, `--gates`, `--prior`, `--out`), `--seats` with `--findings`, and a `--seats` path that is missing, a file, or a symlink loop ("Seat folder not found"; a folder that exists but cannot be listed is `KW-REVIEW-040`) |
 | `KW-REVIEW-024` | Info / Error | The computed verdict. Info on approve, error otherwise. |
 | `KW-REVIEW-025` | Error | A review report could not be written (`--out`) |
 | `KW-REVIEW-026` | Info | A gate does not apply to this change: no changed path matched its `applies-when.paths` or `include`, or its `os` does not match the host, so it was not executed |
@@ -233,6 +233,15 @@ failed gate.
 | `KW-REVIEW-033` | Error / Warning | A gate never started: its program could not start, its working directory does not exist, or a full-suite gate was refused without `--council` outside a terminal (the other gates still run; exit `1`). Error when blocking, warning otherwise. |
 | `KW-REVIEW-034` | Info | The changed set is unknown, so gates with `include` ran unscoped. Fetch the full history, or name a base that exists with `--base`. |
 | `KW-REVIEW-038` | Info / Warning | The CodeGraph index of the tree under review, prepared before any gate starts. Info: it was created or synced. Warning: it could not be prepared; run `kyber-weave doctor --ensure <tree>`. The gates still run, because a review is a read-only run. A repository without governed docs is not checked. |
+| `KW-REVIEW-039` | Warning | A gate was NOT RUN to a result: its own `timeout-seconds` stopped it, or the council deadline (`review.council-deadline-seconds`) stopped it or passed before it started. What it checks is unverified. `review gates` reports it only under `--deadline`, and then leaves it out of the exit code; without `--deadline` a timed-out gate is `KW-REVIEW-022` as before. `review verdict` always treats a timed-out or deadline-cut gate as NOT RUN: it neither requests changes nor raises the risk grade for it. Re-run it alone with `--gate <id>` |
+| `KW-REVIEW-040` | Error | The `review verdict --seats` folder could not be listed, a seat output file in it could not be read, or a seat file declares `NO FINDINGS:` or `SKIPPED:` and also holds a seat-schema key followed by a colon anywhere else in the file: at any indent, after any prose, inside or outside a fence, in any letter case, bare or quoted, at a line start after an optional `- `, or after `{`, `,` or a table's `|`. Fail closed: a false refusal costs a re-run, a dropped finding is never acceptable. Prose, a Markdown table, the closing lines and bullets naming no schema key (`- **Checked:**`, `- note: x`) stay allowed. The file, the reason, and the line and column are named; nothing is computed (exit `1`) |
+| `KW-REVIEW-041` | Error / Warning / Info | Lens coverage. Error: a catalogue lens has no seat file, no `--not-seated <lens>=<reason>` and no `--prior` coverage; the lenses are named (exit `1`). Error: a `--not-seated` value names no catalogue lens or has no `=<reason>` (exit `1`). Info: a lens was not seated, with its reason, or was carried from the prior cycle. Warning: a seat file that is not a catalogue lens (its findings are kept; `reviewer.md`, the reviewer's own seat, is exempt), or a folder entry that cannot be a seat (a directory named `<x>.md`, a file named `.md`, a dotfile, or a name that is not a lowercase lens id), which is named and ignored |
+| `KW-REVIEW-042` | Info / Error | `--drop <id>=<reason>`. Info: the finding was dropped by the reviewer, and the reason is recorded. Error: `--drop` names no finding, or its value has no `<id>=<reason>` form (exit `1`). No option changes a severity or confidence |
+| `KW-REVIEW-043` | Info / Warning | A finding cites a line that is not in its file: beyond its end, or below 1. Info: it was moved to the one line equal to its excerpt's first non-blank line, or its file is missing, outside the repository or unreadable, so the line was not checked (one line per file). Warning: no single line matches, so it was dropped. A line inside the file is never moved |
+| `KW-REVIEW-044` | Warning | A seat that reported findings or no findings wrote no `Discovery:` line, read files directly with no code index lookup and no `Index fallback:` line, named an `Index fallback:` mode the seat contract does not define, or wrote two different `Index fallback:` lines (both named; the first is kept). Never a verdict input |
+| `KW-REVIEW-045` | Warning | `review verdict --findings` read a hand-built findings file, which skips the lens coverage check. Use `--seats` |
+| `KW-REVIEW-046` | Info | The accepted critical and major finding ids, the refutation candidates. Listed only when no blocking gate that ran to a result failed |
+| `KW-REVIEW-047` | Warning | The `correctness` seat reported findings or `NO FINDINGS:` and wrote no readable `Input sites: N traced, M files with none` line, so its tracing of hostile inputs per parse site is unrecorded. A `SKIPPED` seat is exempt. Raised whenever that seat reported findings or `NO FINDINGS:`, because the seat folder carries no changed paths. A coverage note: never a verdict input |
 
 ### Duplicates — `review duplicates`
 
