@@ -55,6 +55,9 @@ public sealed partial class PlanTaskFileValidator
     /// <summary>A Ready plan has no task file beside it. Advisory: it never fails a merge.</summary>
     public const string MissingTaskFile = "KW-DOC-TASKS-006";
 
+    /// <summary>How much of a candidate sidecar is read to see whether it holds the task file schema.</summary>
+    private const int SniffLength = 4096;
+
     /// <summary>A copy of a task file left beside it under another name, such as <c>&lt;plan&gt;.tasks.json.new</c>.</summary>
     public const string SidecarTaskFile = "KW-DOC-TASKS-007";
 
@@ -148,39 +151,83 @@ public sealed partial class PlanTaskFileValidator
                 continue;
             }
 
-            foreach (string file in DocsRootPath.EnumerateContainedFiles(docsRoot, "*"))
+            try
             {
-                string relative = Path.GetRelativePath(_repoRoot, file).Replace('\\', '/');
-                if (!InventoryReachability.IsWithin(relative, planFolder)
-                    || InventoryReachability.IsArchived(relative))
+                foreach (string file in DocsRootPath.EnumerateContainedFiles(docsRoot, "*"))
                 {
-                    continue;
+                    ReportIfSidecar(file, planFolder, seen, report);
                 }
-
-                // A name that ends in the task file's suffix is the task file itself, or a file
-                // KW-DOC-LIFECYCLE-005 already reports; this rule takes only what that one leaves.
-                string name = Path.GetFileName(file);
-                if (!name.Contains(TaskFileSuffix, StringComparison.OrdinalIgnoreCase)
-                    || name.EndsWith(TaskFileSuffix, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                if (!seen.Add(relative))
-                {
-                    continue;
-                }
-
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // A folder the walk cannot read is a state the run reports: aborting here would
+                // hide every other finding, and skipping silently would read as "no sidecars".
                 report.Add(new Diagnostic(
                     SidecarTaskFile,
-                    Severity.Error,
-                    $"'{relative}' is a copy of a task file left beside it: the conductor reads only " +
-                    "'<plan>.tasks.json', so this file is dead weight that the merge would carry.",
-                    relative,
-                    relative,
-                    Hint: "Delete it. If a live plan still needs its task file, write it in place at " +
-                    "'<plan>.tasks.json', never through a temporary sibling."));
+                    Severity.Warning,
+                    $"A folder under '{root}' could not be read ({exception.Message}), so copies of a " +
+                    "task file left beside a plan are not fully checked.",
+                    root,
+                    Hint: "Fix the folder's permissions or remove it, then run the check again."));
             }
+        }
+    }
+
+    /// <summary>Reports <paramref name="file"/> when it is a copy of a task file in the plans folder.</summary>
+    private void ReportIfSidecar(string file, string planFolder, HashSet<string> seen, DiagnosticReport report)
+    {
+        string relative = Path.GetRelativePath(_repoRoot, file).Replace('\\', '/');
+        if (!InventoryReachability.IsWithin(relative, planFolder)
+            || InventoryReachability.IsArchived(relative))
+        {
+            return;
+        }
+
+        // A name that ends in the task file's suffix is the task file itself, or a file
+        // KW-DOC-LIFECYCLE-005 already reports; this rule takes only what that one leaves.
+        string name = Path.GetFileName(file);
+        if (!name.Contains(TaskFileSuffix, StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(TaskFileSuffix, StringComparison.OrdinalIgnoreCase)
+            || !LooksLikeTaskFile(file)
+            || !seen.Add(relative))
+        {
+            return;
+        }
+
+        report.Add(new Diagnostic(
+            SidecarTaskFile,
+            Severity.Error,
+            $"'{relative}' is a copy of a task file left beside it: the conductor reads only " +
+            "'<plan>.tasks.json', so this file is dead weight that the merge would carry.",
+            relative,
+            relative,
+            Hint: "Delete it. If a live plan still needs its task file, write it in place at " +
+            "'<plan>.tasks.json', never through a temporary sibling."));
+    }
+
+    /// <summary>
+    /// True when the file's content is the task file's schema, or cannot be read to prove otherwise.
+    /// </summary>
+    /// <remarks>
+    /// The name narrows the search and the content decides. A copy is the schema's own keys, so a
+    /// file that merely carries the suffix in its name is left alone. Only the head of the file is
+    /// read: the keys open the document, and a copy cut short by an interrupted write still has them.
+    /// A file that cannot be read is reported, because it cannot be shown to be unrelated.
+    /// </remarks>
+    private static bool LooksLikeTaskFile(string file)
+    {
+        try
+        {
+            using StreamReader reader = new(file);
+            char[] head = new char[SniffLength];
+            int read = reader.ReadBlock(head, 0, head.Length);
+            string text = new(head, 0, read);
+            return text.Contains("\"execution-digest\"", StringComparison.Ordinal)
+                || text.Contains("\"schema-version\"", StringComparison.Ordinal);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return true;
         }
     }
 

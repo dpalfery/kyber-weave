@@ -2,6 +2,11 @@ using System.Reflection;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Arbiter.Plans;
+using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Docs.Model;
+using KyberWeave.Core.Docs.Parsing;
+using KyberWeave.Core.Docs.Validation;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -408,6 +413,70 @@ public sealed class PlanTaskFileValidatorTests
 
         AssertReports(run, SidecarTaskFile);
         Assert.Contains("plans folder", run.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("WARNING", SeverityOf(run, SidecarTaskFile));
+    }
+
+    /// <summary>The severity the run printed for a code, read from its JSON findings.</summary>
+    private static string? SeverityOf(ReportedFindings run, string rule)
+    {
+        using JsonDocument document = JsonDocument.Parse(run.Output);
+        foreach (JsonElement finding in document.RootElement.GetProperty("findings").EnumerateArray())
+        {
+            if (finding.GetProperty("code").GetString() == rule)
+            {
+                return finding.GetProperty("severity").GetString();
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The name alone does not make a file a copy of a task file. A file that happens to carry the
+    /// suffix in its name but holds other content is not a sidecar, so it is not reported.
+    /// </summary>
+    [Fact]
+    public void AFileWithTheSuffixInItsNameButOtherContentIsNotKWDOCTASKS007()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        fixture.Write("6-Docs/plans/notes.tasks.json.bak", "{\n  \"note\": \"unrelated\"\n}\n");
+
+        AssertDoesNotReport(Validate(fixture), SidecarTaskFile);
+    }
+
+    /// <summary>
+    /// A plans folder the sidecar walk cannot read is a reported state, not a crash that hides every
+    /// other finding. The document loader walks the same folders first, so the loader reads the
+    /// corpus while it is still readable and the folder is locked before the validator walks it,
+    /// which is the race this guards: a folder that changes between the two walks.
+    /// </summary>
+    [Fact]
+    public void AnUnreadablePlansSubfolderIsReportedNotACrash()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using DocFixture fixture = new();
+        fixture.Write("6-Docs/plans/locked/placeholder.txt", "x");
+        OntologyConfig ontology = OntologyConfig.ProductDefaults;
+        DocumentSet set = new DocumentLoader(fixture.Root, ontology).Load();
+        KyberWeaveConfig config = KyberWeaveConfig.ProductDefaults.WithOntology(ontology);
+        string locked = Path.Combine(fixture.Root, "6-Docs", "plans", "locked");
+        File.SetUnixFileMode(locked, UnixFileMode.None);
+        try
+        {
+            DiagnosticReport report = new PlanTaskFileValidator(fixture.Root, config).Validate(set);
+
+            Diagnostic finding = Assert.Single(report.Items, item => item.Code == SidecarTaskFile);
+            Assert.Equal(Severity.Warning, finding.Severity);
+            Assert.Contains("could not be read", finding.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            File.SetUnixFileMode(locked, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
     }
 
     /// <summary>
