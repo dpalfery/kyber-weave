@@ -1,4 +1,6 @@
+using System.Runtime.Versioning;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Core.Review;
 using Spectre.Console.Cli;
@@ -475,6 +477,90 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
 
         Assert.Equal(1, run.Result);
         AssertDiagnostic(run.Output, UnreadableInput, "Error", "Seat folder not found");
+    }
+
+    /// <summary>
+    /// A seats folder the process cannot list is a seat folder that cannot be read: KW-REVIEW-040 naming the folder, not
+    /// an unhandled UnauthorizedAccessException out of the command.
+    /// </summary>
+    [Fact]
+    [UnsupportedOSPlatform("windows")]
+    public void ASeatFolderThatCannotBeListedIsRefusedUnderKw040NamingTheFolder()
+    {
+        if (OperatingSystem.IsWindows() || Environment.UserName == "root")
+        {
+            // Windows and root ignore the directory mode, so the denied listing cannot be produced here.
+            Assert.Skip("Directory listing permission is not enforced for this user on this platform.");
+        }
+
+        string locked = Path.Combine(_temp.Path, "locked-seats");
+        Directory.CreateDirectory(locked);
+        File.SetUnixFileMode(locked, UnixFileMode.None);
+        try
+        {
+            CapturedConsoleExecution<int> run = Verdict("--seats", locked);
+
+            Assert.Equal(1, run.Result);
+            AssertDiagnostic(run.Output, SeatUnparseable, "Error", locked);
+        }
+        finally
+        {
+            File.SetUnixFileMode(locked, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    /// <summary>A <c>--seats</c> path that is a file is not a folder of seats: refused naming the path, never a crash.</summary>
+    [Fact]
+    public void ASeatsPathThatIsAFileIsRefusedNamingThePath()
+    {
+        string file = WriteFile("not-a-folder.md", NoFindingsSeat("correctness"));
+
+        CapturedConsoleExecution<int> run = Verdict("--seats", file);
+
+        Assert.Equal(1, run.Result);
+        Assert.Contains(file, run.Output, StringComparison.Ordinal);
+        Assert.True(
+            MessagesWithCode(run.Output, UnreadableInput).Count + MessagesWithCode(run.Output, SeatUnparseable).Count > 0,
+            $"Expected KW-REVIEW-023 or KW-REVIEW-040. Output:{Environment.NewLine}{run.Output}");
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // --prior is read as JSON, not as a seat, so it needs the range checks the seat parser applies.
+    // -----------------------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("severity", "\"nit\"")]
+    [InlineData("severity", "7")]
+    [InlineData("confidence", "999")]
+    [InlineData("confidence", "-3")]
+    [InlineData("confidence", "0")]
+    [InlineData("confidence", "1.5")]
+    public void APriorFindingOutsideTheSeatRangesIsRefusedNamingTheFileAndPath(string field, string rawValue)
+    {
+        string prior = Path.Combine(_temp.Path, "prior");
+        Directory.CreateDirectory(prior);
+        JsonObject finding = new()
+        {
+            ["id"] = "correctness/off-by-one",
+            ["lens"] = "correctness",
+            ["severity"] = "major",
+            ["confidence"] = 9,
+            ["file"] = "src/Foo.cs",
+            ["line"] = 12
+        };
+        finding[field] = JsonNode.Parse(rawValue);
+        File.WriteAllText(
+            Path.Combine(prior, "findings.json"),
+            "{\"schema\":\"kyber-weave.review-findings/v1\",\"findings\":[" + finding.ToJsonString() +
+            "],\"changedPaths\":[],\"changedLines\":0}");
+        WriteSeat("correctness", NoFindingsSeat("correctness"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--prior", prior, .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(1, run.Result);
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", "findings.json");
+        AssertDiagnostic(run.Output, UnreadableInput, "Error", $"$.findings[0].{field}");
     }
 
     [Fact]
