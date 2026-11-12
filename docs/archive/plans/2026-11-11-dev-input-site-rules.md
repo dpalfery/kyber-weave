@@ -2,7 +2,7 @@
 id: plans/2026-11-11-dev-input-site-rules
 title: Developers prevent malformed-input defects instead of leaving them for review
 doc-type: plan
-status: current
+status: archived
 component: KyberSquad
 owner: dpalfery
 created: 2026-11-11
@@ -15,7 +15,7 @@ impact-components: [KyberSquad, ReviewCouncil]
 
 # Developers prevent malformed-input defects instead of leaving them for review
 
-**Status: Ready, 2026-11-11.** Approved for execution (D15); task file `2026-11-11-dev-input-site-rules.tasks.json` beside this plan.
+**Status: Archived, 2026-11-11.** Completed: the final council returned `APPROVE` (risk LOW, 9 gates passed). Approved for execution under D15. The task file was removed at archive; the tasks and test contract remain in this plan. See `## Completion summary`.
 **Development mode:** `test-first` (RED by `test-dev`, GREEN by the owning specialist, never the same worker).
 **Autonomy:** `autonomous` (every open item decided by recommendation; provenance in `## Decisions`).
 **Scale:** `extends-component`, components `KyberSquad` (worker contract, developer agent bodies, review-fix skills) and `ReviewCouncil` (ADR 0069 amendment). The repository's coding standards are also edited.
@@ -285,3 +285,56 @@ The end-of-run council (`code-reviewer`, governed by the `code-review` skill) re
 ## docs-dev closeout
 
 T4. Harvest H1 to H4, archive the plan, and remove the task file in the same commit.
+
+## Completion summary
+
+**Delivered** on branch `claude/feat/dev-input-site-rules`, stacked on pull request 595. RED contract `0ebdbd28`; product prose `ac464b17`; repository standards and docs `2544b9b5`, merged as `e2023b34`. The final council returned `APPROVE`, risk LOW, with 9 gates passed.
+
+**Acceptance.**
+1. The developer exit gate states the input-site table and the whole-class rule once, in `delivery-execution`, with pointer sentences in the seven developer bodies (S1 to S8).
+2. The coding standards state that parsers fail closed under `KW-STD-INPUT-001` (S9, S10).
+3. Every fix for a review finding verified as real ships with a test that fails without the fix, bot review rounds included; a nitpick needs none (S11, S12). ADR 0069 records the reviewer side and this amendment.
+4. The four migrated digests were recomputed once, in T2.
+5. The pins for S1 to S12 and the rule-map facts are in `SquadPerformanceContractTests`, `ReviewCouncilLoopContractTests` and `WorkerRuleSingleHomeTests`, and passed in T2 and T3 with non-zero counts.
+
+**Follow-ups**, not done here:
+- **F-1:** A deterministic check of the developer's input-site table and the `Input sites:` / `Defect class:` lines, in the conductor's digest check or an Arbiter rule.
+- **F-2:** Whether the shipped standard templates under `products/kyber-squad/standards/` carry `KW-STD-INPUT-001` for host repositories.
+- **F-3:** `bug-crusher` step 1 still lets a real code defect skip RED with a recorded reason, unlike the test standard's regression-test rule.
+- **F-4:** The whole-class rule in `delivery-execution` says each class input is "covered by a test", but the `csharp-dev`, `go-dev`, `python-dev` and `typescript-dev` bodies bar them from writing tests. The whole-class rule also lacks the `COVERAGE_GAPS` hand-off that the table rule has.
+- **F-5:** `task-gate/SKILL.md` lists `RED_EVIDENCE` as never counted as a seventh field, while its template shows it.
+- **F-6:** The worker rule map's A4 "Enforced by" cell omits the `ProductFile` theory and `TheInputSiteTableIsInNoAgentBody`.
+- **F-7:** `code-review/SKILL.md` states the review-fix test sentence twice, and one whole-file `Contains` row pins it.
+
+## Closeout mapping
+
+Each row gives the destination of one decision or harvest item, its documentation impact, impact components, last-reviewed date and archive status.
+
+**Decisions**
+
+| ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| D1 | `delivery-execution` skill, `## Developer exit gate` (the single home, in product prose); pointer sentences in seven developer bodies; [worker rule map](../../kyber-squad/worker-rule-map.md#report-formats-and-the-completion-digest) (H2) | extends-component | KyberSquad | 2026-11-11 | archived |
+| D2 | [worker rule map](../../kyber-squad/worker-rule-map.md#report-formats-and-the-completion-digest) (H2); [requirements](../../kyber-squad/requirements.md) (H3); `delivery-execution` exit gate, S4 | extends-component | KyberSquad | 2026-11-11 | archived |
+| D3 | `delivery-execution` exit gate, S3 (product prose); [worker rule map](../../kyber-squad/worker-rule-map.md#report-formats-and-the-completion-digest) (H2) | extends-component | KyberSquad | 2026-11-11 | archived |
+| D4 | `delivery-execution` exit gate, S5; [worker rule map](../../kyber-squad/worker-rule-map.md#report-formats-and-the-completion-digest) (H2); the existing whole-class rule of the `dp-code-reviewer` skill, step 2, unchanged | extends-component | KyberSquad | 2026-11-11 | archived |
+| D5 | [requirements](../../kyber-squad/requirements.md) (H3, S6); `delivery-execution`, `task-gate`, `test-dev` product prose (S6) | extends-component | KyberSquad | 2026-11-11 | archived |
+| D6 | `delivery-execution` exit gate, S2 (product prose); [worker rule map](../../kyber-squad/worker-rule-map.md#report-formats-and-the-completion-digest) (H2); the root `AGENTS.md` Config Reg rule, unchanged. No ADR — ADR waiver: a path-reference convention under the existing Config Reg rule. | extends-component | KyberSquad | 2026-11-11 | archived |
+| D7 | [C#](../../standards/csharp/README.md), [TypeScript](../../standards/typescript/README.md), [Go](../../standards/go/README.md), [Rust](../../standards/rust/README.md) and [test](../../standards/test/README.md) standards (H4). No rule-reference row, by decision. No ADR — ADR waiver: a rule id inside the coding standards, not an emitted diagnostic. | none (coding standards) | none | 2026-11-11 | archived |
+| D8 | Placement in the standards (H4): [C#](../../standards/csharp/README.md) `## Errors and diagnostics`, [TypeScript](../../standards/typescript/README.md) `## Types at boundaries`, [Go](../../standards/go/README.md) and [Rust](../../standards/rust/README.md) `## Errors`, [test](../../standards/test/README.md) `## Test the decision, not the implementation` | none (coding standards) | none | 2026-11-11 | archived |
+| D9 | The coding-standard form of the parser rule, S9 in the [C#](../../standards/csharp/README.md), [TypeScript](../../standards/typescript/README.md), [Go](../../standards/go/README.md), [Rust](../../standards/rust/README.md) and [test](../../standards/test/README.md) standards. REVIEW.md rule R3 already states it and is unedited. No ADR — ADR waiver: the rule already exists. | extends-component | ReviewCouncil, KyberSquad | 2026-11-11 | archived |
+| D10 | [ADR 0069](../../adr/0069-the-review-council-loops-until-approve-and-computes-its-verdict-from-seat-output.md) amendment (H1, reviewer side); S11 and S12 in the six review-fix product files; REVIEW.md line 228 and R15, existing and unedited | extends-component | ReviewCouncil, KyberSquad | 2026-11-11 | archived |
+| D11 | Documentation waiver: the reversal notice is a transient pull request disclosure. Its surviving rule is carried by D10's destination, [ADR 0069](../../adr/0069-the-review-council-loops-until-approve-and-computes-its-verdict-from-seat-output.md) (H1). | extends-component | ReviewCouncil, KyberSquad | 2026-11-11 | archived |
+| D12 | Test pins, enforced and cited in the [worker rule map](../../kyber-squad/worker-rule-map.md#report-formats-and-the-completion-digest) (H2): `SquadPerformanceContractTests`, `ReviewCouncilLoopContractTests` and `WorkerRuleSingleHomeTests`. No ADR — ADR waiver: test pins in existing pin homes. | extends-component | KyberSquad | 2026-11-11 | archived |
+| D13 | No new ADR — ADR waiver: mirrors ADR 0069 on the developer side with existing patterns; prose, cheap to revise. The reviewer and developer halves are recorded together in [ADR 0069](../../adr/0069-the-review-council-loops-until-approve-and-computes-its-verdict-from-seat-output.md) (H1). | extends-component | ReviewCouncil, KyberSquad | 2026-11-11 | archived |
+| D14 | Documentation waiver: transient delivery sequencing for this change (one RED task, two parallel GREEN tasks, closeout). No surviving invariant. | extends-component | KyberSquad | 2026-11-11 | archived |
+| D15 | Documentation waiver: approval provenance, transient. The approval record stays in this archived plan's `## Decisions` table. | extends-component | KyberSquad | 2026-11-11 | archived |
+
+**Design harvest**
+
+| ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| H1 | [ADR 0069](../../adr/0069-the-review-council-loops-until-approve-and-computes-its-verdict-from-seat-output.md), `## Consequences`, the "Amended 2026-11-11" bullet | extends-component | ReviewCouncil | 2026-11-11 | archived |
+| H2 | [worker rule map](../../kyber-squad/worker-rule-map.md#report-formats-and-the-completion-digest), `## Report formats and the completion digest`, row A4 | extends-component | KyberSquad | 2026-11-11 | archived |
+| H3 | [requirements](../../kyber-squad/requirements.md), the phased-rollout paragraph: the non-field line list (S6) | extends-component | KyberSquad | 2026-11-11 | archived |
+| H4 | [C#](../../standards/csharp/README.md), [TypeScript](../../standards/typescript/README.md), [Go](../../standards/go/README.md), [Rust](../../standards/rust/README.md) and [test](../../standards/test/README.md) coding standards: `KW-STD-INPUT-001` (S9) and the test-side case rule (S10) | none (coding standards) | none | 2026-11-11 | archived |
