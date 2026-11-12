@@ -1,3 +1,4 @@
+using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Diagnostics;
 using Spectre.Console;
@@ -17,7 +18,11 @@ public sealed class ArbiterPlanCommand : Command<ArbiterSettings>
     /// <summary>
     /// Parses the plan file named by the positional path and prints its tasks,
     /// files, dependencies, contract rows and out-of-scope paths, plus
-    /// <c>KW-ARB-PARSE-00x</c> diagnostics. A plan without tasks reports
+    /// <c>KW-ARB-PARSE-00x</c> diagnostics. The execution digest is reported only for a plan with tasks
+    /// and no dropped content, as the <c>execution-digest</c> metric in json and once on its own line in
+    /// the table, so a task file can record the digest it was written from. An unknown dependency token
+    /// (<c>KW-ARB-PARSE-001</c>) withholds it, since the parser drops that token; a task with no Files
+    /// line (<c>KW-ARB-PARSE-002</c>) does not. A plan with no parsed task reports
     /// <c>KW-ARB-PLAN-001</c>; a missing or unreadable file reports
     /// <c>KW-ARB-PLAN-002</c> and exits 1.
     /// </summary>
@@ -56,49 +61,82 @@ public sealed class ArbiterPlanCommand : Command<ArbiterSettings>
         PlanDocument document = PlanDocumentParser.Parse(text);
         report.AddRange(document.Diagnostics);
 
-        AnsiConsole.MarkupLine($"[bold]Plan:[/] {Markup.Escape(resolved)}");
-        AnsiConsole.MarkupLine($"[grey]Status: {Markup.Escape(document.Status ?? "—")}; mode: {Markup.Escape(document.DevelopmentMode)}.[/]");
+        // Fail closed: a digest is withheld when the parser dropped content. KW-ARB-PARSE-001 (an unknown
+        // dependency token) is removed from the parse, so a digest over it would describe a plan that does
+        // not say what it says. KW-ARB-PARSE-002 (a task with no Files line) is a completeness finding: the
+        // task keeps its text, dependencies and contract, so its digest is offered. The findings are
+        // warnings, so HasErrors does not catch them; the code check does. An empty Tasks section has
+        // HasTasks but no task to digest.
+        bool droppedContent = document.Diagnostics.Any(finding => finding.Code == PlanDocumentParser.UnknownDependencyRule);
+        string? digest = !droppedContent && document.HasTasks && document.Tasks.Count > 0
+            ? PlanDocumentParser.ExecutionDigest(document)
+            : null;
 
-        if (!document.HasTasks)
+        // Only json carries the metric. The table prints the digest on its own unfolded line, and a
+        // metric row would print it again, truncated in a narrow cell.
+        if (digest is not null && settings.ParsedFormat == OutputFormat.Json)
+        {
+            report.AddMetric("execution-digest", digest);
+        }
+
+        // Zero parsed tasks gets the finding whether or not a Tasks heading exists. Either way there is
+        // no execution, and the operator needs the finding to learn why no digest is printed.
+        if (document.Tasks.Count == 0)
         {
             report.Add(new Diagnostic(
                 NoTasks,
                 Severity.Warning,
-                $"Plan '{resolved}' carries no Tasks section.",
+                document.HasTasks
+                    ? $"Plan '{resolved}' has a Tasks section, but no task in it parsed."
+                    : $"Plan '{resolved}' carries no Tasks section.",
                 settings.Path,
-                Hint: "Add a '## Tasks' section with T1, T2, ... headings, or a spec-grammar checklist; without one, readiness answers no-tasks."));
+                Hint: "Add T1, T2, ... headings under '## Tasks' (adding the section if missing), or a spec-grammar checklist; without one, readiness answers no-tasks."));
         }
 
-        if (document.Tasks.Count > 0)
+        // The prose lines are for a person reading the table. Json, sarif and markdown must
+        // carry only the rendered report, or a script reading stdout would parse a non-document.
+        if (settings.ParsedFormat == OutputFormat.Table)
         {
-            Table tasks = new Table().Border(TableBorder.Rounded).Expand();
-            tasks.AddColumn("Task");
-            tasks.AddColumn("Title");
-            tasks.AddColumn("Files");
-            tasks.AddColumn("Depends on");
-            foreach (PlanTask task in document.Tasks)
+            AnsiConsole.MarkupLine($"[bold]Plan:[/] {Markup.Escape(resolved)}");
+            AnsiConsole.MarkupLine($"[grey]Status: {Markup.Escape(document.Status ?? "—")}; mode: {Markup.Escape(document.DevelopmentMode)}.[/]");
+
+            if (digest is { } printed)
             {
-                tasks.AddRow(
-                    new Markup(Markup.Escape(task.Id)),
-                    new Markup(Markup.Escape(task.Title)),
-                    new Markup(Markup.Escape(task.Files.Count > 0 ? string.Join(", ", task.Files) : "—")),
-                    new Markup(Markup.Escape(task.DependsOn.Count > 0 ? string.Join(", ", task.DependsOn) : "—")));
+                // Written unfolded so a narrow console cannot wrap the 64 characters across lines.
+                CommandHelpers.WriteUnfolded(() => AnsiConsole.MarkupLine($"Execution digest: {Markup.Escape(printed)}"));
             }
 
-            AnsiConsole.Write(tasks);
-        }
+            if (document.Tasks.Count > 0)
+            {
+                Table tasks = new Table().Border(TableBorder.Rounded).Expand();
+                tasks.AddColumn("Task");
+                tasks.AddColumn("Title");
+                tasks.AddColumn("Files");
+                tasks.AddColumn("Depends on");
+                foreach (PlanTask task in document.Tasks)
+                {
+                    tasks.AddRow(
+                        new Markup(Markup.Escape(task.Id)),
+                        new Markup(Markup.Escape(task.Title)),
+                        new Markup(Markup.Escape(task.Files.Count > 0 ? string.Join(", ", task.Files) : "—")),
+                        new Markup(Markup.Escape(task.DependsOn.Count > 0 ? string.Join(", ", task.DependsOn) : "—")));
+                }
 
-        if (document.ContractRows.Count > 0)
-        {
-            AnsiConsole.MarkupLine(
-                $"[grey]{document.ContractRows.Count} contract row(s): " +
-                $"{Markup.Escape(string.Join(", ", document.ContractRows.Select(row => row.TaskId)))}.[/]");
-        }
+                AnsiConsole.Write(tasks);
+            }
 
-        if (document.OutOfScope.Count > 0)
-        {
-            AnsiConsole.MarkupLine(
-                $"[grey]Out of scope: {Markup.Escape(string.Join(", ", document.OutOfScope))}.[/]");
+            if (document.ContractRows.Count > 0)
+            {
+                AnsiConsole.MarkupLine(
+                    $"[grey]{document.ContractRows.Count} contract row(s): " +
+                    $"{Markup.Escape(string.Join(", ", document.ContractRows.Select(row => row.TaskId)))}.[/]");
+            }
+
+            if (document.OutOfScope.Count > 0)
+            {
+                AnsiConsole.MarkupLine(
+                    $"[grey]Out of scope: {Markup.Escape(string.Join(", ", document.OutOfScope))}.[/]");
+            }
         }
 
         CommandHelpers.Finish(report, settings, "arbiter plan", "Task");
