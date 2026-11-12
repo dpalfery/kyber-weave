@@ -25,6 +25,11 @@ namespace KyberWeave.Tests;
 /// failing a merge.
 /// </para>
 /// <para>
+/// <c>KW-DOC-TASKS-007</c> is the one error about a file beside the task file: a temporary
+/// sibling such as <c>&lt;plan&gt;.tasks.json.new</c> left in the plans folder is a copy of the
+/// prompts that nothing else reads, so it fails the run whether or not its plan is still there.
+/// </para>
+/// <para>
 /// Each rule's test carries its own control — the same corpus with the file as authored
 /// reports nothing — so no finding below can come from the fixture instead of the edit.
 /// </para>
@@ -48,6 +53,9 @@ public sealed class PlanTaskFileValidatorTests
 
     /// <summary>A Ready plan has no task file beside it. Advisory: it never fails a merge.</summary>
     private const string MissingTaskFile = "KW-DOC-TASKS-006";
+
+    /// <summary>A file in the plans folder is a copy of a task file under another name, such as a temporary sibling.</summary>
+    private const string SidecarTaskFile = "KW-DOC-TASKS-007";
 
     private static ReportedFindings Validate(DocFixture fixture) => new(fixture);
 
@@ -304,6 +312,74 @@ public sealed class PlanTaskFileValidatorTests
     }
 
     /// <summary>
+    /// Issue 599: an architect wrote the task file through a temporary sibling such as
+    /// <c>&lt;plan&gt;.tasks.json.new</c> and left it behind, and no rule read it. The copy holds
+    /// the same prompts, so it is a second, unchecked task file that a later write could pick up
+    /// in place of the one the plan names.
+    /// </summary>
+    /// <param name="suffix">The text appended to the task file's name to make the sidecar.</param>
+    [Theory]
+    [InlineData(".new")]
+    [InlineData(".tmp")]
+    [InlineData(".bak")]
+    [InlineData("~")]
+    public void ASidecarCopyOfATaskFileIsKWDOCTASKS007(string suffix)
+    {
+        using DocFixture accepted = PlanTaskFileProbe.Corpus();
+        accepted.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile());
+        AssertDoesNotReport(Validate(accepted), SidecarTaskFile);
+
+        using DocFixture sidecar = PlanTaskFileProbe.Corpus();
+        sidecar.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile());
+        sidecar.Write(PlanTaskFileProbe.SidecarPath(suffix), PlanTaskFileProbe.TaskFile());
+
+        ReportedFindings run = Validate(sidecar);
+
+        AssertReports(run, SidecarTaskFile);
+        Assert.Equal(1, run.Exit);
+        Assert.Contains(PlanTaskFileProbe.SidecarPath(suffix), run.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Issue 599's leftover copy can outlive the plan it was written from, as when an archived
+    /// plan's sidecar is still in the folder. The copy is reported whether or not a plan sits
+    /// beside it, so the rule matches on the file's name alone.
+    /// </summary>
+    [Fact]
+    public void ASidecarWhosePlanIsGoneIsStillKWDOCTASKS007()
+    {
+        const string OrphanSidecar = "6-Docs/plans/2026-11-05-archived-plan.tasks.json.new";
+
+        using DocFixture accepted = PlanTaskFileProbe.Corpus();
+        accepted.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile());
+        AssertDoesNotReport(Validate(accepted), SidecarTaskFile);
+
+        using DocFixture orphan = PlanTaskFileProbe.Corpus();
+        orphan.Write(OrphanSidecar, PlanTaskFileProbe.TaskFile());
+
+        ReportedFindings run = Validate(orphan);
+
+        AssertReports(run, SidecarTaskFile);
+        Assert.Equal(1, run.Exit);
+        Assert.Contains(OrphanSidecar, run.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The rule is keyed to the sidecar's name and nothing else. The task file itself, and an
+    /// unrelated JSON file in the same folder, are not copies of a task file and are not
+    /// reported, so a rule that flags every JSON file cannot satisfy the cases above.
+    /// </summary>
+    [Fact]
+    public void TheTaskFileItselfAndOtherJsonAreNotKWDOCTASKS007()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        fixture.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile());
+        fixture.Write("6-Docs/plans/notes.json", "{\n  \"note\": \"unrelated\"\n}\n");
+
+        AssertDoesNotReport(Validate(fixture), SidecarTaskFile);
+    }
+
+    /// <summary>
     /// The prompt fixture is the contract an architect copies, so its command has to run. This
     /// programme shipped prompts naming test classes that matched nothing — a filter that
     /// matches nothing exits zero and proves nothing — so the class is resolved from the prompt
@@ -521,6 +597,9 @@ internal static class PlanTaskFileProbe
         Assert.True(outOfScope > 0, "the fixture plan must carry an '## Out of scope' section to insert before.");
         return plan.Insert(outOfScope, LateTask);
     }
+
+    /// <summary>The task file's sidecar: the task file's path with a suffix, as a temporary sibling is named.</summary>
+    internal static string SidecarPath(string suffix) => TaskFilePath + suffix;
 
     /// <summary>An opening paragraph that sends a worker into the plan, which no prompt may do.</summary>
     internal static string PlanReadPrefix() =>
