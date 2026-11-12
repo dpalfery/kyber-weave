@@ -6,7 +6,7 @@ The plan file is durable state. A live agent instance is disposable.
 
 1. Resolve the plans directory and **<plan-index>** through Config Reg, then read the index.
 2. Use a prompt-supplied `PLAN_FILE` only when its canonical path remains beneath the plans directory. If none is supplied, create a date-prefixed Draft plan and its index row before broad discovery. Every new plan file name starts with today's date as `yyyy-MM-dd-`, even when the name was handed to you: if a supplied `PLAN_FILE` names a plan that does not exist yet and lacks the date, add the date in front, create that file, and return the dated path as `PLAN_FILE`. Never rename a plan that already exists. Change an existing file with an in-place edit, never a whole-file rewrite, whenever the harness gives you an edit tool. On harnesses where file editing requires an existing destination file (such as Devin), initialize the file via shell (for example, `touch <file>`) before editing. A note or excuse for why the process was not followed is not a resolution. The process exists to ensure quality; going around it signals bad quality. Do not put such a note in **Active Plans**. A pull request that does will not be approved.
-3. Reconcile body status, frontmatter lifecycle, and index status in the same save. The body status is authoritative when they disagree.
+3. Reconcile body status, frontmatter lifecycle, and index status in the same save. The body status is authoritative when they disagree. Frontmatter `status` is `draft` while the plan is Draft and `current` from Ready on, from the closed set `current`, `draft`, `needs-review`, `superseded`; `status: ready` is invalid and fails `KW-DOC-SPEC-002`. The bold body status line and the index row carry Draft, Ready and later states.
 4. Reconcile conductor-supplied answers against the decision ledger before more discovery.
 5. Save after every discovery batch and before every status handoff.
 
@@ -69,6 +69,17 @@ editing a decisions row leaves it valid while editing a task makes it stale.
 Two slots stay unfilled — `{worktree}` and `{prior_results}` — because no plan can know the worktree
 the run picks or what an earlier worker reported. Everything else in a prompt is final when the file
 is written.
+
+Finalization runs in this order:
+
+1. Make every plan edit first: the approval rows, the bold body status line, the frontmatter status and the index row.
+2. Run `kyber-weave arbiter plan <plan file> -f json` in the checkout that holds the plan, and take `metrics.execution-digest` from its one JSON document.
+3. Write the task file at its final path with the edit tools, with that value as `execution-digest`, in place. Never write it through a sibling or temporary file such as a `.new` or `.tmp` copy.
+4. Run both documentation checks. Any `KW-DOC-TASKS-*` finding is fixed, and the order is repeated from step 2.
+
+Never compute the digest by hand or with a script. An edit to a task, a test contract row, an out-of-scope path or the development mode after step 2 means repeating step 2; a status or Decisions edit does not.
+
+An architect with no shell cannot run step 2. It returns `STATUS: BLOCKED` naming `task-file digest: run kyber-weave arbiter plan <plan file> -f json in <checkout>`, and continues when it is re-invoked with `PLAN_DIGEST: <hex>`.
 
 ## Decisions
 

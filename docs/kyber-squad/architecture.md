@@ -1758,7 +1758,10 @@ what makes resuming a run somewhere else possible at all.
 - **The execution digest covers the execution, not the prose.** It hashes the parsed tasks (id,
   title, text, files, dependencies, skills), the test contract rows, the out-of-scope paths and the
   development mode. A status flip or an edit to a Decisions row is therefore not stale; any task
-  edit is. Stale means the conductor refuses the file until the architect regenerates it.
+  edit is. Stale means the conductor refuses the file until the architect regenerates it. The
+  architect takes the digest from `kyber-weave arbiter plan -f json` after its last plan edit, writes
+  the task file, then validates, and returns `PLAN_FINALIZED` only with no `KW-DOC-TASKS-*` finding;
+  a shell-less architect gets the digest from the conductor as `PLAN_DIGEST`.
 - **Each finished task commits with a `Task:` line.** The worker commits on the feature branch with
   `Task: <id>` and its report in the commit body, and the branch is pushed after each integrated
   task, so `run start --resume` can read the completed tasks and their results from the commits

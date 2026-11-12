@@ -46,7 +46,7 @@ the parsed tasks, files, dependencies, skills, test rows, out-of-scope paths and
 flip or a Decisions edit does not mark it stale while any task edit does. A file that disagrees
 with its plan, a stale digest, a prompt without a command or acceptance criteria, and a prompt
 that tells a worker to open a plan each fail validation (`KW-DOC-TASKS-002` to `-005`). A malformed
-or wrong-schema file fails `-001`, and a Ready plan with no file warns `-006`.
+or wrong-schema file fails `-001`, and a Ready plan with no file warns `-006`. The digest comes from `kyber-weave arbiter plan <plan> -f json`, and frontmatter `status` stays `current` once the body says Ready.
 
 The task file is transient. Closeout removes it with `git rm` in the same commit that archives the
 plan, so it never reaches `main` — this repository squash merges, and nothing durable is lost
@@ -57,7 +57,9 @@ its `tasks.json` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-No plans are open.
+| Plan | Status | Date | Goal |
+|---|---|---|---|
+| [2026-11-12-plan-task-file-digest-producer.md](2026-11-12-plan-task-file-digest-producer.md) | Ready — approved 2026-11-12 (AP1, autonomous); no task file per D11 | 2026-11-12 | Give the architect a supported command for the task file's execution digest, so approved plans can finalize (issue 599) |
 
 ## Archived Plans
 
