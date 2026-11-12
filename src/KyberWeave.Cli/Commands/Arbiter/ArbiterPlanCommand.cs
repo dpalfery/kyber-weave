@@ -18,9 +18,10 @@ public sealed class ArbiterPlanCommand : Command<ArbiterSettings>
     /// <summary>
     /// Parses the plan file named by the positional path and prints its tasks,
     /// files, dependencies, contract rows and out-of-scope paths, plus
-    /// <c>KW-ARB-PARSE-00x</c> diagnostics. The execution digest is reported only for a plan that
-    /// parsed without findings and has tasks: as the <c>execution-digest</c> metric in json, and once
-    /// on its own line in the table, so a task file can record the digest it was written from. A plan without tasks reports
+    /// <c>KW-ARB-PARSE-00x</c> diagnostics. The execution digest is reported only for a plan with tasks
+    /// and no parser findings, as the <c>execution-digest</c> metric in json and once on its own line in
+    /// the table, so a task file can record the digest it was written from. Any finding withholds it,
+    /// since a task without a Files line is an incomplete execution. A plan with no parsed task reports
     /// <c>KW-ARB-PLAN-001</c>; a missing or unreadable file reports
     /// <c>KW-ARB-PLAN-002</c> and exits 1.
     /// </summary>
@@ -59,10 +60,11 @@ public sealed class ArbiterPlanCommand : Command<ArbiterSettings>
         PlanDocument document = PlanDocumentParser.Parse(text);
         report.AddRange(document.Diagnostics);
 
-        // Fail closed: a digest is offered only for a plan that parsed without findings and has tasks.
-        // A finding means the parser dropped or altered a line, so the digest would describe a view a
-        // task file should not be written from. The findings are warnings, so HasErrors does not catch
-        // them; the finding count does. An empty Tasks section has HasTasks but no task to digest.
+        // Fail closed: a digest is offered only for a plan with tasks and no parser findings. Any finding
+        // withholds it, not only the ones that alter a line: a task with no Files line (KW-ARB-PARSE-002)
+        // is an incomplete execution, and its digest would present it as complete. The findings are
+        // warnings, so HasErrors does not catch them; the finding count does. An empty Tasks section has
+        // HasTasks but no task to digest.
         bool parsedWithoutFindings = document.Diagnostics.Count == 0;
         string? digest = parsedWithoutFindings && document.HasTasks && document.Tasks.Count > 0
             ? PlanDocumentParser.ExecutionDigest(document)
@@ -75,12 +77,16 @@ public sealed class ArbiterPlanCommand : Command<ArbiterSettings>
             report.AddMetric("execution-digest", digest);
         }
 
-        if (!document.HasTasks)
+        // Zero parsed tasks gets the finding whether or not a Tasks heading exists. Either way there is
+        // no execution, and the operator needs the finding to learn why no digest is printed.
+        if (document.Tasks.Count == 0)
         {
             report.Add(new Diagnostic(
                 NoTasks,
                 Severity.Warning,
-                $"Plan '{resolved}' carries no Tasks section.",
+                document.HasTasks
+                    ? $"Plan '{resolved}' has a Tasks section, but no task in it parsed."
+                    : $"Plan '{resolved}' carries no Tasks section.",
                 settings.Path,
                 Hint: "Add a '## Tasks' section with T1, T2, ... headings, or a spec-grammar checklist; without one, readiness answers no-tasks."));
         }

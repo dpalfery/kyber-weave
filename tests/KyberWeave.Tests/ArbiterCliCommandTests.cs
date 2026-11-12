@@ -293,6 +293,10 @@ public sealed class ArbiterCliCommandTests : IDisposable
             null!,
             new ArbiterSettings { Path = plan }));
 
+        Assert.Equal(0, json.ExitCode);
+        Assert.Equal(0, table.ExitCode);
+        Assert.Contains("KW-ARB-PLAN-001", json.Output, StringComparison.Ordinal);
+        Assert.Contains("KW-ARB-PLAN-001", table.Output, StringComparison.Ordinal);
         Assert.False(ReportsMetric(json.Output, "execution-digest"));
         Assert.DoesNotContain("Execution digest:", table.Output, StringComparison.Ordinal);
     }
@@ -325,7 +329,10 @@ public sealed class ArbiterCliCommandTests : IDisposable
             null!,
             new ArbiterSettings { Path = plan }));
 
+        Assert.Equal(0, json.ExitCode);
+        Assert.Equal(0, table.ExitCode);
         Assert.Contains("KW-ARB-PARSE-001", json.Output, StringComparison.Ordinal);
+        Assert.Contains("KW-ARB-PARSE-001", table.Output, StringComparison.Ordinal);
         Assert.False(ReportsMetric(json.Output, "execution-digest"));
         Assert.DoesNotContain("Execution digest:", table.Output, StringComparison.Ordinal);
     }
