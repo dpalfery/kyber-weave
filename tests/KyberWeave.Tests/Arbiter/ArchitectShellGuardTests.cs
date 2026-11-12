@@ -72,6 +72,8 @@ public sealed class ArchitectShellGuardTests
     [InlineData("sort f")]
     [InlineData("sort -r f")]
     [InlineData("tail -5 f")]
+    [InlineData("kyber-weave arbiter plan docs/plans/x.md -f json")]
+    [InlineData("cd /w && kyber-weave arbiter plan docs/plans/x.md -f json")]
     public void Bash_ListedCommand_IsAllowed(string command)
     {
         ShellGuardResult result = CheckBash(command);
@@ -140,6 +142,10 @@ public sealed class ArchitectShellGuardTests
     [InlineData("tail --follow f", "tail --follow f")]
     [InlineData("touch ../other/docs/plans/x.md", "touch ../other/docs/plans/x.md")]
     [InlineData("touch ~/docs/plans/x.md", "touch ~/docs/plans/x.md")]
+    [InlineData("kyber-weave arbiter plan docs/plans/x.md", "kyber-weave arbiter plan docs/plans/x.md")]
+    [InlineData("kyber-weave arbiter eval -f json", "kyber-weave arbiter eval -f json")]
+    [InlineData("kyber-weave arbiter install", "kyber-weave arbiter install")]
+    [InlineData("kyber-weave arbiter plan a b -f json", "kyber-weave arbiter plan a b -f json")]
     public void Bash_CommandOutsideTheList_IsDeniedNamingTheOffendingSegment(string command, string offendingSegment)
     {
         ShellGuardResult result = CheckBash(command);
