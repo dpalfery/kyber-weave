@@ -88,7 +88,7 @@ Three facts shape the choice of mechanism:
   boundary by rule id. A hook guard avoids all four.
 - **A `^(Bash|PowerShell)$` matcher in the user-level `settings.json`.** Rejected. It starts the hook process for
   every shell call of every agent on the machine, and it fires twice beside a project agent-file hook.
-- **Shadow mode, or a configuration switch.** Rejected. A boundary that a host can switch off, or that only
+- **Shadow mode, or a per-guard switch.** Rejected. A boundary that a host can switch off on its own, or that only
   records what it would have denied, does not enforce the list. The cost of a wrong denial is one round trip.
 - **Enforcing on every harness now.** Rejected for this change. Several harnesses have no verified shell-tool
   name or no pre-call hook for the shell tool, and an unverified matcher would be a claim the harness does not
