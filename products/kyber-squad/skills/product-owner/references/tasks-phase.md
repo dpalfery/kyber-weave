@@ -41,7 +41,7 @@ The file is written at finalization, not during the tasks phase: write it in pla
 
 Finalization runs in this order:
 
-1. Check the digest before anything is written. A finalization invocation without `SPEC_DIGEST`, or one made after a task, contract-row, out-of-scope or mode edit since the digest was computed, returns `STATUS: BLOCKED` naming `task-file digest: run kyber-weave arbiter plan <spec-folder>/tasks.md -f json in <checkout>`. Nothing else is written, so the spec is not left Ready without a task file.
+1. Check the digest before anything is written. A finalization invocation without `SPEC_DIGEST`, or one made after a task, contract-row, out-of-scope or mode edit since the digest was computed, returns `STATUS: BLOCKED` naming `task-file digest: run kyber-weave arbiter plan <spec-folder>/tasks.md -f json in <checkout>`. `product-owner` has no shell, so it cannot recompute the digest: the conductor must run the producer again after any `tasks.md` edit and never reuse an earlier value, and the owner blocks when `SPEC_DIGEST` is absent or the conductor reports it stale. Nothing else is written, so the spec is not left Ready without a task file.
 2. Record the approval rows, write the spec Ready line (`**Status:** Ready`) in `tasks.md`, and synchronize the index.
 3. Write `tasks.json` with the digest from the conductor's `SPEC_DIGEST` as `execution-digest`.
 4. Return `SPEC_FINALIZED` with `TASK_FILE: <spec-folder>/tasks.json`.

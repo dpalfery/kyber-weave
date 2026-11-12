@@ -94,7 +94,7 @@ public static partial class PlanDocumentParser
 
     // A bold label's text in the emphasis-stripped plain text: a word run ending in a colon, read
     // from the position where a bold run opened (\G anchors the match there).
-    [GeneratedRegex(@"\G[A-Za-z][\w \-/]*:", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\G[A-Za-z][\w .\-/]*:", RegexOptions.CultureInvariant)]
     private static partial Regex BoldLabelRegex();
 
     [GeneratedRegex(@"<[^<>\n]*>", RegexOptions.CultureInvariant)]
@@ -660,16 +660,21 @@ public static partial class PlanDocumentParser
         return LeadingWhitespace(plain, lineStart);
     }
 
-    /// <summary>The count of spaces and tabs that open the line starting at <paramref name="lineStart"/>.</summary>
+    /// <summary>
+    /// The width of the spaces and tabs that open the line starting at <paramref name="lineStart"/>,
+    /// with a tab counted as four columns so a tab-indented line and a space-indented one compare.
+    /// </summary>
     private static int LeadingWhitespace(string plain, int lineStart)
     {
         int index = lineStart;
+        int width = 0;
         while (index < plain.Length && (plain[index] == ' ' || plain[index] == '\t'))
         {
+            width += plain[index] == '\t' ? 4 : 1;
             index++;
         }
 
-        return index - lineStart;
+        return width;
     }
 
     private static int NextLabelStart(List<LabelMatch> labels, int after) =>

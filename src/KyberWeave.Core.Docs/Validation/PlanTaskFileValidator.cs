@@ -122,7 +122,7 @@ public sealed partial class PlanTaskFileValidator
         IsSpecTaskList(artifact) ? SpecTaskListKind : PlanKind;
 
     private static string FileNameOf(string relativePath) =>
-        relativePath[(relativePath.LastIndexOf('/') + 1)..];
+        relativePath[(relativePath.LastIndexOfAny(['/', '\\']) + 1)..];
 
     /// <summary>
     /// The repository-relative directories holding plans and specifications: the folders of the
@@ -639,6 +639,6 @@ public sealed partial class PlanTaskFileValidator
 
     // The plan form puts the colon inside the bold, `**Status: Ready**`; the spec form closes the
     // bold after the colon, `**Status:** Ready`. Both name the same state.
-    [GeneratedRegex(@"\*\*Status:(?:\*\*)?\s*Ready\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\*\*Status:(?:\*\*)?\s*Ready(?![\w-])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ReadyStatusRegex();
 }
