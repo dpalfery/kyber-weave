@@ -313,9 +313,9 @@ public sealed class ReviewVerdictInputTests : IDisposable
     {
         TheoryData<string, string, string, string> data = [];
         foreach (string listKind in Spellings)
-        foreach (string fieldKind in Spellings)
-        foreach ((string field, string value) in new[] { ("severity", "7"), ("confidence", "999") })
-            data.Add(listKind, fieldKind, field, value);
+            foreach (string fieldKind in Spellings)
+                foreach ((string field, string value) in new[] { ("severity", "7"), ("confidence", "999") })
+                    data.Add(listKind, fieldKind, field, value);
         return data;
     }
 
@@ -323,8 +323,8 @@ public sealed class ReviewVerdictInputTests : IDisposable
     {
         TheoryData<string, string> data = [];
         foreach (string kind in Spellings)
-        foreach (string key in new[] { "findings", "changedPaths", "coverage" })
-            data.Add(key, kind);
+            foreach (string key in new[] { "findings", "changedPaths", "coverage" })
+                data.Add(key, kind);
         return data;
     }
 
@@ -332,8 +332,8 @@ public sealed class ReviewVerdictInputTests : IDisposable
     {
         TheoryData<string, string> data = [];
         foreach (string kind in Spellings)
-        foreach (string key in new[] { "gates", "coverageReports" })
-            data.Add(key, kind);
+            foreach (string key in new[] { "gates", "coverageReports" })
+                data.Add(key, kind);
         return data;
     }
 
