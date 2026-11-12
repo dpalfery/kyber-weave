@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: rust
 owner: dpalfery
-last-reviewed: 2026-10-27
+last-reviewed: 2026-11-11
 ---
 
 # Rust coding standard
@@ -50,6 +50,8 @@ merge code that fails them.
   `UpperCamelCase` for types and traits; `SCREAMING_SNAKE_CASE` for constants and statics.
 
 ## Errors
+
+Parsers fail closed (KW-STD-INPUT-001). Code that parses or converts a value from outside the process refuses any input it does not recognise, with an error or diagnostic that names the input; it never silently drops, defaults or coerces it. The one exception is an unknown field in a format whose specification says to ignore unknown fields, and the code names that specification where it skips the field.
 
 - **Typed errors at command boundaries.** A Tauri command returns a crate-local error enum
   derived with `thiserror`, serialized as a tagged `{ kind, message }` payload. `CommandError`

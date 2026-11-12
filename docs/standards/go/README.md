@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: go
 owner: dpalfery
-last-reviewed: 2026-10-27
+last-reviewed: 2026-11-11
 ---
 
 # Go coding standard
@@ -47,6 +47,8 @@ the tools do not check are below.
 - Every exported identifier has a doc comment that starts with its name.
 
 ## Errors
+
+Parsers fail closed (KW-STD-INPUT-001). Code that parses or converts a value from outside the process refuses any input it does not recognise, with an error or diagnostic that names the input; it never silently drops, defaults or coerces it. The one exception is an unknown field in a format whose specification says to ignore unknown fields, and the code names that specification where it skips the field.
 
 - Wrap with context: `fmt.Errorf("<operation> <input>: %w", err)`. Use `%v` only to cut the
   chain on purpose at an API boundary.

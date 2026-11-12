@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: csharp
 owner: dpalfery
-last-reviewed: 2026-11-08
+last-reviewed: 2026-11-11
 ---
 
 # C# coding standard
@@ -109,6 +109,8 @@ Write that block at the point the decision is made. A rationale in a commit mess
 rationale nobody reads.
 
 ## Errors and diagnostics
+
+Parsers fail closed (KW-STD-INPUT-001). Code that parses or converts a value from outside the process refuses any input it does not recognise, with an error or diagnostic that names the input; it never silently drops, defaults or coerces it. The one exception is an unknown field in a format whose specification says to ignore unknown fields, and the code names that specification where it skips the field.
 
 **Catch what you can name.** Operational failures are caught by type — `IOException`,
 `UnauthorizedAccessException`, `YamlException`, `InvalidDataException` — and translated into a
