@@ -18,8 +18,9 @@ namespace KyberWeave.Arbiter.Hooks.Adapters;
 /// </summary>
 /// <remarks>
 /// The architect's shell calls are checked against its documented command list before they run,
-/// by <see cref="ArchitectShellGuard"/>; every other caller's shell call takes the planning-path
-/// Read guard path, which is unchanged. The payload's <c>agent_type</c> outranks the rendered <c>--caller</c>. An
+/// by <see cref="ArchitectShellGuard"/>. This adapter does not check other callers' shell calls
+/// with it; for an implementation specialist, a shell call still reaches the planning-path Read
+/// guard, which is unchanged, and any other caller's shell call passes through. The payload's <c>agent_type</c> outranks the rendered <c>--caller</c>. An
 /// <c>Agent</c> input without <c>subagent_type</c> is not a dispatch and passes through
 /// before configuration loads. <c>updatedInput</c> replaces the entire input, so the
 /// strip path copies every <c>tool_input</c> field and only rewrites <c>prompt</c>.

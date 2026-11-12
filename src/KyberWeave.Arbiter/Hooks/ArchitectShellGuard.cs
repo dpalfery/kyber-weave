@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Core.Arbiter;
@@ -11,7 +12,8 @@ namespace KyberWeave.Arbiter.Hooks;
 /// </summary>
 /// <remarks>
 /// The rule is permanent and not configurable, so it lives beside <see cref="ReadGuard"/> and
-/// <see cref="ConductorGuard"/> rather than in the rules file: a project cannot switch it off. It is
+/// <see cref="ConductorGuard"/> rather than in the rules file, so no rule can switch it off. It is
+/// active only while the Arbiter is enabled: <c>arbiter.enabled: false</c> turns the whole Arbiter off, this guard with it. It is
 /// enforced at once, with no shadow mode. Matching is whole-command and anchored per form, never a
 /// substring match, so a command that merely contains a listed word is not a listed form. The call is
 /// split on unquoted separators; each segment is tokenised, refused on any construct the list cannot
@@ -96,6 +98,28 @@ public static class ArchitectShellGuard
     };
 
     private static readonly char[] GlobCharacters = ['*', '?', '[', '{'];
+
+    /// <summary>
+    /// The characters PowerShell reads as a quote or a statement break beyond ASCII: the typographic single and
+    /// double quotes (U+2018 to U+201F), the carriage return, and the next-line, line- and paragraph-separator
+    /// characters (U+0085, U+2028, U+2029). A PowerShell call that holds one is refused.
+    /// </summary>
+    private static readonly SearchValues<char> PowerShellQuoteAndBreakCharacters = SearchValues.Create(
+    [
+        '\u2018', '\u2019', '\u201A', '\u201B', '\u201C', '\u201D', '\u201E', '\u201F', '\r', '\u0085', '\u2028', '\u2029',
+    ]);
+
+    /// <summary>
+    /// The uniq options that take a value as the next word (<c>-f N</c>, <c>-s N</c>, <c>-w N</c>), named in long form.
+    /// </summary>
+    private static readonly IReadOnlySet<string> UniqValueLongOptions = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "--skip-fields", "--skip-chars", "--check-chars",
+    };
+
+    private static readonly Refusal CarriageReturnRefusal = new(
+        "contains a carriage return outside quotes, which ends a command in PowerShell and is not allowed",
+        "Put each command in its own call, without line breaks");
 
     private static readonly Refusal SubstitutionRefusal = new(
         "uses a variable or command substitution, which is not allowed",
@@ -228,13 +252,16 @@ public static class ArchitectShellGuard
         string? origin = IsRooted(forward) ? Normalize(forward) : null;
         string directory = origin ?? forward;
         string? departure = null;
+        string? previous = null;
         foreach (Segment segment in Split(command, bash))
         {
-            Refusal? refusal = CheckSegment(segment, bash, ref directory, ref departure, origin, planningDirectories);
+            Refusal? refusal = CheckSegment(segment, bash, previous, ref directory, ref departure, origin, planningDirectories);
             if (refusal is not null)
             {
                 return Deny(toolName, refusal.Segment ?? segment.Text, refusal);
             }
+
+            previous = segment.Separator;
         }
 
         return ShellGuardResult.Allow;
@@ -274,7 +301,9 @@ public static class ArchitectShellGuard
 
         void Close(string? separator)
         {
-            segments.Add(new Segment(current.ToString().Trim(), separator));
+            // Only blanks are trimmed: a carriage return or a PowerShell line break inside the text must stay visible to
+            // the checks that refuse it, not vanish at a segment edge.
+            segments.Add(new Segment(current.ToString().Trim(' ', '\t'), separator));
             current.Clear();
         }
 
@@ -444,7 +473,7 @@ public static class ArchitectShellGuard
                 continue;
             }
 
-            if (c == ' ' || c == '\t' || c == '\r')
+            if (c == ' ' || c == '\t')
             {
                 Flush();
                 continue;
@@ -452,6 +481,10 @@ public static class ArchitectShellGuard
 
             switch (c)
             {
+                case '\r':
+                    // Bash reads a bare carriage return as a word character, and PowerShell as a statement break;
+                    // neither reading is one the list can account for.
+                    return new Tokens(words, CarriageReturnRefusal);
                 case '\'':
                     quote = Quote.Single;
                     inWord = true;
@@ -534,6 +567,7 @@ public static class ArchitectShellGuard
     private static Refusal? CheckSegment(
         Segment segment,
         bool bash,
+        string? previousSeparator,
         ref string directory,
         ref string? departure,
         string? origin,
@@ -542,6 +576,19 @@ public static class ArchitectShellGuard
         if (segment.Text.Length == 0)
         {
             return new Refusal("is empty between separators", "Remove the stray separator");
+        }
+
+        // PowerShell reads these as quotes or statement breaks, and the tokeniser reads them as ordinary characters,
+        // so a segment holding one could mean something the list never saw. They are refused before tokenising.
+        if (!bash)
+        {
+            int at = segment.Text.AsSpan().IndexOfAny(PowerShellQuoteAndBreakCharacters);
+            if (at >= 0)
+            {
+                return new Refusal(
+                    $"contains U+{(int)segment.Text[at]:X4}, which PowerShell reads as a quote or a statement break",
+                    "Use ASCII quotes, and one command per line separated by ;");
+            }
         }
 
         Tokens tokens = Tokenize(segment.Text, bash);
@@ -573,7 +620,7 @@ public static class ArchitectShellGuard
 
         if (string.Equals(name, "cd", StringComparison.Ordinal))
         {
-            return CheckChangeDirectory(segment, bash, words, ref directory, ref departure, origin);
+            return CheckChangeDirectory(segment, bash, previousSeparator, words, ref directory, ref departure, origin);
         }
 
         return CheckCommand(name, words, tokens.Quoted ?? [], directory, departure, origin, planningDirectories);
@@ -594,6 +641,7 @@ public static class ArchitectShellGuard
     private static Refusal? CheckChangeDirectory(
         Segment segment,
         bool bash,
+        string? previousSeparator,
         List<string> words,
         ref string directory,
         ref string? departure,
@@ -607,6 +655,25 @@ public static class ArchitectShellGuard
         if (IsFlag(words[1]))
         {
             return new Refusal("uses a flag or cd -, which is not allowed", "Name the directory itself: cd <dir>");
+        }
+
+        if (words[1].StartsWith('~'))
+        {
+            return new Refusal(
+                "changes into a home directory, which is not allowed",
+                "Name a directory beneath the working directory");
+        }
+
+        // A cd is honoured only where the call's own chain carries it: first in the call, or right after &&
+        // (or ; in PowerShell). After || or | the cd may not run, so the directory it would set is not known.
+        bool honoured = previousSeparator is null
+            || string.Equals(previousSeparator, "&&", StringComparison.Ordinal)
+            || (!bash && string.Equals(previousSeparator, ";", StringComparison.Ordinal));
+        if (!honoured)
+        {
+            return new Refusal(
+                "changes directory after a separator that may not run it, which is not allowed",
+                "Put the cd first in the call, or right after &&");
         }
 
         bool chained = string.Equals(segment.Separator, "&&", StringComparison.Ordinal)
@@ -1012,9 +1079,57 @@ public static class ArchitectShellGuard
         return null;
     }
 
+    /// <summary>
+    /// Checks <c>uniq</c>: at most one file operand. The second operand of uniq is an output file, so a second
+    /// operand is refused. Every word after <c>--</c> is an operand, and <c>-f</c>, <c>-s</c> and <c>-w</c> (and their
+    /// long forms) take their value as the next word, which is not an operand.
+    /// </summary>
     private static Refusal? CheckUniq(List<string> words)
     {
-        return words.Skip(1).Count(argument => !IsFlag(argument)) > 1
+        int operands = 0;
+        bool optionsEnded = false;
+        for (int index = 1; index < words.Count; index++)
+        {
+            string argument = words[index];
+            if (!optionsEnded && string.Equals(argument, "--", StringComparison.Ordinal))
+            {
+                optionsEnded = true;
+                continue;
+            }
+
+            if (optionsEnded || !IsFlag(argument) || argument == "-")
+            {
+                operands++;
+                continue;
+            }
+
+            if (argument.StartsWith("--", StringComparison.Ordinal))
+            {
+                if (string.Equals(argument, LongOptionName(argument), StringComparison.Ordinal)
+                    && UniqValueLongOptions.Contains(argument))
+                {
+                    index++;
+                }
+
+                continue;
+            }
+
+            for (int letter = 1; letter < argument.Length; letter++)
+            {
+                if (argument[letter] is 'f' or 's' or 'w')
+                {
+                    // The value is the rest of this word when attached (-f1), otherwise the next word (-f 1).
+                    if (letter == argument.Length - 1)
+                    {
+                        index++;
+                    }
+
+                    break;
+                }
+            }
+        }
+
+        return operands > 1
             ? new Refusal(
                 "names two files, and the second would be an output file, which is not allowed",
                 "Pass at most one input file to uniq")
