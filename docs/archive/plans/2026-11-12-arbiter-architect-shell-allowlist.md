@@ -310,7 +310,7 @@ graph TD
 - The worker read guard's missing `PowerShell` coverage (`ClaudeHookAdapter.IsReadTool`, `ClaudeRenderer.ReadGuardMatcher`).
 - Shell boundaries for other read-only roles (`product-owner`, investigators, reviewers).
 - `src/KyberWeave.Core/Arbiter/Rules/default-rules.yml` and the rule engine (D1).
-- Adding `kyber-weave arbiter plan` to the guard (D5); it lands with PR 600 or after it.
+- Adding `kyber-weave arbiter plan` to the guard (D5): delivered by the merge of `main` into this branch (06469355), which carries the form in the clause and the guard (32b09efd).
 
 ## Risks and verification gates
 
@@ -364,4 +364,4 @@ Every durable decision (D1 to D13) and every Design harvest item (H1 to H6, in t
 | H5 | [ADR 0071](../../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md) and its [index row](../../adr/README.md) | [ADR 0071](../../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md) |
 | H6 | [Arbiter runbook, widening the list](../../kyber-arbiter/runbook.md#the-architect-shell-guard) (the clause itself is `products/kyber-squad/agents/architect.md`, sync-tested; the `capabilities.yml` comment is permission-neutral) | no ADR — ADR waiver: product source bound by the sync test; no separate architectural record |
 
-**Follow-ups, recorded and not delivered by this plan.** Shell enforcement on the other harnesses (D6). The worker read guard's `PowerShell` gap, named in the runbook. Adding `kyber-weave arbiter plan` to the guard when PR 600 lands (D5).
+**Follow-ups, recorded and not delivered by this plan.** Shell enforcement on the other harnesses (D6). The worker read guard's `PowerShell` gap, named in the runbook. The `kyber-weave arbiter plan` form (D5) is delivered by the merge of `main`, so it is no longer a follow-up.

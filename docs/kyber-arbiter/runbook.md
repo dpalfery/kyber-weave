@@ -161,7 +161,9 @@ A command the guard cannot parse is denied, so a wrongly denied command costs on
 **Forms that look unusual but are allowed.** The Bash tool resets its directory on every call, so `cd <dir> &&`
 runs a command in the worktree, and `git -C <dir>` does the same for git. The docs commands take a path operand
 in place of `.`. `sort` accepts only the flags on its allowlist, and `rg` accepts any flag except the ones on its
-denylist. `touch` paths are anchored to the working tree.
+denylist. `touch` paths are anchored to the working tree. `kyber-weave arbiter plan <plan file> -f json` is read-only
+and is the architect's one way to read a task file's execution digest; it is on the architect's command list and in
+the guard. The command list itself lives in `architect.md`, which the sync test binds to the guard.
 
 **Reading a denial.** A denial names the command the architect tried. The architect is told to return
 `STATUS: BLOCKED` with that command rather than work around it, so a denial is the list working. Find
