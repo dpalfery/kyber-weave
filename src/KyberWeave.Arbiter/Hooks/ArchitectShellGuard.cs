@@ -118,6 +118,10 @@ public static class ArchitectShellGuard
         "--skip-fields", "--skip-chars", "--check-chars",
     };
 
+    private static readonly Refusal GlobRefusal = new(
+        "uses an unquoted glob pattern, which the shell expands to names the guard never read",
+        "Quote the pattern, for example '*.md', so it reaches the command as written");
+
     private static readonly Refusal CarriageReturnRefusal = new(
         "contains a carriage return outside quotes, which ends a command in PowerShell and is not allowed",
         "Put each command in its own call, without line breaks");
@@ -263,9 +267,10 @@ public static class ArchitectShellGuard
         string directory = origin ?? forward;
         string? departure = null;
         string? previous = null;
+        int changes = 0;
         foreach (Segment segment in Split(command, bash))
         {
-            Refusal? refusal = CheckSegment(segment, bash, previous, ref directory, ref departure, origin, planningDirectories);
+            Refusal? refusal = CheckSegment(segment, bash, previous, ref directory, ref departure, ref changes, origin, planningDirectories);
             if (refusal is not null)
             {
                 return Deny(toolName, refusal.Segment ?? segment.Text, refusal);
@@ -610,6 +615,12 @@ public static class ArchitectShellGuard
                 case '$':
                 case '`':
                     return new Tokens(words, SubstitutionRefusal);
+                case '*':
+                case '?':
+                case '[':
+                    // An unquoted pattern expands in the shell to file names the check never saw, and a name that begins
+                    // with a dash would then read as an option. A quoted pattern is passed through as written.
+                    return new Tokens(words, GlobRefusal);
                 case '(':
                 case ')':
                 case '{':
@@ -682,6 +693,7 @@ public static class ArchitectShellGuard
         string? previousSeparator,
         ref string directory,
         ref string? departure,
+        ref int changes,
         string? origin,
         IReadOnlyList<string> planningDirectories)
     {
@@ -732,7 +744,7 @@ public static class ArchitectShellGuard
 
         if (string.Equals(name, "cd", StringComparison.Ordinal))
         {
-            return CheckChangeDirectory(segment, bash, previousSeparator, words, ref directory, ref departure, origin);
+            return CheckChangeDirectory(segment, bash, previousSeparator, words, ref directory, ref departure, ref changes, origin);
         }
 
         return CheckCommand(name, words, tokens.Quoted ?? [], directory, departure, origin, planningDirectories);
@@ -757,8 +769,19 @@ public static class ArchitectShellGuard
         List<string> words,
         ref string directory,
         ref string? departure,
+        ref int changes,
         string? origin)
     {
+        // One cd per call. Two cds let a failed first cd leave the second to run from an unknown directory, and the
+        // two-reading check covers one directory only.
+        if (changes > 0)
+        {
+            return new Refusal(
+                "is a second cd in one call, which leaves the directory the call runs in unknown",
+                "One cd per call; combine into a path");
+        }
+
+        changes++;
         if (words.Count != 2)
         {
             return new Refusal("needs exactly one directory operand", "Name one directory: cd <dir>");
