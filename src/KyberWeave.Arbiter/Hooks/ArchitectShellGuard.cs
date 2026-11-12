@@ -54,9 +54,18 @@ public static class ArchitectShellGuard
     /// <summary>The git options that write a file or run a program, named without their leading dashes.</summary>
     private static readonly string[] GitDeniedLongOptions = ["output", "ext-diff", "textconv"];
 
+    /// <summary>
+    /// The git diff options whose names begin with <c>output</c> but only set how a diff is printed. They are
+    /// exempt from the prefix rule, so they stay allowed. Matched exactly, without their <c>=value</c>.
+    /// </summary>
+    private static readonly IReadOnlySet<string> GitBenignOutputOptions = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "output-indicator-new", "output-indicator-old", "output-indicator-context",
+    };
+
     private static readonly IReadOnlySet<string> GuardedProfiles = new HashSet<string>(StringComparer.Ordinal)
     {
-        "architect",
+        ArbiterSquadCatalog.ArchitectCapabilityProfile,
     };
 
     /// <summary>Commands that run another program, so no form of them can be checked by what they run.</summary>
@@ -370,6 +379,7 @@ public static class ArchitectShellGuard
     private static Tokens Tokenize(string text, bool bash)
     {
         List<string> words = [];
+        List<bool> quotedWords = [];
         StringBuilder word = new();
         bool inWord = false;
         bool quoted = false;
@@ -380,6 +390,7 @@ public static class ArchitectShellGuard
             if (inWord)
             {
                 words.Add(word.ToString());
+                quotedWords.Add(quoted);
                 word.Clear();
                 inWord = false;
                 quoted = false;
@@ -489,7 +500,7 @@ public static class ArchitectShellGuard
         }
 
         Flush();
-        return new Tokens(words, null);
+        return new Tokens(words, null, quotedWords);
     }
 
     /// <summary>
@@ -565,7 +576,7 @@ public static class ArchitectShellGuard
             return CheckChangeDirectory(segment, bash, words, ref directory, ref departure, origin);
         }
 
-        return CheckCommand(name, words, directory, departure, origin, planningDirectories);
+        return CheckCommand(name, words, tokens.Quoted ?? [], directory, departure, origin, planningDirectories);
     }
 
     private static bool IsAssignment(string word)
@@ -623,6 +634,7 @@ public static class ArchitectShellGuard
     private static Refusal? CheckCommand(
         string name,
         List<string> words,
+        List<bool> quoted,
         string directory,
         string? departure,
         string? origin,
@@ -647,8 +659,12 @@ public static class ArchitectShellGuard
             case KyberWeaveCli:
                 return CheckKyberWeave(words);
             case "codegraph":
-                // Exactly one query operand, and no flags: explore takes a query and nothing else.
-                return words.Count == 3 && string.Equals(words[1], "explore", StringComparison.Ordinal) && !IsFlag(words[2])
+                // Exactly one query operand. A quoted query is an operand even when it begins with a dash; an unquoted
+                // dash-leading word is a flag, and explore takes none.
+                return words.Count == 3
+                    && string.Equals(words[1], "explore", StringComparison.Ordinal)
+                    && words[2].Length > 0
+                    && (!IsFlag(words[2]) || (quoted.Count > 2 && quoted[2]))
                     ? null
                     : new Refusal(
                         "is not a codegraph form on the architect's list",
@@ -744,7 +760,9 @@ public static class ArchitectShellGuard
             {
                 index++;
             }
-            else if (string.Equals(words[index], "-C", StringComparison.Ordinal) && index + 1 < words.Count)
+            else if (string.Equals(words[index], "-C", StringComparison.Ordinal)
+                && index + 1 < words.Count
+                && !IsFlag(words[index + 1]))
             {
                 index += 2;
             }
@@ -794,7 +812,7 @@ public static class ArchitectShellGuard
         }
 
         string name = LongOptionName(argument)[2..];
-        if (name.Length == 0)
+        if (name.Length == 0 || GitBenignOutputOptions.Contains(name))
         {
             return false;
         }
@@ -873,8 +891,10 @@ public static class ArchitectShellGuard
     private static bool IsDeniedRipgrepLongOption(string option)
     {
         string name = option[2..];
-        if (name.Length < 2)
+        if (name.Length < 2 || string.Equals(name, "pretty", StringComparison.Ordinal))
         {
+            // --pretty is rg's own output format (-p), not a program or a file: it is the one name the prefix rule
+            // would otherwise catch, because it begins with --pre.
             return false;
         }
 
@@ -1227,7 +1247,12 @@ public static class ArchitectShellGuard
     private sealed record Segment(string Text, string? Separator);
 
     /// <summary>The words of one segment, and the refusal that stopped the read, if any.</summary>
-    private sealed record Tokens(List<string> Words, Refusal? Refusal);
+    /// <summary>
+    /// The words of one segment, the refusal that stopped the read if any, and for each word whether any part of it
+    /// was quoted. The quoting matters where a dash-leading word is an operand rather than a flag: a quoted
+    /// <c>"-x"</c> is a query, and only an unquoted <c>-x</c> is an option.
+    /// </summary>
+    private sealed record Tokens(List<string> Words, Refusal? Refusal, List<bool>? Quoted = null);
 
     /// <summary>
     /// Why a construct is refused, and the replacement the architect should use instead. <paramref name="Segment"/>,

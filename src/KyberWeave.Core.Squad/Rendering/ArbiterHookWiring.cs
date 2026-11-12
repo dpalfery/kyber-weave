@@ -79,7 +79,7 @@ public static class ArbiterHookWiring
 
     /// <summary>The capability profiles whose agents' Bash and PowerShell calls the architect shell guard checks.</summary>
     private static readonly HashSet<string> ShellGuardedCapabilityProfiles =
-        new(StringComparer.Ordinal) { "architect" };
+        new(StringComparer.Ordinal) { KyberWeave.Core.Arbiter.ArbiterSquadCatalog.ArchitectCapabilityProfile };
 
     /// <summary>The targets on which Arbiter hooks are produced today.</summary>
     /// <remarks>

@@ -364,8 +364,9 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
         }
 
         bool isShellGuarded = shellGuardedAgents.Contains(agent.Name);
-        string command = ArbiterHookWiring.HookCommandLine(SquadTarget.Claude, agent.Name, scope);
 
+        // The command is built only for an entry that will be written. HookCommandLine rejects a name that is not a
+        // plain agent name, so building it for an agent that gets no hook would fail a render that needs no hook.
         Dictionary<string, object?> HookEntry(string matcher) => new(StringComparer.Ordinal)
         {
             ["matcher"] = matcher,
@@ -374,7 +375,7 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
                 new Dictionary<string, object?>(StringComparer.Ordinal)
                 {
                     ["type"] = "command",
-                    ["command"] = command,
+                    ["command"] = ArbiterHookWiring.HookCommandLine(SquadTarget.Claude, agent.Name, scope),
                     ["timeout"] = arbiter.HookTimeoutSeconds
                 }
             }
