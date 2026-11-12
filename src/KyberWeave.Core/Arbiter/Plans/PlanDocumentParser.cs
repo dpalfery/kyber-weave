@@ -92,6 +92,11 @@ public static partial class PlanDocumentParser
     [GeneratedRegex(@"^[ \t]*-[ \t]+", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     private static partial Regex BulletLineRegex();
 
+    // A bold label's text in the emphasis-stripped plain text: a word run ending in a colon, read
+    // from the position where a bold run opened (\G anchors the match there).
+    [GeneratedRegex(@"\G[A-Za-z][\w \-/]*:", RegexOptions.CultureInvariant)]
+    private static partial Regex BoldLabelRegex();
+
     [GeneratedRegex(@"<[^<>\n]*>", RegexOptions.CultureInvariant)]
     private static partial Regex PlaceholderSegmentRegex();
 
@@ -453,7 +458,7 @@ public static partial class PlanDocumentParser
                 Math.Min(nextLabelStart, DoubleNewlineIndex(plain, filesLabel.ValueStart)),
                 FirstBulletIndex(plain, filesLabel.ValueStart)));
             files.AddRange(ArbiterPathRule.ExtractPaths(plain[filesLabel.ValueStart..paragraphEnd]));
-            files.AddRange(HarvestBulletRun(plain, paragraphEnd));
+            files.AddRange(HarvestBulletRun(plain, paragraphEnd, boldStarts, LineIndent(plain, filesLabel.Start)));
         }
         else if (isSpec)
         {
@@ -466,10 +471,13 @@ public static partial class PlanDocumentParser
         {
             // The bold boundary is filtered against the value start: the label's own
             // closing `**` produces a bold start immediately before the colon, which is
-            // inside the label and must not end its own value region.
+            // inside the label and must not end its own value region. A bullet at the
+            // label's indent or shallower ends the region; a deeper bullet is part of it.
             int end = RegionEnd(plain, dependsLabel.ValueStart, Math.Min(
-                Math.Min(NextLabelStart(labels, dependsLabel.Start), NextBoldStart(boldStarts, dependsLabel.ValueStart)),
-                DoubleNewlineIndex(plain, dependsLabel.ValueStart)));
+                Math.Min(
+                    Math.Min(NextLabelStart(labels, dependsLabel.Start), NextBoldStart(boldStarts, dependsLabel.ValueStart)),
+                    DoubleNewlineIndex(plain, dependsLabel.ValueStart)),
+                SiblingBulletIndex(plain, dependsLabel.ValueStart, LineIndent(plain, dependsLabel.Start))));
             string region = plain[dependsLabel.ValueStart..end].Trim().TrimEnd('.');
             if (!region.Equals("none", StringComparison.OrdinalIgnoreCase))
             {
@@ -508,11 +516,25 @@ public static partial class PlanDocumentParser
     /// continuations, and blank lines between bullets, until a non-bullet paragraph, a
     /// heading, or the next label. The archived plans separate the label from its bullets
     /// with a blank line, and what follows the list — <c>**Objective:**</c> prose with
-    /// its own bullets — is not the task's file scope.
+    /// its own bullets — is not the task's file scope. A bullet opening with a bold label
+    /// (<c>**Acceptance:**</c>) at the Files label's indent or shallower also ends the block,
+    /// so a spec's sibling fields are not read as file scope. Deeper bullets stay in it.
     /// </summary>
-    private static IEnumerable<string> HarvestBulletRun(string plain, int from)
+    /// <param name="plain">The task body with its emphasis delimiters removed.</param>
+    /// <param name="from">The plain-text offset where the bullet block may begin.</param>
+    /// <param name="boldStarts">The plain-text offsets where a bold run opened, from <see cref="StripEmphasis"/>.</param>
+    /// <param name="filesIndent">The indent of the line holding the Files label.</param>
+    private static IEnumerable<string> HarvestBulletRun(string plain, int from, List<int> boldStarts, int filesIndent)
     {
         string[] lines = plain[from..].Split('\n');
+        int[] lineStarts = new int[lines.Length];
+        int offset = from;
+        for (int position = 0; position < lines.Length; position++)
+        {
+            lineStarts[position] = offset;
+            offset += lines[position].Length + 1;
+        }
+
         int index = 0;
         while (index < lines.Length && lines[index].Trim().Length == 0)
         {
@@ -544,7 +566,7 @@ public static partial class PlanDocumentParser
 
             if (BulletLineRegex().IsMatch(line))
             {
-                if (ContainsLabel(line))
+                if (ContainsLabel(line) || OpensBoldLabel(plain, lineStarts[index], line, boldStarts, filesIndent))
                 {
                     break;
                 }
@@ -586,6 +608,69 @@ public static partial class PlanDocumentParser
 
     private static bool ContainsLabel(string line) =>
         FilesLabelRegex().IsMatch(line) || DependsLabelRegex().IsMatch(line) || SkillsLabelRegex().IsMatch(line);
+
+    /// <summary>
+    /// True when a bullet line at <paramref name="indent"/> or shallower opens with a bold label:
+    /// the bullet's text begins where a bold run opened, and the run reads as a <c>Word...:</c> label.
+    /// </summary>
+    private static bool OpensBoldLabel(string plain, int lineStart, string line, List<int> boldStarts, int indent)
+    {
+        Match bullet = BulletLineRegex().Match(line);
+        if (!bullet.Success || LeadingWhitespace(plain, lineStart) > indent)
+        {
+            return false;
+        }
+
+        int contentStart = lineStart + bullet.Length;
+        return boldStarts.Contains(contentStart) && BoldLabelRegex().IsMatch(plain, contentStart);
+    }
+
+    /// <summary>
+    /// The end of a region that a deeper bullet stays inside: the start of the first bullet line after
+    /// the line holding <paramref name="from"/> whose indent is at or below <paramref name="indent"/>.
+    /// </summary>
+    private static int SiblingBulletIndex(string plain, int from, int indent)
+    {
+        int lineEnd = plain.IndexOf('\n', from);
+        if (lineEnd < 0)
+        {
+            return int.MaxValue;
+        }
+
+        int lineStart = lineEnd + 1;
+        while (lineStart < plain.Length)
+        {
+            int next = plain.IndexOf('\n', lineStart);
+            int end = next < 0 ? plain.Length : next;
+            if (BulletLineRegex().IsMatch(plain[lineStart..end]) && LeadingWhitespace(plain, lineStart) <= indent)
+            {
+                return lineStart;
+            }
+
+            lineStart = end + 1;
+        }
+
+        return int.MaxValue;
+    }
+
+    /// <summary>The indent of the line holding <paramref name="position"/>.</summary>
+    private static int LineIndent(string plain, int position)
+    {
+        int lineStart = position == 0 ? 0 : plain.LastIndexOf('\n', position - 1) + 1;
+        return LeadingWhitespace(plain, lineStart);
+    }
+
+    /// <summary>The count of spaces and tabs that open the line starting at <paramref name="lineStart"/>.</summary>
+    private static int LeadingWhitespace(string plain, int lineStart)
+    {
+        int index = lineStart;
+        while (index < plain.Length && (plain[index] == ' ' || plain[index] == '\t'))
+        {
+            index++;
+        }
+
+        return index - lineStart;
+    }
 
     private static int NextLabelStart(List<LabelMatch> labels, int after) =>
         labels.Where(label => label.Start > after).Select(label => (int?)label.Start).FirstOrDefault() ?? int.MaxValue;
