@@ -13,7 +13,8 @@ namespace KyberWeave.Tests.Arbiter;
 /// unlisted flag each make the whole call a denial. The planning directories are the ones
 /// <see cref="ReadGuard.ProtectedDirectories"/> resolves for this repository, so <c>touch</c> is
 /// allowed only beneath them.
-/// RED: <see cref="ArchitectShellGuard"/> does not exist yet.
+/// Pinned against the shipped <see cref="ArchitectShellGuard"/>: each denial and allowance below is a regression
+/// the guard must keep, and the structural and chained-cd cases were red before their fixes landed.
 /// </summary>
 public sealed class ArchitectShellGuardTests
 {
@@ -97,6 +98,10 @@ public sealed class ArchitectShellGuardTests
     [InlineData("rg --glob '*.md' x docs")]
     [InlineData("rg -n 'a|b' src")]
     [InlineData("grep -rn 'a*b' src")]
+    [InlineData("sort -k 2 f")]
+    [InlineData("uniq --skip-fields 1 f")]
+    [InlineData("rg 'foo\\.bar' src")]
+    [InlineData("git status\n")]
     public void Bash_ListedCommand_IsAllowed(string command)
     {
         ShellGuardResult result = CheckBash(command);
@@ -158,6 +163,10 @@ public sealed class ArchitectShellGuardTests
     [InlineData("touch -r a docs/plans/x.md", "touch -r a docs/plans/x.md")]
     [InlineData("cd -", "cd -")]
     [InlineData("git log \"x", "git log \"x")]
+    [InlineData("tail --fo f", "tail --fo f")]
+    [InlineData("tail -nf 5 f", "tail -nf 5 f")]
+    [InlineData("rg -nz p", "rg -nz p")]
+    [InlineData("touch \"docs/plans/*.md\"", "touch \"docs/plans/*.md\"")]
     [InlineData("uniq -- in -out", "uniq -- in -out")]
     [InlineData("git log | uniq -- - -b", "uniq -- - -b")]
     [InlineData("sort --ou=out1.txt in.txt", "sort --ou=out1.txt in.txt")]
@@ -283,6 +292,45 @@ public sealed class ArchitectShellGuardTests
     }
 
     /// <summary>
+    /// The find actions that run a program or write a file. Each row reaches the action check, not the brace or
+    /// backslash check, so the reason must name the action itself.
+    /// </summary>
+    [Theory]
+    [InlineData("find . -exec rm x ;", "-exec")]
+    [InlineData("find . -exec rm x +", "-exec")]
+    [InlineData("find . -execdir rm x ;", "-execdir")]
+    [InlineData("find . -ok rm x ;", "-ok")]
+    [InlineData("find . -okdir rm x ;", "-okdir")]
+    [InlineData("find . -exec rm '{}' ;", "-exec")]
+    public void FindExecAction_IsDeniedNamingTheAction(string command, string action)
+    {
+        ShellGuardResult result = CheckBash(command);
+
+        Assert.False(result.Allowed, $"'{command}' runs a program through find and must be denied.");
+        string reason = result.Reason ?? string.Empty;
+        Assert.Contains(RuleId, reason, StringComparison.Ordinal);
+        Assert.Contains(action, reason, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A cd whose directory the touch would not resolve beneath the planning folder from the worktree, and a cd
+    /// reached only after a separator other than &amp;&amp;. The reason names the cd, not just the rule.
+    /// </summary>
+    [Theory]
+    [InlineData("cd /w/src && touch docs/plans/x.md", "touch docs/plans/x.md")]
+    [InlineData("git status || cd docs && ls", "cd docs")]
+    [InlineData("git status | cd docs && ls", "cd docs")]
+    public void CdOrTouchInATrackedOrChainedCall_IsDeniedNamingTheSegment(string command, string offendingSegment)
+    {
+        ShellGuardResult result = CheckBash(command);
+
+        Assert.False(result.Allowed, $"'{command}' must be denied.");
+        string reason = result.Reason ?? string.Empty;
+        Assert.Contains(RuleId, reason, StringComparison.Ordinal);
+        Assert.Contains(offendingSegment, reason, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A call with more than one cd segment, and an unquoted glob in an operand. A cd chain leaves the directory
     /// the later touch resolves against ambiguous, and an unquoted glob expands before the list judges it. Each is
     /// denied under the rule id, pinned without a fragment because the reason names the rule.
@@ -294,6 +342,7 @@ public sealed class ArchitectShellGuardTests
     [InlineData("Bash", "ls docs/*.md")]
     [InlineData("Bash", "grep -rn x docs/p?ans")]
     [InlineData("Bash", "head -5 docs/[a]*.md")]
+    [InlineData("Bash", "git status ;; git log")]
     [InlineData("Bash", "wc -l *")]
     public void CommandWithAChainedCdOrUnquotedGlob_IsDeniedUnderTheRule(string tool, string command)
     {
@@ -304,13 +353,12 @@ public sealed class ArchitectShellGuardTests
     }
 
     [Fact]
-    public void Bash_TrailingSeparator_IsDeniedUnderTheRule()
+    public void Bash_TrailingSeparator_IsAllowed()
     {
-        // A trailing ';' leaves an empty final segment, so the reason names the rule rather than a command.
+        // A trailing ';' ends the list with no empty command after it, so the guard lets the command through.
         ShellGuardResult result = CheckBash("git status;");
 
-        Assert.False(result.Allowed, "A command ending in a separator is not on the architect's list and must be denied.");
-        Assert.Contains(RuleId, result.Reason ?? string.Empty, StringComparison.Ordinal);
+        Assert.True(result.Allowed, $"A trailing ';' after a listed command must be allowed. Reason: {result.Reason}");
     }
 
     /// <summary>

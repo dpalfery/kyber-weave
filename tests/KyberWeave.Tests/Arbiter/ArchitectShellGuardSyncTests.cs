@@ -11,7 +11,7 @@ namespace KyberWeave.Tests.Arbiter;
 /// backticked spans in the architect agent file's command-set clause must equal the keys of
 /// <see cref="ArchitectShellGuard.DocumentedForms"/>, and the guard must give each documented sample
 /// the verdict the table records. Without this the document and the enforcement can disagree silently.
-/// RED: <see cref="ArchitectShellGuard"/> does not exist yet.
+/// Pinned against the shipped <see cref="ArchitectShellGuard"/> and the architect file as shipped.
 /// </summary>
 public sealed class ArchitectShellGuardSyncTests
 {
