@@ -19,8 +19,8 @@ public sealed class ArbiterPlanCommand : Command<ArbiterSettings>
     /// Parses the plan file named by the positional path and prints its tasks,
     /// files, dependencies, contract rows and out-of-scope paths, plus
     /// <c>KW-ARB-PARSE-00x</c> diagnostics. The plan's execution digest is reported as the
-    /// <c>execution-digest</c> metric in every format, and printed on its own line in the table,
-    /// so a task file can record the digest it was written from. A plan without tasks reports
+    /// <c>execution-digest</c> metric in json, sarif and markdown, and printed once on its own line
+    /// in the table, so a task file can record the digest it was written from. A plan without tasks reports
     /// <c>KW-ARB-PLAN-001</c>; a missing or unreadable file reports
     /// <c>KW-ARB-PLAN-002</c> and exits 1.
     /// </summary>
@@ -60,7 +60,13 @@ public sealed class ArbiterPlanCommand : Command<ArbiterSettings>
         report.AddRange(document.Diagnostics);
 
         string digest = PlanDocumentParser.ExecutionDigest(document);
-        report.AddMetric("execution-digest", digest);
+
+        // The table prints the digest on its own unfolded line. A metric row would print it again,
+        // truncated, in a narrow cell, so only the machine-readable formats carry the metric.
+        if (settings.ParsedFormat != OutputFormat.Table)
+        {
+            report.AddMetric("execution-digest", digest);
+        }
 
         if (!document.HasTasks)
         {

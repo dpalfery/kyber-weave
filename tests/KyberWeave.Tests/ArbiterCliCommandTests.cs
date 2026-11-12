@@ -220,6 +220,29 @@ public sealed class ArbiterCliCommandTests : IDisposable
     }
 
     /// <summary>
+    /// The table shows the digest once. The unfolded line is the copyable one; a second copy in the
+    /// metrics table can fold across rows on a narrow console, so it is not rendered there.
+    /// </summary>
+    [Fact]
+    public void Plan_TableShowsTheDigestOnce()
+    {
+        string text = DigestPlan(frontmatterStatus: "current", bodyStatus: "Ready");
+        string plan = WriteFile("arbiter-plan-digest-once.md", text);
+
+        ArbiterPlanCommand command = new();
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new ArbiterSettings { Path = plan }));
+
+        string expected = PlanDocumentParser.ExecutionDigest(PlanDocumentParser.Parse(text));
+        Assert.Equal(1, execution.Output.Split(expected).Length - 1);
+
+        // The metrics cell truncates the digest, so the full value never repeats there; a prefix
+        // is what a second copy would leave behind, and counting it is what catches the duplicate.
+        Assert.Equal(1, execution.Output.Split(expected[..16]).Length - 1);
+    }
+
+    /// <summary>
     /// A status change is bookkeeping, not a plan edit, so it must not stale a task file. The
     /// digest covers the tasks, the contract and the out-of-scope list, and not the status
     /// fields, which the plan's owner moves without touching what a worker is asked to do.
