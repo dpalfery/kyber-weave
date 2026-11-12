@@ -380,14 +380,14 @@ public sealed class PlanTaskFileValidatorTests
     }
 
     /// <summary>
-    /// An archived plan folder is out of scope for the sidecar rule, so a copy of a task file under
-    /// the archive is not reported; only the live plans folder is policed.
+    /// A copy under an <c>archive</c> folder inside the plans folder is within the plans folder but
+    /// archived, so it is not reported; this pins the archive exclusion itself, not the folder test.
     /// </summary>
     [Fact]
     public void AnArchivedSidecarIsNotKWDOCTASKS007()
     {
         using DocFixture fixture = PlanTaskFileProbe.Corpus();
-        fixture.Write("6-Docs/archive/plans/2026-11-05-archived-plan.tasks.json.new", "{}\n");
+        fixture.Write("6-Docs/plans/archive/2026-11-05-archived-plan.tasks.json.new", "{}\n");
 
         AssertDoesNotReport(Validate(fixture), SidecarTaskFile);
     }
