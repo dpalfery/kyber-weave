@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
@@ -108,7 +109,7 @@ public static class ReviewJson
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
         JsonNode? root = JsonNode.Parse(json);
-        RejectNullListEntries(root, "$");
+        RejectNullListEntries(root, typeof(GateReport), "$");
         GateReport report = root.Deserialize<GateReport>(Options)
                             ?? throw new JsonException("The gate report is empty.");
         if (report.Gates is null)
@@ -133,11 +134,17 @@ public static class ReviewJson
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
         JsonNode? root = JsonNode.Parse(json);
-        RejectNullListEntries(root, "$");
+        RejectNullListEntries(root, typeof(FindingsReport), "$");
         if (root is JsonObject document && document["findings"] is JsonArray findings)
         {
-            foreach (JsonObject finding in findings.OfType<JsonObject>())
+            for (int index = 0; index < findings.Count; index++)
+            {
+                if (findings[index] is not JsonObject finding)
+                    continue;
+
+                CheckRanges(finding, $"$.findings[{index}]");
                 BindSnakeCaseFailureScenario(finding);
+            }
         }
 
         FindingsReport report = root.Deserialize<FindingsReport>(Options)
@@ -163,32 +170,122 @@ public static class ReviewJson
     }
 
     /// <summary>
-    /// Refuses a document holding a <c>null</c> element in any list, at any depth. The serializer binds such an
-    /// element as a null entry, and every reader downstream (the engine, the coverage check, the report) would have to
-    /// guard each list on its own; one walk before binding covers every list the document has or will gain.
+    /// Refuses a <c>null</c> element in any list the reader binds, at any depth, naming its JSON path.
     /// </summary>
+    /// <remarks>
+    /// The lists are found from the model types themselves (<see cref="FindingsReport"/>, <see cref="GateReport"/> and
+    /// the records they hold), so a list the model gains is covered without a name list to keep in step. A null in an
+    /// unknown property is left alone: unknown properties are tolerated on read, and nothing binds that list.
+    /// </remarks>
     /// <param name="node">The node to walk.</param>
+    /// <param name="type">The model type the node binds to.</param>
     /// <param name="path">The node's JSON path, named in the refusal.</param>
-    private static void RejectNullListEntries(JsonNode? node, string path)
+    private static void RejectNullListEntries(JsonNode? node, Type type, string path)
     {
+        type = Nullable.GetUnderlyingType(type) ?? type;
         switch (node)
         {
-            case JsonArray array:
+            case JsonArray array when ListElementType(type) is { } element:
                 for (int index = 0; index < array.Count; index++)
                 {
                     string entry = $"{path}[{index}]";
                     if (array[index] is null)
                         throw new JsonException($"The list at '{path}' has a null entry at '{entry}'.");
 
-                    RejectNullListEntries(array[index], entry);
+                    RejectNullListEntries(array[index], element, entry);
                 }
 
                 break;
-            case JsonObject obj:
+            case JsonObject obj when IsModel(type):
                 foreach (KeyValuePair<string, JsonNode?> property in obj)
-                    RejectNullListEntries(property.Value, $"{path}.{property.Key}");
+                {
+                    // Web defaults read property names case-insensitively, so the match here does too.
+                    PropertyInfo? bound = type.GetProperty(
+                        property.Key, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+                    if (bound is not null)
+                        RejectNullListEntries(property.Value, bound.PropertyType, $"{path}.{property.Key}");
+                }
+
                 break;
         }
+    }
+
+    /// <summary>The element type when <paramref name="type"/> is a list (not a string or a dictionary), else null.</summary>
+    private static Type? ListElementType(Type type)
+    {
+        if (type == typeof(string) || type.IsAssignableTo(typeof(System.Collections.IDictionary)))
+            return null;
+
+        if (type.IsArray)
+            return type.GetElementType();
+
+        Type? enumerable = type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IEnumerable<>)
+            ? type
+            : type.GetInterfaces().FirstOrDefault(candidate =>
+                candidate.IsGenericType && candidate.GetGenericTypeDefinition() == typeof(IEnumerable<>));
+        if (enumerable is null)
+            return null;
+
+        Type element = enumerable.GetGenericArguments()[0];
+        bool isDictionary = element.IsGenericType && element.GetGenericTypeDefinition() == typeof(KeyValuePair<,>);
+        return isDictionary ? null : element;
+    }
+
+    /// <summary>Whether <paramref name="type"/> is one of the review model records, whose properties are walked.</summary>
+    private static bool IsModel(Type type) =>
+        type.IsClass && type != typeof(string) && type.Namespace == typeof(ReviewJson).Namespace;
+
+    /// <summary>
+    /// Holds a finding read from JSON to the ranges a seat's finding is held to. The serializer would bind a number as
+    /// a severity (any integer becomes an enum value) and any integer as a confidence, so both are checked on the raw
+    /// value: severity must be one of the severity names, confidence a whole number from 1 to 10.
+    /// </summary>
+    /// <remarks>
+    /// Every property whose name matches ignoring case is checked, not only the first: the serializer reads names
+    /// case-insensitively, so a second <c>"Severity": 7</c> beside a valid <c>"severity"</c> would otherwise be the
+    /// value that binds.
+    /// </remarks>
+    private static void CheckRanges(JsonObject finding, string path)
+    {
+        foreach (KeyValuePair<string, JsonNode?> property in finding)
+        {
+            if (string.Equals(property.Key, "severity", StringComparison.OrdinalIgnoreCase))
+            {
+                bool named = property.Value is JsonValue text
+                             && text.GetValueKind() == JsonValueKind.String
+                             && Enum.GetNames<ReviewSeverity>().Any(name =>
+                                 string.Equals(name, text.GetValue<string>(), StringComparison.OrdinalIgnoreCase));
+                if (!named)
+                {
+                    throw new JsonException(
+                        $"'{path}.{property.Key}' is {Describe(property.Value)}; it must be \"critical\", \"major\" or " +
+                        "\"minor\".");
+                }
+            }
+            else if (string.Equals(property.Key, "confidence", StringComparison.OrdinalIgnoreCase))
+            {
+                bool inRange = property.Value is JsonValue number
+                               && number.GetValueKind() == JsonValueKind.Number
+                               && number.TryGetValue(out int value)
+                               && value is >= 1 and <= 10;
+                if (!inRange)
+                {
+                    throw new JsonException(
+                        $"'{path}.{property.Key}' is {Describe(property.Value)}; it must be a whole number from 1 to 10.");
+                }
+            }
+        }
+    }
+
+    private static string Describe(JsonNode? node)
+    {
+        const int limit = 60;
+        string text = node?.ToJsonString() ?? "null";
+        if (text.Length <= limit)
+            return text;
+
+        // Back off one character rather than split a surrogate pair at the cut.
+        return text[..(char.IsHighSurrogate(text[limit - 1]) ? limit - 1 : limit)] + "…";
     }
 
     private static void BindSnakeCaseFailureScenario(JsonObject finding)

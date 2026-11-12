@@ -251,8 +251,27 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
             return false;
         }
 
-        FileSystemInfo[] entries = new DirectoryInfo(full)
-            .GetFileSystemInfos("*.md", new EnumerationOptions { RecurseSubdirectories = false, AttributesToSkip = 0 });
+        // IgnoreInaccessible is off: a folder the process cannot list must be refused, not read as an empty folder
+        // whose every lens then looks unaccounted for, or whose seats silently vanish.
+        FileSystemInfo[] entries;
+        try
+        {
+            entries = new DirectoryInfo(full).GetFileSystemInfos(
+                "*.md",
+                new EnumerationOptions { RecurseSubdirectories = false, AttributesToSkip = 0, IgnoreInaccessible = false });
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            report.Add(new Diagnostic(
+                SeatUnreadable,
+                Severity.Error,
+                $"The seat folder {full} could not be listed ({ex.GetType().Name}).",
+                Subject,
+                full,
+                Hint: "Give the process read and list access to the seat folder, then compute the verdict again."));
+            return false;
+        }
+
         foreach (FileSystemInfo entry in entries.OrderBy(entry => entry.Name, StringComparer.Ordinal))
         {
             // An entry that cannot be a seat (a directory, an empty or dotted stem, a name that is not a lens id)
