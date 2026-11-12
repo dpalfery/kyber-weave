@@ -10,7 +10,7 @@ The conductor supplies `DEVELOPMENT_MODE`. If omitted, record `test-first`. Reco
 
 ## Work
 
-Produce a numbered checkbox task list with at most two hierarchy levels. Every task includes a concrete objective, exact files or components, acceptance criteria, dependencies, required skills, and requirement ids. Tasks must be executable by a cold worker without design decisions.
+Produce a numbered checkbox task list with at most two hierarchy levels. Group tasks under `###` headings, and use checkbox items only for dispatchable tasks, because every checkbox item needs its own task-file entry. Every task includes a concrete objective, exact files or components, acceptance criteria, dependencies, required skills, and requirement ids. Tasks must be executable by a cold worker without design decisions.
 
 Persist:
 
@@ -33,9 +33,18 @@ Mark any genuinely no-test task explicitly and name its replacement validation. 
 
 ## Task file
 
-Beside `tasks.md`, persist the tracked task file `<spec-folder>/tasks.json`, the specification form of the same contract a plan uses. It carries a schema version, the specification's path, the execution digest, and one entry per task: id, role, dependencies, file scope, `session` group and the full prompt, each prompt naming files by path plus symbol, the full test class names and the exact commands.
+Beside `tasks.md`, the tracked task file `<spec-folder>/tasks.json` is the specification form of the same contract a plan uses, and it is written only at finalization (see below). It carries a schema version, the specification's path, the execution digest, and one entry per task: id, role, dependencies, file scope, `session` group and the full prompt, each prompt naming files by path plus symbol, the full test class names and the exact commands.
 
 Only two slots stay unfilled — `{worktree}` and `{prior_results}` — because the conductor fills them at dispatch from what no authoring phase can know.
+
+The file is written at finalization, not during the tasks phase: write it in place at its final path with the edit tools, never through a sibling or temporary file. Its `plan` field holds the repository-relative path of `tasks.md`. `product-owner` has no shell, so the conductor passes the execution digest as `SPEC_DIGEST`. Never compute the digest by hand or with a script.
+
+Finalization runs in this order:
+
+1. Check the digest before anything is written. A finalization invocation without `SPEC_DIGEST`, or one made after a task, contract-row, out-of-scope or mode edit since the digest was computed, returns `STATUS: BLOCKED` naming `task-file digest: run kyber-weave arbiter plan <spec-folder>/tasks.md -f json in <checkout>`. `product-owner` has no shell, so it cannot recompute the digest: the conductor must run the producer immediately before every finalization invocation and pass that fresh value, never one carried over from before a `tasks.md` edit; the owner blocks only when `SPEC_DIGEST` is absent, and `KW-DOC-TASKS-003` in validation catches a stale one. Nothing else is written, so the spec is not left Ready without a task file.
+2. Record the approval rows, write the spec Ready line (`**Status:** Ready`) in `tasks.md`, and synchronize the index.
+3. Write `tasks.json` with the digest from the conductor's `SPEC_DIGEST` as `execution-digest`.
+4. Return `SPEC_FINALIZED` with `TASK_FILE: <spec-folder>/tasks.json`.
 
 ## Gaps and coverage
 
@@ -59,8 +68,8 @@ CONTRACT: <Test contract | verification contract>
 COVERAGE: <all requirement ids covered, or list gaps>
 ```
 
-On conductor-supplied explicit approval, record `Phase status: Approved` and return `STATUS: PHASE_APPROVED`. When all three phases are approved, synchronize the spec index as Draft awaiting final approval and return `STATUS: SPEC_READY`. Only a later finalization invocation carrying explicit **approve and execute** authorization records Ready and returns `STATUS: SPEC_FINALIZED`.
+On conductor-supplied explicit approval, record `Phase status: Approved` and return `STATUS: PHASE_APPROVED`. When all three phases are approved, synchronize the spec index as Draft awaiting final approval and return `STATUS: SPEC_READY`. Only a later finalization invocation carrying explicit **approve and execute** authorization records Ready and returns `STATUS: SPEC_FINALIZED`. `SPEC_FINALIZED` also returns `TASK_FILE: <spec-folder>/tasks.json`.
 
 ## Consolidated review recording
 
-When the conductor presents a consolidated review for a tasks `STATUS: READY_FOR_REVIEW` with `GAPS: none` and `OPEN_QUESTIONS: none`, this phase permits the combined recording: one presentation carries both the tasks approval and the execute approval as two AUTONOMOUS_APPROVAL rows. The conductor supplies each approval explicitly; the owner records them and returns the normal `STATUS: PHASE_APPROVED` / `STATUS: SPEC_FINALIZED` progression.
+When the conductor presents a consolidated review for a tasks `STATUS: READY_FOR_REVIEW` with `GAPS: none` and `OPEN_QUESTIONS: none`, this phase permits the combined recording: one presentation carries both the tasks approval and the execute approval as two AUTONOMOUS_APPROVAL rows. The conductor supplies each approval explicitly; the owner records them and returns the normal `STATUS: PHASE_APPROVED` / `STATUS: SPEC_FINALIZED` progression. The collapsed invocation that carries both approvals also carries `SPEC_DIGEST`, and the task file is written in that same invocation.

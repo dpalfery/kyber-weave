@@ -1,7 +1,7 @@
 using KyberWeave.Core.Arbiter.Plans;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
 /// Contract tests for the Kyber Arbiter plan parser (task 1.3). The conformance set is
@@ -283,4 +283,125 @@ public sealed class ArbiterPlanParserTests
 
         Assert.Equal(["3"], DiagnosticCodes(parsed, PlanDocumentParser.UnknownDependencyRule));
     }
+
+    /// <summary>
+    /// A spec's <c>Depends on: none</c> is followed by the requirements reference, a plain bullet
+    /// with no label. That bullet is not part of the dependency value, so task 1.1 has none, and
+    /// the reference's numbers are not read as dependencies on it. Without the boundary, 1.1 would
+    /// depend on itself.
+    /// </summary>
+    [Fact]
+    public void SpecDependsNoneFollowedByRequirementsHasNoDependencies()
+    {
+        PlanDocument parsed = PlanDocumentParser.Parse(SpecTaskFixture(
+            dependsOnFirst: "none",
+            filesFirst: "`src/one.cs`"));
+
+        Assert.Empty(Task(parsed, "1.1").DependsOn);
+        Assert.DoesNotContain("1.1", DiagnosticCodes(parsed, PlanDocumentParser.UnknownDependencyRule));
+        Assert.Equal(["1.1"], Task(parsed, "1.2").DependsOn);
+    }
+
+    /// <summary>
+    /// A spec's Files list stops at the next bold-labelled bullet, so the dotted symbol under
+    /// <c>**Acceptance:**</c> is not read as a file. Without the stop, a worker's file scope grows
+    /// by whatever its acceptance criteria happen to name.
+    /// </summary>
+    [Fact]
+    public void SpecFilesBulletListStopsAtTheNextBoldLabelledBullet()
+    {
+        PlanDocument parsed = PlanDocumentParser.Parse(SpecTaskFixture(
+            dependsOnFirst: "none",
+            filesFirst: "`src/one.cs`"));
+
+        Assert.Equal(["src/one.cs"], Task(parsed, "1.1").Files);
+    }
+
+    /// <summary>
+    /// The plan grammar has the same stop: a Files list ends at a bold-labelled bullet at its own
+    /// indent, so the dotted symbol under <c>**Acceptance criteria:**</c> is not a file scope.
+    /// </summary>
+    [Fact]
+    public void PlanFilesBulletListStopsAtAnAcceptanceBullet()
+    {
+        PlanDocument parsed = PlanDocumentParser.Parse(
+            """
+            # Plan
+
+            ## Tasks
+
+            ### T1: Plan task
+
+            - **Files:**
+              - `src/KyberWeave.Core/Widget.cs`
+            - **Acceptance criteria:**
+              - `Widget.Flag` is reported.
+            """);
+
+        Assert.Equal(["src/KyberWeave.Core/Widget.cs"], Task(parsed, "T1").Files);
+    }
+
+    /// <summary>
+    /// The stops must not swallow what the author nested. A dependency list whose sub-bullets are
+    /// task ids keeps both ids, and a Files list whose sub-bullet opens with a bold label keeps that
+    /// bullet's path together with the bullet after it. Both are regression guards for the stop
+    /// rules above.
+    /// </summary>
+    [Fact]
+    public void NestedBulletsStillCount()
+    {
+        PlanDocument parsed = PlanDocumentParser.Parse(
+            """
+            ## Tasks
+
+            ### Phase 1
+
+            - [ ] 1.1 RED: First item
+              - **Files:**
+                - `src/a.cs`
+            - [ ] 1.2 GREEN: Second item
+              - **Files:**
+                - `src/b.cs`
+            - [ ] 2.1 GREEN: Third item
+              - **Depends on:**
+                - 1.1
+                - 1.2
+              - **Files:**
+                - **New:** `src/c.cs`
+                - `src/d.cs`
+            """);
+
+        PlanTask third = Task(parsed, "2.1");
+        Assert.Equal(["1.1", "1.2"], third.DependsOn);
+        Assert.Equal(["src/c.cs", "src/d.cs"], third.Files);
+    }
+
+    /// <summary>
+    /// A spec task list with two checkbox tasks in the layout the spec task files use: task 1.1
+    /// depends on nothing, task 1.2 depends on 1.1, and each names one file. The dependency and
+    /// file lines are passed in so a test can vary exactly the line it proves.
+    /// </summary>
+    private static string SpecTaskFixture(string dependsOnFirst, string filesFirst) =>
+        $"""
+        ## Tasks
+
+        ### Phase 1
+
+        - [ ] 1.1 RED: The first task
+          - **Objective:** Pin the first behaviour.
+          - **Files:**
+            - {filesFirst}
+          - **Acceptance:**
+            - `Widget.Flag` is reported.
+          - **Skills:** `test-dev`
+          - **Depends on:** {dependsOnFirst}
+          - _Requirements: 1.1, 1.2_
+        - [ ] 1.2 GREEN: The second task
+          - **Objective:** Make the second behaviour pass.
+          - **Files:**
+            - `src/two.cs`
+          - **Skills:** `csharp-dev`
+          - **Depends on:** 1.1
+          - _Requirements: 1.1, 1.2_
+        """;
 }
