@@ -103,6 +103,44 @@ public sealed class WorkerRuleSingleHomeTests
         Assert.Contains("cleanupcode", map, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    ///     The correctness table's header is defined once, in the correctness lens of the code-review skill.
+    ///     An agent body that spells it again is a second copy that drifts from the lens owning the columns.
+    /// </summary>
+    [Fact]
+    public void TheInputSiteTableIsInNoAgentBody()
+    {
+        string[] repeating = AgentsContaining("| Site | Source | Absent or null |");
+
+        Assert.True(
+            repeating.Length == 0,
+            "The input-site table is defined once, in the correctness lens, not in an agent body. " +
+            "Still carrying the table header: " + string.Join(", ", repeating));
+    }
+
+    /// <summary>
+    ///     The rule map records where the input-site table rule lives, so the map and the developer exit gate
+    ///     cannot disagree about its home. The two names must share one row: the map already names the table
+    ///     in the review-lens row, and a bare word match there would pass without the developer home recorded.
+    /// </summary>
+    [Fact]
+    public void TheRuleMapRecordsTheInputSiteRuleHome()
+    {
+        Assert.True(
+            File.Exists(RuleMapPath),
+            $"The rule map must live at '{RuleMapPath}'.");
+
+        string map = File.ReadAllText(RuleMapPath);
+        string? row = map
+            .Split('\n')
+            .FirstOrDefault(line => line.Contains("input-site table", StringComparison.Ordinal)
+                                    && line.Contains("delivery-execution", StringComparison.Ordinal));
+
+        Assert.True(
+            row is not null,
+            "The rule map must carry one row that names the input-site table and its home, delivery-execution.");
+    }
+
     /// <summary>Every agent body holding <paramref name="text"/>, by file name.</summary>
     private static string[] AgentsContaining(string text)
     {

@@ -289,7 +289,7 @@ not run the verdict engine. Walk the whole diff against this checklist:
 5. **Defect classes.** The defect-class checklist of the pre-push gate below, step 3.
 
 Fix every major-or-worse finding before the pull request is opened. The pull request
-description carries one line: `Quick review: <n> findings, <m> fixed, open: <ids or none>`.
+description carries one line: `Quick review: <n> findings, <m> fixed, open: <ids or none>`. In this skill, a finding verified as real is one that survived the council's adjudication; a quick review has no council, so the session's own check against the cited code stands in for it. The test rule in step 2 of the Pre-push self-review gate applies to a quick review's fixes too.
 
 ## Pre-push self-review gate
 
@@ -310,7 +310,7 @@ Procedure above and the host's declared gates.
    exists, re-review the fix as a verifier cycle (see **Review loop** above), and use that
    later verdict in the pull request description. A verdict computed before a fix is void. List any major-or-worse
    finding still open by id in the pull request description. Minor/Info findings never
-   block. Required CI decides readiness; the verdict does not gate the push or the ready step.
+   block. Required CI decides readiness; the verdict does not gate the push or the ready step. In this skill, a finding verified as real is one that survived the council's adjudication. A fix for a review finding verified as real ships with a test that fails without the fix, bot review rounds included; a finding classified as a nitpick needs no test.
    Run the gates command without `--council`. The CLI refuses the full-suite gates, and each refusal is a blocking failure that names the targeted alternatives; report those as "not run here, CI runs them", and do not count a refusal as a code finding in the verdict.
 3. **Defect-class checklist.** Walk each class explicitly over the whole change, as part of this pre-push gate (the draft push does not wait for it):
    a. Invented/hidden values: `?? 0`, `|| N`, `?? []`, clamps, default window/price/size/duration, unmeasured shown as zero or "measured", partial data looking complete (honest-unobservability: absent stays absent with reason).

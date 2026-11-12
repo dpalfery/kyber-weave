@@ -115,3 +115,11 @@ lens needs a seat file or a recorded reason for not seating it.
 - **What becomes harder.** The reviewer must write seat files to disk, and a reviewer could still
   alter them on the way; capturing seat output in the Arbiter's hook would close that. Each fix
   round costs another council cycle, bounded by the hard stop.
+- **Amended 2026-11-11: the developer side carries the same rules.** A developer whose change adds
+  or alters a site where an outside value is parsed, converted, or passed to a file or collection
+  API fills the input-site table the correctness lens defines, at the developer exit gate. A
+  developer fix for a reported defect covers the defect's whole class, by the rule the verifier
+  uses to call a finding FIXED. Every fix for a review finding verified as real ships with a test
+  that fails without the fix, bot review rounds included; a finding classified as a nitpick needs
+  none. The rules live in the `delivery-execution` skill's developer exit gate and the review-fix
+  skills; this record states the reviewer side and the amendment only.

@@ -5,7 +5,7 @@ source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
 selected-baseline: .github/agents/csharp-dev.agent.md
 sources:
   .github/agents/csharp-dev.agent.md: 09cd65841fbb82e81060cbbccdc91c6aac7ee209a84b97e30799cc3281cbe146
-final-body-sha256: 936b0877673af798ebb34fce158b76b3e0767940443e8380a11f390e9bce901e
+final-body-sha256: ecc74c39e615f9940df0f596383b0052954615bda0df24bae34991a1ec968c0f
 ---
 # csharp-dev migration
 
@@ -18,7 +18,7 @@ YAML frontmatter is removed.
 
 The body has since evolved: test execution with `--no-build` and `dotnet test`, the task-gate
 exit gate, and `path.agent_scratchpad` worktree isolation. Its full-suite sentence now says the council runs the suite once per review cycle, since the review loop re-runs the gates each cycle. `final-body-sha256` covers that
-evolved body.
+evolved body. Its Hard rules have since also gained the input-site table rule and the defect-class rule, which the Developer exit gate in the delivery-execution skill defines.
 
 ## Canonical projection
 

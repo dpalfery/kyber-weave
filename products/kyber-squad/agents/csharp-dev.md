@@ -97,6 +97,7 @@ Use the host's indexes before raw reads. Load the CodeGraph and `kw-docs` docume
 - Never enter an unconstrained test-fix loop. When a fix fails, follow the failure loop in `skills/task-gate/references/rework.md` and escalate rather than keeping at it.
 - Never hack production code to satisfy contradictory invariants between legacy test fixtures and approved design.
 - Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
+- If your change adds or alters a site where a value from outside the process is parsed, converted, or passed to a file or collection API, fill the input-site table before you report done, and make a fix for a reported defect cover its whole class; the Developer exit gate in the delivery-execution skill holds the rule, and the correctness lens of the code-review skill defines the table.
 
 ## Completion digest
 

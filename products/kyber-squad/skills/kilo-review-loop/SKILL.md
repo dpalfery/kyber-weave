@@ -50,7 +50,7 @@ that command is a stop, not something to work around with direct file reads.
    warning suppression list. Verify the claim on the path that matters: a bot comment about
    behaviour deserves a test through the real path, not a hand-fed fact. Use one commit per fix
    (or per tightly related group) so each reply can cite its own hash. Share one helper when
-   several comments are the same mechanism.
+   several comments are the same mechanism. In this skill, a comment verified as real is one the session checked against the cited code and found true, and that `arbiter_classify_bot_review_comment` did not classify `nitpick` or `already-fixed`; the session writes the test and the fix itself. A fix for a review finding verified as real ships with a test that fails without the fix, bot review rounds included; a finding classified as a nitpick needs no test.
 5. **Run the gates.** Build and formatters for the touched projects, and the tests that target
    the changed code (map changed files to test classes/files, e.g. `dotnet test --filter`,
    `vitest related --run <files>` with paths relative to the package's directory,

@@ -5,7 +5,7 @@ source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
 selected-baseline: .github/agents/python-dev.agent.md
 sources:
   .github/agents/python-dev.agent.md: f058efe4c9f5bd07ff6d908f539265eb5219a59806ac7db8b1be42525eefa944
-final-body-sha256: 23e3f507e981ec524c2ebbbd51c0b219c34f5dd98e82d6e44d427c0e1ad0d38a
+final-body-sha256: aaa63a1e3da615f4b525a6b701afc4bff11df68f466c058902410a85065dcfa9
 ---
 # python-dev migration
 
@@ -15,6 +15,8 @@ The canonical agent description and instruction body were synchronized from `.gi
 Hotshot commit `677c3a876ba9c62f1083608596b238c9deaff167`. The selected source file's SHA-256 is recorded in frontmatter,
 while `final-body-sha256` is the SHA-256 of the UTF-8, LF-normalized instruction body after
 YAML frontmatter is removed.
+
+The body has since evolved: its Hard rules now carry the input-site table rule and the defect-class rule, and `final-body-sha256` covers that evolved body.
 
 ## Canonical projection
 

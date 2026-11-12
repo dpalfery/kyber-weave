@@ -130,7 +130,7 @@ TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE — agent
 RED_EVIDENCE: <runner filter> — <failing tests> — <reason>
 ```
 
-`RED_EVIDENCE:` is part of the template, not an aside. The in-flight ledger reads its value from
+`RED_EVIDENCE:` is part of the template, not an aside; it follows the six digest fields and is never counted as a seventh. The in-flight ledger reads its value from
 the returned output as its `ledger.red-evidence` fact, and Arbiter rule `KW-ARB-MODE-001` uses
 that fact to gate test-first plans: an implementation dispatch with no RED evidence on record
 escalates. The line names the runner filter that was run, the tests that failed, and the
@@ -139,10 +139,7 @@ recorded no RED run, such as a maintenance pass with no failing-first cycle. Any
 literal `none` counts as evidence, so the fields must be the values actually run, never
 placeholders.
 
-Lines of the explanatory message body that are not digest fields are never counted or rejected
-as a seventh field. They are exactly these shapes: the `Discovery: codegraph N, docs N, direct
-reads N` header, `COVERAGE_GAPS:` followed by free text, and `Artifact:` or `Baseline:` followed
-by one path. When the circuit breaker trips, return the escalation in
+Lines that are not one of the six digest fields are never counted or rejected as a seventh field. They are exactly these shapes: the Discovery: codegraph N, docs N, direct reads N header; COVERAGE_GAPS: followed by free text; RED_EVIDENCE: followed by the runner filter, the failing tests and the reason; Input sites: N traced, M files with none; Defect class: followed by one sentence and the inputs it covers; and Artifact: or Baseline: followed by one repository-relative or absolute path. When the circuit breaker trips, return the escalation in
 [references/rework.md](references/rework.md) instead of this digest.
 
 ## Boundaries

@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: typescript
 owner: dpalfery
-last-reviewed: 2026-10-24
+last-reviewed: 2026-11-11
 ---
 
 # TypeScript coding standard
@@ -21,6 +21,8 @@ remain defined by [KyberDash architecture](../../dash/architecture.md) and the
 [display-layer rule](../../rules/kyberdash-display-layer.md).
 
 ## Types at boundaries
+
+Parsers fail closed (KW-STD-INPUT-001). Code that parses or converts a value from outside the process refuses any input it does not recognise, with an error or diagnostic that names the input; it never silently drops, defaults or coerces it. The one exception is an unknown field in a format whose specification says to ignore unknown fields, and the code names that specification where it skips the field.
 
 All three TypeScript projects enable `strict`. Keep values typed through their full path;
 explicit `any` is an ESLint error. At an untrusted boundary—JSON, files, SQLite rows, IPC, or
