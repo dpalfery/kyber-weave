@@ -122,6 +122,10 @@ public static class ArchitectShellGuard
         "uses an unquoted glob pattern, which the shell expands to names the guard never read",
         "Quote the pattern, for example '*.md', so it reaches the command as written");
 
+    private static readonly Refusal BackslashPathRefusal = new(
+        "has a backslash in a path operand, which is not allowed in Bash",
+        "Name the path with forward slashes, inside single quotes if it needs them");
+
     private static readonly Refusal CarriageReturnRefusal = new(
         "contains a carriage return outside quotes, which ends a command in PowerShell and is not allowed",
         "Put each command in its own call, without line breaks");
@@ -305,7 +309,7 @@ public static class ArchitectShellGuard
     /// Finds the first construct in the whole call that the list cannot account for, before any split. The checks are
     /// classes, not spellings: any non-ASCII character, any control character other than tab and line feed, a line
     /// feed inside a quoted word, an unquoted <c>#</c> that starts a word (a comment that hides the rest of its
-    /// line), and in Bash any backslash.
+    /// line), and in Bash any backslash outside single quotes.
     /// </summary>
     private static StructuralFault? FindStructuralFault(string command, bool bash)
     {
@@ -415,10 +419,17 @@ public static class ArchitectShellGuard
     private static string WithoutTrailingSeparator(string command)
     {
         string body = command.TrimEnd(' ', '\t', '\n');
-        if (body.EndsWith(';') && !body[..^1].TrimEnd(' ', '\t').EndsWith("{}", StringComparison.Ordinal))
+        if (body.EndsWith(';'))
         {
-            // A ; that ends find's own {} terminator is part of that call, not a trailing separator.
-            body = body[..^1].TrimEnd(' ', '\t', '\n');
+            string before = body[..^1].TrimEnd(' ', '\t');
+
+            // A ; on a line of its own is an empty statement, not a trailing separator, so it is kept and refused.
+            // A ; that ends find's own {} terminator is part of that call.
+            bool onOwnLine = before.Length == 0 || before[^1] == '\n';
+            if (!onOwnLine && !before.EndsWith("{}", StringComparison.Ordinal))
+            {
+                body = before.TrimEnd(' ', '\t', '\n');
+            }
         }
 
         return body;
@@ -766,7 +777,7 @@ public static class ArchitectShellGuard
             return CheckChangeDirectory(segment, bash, previousSeparator, words, ref directory, ref departure, ref changes, origin);
         }
 
-        return CheckCommand(name, words, tokens.Quoted ?? [], directory, departure, origin, planningDirectories);
+        return CheckCommand(name, words, tokens.Quoted ?? [], bash, directory, departure, origin, planningDirectories);
     }
 
     private static bool IsAssignment(string word)
@@ -839,7 +850,12 @@ public static class ArchitectShellGuard
                 "Put the cd first, joined to the command it serves with &&");
         }
 
-        string? resolved = Resolve(directory, words[1]);
+        if (bash && words[1].AsSpan().Contains('\\'))
+        {
+            return BackslashPathRefusal;
+        }
+
+        string? resolved = Resolve(directory, words[1], powerShell: !bash);
         if (resolved is null)
         {
             return UnresolvableRefusal;
@@ -856,6 +872,7 @@ public static class ArchitectShellGuard
         string name,
         List<string> words,
         List<bool> quoted,
+        bool bash,
         string directory,
         string? departure,
         string? origin,
@@ -909,7 +926,7 @@ public static class ArchitectShellGuard
             case "uniq":
                 return CheckUniq(words);
             case "touch":
-                return CheckTouch(words, directory, departure, origin, planningDirectories);
+                return CheckTouch(words, bash, directory, departure, origin, planningDirectories);
             case "cat":
             case "sed":
             case "awk":
@@ -1296,6 +1313,7 @@ public static class ArchitectShellGuard
     /// </summary>
     private static Refusal? CheckTouch(
         List<string> words,
+        bool bash,
         string directory,
         string? departure,
         string? origin,
@@ -1343,8 +1361,15 @@ public static class ArchitectShellGuard
             // The operand must be valid under both readings of where the call runs: the cd'd directory, and the origin.
             // A cd whose target does not exist fails and leaves the call in the origin, and a separator after a cd
             // does not say whether the cd ran. Checking both closes that gap without tracking which cd succeeded.
-            string? fromDirectory = Resolve(directory, operand);
-            string? fromOrigin = Resolve(origin, operand);
+            // In Bash a backslash is an escape, not a separator, so a path that holds one names a file the list did
+            // not read; PowerShell reads it as a separator, and the path is converted in Resolve.
+            if (bash && operand.AsSpan().Contains('\\'))
+            {
+                return BackslashPathRefusal;
+            }
+
+            string? fromDirectory = Resolve(directory, operand, powerShell: !bash);
+            string? fromOrigin = Resolve(origin, operand, powerShell: !bash);
             if (fromDirectory is null || fromOrigin is null)
             {
                 return UnresolvableRefusal;
@@ -1450,9 +1475,11 @@ public static class ArchitectShellGuard
     /// when the result is not rooted or a <c>..</c> climbs above the root, because such a path has no
     /// spelling the planning check can trust.
     /// </summary>
-    private static string? Resolve(string baseDirectory, string operand)
+    private static string? Resolve(string baseDirectory, string operand, bool powerShell)
     {
-        string forward = operand.Replace('\\', '/');
+        // PowerShell takes a backslash as a path separator. Bash takes it as an escape, so a Bash path that holds one is
+        // refused before it reaches here, and this function never turns it into a separator.
+        string forward = powerShell ? operand.Replace('\\', '/') : operand;
         if (IsRooted(forward))
         {
             return Normalize(forward);
