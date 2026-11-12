@@ -290,12 +290,7 @@ T4. Harvest H1 to H4, archive the plan, and remove the task file in the same com
 
 **Delivered** on branch `claude/feat/dev-input-site-rules`, stacked on pull request 595. RED contract `0ebdbd28`; product prose `ac464b17`; repository standards and docs `2544b9b5`, merged as `e2023b34`. The final council returned `APPROVE`, risk LOW, with 9 gates passed.
 
-**Acceptance.**
-1. The developer exit gate states the input-site table and the whole-class rule once, in `delivery-execution`, with pointer sentences in the seven developer bodies (S1 to S8).
-2. The coding standards state that parsers fail closed under `KW-STD-INPUT-001` (S9, S10).
-3. Every fix for a review finding verified as real ships with a test that fails without the fix, bot review rounds included; a nitpick needs none (S11, S12). ADR 0069 records the reviewer side and this amendment.
-4. The four migrated digests were recomputed once, in T2.
-5. The pins for S1 to S12 and the rule-map facts are in `SquadPerformanceContractTests`, `ReviewCouncilLoopContractTests` and `WorkerRuleSingleHomeTests`, and passed in T2 and T3 with non-zero counts.
+**Acceptance.** The final council returned `APPROVE`, risk LOW, with 9 gates passed. The docs closeout re-ran both documentation gates with zero findings. This closeout read directly: S6 in `docs/kyber-squad/requirements.md`, S9 and S10 in the five standards, and the worker rule map's row A4. It did not re-read the product prose (S1 to S5, S7, S8, S11 and S12), recompute the four migrated digests, or re-run the test classes; the council and CI are the evidence for those.
 
 **Follow-ups**, not done here:
 - **F-1:** A deterministic check of the developer's input-site table and the `Input sites:` / `Defect class:` lines, in the conductor's digest check or an Arbiter rule.
