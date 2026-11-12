@@ -31,6 +31,10 @@ namespace KyberWeave.Core.Docs.Validation;
 /// merge that carries an unconverted plan. The rest are errors, because each means a file that
 /// exists and says something the plan does not.
 /// </para>
+/// <para>
+/// The sidecar rule, <see cref="SidecarTaskFile" />, walks the plans folder rather than following
+/// a plan, so it catches a copy whose plan has already been archived.
+/// </para>
 /// </remarks>
 public sealed partial class PlanTaskFileValidator
 {
@@ -51,6 +55,12 @@ public sealed partial class PlanTaskFileValidator
 
     /// <summary>A Ready plan has no task file beside it. Advisory: it never fails a merge.</summary>
     public const string MissingTaskFile = "KW-DOC-TASKS-006";
+
+    /// <summary>How much of a candidate sidecar is read to see whether it holds the task file schema.</summary>
+    private const int SniffLength = 65536;
+
+    /// <summary>A copy of a task file left beside it under another name, such as <c>&lt;plan&gt;.tasks.json.new</c>.</summary>
+    public const string SidecarTaskFile = "KW-DOC-TASKS-007";
 
     /// <summary>The schema version this build reads.</summary>
     private const int SchemaVersion = 1;
@@ -101,7 +111,8 @@ public sealed partial class PlanTaskFileValidator
         ArgumentNullException.ThrowIfNull(set);
 
         DiagnosticReport report = new();
-        IReadOnlyList<string> planningDirectories = PlanningDirectories();
+        IReadOnlyList<ConfigRegEntry> registry = _config.ConfigReg.Resolve(_config.Ontology);
+        IReadOnlyList<string> planningDirectories = PlanningDirectories(registry);
 
         foreach (DocumentModel artifact in set.Documents.Where(document =>
                      (document.DocType == DocType.Plan || IsSpecTaskList(document))
@@ -109,6 +120,8 @@ public sealed partial class PlanTaskFileValidator
         {
             ValidateArtifact(artifact, KindOf(artifact), planningDirectories, report);
         }
+
+        ReportSidecarTaskFiles(registry, report);
 
         return report;
     }
@@ -125,6 +138,185 @@ public sealed partial class PlanTaskFileValidator
         relativePath[(relativePath.LastIndexOfAny(['/', '\\']) + 1)..];
 
     /// <summary>
+    /// Reports each file in the plans folder whose name is a copy of the task file, such as
+    /// <c>&lt;plan&gt;.tasks.json.new</c>.
+    /// </summary>
+    /// <remarks>
+    /// The walk runs over the folder rather than per plan. A sidecar is picked by its name and confirmed
+    /// by its content, so it is reported whether its plan is live, archived, or never existed, which is the state an
+    /// abandoned copy is usually in. The file system is read rather than git, so untracked and
+    /// ignored files count: a copy that was never committed still reaches the merge's working tree.
+    /// </remarks>
+    private void ReportSidecarTaskFiles(IReadOnlyList<ConfigRegEntry> registry, DiagnosticReport report)
+    {
+        string? planFolder = FolderOf(registry, ConfigRegConfig.PlanIndexProperty);
+        if (planFolder is null)
+        {
+            // No folder to scope the walk to: say so, because a clean result here would read as
+            // "no sidecars" when nothing was checked.
+            report.Add(new Diagnostic(
+                SidecarTaskFile,
+                Severity.Warning,
+                "The plans folder could not be resolved from the 'plan-index' registry property, so " +
+                "copies of a task file left beside a plan are not checked.",
+                ConfigRegConfig.PlanIndexProperty,
+                Hint: "Set 'plan-index' to an index file inside a plans folder, such as 'docs/plans/README.md'."));
+            return;
+        }
+
+        string start = Path.Combine(_repoRoot, planFolder.Replace('/', Path.DirectorySeparatorChar));
+        // A resolved folder that does not exist holds no sidecars, so a clean result is true here;
+        // KW-CONFIG-REG-001 already reports a registry index path that points at nothing.
+        if (Directory.Exists(start))
+        {
+            WalkForSidecars(start, planFolder, report);
+        }
+    }
+
+    /// <summary>
+    /// Lists one directory of the plans folder, reports its sidecars and recurses, following no
+    /// symbolic link and skipping any <c>archive</c> folder.
+    /// </summary>
+    /// <remarks>
+    /// Each directory is read on its own, so one that cannot be read is reported and the walk goes
+    /// on with its siblings: a single locked folder must not hide a sidecar beside it.
+    /// </remarks>
+    private void WalkForSidecars(string directory, string relativeDirectory, DiagnosticReport report)
+    {
+        List<FileSystemInfo> entries;
+        try
+        {
+            entries = [.. new DirectoryInfo(directory).EnumerateFileSystemInfos(
+                "*",
+                new EnumerationOptions { IgnoreInaccessible = false, AttributesToSkip = 0 })];
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // A folder the walk cannot read is a state the run reports: aborting would hide every
+            // other finding, and skipping silently would read as "no sidecars".
+            report.Add(new Diagnostic(
+                SidecarTaskFile,
+                Severity.Warning,
+                $"'{relativeDirectory}' could not be read ({exception.Message}), so copies of a task file " +
+                "left in it are not checked.",
+                relativeDirectory,
+                Hint: "Fix the folder's permissions or remove it, then run the check again."));
+            return;
+        }
+
+        foreach (FileSystemInfo entry in entries.OrderBy(e => e.Name, StringComparer.Ordinal))
+        {
+            if (entry.LinkTarget is not null)
+            {
+                continue;
+            }
+
+            string relative = relativeDirectory + "/" + entry.Name;
+            if (entry is DirectoryInfo subdirectory)
+            {
+                if (!InventoryReachability.IsArchived(relative))
+                {
+                    WalkForSidecars(subdirectory.FullName, relative, report);
+                }
+            }
+            else
+            {
+                ReportIfSidecar(entry.FullName, relative, report);
+            }
+        }
+    }
+
+    /// <summary>Reports <paramref name="file"/> when it is a copy of a task file.</summary>
+    private static void ReportIfSidecar(string file, string relative, DiagnosticReport report)
+    {
+        // A name that ends in the task file's suffix is the task file itself, or a file
+        // KW-DOC-LIFECYCLE-005 already reports; this rule takes only what that one leaves.
+        string name = Path.GetFileName(file);
+        if (!name.Contains(TaskFileSuffix, StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(TaskFileSuffix, StringComparison.OrdinalIgnoreCase)
+            || !LooksLikeTaskFile(file))
+        {
+            return;
+        }
+
+        report.Add(new Diagnostic(
+            SidecarTaskFile,
+            Severity.Error,
+            $"'{relative}' is a copy of a task file left beside it: the conductor reads only " +
+            "'<plan>.tasks.json', so this file is dead weight that the merge would carry.",
+            relative,
+            relative,
+            Hint: "Delete it. If a live plan still needs its task file, write it in place at " +
+            "'<plan>.tasks.json', never through a temporary sibling."));
+    }
+
+    /// <summary>
+    /// True when the file's own top-level keys are the task file schema's, or it cannot be read to
+    /// prove otherwise; false when it is gone or holds something else.
+    /// </summary>
+    /// <remarks>
+    /// The name narrows the search and the content decides. The head of the file is read as JSON
+    /// and only the keys of its top-level object count, so a note that merely quotes a schema key is
+    /// left alone, and a copy cut short by an interrupted write still has the keys it opened with.
+    /// A file that cannot be read is reported, because it cannot be shown to be unrelated; one that
+    /// has been deleted since the listing is not, because there is nothing left to report.
+    /// </remarks>
+    private static bool LooksLikeTaskFile(string file)
+    {
+        try
+        {
+            using FileStream stream = File.OpenRead(file);
+            byte[] head = new byte[SniffLength];
+            int read = stream.Read(head, 0, head.Length);
+            return HasSchemaKey(head.AsSpan(0, read));
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return false;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// True when the top-level keys are the task file's: its <c>execution-digest</c>, or its
+    /// <c>schema-version</c> beside its <c>plan</c> or <c>tasks</c>. A bare <c>schema-version</c>
+    /// is a common key in unrelated JSON and proves nothing.
+    /// </summary>
+    private static bool HasSchemaKey(ReadOnlySpan<byte> head)
+    {
+        Utf8JsonReader reader = new(head, isFinalBlock: false, state: default);
+        bool schemaVersion = false;
+        bool planOrTasks = false;
+        try
+        {
+            while (reader.Read())
+            {
+                if (reader.TokenType != JsonTokenType.PropertyName || reader.CurrentDepth != 1)
+                {
+                    continue;
+                }
+
+                if (reader.ValueTextEquals("execution-digest"))
+                {
+                    return true;
+                }
+
+                schemaVersion |= reader.ValueTextEquals("schema-version");
+                planOrTasks |= reader.ValueTextEquals("plan") || reader.ValueTextEquals("tasks");
+            }
+        }
+        catch (JsonException)
+        {
+            // Not JSON, or broken before enough keys: judge by the keys read so far.
+        }
+
+        return schemaVersion && planOrTasks;
+    }
+
+    /// <summary>
     /// The repository-relative directories holding plans and specifications: the folders of the
     /// three planning indexes.
     /// </summary>
@@ -133,7 +325,7 @@ public sealed partial class PlanTaskFileValidator
     /// against the folder it actually uses. These are the same directories the Arbiter publishes
     /// as <c>config.planning-dirs</c>, which is what lets one detector answer both rules.
     /// </remarks>
-    private IReadOnlyList<string> PlanningDirectories()
+    private static IReadOnlyList<string> PlanningDirectories(IReadOnlyList<ConfigRegEntry> registry)
     {
         string[] properties =
         [
@@ -142,27 +334,32 @@ public sealed partial class PlanTaskFileValidator
             ConfigRegConfig.TodoIndexProperty
         ];
 
-        IReadOnlyList<ConfigRegEntry> registry = _config.ConfigReg.Resolve(_config.Ontology);
         List<string> directories = [];
         foreach (string property in properties)
         {
-            string? indexPath = registry
-                .FirstOrDefault(entry => string.Equals(entry.Name, property, StringComparison.Ordinal))
-                ?.Path;
-            if (string.IsNullOrWhiteSpace(indexPath))
+            if (FolderOf(registry, property) is { } directory)
             {
-                continue;
-            }
-
-            string normalized = indexPath.Replace('\\', '/');
-            int separator = normalized.LastIndexOf('/');
-            if (separator > 0)
-            {
-                directories.Add(normalized[..separator]);
+                directories.Add(directory);
             }
         }
 
         return directories;
+    }
+
+    /// <summary>The folder of a registry property's index file, or null when the property is unset.</summary>
+    private static string? FolderOf(IReadOnlyList<ConfigRegEntry> registry, string property)
+    {
+        string? indexPath = registry
+            .FirstOrDefault(entry => string.Equals(entry.Name, property, StringComparison.Ordinal))
+            ?.Path;
+        if (string.IsNullOrWhiteSpace(indexPath))
+        {
+            return null;
+        }
+
+        string normalized = indexPath.Replace('\\', '/');
+        int separator = normalized.LastIndexOf('/');
+        return separator > 0 ? normalized[..separator] : null;
     }
 
     /// <summary>
