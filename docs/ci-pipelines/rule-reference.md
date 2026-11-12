@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-11-11
+last-reviewed: 2026-11-12
 ---
 
 # Rule reference
@@ -62,7 +62,7 @@ behind a flag, because the orchestrator has the docs tools and no shell.
 |---|---|---|
 | `KW-DOC-TASKS-001` | Error | The file is not the JSON this build reads, or declares a schema version it does not read |
 | `KW-DOC-TASKS-002` | Error | The file's plan, tasks, files or dependencies disagree with the plan's |
-| `KW-DOC-TASKS-003` | Error | The execution digest is stale: the plan moved after the file was written. A status or Decisions edit does not move it; a task edit does |
+| `KW-DOC-TASKS-003` | Error | The execution digest is stale: the plan moved after the file was written. A status or Decisions edit does not move it; a task edit does. Produce the digest with `kyber-weave arbiter plan <plan> -f json` after the last plan edit |
 | `KW-DOC-TASKS-004` | Error | A prompt carries no command, or no acceptance criteria |
 | `KW-DOC-TASKS-005` | Error | A prompt tells the worker to open a plan, specification or todo — the authoring-time half of `KW-ARB-PLANREAD-001` |
 | `KW-DOC-TASKS-006` | Warning | A Ready plan has no task file beside it. Advisory: it never fails a merge, because every plan sits in that state until its architect writes one |
