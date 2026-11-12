@@ -18,9 +18,9 @@ public sealed class ArbiterPlanCommand : Command<ArbiterSettings>
     /// <summary>
     /// Parses the plan file named by the positional path and prints its tasks,
     /// files, dependencies, contract rows and out-of-scope paths, plus
-    /// <c>KW-ARB-PARSE-00x</c> diagnostics. The plan's execution digest is reported as the
-    /// <c>execution-digest</c> metric in json, sarif and markdown, and printed once on its own line
-    /// in the table, so a task file can record the digest it was written from. A plan without tasks reports
+    /// <c>KW-ARB-PARSE-00x</c> diagnostics. A plan with tasks reports its execution digest as the
+    /// <c>execution-digest</c> metric in json, and prints it once on its own line in the table, so a
+    /// task file can record the digest it was written from. A plan without tasks reports
     /// <c>KW-ARB-PLAN-001</c>; a missing or unreadable file reports
     /// <c>KW-ARB-PLAN-002</c> and exits 1.
     /// </summary>
@@ -59,11 +59,12 @@ public sealed class ArbiterPlanCommand : Command<ArbiterSettings>
         PlanDocument document = PlanDocumentParser.Parse(text);
         report.AddRange(document.Diagnostics);
 
-        string digest = PlanDocumentParser.ExecutionDigest(document);
+        // A plan with no tasks has no execution to digest, so it reports no digest at all.
+        string? digest = document.HasTasks ? PlanDocumentParser.ExecutionDigest(document) : null;
 
-        // The table prints the digest on its own unfolded line. A metric row would print it again,
-        // truncated, in a narrow cell, so only the machine-readable formats carry the metric.
-        if (settings.ParsedFormat != OutputFormat.Table)
+        // Only json carries the metric. The table prints the digest on its own unfolded line, and a
+        // metric row would print it again, truncated in a narrow cell.
+        if (digest is not null && settings.ParsedFormat == OutputFormat.Json)
         {
             report.AddMetric("execution-digest", digest);
         }
@@ -85,8 +86,11 @@ public sealed class ArbiterPlanCommand : Command<ArbiterSettings>
             AnsiConsole.MarkupLine($"[bold]Plan:[/] {Markup.Escape(resolved)}");
             AnsiConsole.MarkupLine($"[grey]Status: {Markup.Escape(document.Status ?? "—")}; mode: {Markup.Escape(document.DevelopmentMode)}.[/]");
 
-            // Written unfolded so a narrow console cannot wrap the 64 characters across lines.
-            CommandHelpers.WriteUnfolded(() => AnsiConsole.MarkupLine($"Execution digest: {Markup.Escape(digest)}"));
+            if (digest is { } printed)
+            {
+                // Written unfolded so a narrow console cannot wrap the 64 characters across lines.
+                CommandHelpers.WriteUnfolded(() => AnsiConsole.MarkupLine($"Execution digest: {Markup.Escape(printed)}"));
+            }
 
             if (document.Tasks.Count > 0)
             {

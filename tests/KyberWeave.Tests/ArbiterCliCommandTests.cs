@@ -243,6 +243,34 @@ public sealed class ArbiterCliCommandTests : IDisposable
     }
 
     /// <summary>
+    /// A plan with no tasks has no execution to digest. It reports KW-ARB-PLAN-001 and no digest in
+    /// either format, so a digest for an empty execution cannot be copied into a task file.
+    /// </summary>
+    [Fact]
+    public void Plan_WithoutTasks_ReportsNoDigest()
+    {
+        string plan = WriteFile("arbiter-plan-digest-empty.md", """
+            # Packet without tasks
+
+            ## Notes
+
+            Nothing actionable here.
+            """);
+
+        ArbiterPlanCommand command = new();
+        CommandExecution json = Capture(() => command.Execute(
+            null!,
+            new ArbiterSettings { Path = plan, Format = "json" }));
+        CommandExecution table = Capture(() => command.Execute(
+            null!,
+            new ArbiterSettings { Path = plan }));
+
+        Assert.Contains("KW-ARB-PLAN-001", json.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("execution-digest", json.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("Execution digest:", table.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A status change is bookkeeping, not a plan edit, so it must not stale a task file. The
     /// digest covers the tasks, the contract and the out-of-scope list, and not the status
     /// fields, which the plan's owner moves without touching what a worker is asked to do.
