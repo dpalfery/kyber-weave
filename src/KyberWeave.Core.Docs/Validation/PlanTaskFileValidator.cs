@@ -30,6 +30,10 @@ namespace KyberWeave.Core.Docs.Validation;
 /// merge that carries an unconverted plan. The rest are errors, because each means a file that
 /// exists and says something the plan does not.
 /// </para>
+/// <para>
+/// The sidecar rule, <see cref="SidecarTaskFile" />, walks the plans folder rather than following
+/// a plan, so it catches a copy whose plan has already been archived.
+/// </para>
 /// </remarks>
 public sealed partial class PlanTaskFileValidator
 {
@@ -50,6 +54,9 @@ public sealed partial class PlanTaskFileValidator
 
     /// <summary>A Ready plan has no task file beside it. Advisory: it never fails a merge.</summary>
     public const string MissingTaskFile = "KW-DOC-TASKS-006";
+
+    /// <summary>A copy of a task file left beside it under another name, such as <c>&lt;plan&gt;.tasks.json.new</c>.</summary>
+    public const string SidecarTaskFile = "KW-DOC-TASKS-007";
 
     /// <summary>The schema version this build reads.</summary>
     private const int SchemaVersion = 1;
@@ -99,7 +106,72 @@ public sealed partial class PlanTaskFileValidator
             ValidatePlan(plan, planningDirectories, report);
         }
 
+        ReportSidecarTaskFiles(report);
+
         return report;
+    }
+
+    /// <summary>
+    /// Reports each file in the plans folder whose name is a copy of the task file, such as
+    /// <c>&lt;plan&gt;.tasks.json.new</c>.
+    /// </summary>
+    /// <remarks>
+    /// The walk runs over the folder rather than per plan. A sidecar is found by its name alone, so
+    /// it is reported whether its plan is live, archived, or never existed, which is the state an
+    /// abandoned copy is usually in. The file system is read rather than git, so untracked and
+    /// ignored files count: a copy that was never committed still reaches the merge's working tree.
+    /// </remarks>
+    private void ReportSidecarTaskFiles(DiagnosticReport report)
+    {
+        string? planFolder = PlanFolder();
+        if (planFolder is null)
+        {
+            return;
+        }
+
+        HashSet<string> seen = new(DocsRootPath.PathComparer);
+        foreach (string root in _config.Ontology.DocsRoots)
+        {
+            string docsRoot = Path.Combine(_repoRoot, root.Replace('/', Path.DirectorySeparatorChar));
+            if (!Directory.Exists(docsRoot))
+            {
+                continue;
+            }
+
+            foreach (string file in DocsRootPath.EnumerateContainedFiles(docsRoot, "*"))
+            {
+                string relative = Path.GetRelativePath(_repoRoot, file).Replace('\\', '/');
+                if (!InventoryReachability.IsWithin(relative, planFolder)
+                    || InventoryReachability.IsArchived(relative))
+                {
+                    continue;
+                }
+
+                // A name that ends in the task file's suffix is the task file itself, or a file
+                // KW-DOC-LIFECYCLE-005 already reports; this rule takes only what that one leaves.
+                string name = Path.GetFileName(file);
+                if (!name.Contains(TaskFileSuffix, StringComparison.OrdinalIgnoreCase)
+                    || name.EndsWith(TaskFileSuffix, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (!seen.Add(relative))
+                {
+                    continue;
+                }
+
+                report.Add(new Diagnostic(
+                    SidecarTaskFile,
+                    Severity.Error,
+                    $"'{relative}' is a copy of a task file left beside it: the conductor reads only " +
+                    "'<plan>.tasks.json', so this file is dead weight that the merge would carry.",
+                    relative,
+                    relative,
+                    Hint: "Delete it. Write the task file in place at '<plan>.tasks.json', never through a " +
+                    "temporary sibling."));
+            }
+        }
     }
 
     /// <summary>
@@ -124,23 +196,33 @@ public sealed partial class PlanTaskFileValidator
         List<string> directories = [];
         foreach (string property in properties)
         {
-            string? indexPath = registry
-                .FirstOrDefault(entry => string.Equals(entry.Name, property, StringComparison.Ordinal))
-                ?.Path;
-            if (string.IsNullOrWhiteSpace(indexPath))
+            if (FolderOf(registry, property) is { } directory)
             {
-                continue;
-            }
-
-            string normalized = indexPath.Replace('\\', '/');
-            int separator = normalized.LastIndexOf('/');
-            if (separator > 0)
-            {
-                directories.Add(normalized[..separator]);
+                directories.Add(directory);
             }
         }
 
         return directories;
+    }
+
+    /// <summary>The repository-relative folder holding plans, or null when the registry does not set one.</summary>
+    private string? PlanFolder() =>
+        FolderOf(_config.ConfigReg.Resolve(_config.Ontology), ConfigRegConfig.PlanIndexProperty);
+
+    /// <summary>The folder of a registry property's index file, or null when the property is unset.</summary>
+    private static string? FolderOf(IReadOnlyList<ConfigRegEntry> registry, string property)
+    {
+        string? indexPath = registry
+            .FirstOrDefault(entry => string.Equals(entry.Name, property, StringComparison.Ordinal))
+            ?.Path;
+        if (string.IsNullOrWhiteSpace(indexPath))
+        {
+            return null;
+        }
+
+        string normalized = indexPath.Replace('\\', '/');
+        int separator = normalized.LastIndexOf('/');
+        return separator > 0 ? normalized[..separator] : null;
     }
 
     private void ValidatePlan(
