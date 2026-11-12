@@ -76,6 +76,9 @@ public static class ReviewJson
 {
     private const string SnakeCaseFailureScenario = "failure_scenario";
 
+    /// <summary>A name repeated with exactly the same spelling is refused by the parser itself.</summary>
+    private static readonly JsonDocumentOptions ParseOptions = new() { AllowDuplicateProperties = false };
+
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true,
@@ -108,7 +111,7 @@ public static class ReviewJson
     public static GateReport ReadGates(string json)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
-        JsonNode? root = JsonNode.Parse(json);
+        JsonNode? root = JsonNode.Parse(json, documentOptions: ParseOptions);
         RejectNullListEntries(root, typeof(GateReport), "$");
         GateReport report = root.Deserialize<GateReport>(Options)
                             ?? throw new JsonException("The gate report is empty.");
@@ -128,12 +131,13 @@ public static class ReviewJson
     /// <remarks>
     /// A seat writes its failure scenario as <c>failure_scenario</c>, the spelling its prompt uses, while the
     /// document's own spelling is <c>failureScenario</c>. Both are read, so a finding is never dropped as
-    /// incomplete for the spelling of a field it has. The document spelling wins when both are present.
+    /// incomplete for the spelling of a field it has. A finding that writes both is refused: two values for one
+    /// field, like any two spellings of one name.
     /// </remarks>
     public static FindingsReport ReadFindings(string json)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
-        JsonNode? root = JsonNode.Parse(json);
+        JsonNode? root = JsonNode.Parse(json, documentOptions: ParseOptions);
         RejectNullListEntries(root, typeof(FindingsReport), "$");
         if (root is JsonObject document)
         {
@@ -204,6 +208,7 @@ public static class ReviewJson
 
                 break;
             case JsonObject obj when IsModel(type):
+                RejectTwoSpellings(obj, path);
                 foreach (PropertyInfo bound in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
                 {
                     foreach ((string key, JsonNode? value) in Members(obj, bound.Name))
@@ -211,6 +216,31 @@ public static class ReviewJson
                 }
 
                 break;
+        }
+    }
+
+    /// <summary>
+    /// Refuses an object the model binds that holds two names equal ignoring case, naming the object's path and both
+    /// spellings. The serializer reads names ignoring case, so which value binds would be an accident of order. The
+    /// snake-case <c>failure_scenario</c> is the same field as <c>failureScenario</c>, so it is grouped with it.
+    /// </summary>
+    private static void RejectTwoSpellings(JsonObject obj, string path)
+    {
+        Dictionary<string, string> seen = new(StringComparer.OrdinalIgnoreCase);
+        foreach (KeyValuePair<string, JsonNode?> property in obj)
+        {
+            string name = string.Equals(property.Key, SnakeCaseFailureScenario, StringComparison.OrdinalIgnoreCase)
+                ? nameof(ReviewFinding.FailureScenario)
+                : property.Key;
+
+            if (seen.TryGetValue(name, out string? first))
+            {
+                throw new JsonException(
+                    $"'{path}.{property.Key}' names the same field as '{path}.{first}' (the object at '{path}' " +
+                    "spells one name twice). Keep one spelling.");
+            }
+
+            seen[name] = property.Key;
         }
     }
 
