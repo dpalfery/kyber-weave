@@ -289,7 +289,7 @@ not run the verdict engine. Walk the whole diff against this checklist:
 5. **Defect classes.** The defect-class checklist of the pre-push gate below, step 3.
 
 Fix every major-or-worse finding before the pull request is opened. The pull request
-description carries one line: `Quick review: <n> findings, <m> fixed, open: <ids or none>`. In this skill, a finding verified as real is one that survived the council's adjudication; a quick review has no council, so the session's own check against the cited code stands in for it. A fix for a review finding verified as real ships with a test that fails without the fix, bot review rounds included; a finding classified as a nitpick needs no test.
+description carries one line: `Quick review: <n> findings, <m> fixed, open: <ids or none>`. In this skill, a finding verified as real is one that survived the council's adjudication; a quick review has no council, so the session's own check against the cited code stands in for it. The test rule in step 2 of the full review applies to a quick review's fixes too.
 
 ## Pre-push self-review gate
 

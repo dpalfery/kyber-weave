@@ -296,10 +296,10 @@ T4. Harvest H1 to H4, archive the plan, and remove the task file in the same com
 - **F-1:** A deterministic check of the developer's input-site table and the `Input sites:` / `Defect class:` lines, in the conductor's digest check or an Arbiter rule.
 - **F-2:** Whether the shipped standard templates under `products/kyber-squad/standards/` carry `KW-STD-INPUT-001` for host repositories.
 - **F-3:** `bug-crusher` step 1 still lets a real code defect skip RED with a recorded reason, unlike the test standard's regression-test rule.
-- **F-4:** The whole-class rule in `delivery-execution` says each class input is "covered by a test", but the `csharp-dev`, `go-dev`, `python-dev` and `typescript-dev` bodies bar them from writing tests. The whole-class rule also lacks the `COVERAGE_GAPS` hand-off that the table rule has.
-- **F-5:** `task-gate/SKILL.md` lists `RED_EVIDENCE` as never counted as a seventh field, while its template shows it.
-- **F-6:** The worker rule map's A4 "Enforced by" cell omits the `ProductFile` theory and `TheInputSiteTableIsInNoAgentBody`.
-- **F-7:** `code-review/SKILL.md` states the review-fix test sentence twice, and one whole-file `Contains` row pins it.
+- **F-4 (fixed in this PR):** The whole-class rule in `delivery-execution` says each class input is "covered by a test", but the `csharp-dev`, `go-dev`, `python-dev` and `typescript-dev` bodies bar them from writing tests. The whole-class rule also lacks the `COVERAGE_GAPS` hand-off that the table rule has.
+- **F-5 (fixed in this PR):** `task-gate/SKILL.md` lists `RED_EVIDENCE` as never counted as a seventh field, while its template shows it.
+- **F-6 (fixed in this PR):** The worker rule map's A4 "Enforced by" cell omits the `ProductFile` theory and `TheInputSiteTableIsInNoAgentBody`.
+- **F-7 (fixed in this PR):** `code-review/SKILL.md` states the review-fix test sentence twice, and one whole-file `Contains` row pins it.
 
 ## Closeout mapping
 

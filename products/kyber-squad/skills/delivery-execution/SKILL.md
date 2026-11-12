@@ -82,7 +82,7 @@ Every THROWS or accepted wrong cell is fixed before the worker reports done, and
 
 The worker saves the table as `.agent_scratchpad/<task-id>/input-sites.md`, cites it on an Artifact: line, and reports Input sites: N traced, M files with none in the message body beside its digest.
 
-A fix for a reported defect covers the defect's whole class: the worker states the class in one sentence and names at least three other inputs of that class that the original failure scenario did not name, each covered by a test, on one line: `Defect class: <one sentence> — inputs: <input>; <input>; <input>.`
+A fix for a reported defect covers the defect's whole class: the worker states the class in one sentence and names at least three other inputs of that class that the original failure scenario did not name, each covered by a test, on one line: `Defect class: <one sentence> — inputs: <input>; <input>; <input>.` A class input that no test covers yet goes on the worker's COVERAGE_GAPS line, as a fixed cell does above.
 
 Workers precede the six-field completion digest block with the `Discovery: codegraph N, docs N, direct reads N` header; this header is valid and is not rejected as a 7th digest field, and neither is any other line in the list below. The completion digest itself must follow this exact six-field schema, subject to the phased-rollout scope in the bullets below:
 

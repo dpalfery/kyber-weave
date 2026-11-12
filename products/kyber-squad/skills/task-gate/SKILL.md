@@ -130,7 +130,7 @@ TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE — agent
 RED_EVIDENCE: <runner filter> — <failing tests> — <reason>
 ```
 
-`RED_EVIDENCE:` is part of the template, not an aside. The in-flight ledger reads its value from
+`RED_EVIDENCE:` is part of the template, not an aside; it follows the six digest fields and is never counted as a seventh. The in-flight ledger reads its value from
 the returned output as its `ledger.red-evidence` fact, and Arbiter rule `KW-ARB-MODE-001` uses
 that fact to gate test-first plans: an implementation dispatch with no RED evidence on record
 escalates. The line names the runner filter that was run, the tests that failed, and the
