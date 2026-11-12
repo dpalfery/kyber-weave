@@ -302,6 +302,11 @@ app.Configure(config =>
             .WithExample("review", "gates", ".")
             .WithExample("review", "gates", ".", "--out", "gates.json");
 
+        review.AddCommand<ReviewWaitCommand>("wait")
+            .WithDescription("Wait for a review gates run started with --out to finish, and report its result.")
+            .WithExample("review", "wait", "artifacts/gates.json")
+            .WithExample("review", "wait", "artifacts/gates.json", "--timeout", "300");
+
         review.AddCommand<ReviewCatalogueCommand>("catalogue")
             .WithDescription("Print the catalogue review: block for the declared technologies without writing any file.")
             .WithExample("review", "catalogue", ".")

@@ -127,3 +127,24 @@ public sealed class ReviewVerdictSettings : AnalysisSettings
                  "check), with per-lens coverage, to this path as JSON. The verdict itself is printed, not written.")]
     public string? Out { get; set; }
 }
+
+/// <summary>Settings for <c>review wait</c>. Takes no repository path, unlike <see cref="AnalysisSettings"/>.</summary>
+public sealed class ReviewWaitSettings : CommandSettings
+{
+    /// <summary>The <c>--out</c> path the review gates run was given, which names the run to wait for.</summary>
+    [CommandArgument(0, "<report>")]
+    [Description("The --out path the review gates run was given.")]
+    public string Report { get; set; } = string.Empty;
+
+    /// <summary>Seconds to wait before the command gives up with exit 124. Giving up never touches the run.</summary>
+    [CommandOption("--timeout <SECONDS>")]
+    [Description("Seconds to wait before giving up with exit 124. The run is not touched; run the same command " +
+                 "again to keep waiting.")]
+    public int Timeout { get; set; } = 110;
+
+    /// <summary>Seconds a run that finished before this wait began must stay the newest run before it is reported.</summary>
+    [CommandOption("--settle <SECONDS>")]
+    [Description("Seconds a finished run that ended before this wait started must stay the newest run before it " +
+                 "is reported.")]
+    public int Settle { get; set; } = 5;
+}
