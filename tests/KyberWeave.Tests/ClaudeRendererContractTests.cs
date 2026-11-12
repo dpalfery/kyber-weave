@@ -1004,6 +1004,15 @@ public sealed class ClaudeRendererContractTests : IDisposable
             RequireScalar(hook, "timeout", "architect"));
     }
 
+    /// <summary>
+    /// Whether a rendered Markdown file carries YAML frontmatter. Reference documents an agent ships beside its
+    /// definition (for example under <c>agents/architect/references/</c>) are plain Markdown with no frontmatter,
+    /// so the hook scans read only the files that can hold hooks and every other file is left out.
+    /// </summary>
+    private static bool HasFrontmatter(SquadDeploymentFile file) =>
+        file.RelativePath.EndsWith(".md", StringComparison.Ordinal)
+        && Encoding.UTF8.GetString(file.Content.Span).StartsWith("---\n", StringComparison.Ordinal);
+
     private static bool CarriesShellMatcher(YamlMappingNode frontmatter)
     {
         if (!frontmatter.Children.TryGetValue(new YamlScalarNode("hooks"), out YamlNode? hooks)
@@ -1075,7 +1084,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
         string expected = scope == SquadDeploymentScope.Global ? "agents/architect.md" : ".claude/agents/architect.md";
 
         List<string> carriers = [];
-        foreach (SquadDeploymentFile file in result.Files.Where(f => f.RelativePath.EndsWith(".md", StringComparison.Ordinal)))
+        foreach (SquadDeploymentFile file in result.Files.Where(HasFrontmatter))
         {
             (YamlMappingNode frontmatter, _) = SplitFrontmatter(Encoding.UTF8.GetString(file.Content.Span), file.RelativePath);
             if (CarriesShellMatcher(frontmatter))
@@ -1098,8 +1107,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
             new SquadArbiterWiring(Enabled: false, HookTimeoutSeconds: ShellHookTimeoutSeconds));
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
-        foreach (SquadDeploymentFile file in result.Files.Where(f => f.RelativePath.Contains("agents/", StringComparison.Ordinal)
-                                                                    && f.RelativePath.EndsWith(".md", StringComparison.Ordinal)))
+        foreach (SquadDeploymentFile file in result.Files.Where(HasFrontmatter))
         {
             (YamlMappingNode frontmatter, _) = SplitFrontmatter(Encoding.UTF8.GetString(file.Content.Span), file.RelativePath);
             Assert.False(
