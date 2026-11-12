@@ -104,7 +104,6 @@ public sealed class ArchitectShellGuardTests
     [InlineData("git status; git log -1")]
     [InlineData("git status 2>&1")]
     [InlineData("git status || git log")]
-    [InlineData("cd C:\\w; touch docs/plans/x.md")]
     public void PowerShell_ListedCommand_IsAllowed(string command)
     {
         ShellGuardResult result = Check("PowerShell", command);
@@ -226,6 +225,19 @@ public sealed class ArchitectShellGuardTests
     }
 
     [Fact]
+    public void PowerShell_TouchPlanFileUnderADriveWorkingDirectory_IsAllowed()
+    {
+        // The worktree reported as a drive path: the cd to the same drive path is tracked, and the touch resolves beneath it.
+        ShellGuardResult result = ArchitectShellGuard.Check(
+            "PowerShell",
+            CommandInput("cd C:\\w; touch docs/plans/x.md"),
+            "C:\\w",
+            PlanningDirectories.Value);
+
+        Assert.True(result.Allowed, $"A planning-folder touch after cd to the working drive path must be allowed. Reason: {result.Reason}");
+    }
+
+    [Fact]
     public void Bash_TrailingSeparator_IsDeniedUnderTheRule()
     {
         // A trailing ';' leaves an empty final segment, so the reason names the rule rather than a command.
@@ -297,6 +309,7 @@ public sealed class ArchitectShellGuardTests
     [InlineData("Set-Content f x", "Set-Content f x")]
     [InlineData("git status 2>$null", "git status 2>$null")]
     [InlineData("git status 2>/dev/null", "git status 2>/dev/null")]
+    [InlineData("cd C:\\w; touch docs/plans/x.md", "C:\\w")]
     public void PowerShell_CommandOutsideTheList_IsDeniedNamingTheOffendingSegment(string command, string offendingSegment)
     {
         ShellGuardResult result = Check("PowerShell", command);
