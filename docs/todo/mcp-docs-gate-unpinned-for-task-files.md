@@ -5,7 +5,7 @@ doc-type: todo
 component: DocGraph
 status: draft
 owner: dpalfery
-last-reviewed: 2026-11-08
+last-reviewed: 2026-11-12
 ---
 
 # No test drives the docs MCP validate tool over a plan task file
