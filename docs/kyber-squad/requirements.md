@@ -4,7 +4,7 @@ title: Kyber-Squad requirements and degradation contract
 doc-type: requirements
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-11-08
+last-reviewed: 2026-11-11
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -75,7 +75,7 @@ not a new `KS-*` id. `KS-001` through `KS-008` stay as numbered. Mechanics live 
 
 | Invariant | Requirement |
 |---|---|
-| **Build-once, test-many iteration** | Workers build the test project once before iteration (`dotnet build KyberWeave.sln -c Release`) and use `--no-build` or direct assembly runner invocations (`dotnet <dll> -class "<namespace>.<Class>"`) during inner-loop RED/GREEN cycles. No worker runs the full test suite, even for a cross-cutting change; full-suite execution is reserved for the final council review, which runs it once per run, on the integrated head, and for CI. A worker's task end runs only the test classes its task touched; with no covering class it reports `TESTS: total=0` with the reason. |
+| **Build-once, test-many iteration** | Workers build the test project once before iteration (`dotnet build KyberWeave.sln -c Release`) and use `--no-build` or direct assembly runner invocations (`dotnet <dll> -class "<namespace>.<Class>"`) during inner-loop RED/GREEN cycles. No worker runs the full test suite, even for a cross-cutting change; full-suite execution is reserved for the final council review, which runs it once per review cycle, on the integrated head, and for CI. A worker's task end runs only the test classes its task touched; with no covering class it reports `TESTS: total=0` with the reason. |
 | **Zero-stash RED proofs** | Capturing honest RED proof evidence must never use `git stash` or `git stash pop` on dirty working trees. RED proofs are captured by running newly authored tests against a clean base checkout, a throwaway working tree copy, or an isolated `git worktree` before production implementation begins. |
 | **Strict 6-field completion digest** | Subagents conclude dispatches with the standardized 6-field digest schema (`STATUS`, `FILES`, `TESTS`, `COMMIT`, `REMOTE_HEAD`, `TASK_GATE`). Conductor enforces this exact schema and rejects digests when any required field is missing, when `STATUS: FAIL` is reported, or when `TASK_GATE:` is missing or `FAIL`. The only exemption is a valid escalation (`STATUS: ESCALATION` with a valid `CIRCUIT_BREAKER_TRIGGER`), defined in [the rule below this table](#conductor-execution-and-worker-invariants). |
 | **Adversarial RED/GREEN role separation** | The two-agent adversarial boundary between `test-dev` (RED) and the implementation specialist (GREEN) is strictly preserved; collapsing RED and GREEN into a single worker dispatch is forbidden. Small adjacent task bundling is permitted strictly for same-role micro-tasks, and an independent verification pass (`task-gate` deterministic exit check and final council review) is mandatory on the integrated working tree. |

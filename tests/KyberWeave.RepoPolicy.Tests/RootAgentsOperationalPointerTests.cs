@@ -183,6 +183,26 @@ public sealed class RootAgentsOperationalPointerTests
             $"{relativePath} must hold the targeted command '{command}'.");
     }
 
+    /// <summary>
+    /// A change of at most 300 changed lines gets the quick review before its pull request opens,
+    /// and a larger one gets the full pre-push council. An agent that reads only the root file
+    /// otherwise has no size threshold to choose the review by.
+    /// </summary>
+    [Fact]
+    public void QuickReviewThresholdIsStatedAtTheRoot()
+    {
+        string agents = System.Text.RegularExpressions.Regex.Replace(
+            ReadAgents().Replace("`", string.Empty, StringComparison.Ordinal).Replace("*", string.Empty, StringComparison.Ordinal),
+            @"\s+",
+            " ");
+
+        Assert.True(
+            agents.Contains(
+                "A change of at most 300 changed lines (added plus removed, from git diff --numstat <base>...HEAD) gets the quick review before its pull request is opened; a larger change gets the full pre-push council.",
+                StringComparison.Ordinal),
+            "AGENTS.md must state the 300-line quick-review threshold and the full pre-push council for larger changes.");
+    }
+
     private static string ReadAgents()
     {
         Assert.True(File.Exists(AgentsPath), $"Root instruction file '{AgentsPath}' is missing.");

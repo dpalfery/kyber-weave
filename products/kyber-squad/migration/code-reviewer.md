@@ -5,7 +5,7 @@ source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
 selected-baseline: .github/agents/code-reviewer.agent.md
 sources:
   .github/agents/code-reviewer.agent.md: 98440b62230139ae74e4f1a54d15482db338ab34bf912d98afbc629b249ffd14
-final-body-sha256: cb18b5b4ea6239a9e06cc493eafd0fc76382531c55dbc9e929a4bc2a1bd4c43c
+final-body-sha256: 9c91f8454ee4627a6915be033b680fe9f7edec9ee0fa9688064a7e37f7e075cb
 ---
 # code-reviewer migration
 
@@ -27,6 +27,9 @@ through the runner's `--gate` option, and the seat handback: a harness that give
 council stops it with `STATUS: COUNCIL_SEATS_NEEDED`, and the session above seats the lenses and re-invokes it.
 It also indexes the tree under review with `kyber-weave doctor --ensure .` before any seat is dispatched, records that
 result and any seat's `Index fallback:` line under Council coverage, and reports a tree it cannot index as a coverage gap.
+The review loop changed it again: the reviewer runs after each fix round as well as at the end, every later cycle in
+verifier mode; it saves each seat's output to the cycle folder and computes the verdict from those seat files; the
+council's gates stop at the council deadline; and its seats report discovery above their attestation line.
 `final-body-sha256` covers that evolved body.
 
 ## Canonical projection

@@ -169,6 +169,18 @@ public static class CommandHelpers
         if (path is null)
             return;
 
+        // An empty --out names no file; resolving it would throw rather than report.
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            report.Add(new Diagnostic(
+                code,
+                Severity.Error,
+                "--out was given an empty value, so the report was not written.",
+                "review",
+                Hint: "Name the file to write, or drop --out."));
+            return;
+        }
+
         string full = Path.GetFullPath(path);
         try
         {

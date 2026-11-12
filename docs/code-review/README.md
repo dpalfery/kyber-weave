@@ -4,7 +4,7 @@ title: Review council
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-02
+last-reviewed: 2026-11-11
 ---
 
 # Review council
@@ -16,7 +16,7 @@ Parallel code review with an auditable verdict.
 | [Architecture](architecture.md) | The three layers, the two lens seats, the evidence schema, the verdict rules, permissions, configuration |
 | [Rule reference](../ci-pipelines/rule-reference.md#code-review--the-review-council) | Every `KW-REVIEW-*` id |
 | [ADR 0002](../adr/0002-three-layer-review-council-verdict-engine.md) | Three-layer review council and verdict engine decision record |
-| [ADR 0005](../adr/0005-task-level-fast-review.md) | A deterministic developer exit gate for single tasks, the council once per run |
+| [ADR 0005](../adr/0005-task-level-fast-review.md) | A deterministic developer exit gate for single tasks, the council at the end of each run |
 | [Plan](../archive/plans/2026-08-20-code-review-council.md) | Original plan: why it is shaped this way, and what was rejected |
 
 ## Principles
@@ -57,9 +57,11 @@ apply the fix, and another pass to confirm it — to arrive at an edit `cleanupc
 made for free. So the machine layer runs first, as the developer's exit gate, and a mechanical
 finding in the council's review is evidence the gate did not run, and *that* is the finding.
 
-The same logic caps the passes. The gate gets two rework cycles per key and the council gets one
-run. A defect surviving that many looks at the problem, not at the reviewer, and the answer is
-a plan rather than another read.
+The same logic caps the passes. The gate gets two rework cycles per key. The council
+re-reviews after every fix round until it approves, each later cycle a cheap verifier re-check
+of the fix delta, and stops after 5 cycles or 3 in a row without the critical and major count
+falling; what is still open goes in the pull request for a person. A defect surviving that many
+looks at the problem, not at the reviewer.
 
 ## The idea in one page
 
@@ -85,7 +87,7 @@ individual task, and paying the council's price to ask it was the problem this s
 | Layer | Who | Scope | Cost |
 |---|---|---|---|
 | **Developer exit gate** | The developer agent running `task-gate`: `dotnet format`, analyzer code fixes, `cleanupcode --include`, build and tests | The files one task changed | No model at all |
-| **Run review** | `code-reviewer` | The whole run, once at the end | The full council |
+| **Run review** | `code-reviewer` | The whole run at the end, then each fix round | The full council, then verifier cycles |
 
 **The bottom layer has no model in it.** Each developer's exit gate applies fixes and then
 verifies, before the change leaves the worker: predefined type keywords, `var` where the standard
@@ -95,14 +97,15 @@ worker, and two reworks for the same gate key trip the circuit-breaker into the 
 findings collection, which `architect` plans against before the run ends. A mechanical defect that
 reaches the council means the gate did not run.
 
-**The top layer runs once.** `code-reviewer` reviews the whole run at the end — and a single task
-only when a human explicitly asks. Nothing a task does summons it: not a failed pass, not a
+**The top layer runs at the end of the run.** `code-reviewer` reviews the whole run at the end,
+and re-checks each fix round of its own review loop — and a single task only when a human
+explicitly asks. Nothing a task does summons it: not a failed pass, not a
 policy concern, not a concern that looks serious. Each of those would be a per-task council bill.
 
 What the task layer does not cover, and names as uncovered in every report: security modelling,
 authorization and tenancy, performance at scale, blast radius and revertibility, cross-file
 duplication, analyzer triage, dependency supply chain, and test adequacy against coverage. The
-council owns all of them, once, over everything.
+council owns all of them, over everything.
 
 ## The review commands
 
@@ -110,7 +113,7 @@ council owns all of them, once, over everything.
 kyber-weave review gates .                                          # run the declared gates
 kyber-weave review suppressions .                                   # fail an added suppression with no reason
 kyber-weave review duplicates .                                     # cluster duplicate bodies
-kyber-weave review verdict . --findings findings.json --gates gates.json
+kyber-weave review verdict . --seats seats --gates gates.json --out findings.json  # verdict from the seat files
 kyber-weave review catalogue                                        # print the shipped per-technology gates
 ```
 

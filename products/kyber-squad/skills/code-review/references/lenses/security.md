@@ -25,7 +25,11 @@ Two of its rules govern your output and are worth restating because they are wha
 lens trustworthy:
 
 - **Confidence 8 or above, or it does not ship as a finding.** Everything from 4 to 7 is
-  investigation, not a report.
+  investigation, not a report. This is a lens-specific exception to the seat rule in
+  `review-lens`: every other lens reports at the effective min-confidence its invocation names,
+  but this lens keeps its own floor of 8 even when the invocation names a lower one, because the
+  `security-review` skill's threshold is tuned against false positives. An invocation floor
+  above 8 still applies.
 - **The hard exclusions are hard.** Denial of service, resource exhaustion, rate limiting,
   missing hardening, theoretical races, outdated third-party libraries, log spoofing,
   missing audit logs, and the rest of that list are not findings here regardless of how

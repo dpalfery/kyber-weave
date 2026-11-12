@@ -1,6 +1,6 @@
 ---
 name: resharper-clt
-description: Use when running JetBrains ReSharper Command Line Tools over a .NET solution — the CleanupCode/format fix pass an agent runs before claiming C# work complete, or the once-per-run InspectCode gate whose output a code review triages. Do NOT use for non-.NET languages, for judging design or correctness by reading code, as a substitute for the compiler and test gates, or to run InspectCode from inside a per-task completion gate.
+description: Use when running JetBrains ReSharper Command Line Tools over a .NET solution — the CleanupCode/format fix pass an agent runs before claiming C# work complete, or the once-per-review-cycle InspectCode gate whose output a code review triages. Do NOT use for non-.NET languages, for judging design or correctness by reading code, as a substitute for the compiler and test gates, or to run InspectCode from inside a per-task completion gate.
 license: MIT
 ---
 
@@ -56,7 +56,7 @@ the path declared as **.agent_scratchpad** where the repository declares one. Su
 | Formatting and cleanup | `dotnet jb cleanupcode <solution>` |
 
 Scope the run to the affected projects when the solution is large and you are iterating by
-hand. The once-per-run review gate takes the full solution: it is the only inspection pass in
+hand. The once-per-review-cycle review gate takes the full solution: it is the only inspection pass in
 the run, so narrowing it drops coverage nothing else replaces.
 
 ## Two cadences, and which one you are in
@@ -67,7 +67,7 @@ the mistake this section exists to prevent.
 | | Command | Who runs it | When |
 |---|---|---|---|
 | **Fix pass** | `dotnet format`, `dotnet format analyzers`, `cleanupcode` | the agent that wrote the code | every task, before `READY_FOR_REVIEW` |
-| **Inspection** | `inspectcode` | the review gate runner | once per run, over the whole accumulated change |
+| **Inspection** | `inspectcode` | the review gate runner | once per review cycle, over the whole accumulated change |
 
 The reason is contention and cost. `inspectcode` loads the entire solution; run at baseline and
 again at the end by every worker, it was both the slowest part of a completion gate and the part
@@ -218,7 +218,7 @@ no formatter can decide that materializing the sequence is the right fix. The wo
 DIAGNOSTICS: clean on 2-Application/Hauling.Application/Dispatch/LoadPlanner.cs | fix pass: format, format analyzers, cleanupcode — all applied | artifacts: .agent_scratchpad/T3/artifacts | baseline: .agent_scratchpad/T3/diagnostics-baseline.md | remaining: none
 ```
 
-**At the end of the run.** The `inspectcode` gate runs once over the whole solution:
+**At the end of the run.** The `inspectcode` gate runs once per review cycle over the whole solution:
 
 ```xml
 <Issue TypeId="PossibleMultipleEnumeration"
@@ -239,9 +239,9 @@ lens drops them; that attribution, not the worker's baseline, is what "pre-exist
 - `cleanupcode` rewrites source. It belongs to the completion gate above, run by the agent that
   wrote the code, before any reviewer sees it — and NEVER as part of a review itself. A reviewer
   that edits the code it is judging has stopped being a reviewer.
-- `inspectcode` is the mirror image: it belongs to the review gate, once per run, and NEVER to a
+- `inspectcode` is the mirror image: it belongs to the review gate, once per review cycle, and NEVER to a
   per-task completion gate. A worker that runs it loads the whole solution to analyze a tree its
-  peers are still editing, and pays that cost once per task instead of once per run.
+  peers are still editing, and pays that cost once per task instead of once per review cycle.
 - Formatter output is not a review finding. Whitespace differences belong to `cleanupcode`, not
   to the findings list. A reviewer that finds mechanical issues is looking at a change whose
   completion gate did not run: the correct report is that single fact, not a list of nits the

@@ -13,6 +13,7 @@ decided-by:
   - adr/0005-task-level-fast-review
   - adr/0053-kyber-arbiter-three-step-decision-gates
   - adr/0064-project-knowledge-lives-in-gates-and-standards-reached-through-tools
+  - adr/0069-the-review-council-loops-until-approve-and-computes-its-verdict-from-seat-output
 code-refs:
   - VerdictEngine
   - GateRunner
@@ -25,6 +26,8 @@ code-refs:
   - ProjectRootDetector
   - ReviewBlockWriter
   - ReviewCatalogueCommand
+  - SeatOutputParser
+  - CitedLineCheck
 sections:
   "#":
     keywords:
@@ -69,7 +72,7 @@ flowchart TD
     Approval -->|"granted"| Worker
     Approval -->|"denied · stop"| PlanDenied["stop and ask — Draft plan not executable"]
     Drain -->|"collection empty"| Join
-    Join -->|"end of run · the only automatic council run"| Scope
+    Join -->|"end of run · the council's first cycle"| Scope
     HumanAsk["human asks for a review"] --> Scope
 
     subgraph CR["code-reviewer — orchestrator and adjudicator"]
@@ -92,11 +95,11 @@ flowchart TD
         RT["review-triage ×3<br/>model-profile: fast"]
     end
 
-    Council -->|"findings"| Confirm["3. Adversarial confirm<br/>one refuter per major or critical finding"]
+    Council -->|"seat files · one per lens"| Confirm["3. Adversarial confirm<br/>one batched refuter over the KW-REVIEW-046 candidates"]
     Confirm --> Adjudicate
     Gates -->|"gates.json"| Adjudicate
 
-    Adjudicate["4. Adjudication<br/>quote verified · duplicates reconciled<br/>claims checked against gate output"] --> VE
+    Adjudicate["4. Adjudication<br/>quote verified · duplicates reconciled<br/>every removal through --drop id=reason"] --> VE
 
     subgraph VE["LAYER 3 — Verdict engine (unit-tested code)"]
         direction LR
@@ -106,10 +109,10 @@ flowchart TD
     VE --> Out["APPROVE · REQUEST_CHANGES<br/>+ risk grade + KW-REVIEW-* diagnostics"]
 
     Out -->|"APPROVE"| RunComplete["run complete"]
-    Out -->|"REQUEST_CHANGES"| ObjRemed["remediation loop — workers then verifier re-review"]
+    Out -->|"REQUEST_CHANGES"| ObjRemed["review loop — owning workers fix critical, major<br/>and failed blocking gates, then verifier re-review until APPROVE"]
     ObjRemed --> Worker
-    ObjRemed -->|"three-cycle cap · terminal failure"| ObjFailed["terminal failure — stop and report"]
-    Join --> ObjReview["objective-level code-reviewer<br/>once per objective"]
+    ObjRemed -->|"5-cycle cap · no-progress stop"| ObjFailed["hard stop — open findings listed in the PR<br/>as pending human review · delivery continues"]
+    Worker -->|"fix round done"| ObjReview["verifier cycle<br/>fix delta · --prior cycle folder"]
     ObjReview --> Scope
 
     Cfg -.-> Gates
@@ -215,6 +218,10 @@ The review council enforces explicit contract verification disciplines across it
 - **Contract assertion rigor (`test-adequacy`, `R14`):** Flags bare single-word `Assert.Contains` checks that match common boilerplate, unguarded boolean `||` assertions where one branch matches unrelated text, and non-contiguous `foreach` loops over multi-line schemas; requires contiguous block assertions.
 - **Operational lifecycle state-machine walks (`correctness`, `supportability`):** Walks the complete resource lifecycle from `create` → `execute` → `integrate` → `cleanup`/`remove`/`prune`, and verifies error paths including `conflict` and `rollback` for concurrency primitives, worktrees, locks, and temp-paths.
 - **Literal prompt parsing (`correctness`, `R16`):** Prohibits charitable reading of agent prompt instructions; parses prompt directives literally as executed by language models, flagging any gate deadlock, self-contradiction, or missing recovery step.
+- **Input-site table (`correctness`):** For every changed code file the seat writes "no input site" or one row per site where a value from outside the process is parsed, converted, or passed to a file or collection API, with what the code does today for each hostile input class (absent or null, a null element in a list, empty, wrong type, zero or negative, the largest value, characters the API rejects, repeated or contradictory markers). Every `THROWS` or `accepted wrong` cell is a finding. The seat closes with an `Input sites:` count, and a correctness seat that reported findings or `NO FINDINGS` without it draws `KW-REVIEW-047`, and a `SKIPPED` correctness seat is exempt.
+- **Rule subjects and side-by-side statements (`documentation-accuracy`):** Who a rule applies to ("a seat", "every gate") is a claim checked at the call site that decides it, and each rule id or command the changed prose states is quoted side by side from every document that states it; a different subject, condition or flag list is a finding.
+- **Hand-off of malformed inputs (`test-adequacy` to `correctness`):** Test-adequacy says what the code does today for each malformed input it names, and hands one it cannot show is refused to correctness as a `test-adequacy/out-of-scope` finding, rather than reporting only the missing test.
+- **No reviewer hunt list:** The reviewer hands each seat its lens file and guidance sections, not a list of its own things to hunt for. A list of areas narrows a seat to those areas, and an area is not an input. Named focus files must each be accounted for by the seat.
 
 ## Why lenses are files, not agents
 
@@ -297,6 +304,59 @@ refusing unverified claims is not permitted to make one.
 
 ## How a finding survives
 
+Findings reach the verdict from **seat files**, not from a findings file the reviewer writes.
+Each seat's output is saved unchanged as `<lens>.md` in the cycle's `seats` folder (a finding
+the reviewer raises itself goes in `reviewer.md`), and `kyber-weave review verdict . --seats
+<cycle>/seats --gates <cycle>/gates.json --out <cycle>/findings.json` parses them
+(`SeatOutputParser`). The reviewer's only action on a finding is `--drop <id>=<reason>`: it
+never edits a finding and never changes its severity, so every removal appears in the Dropped
+list with its reason, and a bad `--drop` is refused (`KW-REVIEW-042`). Two checks run before
+the policy below:
+
+- **Lens coverage (`KW-REVIEW-041`).** Every catalogue lens needs a seat file, a
+  `--not-seated <lens>=<reason>`, or coverage carried from the prior cycle through `--prior`;
+  otherwise the command refuses to compute. An entry that cannot be a seat (a directory, a
+  file named only `.md`, a dotfile, or a name that is not a lowercase lens id) is named under a
+  `KW-REVIEW-041` warning and skipped, never parsed. A `--seats` path that is missing, a file, or a symlink loop is
+  refused as "Seat folder not found" (`KW-REVIEW-023`); a seats folder that exists but cannot be
+  listed is refused (`KW-REVIEW-040`). A file with a lowercase lens-id name that is not a catalogue lens
+  (such as `prior-art-performance.md`) keeps its findings but covers no lens, and draws the same
+  warning; `reviewer.md`, the reviewer's own seat, is exempt. An unreadable seat file is refused
+  (`KW-REVIEW-040`), and so is one that declares `NO FINDINGS:` or `SKIPPED:` while a seat-schema
+  key followed by a colon (`id:`, `severity:`, `file:` and the rest of the finding schema)
+  appears anywhere else in it, in any letter case: in a list, a flow mapping, a fence, after
+  prose or after a table's `|`. The check fails
+  closed: such a file is never counted clean. Prose, a Markdown table, the closing lines and plain
+  bullets with no such key are allowed.
+- **Cited lines (`KW-REVIEW-043`, `CitedLineCheck`).** A finding whose cited line lies outside
+  its file is moved to the one line that holds its excerpt, or dropped when no single line
+  does. A line inside the file is never moved. A finding whose file is missing, outside the
+  repository or unreadable is left as written and reported as unverified, one info line per file.
+
+A seat file's `severity` must be one of the three names (`critical`, `major`, `minor`, in any
+letter case) and its `confidence` a whole number from 1 to 10, or the seat is refused
+(`KW-REVIEW-040`). A findings JSON file read through `--findings` or `--prior` is held to the same
+values, checked on the raw JSON: a severity that is a number or not one of the names (matched in
+any letter case, so `"MAJOR"` is accepted), or a confidence that is not a JSON whole number from 1
+to 10 (a float such as `9.0` or `1e1`, or a numeric string such as `"9"`, is refused), refuses the
+file (`KW-REVIEW-023`). So does a `null` element in any list the command binds, in a findings or
+a gates document; a `null` inside a property the command does not know is tolerated. Two spellings
+of one name in an object the verdict reads are refused too (`KW-REVIEW-023`), because the reader
+would otherwise bind whichever came last: names match ignoring case, and a seat's
+`failure_scenario` and the document's `failureScenario` count as one name. Objects inside
+properties the command does not know are not walked.
+
+A findings or `NO FINDINGS` seat that wrote no `Discovery:` line, read files directly with no index lookup and no
+`Index fallback:` line, wrote an `Index fallback:` value outside the three modes, or wrote two
+different `Index fallback:` lines (the first is kept), draws a
+warning (`KW-REVIEW-044`); a `SKIPPED` seat is exempt, and the warning is never a verdict input.
+The `correctness` seat also closes with `Input sites: N traced, M files with none`, above its
+`Discovery:` line, after a Markdown input-site table that the parser skips; a correctness seat that
+reported findings or `NO FINDINGS` and wrote no readable `Input sites:` line draws a warning
+(`KW-REVIEW-047`), never a verdict input; a `SKIPPED` correctness seat is exempt.
+A seat file that repeats its `Discovery:` or `Input sites:` line, as a lens split across two spawns
+does, is read as the sum of the lines; a malformed or overflowing line makes the count unreadable.
+
 ```mermaid
 flowchart TD
     F["Finding reported by a lens"] --> E{"excerpt + evidence<br/>+ failure_scenario?"}
@@ -317,7 +377,13 @@ while the exemption stays. On the day after it lapses the finding returns on its
 
 ### Adversarial confirmation and refutation guardrails
 
-Step 3 spends one more `review-lens` invocation attempting to refute every surviving finding of severity `major` or `critical`. However, to prevent adversarial refuters from invalidating verified standards through specious dismissals, the refutation pass enforces strict **refutation guardrails**:
+Step 3 sends every refutation candidate — the accepted `major` and `critical` findings the
+verdict command lists under `KW-REVIEW-046` — to **one batched** `review-lens` spawn. Its single
+`REFUTE:` header names the first candidate, because a repeated header would leave the Arbiter
+without the fact it reads; the body carries every candidate's YAML, and the refuter answers once
+per finding id. The reviewer drops each refuted finding with `--drop <id>=refuted: <reason>` and
+computes the verdict again. A verifier cycle sends only the candidates no earlier cycle refuted.
+However, to prevent adversarial refuters from invalidating verified standards through specious dismissals, the refutation pass enforces strict **refutation guardrails**:
 - Refuters must adhere to Ground Rule 1: every finding stating a concrete failure scenario must be refuted with concrete proof of why that failure cannot occur, never an opinion or stylistic argument.
 - Refuters cannot dismiss findings under 'repo-idiom' excuses or familiarity arguments.
 - Refuters are strictly forbidden from dropping:
@@ -345,6 +411,14 @@ The properties of that order are load-bearing:
 
 **Gate failures outrank findings.** A failing blocking gate forces `REQUEST_CHANGES` immediately;
 clean code cannot pass with failed build, test, or analyzer evidence.
+
+**A gate that time stopped is NOT RUN, not failed.** A gate whose outcome is `TimedOut` (its
+own limit) or `DeadlinePassed` (the council deadline) reached no result. The engine reports it as
+`KW-REVIEW-039`, a warning that what it checks is unverified; it never trips rule 1 and never
+grades risk `HIGH`. A gate whose program never started still blocks, because approving past it
+would read as a gate that ran and passed. That is the verdict's reading; the `review gates` exit code
+treats a timed-out blocking gate as a failure unless the run passed `--deadline` (see
+[Reaching a verdict in one pass](#reaching-a-verdict-in-one-pass)).
 
 **Exit codes are binary.** `0` for `APPROVE` and `1` for `REQUEST_CHANGES`. Former rules
 `KW-REVIEW-008`, `KW-REVIEW-009`, and `KW-REVIEW-011` are retired in place; review policy no longer
@@ -657,10 +731,11 @@ before any gate starts (`KW-REVIEW-028`, client-input error exit `2`).
 
 #### Reaching a verdict in one pass
 
-A review runs its gates **once**, then reports one verdict. The command that does it is
-`kyber-weave review gates . --base <ref> --council`: `--base` scopes the gates to the change
-under review, `--council` admits the gates marked `full-suite`, and `--out` writes the report
-the verdict reads. Three behaviours make a single run enough, and each is a rule rather than a
+A review cycle runs its gates **once**, then reports one verdict. The command the council runs
+is `kyber-weave review gates . --base <ref> --council --deadline --out <cycle>/gates.json`:
+`--base` scopes the gates to the change under review, `--council` admits the gates marked
+`full-suite`, `--deadline` bounds the run, and `--out` writes the report the verdict reads into
+the cycle folder. Four behaviours make a single run enough, and each is a rule rather than a
 timing accident.
 
 **A refused full-suite gate ends an `--all` run at once.** Under `--all` there is no per-gate
@@ -680,6 +755,18 @@ zero gates, which a reader could take as a pass. `--gate` is exclusive with `--a
 `--agent` — both combinations are refused with `KW-REVIEW-028` and exit `2` — and combines with
 `--paths`, `--base` and `--council`. A reviewer that reads `artifacts/gates.json`, fixes one
 thing and needs that one gate re-checked pays for one gate, not the suite.
+
+**The council deadline bounds the council's run, and only when asked for.** `--deadline` turns
+on the run-level deadline `review.council-deadline-seconds` (default `600`). At the deadline, every
+gate still running is cut, a `concurrent` gate declared earlier included, and every gate not yet
+started is not started; all of them are recorded as `DeadlinePassed`. A gate its own
+`timeout-seconds` stopped is `TimedOut`. Under `--deadline` either one is reported NOT RUN (`KW-REVIEW-039`, a
+warning) and left out of the exit code, so the council goes on to a verdict on the evidence it
+has instead of waiting on a slow suite. Without `--deadline` nothing changes: CI, task gates,
+`--gate` re-checks and the pre-push self-review have no run deadline, and a blocking gate stopped
+by its own `timeout-seconds` fails `review gates` (`KW-REVIEW-022`, exit `1`) as it always has.
+`--deadline` is refused with `--gate` and with `--agent` (exit `2`). `review verdict` reads a
+`TimedOut` or `DeadlinePassed` result as NOT RUN either way, never as a blocking failure.
 
 **A gate whose dependency is absent does not start.** `requires-paths` turns "the tool was
 never installed" into its own reported fact instead of a code failure the reviewer has to
@@ -870,8 +957,9 @@ key: written on a task gate it is an unknown key (`KW-CONFIG-002`), not a silent
 The two principles this area answers to are stated in the
 [review index](README.md#principles); this section is how they are implemented.
 
-**One reviewer, and a deterministic gate ahead of it.** `code-reviewer` reviews the whole run,
-once, at the end — and one task only when a human explicitly asks. There is no condition under
+**One reviewer, and a deterministic gate ahead of it.** `code-reviewer` reviews the whole run
+at the end, and again after each fix round of the review loop below — and one task only when a
+human explicitly asks. There is no condition under
 which a task summons the council: not a failed gate, not a reserved path, not a concern that
 looks serious. Each of those would be a per-task council bill, and avoiding that bill is the
 entire point of the split.
@@ -892,13 +980,58 @@ rather than performing it.
 |---|---|---|
 | `shadow` | Full review, verdict recorded, **gates nothing** | First rollout on a repository |
 | `enabled` | The verdict gates | Normal operation |
-| `verifier` | Re-checks only the prior findings | After a fix push |
-| `full` | Forces a complete council re-scan | Escalation, or a stale prior review |
+| `verifier` | Re-checks only the prior findings and the fix delta | Every review cycle after the first |
+| `full` | Forces a complete council re-scan | Selected by a person: a disputed verdict, or a stale prior review |
 
-`verifier` is the cost lever: gates re-run every cycle because their result *is* the evidence,
-but only lenses owning an outstanding finding re-run. The loop escalates after three cycles
-without the surviving-finding count falling — a loop that is not converging is not going to,
-and the usual cause needs a person.
+**The review loop.** After `REQUEST_CHANGES`, every critical and major finding, and every
+failed blocking gate, goes to the worker that owns its scope; the council then re-reviews, and
+it keeps doing so until it returns `APPROVE`. Minor findings never start a cycle. Every cycle
+after the first is a `verifier` cycle: it reviews the fix delta `git diff <prior head>...<head>`,
+re-seats only the lenses that own an outstanding finding or whose predicate the delta newly
+satisfies, and passes `--prior <prior cycle folder>` so the lenses it did not re-seat keep their
+coverage. Gates re-run every cycle because their result *is* the evidence. A finding is FIXED only
+when the fix refuses its whole class: the verifier states the class in one sentence, names at
+least three other inputs of that class that the original failure scenario did not name, and
+traces each through the fix. A fix that refuses only the input the finding named leaves the
+finding open.
+
+The loop has a hard stop: 5 review cycles, or 3 cycles in a row in which the count of
+surviving critical and major findings does not fall. The findings still open are then listed in
+the pull request as pending human review, and delivery continues — a loop that is not
+converging is not going to, and the usual cause needs a person. A finding whose rework tripped
+the circuit-breaker stays open and counts toward the stop. The loop runs on the open pull
+request: ready stays decided by required CI alone.
+
+Each cycle keeps its record in `.agent_scratchpad/<task-id>/review/cycle-<n>/` — the `seats`
+folder, `gates.json`, the `findings.json` the verdict command writes, and `head` — until the run
+ends. A verdict-command refusal (`KW-REVIEW-040`, `-041`, `-042`) is the reviewer's to fix in
+the same cycle and never counts as one.
+
+## Quick review, sibling sweep and seat confidence
+
+**Quick review.** A change of at most 300 changed lines (added plus removed, from
+`git diff --numstat <base>...HEAD`) gets the quick review before its pull request is opened; a
+larger change gets the full pre-push council. The quick review is one pass by the session that
+made the change: no seats, no gates beyond what the root `AGENTS.md` requires before a pull
+request, and no verdict engine. It walks a fixed checklist (intent against the description, the
+changed lines' correctness, the sibling sweep below, contract-assertion strength under `REVIEW.md`
+R14, and the pre-push defect-class checklist), fixes every major-or-worse finding first, and puts
+one line in the pull request description: `Quick review: <n> findings, <m> fixed, open: <ids or
+none>`. It fires where a session reads the root `AGENTS.md` or the `create-pull-request` skill.
+A pull request opened from a web interface, or by a session that never read either, is not
+covered; bot review is the backstop there.
+
+**Sibling sweep.** When a diff changes a rule's wording in one file, the `documentation-accuracy`
+seat lists every other file carrying the same rule text, checks each one, and reports each sibling
+the diff left stale. It finds them with Grep and `docs_find_duplicates_conflicts_ambiguous_terms`,
+and names the siblings it checked in its `NO FINDINGS` sentence. The quick review walks the same
+sweep.
+
+**Seat confidence.** Every seat reports at or above the effective `min-confidence` its invocation
+names (strict 5, balanced 7, lenient 8), and 7 when none is named; the rubric bands describe
+certainty, not a cut-off. The reviewer never drops a finding for confidence itself, because the
+verdict engine does. The security lens is the one exception: it keeps its own floor of 8, tuned in
+the `security-review` skill against false positives.
 
 ## Gate applicability and Arbiter review gates
 

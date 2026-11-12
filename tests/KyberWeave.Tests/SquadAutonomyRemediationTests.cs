@@ -1,12 +1,13 @@
+using System.Text.RegularExpressions;
 using Xunit;
 
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Pins the auto-remediate loop: one actionable Critical/Major council finding earns a single
-/// bounded same-session remediation rework (with a task-gate re-run) before any park flag.
-/// Today the council parks immediately, so every assertion here fails until the conductor and
-/// worker contracts name the loop, its cap, and its bypass paths.
+/// Pins the council review loop: the council re-reviews after every fix round until it returns
+/// APPROVE, the loop stops after five cycles or three flat cycles with the open findings listed
+/// for human review, every review after the first is a verifier cycle, a failed blocking gate is
+/// fixed inside the same loop, and minor findings never loop.
 /// </summary>
 public sealed class SquadAutonomyRemediationTests
 {
@@ -19,7 +20,7 @@ public sealed class SquadAutonomyRemediationTests
     }
 
     /// <summary>
-    /// The council remediation loop lives in the shared execution contract both entry points load,
+    /// The council loop lives in the shared execution contract both entry points load,
     /// so that skill is the surface these pins read.
     /// </summary>
     private static string ExecutionAndReview()
@@ -37,6 +38,22 @@ public sealed class SquadAutonomyRemediationTests
         return Read("skills", "code-review", "SKILL.md");
     }
 
+    private static string Normalise(string text)
+    {
+        string unmarked = text
+            .Replace("`", string.Empty, StringComparison.Ordinal)
+            .Replace("*", string.Empty, StringComparison.Ordinal);
+
+        return Regex.Replace(unmarked, @"\s+", " ").Trim();
+    }
+
+    private static void AssertSentence(string text, string sentence)
+    {
+        Assert.True(
+            Normalise(text).Contains(Normalise(sentence), StringComparison.Ordinal),
+            $"Missing sentence: {Normalise(sentence)}");
+    }
+
     private static void AssertAll(string text, params string[] phrases)
     {
         foreach (string phrase in phrases)
@@ -46,73 +63,59 @@ public sealed class SquadAutonomyRemediationTests
     }
 
     /// <summary>
-    /// One actionable Major must route to rework first: the conductor packet names a single
-    /// bounded remediation pass before any park flag, instead of parking on first failure.
+    /// The council re-reviews after every fix round until it returns APPROVE, so a fix is never
+    /// accepted on the strength of the previous verdict.
     /// </summary>
     [Fact]
-    public void ActionableMajorFindingsEarnOneBoundedRemediationPassBeforeAnyPark()
+    public void CouncilReReviewsAfterEveryFixRoundUntilApprove()
     {
-        string execution = ExecutionAndReview();
-
-        AssertAll(execution,
-            "one bounded remediation pass",
-            "before park");
-        Assert.Matches(@"\bactionable\b", execution);
-        Assert.True(
-            execution.IndexOf("one bounded remediation pass", StringComparison.Ordinal) <
-            execution.IndexOf("before park", StringComparison.Ordinal),
-            "Remediation rework must be ordered before any park flag.");
+        AssertSentence(
+            ExecutionAndReview(),
+            "The council re-reviews after every fix round until it returns APPROVE.");
     }
 
     /// <summary>
-    /// The remediation pass continues the same worker session in the same file scope and
-    /// ends with a fresh task-gate re-run, so evidence is current instead of remembered.
+    /// The loop has a hard stop: five cycles, or three cycles in a row in which the surviving
+    /// critical and major count does not fall. The findings still open are listed in the pull
+    /// request for human review, and delivery continues rather than parking the change.
     /// </summary>
     [Fact]
-    public void RemediationReusesTheSameWorkerSessionAndRerunsTheTaskGate()
+    public void LoopStopsAfterFiveCyclesOrThreeFlatCyclesAndListsTheOpenFindings()
     {
-        string execution = ExecutionAndReview();
-
-        AssertAll(execution,
-            "same session",
-            "same file scope",
-            "task-gate re-run");
+        AssertSentence(
+            ExecutionAndReview(),
+            "The loop stops after 5 review cycles, or after 3 cycles in a row in which the count of surviving critical and major findings does not fall; the findings still open are then listed in the pull request as pending human review, and delivery continues.");
     }
 
     /// <summary>
-    /// The loop is bounded at one: unactionable, out-of-scope, or second-failure findings
-    /// park immediately with their finding ids instead of earning another worker dispatch.
+    /// A failed blocking gate is not a separate path: it is fixed inside the same loop by the
+    /// worker that owns the failing scope, exactly like a finding.
     /// </summary>
     [Fact]
-    public void SecondFailureOrUnactionableFindingParksImmediatelyWithFindingIds()
+    public void BlockingGateFailureIsFixedInsideTheSameLoopByItsOwningWorker()
     {
-        string execution = ExecutionAndReview();
-
-        AssertAll(execution,
-            "Unactionable",
-            "second-failure",
-            "park immediately",
-            "finding ids");
+        AssertSentence(
+            ExecutionAndReview(),
+            "A failed blocking gate is fixed inside the same loop: it goes to the worker that owns the failing scope, like a finding.");
     }
 
     /// <summary>
-    /// A Minor-only council reports and moves on: Minor/Info findings never trigger a
-    /// remediation loop and never park the change or task.
+    /// A Minor-only council reports and moves on: Minor/Info findings never start another loop
+    /// cycle, so a cosmetic finding cannot hold a change open.
     /// </summary>
     [Fact]
-    public void MinorOnlyCouncilNeverLoopsNorParks()
+    public void MinorOnlyCouncilNeverLoops()
     {
         string execution = ExecutionAndReview();
 
         AssertAll(execution,
             "Minor/Info",
-            "never trigger remediation",
-            "never park");
+            "never loop");
     }
 
     /// <summary>
     /// Reserved-path, size, and blocking-gate verdicts are not findings for this loop: they
-    /// keep their escalation and REQUEST_CHANGES paths and bypass remediation entirely.
+    /// keep their escalation and REQUEST_CHANGES paths and bypass the review loop entirely.
     /// </summary>
     [Fact]
     public void CouncilBypassPathsStayOutsideTheRemediationLoop()
@@ -127,34 +130,30 @@ public sealed class SquadAutonomyRemediationTests
     }
 
     /// <summary>
-    /// The worker side of the contract agrees: actionable Critical/Major findings get one
-    /// remediation pass, while Minor/Info findings are reported without a loop or park.
+    /// The reviewer side of the contract agrees: every review after the first is a verifier
+    /// cycle that re-checks the prior findings and the fix delta, not a full council.
     /// </summary>
     [Fact]
-    public void CodeReviewerRoutesActionableCriticalMajorFindingsToOneRemediationPass()
+    public void CodeReviewerRunsEveryReviewAfterTheFirstAsAVerifierCycle()
     {
-        string reviewer = CodeReviewer();
-
-        AssertAll(reviewer,
-            "actionable",
-            "Critical",
-            "Major",
-            "one remediation pass",
-            "Minor/Info");
+        AssertSentence(
+            CodeReviewer(),
+            "Every review after the first runs in the verifier mode of the dp-code-reviewer skill: it re-checks the prior findings and the fix delta, not a full council.");
     }
 
     /// <summary>
-    /// The skill adjudication notes the same loop without rewriting the verdict table: the
-    /// fixed rules still decide, and the Minor/Info never-loop rule is stated alongside them.
+    /// The skill adjudication states the verifier cycle without rewriting the verdict table: the
+    /// fixed rules still decide, and the verifier rule is stated alongside them.
     /// </summary>
     [Fact]
-    public void CodeReviewSkillNotesRemediationLoopWhileVerdictTableStillDecides()
+    public void CodeReviewSkillStatesTheVerifierCycleWhileVerdictTableStillDecides()
     {
         string skill = CodeReviewSkill();
 
+        AssertSentence(
+            skill,
+            "Every review after the first runs in the verifier mode of the dp-code-reviewer skill: it re-checks the prior findings and the fix delta, not a full council.");
         AssertAll(skill,
-            "remediation pass",
-            "Minor/Info",
             "Rule",
             "Verdict",
             "major-count-blocks");

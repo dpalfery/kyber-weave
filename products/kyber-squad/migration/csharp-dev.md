@@ -5,7 +5,7 @@ source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
 selected-baseline: .github/agents/csharp-dev.agent.md
 sources:
   .github/agents/csharp-dev.agent.md: 09cd65841fbb82e81060cbbccdc91c6aac7ee209a84b97e30799cc3281cbe146
-final-body-sha256: 0588b8e0ac950b4c7dd5f9deb112c301b0fb7f84be3857d7a8e7fcfb088dc38c
+final-body-sha256: 936b0877673af798ebb34fce158b76b3e0767940443e8380a11f390e9bce901e
 ---
 # csharp-dev migration
 
@@ -17,7 +17,7 @@ while `final-body-sha256` is the SHA-256 of the UTF-8, LF-normalized instruction
 YAML frontmatter is removed.
 
 The body has since evolved: test execution with `--no-build` and `dotnet test`, the task-gate
-exit gate, and `path.agent_scratchpad` worktree isolation. `final-body-sha256` covers that
+exit gate, and `path.agent_scratchpad` worktree isolation. Its full-suite sentence now says the council runs the suite once per review cycle, since the review loop re-runs the gates each cycle. `final-body-sha256` covers that
 evolved body.
 
 ## Canonical projection
