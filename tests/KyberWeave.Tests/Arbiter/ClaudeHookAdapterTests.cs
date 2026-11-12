@@ -630,4 +630,25 @@ public sealed class ClaudeHookAdapterTests
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout);
     }
+
+    [Fact]
+    public void ShellGuard_ArchitectBashCallWithoutToolInput_IsDeniedAndLogged()
+    {
+        // A call the guard cannot read is not a call it may let through: it is denied, and the log names the rule.
+        JsonNode root = JsonNode.Parse(ShellPayload("Bash", "git status", "architect"))
+            ?? throw new InvalidOperationException("The shell payload is not a JSON document.");
+        root.AsObject().Remove("tool_input");
+        HookCommand command = new(
+            HarnessAdapterRegistry.CreateDefault(new ScriptedEngine()),
+            _ => EnabledConfig(),
+            () => "decision-shell-no-input");
+        using StringWriter stdout = new();
+        using StringWriter log = new();
+
+        int exit = command.Run("claude", "conductor", root.ToJsonString(), stdout, log);
+
+        Assert.Equal(0, exit);
+        AssertShellDenied(stdout.ToString());
+        Assert.Contains("KW-ARB-SHELL-001", log.ToString(), StringComparison.Ordinal);
+    }
 }

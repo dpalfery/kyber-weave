@@ -82,6 +82,10 @@ public sealed class ArchitectShellGuardTests
     [InlineData("touch docs/./plans/x.md")]
     [InlineData("codegraph explore \"x\"")]
     [InlineData("ls docs 2>/dev/null")]
+    [InlineData("git diff --output-indicator-new=+ --output-indicator-old=-")]
+    [InlineData("rg --pretty p docs")]
+    [InlineData("codegraph explore \"-x\"")]
+    [InlineData("codegraph explore \"x y\"")]
     public void Bash_ListedCommand_IsAllowed(string command)
     {
         ShellGuardResult result = CheckBash(command);
@@ -92,6 +96,8 @@ public sealed class ArchitectShellGuardTests
     [Theory]
     [InlineData("git status")]
     [InlineData("cd C:\\w; git log -1")]
+    [InlineData("git status; git log -1")]
+    [InlineData("git status 2>&1")]
     public void PowerShell_ListedCommand_IsAllowed(string command)
     {
         ShellGuardResult result = Check("PowerShell", command);
@@ -154,6 +160,25 @@ public sealed class ArchitectShellGuardTests
     [InlineData("kyber-weave arbiter eval -f json", "kyber-weave arbiter eval -f json")]
     [InlineData("kyber-weave arbiter install", "kyber-weave arbiter install")]
     [InlineData("kyber-weave arbiter plan a b -f json", "kyber-weave arbiter plan a b -f json")]
+    [InlineData("rg --hostname-bin=x p", "rg --hostname-bin=x p")]
+    [InlineData("rg --hyperlink-format=x p", "rg --hyperlink-format=x p")]
+    [InlineData("find . -fls f", "find . -fls f")]
+    [InlineData("find . -fprintf f %p", "find . -fprintf f %p")]
+    [InlineData("find . -fprint0 f", "find . -fprint0 f")]
+    [InlineData("git --exec-path=x log", "git --exec-path=x log")]
+    [InlineData("git --config-env=a=b log", "git --config-env=a=b log")]
+    [InlineData("git --namespace=x log", "git --namespace=x log")]
+    [InlineData("git -C --no-pager log", "git -C --no-pager log")]
+    [InlineData("touch docs/plans/a.md src/b.md", "touch docs/plans/a.md src/b.md")]
+    [InlineData("touch src/a.md docs/plans/b.md", "touch src/a.md docs/plans/b.md")]
+    [InlineData("touch docs/plans/x.txt", "touch docs/plans/x.txt")]
+    [InlineData("touch /abs/elsewhere/docs/plans/x.md", "touch /abs/elsewhere/docs/plans/x.md")]
+    [InlineData("codegraph explore \"\"", "codegraph explore \"\"")]
+    [InlineData("codegraph explore -x", "codegraph explore -x")]
+    [InlineData("kyber-weave docs validate -x --merge-ready", "kyber-weave docs validate -x --merge-ready")]
+    [InlineData("git status || git log", "git log")]
+    [InlineData("cd /w", "cd /w")]
+    [InlineData("cd", "cd")]
     [InlineData("cd /tmp && touch docs/plans/x.md", "cd /tmp")]
     [InlineData("git diff --out=f", "git diff --out=f")]
     [InlineData("git diff --ou=f", "git diff --ou=f")]
@@ -193,6 +218,16 @@ public sealed class ArchitectShellGuardTests
     }
 
     [Fact]
+    public void Bash_TrailingSeparator_IsDeniedUnderTheRule()
+    {
+        // A trailing ';' leaves an empty final segment, so the reason names the rule rather than a command.
+        ShellGuardResult result = CheckBash("git status;");
+
+        Assert.False(result.Allowed, "A command ending in a separator is not on the architect's list and must be denied.");
+        Assert.Contains(RuleId, result.Reason ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Bash_EmptyCommand_IsDeniedUnderTheRule()
     {
         ShellGuardResult result = CheckBash(string.Empty);
@@ -207,6 +242,8 @@ public sealed class ArchitectShellGuardTests
     [InlineData("& git status", "& git status")]
     [InlineData("Set-Content f x", "Set-Content f x")]
     [InlineData("git status 2>$null", "git status 2>$null")]
+    [InlineData("git status || git log", "git log")]
+    [InlineData("git status 2>/dev/null", "git status 2>/dev/null")]
     public void PowerShell_CommandOutsideTheList_IsDeniedNamingTheOffendingSegment(string command, string offendingSegment)
     {
         ShellGuardResult result = Check("PowerShell", command);
