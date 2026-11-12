@@ -86,6 +86,7 @@ public sealed class ArchitectShellGuardTests
     [InlineData("rg --pretty p docs")]
     [InlineData("codegraph explore \"-x\"")]
     [InlineData("codegraph explore \"x y\"")]
+    [InlineData("git status || git log")]
     public void Bash_ListedCommand_IsAllowed(string command)
     {
         ShellGuardResult result = CheckBash(command);
@@ -98,6 +99,7 @@ public sealed class ArchitectShellGuardTests
     [InlineData("cd C:\\w; git log -1")]
     [InlineData("git status; git log -1")]
     [InlineData("git status 2>&1")]
+    [InlineData("git status || git log")]
     public void PowerShell_ListedCommand_IsAllowed(string command)
     {
         ShellGuardResult result = Check("PowerShell", command);
@@ -176,7 +178,6 @@ public sealed class ArchitectShellGuardTests
     [InlineData("codegraph explore \"\"", "codegraph explore \"\"")]
     [InlineData("codegraph explore -x", "codegraph explore -x")]
     [InlineData("kyber-weave docs validate -x --merge-ready", "kyber-weave docs validate -x --merge-ready")]
-    [InlineData("git status || git log", "git log")]
     [InlineData("cd /w", "cd /w")]
     [InlineData("cd", "cd")]
     [InlineData("cd /tmp && touch docs/plans/x.md", "cd /tmp")]
@@ -242,7 +243,6 @@ public sealed class ArchitectShellGuardTests
     [InlineData("& git status", "& git status")]
     [InlineData("Set-Content f x", "Set-Content f x")]
     [InlineData("git status 2>$null", "git status 2>$null")]
-    [InlineData("git status || git log", "git log")]
     [InlineData("git status 2>/dev/null", "git status 2>/dev/null")]
     public void PowerShell_CommandOutsideTheList_IsDeniedNamingTheOffendingSegment(string command, string offendingSegment)
     {
