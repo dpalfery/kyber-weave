@@ -769,10 +769,11 @@ flowchart TD
   that would fire for this event and tool: the project's `.claude/settings.json` and `settings.local.json`;
   the effective agent file for `agent_type`, the project agent when it exists, else the user agent; and each
   effective skill, where a personal skill shadows a project skill of the same name. A source counts only under
-  the exact `PreToolUse` or `PostToolUse` key, with a matcher that matches `Agent` or `Task`, and a command that
-  runs the project-scope hook. Read-guard and hand-back matchers do not count.
+  the exact `PreToolUse` or `PostToolUse` key, with a matcher that matches the event's tool (`Agent` or `Task`
+  for a dispatch, `SubagentHandback` for a background return), and a command that runs the project-scope hook.
+  Read-guard matchers do not count.
 - **One evaluation per dispatch.** Only the dispatch events claim: the tool `Agent` or `Task`, on `PreToolUse`
-  or `PostToolUse`. The claim is `artifacts/arbiter/claims/<id>.pre` (or `.post`), where `<id>` is the
+  or `PostToolUse`, and the `SubagentHandback` return on `PreToolUse` (claim suffix `.handback`). The claim is `artifacts/arbiter/claims/<id>.pre` (or `.post`), where `<id>` is the
   `tool_use_id` (or its SHA-256 when that id is not a plain token; an id over 256 characters is not claimed, so that dispatch is evaluated without a claim). The project hook writes `project` and
   yields only to an existing `global` claim, logging `Arbiter: dispatch already claimed by the global hook;
   not evaluated twice.` The user-level hook, when candidates exist, waits up to 1.5 s for a `project` claim and
@@ -872,6 +873,11 @@ runs the post-dispatch rules. A non-allow outcome never denies the hand-back —
 `message`, so the dispatcher receives the outcome inside the hand-back. Foreground calls
 keep the `PostToolUse` path, and a return observed by neither is reported by `audit` as an
 unpaired event (`KW-ARB-AUDIT-003`).
+
+The user-level settings block carries the same hand-back hook (`PreToolUse` on `^SubagentHandback$`), so a
+background return is recorded in a project whose agents carry no hand-back hook of their own. It follows the
+same claim rule as a dispatch: when an agent's own hand-back hook claims the return, the user-level hook defers.
+A machine whose block predates this entry gets it on the next `kyber-weave arbiter install --target claude`.
 
 ### Phase 3 notes
 

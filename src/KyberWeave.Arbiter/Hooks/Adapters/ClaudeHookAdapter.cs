@@ -562,9 +562,15 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         string.Equals(tool, "Agent", StringComparison.Ordinal)
         || string.Equals(tool, "Task", StringComparison.Ordinal);
 
-    // The claim phase of a sub-agent dispatch event, or null for every other event and tool.
+    // The claim phase of a sub-agent dispatch or hand-back event, or null for every other event and tool.
     private static string? DispatchPhase(string? eventName, string? tool)
     {
+        // A background sub-agent returns through SubagentHandback, which is a PreToolUse event only.
+        if (IsHandbackTool(tool))
+        {
+            return string.Equals(eventName, "PreToolUse", StringComparison.Ordinal) ? "handback" : null;
+        }
+
         if (!IsDispatchTool(tool))
         {
             return null;
