@@ -33,7 +33,7 @@ Mark any genuinely no-test task explicitly and name its replacement validation. 
 
 ## Task file
 
-Beside `tasks.md`, persist the tracked task file `<spec-folder>/tasks.json`, the specification form of the same contract a plan uses. It carries a schema version, the specification's path, the execution digest, and one entry per task: id, role, dependencies, file scope, `session` group and the full prompt, each prompt naming files by path plus symbol, the full test class names and the exact commands.
+Beside `tasks.md`, the tracked task file `<spec-folder>/tasks.json` is the specification form of the same contract a plan uses, and it is written only at finalization (see below). It carries a schema version, the specification's path, the execution digest, and one entry per task: id, role, dependencies, file scope, `session` group and the full prompt, each prompt naming files by path plus symbol, the full test class names and the exact commands.
 
 Only two slots stay unfilled — `{worktree}` and `{prior_results}` — because the conductor fills them at dispatch from what no authoring phase can know.
 
@@ -41,12 +41,10 @@ The file is written at finalization, not during the tasks phase: write it in pla
 
 Finalization runs in this order:
 
-1. Record the approval rows, write the spec Ready line (`**Status:** Ready`) in `tasks.md`, and synchronize the index.
-2. Take the digest from the conductor's `SPEC_DIGEST`.
-3. Write `tasks.json` with it as `execution-digest`.
+1. Check the digest before anything is written. A finalization invocation without `SPEC_DIGEST`, or one made after a task, contract-row, out-of-scope or mode edit since the digest was computed, returns `STATUS: BLOCKED` naming `task-file digest: run kyber-weave arbiter plan <spec-folder>/tasks.md -f json in <checkout>`. Nothing else is written, so the spec is not left Ready without a task file.
+2. Record the approval rows, write the spec Ready line (`**Status:** Ready`) in `tasks.md`, and synchronize the index.
+3. Write `tasks.json` with the digest from the conductor's `SPEC_DIGEST` as `execution-digest`.
 4. Return `SPEC_FINALIZED` with `TASK_FILE: <spec-folder>/tasks.json`.
-
-A finalization invocation without `SPEC_DIGEST`, or one made after a task, contract-row, out-of-scope or mode edit since the digest was computed, returns `STATUS: BLOCKED` naming `task-file digest: run kyber-weave arbiter plan <spec-folder>/tasks.md -f json in <checkout>`.
 
 ## Gaps and coverage
 
