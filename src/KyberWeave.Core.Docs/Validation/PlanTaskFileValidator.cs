@@ -126,6 +126,15 @@ public sealed partial class PlanTaskFileValidator
         string? planFolder = PlanFolder();
         if (planFolder is null)
         {
+            // No folder to scope the walk to: say so, because a clean result here would read as
+            // "no sidecars" when nothing was checked.
+            report.Add(new Diagnostic(
+                SidecarTaskFile,
+                Severity.Warning,
+                "The plans folder could not be resolved from the 'plan-index' registry property, so " +
+                "copies of a task file left beside a plan are not checked.",
+                ConfigRegConfig.PlanIndexProperty,
+                Hint: "Set 'plan-index' to an index file inside a plans folder, such as 'docs/plans/README.md'."));
             return;
         }
 

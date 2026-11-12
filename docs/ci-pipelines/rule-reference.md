@@ -66,7 +66,7 @@ behind a flag, because the orchestrator has the docs tools and no shell.
 | `KW-DOC-TASKS-004` | Error | A prompt carries no command, or no acceptance criteria |
 | `KW-DOC-TASKS-005` | Error | A prompt tells the worker to open a plan, specification or todo — the authoring-time half of `KW-ARB-PLANREAD-001` |
 | `KW-DOC-TASKS-006` | Warning | A Ready plan has no task file beside it. Advisory: it never fails a merge, because every plan sits in that state until its architect writes one |
-| `KW-DOC-TASKS-007` | Error | A copy of a task file left in the plans folder under another name, such as `<plan>.tasks.json.new` or `.tmp`, with or without its plan beside it. Names ending in `.tasks.json` are `KW-DOC-LIFECYCLE-005`'s |
+| `KW-DOC-TASKS-007` | Error | A copy of a task file left in the plans folder under another name, such as `<plan>.tasks.json.new` or `.tmp`, with or without its plan beside it. Names ending in `.tasks.json` are `KW-DOC-LIFECYCLE-005`'s. A Warning, same code, when `plan-index` names no plans folder (a root-level file), because nothing was checked |
 
 `KW-DOC-TASKS-007` walks the plans folder recursively, skips `docs/archive/**`, and reads the file system rather than git, so an untracked or git-ignored copy counts.
 

@@ -393,6 +393,24 @@ public sealed class PlanTaskFileValidatorTests
     }
 
     /// <summary>
+    /// A registry whose <c>plan-index</c> is a root-level file names no plans folder, so the
+    /// sidecar walk has nothing to scope to. That is a state the run reports, not a clean result:
+    /// silence would read as "no sidecars" when nothing was checked.
+    /// </summary>
+    [Fact]
+    public void AnUnresolvablePlansFolderIsReportedAsAWarningNotSilence()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        fixture.Write("README.md", "# Plans\n");
+        fixture.Write(".kyber-weave/kyber-weave.yml", "config-reg:\n  plan-index: README.md\n");
+
+        ReportedFindings run = Validate(fixture);
+
+        AssertReports(run, SidecarTaskFile);
+        Assert.Contains("plans folder", run.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// The prompt fixture is the contract an architect copies, so its command has to run. This
     /// programme shipped prompts naming test classes that matched nothing — a filter that
     /// matches nothing exits zero and proves nothing — so the class is resolved from the prompt
