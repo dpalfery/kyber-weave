@@ -22,10 +22,10 @@ namespace KyberWeave.Arbiter.Hooks;
 /// (<c>~/.config/kyber-weave/arbiter.yml</c>) applies field by field to the provider,
 /// as in every other host. A non-allow outcome renders the escalation envelope on
 /// conductor and investigate triggers, the post-return block, or the review note;
-/// an error result — the evaluator throws rather than allows — writes
-/// <c>KW-ARB-HOOK-001</c> to the log and the chat-visible note and lets the dispatch
-/// continue. A malformed user override still fails closed like a malformed host
-/// config. Nothing but the returned outcome ever reaches stdout:
+/// an error result, an evaluator fault and a malformed user override all write
+/// <c>KW-ARB-HOOK-001</c> to the log and the chat-visible note and let the dispatch
+/// continue: the Arbiter blocks only on a finding, never on a failure to decide.
+/// Nothing but the returned outcome ever reaches stdout:
 /// diagnostics go to <see cref="HookContext.Log"/> (stderr in production).
 /// Evaluation is synchronous at this boundary because the adapters are; the wait
 /// stays inside the harness's per-hook timeout.
@@ -178,8 +178,8 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         }
         catch (InvalidOperationException ex)
         {
-            // A malformed user override fails closed like a malformed host config.
-            return BlockWithError(harness, resolved, ex.Message, context.NewDecisionId(), isPost);
+            // A malformed user override leaves no provider to decide with: the dispatch continues loudly.
+            return AllowLoudly(harness, ex.Message, context.NewDecisionId(), context);
         }
 
         IArbiterProvider provider = _providerFactory(effective);
@@ -595,34 +595,6 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         return new HookOutcome(
             HookOutcomeKind.AllowWithNote,
             $"{HookCommand.FailClosedCode}: {flat}. The dispatch continues without an Arbiter decision.");
-    }
-
-    private static HookOutcome BlockWithError(
-        string harness, string? caller, string? message, string decisionId, bool isPost)
-    {
-        string flat = OneLine(message);
-        if (flat.StartsWith(HookCommand.FailClosedCode + ": ", StringComparison.Ordinal))
-        {
-            flat = flat.Substring((HookCommand.FailClosedCode + ": ").Length);
-        }
-
-        string trigger = string.Equals(caller, "conductor", StringComparison.Ordinal) ? "delegate" : "investigate";
-        string rendered = new ArbiterEscalationEnvelope(
-            trigger,
-            $"{caller ?? "unidentified"} ({harness})",
-            null,
-            null,
-            null,
-            [new ArbiterEnvelopeEntry(
-                HookCommand.FailClosedCode,
-                "Did the hook host fail before evaluation completed?",
-                ArbiterAnswerText.Error(HookCommand.FailClosedCode, flat),
-                $"{HookCommand.FailClosedCode}: {flat}")],
-            string.IsNullOrWhiteSpace(decisionId) ? "unknown" : decisionId,
-            1).Render();
-        return isPost
-            ? new HookOutcome(HookOutcomeKind.PostBlock, rendered)
-            : new HookOutcome(HookOutcomeKind.Deny, rendered);
     }
 
     private Func<Uri, string?> KeyResolverFor(KyberWeaveConfig config)

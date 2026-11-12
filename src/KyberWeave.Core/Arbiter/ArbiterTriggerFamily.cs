@@ -3,14 +3,15 @@ namespace KyberWeave.Core.Arbiter;
 /// <summary>
 /// The trigger family. The family fixes the effects its rules may use, what
 /// undecidable maps to, and how answers combine. A host cannot remap
-/// undecidable.
+/// undecidable, and no family maps it to a block: the Arbiter blocks only on a
+/// positive finding, never because it could not decide (ADR 0072).
 /// </summary>
 public enum ArbiterTriggerFamily
 {
-    /// <summary><c>delegate</c> triggers: escalate wins, undecidable escalates.</summary>
+    /// <summary><c>delegate</c> triggers: escalate wins, undecidable allows.</summary>
     Conductor,
 
-    /// <summary><c>investigate</c> triggers: escalate wins, undecidable escalates.</summary>
+    /// <summary><c>investigate</c> triggers: escalate wins, undecidable allows.</summary>
     Investigate,
 
     /// <summary><c>lens.spawn</c>: skip wins, undecidable allows.</summary>
@@ -150,11 +151,15 @@ public static class ArbiterTriggerFamilies
         _ => Rules.RuleEffects.Allow,
     };
 
-    /// <summary>The fixed effect an undecidable answer maps to.</summary>
+    /// <summary>
+    /// The fixed effect an undecidable answer maps to: always the effect that lets the trigger proceed.
+    /// A parse miss, a provider error or timeout, a low-confidence answer and a missing fact are all
+    /// undecidable, and none of them may block; the decision record keeps the undecidable answer.
+    /// </summary>
     public static string UndecidableEffect(ArbiterTriggerFamily family) => family switch
     {
-        ArbiterTriggerFamily.Conductor => Rules.RuleEffects.Escalate,
-        ArbiterTriggerFamily.Investigate => Rules.RuleEffects.Escalate,
+        ArbiterTriggerFamily.Conductor => Rules.RuleEffects.Allow,
+        ArbiterTriggerFamily.Investigate => Rules.RuleEffects.Allow,
         ArbiterTriggerFamily.LensSpawn => Rules.RuleEffects.Allow,
         ArbiterTriggerFamily.RefuteSpawn => Rules.RuleEffects.Allow,
         ArbiterTriggerFamily.LensReturned => Rules.RuleEffects.Allow,

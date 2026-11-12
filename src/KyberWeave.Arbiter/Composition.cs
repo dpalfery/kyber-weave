@@ -28,7 +28,7 @@ public static class Composition
 
     /// <summary>
     /// Dispatches with an injectable host factory. Tests pass a throwing factory to prove
-    /// a construction fault still blocks; production passes null for the default host.
+    /// a construction fault still lets the dispatch continue; production passes null for the default host.
     /// </summary>
     internal static async Task<int> DispatchAsync(
         string[] args,
@@ -68,7 +68,7 @@ public static class Composition
                     await stderr.WriteLineAsync(
                         "Usage: kyber-weave-arbiter hook --harness <token> [--caller <agent>] [--scope project|global] [--home <path>].")
                         .ConfigureAwait(false);
-                    return 2;
+                    return 1;
                 }
             }
 
@@ -77,7 +77,7 @@ public static class Composition
                 await stderr.WriteLineAsync(
                     "Usage: kyber-weave-arbiter hook --harness <token> [--caller <agent>]. " +
                     "The hook event is read on stdin.").ConfigureAwait(false);
-                return 2;
+                return 1;
             }
 
             try
@@ -88,10 +88,9 @@ public static class Composition
             }
             catch (Exception ex)
             {
-                // Fail closed: the stdin read or the host construction broke before the
-                // host's own catch existed. Yield this harness's block, never an
-                // empty-stdout error that Claude and Copilot treat as non-blocking.
-                return await FailClosedAsync(harness, caller, ex, stdout, stderr).ConfigureAwait(false);
+                // Fail open: the stdin read or the host construction broke before the host's own
+                // catch existed. The failure is logged and the dispatch continues (ADR 0072).
+                return await FailOpenAsync(harness, ex, stdout, stderr).ConfigureAwait(false);
             }
         }
 
@@ -122,77 +121,58 @@ public static class Composition
         await stderr.WriteLineAsync(
             "Usage: kyber-weave-arbiter hook --harness <token> [--caller <agent>] | kyber-weave-arbiter guard [--allow-mcp <server>] | kyber-weave-arbiter --version.")
             .ConfigureAwait(false);
-        return 2;
+        return 1;
     }
 
     /// <summary>
-    /// Renders the fail-closed block for a fault before <see cref="HookCommand"/> ran.
-    /// Returns 0 carrying the block on stdout, or 2 when stdout itself is broken so the
-    /// harness still blocks on the exit code. Stdout carries only the block.
+    /// Lets the dispatch continue after a fault before <see cref="HookCommand"/> ran: logs
+    /// <c>KW-ARB-HOOK-001</c> to stderr and writes the harness's allow document when it has
+    /// one. Returns 0, so no harness reads the fault as a block.
     /// </summary>
-    private static async Task<int> FailClosedAsync(
+    private static async Task<int> FailOpenAsync(
         string harness,
-        string? caller,
         Exception fault,
         TextWriter stdout,
         TextWriter stderr)
     {
         string detail = OneLine(fault.Message);
-        string decisionId;
-        try
-        {
-            decisionId = ArbiterRecordId.New(DateTimeOffset.UtcNow);
-        }
-        catch (Exception)
-        {
-            decisionId = "unknown";
-        }
-
-        string block;
+        string? allow = null;
         try
         {
             HarnessAdapterRegistry registry =
                 HarnessAdapterRegistry.CreateDefault(new ArbiterHookDecisionEngine());
             if (registry.TryGet(harness, out IHarnessHookAdapter? adapter) && adapter is not null)
             {
-                try
-                {
-                    block = adapter.RenderFailClosed(detail, caller, string.Empty, decisionId);
-                }
-                catch (Exception)
-                {
-                    block = LastResortBlock.For(harness);
-                }
-            }
-            else
-            {
-                block = LastResortBlock.For(harness);
+                allow = adapter.DisabledAllowDocument;
             }
         }
         catch (Exception)
         {
-            block = LastResortBlock.For(harness);
+            // Without an adapter there is no allow document; empty stdout allows on every command harness.
         }
 
         try
         {
             await stderr.WriteLineAsync(
-                $"{HookCommand.FailClosedCode}: hook host failed before evaluation: {detail}")
+                $"{HookCommand.FailClosedCode}: hook host failed before evaluation: {detail}. " +
+                "The dispatch continues without an Arbiter decision.")
                 .ConfigureAwait(false);
         }
         catch (Exception)
         {
-            // Stderr is best effort; the block on stdout (or the exit code) still fails closed.
+            // Stderr is best effort.
         }
 
-        try
+        if (allow is not null)
         {
-            await stdout.WriteAsync(block).ConfigureAwait(false);
-        }
-        catch (Exception)
-        {
-            // Stdout is broken, so no document can ride it: block on the exit code.
-            return 2;
+            try
+            {
+                await stdout.WriteAsync(allow).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // Stdout is broken; exit 0 still lets the dispatch continue.
+            }
         }
 
         return 0;

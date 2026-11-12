@@ -55,9 +55,10 @@ public sealed record ArbiterEvaluatorOptions(
 /// evaluation so a hook killed mid-evaluation still leaves an undecided entry;
 /// one decision record per trigger is appended after, the primary first and
 /// each secondary behind it, all sharing the event's ledger id. A provider
-/// failure degrades to <c>undecidable</c> (which the family maps); any other
-/// exception becomes an error result carrying <c>KW-ARB-HOOK-001</c>, never
-/// <c>allow</c>. The key is resolved to prove the origin is served but is never
+/// failure degrades to <c>undecidable</c>, which every family maps to its proceeding
+/// effect; any other exception becomes an error result that carries
+/// <c>KW-ARB-HOOK-001</c> and allows, because the Arbiter never blocks on a decision it
+/// could not reach. The key is resolved to prove the origin is served but is never
 /// logged.
 /// </remarks>
 public sealed class ArbiterEvaluator
@@ -181,10 +182,11 @@ public sealed class ArbiterEvaluator
         }
         catch (Exception ex)
         {
-            // Fail closed: an evaluator exception is an error result, never allow.
+            // Fail open: an evaluator exception is an error result that allows. The caller logs
+            // KW-ARB-HOOK-001 with the message, and the ledger entry already appended keeps the trail.
             // ledgerId is empty only when the fault landed before the id was allocated.
             return new ArbiterEvaluationResult(
-                RuleEffects.Escalate, true, HookErrorCode, ex.Message, [], ledgerId);
+                RuleEffects.Allow, true, HookErrorCode, ex.Message, [], ledgerId);
         }
     }
 

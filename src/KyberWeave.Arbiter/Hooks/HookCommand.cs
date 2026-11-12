@@ -13,9 +13,9 @@ namespace KyberWeave.Arbiter.Hooks;
 /// The host writes the harness's decision document on stdout, and nothing else.
 /// Logging goes to the <c>log</c> writer (stderr in production). The exit code is 0:
 /// a block rides the decision document, so a failing gate never needs a failing
-/// process. One top-level catch turns any exception into that harness's block
-/// carrying <c>KW-ARB-HOOK-001</c>; on conductor dispatches the reason is an
-/// escalation envelope with <c>ANSWER: error</c>.
+/// process. One top-level catch turns any exception into an allow: the host logs
+/// <c>KW-ARB-HOOK-001</c> with the reason and writes the harness's allow document,
+/// because a host that cannot decide must not block the dispatch (ADR 0072).
 /// </remarks>
 public sealed class HookCommand
 {
@@ -46,8 +46,9 @@ public sealed class HookCommand
     }
 
     /// <summary>
-    /// Runs one hook event. Returns 0 always: blocks ride stdout, and unknown-harness
-    /// usage errors (which have no harness block shape) return 2 with stderr diagnostics.
+    /// Runs one hook event. Returns 0 for every event: blocks ride stdout. An unknown
+    /// harness token is a usage error with no harness document to write; it returns 1 with
+    /// stderr diagnostics, which Claude and Copilot treat as a non-blocking hook error.
     /// </summary>
     /// <remarks>
     /// The user-level hook (<see cref="HookScope.Global"/>) evaluates a project's dispatch under that
@@ -75,7 +76,7 @@ public sealed class HookCommand
                 $"Unknown harness '{harness}'. Known harnesses: " +
                 $"{string.Join(", ", _registry.Tokens.Order(StringComparer.Ordinal))}. " +
                 "Usage: kyber-weave-arbiter hook --harness <token> [--caller <agent>].");
-            return 2;
+            return 1;
         }
 
         try
@@ -167,20 +168,12 @@ public sealed class HookCommand
         }
         catch (Exception ex)
         {
-            string block;
-            try
-            {
-                block = adapter.RenderFailClosed(OneLine(ex.Message), caller, stdin, _newDecisionId());
-            }
-            catch (Exception)
-            {
-                // The block renderer never throws by contract; this is the last resort
-                // so a host failure still fails closed when the renderer itself breaks.
-                block = LastResortBlock.For(harness);
-            }
-
-            stdout.Write(block);
-            return 0;
+            // Fail open: the host could not reach a decision, so the dispatch continues and the
+            // failure is logged with its code. Only a positive finding may block (ADR 0072).
+            log.WriteLine(
+                $"{FailClosedCode}: hook host failed ({_newDecisionId()}) on '{harness}': {OneLine(ex.Message)}. " +
+                "The dispatch continues without an Arbiter decision.");
+            return WriteDisabledAllow(adapter, stdout);
         }
     }
 
