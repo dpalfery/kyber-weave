@@ -88,7 +88,7 @@ public sealed class ArbiterPlanCommand : Command<ArbiterSettings>
                     ? $"Plan '{resolved}' has a Tasks section, but no task in it parsed."
                     : $"Plan '{resolved}' carries no Tasks section.",
                 settings.Path,
-                Hint: "Add a '## Tasks' section with T1, T2, ... headings, or a spec-grammar checklist; without one, readiness answers no-tasks."));
+                Hint: "Add T1, T2, ... headings under '## Tasks' (adding the section if missing), or a spec-grammar checklist; without one, readiness answers no-tasks."));
         }
 
         // The prose lines are for a person reading the table. Json, sarif and markdown must
