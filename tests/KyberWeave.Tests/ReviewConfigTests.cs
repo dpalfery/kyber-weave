@@ -284,6 +284,19 @@ public class ReviewConfigTests
             StringComparison.Ordinal);
 
     /// <summary>
+    /// A council deadline of zero would stop every gate before it started, and a negative one means nothing, so either
+    /// is refused where the operator wrote it, under the key's own name.
+    /// </summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-30)]
+    public void NonPositiveCouncilDeadlineIsRejectedNamingTheKey(int seconds) =>
+        Assert.Contains(
+            "council-deadline-seconds",
+            Invalid($"review:\n  council-deadline-seconds: {seconds}\n").Message,
+            StringComparison.Ordinal);
+
+    /// <summary>
     /// ASSUMED API (T5 RED, issue #386 item E): <c>review.max-concurrent-workers</c> reads as
     /// <c>ReviewConfig.MaxConcurrentWorkers</c> (default 4). T5 GREEN provides the member; until
     /// then the value is observed through reflection so the suite still builds and the RED is a

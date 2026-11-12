@@ -127,6 +127,35 @@ public class ReviewVerdictTests
         Assert.Contains(outcome.Diagnostics, d => d.Code == VerdictEngine.BlockingGateFailed);
     }
 
+    /// <summary>
+    /// A blocking gate the time limit or the council deadline stopped did not finish, so it says nothing about
+    /// whether the change is broken. It is reported as a warning (KW-REVIEW-039) and neither requests changes
+    /// nor raises the risk grade. Stopping for lack of time is a budget the council ran out of, not a defect.
+    /// </summary>
+    [Theory]
+    [InlineData(GateOutcome.TimedOut)]
+    [InlineData(GateOutcome.DeadlinePassed)]
+    public void ABlockingGateStoppedForTimeDoesNotRequestChangesOrRaiseRisk(GateOutcome outcome)
+    {
+        ReviewOutcome result = Evaluate(gates: [new GateResult("test", true, -1, "stopped", Outcome: outcome)]);
+
+        Assert.Equal(ReviewVerdict.Approve, result.Verdict);
+        Assert.NotEqual(RiskGrade.High, result.Risk);
+        Assert.Contains(result.Diagnostics, d => d is { Code: "KW-REVIEW-039", Severity: Severity.Warning });
+    }
+
+    /// <summary>
+    /// A blocking gate whose program never started is still a reason to request changes: the missing tool has to
+    /// be installed before the gate can say anything, so it is not treated like a stopped-for-time gate.
+    /// </summary>
+    [Fact]
+    public void ABlockingGateThatNeverStartedStillRequestsChanges()
+    {
+        ReviewOutcome result = Evaluate(gates: [new GateResult("tests", true, -1, "could not start", Outcome: GateOutcome.NotStarted)]);
+
+        Assert.Equal(ReviewVerdict.RequestChanges, result.Verdict);
+    }
+
     [Fact]
     public void AFailingNonBlockingGateDoesNotBlock()
     {

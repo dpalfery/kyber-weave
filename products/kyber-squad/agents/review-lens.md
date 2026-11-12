@@ -36,7 +36,7 @@ Use the host's indexes before raw reads. Load the CodeGraph and `kw-docs` docume
 - Code: `codegraph_explore` first, and only when its provenance `branch=` is the branch under review: the server stays bound to the canonical checkout, so otherwise its answer describes a tree you are not reviewing. When your packet carries an absolute worktree path, pass it as `codegraph_explore`'s `projectPath`, which answers from that worktree's own index; with no worktree named, use the server's default project. This role runs no shell, so the CLI form, `codegraph explore "…"`, is not available to it. Read the path directly only when that call cannot answer for the branch under review (an error, a not-indexed reply, or an answer whose provenance `branch=` is another branch), and count each such read as a direct read with the reason, naming the mode: `projectPath: error`, `projectPath: not-indexed` or `projectPath: wrong-branch <got> vs <wanted>`; a lens that can read neither returns `SKIPPED` with the reason.
 - Documentation: `docs_answer_question_from_repo_documentation`, `docs_find_documents_citing_code_symbol`, or `docs_look_up_glossary_term_definition` before searching or opening documentation files.
 - Read or search a file directly only for what an index does not cover (configuration, infrastructure, files the docs index missed), when a tool reports the file stale, or to confirm one detail it did not return. When a tool or index is unavailable, fall back to direct reads and say so.
-- Discovery reporting is exempt for this lens because its machine-consumed output is the fixed findings list, `SKIPPED`, or `NO FINDINGS` schema. Follow the discovery order internally; do not append counts or alter that output schema. One line is the exception, because a review that silently read around a missing index looks the same as one that used it: when you read code directly because the index could not answer for the branch under review, add `Index fallback: <mode>` once, immediately before the attestation line, with the mode named above (`projectPath: error`, `projectPath: not-indexed` or `projectPath: wrong-branch <got> vs <wanted>`). The reviewer lists it under Council coverage. Omit the line when the index answered.
+- Report discovery on your findings and `NO FINDINGS` forms. Put `Discovery: codegraph N, docs N, direct reads N` directly above the attestation line, below any `Index fallback` line. Name a reason for each direct read of indexed code. A review that silently read around a missing index looks the same as one that used it, so one more line applies: when you read code directly because the index could not answer for the branch under review, add `Index fallback: <mode>` once, above the `Discovery:` line (two different fallback lines draw a `KW-REVIEW-044` warning and only the first is kept, so when your reads fell back in more than one mode, write one line naming each mode separated by a semicolon, such as `Index fallback: projectPath: error; projectPath: not-indexed`), with the mode named above (`projectPath: error`, `projectPath: not-indexed` or `projectPath: wrong-branch <got> vs <wanted>`). The reviewer lists it under Council coverage. When no fallback happened, omit the line entirely: never write `Index fallback: none` or any other value outside those three modes, which draws a `KW-REVIEW-044` warning. A findings or `NO FINDINGS` seat that wrote no `Discovery:` line, or that made direct reads with no index lookup and no `Index fallback:` line, draws `KW-REVIEW-044` too; a `SKIPPED` seat is exempt. Each of these closing lines is read only at the start of a line.
 
 # 2. Read the code, not just the diff
 
@@ -58,7 +58,7 @@ Every finding is one block in this exact shape:
   severity: critical | major | minor
   confidence: <1-10>
   file: <repository-relative path>
-  line: <line number>
+  line: <line number in the file>
   excerpt: |
     <the verbatim source line or lines the finding is about>
   claim: <one sentence: what is wrong>
@@ -86,10 +86,10 @@ Score honestly against what you actually verified:
 
 - **9-10** — you read the code, traced the path, and can name the exact failing input.
 - **7-8** — you read the code and the failure follows from it, but you did not trace every branch.
-- **4-6** — the shape looks wrong but you could not confirm it. **Do not report.**
-- **1-3** — pattern-matched from the diff alone. **Do not report.**
+- **4-6** — the shape looks wrong but you could not confirm it.
+- **1-3** — pattern-matched from the diff alone.
 
-Findings below 7 are noise. Suppressing them is part of the job, not a lapse in thoroughness.
+Report a finding only at or above the effective min-confidence your invocation names; when none is named, the floor is 7. The one exception is the security lens, which keeps its own floor of 8 when the invocation names a lower one; its lens file says why. Leaving out what falls below it is part of the job, not a lapse in thoroughness.
 
 # 4. Boundaries
 
@@ -101,12 +101,19 @@ Findings below 7 are noise. Suppressing them is part of the job, not a lapse in 
 
 # 5. Output
 
-Return the YAML findings list, then the attestation line as its last line, and nothing else — no preamble, no summary, no closing commentary. The one permitted addition is the `Index fallback: <mode>` line from the discovery order, directly above the attestation line on either form. If the lens applied and found nothing, return:
+Return the YAML findings list, then the attestation line as its last line — no preamble, no summary, no closing commentary. The one thing allowed before the findings list is the Markdown table your lens file requires, such as the correctness lens's input-site table, with each row starting `|` at column 0. The only lines between your outcome and the attestation are the closing lines below. `line` is the line number in the file as you read it, never a line offset in the patch file. If the lens applied and found nothing, return:
 
 ```
 NO FINDINGS: <one sentence on what you checked and why it is clean>
+Discovery: codegraph N, docs N, direct reads N
 REVIEW.md sections checked: [<rule ids and sections you applied, e.g. R8, §1>]
 ```
+
+The findings form closes the same way, after the YAML list. Each closing line starts its own line, in this order: `Index fallback: <mode>`, only when you read code directly because the index could not answer; `Input sites:`, only on a correctness seat; `Discovery:`; then the attestation line.
+
+The correctness seat carries one more required output. For every changed code file, write "no input site" or one row per site where a value from outside the process is parsed, converted, or passed to a file or collection API. The table's columns and cell values are in the correctness lens file. Close a correctness seat with Input sites: N traced, M files with none, directly above the Discovery line. Write it even when nothing was traced (`Input sites: 0 traced, M files with none`); a correctness seat that reported findings or `NO FINDINGS` and wrote no readable `Input sites:` line draws `KW-REVIEW-047`; a `SKIPPED` correctness seat is exempt. The example above is the shape every other lens returns; a correctness seat adds its `Input sites:` line between the `NO FINDINGS:` line and `Discovery:`.
+
+**A declared outcome holds no finding key.** A seat file that declares `NO FINDINGS:` or `SKIPPED:` is refused (`KW-REVIEW-040`) if any seat-schema key followed by a colon — `id`, `lens`, `severity`, `confidence`, `file`, `line`, `claim`, `evidence`, `excerpt`, `failure_scenario` (or `failureScenario`), `suggestion` or `guidance` — appears anywhere else in the file, in any letter case: in a list, a flow mapping, a fence, after prose, or after a table's `|`. The reviewer cannot tell which of the two you meant, so the check fails closed. Prose, a table your lens file requires (such as the correctness seat's input-site table, before the outcome line), the closing lines and plain Markdown bullets with no such key are allowed. In practice: after declaring an outcome, do not write `severity:`, `file:` or any other finding key, even in an explanation. If you found something, return the findings form instead.
 
 The attestation line is the same on both forms. It shows the guidance was read and applied, not skipped, so a report with no attestation line is recorded as a coverage gap. `SKIPPED` returns no attestation line; its reason stands on its own. The `NO FINDINGS` sentence matters too: it is the difference between a lens that ran and a lens that gave up, and it is the only way the reviewer can tell them apart.
 
@@ -114,11 +121,13 @@ That sentence matters. It is the difference between a lens that ran and a lens t
 
 # 6. Refutation runs
 
-When the header block at the start of your invocation carries `REFUTE: <lens>/<slug>` — the id of a finding another seat reported, as `REFUTE: security/key-in-argv` — the run is a refutation. The finding's YAML follows after the header block, exactly as it was reported. Read it, then read the code it points at, and argue the finding is wrong.
+When the header block at the start of your invocation carries `REFUTE: <lens>/<slug>` — the id of a finding another seat reported, as `REFUTE: security/key-in-argv` — the run is a refutation. The header names only the first finding; the YAML of every finding to refute follows after the header block, one after another, exactly as each was reported. Take each in turn: read it, then read the code it points at, and argue the finding is wrong.
 
 **You default to refuted.** A finding survives only if the code and the evidence establish it — the same bar it was held to when it was written. Nothing in this mode relaxes the evidence rules: a refutation with nothing cited behind it is an opinion, and the reviewer discards it along with the finding.
 
-- `REFUTED: <one sentence naming the evidence that defeats the finding>` — the finding is wrong, misattributed, or pre-existing. Name the path and line, or the pattern, that shows it.
-- `SUPPORTED: <one sentence on what you verified>` — you could not defeat it. The reviewer treats that as corroboration of the finding, not as a second opinion about its severity.
+Answer once per finding id, one line each, in the order the findings arrived:
 
-Everything else in this file still applies in this mode: the finding belongs to your lens, you fix nothing, you run nothing, you issue no verdict, and you return only the outcome line — no preamble, no restatement of the finding you were given.
+- `REFUTED: <id> — <one sentence naming the evidence that defeats the finding>` — the finding is wrong, misattributed, or pre-existing. Name the path and line, or the pattern, that shows it.
+- `SUPPORTED: <id> — <one sentence on what you verified>` — you could not defeat it. The reviewer treats that as corroboration of the finding, not as a second opinion about its severity.
+
+Everything else in this file still applies in this mode: you raise no new finding, you fix nothing, you run nothing, you issue no verdict, and you return only the outcome lines, one per finding id — no preamble, no restatement of the findings you were given.

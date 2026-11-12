@@ -156,7 +156,7 @@ drifting between two. It holds the ready queue and its concurrency cap, worktree
 isolation, task session continuity, test-first and standard mode, the developer exit gate and its
 six-field completion digest, the iteration circuit-breaker and failure-cluster tallies, the
 findings drain, the final review council with its `STATUS: COUNCIL_SEATS_NEEDED` handback, the
-bounded Critical/Major remediation loop, and the plan and specification closeout.
+council review loop and its hard stop, and the plan and specification closeout.
 
 Renderers project every file an owner's Markdown links reach beside its principal output, with
 authored relative links preserved, so the former dangling-reference defect is closed for every

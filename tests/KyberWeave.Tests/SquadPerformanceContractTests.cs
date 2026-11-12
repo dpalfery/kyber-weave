@@ -551,12 +551,29 @@ public sealed class SquadPerformanceContractTests
     {
         string content = ReadRepoFile(relativePath);
         Assert.Matches(@"(?i)\bonly the test classes (?:its|your|the) task touched\b", content);
-        Assert.Matches(@"(?i)\bonce per run\b", content);
+        Assert.Matches(@"(?i)\bonce per review cycle\b", content);
+        string[] fullSuiteSentences = CouncilFullSuiteSentences(content).ToArray();
+        Assert.NotEmpty(fullSuiteSentences);
+        foreach (string sentence in fullSuiteSentences)
+            Assert.DoesNotMatch(@"(?i)\bonce per run\b", sentence);
         Assert.Matches(@"(?i)\bintegrated\s+head\b", content);
         Assert.Matches(@"(?i)`TESTS: total=0`\s+with\s+the\s+reason\b", content);
         Assert.False(
             ReservesFullSuiteForTaskEnd(content),
             $"{relativePath} must not reserve the full suite for task end.");
+    }
+
+    /// <summary>
+    ///     The sentences describing the council's full-suite run. The "once per run" absence check is
+    ///     scoped to these rather than the whole file, because the phrase may occur in unrelated prose.
+    /// </summary>
+    private static IEnumerable<string> CouncilFullSuiteSentences(string content)
+    {
+        string flattened = Regex.Replace(content, @"\s+", " ");
+        foreach (string sentence in Regex.Split(flattened, @"(?<=[.!?])\s+"))
+            if (Regex.IsMatch(sentence, @"\bfull\b", RegexOptions.IgnoreCase) &&
+                Regex.IsMatch(sentence, @"\bcouncil\b", RegexOptions.IgnoreCase))
+                yield return sentence;
     }
 
     [Theory]

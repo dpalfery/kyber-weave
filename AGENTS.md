@@ -65,6 +65,10 @@ cores; partial runs, builds and format checks never take a slot. Playwright runs
 
 ### Before opening a PR
 
+A change of at most 300 changed lines (added plus removed, from `git diff --numstat <base>...HEAD`)
+gets the quick review before its pull request is opened; a larger change gets the full pre-push
+council. Both are in the `code-review` skill.
+
 Run the build and the targeted tests above, the `task-gate` skill if you are a dev agent, and the
 docs gates:
 

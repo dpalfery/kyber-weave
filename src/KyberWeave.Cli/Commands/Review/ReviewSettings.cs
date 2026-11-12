@@ -56,6 +56,12 @@ public sealed class ReviewGatesSettings : AnalysisSettings
                  "Without it, full-suite gates are refused when stdin is not a terminal.")]
     public bool Council { get; set; }
 
+    [CommandOption("--deadline")]
+    [Description("Bound the run by review.council-deadline-seconds (default 600). A gate the deadline or its own " +
+                 "timeout stops is reported as not run (KW-REVIEW-039) and left out of the exit code. Without it, " +
+                 "no run deadline applies and a timed-out blocking gate fails the run. Not with --gate or --agent.")]
+    public bool Deadline { get; set; }
+
     /// <summary>
     ///     Whether an option that only makes sense for one agent was given. <c>--paths</c> and <c>--base</c> also
     ///     scope the repository-wide council gates, so they are not agent-only.
@@ -90,4 +96,34 @@ public sealed class ReviewVerdictSettings : AnalysisSettings
     [CommandOption("--gates <PATH>")]
     [Description("Path to the gate report JSON produced by 'review gates'.")]
     public string? Gates { get; set; }
+
+    [CommandOption("--seats <DIR>")]
+    [Description("Folder of council seat output files, one <lens>.md per seat.")]
+    public string? Seats { get; set; }
+
+    [CommandOption("--drop <ID=REASON>")]
+    [Description("Drop the finding with this id, giving the reason. Repeat for several.")]
+    // reason: Spectre.Console.Cli binds repeated options to arrays.
+    [SuppressMessage(
+        "Performance", "CA1819:Properties should not return arrays",
+        Justification = "Spectre.Console.Cli binds repeated options to arrays.")]
+    public string[] Drop { get; set; } = [];
+
+    [CommandOption("--not-seated <LENS=REASON>")]
+    [Description("Record that this lens did not run, giving the reason. Repeat for several.")]
+    // reason: Spectre.Console.Cli binds repeated options to arrays.
+    [SuppressMessage(
+        "Performance", "CA1819:Properties should not return arrays",
+        Justification = "Spectre.Console.Cli binds repeated options to arrays.")]
+    public string[] NotSeated { get; set; } = [];
+
+    [CommandOption("--prior <DIR>")]
+    [Description("Folder holding the previous cycle's findings.json (written by --out). A lens its coverage lists " +
+                 "counts as covered, carried from that cycle; its findings are not re-read.")]
+    public string? Prior { get; set; }
+
+    [CommandOption("--out <PATH>")]
+    [Description("Write the findings document the verdict was computed from (after --drop and the cited-line " +
+                 "check), with per-lens coverage, to this path as JSON. The verdict itself is printed, not written.")]
+    public string? Out { get; set; }
 }

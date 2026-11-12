@@ -51,7 +51,7 @@ not a pass until a run without `--fix` reports every declared gate as passing.
 When the task changed C# files, the mechanical findings can be erased before the gate runs.
 Follow the `resharper-clt` skill's fix pass, scoped with `--include` to this task's files.
 Run only the `cleanupcode` fix pass. Never run `InspectCode` from this gate: inspection is a
-once-per-run review gate, and a per-task run loads the whole solution.
+review gate, run once per review cycle, and a per-task run loads the whole solution.
 
 ## Loop and the 2-cycle cap
 

@@ -6,7 +6,7 @@ selected-baseline: .github/agents/conductor.agent.md
 sources:
   .github/agents/conductor.agent.md: fe8fa326b83780cafb4a9b8aba06312ddb106eb732de1f7a64f3a88b8fe773c6
   .github/agents/conductor-v3.agent.md: 0392bd1e3dd09ab67f45801cb39aac7d016b5ed43733ee2ae65ac6c5668d7204
-final-body-sha256: 2e0b2083355845d2aa50aa19c00366affc33af89ee7494ae7068ae6cbdc7ce3f
+final-body-sha256: e1854c95ea868e60bb758cd9144477572265add9a2e86606624a1f32f8fd008f
 ---
 # conductor migration
 
@@ -21,6 +21,9 @@ the conductor seat the `review-lens` and `review-triage` lenses for a reviewer w
 The body names the `delivery-execution` skill rather than linking a local reference: the worker execution
 contract that used to sit among the conductor's own reference files is that skill now, so both the
 conductor and the `bug-crusher` workflow load one copy.
+The review loop changed it again: the council re-reviews after every fix round until it approves or reaches its hard
+stop, which now completes the objective too, with the verdict computed from the seat files, the council's gates
+bounded by the council deadline, and the review seats reporting discovery like every other worker.
 
 ## Canonical projection
 
