@@ -1494,7 +1494,9 @@ to every dispatched worker's body exactly once.
 
 **What the block carries.** The Discovery order (`codegraph_explore` first, then the `kw-docs` tools,
 a direct read only for what an index does not cover, with that file and the reason named in the
-report); the plan-read ban (`<plan-index>` and `<specification-index>` are the conductor's, and an
+report; tools are called directly, tool search only when the harness lists them as deferred, a failed
+call falls back to the shell form and then direct reads, and a tool is called unavailable only with
+the quoted error text of a call that was made); the plan-read ban (`<plan-index>` and `<specification-index>` are the conductor's, and an
 insufficient packet returns a blocker); the full-suite ban (run the classes the task names, because the
 review council and CI run the full suite on the integrated head); and the batched-reads line. The four
 rules and the check that holds each one are tabulated in [the worker rule map](worker-rule-map.md).
@@ -1999,6 +2001,11 @@ not a convenience, and **a failure stops the run**
   `STATUS: TOOL_FAILURE` with the doctor's `fix:` line and dispatches nothing, in supervised mode and
   under `autonomy: autonomous` alike. `autonomy: autonomous` stops rather than parking the item for
   human review, because a run with no code search produces findings nobody can trust.
+- **Only machine evidence stops a run.** A non-zero `doctor --ensure` exit, or a tool response or worker
+  report carrying the literal line `STATUS: TOOL_FAILURE`, stops it. A worker's note that it fell back to
+  direct reads, or a `Discovery:` line with zeros, is a warning in the run report and the run continues.
+  A conductor that doubts the tooling dispatches one `doctor --ensure` and the exit code decides, never a
+  question to the user in autonomous mode.
 - **The setting is read, not judged.** `stop-on-tool-failure` in `.kyber-weave/kyber-weave.yml`
   decides it, and the doctor reads that setting itself, so no agent interprets a degraded result:
   **absent means stop**, `false` means the tool's failure is reported and the run continues. A value
