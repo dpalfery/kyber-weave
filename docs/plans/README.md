@@ -58,7 +58,9 @@ its `tasks.json` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-No plans are open.
+| Plan | Status | Date | Goal |
+|---|---|---|---|
+| [Wait for a review gate run without polling the process list](2026-11-12-review-wait-command.md) | Ready | 2026-11-12 | Add `kyber-weave review wait` and completion markers to `review gates --out`, and a no-polling rule in the review contracts. |
 
 ## Archived Plans
 
