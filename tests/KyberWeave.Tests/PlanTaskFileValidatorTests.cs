@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Arbiter.Plans;
+using KyberWeave.Core.Processes;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -323,6 +324,23 @@ public sealed class PlanTaskFileValidatorTests
                 $"the task-file fixture's prompt runs '-class \"{className}\"', which matches no type in " +
                 "KyberWeave.Tests, so that command would run zero tests and exit zero.");
         }
+    }
+
+    /// <summary>
+    /// The stale-digest hint pastes the plan path into a shell command, so the path is quoted by the
+    /// house helper. A path with a space or a character a shell would interpret still pastes as written.
+    /// </summary>
+    [Theory]
+    [InlineData("6-Docs/plans/plain.md")]
+    [InlineData("6-Docs/plans/with space.md")]
+    [InlineData("6-Docs/plans/$HOME.md")]
+    [InlineData("6-Docs/plans/\"quoted\".md")]
+    [InlineData("6-Docs/plans/`tick`.md")]
+    [InlineData("6-Docs/plans/back\\slash.md")]
+    public void ShellQuote_KeepsEveryPlanPathCharacterLiteral(string path)
+    {
+        string expected = OperatingSystem.IsWindows() ? "\"" + path + "\"" : "'" + path + "'";
+        Assert.Equal(expected, ShellQuote.Quote(path));
     }
 
     /// <summary>

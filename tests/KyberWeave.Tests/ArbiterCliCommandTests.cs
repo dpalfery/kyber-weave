@@ -239,7 +239,9 @@ public sealed class ArbiterCliCommandTests : IDisposable
 
         // The metrics cell truncates the digest, so the full value never repeats there; a prefix
         // is what a second copy would leave behind, and counting it is what catches the duplicate.
-        Assert.Equal(1, execution.Output.Split(expected[..16]).Length - 1);
+        const int prefixLength = 16;
+        Assert.True(expected.Length >= prefixLength, "The digest is shorter than the prefix this test counts.");
+        Assert.Equal(1, execution.Output.Split(expected[..prefixLength]).Length - 1);
     }
 
     /// <summary>
@@ -266,8 +268,63 @@ public sealed class ArbiterCliCommandTests : IDisposable
             new ArbiterSettings { Path = plan }));
 
         Assert.Contains("KW-ARB-PLAN-001", json.Output, StringComparison.Ordinal);
-        Assert.DoesNotContain("execution-digest", json.Output, StringComparison.Ordinal);
+        Assert.False(ReportsMetric(json.Output, "execution-digest"));
         Assert.DoesNotContain("Execution digest:", table.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A task with no Files line is a completeness finding, not dropped content. Its execution is
+    /// whole, so its digest is offered, and the finding is still reported.
+    /// </summary>
+    [Fact]
+    public void Plan_TaskWithoutFiles_StillReportsTheDigest()
+    {
+        string plan = WriteFile("arbiter-plan-digest-no-files.md", """
+            # Packet without files
+
+            ## Tasks
+
+            ### T1: First task
+
+            Body text with no file scope.
+            """);
+
+        ArbiterPlanCommand command = new();
+        CommandExecution json = Capture(() => command.Execute(
+            null!,
+            new ArbiterSettings { Path = plan, Format = "json" }));
+
+        Assert.Equal(0, json.ExitCode);
+        Assert.Contains("KW-ARB-PARSE-002", json.Output, StringComparison.Ordinal);
+        Assert.True(ReportsMetric(json.Output, "execution-digest"));
+    }
+
+    /// <summary>
+    /// The digest metric is a json field. The table prints its own line, and sarif and markdown carry
+    /// no digest, so a reader of either format cannot take a digest for part of its report.
+    /// </summary>
+    [Fact]
+    public void Plan_DigestMetricIsJsonOnly()
+    {
+        string plan = WriteFile(
+            "arbiter-plan-digest-formats.md",
+            DigestPlan(frontmatterStatus: "current", bodyStatus: "Ready"));
+
+        ArbiterPlanCommand command = new();
+        CommandExecution json = Capture(() => command.Execute(
+            null!,
+            new ArbiterSettings { Path = plan, Format = "json" }));
+        CommandExecution sarif = Capture(() => command.Execute(
+            null!,
+            new ArbiterSettings { Path = plan, Format = "sarif" }));
+        CommandExecution markdown = Capture(() => command.Execute(
+            null!,
+            new ArbiterSettings { Path = plan, Format = "markdown" }));
+
+        Assert.True(ReportsMetric(json.Output, "execution-digest"));
+        Assert.False(JsonCarriesProperty(sarif.Output, "execution-digest"));
+        Assert.DoesNotContain("execution-digest", markdown.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("Execution digest:", markdown.Output, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -335,6 +392,39 @@ public sealed class ArbiterCliCommandTests : IDisposable
         Assert.Contains("KW-ARB-PARSE-001", table.Output, StringComparison.Ordinal);
         Assert.False(ReportsMetric(json.Output, "execution-digest"));
         Assert.DoesNotContain("Execution digest:", table.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>Whether any object in the json output carries a property named <paramref name="name"/>.</summary>
+    private static bool JsonCarriesProperty(string output, string name)
+    {
+        using JsonDocument document = ParseWholeOutput(output);
+        return CarriesProperty(document.RootElement, name);
+    }
+
+    private static bool CarriesProperty(JsonElement element, string name)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (JsonProperty property in element.EnumerateObject())
+            {
+                if (property.Name == name || CarriesProperty(property.Value, name))
+                {
+                    return true;
+                }
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement item in element.EnumerateArray())
+            {
+                if (CarriesProperty(item, name))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /// <summary>Whether the json report's <c>metrics</c> object carries <paramref name="key"/>.</summary>
