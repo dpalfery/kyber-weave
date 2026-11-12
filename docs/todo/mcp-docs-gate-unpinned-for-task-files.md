@@ -5,14 +5,14 @@ doc-type: todo
 component: DocGraph
 status: draft
 owner: dpalfery
-last-reviewed: 2026-11-08
+last-reviewed: 2026-11-12
 ---
 
 # No test drives the docs MCP validate tool over a plan task file
 
 The conductor has no shell, so the only route by which it can check a plan's task file is the docs
 MCP tool `docs_validate_governed_document_schema`. That tool and `kyber-weave docs validate` share
-one gate — `DocsSchemaGate` constructs `PlanTaskFileValidator` for both — so the six task-file rules
+one gate — `DocsSchemaGate` constructs `PlanTaskFileValidator` for both — so the seven task-file rules
 reach the conductor by construction. What is missing is a test that proves it from the MCP side.
 
 Today the rules are pinned only at the validator: `PlanTaskFileValidatorTests` builds a document set

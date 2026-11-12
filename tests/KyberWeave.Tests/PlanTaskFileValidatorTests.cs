@@ -2,6 +2,11 @@ using System.Reflection;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Arbiter.Plans;
+using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Docs.Model;
+using KyberWeave.Core.Docs.Parsing;
+using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Core.Processes;
 using Xunit;
 
@@ -24,6 +29,11 @@ namespace KyberWeave.Tests;
 /// <c>KW-DOC-TASKS-006</c> is the one warning: a plan marked Ready with no task file beside it
 /// is the state every plan is in until the architect writes one, so it must advise without
 /// failing a merge.
+/// </para>
+/// <para>
+/// <c>KW-DOC-TASKS-007</c> is the one error about a file beside the task file: a temporary
+/// sibling such as <c>&lt;plan&gt;.tasks.json.new</c> left in the plans folder is a copy of the
+/// prompts that nothing else reads, so it fails the run whether or not its plan is still there.
 /// </para>
 /// <para>
 /// Each rule's test carries its own control — the same corpus with the file as authored
@@ -49,6 +59,9 @@ public sealed class PlanTaskFileValidatorTests
 
     /// <summary>A Ready plan has no task file beside it. Advisory: it never fails a merge.</summary>
     private const string MissingTaskFile = "KW-DOC-TASKS-006";
+
+    /// <summary>A file in the plans folder is a copy of a task file under another name, such as a temporary sibling.</summary>
+    private const string SidecarTaskFile = "KW-DOC-TASKS-007";
 
     private static ReportedFindings Validate(DocFixture fixture) => new(fixture);
 
@@ -302,6 +315,234 @@ public sealed class PlanTaskFileValidatorTests
 
         AssertReports(run, MissingTaskFile);
         Assert.Equal(0, run.Exit);
+    }
+
+    /// <summary>
+    /// Issue 599: an architect wrote the task file through a temporary sibling such as
+    /// <c>&lt;plan&gt;.tasks.json.new</c> and left it behind, and no rule read it. The copy holds
+    /// the same prompts, so it is a second, unchecked task file that a later write could pick up
+    /// in place of the one the plan names.
+    /// </summary>
+    /// <param name="suffix">The text appended to the task file's name to make the sidecar.</param>
+    [Theory]
+    [InlineData(".new")]
+    [InlineData(".tmp")]
+    [InlineData(".bak")]
+    [InlineData("~")]
+    public void ASidecarCopyOfATaskFileIsKWDOCTASKS007(string suffix)
+    {
+        using DocFixture accepted = PlanTaskFileProbe.Corpus();
+        accepted.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile());
+        AssertDoesNotReport(Validate(accepted), SidecarTaskFile);
+
+        using DocFixture sidecar = PlanTaskFileProbe.Corpus();
+        sidecar.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile());
+        sidecar.Write(PlanTaskFileProbe.SidecarPath(suffix), PlanTaskFileProbe.TaskFile());
+
+        ReportedFindings run = Validate(sidecar);
+
+        AssertReports(run, SidecarTaskFile);
+        Assert.Equal(1, run.Exit);
+        Assert.Contains(PlanTaskFileProbe.SidecarPath(suffix), run.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Issue 599's leftover copy can outlive the plan it was written from, as when an archived
+    /// plan's sidecar is still in the folder. The copy is reported whether or not a plan sits
+    /// beside it, so the rule matches on the file's name alone.
+    /// </summary>
+    [Fact]
+    public void ASidecarWhosePlanIsGoneIsStillKWDOCTASKS007()
+    {
+        const string OrphanSidecar = "6-Docs/plans/2026-11-05-archived-plan.tasks.json.new";
+
+        using DocFixture accepted = PlanTaskFileProbe.Corpus();
+        accepted.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile());
+        AssertDoesNotReport(Validate(accepted), SidecarTaskFile);
+
+        using DocFixture orphan = PlanTaskFileProbe.Corpus();
+        orphan.Write(OrphanSidecar, PlanTaskFileProbe.TaskFile());
+
+        ReportedFindings run = Validate(orphan);
+
+        AssertReports(run, SidecarTaskFile);
+        Assert.Equal(1, run.Exit);
+        Assert.Contains(OrphanSidecar, run.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The rule is keyed to the sidecar's name and nothing else. The task file itself, and an
+    /// unrelated JSON file in the same folder, are not copies of a task file and are not
+    /// reported, so a rule that flags every JSON file cannot satisfy the cases above.
+    /// </summary>
+    [Fact]
+    public void TheTaskFileItselfAndOtherJsonAreNotKWDOCTASKS007()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        fixture.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile());
+        fixture.Write("6-Docs/plans/notes.json", "{\n  \"note\": \"unrelated\"\n}\n");
+
+        AssertDoesNotReport(Validate(fixture), SidecarTaskFile);
+    }
+
+    /// <summary>
+    /// A copy under an <c>archive</c> folder inside the plans folder is within the plans folder but
+    /// archived, so it is not reported; this pins the archive exclusion itself, not the folder test.
+    /// </summary>
+    [Fact]
+    public void AnArchivedSidecarIsNotKWDOCTASKS007()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        fixture.Write("6-Docs/plans/archive/2026-11-05-archived-plan.tasks.json.new", "{}\n");
+
+        AssertDoesNotReport(Validate(fixture), SidecarTaskFile);
+    }
+
+    /// <summary>
+    /// A registry whose <c>plan-index</c> is a root-level file names no plans folder, so the
+    /// sidecar walk has nothing to scope to. That is a state the run reports, not a clean result:
+    /// silence would read as "no sidecars" when nothing was checked.
+    /// </summary>
+    [Fact]
+    public void AnUnresolvablePlansFolderIsReportedAsAWarningNotSilence()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        fixture.Write("README.md", "# Plans\n");
+        fixture.Write(".kyber-weave/kyber-weave.yml", "config-reg:\n  plan-index: README.md\n");
+
+        ReportedFindings run = Validate(fixture);
+
+        AssertReports(run, SidecarTaskFile);
+        Assert.Contains("plans folder", run.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("WARNING", SeverityOf(run, SidecarTaskFile));
+    }
+
+    /// <summary>The severity the run printed for a code, read from its JSON findings.</summary>
+    private static string? SeverityOf(ReportedFindings run, string rule)
+    {
+        using JsonDocument document = JsonDocument.Parse(run.Output);
+        foreach (JsonElement finding in document.RootElement.GetProperty("findings").EnumerateArray())
+        {
+            if (finding.GetProperty("code").GetString() == rule)
+            {
+                return finding.GetProperty("severity").GetString();
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The name alone does not make a file a copy of a task file. A file that happens to carry the
+    /// suffix in its name but holds other content is not a sidecar, so it is not reported.
+    /// </summary>
+    [Fact]
+    public void AFileWithTheSuffixInItsNameButOtherContentIsNotKWDOCTASKS007()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        fixture.Write("6-Docs/plans/notes.tasks.json.bak", "{\n  \"note\": \"unrelated\"\n}\n");
+
+        AssertDoesNotReport(Validate(fixture), SidecarTaskFile);
+    }
+
+    /// <summary>
+    /// A plans folder the sidecar walk cannot read is a reported state, not a crash that hides every
+    /// other finding, and it does not stop the walk: a sidecar beside the unreadable folder is still
+    /// found. The document loader walks the same folders first, so the loader reads the corpus while
+    /// it is still readable and the folder is locked before the validator walks it, which is the
+    /// race this guards: a folder that changes between the two walks.
+    /// </summary>
+    [Fact]
+    public void AnUnreadablePlansSubfolderIsReportedAndTheWalkContinues()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Unix file modes are the only way to make a folder unreadable here.");
+            return;
+        }
+
+        using DocFixture fixture = new();
+        fixture.Write("6-Docs/plans/locked/placeholder.txt", "x");
+        fixture.Write("6-Docs/plans/zz-later.tasks.json.new", PlanTaskFileProbe.TaskFile());
+        OntologyConfig ontology = OntologyConfig.ProductDefaults;
+        DocumentSet set = new DocumentLoader(fixture.Root, ontology).Load();
+        KyberWeaveConfig config = KyberWeaveConfig.ProductDefaults.WithOntology(ontology);
+        string locked = Path.Combine(fixture.Root, "6-Docs", "plans", "locked");
+        File.SetUnixFileMode(locked, UnixFileMode.None);
+        try
+        {
+            Assert.SkipWhen(CanList(locked), "Running with privileges that ignore file modes (such as root), so the folder stays readable.");
+
+            DiagnosticReport report = new PlanTaskFileValidator(fixture.Root, config).Validate(set);
+
+            Diagnostic warning = Assert.Single(report.Items, item => item.Code == SidecarTaskFile && item.Severity == Severity.Warning);
+            Assert.Contains("could not be read", warning.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(
+                report.Items,
+                item => item.Code == SidecarTaskFile && item.Severity == Severity.Error
+                        && item.Message.Contains("zz-later.tasks.json.new", StringComparison.Ordinal));
+        }
+        finally
+        {
+            File.SetUnixFileMode(locked, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    private static bool CanList(string directory)
+    {
+        try
+        {
+            _ = Directory.GetFileSystemEntries(directory);
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The content check reads the file's own top-level keys, not any text that mentions them. A
+    /// note that quotes a schema key is not a task file.
+    /// </summary>
+    [Fact]
+    public void AFileThatOnlyMentionsASchemaKeyInTextIsNotKWDOCTASKS007()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        fixture.Write(
+            "6-Docs/plans/notes.tasks.json.bak",
+            "Scratch note: the task file's \"execution-digest\" and \"schema-version\" keys are documented.\n");
+
+        AssertDoesNotReport(Validate(fixture), SidecarTaskFile);
+    }
+
+    /// <summary>
+    /// <c>schema-version</c> alone is a common key in unrelated JSON, so it does not make a file a
+    /// task file; it counts only beside another key of the task file's schema.
+    /// </summary>
+    [Fact]
+    public void UnrelatedJsonWithOnlyASchemaVersionKeyIsNotKWDOCTASKS007()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        fixture.Write("6-Docs/plans/other.tasks.json.bak", "{\n  \"schema-version\": 3,\n  \"name\": \"unrelated\"\n}\n");
+
+        AssertDoesNotReport(Validate(fixture), SidecarTaskFile);
+    }
+
+    /// <summary>
+    /// A copy whose schema key sits past the first few kilobytes is still a copy: the head that is
+    /// read is large enough for a real task file's opening keys.
+    /// </summary>
+    [Fact]
+    public void ASidecarWhoseDigestKeyFollowsALongPlanValueIsKWDOCTASKS007()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        string padding = new('x', 20000);
+        fixture.Write(
+            "6-Docs/plans/long.tasks.json.new",
+            "{\n  \"plan\": \"" + padding + "\",\n  \"execution-digest\": \"abc\"\n}\n");
+
+        AssertReports(Validate(fixture), SidecarTaskFile);
     }
 
     /// <summary>
@@ -577,6 +818,9 @@ internal static class PlanTaskFileProbe
         Assert.True(outOfScope > 0, "the fixture plan must carry an '## Out of scope' section to insert before.");
         return plan.Insert(outOfScope, LateTask);
     }
+
+    /// <summary>The task file's sidecar: the task file's path with a suffix, as a temporary sibling is named.</summary>
+    internal static string SidecarPath(string suffix) => TaskFilePath + suffix;
 
     /// <summary>An opening paragraph that sends a worker into the plan, which no prompt may do.</summary>
     internal static string PlanReadPrefix() =>
