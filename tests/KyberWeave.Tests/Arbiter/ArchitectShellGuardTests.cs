@@ -94,6 +94,9 @@ public sealed class ArchitectShellGuardTests
     [InlineData("grep -rn \"a b\" src")]
     [InlineData("rg -n '#include' src")]
     [InlineData("grep -c x#y f")]
+    [InlineData("rg --glob '*.md' x docs")]
+    [InlineData("rg -n 'a|b' src")]
+    [InlineData("grep -rn 'a*b' src")]
     public void Bash_ListedCommand_IsAllowed(string command)
     {
         ShellGuardResult result = CheckBash(command);
@@ -277,6 +280,27 @@ public sealed class ArchitectShellGuardTests
             PlanningDirectories.Value);
 
         Assert.True(result.Allowed, $"A planning-folder touch after cd C:\\w under a C:\\w working directory must be allowed. Reason: {result.Reason}");
+    }
+
+    /// <summary>
+    /// A call with more than one cd segment, and an unquoted glob in an operand. A cd chain leaves the directory
+    /// the later touch resolves against ambiguous, and an unquoted glob expands before the list judges it. Each is
+    /// denied under the rule id, pinned without a fragment because the reason names the rule.
+    /// </summary>
+    [Theory]
+    [InlineData("PowerShell", "cd nope; cd ..; touch docs/plans/x.md")]
+    [InlineData("Bash", "cd a && cd b && ls")]
+    [InlineData("Bash", "cd /w && cd docs && touch plans/x.md")]
+    [InlineData("Bash", "ls docs/*.md")]
+    [InlineData("Bash", "grep -rn x docs/p?ans")]
+    [InlineData("Bash", "head -5 docs/[a]*.md")]
+    [InlineData("Bash", "wc -l *")]
+    public void CommandWithAChainedCdOrUnquotedGlob_IsDeniedUnderTheRule(string tool, string command)
+    {
+        ShellGuardResult result = Check(tool, command);
+
+        Assert.False(result.Allowed, $"'{command}' ({tool}) must be denied.");
+        Assert.Contains(RuleId, result.Reason ?? string.Empty, StringComparison.Ordinal);
     }
 
     [Fact]
