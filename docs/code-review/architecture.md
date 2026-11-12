@@ -317,12 +317,14 @@ the policy below:
   `--not-seated <lens>=<reason>`, or coverage carried from the prior cycle through `--prior`;
   otherwise the command refuses to compute. An entry that cannot be a seat (a directory, a
   file named only `.md`, a dotfile, or a name that is not a lowercase lens id) is named under a
-  `KW-REVIEW-041` warning and skipped, never parsed. A file with a lowercase lens-id name that is
-  not a catalogue lens (such as `prior-art-performance.md`) keeps its findings but covers no
-  lens, and draws the same warning. An unreadable seat file is refused
+  `KW-REVIEW-041` warning and skipped, never parsed; a seats folder that cannot be listed is
+  refused (`KW-REVIEW-040`). A file with a lowercase lens-id name that is not a catalogue lens
+  (such as `prior-art-performance.md`) keeps its findings but covers no lens, and draws the same
+  warning; `reviewer.md`, the reviewer's own seat, is exempt. An unreadable seat file is refused
   (`KW-REVIEW-040`), and so is one that declares `NO FINDINGS:` or `SKIPPED:` while a seat-schema
   key followed by a colon (`id:`, `severity:`, `file:` and the rest of the finding schema)
-  appears anywhere else in it, in a list, a flow mapping, a fence or after prose. The check fails
+  appears anywhere else in it, in any letter case: in a list, a flow mapping, a fence, after
+  prose or after a table's `|`. The check fails
   closed: such a file is never counted clean. Prose, a Markdown table, the closing lines and plain
   bullets with no such key are allowed.
 - **Cited lines (`KW-REVIEW-043`, `CitedLineCheck`).** A finding whose cited line lies outside
@@ -332,8 +334,10 @@ the policy below:
 
 A seat file's `severity` must be one of the three names and its `confidence` a number from 1 to
 10, or the seat is refused (`KW-REVIEW-040`). A findings JSON file read through `--findings` or
-`--prior` is taken as given: the verdict command does not check that its severities and
-confidences are in range. That is a known gap, listed as a follow-up.
+`--prior` is held to the same values: a severity that is not a known name, or a confidence
+outside 1 to 10, refuses the file (`KW-REVIEW-023`). So does a `null` element in any list the
+verdict command reads, in a findings or a gates document; a `null` inside a property the command
+does not know is tolerated.
 
 A findings or `NO FINDINGS` seat that wrote no `Discovery:` line, read files directly with no index lookup and no
 `Index fallback:` line, wrote an `Index fallback:` value outside the three modes, or wrote two
