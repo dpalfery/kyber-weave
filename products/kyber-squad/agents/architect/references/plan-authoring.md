@@ -75,7 +75,7 @@ is written.
 Finalization runs in this order:
 
 1. Make every plan edit first: the approval rows, the bold body status line, the frontmatter status and the index row.
-2. Run `kyber-weave arbiter plan <plan file> -f json` in the checkout that holds the plan, and take `metrics.execution-digest` from its one JSON document.
+2. Run `kyber-weave arbiter plan <plan file> -f json` in the checkout that holds the plan, and take `metrics.execution-digest` from its one JSON document only when the command exits 0 and reports no `KW-ARB-PARSE-*` or `KW-ARB-PLAN-001` finding, since a plan with no tasks has no digest either. Otherwise fix the plan and re-run this step.
 3. Write the task file at its final path with the edit tools, with that value as `execution-digest`, in place. Never write it through a sibling or temporary file such as a `.new` or `.tmp` copy.
 4. Run both documentation checks. Any `KW-DOC-TASKS-*` finding is fixed, and the order is repeated from step 2.
 
