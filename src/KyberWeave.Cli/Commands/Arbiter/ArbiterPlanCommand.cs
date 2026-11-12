@@ -18,9 +18,9 @@ public sealed class ArbiterPlanCommand : Command<ArbiterSettings>
     /// <summary>
     /// Parses the plan file named by the positional path and prints its tasks,
     /// files, dependencies, contract rows and out-of-scope paths, plus
-    /// <c>KW-ARB-PARSE-00x</c> diagnostics. A plan with tasks reports its execution digest as the
-    /// <c>execution-digest</c> metric in json, and prints it once on its own line in the table, so a
-    /// task file can record the digest it was written from. A plan without tasks reports
+    /// <c>KW-ARB-PARSE-00x</c> diagnostics. The execution digest is reported only for a plan that
+    /// parsed without findings and has tasks: as the <c>execution-digest</c> metric in json, and once
+    /// on its own line in the table, so a task file can record the digest it was written from. A plan without tasks reports
     /// <c>KW-ARB-PLAN-001</c>; a missing or unreadable file reports
     /// <c>KW-ARB-PLAN-002</c> and exits 1.
     /// </summary>
@@ -59,8 +59,14 @@ public sealed class ArbiterPlanCommand : Command<ArbiterSettings>
         PlanDocument document = PlanDocumentParser.Parse(text);
         report.AddRange(document.Diagnostics);
 
-        // A plan with no tasks has no execution to digest, so it reports no digest at all.
-        string? digest = document.HasTasks ? PlanDocumentParser.ExecutionDigest(document) : null;
+        // Fail closed: a digest is offered only for a plan that parsed without findings and has tasks.
+        // A finding means the parser dropped or altered a line, so the digest would describe a view a
+        // task file should not be written from. The findings are warnings, so HasErrors does not catch
+        // them; the finding count does. An empty Tasks section has HasTasks but no task to digest.
+        bool parsedWithoutFindings = document.Diagnostics.Count == 0;
+        string? digest = parsedWithoutFindings && document.HasTasks && document.Tasks.Count > 0
+            ? PlanDocumentParser.ExecutionDigest(document)
+            : null;
 
         // Only json carries the metric. The table prints the digest on its own unfolded line, and a
         // metric row would print it again, truncated in a narrow cell.
