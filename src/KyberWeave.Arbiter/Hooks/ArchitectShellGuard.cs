@@ -48,8 +48,11 @@ public static class ArchitectShellGuard
     /// </summary>
     private static readonly IReadOnlySet<string> RipgrepExecutingOptions = new HashSet<string>(StringComparer.Ordinal)
     {
-        "--pre", "--pre-glob", "--search-zip",
+        "--pre", "--pre-glob", "--search-zip", "--hostname-bin", "--hyperlink-format",
     };
+
+    /// <summary>The git options that write a file or run a program, named without their leading dashes.</summary>
+    private static readonly string[] GitDeniedLongOptions = ["output", "ext-diff", "textconv"];
 
     private static readonly IReadOnlySet<string> GuardedProfiles = new HashSet<string>(StringComparer.Ordinal)
     {
@@ -160,9 +163,17 @@ public static class ArchitectShellGuard
             return false;
         }
 
+        // The name is matched without regard to case: a caller that names the architect in any casing is the architect.
         ArbiterSquadCatalog catalog = ArbiterSquadCatalog.LoadEmbedded();
-        return catalog.Agents.TryGetValue(agentName, out ArbiterSquadAgent? agent)
-            && GuardedProfiles.Contains(agent.CapabilityProfile);
+        foreach (KeyValuePair<string, ArbiterSquadAgent> entry in catalog.Agents)
+        {
+            if (string.Equals(entry.Key, agentName, StringComparison.OrdinalIgnoreCase))
+            {
+                return GuardedProfiles.Contains(entry.Value.CapabilityProfile);
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -201,15 +212,19 @@ public static class ArchitectShellGuard
                 "Send the command as a string in the command field"));
         }
 
-        // Normalised once, so the planning check compares like with like: "/w/" and "/w" name the same tree.
+        // The payload's directory is the origin: touch creates files only beneath the planning directories of
+        // this tree, however far a cd has moved the effective directory. A blank or unrooted origin is null, and
+        // touch then fails closed rather than anchoring to the file-system root.
         string forward = workingDirectory.Replace('\\', '/');
-        string directory = Normalize(forward) ?? forward;
+        string? origin = IsRooted(forward) ? Normalize(forward) : null;
+        string directory = origin ?? forward;
+        string? departure = null;
         foreach (Segment segment in Split(command, bash))
         {
-            Refusal? refusal = CheckSegment(segment, bash, ref directory, planningDirectories);
+            Refusal? refusal = CheckSegment(segment, bash, ref directory, ref departure, origin, planningDirectories);
             if (refusal is not null)
             {
-                return Deny(toolName, segment.Text, refusal);
+                return Deny(toolName, refusal.Segment ?? segment.Text, refusal);
             }
         }
 
@@ -308,6 +323,11 @@ public static class ArchitectShellGuard
                 case '\n':
                     Close("\n");
                     break;
+                case ';' when EndsWithBraceWord(current):
+                    // find's own terminator after {} (find . -exec ls {} ;) is not a separator. The segment it ends
+                    // holds a brace, which the tokeniser always refuses, so the whole chunk is denied as written.
+                    current.Append(c);
+                    break;
                 case ';':
                     Close(";");
                     break;
@@ -330,6 +350,14 @@ public static class ArchitectShellGuard
 
         Close(null);
         return segments;
+    }
+
+    /// <summary>Whether the text read so far ends with a bare <c>{}</c> word.</summary>
+    private static bool EndsWithBraceWord(StringBuilder current)
+    {
+        string text = current.ToString().TrimEnd();
+        return text.EndsWith("{}", StringComparison.Ordinal)
+            && (text.Length == 2 || char.IsWhiteSpace(text[text.Length - 3]));
     }
 
     // ---- Tokenising --------------------------------------------------------------------------------
@@ -496,6 +524,8 @@ public static class ArchitectShellGuard
         Segment segment,
         bool bash,
         ref string directory,
+        ref string? departure,
+        string? origin,
         IReadOnlyList<string> planningDirectories)
     {
         if (segment.Text.Length == 0)
@@ -532,10 +562,10 @@ public static class ArchitectShellGuard
 
         if (string.Equals(name, "cd", StringComparison.Ordinal))
         {
-            return CheckChangeDirectory(segment, bash, words, ref directory);
+            return CheckChangeDirectory(segment, bash, words, ref directory, ref departure, origin);
         }
 
-        return CheckCommand(name, words, directory, planningDirectories);
+        return CheckCommand(name, words, directory, departure, origin, planningDirectories);
     }
 
     private static bool IsAssignment(string word)
@@ -550,7 +580,13 @@ public static class ArchitectShellGuard
     /// Checks <c>cd &lt;dir&gt;</c>: one operand, no flags, and a following <c>&amp;&amp;</c> (or <c>;</c> in
     /// PowerShell) so the directory it sets applies to the commands after it.
     /// </summary>
-    private static Refusal? CheckChangeDirectory(Segment segment, bool bash, List<string> words, ref string directory)
+    private static Refusal? CheckChangeDirectory(
+        Segment segment,
+        bool bash,
+        List<string> words,
+        ref string directory,
+        ref string? departure,
+        string? origin)
     {
         if (words.Count != 2)
         {
@@ -577,6 +613,9 @@ public static class ArchitectShellGuard
             return UnresolvableRefusal;
         }
 
+        // A cd may leave the tree: reads still work from there. The departure is remembered, so a later touch that
+        // would anchor outside the tree can name the cd that took it there. Coming back inside clears it.
+        departure = origin is not null && !IsWithin(resolved, origin) ? segment.Text : null;
         directory = resolved;
         return null;
     }
@@ -585,6 +624,8 @@ public static class ArchitectShellGuard
         string name,
         List<string> words,
         string directory,
+        string? departure,
+        string? origin,
         IReadOnlyList<string> planningDirectories)
     {
         if (WrapperCommands.Contains(name))
@@ -606,7 +647,8 @@ public static class ArchitectShellGuard
             case KyberWeaveCli:
                 return CheckKyberWeave(words);
             case "codegraph":
-                return words.Count >= 3 && string.Equals(words[1], "explore", StringComparison.Ordinal)
+                // Exactly one query operand, and no flags: explore takes a query and nothing else.
+                return words.Count == 3 && string.Equals(words[1], "explore", StringComparison.Ordinal) && !IsFlag(words[2])
                     ? null
                     : new Refusal(
                         "is not a codegraph form on the architect's list",
@@ -630,7 +672,7 @@ public static class ArchitectShellGuard
             case "uniq":
                 return CheckUniq(words);
             case "touch":
-                return CheckTouch(words, directory, planningDirectories);
+                return CheckTouch(words, directory, departure, origin, planningDirectories);
             case "cat":
             case "sed":
             case "awk":
@@ -672,10 +714,10 @@ public static class ArchitectShellGuard
             && words.Count == 4
             && string.Equals(words[2], "drift", StringComparison.Ordinal)
             && !IsFlag(words[3]);
-        bool doctor = words.Count >= 3
+        // doctor --ensure takes no operand: an extra path would be a second target the form does not name.
+        bool doctor = words.Count == 3
             && string.Equals(words[1], "doctor", StringComparison.Ordinal)
-            && string.Equals(words[2], "--ensure", StringComparison.Ordinal)
-            && (words.Count == 3 || (words.Count == 4 && !IsFlag(words[3])));
+            && string.Equals(words[2], "--ensure", StringComparison.Ordinal);
 
         // The plan reader: exactly one path operand, then -f json. Any other arbiter subcommand (eval, setup,
         // install, uninstall, and the rest) is not this form and is refused by the default branch.
@@ -727,7 +769,7 @@ public static class ArchitectShellGuard
 
         for (int argument = index + 1; argument < words.Count; argument++)
         {
-            if (IsOption(words[argument], "--output"))
+            if (IsDeniedGitLongOption(words[argument]))
             {
                 return new Refusal(
                     "writes its output to a file, which is not allowed",
@@ -736,6 +778,36 @@ public static class ArchitectShellGuard
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Whether a git long option is one of the options that writes a file or runs a program. GNU parse-options
+    /// accepts any unambiguous abbreviation of an option, so a name is refused when it is a prefix of a denied
+    /// option (<c>--o</c>, <c>--ou</c>, <c>--ex</c>, <c>--te</c>) or begins with one (<c>--output=f</c>). An
+    /// ordinary option such as <c>--oneline</c> is neither, and stays allowed.
+    /// </summary>
+    private static bool IsDeniedGitLongOption(string argument)
+    {
+        if (!argument.StartsWith("--", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        string name = LongOptionName(argument)[2..];
+        if (name.Length == 0)
+        {
+            return false;
+        }
+
+        foreach (string denied in GitDeniedLongOptions)
+        {
+            if (denied.StartsWith(name, StringComparison.Ordinal) || name.StartsWith(denied, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static Refusal GitRefusal(string subcommand)
@@ -775,10 +847,7 @@ public static class ArchitectShellGuard
         {
             if (argument.StartsWith("--", StringComparison.Ordinal))
             {
-                string name = LongOptionName(argument);
-                if (RipgrepExecutingOptions.Contains(name)
-                    || name.StartsWith("--host", StringComparison.Ordinal)
-                    || name.StartsWith("--hyper", StringComparison.Ordinal))
+                if (IsDeniedRipgrepLongOption(LongOptionName(argument)))
                 {
                     return RipgrepRefusal;
                 }
@@ -793,6 +862,32 @@ public static class ArchitectShellGuard
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Whether an rg long option is one of the options that run a program or read compressed input. Matched in
+    /// both directions: a name of two or more characters is refused when it is a prefix of a denied option
+    /// (<c>--pr</c>, <c>--pre</c>, <c>--hyper</c>) or begins with one. Options such as <c>--glob</c>, <c>--type</c>
+    /// and <c>--max-count</c> match neither way and stay allowed.
+    /// </summary>
+    private static bool IsDeniedRipgrepLongOption(string option)
+    {
+        string name = option[2..];
+        if (name.Length < 2)
+        {
+            return false;
+        }
+
+        foreach (string denied in RipgrepExecutingOptions)
+        {
+            string bare = denied[2..];
+            if (bare.StartsWith(name, StringComparison.Ordinal) || name.StartsWith(bare, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static readonly Refusal RipgrepRefusal = new(
@@ -910,13 +1005,36 @@ public static class ArchitectShellGuard
     /// Checks <c>touch</c>: literal operands with no flags, each resolved against the effective directory,
     /// beneath one of the planning directories, and named <c>.md</c> or <c>.json</c>.
     /// </summary>
-    private static Refusal? CheckTouch(List<string> words, string directory, IReadOnlyList<string> planningDirectories)
+    private static Refusal? CheckTouch(
+        List<string> words,
+        string directory,
+        string? departure,
+        string? origin,
+        IReadOnlyList<string> planningDirectories)
     {
         if (words.Count < 2)
         {
             return new Refusal(
                 "names no file to create",
                 "Name one literal file path beneath the plan, specification or todo directory");
+        }
+
+        // Fail closed: without a usable payload directory there is no tree to anchor a path to.
+        if (origin is null)
+        {
+            return new Refusal(
+                "has no usable working directory to anchor the path to",
+                "Run the call from the repository's working directory");
+        }
+
+        // A cd may move the effective directory only within the payload's own tree. Once it has left, touch has no
+        // tree to check a path against, and a relative name would land wherever the cd took it.
+        if (!IsWithin(directory, origin))
+        {
+            return new Refusal(
+                "changes into a directory outside the working tree, and touch cannot anchor a path there",
+                "Create the file from the working directory, without changing into another tree first",
+                departure);
         }
 
         foreach (string operand in words.Skip(1))
@@ -939,7 +1057,7 @@ public static class ArchitectShellGuard
                 return UnresolvableRefusal;
             }
 
-            if (operand.StartsWith('~') || !IsBeneathPlanningDirectory(path, directory, planningDirectories))
+            if (operand.StartsWith('~') || !IsBeneathPlanningDirectory(path, origin, planningDirectories))
             {
                 return new Refusal(
                     "names a file outside the plan, specification and todo directories",
@@ -963,17 +1081,28 @@ public static class ArchitectShellGuard
         "Name a path beneath the working directory, without climbing above it");
 
     /// <summary>
-    /// Whether a resolved path lies under one of the planning directories of the effective directory's own
-    /// tree: it must start with <paramref name="directory"/>, and the rest of it must start with a planning
-    /// directory. A path that resolves anywhere else, including another tree that happens to contain the same
-    /// directory names, is refused.
+    /// Whether <paramref name="directory"/> is <paramref name="root"/> or lies beneath it.
+    /// </summary>
+    private static bool IsWithin(string directory, string root)
+    {
+        string prefix = root.EndsWith('/') ? root : root + "/";
+        return string.Equals(directory, root, StringComparison.Ordinal)
+            || directory.StartsWith(prefix, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Whether a resolved path lies under one of the planning directories of the payload's own tree
+    /// (<paramref name="origin"/>): the path must start with the origin, and the rest must start with a planning
+    /// directory. Each planning directory is normalised first, so <c>docs/./plans</c>, a trailing slash and a
+    /// backslash name the same directory as <c>docs/plans</c>. A directory that climbs out of the tree names
+    /// nothing and never matches.
     /// </summary>
     private static bool IsBeneathPlanningDirectory(
         string path,
-        string directory,
+        string origin,
         IReadOnlyList<string> planningDirectories)
     {
-        string root = directory.EndsWith('/') ? directory : directory + "/";
+        string root = origin.EndsWith('/') ? origin : origin + "/";
         if (!path.StartsWith(root, StringComparison.Ordinal))
         {
             return false;
@@ -982,14 +1111,40 @@ public static class ArchitectShellGuard
         string relative = path[root.Length..];
         foreach (string planning in planningDirectories)
         {
-            string trimmed = planning.Replace('\\', '/').Trim('/');
-            if (trimmed.Length > 0 && relative.StartsWith(trimmed + "/", StringComparison.Ordinal))
+            string normalized = NormalizeRelativeDirectory(planning);
+            if (normalized.Length > 0 && relative.StartsWith(normalized + "/", StringComparison.Ordinal))
             {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Normalises a relative planning directory to one forward-slash spelling with no leading, trailing or doubled
+    /// separators and no <c>.</c> segments. Returns the empty string when the directory is empty or climbs with
+    /// <c>..</c>, so it matches nothing.
+    /// </summary>
+    private static string NormalizeRelativeDirectory(string directory)
+    {
+        List<string> parts = [];
+        foreach (string part in directory.Replace('\\', '/').Split('/'))
+        {
+            if (part.Length == 0 || part == ".")
+            {
+                continue;
+            }
+
+            if (part == "..")
+            {
+                return string.Empty;
+            }
+
+            parts.Add(part);
+        }
+
+        return string.Join("/", parts);
     }
 
     // ---- Paths -------------------------------------------------------------------------------------
@@ -1002,10 +1157,15 @@ public static class ArchitectShellGuard
     private static string? Resolve(string baseDirectory, string operand)
     {
         string forward = operand.Replace('\\', '/');
-        string joined = IsRooted(forward)
-            ? forward
-            : $"{baseDirectory.Replace('\\', '/').TrimEnd('/')}/{forward}";
-        return Normalize(joined);
+        if (IsRooted(forward))
+        {
+            return Normalize(forward);
+        }
+
+        // A relative operand needs a rooted base. A blank or unrooted base would otherwise join to "/<operand>",
+        // anchoring the path to the file-system root, so it resolves to nothing instead.
+        string baseForward = baseDirectory.Replace('\\', '/');
+        return IsRooted(baseForward) ? Normalize($"{baseForward.TrimEnd('/')}/{forward}") : null;
     }
 
     private static bool IsRooted(string path) =>
@@ -1069,8 +1229,12 @@ public static class ArchitectShellGuard
     /// <summary>The words of one segment, and the refusal that stopped the read, if any.</summary>
     private sealed record Tokens(List<string> Words, Refusal? Refusal);
 
-    /// <summary>Why a construct is refused, and the replacement the architect should use instead.</summary>
-    private sealed record Refusal(string Why, string Replacement);
+    /// <summary>
+    /// Why a construct is refused, and the replacement the architect should use instead. <paramref name="Segment"/>,
+    /// when set, is the segment the denial names in place of the one that was refused: a touch refused because an
+    /// earlier cd left the tree names that cd.
+    /// </summary>
+    private sealed record Refusal(string Why, string Replacement, string? Segment = null);
 }
 
 /// <summary>One shell guard verdict.</summary>
