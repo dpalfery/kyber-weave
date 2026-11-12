@@ -123,6 +123,7 @@ public static class ArchitectShellGuard
         {
             ["kyber-weave docs validate . --merge-ready"] = new("kyber-weave docs validate . --merge-ready", true),
             ["kyber-weave docs drift ."] = new("kyber-weave docs drift .", true),
+            ["kyber-weave arbiter plan <plan file> -f json"] = new("kyber-weave arbiter plan docs/plans/x.md -f json", true),
             ["codegraph explore \"…\""] = new("codegraph explore \"x\"", true),
             ["kyber-weave doctor --ensure"] = new("kyber-weave doctor --ensure", true),
             ["git"] = new("git status", true),
@@ -676,11 +677,20 @@ public static class ArchitectShellGuard
             && string.Equals(words[2], "--ensure", StringComparison.Ordinal)
             && (words.Count == 3 || (words.Count == 4 && !IsFlag(words[3])));
 
-        return validate || drift || doctor
+        // The plan reader: exactly one path operand, then -f json. Any other arbiter subcommand (eval, setup,
+        // install, uninstall, and the rest) is not this form and is refused by the default branch.
+        bool arbiterPlan = words.Count == 6
+            && string.Equals(words[1], "arbiter", StringComparison.Ordinal)
+            && string.Equals(words[2], "plan", StringComparison.Ordinal)
+            && !IsFlag(words[3])
+            && string.Equals(words[4], "-f", StringComparison.Ordinal)
+            && string.Equals(words[5], "json", StringComparison.Ordinal);
+
+        return validate || drift || doctor || arbiterPlan
             ? null
             : new Refusal(
                 "is not a kyber-weave form on the architect's list",
-                "Use kyber-weave docs validate <dir> --merge-ready, docs drift <dir>, or doctor --ensure");
+                "Use kyber-weave docs validate <dir> --merge-ready, docs drift <dir>, doctor --ensure, or arbiter plan <plan file> -f json");
     }
 
     private static Refusal? CheckGit(List<string> words)
