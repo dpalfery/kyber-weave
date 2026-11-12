@@ -525,4 +525,109 @@ public sealed class ClaudeHookAdapterTests
         Assert.Equal("Implement T2.", updated.GetProperty("prompt").GetString());
         Assert.False(updated.TryGetProperty("model", out _));
     }
+
+    // Shell guard (KW-ARB-SHELL-001). The architect's Bash and PowerShell calls are checked against its
+    // documented command list before they run; other callers keep the behaviour they had.
+
+    /// <summary>A Bash or PowerShell PreToolUse payload from the shipped fixture, with the given command and agent type.</summary>
+    private static string ShellPayload(string tool, string command, string? agentType)
+    {
+        JsonNode root = JsonNode.Parse(Fixture("pre-bash-denied.json"))
+            ?? throw new InvalidOperationException("The shipped Claude Bash fixture is not a JSON document.");
+        root["tool_name"] = tool;
+        root["tool_input"] = new JsonObject { ["command"] = command };
+        if (agentType is null)
+        {
+            root.AsObject().Remove("agent_type");
+        }
+        else
+        {
+            root["agent_type"] = agentType;
+        }
+
+        return root.ToJsonString();
+    }
+
+    private static void AssertShellDenied(string stdout)
+    {
+        using JsonDocument doc = JsonDocument.Parse(stdout);
+        JsonElement output = doc.RootElement.GetProperty("hookSpecificOutput");
+        Assert.Equal("deny", output.GetProperty("permissionDecision").GetString());
+        Assert.Contains(
+            "KW-ARB-SHELL-001",
+            output.GetProperty("permissionDecisionReason").GetString() ?? string.Empty,
+            StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Bash", "grep x | sed y")]
+    [InlineData("Bash", "python3 x.py")]
+    [InlineData("PowerShell", "grep x | sed y")]
+    [InlineData("PowerShell", "python3 x.py")]
+    public void ShellGuard_ArchitectCallOutsideTheList_IsDeniedBeforeItRuns_WhenTheAgentTypeNamesIt(string tool, string command)
+    {
+        // The conductor is the --caller flag; the payload's agent_type must outrank it.
+        (int exit, string stdout) = Run(ShellPayload(tool, command, "architect"), "conductor", new ScriptedEngine());
+
+        Assert.Equal(0, exit);
+        AssertShellDenied(stdout);
+    }
+
+    [Fact]
+    public void ShellGuard_ArchitectCallOutsideTheList_IsDeniedWhenTheRenderedCallerNamesIt()
+    {
+        (int exit, string stdout) = Run(ShellPayload("Bash", "python3 x.py", agentType: null), "architect", new ScriptedEngine());
+
+        Assert.Equal(0, exit);
+        AssertShellDenied(stdout);
+    }
+
+    [Theory]
+    [InlineData("Bash")]
+    [InlineData("PowerShell")]
+    public void ShellGuard_ArchitectCallOnTheList_PassesThroughSilently(string tool)
+    {
+        (int exit, string stdout) = Run(ShellPayload(tool, "git status", "architect"), "conductor", new ScriptedEngine());
+
+        Assert.Equal(0, exit);
+        Assert.Equal(string.Empty, stdout);
+    }
+
+    [Fact]
+    public void ShellGuard_CsharpDevBashCall_KeepsTheWorkerPlanningPathDeny()
+    {
+        // grep is on the architect's list, so an allow here would mean the shell guard reached csharp-dev.
+        string planningDirectory = ReadGuard.ProtectedDirectories(new KyberWeaveConfig())[0];
+
+        (int exit, string stdout) = Run(
+            ShellPayload("Bash", $"grep -rn x {planningDirectory}", "csharp-dev"),
+            "conductor",
+            new ScriptedEngine());
+
+        Assert.Equal(0, exit);
+        using JsonDocument doc = JsonDocument.Parse(stdout);
+        JsonElement output = doc.RootElement.GetProperty("hookSpecificOutput");
+        Assert.Equal("deny", output.GetProperty("permissionDecision").GetString());
+        string reason = output.GetProperty("permissionDecisionReason").GetString() ?? string.Empty;
+        Assert.Contains("Req 25", reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("KW-ARB-SHELL-001", reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ShellGuard_ConductorBashCall_IsPassThrough()
+    {
+        (int exit, string stdout) = Run(ShellPayload("Bash", "python3 x.py", "conductor"), "conductor", new ScriptedEngine());
+
+        Assert.Equal(0, exit);
+        Assert.Equal(string.Empty, stdout);
+    }
+
+    [Fact]
+    public void ShellGuard_BashCallWithNoCaller_IsPassThrough()
+    {
+        (int exit, string stdout) = Run(ShellPayload("Bash", "python3 x.py", agentType: null), null, new ScriptedEngine());
+
+        Assert.Equal(0, exit);
+        Assert.Equal(string.Empty, stdout);
+    }
 }
