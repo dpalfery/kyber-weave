@@ -268,9 +268,10 @@ public sealed class ReviewGuidanceCouncilContractTests
         string lensPath = Path.Combine(LensesRoot, "test-infrastructure.md");
         Assert.True(File.Exists(lensPath), $"Council lens '{lensPath}' is missing.");
 
-        string catalogue = File.ReadAllText(Path.Combine(ProductRoot, "skills", "code-review", "SKILL.md"));
+        // The lens catalogue lives in the first-review reference, beside the lens files it links.
+        string catalogue = File.ReadAllText(Path.Combine(ProductRoot, "skills", "code-review", "references", "first-review.md"));
         Assert.True(
-            catalogue.Contains("references/lenses/test-infrastructure.md", StringComparison.Ordinal),
+            catalogue.Contains("(lenses/test-infrastructure.md)", StringComparison.Ordinal),
             "The code-review skill catalogue must list the test-infrastructure lens.");
 
         string guidance = File.ReadAllText(ReviewGuidancePath);
@@ -293,9 +294,10 @@ public sealed class ReviewGuidanceCouncilContractTests
         string lensPath = Path.Combine(LensesRoot, "documentation-accuracy.md");
         Assert.True(File.Exists(lensPath), $"Council lens '{lensPath}' is missing.");
 
-        string catalogue = File.ReadAllText(Path.Combine(ProductRoot, "skills", "code-review", "SKILL.md"));
+        // The lens catalogue lives in the first-review reference, beside the lens files it links.
+        string catalogue = File.ReadAllText(Path.Combine(ProductRoot, "skills", "code-review", "references", "first-review.md"));
         Assert.True(
-            catalogue.Contains("references/lenses/documentation-accuracy.md", StringComparison.Ordinal),
+            catalogue.Contains("(lenses/documentation-accuracy.md)", StringComparison.Ordinal),
             "The code-review skill catalogue must list the documentation-accuracy lens.");
 
         string guidance = File.ReadAllText(ReviewGuidancePath);

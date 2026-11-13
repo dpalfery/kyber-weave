@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-10-30
+last-reviewed: 2026-11-13
 ---
 
 # Skill-resource dispositions and policy-line ledger
@@ -57,6 +57,11 @@ it stands, not this ledger's quotations of what it used to say.
 |---|---|---|---|---|---|
 | `skills/code-review-loop/code-review-loop.md` | procedure | retain-in-place | rendered | — | Kyber-authored review-remediation procedure across platforms; linked from its `SKILL.md` and delivered beside the principal in every harness. |
 | `skills/code-review/references/azure.md` | review-pointer | pointer-already-#126 | rendered | the declared `<azure-coding-standard>` | Pointer-only since #126 (finding 7); resolves the `<azure-coding-standard>` registry token where the host declares one. |
+| `skills/code-review/references/configuration.md` | procedure | retain-in-place | rendered | — | The host's `review:` configuration keys, moved out of `SKILL.md` because the reviewer does not read them on a cycle. Split out of `SKILL.md` on 2026-11-13 so each review cycle reads only its own part. |
+| `skills/code-review/references/first-review.md` | procedure | retain-in-place | rendered | — | The council fan-out and the lens catalogue, read only in a first full review; the council's gate run names it on its `next:` line. Split out of `SKILL.md` on 2026-11-13 so each review cycle reads only its own part. |
+| `skills/code-review/references/pre-push.md` | procedure | retain-in-place | rendered | — | The pre-push self-review gate, read only when a session reviews its own change after the draft push. Split out of `SKILL.md` on 2026-11-13 so each review cycle reads only its own part. |
+| `skills/code-review/references/quick-review.md` | procedure | retain-in-place | rendered | — | The quick review of a change of at most 300 lines, read alone. Split out of `SKILL.md` on 2026-11-13 so each review cycle reads only its own part. |
+| `skills/code-review/references/verifier-cycle.md` | procedure | retain-in-place | rendered | — | The review loop and what a verifier cycle re-checks, read in every cycle after the first; the gate run names it on its `next:` line. Split out of `SKILL.md` on 2026-11-13 so each review cycle reads only its own part. |
 | `skills/code-review/references/csharp.md` | review-pointer | pointer-already-#126 | rendered | the declared `<csharp-coding-standard>` | Pointer-only since #126; resolves `<csharp-coding-standard>` where declared. |
 | `skills/code-review/references/github-actions.md` | review-pointer | pointer-already-#126 | rendered | the declared `<github-actions-coding-standard>` | Pointer-only since #126; resolves `<github-actions-coding-standard>` where declared. |
 | `skills/code-review/references/go.md` | review-pointer | pointer-already-#126 | rendered | the declared `<go-coding-standard>` | Pointer-only; names the `<go-coding-standard>` registry token and reports "no Go standard declared" when undeclared. Linked from `SKILL.md` under Technology checklists. |

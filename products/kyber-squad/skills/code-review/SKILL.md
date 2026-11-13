@@ -19,6 +19,20 @@ A verdict produced by the same model that produced the findings cannot be audite
 regression-tested, and can legitimately differ between two runs over the same diff — so the
 last step is arithmetic instead.
 
+## Which part to read
+
+The council's gate run (`review gates … --council`) prints the cycle and, on its `next:` line, the one reference
+that applies, so the choice is a machine fact:
+
+| Review | Read with this file |
+|---|---|
+| First full review (`cycle: 1 mode: full`), or any review outside the council | [references/first-review.md](references/first-review.md) |
+| Verifier cycle (`mode: verifier`) | [references/verifier-cycle.md](references/verifier-cycle.md) |
+| Quick review of a change of at most 300 lines | [references/quick-review.md](references/quick-review.md) only |
+| Pre-push self-review of your own change | [references/pre-push.md](references/pre-push.md) |
+
+Lens charters stay in `references/lenses/<lens>.md`, one per lens.
+
 ## Procedure
 
 ### 1. Scope the change
@@ -106,79 +120,11 @@ If the host has declared no gates, the command says so. Record that: a review wi
 executed evidence is a weaker review, and the report must not read as though everything
 passed.
 
-**Council.** Before lens fan-out, `code-reviewer` materializes the unified diff `git diff <base>...<head>` to `.agent_scratchpad/<task-id>/review-diff.patch`, passes `.agent_scratchpad/<task-id>/review-diff.patch` in every `review-lens` and `review-triage` invocation packet so read-only seats inspect the diff via `view_file` without running git commands, and removes it after the review council completes (including on failure).
-Invoke one seat per applicable lens, all in flight at once, each named with its
-lens file, the review scope, and its assigned review-guidance sections. Every lens declares an
-applicability predicate and returns `SKIPPED` with a reason when the diff holds nothing it
-owns — auto-skipping is what makes seventeen lenses affordable. Every seat given guidance sections
-ends its output with one attestation line, `REVIEW.md sections checked: [<ids>]`, on both its
-findings form and its `NO FINDINGS` form (a `review-triage` seat lists `Ground rules`). A
-findings or `NO FINDINGS` seat without that line has not shown it applied the guidance; the
-report records that as a coverage gap under Council coverage. `SKIPPED` seats return no
-attestation, and a missing attestation is never a verdict input. Where the harness cannot start
-separate seats, the reviewer applies each lens in turn with the same guidance sections and
-returns the same attestation line.
+**Council.** In a first full review, seat the council as [references/first-review.md](references/first-review.md) says: one seat per applicable lens, all at once, each with its lens file, the review scope and its review-guidance sections, ending with the attestation line `REVIEW.md sections checked: [<ids>]`. A verifier cycle re-seats only the lenses [references/verifier-cycle.md](references/verifier-cycle.md) names. Either way, every seat reads the diff `code-reviewer` materialized to `.agent_scratchpad/<task-id>/review-diff.patch`, removed once the council completes, and:
 
 Seat one lens per spawn. Save each seat's output unchanged as `<lens>.md` in the cycle's `seats` folder before you adjudicate. The verdict command matches a seat file to a lens by its name alone, so a file named for two lenses at once (`prior-art-performance.md`) keeps its findings but covers no lens and draws a `KW-REVIEW-041` warning; one spawn per lens and one file per lens avoids it. When one lens is split by file across two or more spawns, save their outputs unchanged, one after another, as that lens's one `<lens>.md`; the verdict command sums the repeated `Input sites:` and `Discovery:` lines per counter, and one malformed repeated line makes that count unreadable (`KW-REVIEW-044` or `KW-REVIEW-047`). `Index fallback:` lines are not summed: a repeated identical line is fine, but two different ones draw `KW-REVIEW-044` and only the first is kept. When the parts fell back in different modes, merge them into one line naming each mode, separated by a semicolon (`Index fallback: projectPath: error; projectPath: not-indexed`), so no evidence is discarded. A finding you raise yourself, such as a claim with no gate behind it, goes in `reviewer.md` in the same folder.
 
 Every finding cites a file and a `line`, and `line` is the line number in the file as you read it, never a line offset in the patch file. The verdict command checks each cited line against the file (`KW-REVIEW-043`): a line outside the file is moved to the one line that holds the excerpt, and the finding is dropped when no single line does.
-
-The **Runner** column is not advisory. `review-lens` reads code and judges it. `review-triage`
-takes a machine artifact — analyzer diagnostics, a manifest diff — and attributes it to the
-change; that work is bounded and checkable, so it runs on the `fast` model profile. Sending a
-judgement lens to triage buys shallow findings; sending a triage lens to judgement pays a
-premium for attribution.
-
-| Lens | Runner | Owns |
-|---|---|---|
-| [intent-alignment](references/lenses/intent-alignment.md) | `review-lens` | Does the diff do what its description says, and is it one change? |
-| [correctness](references/lenses/correctness.md) | `review-lens` | Boundaries, absent values, error paths, state, real concurrency |
-| [security](references/lenses/security.md) | `review-lens` | Exploitable vulnerabilities, via the `security-review` skill |
-| [authz-tenancy](references/lenses/authz-tenancy.md) | `review-lens` | Authorization per access, tenant scoping, privilege boundaries |
-| [di-composition](references/lenses/di-composition.md) | `review-lens` | Constructor injection, no locally created collaborators, registration |
-| [model-placement](references/lenses/model-placement.md) | `review-lens` | Type classification against the declared coding standard |
-| [prior-art](references/lenses/prior-art.md) | `review-lens` | Does this already exist? Duplicate types, divergent idioms, generality nothing asked for |
-| [duplicate-implementation](references/lenses/duplicate-implementation.md) | **`review-triage`** | Bodies duplicated across the tree, attributed from the duplicates gate |
-| [test-adequacy](references/lenses/test-adequacy.md) | `review-lens` | Would the tests catch this breaking? Behaviour over implementation |
-| [static-analysis-triage](references/lenses/static-analysis-triage.md) | **`review-triage`** | Analyzer output, attributed and reported by rule id |
-| [test-infrastructure](references/lenses/test-infrastructure.md) | `review-lens` | Is the shared test machinery sound: isolation, caches, fixtures, global state? |
-| [documentation-accuracy](references/lenses/documentation-accuracy.md) | `review-lens` | Is every factual claim in the changed docs, plans and doc comments true of the code? |
-| [performance](references/lenses/performance.md) | `review-lens` | Cost at scale, with a named growth dimension |
-| [blast-radius-revertibility](references/lenses/blast-radius-revertibility.md) | `review-lens` | What else it reaches, and whether it can be undone |
-| [supportability](references/lenses/supportability.md) | `review-lens` | Diagnosability, correlation, what leaks to the caller |
-| [dependency-supply-chain](references/lenses/dependency-supply-chain.md) | **`review-triage`** | What the change asks the project to newly trust |
-| [infra-workflow](references/lenses/infra-workflow.md) | `review-lens` | Migrations, workflows, infrastructure, and their trust boundaries |
-
-Only three lenses are triage, and that is the honest count rather than a hedge. The rest need
-a judgement about code that a fast model would make badly. `static-analysis-triage` is
-nonetheless the single best candidate in the catalogue: it applies to almost every change that
-builds, and it carries the largest input of any lens, so it is both the most mechanical seat
-and the most frequently expensive one.
-
-Three lenses consume gate output — `test-adequacy` needs the coverage report,
-`static-analysis-triage` needs the analyzer results, and `duplicate-implementation` needs the
-duplicates report. Issue each when its own gate completes, not behind a barrier on all gates.
-When the host has declared a `review.coverage` floor and the gate report carries no coverage
-evidence, `test-adequacy` treats that absence as a finding — not a skip, and not "we did
-not look".
-
-`prior-art` and `duplicate-implementation` divide one concern by unit and by evidence.
-`duplicate-implementation` reports **bodies**, from a gate artifact, and may not report what
-it found by reading. `prior-art` reports **types**, from reading, and may not report without
-quoting the counterpart it found. Neither may report the other's unit.
-
-**Technology checklists.** The per-technology references —
-[C#](references/csharp.md), [Python](references/python.md), [React](references/react.md),
-[SQL](references/sql.md), [Pulumi](references/pulumi.md), [Azure](references/azure.md),
-[GitHub Actions](references/github-actions.md), [TypeScript](references/typescript.md),
-[Rust](references/rust.md), [Tauri](references/tauri.md), [Go](references/go.md) — are lens
-modifiers, not lenses. A lens loads
-the checklists for the technologies actually present in the diff. Each checklist points at the
-host's declared `<technology>-coding-standard` and states no rule of its own; an undeclared or
-draft standard is reported, never replaced with a built-in checklist. A checklist's Review traps
-section, where it has one, is a set of non-authoritative detection prompts: they are not rules,
-they do not substitute for the declared standard, and a finding raised from one needs quoted
-evidence like any other.
 
 ### 3. Confirm before believing
 
@@ -264,7 +210,7 @@ number. Minor findings never block at any level. Pass the strictness and the eff
 findings instead of having them dropped at the source and a lenient host is not flooded. The
 security lens is the one exception: it keeps its own floor of 8 (see its lens file).
 
-**Review loop.** The council re-reviews after every fix round until it returns APPROVE. Every review after the first runs in the verifier mode of the dp-code-reviewer skill: it re-checks the prior findings and the fix delta, not a full council. A verifier cycle reviews the fix delta `git diff <prior head>...<head>`, re-seats only the lenses that own an outstanding finding or whose predicate the delta newly satisfies, and passes `--prior <prior cycle folder>`. A finding is FIXED only when the fix refuses its whole class: state the class in one sentence, name at least three other inputs of that class that the original failure scenario did not name, and trace each through the fix. Minor/Info findings never start a cycle and never block: the `major-count-blocks` threshold and the table above still decide the verdict, and the loop does not rewrite those rules. The `delivery-execution` skill owns the loop's hard stop.
+**Review loop.** The council re-reviews after every fix round until it returns APPROVE; every cycle after the first is a verifier cycle, set out in [references/verifier-cycle.md](references/verifier-cycle.md).
 
 **Risk** (`LOW` / `MEDIUM` / `HIGH`) is graded from what was found and what was touched,
 never from diff size. A twelve-line migration dropping a column outranks a three-thousand-line
@@ -278,51 +224,11 @@ say so alongside it with the finding that should have changed it.
 
 ## Quick review
 
-A change of at most 300 changed lines (added plus removed, from `git diff --numstat <base>...HEAD`) gets the quick review before its pull request is opened; a larger change gets the full pre-push council.
-
-The quick review is one pass by the session that made the change. It starts no seats and no
-spawns, runs no gates beyond what the root `AGENTS.md` requires before a pull request, and does
-not run the verdict engine. Walk the whole diff against this checklist:
-
-1. **Intent.** Does the diff do what its description says, and nothing it does not say?
-2. **Correctness of the changed lines.** Boundaries, absent values, error paths, and state.
-3. **Siblings.** When the diff changes a rule's wording in one file, list every other file that carries the same rule text, check each one, and report each sibling the diff left stale.
-4. **Contract-assertion strength.** A test or contract check that would pass with the fix reverted is a finding (`REVIEW.md` R14).
-5. **Defect classes.** The defect-class checklist of the pre-push gate below, step 3.
-
-Fix every major-or-worse finding before the pull request is opened. The pull request
-description carries one line: `Quick review: <n> findings, <m> fixed, open: <ids or none>`. In this skill, a finding verified as real is one that survived the council's adjudication; a quick review has no council, so the session's own check against the cited code stands in for it. The test rule in step 2 of the Pre-push self-review gate applies to a quick review's fixes too.
+A change of at most 300 changed lines (added plus removed, from `git diff --numstat <base>...HEAD`) gets the quick review before its pull request is opened; a larger change gets the full pre-push council. The quick review is one pass by the session that made the change, with no seats, no gates beyond the root `AGENTS.md` and no verdict engine: follow [references/quick-review.md](references/quick-review.md) alone.
 
 ## Pre-push self-review gate
 
-"Pre-push" is the name of this gate, kept for its heading and its references. It does not mean the gate runs before the push: the draft pull request is pushed first, and a draft push never waits for this gate. Required CI decides readiness.
-
-Run this gate on your own finished change. Its verdict is evidence for the pull request description; it does not block the push or the ready step. It works the same in any
-harness — Claude, Pi, OpenCode, Antigravity, or others — because it uses only the
-Procedure above and the host's declared gates.
-
-1. **Sync.** Refresh the remote head and the base branch before the draft push. If another
-   actor advanced either, reconcile their changes into your branch and revalidate the
-   affected work. Merge, never rebase, never force-push. Confirm the refreshed remote
-   head and base branch are reachable from your local `HEAD` before the draft push.
-2. **Council over the whole change.** Push first, as a draft pull request where one can
-   be opened. The council reviews the pushed branch, or the local branch when the push
-   fails, and never waits for a pull request. Then run full Procedure steps 1–5 over the whole accumulated diff against its
-   base, not just the last files touched. Fix major-or-worse findings where a bounded fix
-   exists, re-review the fix as a verifier cycle (see **Review loop** above), and use that
-   later verdict in the pull request description. A verdict computed before a fix is void. List any major-or-worse
-   finding still open by id in the pull request description. Minor/Info findings never
-   block. Required CI decides readiness; the verdict does not gate the push or the ready step. In this skill, a finding verified as real is one that survived the council's adjudication. A fix for a review finding verified as real ships with a test that fails without the fix, bot review rounds included; a finding classified as a nitpick needs no test.
-   Run the gates command without `--council`. The CLI refuses the full-suite gates, and each refusal is a blocking failure that names the targeted alternatives; report those as "not run here, CI runs them", and do not count a refusal as a code finding in the verdict.
-3. **Defect-class checklist.** Walk each class explicitly over the whole change, as part of this pre-push gate (the draft push does not wait for it):
-   a. Invented/hidden values: `?? 0`, `|| N`, `?? []`, clamps, default window/price/size/duration, unmeasured shown as zero or "measured", partial data looking complete (honest-unobservability: absent stays absent with reason).
-   b. Scope/cost: filters/dedupe too wide or single-caller-only; N+1/per-run loops; unbounded reads/copies; caps without paging; large payloads kept alive.
-   c. Parity: guard added in one place not every caller/branch (store vs direct-DB, harness vs run scope, API vs UI, producer vs consumer).
-   d. Stale text: comments/docs/test names/version-migration numbers/PR description mismatch code (grep old value).
-   e. Tests only pure helpers never real render/serve path; assertions locking bug; new test passing even if fix reverted.
-   f. Lint and type gates actually run.
-4. **Evidence.** Paste the real gate output into the push report. A claim with no
-   gate result is "unverified", never "passing".
+Run on your own finished change after its draft push, which never waits for it: [references/pre-push.md](references/pre-push.md). Its verdict is evidence for the pull request description and gates neither the push nor the ready step.
 
 ## Arbiter fallback
 
@@ -392,32 +298,4 @@ any other.
 
 ## Configuration
 
-Everything host-specific lives in one place — `review:` in `.kyber-weave/kyber-weave.yml`:
-
-```yaml
-review:
-  gates:
-    - id: test
-      run: [dotnet, test, -c, Release]     # argv, never a command line
-      blocking: true
-    - id: build                            # .NET compiler and analyzer warnings
-      run: [dotnet, build, MySolution.sln, -c, Release]
-      blocking: true
-  coverage:
-    file-line-percent: 85
-    class-line-percent: 85
-  duplicates:
-    minimum-lines: 4                       # normalized lines, signature and braces excluded
-  policy:
-    strictness: balanced                  # lenient | balanced | strict; explicit keys below override it
-    # major-count-blocks: 3               # optional; overrides the strictness preset
-    # min-confidence: 7                    # optional; overrides the strictness preset
-    suppressions:
-      - id: correctness/generated-nullable
-        reason: Regenerated client, tracked separately.
-        expires: 2026-11-18                # required; re-justify or it returns
-```
-
-`run` is argv because the gate runner refuses a shell. A pipeline or a redirect cannot be
-expressed here, and neither can an injection — that is the trade, and it is the right way
-round.
+Everything host-specific lives under `review:` in `.kyber-weave/kyber-weave.yml`; its keys are in [references/configuration.md](references/configuration.md).

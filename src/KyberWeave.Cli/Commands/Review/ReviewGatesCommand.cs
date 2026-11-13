@@ -442,6 +442,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
     private static void WriteCycleHeader(CouncilCycle cycle)
     {
         Console.WriteLine($"cycle: {cycle.Plan.Number} mode: {cycle.Mode}");
+        Console.WriteLine($"next: read {CycleReference(cycle.Verifier)} in the code-review skill");
         if (cycle.Folder is not null)
             Console.WriteLine($"folder: {cycle.Folder}");
 
@@ -459,6 +460,10 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
 
         Console.Out.Flush();
     }
+
+    /// <summary>The code-review skill reference a reviewer reads for this kind of cycle.</summary>
+    internal static string CycleReference(bool verifier) =>
+        verifier ? "references/verifier-cycle.md" : "references/first-review.md";
 
     /// <summary>
     ///     The gate report with an earlier passing result in place of each gate this cycle did not run, in declaration

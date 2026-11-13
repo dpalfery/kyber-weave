@@ -1,0 +1,7 @@
+# Verifier cycle
+
+Read this in every review cycle after the first, which the council's gate run prints as `cycle: <n> mode: verifier` and `next: read references/verifier-cycle.md`. The gate run has already printed the `recheck:` findings and the `rerun:`/`carry:` gates, run only the `rerun:` gates and carried the rest into `gates.json`; `--full` runs every gate instead. The refutation pass sends only the candidates no earlier cycle refuted, and the verdict command takes `--prior <prior cycle folder>` (step 5 of `SKILL.md`).
+
+## Review loop
+
+**Review loop.** The council re-reviews after every fix round until it returns APPROVE. Every review after the first runs in the verifier mode of the dp-code-reviewer skill: it re-checks the prior findings and the fix delta, not a full council. A verifier cycle reviews the fix delta `git diff <prior head>...<head>`, re-seats only the lenses that own an outstanding finding or whose predicate the delta newly satisfies, and passes `--prior <prior cycle folder>`. A finding is FIXED only when the fix refuses its whole class: state the class in one sentence, name at least three other inputs of that class that the original failure scenario did not name, and trace each through the fix. Minor/Info findings never start a cycle and never block: the `major-count-blocks` threshold and the table above still decide the verdict, and the loop does not rewrite those rules. The `delivery-execution` skill owns the loop's hard stop.

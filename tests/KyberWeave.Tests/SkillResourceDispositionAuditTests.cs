@@ -12,7 +12,7 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Pins the eight-part content-preservation audit contract for the 89 skill resources under
+/// Pins the eight-part content-preservation audit contract for the 94 skill resources under
 /// <c>products/kyber-squad/skills/</c>: every resource has exactly one disposition row, the
 /// disposition and delivery vocabularies are closed and self-consistent with the policy-line
 /// ledger, every ledger destination names a real template section containing its anchor, every
@@ -72,7 +72,7 @@ public sealed class SkillResourceDispositionAuditTests
 
     /// <summary>
     /// Prevents a resource from being silently dropped, duplicated, or invented in the audit: the
-    /// table's Resource column must equal, one-for-one, the 89 files on disk under
+    /// table's Resource column must equal, one-for-one, the 94 files on disk under
     /// <c>products/kyber-squad/skills/**</c> other than <c>SKILL.md</c>.
     /// </summary>
     [Fact]
@@ -112,7 +112,7 @@ public sealed class SkillResourceDispositionAuditTests
         // The count is exact on purpose: a resource added without a row, or a row without a
         // resource, is already caught by the comparison above, so this catches the other
         // failure — a row added twice under different spellings of the same path.
-        Assert.Equal(89, rows.Count);
+        Assert.Equal(94, rows.Count);
     }
 
     /// <summary>
@@ -562,10 +562,21 @@ public sealed class SkillResourceDispositionAuditTests
         return Path.Combine(ProductRoot, productRelativeResource.Replace('/', Path.DirectorySeparatorChar));
     }
 
+    // The parts of the code-review procedure split out of SKILL.md are procedure, not technology checklists.
+    private static readonly HashSet<string> CodeReviewProcedureParts = new(StringComparer.Ordinal)
+    {
+        "skills/code-review/references/configuration.md",
+        "skills/code-review/references/first-review.md",
+        "skills/code-review/references/pre-push.md",
+        "skills/code-review/references/quick-review.md",
+        "skills/code-review/references/verifier-cycle.md",
+    };
+
     private static bool IsNonLensCodeReviewReference(string resource)
     {
         return resource.StartsWith("skills/code-review/references/", StringComparison.Ordinal) &&
-               !resource.StartsWith("skills/code-review/references/lenses/", StringComparison.Ordinal);
+               !resource.StartsWith("skills/code-review/references/lenses/", StringComparison.Ordinal) &&
+               !CodeReviewProcedureParts.Contains(resource);
     }
 
     /// <summary>Implements the D5 disposition-derivation table.</summary>
