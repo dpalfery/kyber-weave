@@ -292,7 +292,7 @@ still leaves it alone.
 **Your half:** the server entry in `kilo.jsonc`'s `mcp` key under the key `kw-docs`, launched as
 `kyber-weave-mcp --repo-root .`. An agent file cannot add a server and `squad install` writes no
 harness settings file, so a rendered grant with no `mcp` entry reaches nothing. Then check the repository
-rather than assuming it — call `docs_get_source_repository_and_revision` (it takes no arguments)
+rather than assuming it — call `docs_get_source_repository_and_revision` (its only argument is the optional `projectPath`)
 and confirm its `repo=` equals `git rev-parse --git-common-dir` in the repository you meant.
 
 Do not hand-add a permission key to a rendered agent file: install and update own those bytes.
@@ -1142,6 +1142,30 @@ came from, which is what decides whether a code answer is about your branch.
 
 ## The tools
 
+### Naming your worktree with `projectPath`
+
+The server binds one root at startup, but agent runs work in linked worktrees created after it
+started, so an answer from the bound root can describe a different branch than the one being
+edited. Every tool therefore takes an optional `projectPath`, the same name CodeGraph's
+`codegraph_explore` uses: the absolute path of a worktree of this repository. Omit it and the
+call is answered from the server's root, as before.
+
+- **Same repository only.** Git is asked for the path's working-tree top level and common git
+  directory (`git rev-parse --show-toplevel --git-common-dir`). The common directory must equal
+  the server root's; a path in another repository, a path that is not inside a git working
+  tree, and a path that is not a directory are refused with a `projectPath was refused:` line
+  after the provenance line, and nothing is answered from the server root in their place. A
+  subdirectory of a worktree names that worktree.
+- **The provenance line shows the root used.** `root=`, `branch=`, `rev=`, `dirty=` and
+  `documents=` describe the worktree the answer came from, so a caller can confirm its own
+  checkout answered.
+- **Per-root state.** The document host, analysis reader and CodeGraph refresh schedule are
+  built on first use for each root and kept in a registry of the four most recently used
+  worktrees (the server root is separate and never evicted). The least recently used one is
+  dropped when a fifth is named, and is rebuilt on its next call.
+- **The index is the worktree's own.** The CodeGraph joins and the freshness refresh use the
+  `.codegraph/` of the named worktree, never the server root's.
+
 All eight are declared `ReadOnly` and `OpenWorld = false`, which the SDK maps to the
 protocol's `readOnlyHint` and `openWorldHint`. A client can act on an annotation; it cannot
 act on a sentence claiming the same thing, which is why that claim is no longer prose.
@@ -1198,7 +1222,7 @@ what comes back. A name that states the question wins that decision on merit; a 
 explained before it can be chosen. The cost is paid in the qualified form, which is why the three
 figures above are a budget rather than a remark.
 
-### `docs_answer_question_from_repo_documentation(query, cursor = null)`
+### `docs_answer_question_from_repo_documentation(query, cursor = null, projectPath = null)`
 
 One answer for a question, symbol, route, component, or document id — not a ranked list of
 documents. After the relevance floor, leaves inside qualifying documents compete; the
@@ -1229,7 +1253,7 @@ claims; see [the documentation ontology](../documentation-ontology.md) and [ADR
 A miss says so plainly, reports how many documents were considered, and suggests naming a
 component, doc-id, or symbol instead. Treat that as permission to fall back to grep.
 
-### `docs_get_coding_standard_for_technology(technology, topic = null, charBudget = 12000)`
+### `docs_get_coding_standard_for_technology(technology, topic = null, charBudget = 12000, projectPath = null)`
 
 The local answer for one stack: which standard this repository writes that technology by,
 and what it says. A portable agent arrives holding the standard its own stack ships; this
@@ -1374,7 +1398,7 @@ Four replies are not a standard at all:
   reply never claims otherwise, and the prose is the point: a caller that receives no prose
   opens the file, which is the cost this tool exists to prevent.
 
-### `docs_find_documents_citing_code_symbol(symbol)`
+### `docs_find_documents_citing_code_symbol(symbol, projectPath = null)`
 
 The documents whose `code-refs` **formally claim** a symbol — not those that mention it in
 prose, which is exactly the distinction grep cannot make. Run it before renaming, moving,
@@ -1383,7 +1407,7 @@ or deleting anything to find the documentation that must change with it.
 An empty result distinguishes the two cases the caller cares about: the symbol is
 undocumented, or it is discussed in prose that never claimed ownership of it.
 
-### `docs_find_duplicates_conflicts_ambiguous_terms(kind?, cursor?, limit = 20, charBudget = 12000)`
+### `docs_find_duplicates_conflicts_ambiguous_terms(kind?, cursor?, limit = 20, charBudget = 12000, projectPath = null)`
 
 Runs the repository's current configured documentation analysis and returns candidates in
 stable kind, term, and candidate-id order. `kind` is optional and accepts `duplicate`,
@@ -1396,7 +1420,7 @@ response keeps local cost/cache metrics and line-addressable evidence inside the
 budget. Use [`docs review export`](analysis.md#cli-and-exit-behavior) when a reviewing
 agent needs the versioned rubric and hashes for reusable verdicts.
 
-### `docs_look_up_glossary_term_definition(term)`
+### `docs_look_up_glossary_term_definition(term, projectPath = null)`
 
 Looks up one managed glossary term case-insensitively and returns its proposed, approved,
 and rejected senses, definitions, scopes, and aliases. An unknown term is an ordinary
@@ -1408,12 +1432,11 @@ glossary proposals enter through `docs glossary --write` at the CLI. The MCP rea
 the current config and corpus for each call; embeddings remain loopback-only and are not
 called unless the local cache is safely ignored.
 
-### `docs_validate_governed_document_schema(mergeReady = false, base = "origin/HEAD", charBudget = 12000)`
+### `docs_validate_governed_document_schema(mergeReady = false, base = "origin/HEAD", charBudget = 12000, projectPath = null)`
 
 Runs the same schema conformance gate as [`kyber-weave docs validate`](governance.md) against
-the corpus the server already bound at startup. There is **no repository-path argument**: the
-root is `DocumentIndexHost.RepositoryRoot` for this process, disclosed by the provenance line
-on every response. Compare that `repo=` to `git rev-parse --git-common-dir` before trusting a
+the corpus the server already bound at startup, or the worktree `projectPath` names. The root
+used is disclosed by the provenance line on every response. Compare that `repo=` to `git rev-parse --git-common-dir` before trusting a
 pass or fail.
 
 `mergeReady` maps to the CLI's `--merge-ready`. Default `false` is the **planning gate** —
@@ -1443,12 +1466,12 @@ an omitted count so the caller knows how many more exist.
 The document walk reads the tree on disk, not `git ls-files`, so an untracked plan file under
 the active plans folder is visible to this gate the same way it is to the CLI.
 
-### `docs_detect_drift_between_documents_and_code(charBudget = 12000)`
+### `docs_detect_drift_between_documents_and_code(charBudget = 12000, projectPath = null)`
 
 Runs the same entity-drift gate as [`kyber-weave docs drift`](governance.md) against the
-server's resolved repository root — again with no path argument and the same provenance
+server's resolved repository root, or the worktree `projectPath` names, with the same provenance
 contract as
-[`docs_validate_governed_document_schema`](#docs_validate_governed_document_schemamergeready--false-base--originhead-charbudget--12000).
+[`docs_validate_governed_document_schema`](#docs_validate_governed_document_schemamergeready--false-base--originhead-charbudget--12000-projectpath--null).
 
 `charBudget` uses the same default, clamp, and truncation rules as
 `docs_validate_governed_document_schema`. Response
@@ -1460,10 +1483,10 @@ findings when present. A missing or unreadable CodeGraph index is reported as cr
 `KW-DOC-DRIFT-001` with the existing "Drift cannot be verified" message — not as `result:
 pass`.
 
-### `docs_get_source_repository_and_revision()`
+### `docs_get_source_repository_and_revision(projectPath = null)`
 
-Reports the provenance of the corpus this server is answering from, with no query and no
-arguments. This is the cheap session-start check: call it once before trusting any other
+Reports the provenance of the corpus this server is answering from, with no query and only the
+optional `projectPath`. This is the cheap session-start check: call it once before trusting any other
 docs tool, and compare its `repo=` to `git rev-parse --git-common-dir` — a different `root=`
 with the same `repo=` is another worktree of this repository, and a different `repo=` is the
 wrong repository. It returns exactly

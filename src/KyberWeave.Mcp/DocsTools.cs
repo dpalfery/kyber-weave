@@ -69,6 +69,7 @@ public sealed partial class DocsTools
     private readonly DocumentIndexHost _host;
     private readonly IDocsAnalysisReader? _analysisReader;
     private readonly CodeGraphFreshness _freshness;
+    private readonly DocsRootRegistry? _roots;
 
     /// <summary>Tools over <paramref name="host"/>, with the documentation analysis surface unavailable.</summary>
     /// <param name="host">The corpus this server answers from.</param>
@@ -102,7 +103,22 @@ public sealed partial class DocsTools
     /// schedule explicitly.
     /// </remarks>
     public DocsTools(DocumentIndexHost host, IDocsAnalysisReader? analysisReader, CodeGraphFreshness? freshness)
+        : this(host, analysisReader, freshness, null)
     {
+    }
+
+    /// <summary>Tools over <paramref name="host"/> that also answer for other worktrees through <paramref name="roots"/>.</summary>
+    /// <param name="host">The corpus this server answers from.</param>
+    /// <param name="analysisReader">The analysis port, or null when this host has no analysis surface.</param>
+    /// <param name="freshness">The refresh schedule, or null for none.</param>
+    /// <param name="roots">Resolves a per-call <c>projectPath</c>, or null when this host serves one root only.</param>
+    public DocsTools(
+        DocumentIndexHost host,
+        IDocsAnalysisReader? analysisReader,
+        CodeGraphFreshness? freshness,
+        DocsRootRegistry? roots)
+    {
+        _roots = roots;
         _host = host ?? throw new ArgumentNullException(nameof(host));
         _analysisReader = analysisReader;
         _freshness = freshness ?? new CodeGraphFreshness(_host.RepositoryRoot, refreshEnabled: false);
@@ -130,8 +146,10 @@ public sealed partial class DocsTools
             Continuation token from a prior incomplete answer for the same question. Omit on
             the first call; repeat the same question with this value to read the next span.
             """)]
-        string? cursor = null)
+        string? cursor = null,
+        [Description("Absolute path of your worktree of this repository. Omit for the server's checkout.")] string? projectPath = null)
     {
+        if (Redirect(projectPath, tools => tools.Explore(query, cursor)) is { } redirected) return redirected;
         CodeGraphGate gate = CheckCodeGraph();
         if (gate.Failure is { } failure) return Blocked(Provenance(null), failure);
         DocumentIndex index = _host.Current();
@@ -206,8 +224,10 @@ public sealed partial class DocsTools
         Empty result: no document claims it, so nothing to update.
         """)]
     public string ForSymbol(
-        [Description("A bare or fully qualified symbol name, e.g. 'DataProtectionHealthCheck' or 'KyberWeave.Core.Docs.Search.DocumentIndex'. Both forms resolve.")] string symbol)
+        [Description("A bare or fully qualified symbol name, e.g. 'DataProtectionHealthCheck' or 'KyberWeave.Core.Docs.Search.DocumentIndex'. Both forms resolve.")] string symbol,
+        [Description("Absolute path of your worktree of this repository. Omit for the server's checkout.")] string? projectPath = null)
     {
+        if (Redirect(projectPath, tools => tools.ForSymbol(symbol)) is { } redirected) return redirected;
         CodeGraphGate gate = CheckCodeGraph();
         if (gate.Failure is { } failure) return Blocked(Provenance(null), failure);
         DocumentIndex index = _host.Current();
@@ -253,8 +273,10 @@ public sealed partial class DocsTools
         [Description("Limits results to one kind of finding: 'duplicate', 'conflict', or 'terminology'. Omit to return every kind.")] string? kind = null,
         [Description("Opaque candidate id taken from the 'next cursor' line of a previous response, to continue after that item. Omit for the first page.")] string? cursor = null,
         [Description("Maximum candidates to return (1-20). Defaults to 20; larger values are capped at 20.")] int limit = 20,
-        [Description("Maximum response characters (up to 12000). Defaults to 12000. Evidence per candidate is capped independently, so one candidate cannot consume the whole page.")] int charBudget = 12000)
+        [Description("Maximum response characters (up to 12000). Defaults to 12000. Evidence per candidate is capped independently, so one candidate cannot consume the whole page.")] int charBudget = 12000,
+        [Description("Absolute path of your worktree of this repository. Omit for the server's checkout.")] string? projectPath = null)
     {
+        if (Redirect(projectPath, tools => tools.AnalysisCandidates(kind, cursor, limit, charBudget)) is { } redirected) return redirected;
         CodeGraphGate gate = CheckCodeGraph();
         if (gate.Failure is { } failure) return Blocked(Provenance(null), failure);
         DocumentIndex index = _host.Current();
@@ -368,8 +390,10 @@ public sealed partial class DocsTools
         Unknown term: empty result, no sense declared.
         """)]
     public string Glossary(
-        [Description("A single glossary term, matched case-insensitively. Pass the term alone, not a sentence.")] string term)
+        [Description("A single glossary term, matched case-insensitively. Pass the term alone, not a sentence.")] string term,
+        [Description("Absolute path of your worktree of this repository. Omit for the server's checkout.")] string? projectPath = null)
     {
+        if (Redirect(projectPath, tools => tools.Glossary(term)) is { } redirected) return redirected;
         CodeGraphGate gate = CheckCodeGraph();
         if (gate.Failure is { } failure) return Blocked(Provenance(null), failure);
         DocumentIndex index = _host.Current();
@@ -447,9 +471,9 @@ public sealed partial class DocsTools
     [Description("""
         Use when you need the same schema conformance gate as kyber-weave docs validate after
         editing governed documentation — especially after writing or revising a plan under
-        docs/plans — and before claiming PLAN_READY or PLAN_FINALIZED. There is no
-        repository-path argument: compare the provenance root to your checkout before trusting
-        the verdict. Default mergeReady false is the planning gate while a plan stays in the
+        docs/plans — and before claiming PLAN_READY or PLAN_FINALIZED. Pass
+        projectPath when you work in a linked worktree; compare the provenance root to your checkout
+        before trusting the verdict. Default mergeReady false is the planning gate while a plan stays in the
         active plans folder. Returns provenance, pass or fail with counts, then findings.
         """)]
     public string DocsValidate(
@@ -467,8 +491,10 @@ public sealed partial class DocsTools
             Total characters of finding text after the verdict line (1000-120000). Defaults
             to 12000. The provenance and verdict lines are always emitted whole.
             """)]
-        int charBudget = DocumentIndex.DefaultCharBudget)
+        int charBudget = DocumentIndex.DefaultCharBudget,
+        [Description("Absolute path of your worktree of this repository. Omit for the server's checkout.")] string? projectPath = null)
     {
+        if (Redirect(projectPath, tools => tools.DocsValidate(mergeReady, @base, charBudget)) is { } redirected) return redirected;
         CodeGraphGate gate = CheckCodeGraph();
         if (gate.Failure is { } failure) return Blocked(Provenance(null), failure);
         DocumentIndex index = _host.Current();
@@ -506,8 +532,8 @@ public sealed partial class DocsTools
     [Description("""
         Use when you need the same entity-drift gate as kyber-weave docs drift after
         documentation edits that cite code symbols or API routes, alongside docs_validate_governed_document_schema
-        before PLAN_READY or PLAN_FINALIZED. There is no repository-path argument: compare
-        the provenance root to your checkout. A missing CodeGraph index fails rather than
+        before PLAN_READY or PLAN_FINALIZED. Pass projectPath when you work in
+        a linked worktree; compare the provenance root to your checkout. A missing CodeGraph index fails rather than
         passing silently. Warnings such as KW-DOC-DRIFT-003 do not fail the gate but still
         appear. Returns provenance, pass or fail with counts, then findings.
         """)]
@@ -516,8 +542,10 @@ public sealed partial class DocsTools
             Total characters of finding text after the verdict line (1000-120000). Defaults
             to 12000. The provenance and verdict lines are always emitted whole.
             """)]
-        int charBudget = DocumentIndex.DefaultCharBudget)
+        int charBudget = DocumentIndex.DefaultCharBudget,
+        [Description("Absolute path of your worktree of this repository. Omit for the server's checkout.")] string? projectPath = null)
     {
+        if (Redirect(projectPath, tools => tools.DocsDrift(charBudget)) is { } redirected) return redirected;
         CodeGraphGate gate = CheckCodeGraph();
         DocumentIndex index = _host.Current();
         string provenance = Provenance(index);
@@ -557,7 +585,7 @@ public sealed partial class DocsTools
     [McpServerTool(Name = "docs_get_source_repository_and_revision", ReadOnly = true, OpenWorld = false)]
     [Description("""
         Which repository is this server answering from? Returns one line: absolute repo
-        root, short HEAD revision (with dirty marker), and document count. No arguments.
+        root, short HEAD revision (with dirty marker), and document count. Pass projectPath to ask about a linked worktree.
 
         Use when a docs answer names a file missing from your checkout, or when several
         servers may be bound to different repositories. Not needed otherwise: every docs
@@ -565,8 +593,10 @@ public sealed partial class DocsTools
 
         Zero documents is not an error; the line still reports the root.
         """)]
-    public string DocsStatus()
+    public string DocsStatus(
+        [Description("Absolute path of your worktree of this repository. Omit for the server's checkout.")] string? projectPath = null)
     {
+        if (Redirect(projectPath, tools => tools.DocsStatus()) is { } redirected) return redirected;
         DocumentIndex index = _host.Current();
         return Provenance(index);
     }
@@ -619,8 +649,10 @@ public sealed partial class DocsTools
             Total characters of prose across the standards returned (1000-120000). Defaults to
             12000. A value outside the range is clamped to the nearer bound, so a budget below
             the floor behaves as the floor rather than as an empty answer.
-            """)] int charBudget = DocumentIndex.DefaultCharBudget)
+            """)] int charBudget = DocumentIndex.DefaultCharBudget,
+        [Description("Absolute path of your worktree of this repository. Omit for the server's checkout.")] string? projectPath = null)
     {
+        if (Redirect(projectPath, tools => tools.AgentCodingStandards(technology, topic, charBudget)) is { } redirected) return redirected;
         CodeGraphGate gate = CheckCodeGraph();
         if (gate.Failure is { } failure) return Blocked(Provenance(null), failure);
         DocumentIndex index = _host.Current();
@@ -700,6 +732,19 @@ public sealed partial class DocsTools
     /// missing reads exactly like a complete one. <see cref="DocsStatus"/> is exempt because it is
     /// the tool a caller reaches for once something else has failed, and it has to answer.
     /// </remarks>
+    private string? Redirect(string? projectPath, Func<DocsTools, string> call)
+    {
+        if (string.IsNullOrWhiteSpace(projectPath)) return null;
+
+        if (_roots is null)
+            return Provenance() + "\nprojectPath was refused: this server answers for one checkout only.";
+
+        if (!_roots.TryResolve(projectPath, out DocsTools? target, out string? refusal))
+            return Provenance() + "\nprojectPath was refused: " + refusal;
+
+        return target is null ? null : call(target);
+    }
+
     private CodeGraphGate CheckCodeGraph() => _freshness.Evaluate(_host.CreateCodeGraphResolver);
 
     /// <summary>

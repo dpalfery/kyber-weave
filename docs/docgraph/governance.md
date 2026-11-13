@@ -37,9 +37,9 @@ anything.
 
 An agent with the `kw-docs` documentation MCP server bound to its checkout obtains the same
 two gates through the read-only tools
-[`docs_validate_governed_document_schema`](mcp-runbook.md#docs_validate_governed_document_schemamergeready--false-base--originhead-charbudget--12000)
+[`docs_validate_governed_document_schema`](mcp-runbook.md#docs_validate_governed_document_schemamergeready--false-base--originhead-charbudget--12000-projectpath--null)
 and
-[`docs_detect_drift_between_documents_and_code`](mcp-runbook.md#docs_detect_drift_between_documents_and_codecharbudget--12000).
+[`docs_detect_drift_between_documents_and_code`](mcp-runbook.md#docs_detect_drift_between_documents_and_codecharbudget--12000-projectpath--null).
 Each tool runs the same Core
 logic as the matching CLI command against the server's resolved repository root and returns
 the findings in the response — it is not a separate rule set and introduces no new `KW-*`

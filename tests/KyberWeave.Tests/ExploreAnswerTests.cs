@@ -517,7 +517,7 @@ public sealed class ExploreAnswerTests : IDisposable
         ParameterInfo? cursorParameter = ExploreMethod.GetParameters()
             .SingleOrDefault(parameter => string.Equals(parameter.Name, "cursor", StringComparison.Ordinal));
         Assert.NotNull(cursorParameter);
-        return (string)ExploreMethod.Invoke(tools, [query, cursor])!;
+        return (string)ExploreMethod.Invoke(tools, [query, cursor, null])!;
     }
 
     private static double ContractConfidence(double winningTopic, double bestOtherTopic, bool incomplete)
