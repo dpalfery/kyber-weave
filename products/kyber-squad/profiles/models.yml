@@ -10,7 +10,7 @@ profiles:
     cursor: claude-sonnet-5-5[effort=high]
     devin: claude-opus-5-5-high
     factory: glm-5.3[reasoningEffort=high]
-    kilo: kilo/deepseek/deepseek-v4-pro-0813
+    kilo: zai-coding-plan/glm-5.3
     opencode: zai-coding-plan/glm-5.3
     pi: zai/glm-5.3[thinking=high]
     zcode: glm-5.3
@@ -23,7 +23,7 @@ profiles:
     cursor: claude-sonnet-5-5[effort=high]
     devin: claude-opus-5-5-high
     factory: glm-5.3[reasoningEffort=high]
-    kilo: kilo/deepseek/deepseek-v4-pro-0813
+    kilo: zai-coding-plan/glm-5.3
     opencode: zai-coding-plan/glm-5.3
     pi: zai/glm-5.3[thinking=high]
     zcode: glm-5.3
@@ -36,7 +36,7 @@ profiles:
     cursor: composer-2.5[]
     devin: deepseek-v4-1-flash-high
     factory: deepseek-v4.1-flash[reasoningEffort=high]
-    kilo: spark1.3 contributor
+    kilo: opencode-go/muse-spark-1.3-contributor
     opencode: opencode-go/muse-spark-1.3-contributor
     pi: opencode-go/muse-spark-1.3-contributor[thinking=low]
     zcode: glm-5.3-flash
@@ -48,8 +48,8 @@ profiles:
     copilot: Grok 4.7 (copilot)
     cursor: grok-4.7[]
     devin: swe-2-high
-    factory: glm-5.3-flash[reasoningEffort=high]
-    kilo: muse-spark1.3 contributor
+    factory: deepseek-v4.1-flash[reasoningEffort=high]
+    kilo: opencode-go/muse-spark-1.3-contributor
     opencode: opencode-go/muse-spark-1.3-contributor
     pi: opencode-go/muse-spark-1.3-contributor[thinking=medium]
     zcode: glm-5.3-flash
@@ -58,7 +58,7 @@ profiles:
     antigravity: flash
     claude: sonnet
     devin: inherit
-    kilo: inherit
+    kilo: opencode-go/deepseek-v4.1-flash
     opencode: opencode/big-pickle
     pi: inherit
     zcode: glm-5.3-flash
@@ -70,8 +70,8 @@ profiles:
     copilot: Gemini 3.8 Flash (copilot)
     cursor: kimi-k2.7-code[]
     devin: grok-4-7-high
-    factory: deepseek-v4-pro[reasoningEffort=high]
-    kilo: kimi k2.7 code
+    factory: muse-spark-1.3[reasoningEffort=high]
+    kilo: opencode-go/kimi-k2.7-code
     opencode: opencode-go/kimi-k2.7-code
     pi: opencode-go/kimi-k2.7-code[thinking=high]
     zcode: glm-5.3-flash
