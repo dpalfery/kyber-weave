@@ -36,6 +36,7 @@ public static class ArbiterTriggerCatalog
         "plan.task.text",
         "plan.task.files",
         "plan.task.depends-on",
+        "plan.task.dependents",
         "plan.task.skills",
         "plan.out-of-scope",
         "plan.test-contract.row",

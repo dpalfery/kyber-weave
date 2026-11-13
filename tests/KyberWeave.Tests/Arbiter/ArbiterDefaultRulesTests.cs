@@ -138,10 +138,12 @@ public sealed class ArbiterDefaultRulesTests
         ArbiterRule mode = ArbiterConfig.ProductDefaults.Rules.Single(r => r.Id == "KW-ARB-MODE-001");
 
         Assert.DoesNotContain("missing-contract", mode.Answers);
-        Assert.Equal(["no-task", "not-required", "present", "missing", "returns-unobservable", "returns-unread"], mode.Answers);
-        // missing comes from the model question only; step 0 never answers it (ADR 0072).
-        Assert.DoesNotContain(mode.Decide!, clause => string.Equals(clause.Answer, "missing", StringComparison.Ordinal));
+        Assert.Equal(["no-task", "not-required", "present", "missing", "returns-unobservable", "returns-unread", "in-order"], mode.Answers);
+        // missing and in-order come from the model question only; step 0 never answers them (ADR 0072).
+        Assert.DoesNotContain(mode.Decide!, clause => clause.Answer is "missing" or "in-order");
         Assert.NotNull(mode.Ask);
+        Assert.Equal(["in-order", "missing"], mode.Ask.Criteria!.Keys.Order(StringComparer.Ordinal));
+        Assert.Equal("allow", mode.Effects["in-order"]);
     }
 
     [Fact]

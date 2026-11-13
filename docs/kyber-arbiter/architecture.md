@@ -164,7 +164,7 @@ request stays inside the provider budget instead of going unasked: `delegation.h
 prompt with its headers), `delegation.body-head` (the prompt the worker reads),
 `delegation.returned-tail` (the end of the worker's report, where its digest sits) and
 `gate.report.claim` (the raw `TASK_GATE:` line). `plan.task-list` lists every task of the plan
-as `id: title`. `ledger.task-returns` holds up to four stored report tails for this task and
+as `id: title`, in plan order, and `plan.task.dependents` lists the tasks that name this one as a dependency. `ledger.task-returns` holds up to four stored report tails for this task and
 the tasks it depends on: on each `delegate.returned` the evaluator stores the last 2,000
 characters of the report in the run store beside the plan (`stores/returns-*/returns.jsonl`),
 never in the ledger, which holds no text.
@@ -234,7 +234,7 @@ each, what stays at step 0 and which answer only the model can give.
 | `KW-ARB-READY-001` | `delegate` | 0, then 1 (`choice`, ≥ 0.8) | Has every task this one depends on finished? Step 0: `no-task`, `overlaps-in-flight` (escalates), `ready`, `returns-unobservable`, `returns-unread` (no stored reports can be found for a loosely named plan, so it is not asked). Model only: `waiting` (escalates), reading `ledger.task-returns`. |
 | `KW-ARB-OWNER-001` | `delegate` | 0, then 1 (`choice`, ≥ 0.8) | Does the task name the target as its specialist? Step 0: `no-task`, `owner`, `no-mapping`. Model only: `not-owner` (escalates). |
 | `KW-ARB-OWNER-002` | `delegate` | 1 (`choice`, ≥ 0.8) | Which roster specialist owns this task? |
-| `KW-ARB-MODE-001` | `delegate` | 0, then 1 (`choice`, ≥ 0.8) | In test-first mode, were failing tests written first? Step 0: `no-task`, `not-required`, `present`, `returns-unobservable`, `returns-unread`. Model only: `missing` (escalates), reading `ledger.task-returns`. |
+| `KW-ARB-MODE-001` | `delegate` | 0, then 1 (`choice`, ≥ 0.8) | In test-first mode, does this dispatch build working logic a failing test should already exist for, with none on record? Step 0: `no-task`, `not-required`, `present`, `returns-unobservable`, `returns-unread`. Model only: `missing` (escalates) or `in-order` (allows: a failing run is reported, or the task adds only declarations or stubs that later tests need to compile), reading the task, `plan.task-list`, `plan.task.dependents`, `ledger.task-returns` and the dispatch. |
 | `KW-ARB-ROSTER-001` | `delegate`, `investigate` | 0 | Is the target in the caller's `delegates-to`? Machine fact: the embedded catalog. Only a caller the catalog names with a `delegates-to` list is judged: an unidentified caller, a helper agent outside the Squad, and an agent that delegates to no one answer `no-roster`, which allows. |
 | `KW-ARB-RUN-001` | `delegate`, `delegate.planner`, `investigate` | 0 | Has a run been started before an orchestrator hands a specialist that writes files any work? Machine facts: the catalog (the caller's `delegates-to` lists the target, whose profile is `worker`, `documentation`, `architect` or `product-planning`: a planner's plan belongs on the run branch), and `run.started`, a run record under `~/.kyber-weave/runs/` for this repository whose worktree still has its branch checked out. `not-started` escalates; unreadable evidence leaves the fact absent and allows. See the [runbook](runbook.md#reading-a-run-start-refusal). |
 | `KW-ARB-PLANREAD-001` | `delegate` | 0, then 1 (`choice`, ≥ 0.8) | Does the dispatch tell the worker to open a plan, specification or todo file? Step 0: `closeout`, `no-plan`. Model only: `names-plan` (escalates); `mentions-only` allows. |
@@ -770,6 +770,19 @@ compared.
   adopted. A repeat run scored an applying lens at 0.55 on Jev 1.14. Without the diff summary,
   every lens scored between 0.12 and 0.45 on both models, so a ceiling of 0.6 would skip all
   of them.
+
+**`KW-ARB-MODE-001`, 2026-11-13.** A live run escalated two stub tasks that its test-first plan
+ordered before their failing tests, so that a shared test project compiles after every task, with
+`missing` at 1.0 and 0.98. Twelve cases were added (`mode-001` to `mode-012`): four stub tasks
+(`in-order`), four that build logic with no failing run on record (`missing`), and four whose
+failing run is reported in prose without the `RED_EVIDENCE:` marker (`in-order`), labelled by
+one Claude model and not reviewed by a person. With the old
+question, both models answered three of the four stub cases `missing` with confidence 1.0 in two
+runs each, so they would have escalated; the other nine were right. The question now reads the
+plan's task list and the tasks that depend on this one, and offers `in-order` for a stub. With the
+final wording, three runs on each model answered all 12 right, with no wrong answer above the
+floor; 10 or 11 of 12 cleared it. The criteria were reworded once against these same cases, so
+the result is partly selection, and 12 cases are few.
 
 Confidence on one case can differ noticeably between the models (0.89 and 0.67 on the same
 case), so a floor set for one model is not assumed to hold for another.

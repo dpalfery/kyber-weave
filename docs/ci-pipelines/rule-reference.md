@@ -295,7 +295,7 @@ receipts and logs key on them, so an id is never reused or renumbered.
 | `KW-ARB-READY-001` | `delegate` | 0, then 1 | Dependencies complete; files clear of work in flight. The in-flight overlap escalates at step 0; only a confident model `waiting` escalates for dependencies |
 | `KW-ARB-OWNER-001` | `delegate` | 0, then 1 | Target is the specialist the task names; only a confident model `not-owner` escalates |
 | `KW-ARB-OWNER-002` | `delegate` | 1 | Roster specialist owning this task |
-| `KW-ARB-MODE-001` | `delegate` | 0, then 1 | Failing tests exist before an implementation dispatch in test-first mode; only a confident model `missing` escalates |
+| `KW-ARB-MODE-001` | `delegate` | 0, then 1 | Failing tests exist before an implementation dispatch in test-first mode; a stub task the plan orders before its tests is not one. Only a confident model `missing` escalates |
 | `KW-ARB-ROSTER-001` | `delegate`, `investigate` | 0 | Target is in the caller's `delegates-to`. Judged only for a caller the catalog names with a `delegates-to` list; any other caller answers `no-roster`, which allows |
 | `KW-ARB-RUN-001` | `delegate`, `delegate.planner`, `investigate` | 0 | A run is live for the repository before an orchestrator hands a specialist that writes files (`worker`, `documentation`, or a planner's `architect` or `product-planning` profile) any work. `not-started` escalates and names `kyber-weave run start`; the run-start dispatch, `github-devops` and read-only targets are exempt, and unreadable evidence allows |
 | `KW-ARB-PLANREAD-001` | `delegate` | 0, then 1 | The dispatch does not tell the worker to open a plan, specification or todo file; a documentation-profile target is exempt, and only a confident model `names-plan` escalates |
