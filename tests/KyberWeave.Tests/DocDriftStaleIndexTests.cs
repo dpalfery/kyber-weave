@@ -78,6 +78,20 @@ public sealed class DocDriftStaleIndexTests : IDisposable
     }
 
     [Fact]
+    public void ANewCodeFileInAFolderTheIndexNeverCoveredIsNotStale()
+    {
+        string root = CreateRepositoryWithIndexedClass("Known");
+        Directory.CreateDirectory(Path.Combine(root, "vendor", "lib"));
+        File.WriteAllText(Path.Combine(root, "vendor", "lib", "Skipped.cs"), "public class Skipped {}\n");
+        Git(root, "add", "-A");
+        Git(root, "commit", "-q", "-m", "vendored code");
+
+        DiagnosticReport report = Drift(root, "Missing");
+
+        Assert.Equal(DocDriftLinter.UnresolvedCodeRef, Assert.Single(report.Items).Code);
+    }
+
+    [Fact]
     public void AnIndexWithNothingUnresolvedStaysQuietEvenWhenItLags()
     {
         string root = CreateRepositoryWithIndexedClass("Known");

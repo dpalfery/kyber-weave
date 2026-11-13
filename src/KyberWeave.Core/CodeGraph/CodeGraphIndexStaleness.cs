@@ -47,6 +47,15 @@ internal static class CodeGraphIndexStaleness
 
         if (codeExtensions.Count == 0) return null;
 
+        // Where the index has code at all. A new file outside every such folder is one the index
+        // skips on purpose (vendored, generated or ignored trees), and the index exposes no ignore
+        // list of its own to say so.
+        HashSet<string> indexedDirectories = new(StringComparer.Ordinal);
+        foreach ((string path, (long _, int nodes)) in files)
+        {
+            if (nodes > 0) indexedDirectories.Add(DirectoryOf(path));
+        }
+
         string? head = Git(repositoryRoot, "rev-parse", "HEAD");
         if (head is null) return null;
         head = head.Trim();
@@ -65,7 +74,7 @@ internal static class CodeGraphIndexStaleness
         {
             string path = line.Trim();
             if (path.Length == 0 || !codeExtensions.Contains(Path.GetExtension(path))) continue;
-            if (IsChangedSinceIndex(repositoryRoot, path, files)) changed.Add(path);
+            if (IsChangedSinceIndex(repositoryRoot, path, files, indexedDirectories)) changed.Add(path);
         }
 
         if (changed.Count == 0) return null;
@@ -80,16 +89,37 @@ internal static class CodeGraphIndexStaleness
     private static bool IsChangedSinceIndex(
         string root,
         string relativePath,
-        IReadOnlyDictionary<string, (long ModifiedMilliseconds, int NodeCount)> files)
+        IReadOnlyDictionary<string, (long ModifiedMilliseconds, int NodeCount)> files,
+        IReadOnlySet<string> indexedDirectories)
     {
         string full = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
         bool indexed = files.TryGetValue(relativePath, out (long ModifiedMilliseconds, int NodeCount) recorded);
 
         if (!File.Exists(full)) return indexed;
-        if (!indexed) return true;
+        if (!indexed) return IsUnderIndexedCode(relativePath, indexedDirectories);
 
         long onDisk = new DateTimeOffset(File.GetLastWriteTimeUtc(full)).ToUnixTimeMilliseconds();
         return onDisk > recorded.ModifiedMilliseconds + ClockSlackMilliseconds;
+    }
+
+    private static string DirectoryOf(string path)
+    {
+        int slash = path.LastIndexOf('/');
+        return slash < 0 ? string.Empty : path[..slash];
+    }
+
+    /// <summary>True when the file sits in a folder the index holds code for, or beneath one.</summary>
+    private static bool IsUnderIndexedCode(string path, IReadOnlySet<string> indexedDirectories)
+    {
+        string directory = DirectoryOf(path);
+        while (true)
+        {
+            if (indexedDirectories.Contains(directory)) return true;
+            if (directory.Length == 0) return false;
+            directory = DirectoryOf(directory);
+            // The repository root counts only for files directly in it: every file is beneath it.
+            if (directory.Length == 0) return false;
+        }
     }
 
     private static string Short(string commit) => commit.Length > 8 ? commit[..8] : commit;
