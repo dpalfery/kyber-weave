@@ -2232,3 +2232,11 @@ rules:
     controls:
       - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/shared/worker-baseline.md
+  - id: architect-runs-docs-tasks-check-before-finalize
+    statement: Before FINALIZE the architect runs docs tasks --check and fixes every packet warning it prints (a task whose packet cannot be understood without the plan, or a test task ordered before the code it names).
+    stated-in:
+      - path: products/kyber-squad/agents/architect/references/plan-authoring.md
+        section: Task file
+    controls:
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+      - products/kyber-squad/shared/worker-baseline.md

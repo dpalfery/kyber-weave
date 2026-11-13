@@ -62,6 +62,18 @@ public sealed partial class PlanTaskFileValidator
     /// <summary>A copy of a task file left beside it under another name, such as <c>&lt;plan&gt;.tasks.json.new</c>.</summary>
     public const string SidecarTaskFile = "KW-DOC-TASKS-007";
 
+    /// <summary>A task cites a decision or test contract row the plan does not have, or cites more than its packet can carry. A warning.</summary>
+    public const string UnresolvedReference = "KW-DOC-TASKS-008";
+
+    /// <summary>A task points at plan content without saying which ("see above", "as described in the plan"). A warning.</summary>
+    public const string VagueReference = "KW-DOC-TASKS-009";
+
+    /// <summary>A test task in a compiled test project is not ordered after the task that creates what its tests reference. A warning.</summary>
+    public const string CompileUnitOrder = "KW-DOC-TASKS-010";
+
+    /// <summary>A model that read only a task's packet says a developer could not do the task from it. A warning.</summary>
+    public const string PacketNotSelfContained = "KW-DOC-TASKS-011";
+
     /// <summary>The schema version this build reads.</summary>
     private const int SchemaVersion = 1;
 

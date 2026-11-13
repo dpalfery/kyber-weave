@@ -27,13 +27,15 @@ public enum PlanTaskFileMode
 /// <param name="ExecutionDigest">The digest recorded in the derived file; null when none was derived.</param>
 /// <param name="TaskCount">How many tasks the derived file carries.</param>
 /// <param name="Wrote">True when this run changed the file on disk.</param>
+/// <param name="File">The derived file; null when none was derived.</param>
 public sealed record PlanTaskFileOutcome(
     DiagnosticReport Report,
     string TaskFilePath,
     string? Json,
     string? ExecutionDigest,
     int TaskCount,
-    bool Wrote);
+    bool Wrote,
+    PlanTaskFile? File = null);
 
 /// <summary>
 /// Derives a plan's, or a specification's, task file from the task list it sits beside, so nobody
@@ -112,7 +114,7 @@ public sealed partial class PlanTaskFileGenerator
 
         IReadOnlyList<string> planningDirectories = PlanTaskFileValidator.PlanningDirectories(
             _config.ConfigReg.Resolve(_config.Ontology));
-        PlanTaskFile? file = Build(artifact, markdown, planningDirectories, report);
+        PlanTaskFile? file = Build(artifact, markdown, planningDirectories, report, _repoRoot);
         if (file is null)
         {
             return new PlanTaskFileOutcome(report, taskFile, null, null, 0, false);
@@ -136,7 +138,7 @@ public sealed partial class PlanTaskFileGenerator
                 throw new ArgumentOutOfRangeException(nameof(mode), mode, "Unknown task file mode.");
         }
 
-        return new PlanTaskFileOutcome(report, taskFile, json, file.ExecutionDigest, count, wrote);
+        return new PlanTaskFileOutcome(report, taskFile, json, file.ExecutionDigest, count, wrote, file);
     }
 
     /// <summary>
@@ -147,11 +149,13 @@ public sealed partial class PlanTaskFileGenerator
     /// <param name="markdown">The plan, or specification task list, as authored.</param>
     /// <param name="planningDirectories">The folders holding plans, which no prompt may send a worker into.</param>
     /// <param name="report">Receives every gap found; all of them are reported in one run.</param>
+    /// <param name="repoRoot">The repository root, to tell production files that exist from ones a task must create; null when unknown.</param>
     public static PlanTaskFile? Build(
         string artifactPath,
         string markdown,
         IReadOnlyList<string> planningDirectories,
-        DiagnosticReport report)
+        DiagnosticReport report,
+        string? repoRoot = null)
     {
         ArgumentNullException.ThrowIfNull(markdown);
         ArgumentNullException.ThrowIfNull(planningDirectories);
@@ -184,12 +188,13 @@ public sealed partial class PlanTaskFileGenerator
             return null;
         }
 
+        PlanPacketContext context = PlanPacketContext.Parse(markdown);
         List<PlanTaskFileEntry> entries = [];
         foreach (PlanTask task in parsed.Tasks)
         {
             PlanContractRow? row = parsed.ContractRows.FirstOrDefault(
                 candidate => string.Equals(candidate.TaskId, task.Id, StringComparison.Ordinal));
-            PlanTaskFileEntry? entry = BuildEntry(task, row, artifactPath, planningDirectories, report);
+            PlanTaskFileEntry? entry = BuildEntry(task, row, parsed, context, repoRoot, artifactPath, planningDirectories, report);
             if (entry is null)
             {
                 gaps = true;
@@ -212,6 +217,9 @@ public sealed partial class PlanTaskFileGenerator
     private static PlanTaskFileEntry? BuildEntry(
         PlanTask task,
         PlanContractRow? row,
+        PlanDocument parsed,
+        PlanPacketContext context,
+        string? repoRoot,
         string artifactPath,
         IReadOnlyList<string> planningDirectories,
         DiagnosticReport report)
@@ -277,7 +285,15 @@ public sealed partial class PlanTaskFileGenerator
             }
         }
 
-        string prompt = ComposePrompt(task, body, command, acceptance);
+        string fixCommand = TaskFileCommand.Write(artifactPath);
+        InlinedPlanContent inlined = PlanPacketInliner.Build(task, body, context, artifactPath, fixCommand);
+        report.AddRange(inlined.Findings);
+        if (PlanCompileUnitOrder.Check(task, parsed, repoRoot, artifactPath, fixCommand) is { } order)
+        {
+            report.Add(order);
+        }
+
+        string prompt = ComposePrompt(task, body, inlined.Text, command, acceptance);
         IReadOnlyList<string> instructions = PlanReadInstruction.Find(prompt, planningDirectories);
         if (instructions.Count > 0)
         {
@@ -303,7 +319,7 @@ public sealed partial class PlanTaskFileGenerator
                 prompt);
     }
 
-    private static string ComposePrompt(PlanTask task, string body, string? command, string? acceptance)
+    private static string ComposePrompt(PlanTask task, string body, string inlined, string? command, string? acceptance)
     {
         StringBuilder prompt = new();
         prompt.Append("Task ").Append(task.Id);
@@ -313,6 +329,11 @@ public sealed partial class PlanTaskFileGenerator
         }
 
         prompt.Append('\n').Append("Worktree: ").Append(WorktreeSlot).Append("\n\n").Append(body).Append('\n');
+        if (inlined.Length > 0)
+        {
+            prompt.Append('\n').Append(inlined);
+        }
+
         if (command is not null)
         {
             prompt.Append("\nCommand: `").Append(command).Append("`\n");
