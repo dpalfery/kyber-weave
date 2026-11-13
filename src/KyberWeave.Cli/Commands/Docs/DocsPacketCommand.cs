@@ -1,5 +1,6 @@
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Rendering;
+using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Validation;
@@ -29,7 +30,8 @@ public sealed class DocsPacketCommand : Command<DocsPacketSettings>
     /// Prints the packet of the named task: the task file's prompt with <c>{worktree}</c> filled in and the
     /// prior-results slot filled from <c>--prior-results</c>, or labelled as empty, then the host facts section
     /// (<see cref="PacketHostFacts" />) and nothing else. The plan comes from <c>--plan</c>, else from the one Ready or In progress plan under the planning
-    /// folders. The task file is checked against the plan first, so a stale file is refused with the fix.
+    /// folders. When this checkout has none, the repository's other git worktrees are searched for the one active
+    /// plan that has the task, so a worker whose shell is not in its worktree still gets its packet. The task file is checked against the plan first, so a stale file is refused with the fix.
     /// Exits 0 after printing; exits 1 with the reason and the next command otherwise.
     /// </summary>
     public override int Execute(CommandContext context, DocsPacketSettings settings, CancellationToken cancellationToken)
@@ -43,6 +45,11 @@ public sealed class DocsPacketCommand : Command<DocsPacketSettings>
         }
 
         string? plan = ChoosePlan(root, config, settings, current, report);
+        if (plan is null && settings.Plan is null && PlanTaskPacket.ActivePlans(root, config).Count == 0)
+        {
+            plan = FindInOtherWorktrees(ref root, config, settings, current, report);
+        }
+
         if (plan is null)
         {
             return Fail(report);
@@ -117,16 +124,68 @@ public sealed class DocsPacketCommand : Command<DocsPacketSettings>
             return active[0];
         }
 
+        if (active.Count == 0)
+        {
+            // Not reported here: the caller still searches the repository's other worktrees.
+            return null;
+        }
+
         report.Add(new Diagnostic(
             PlanNotChosen,
             Severity.Error,
-            active.Count == 0
-                ? "No plan is Ready or In progress under the planning folders, so there is no packet to print."
-                : $"{active.Count} plans are Ready or In progress: {string.Join(", ", active)}.",
+            $"{active.Count} plans are Ready or In progress: {string.Join(", ", active)}.",
             "docs packet",
-            Hint: active.Count == 0
-                ? "Report this to the conductor; do not look for the plan yourself."
-                : "Run this command again with --plan <one of those plans>."));
+            Hint: "Run this command again with --plan <one of those plans>."));
+        return null;
+    }
+
+    private static string? FindInOtherWorktrees(ref string root, KyberWeaveConfig config, DocsPacketSettings settings, string current, DiagnosticReport report)
+    {
+        string here = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+        List<(string Worktree, string Plan)> matches = [];
+        foreach (string worktree in (settings.ListWorktrees ?? (dir => GitFacts.ListWorktrees(dir)))(root))
+        {
+            string other = Path.TrimEndingDirectorySeparator(Path.GetFullPath(worktree));
+            if (string.Equals(other, here, StringComparison.Ordinal) || !Directory.Exists(other))
+            {
+                continue;
+            }
+
+            foreach (string candidate in PlanTaskPacket.ActivePlans(other, config))
+            {
+                PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(other, config).Run(candidate, PlanTaskFileMode.Check);
+                if (outcome.File is not null && PlanTaskPacket.FindTask(outcome.File, settings.Task) is not null)
+                {
+                    matches.Add((other, candidate));
+                }
+            }
+        }
+
+        if (matches.Count == 1)
+        {
+            root = matches[0].Worktree;
+            return matches[0].Plan;
+        }
+
+        string searched = $"No plan is Ready or In progress under the planning folders of {here} (the directory searched was {current}).";
+        if (matches.Count == 0)
+        {
+            report.Add(new Diagnostic(
+                PlanNotChosen,
+                Severity.Error,
+                $"{searched} No other git worktree of this repository has an active plan with task '{settings.Task}' either, so there is no packet to print.",
+                "docs packet",
+                Hint: "Report this to the conductor; do not look for the plan yourself."));
+            return null;
+        }
+
+        string forms = string.Join("; ", matches.Select(match => $"cd {match.Worktree} && kyber-weave docs packet {settings.Task}"));
+        report.Add(new Diagnostic(
+            PlanNotChosen,
+            Severity.Error,
+            $"{searched} {matches.Count} other worktrees have an active plan with task '{settings.Task}': {string.Join(", ", matches.Select(match => match.Worktree))}.",
+            "docs packet",
+            Hint: $"Run the command from the worktree named in the dispatch: {forms}."));
         return null;
     }
 

@@ -21,9 +21,17 @@ public sealed class DocsPacketCommandTests
         return fixture;
     }
 
-    private static (int Exit, string Output) Packet(DocFixture fixture, string task, string? plan = null, string? prior = null)
+    private static (int Exit, string Output) Packet(
+        DocFixture fixture, string task, string? plan = null, string? prior = null, params string[] worktrees)
     {
-        DocsPacketSettings settings = new() { Task = task, Plan = plan, PriorResults = prior, WorkingDirectory = fixture.Root };
+        DocsPacketSettings settings = new()
+        {
+            Task = task,
+            Plan = plan,
+            PriorResults = prior,
+            WorkingDirectory = fixture.Root,
+            ListWorktrees = _ => [fixture.Root, .. worktrees],
+        };
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
             () => new DocsPacketCommand().Execute(null!, settings, CancellationToken.None));
         return (execution.Result, execution.Output);
@@ -121,6 +129,55 @@ public sealed class DocsPacketCommandTests
 
         Assert.Equal(1, exit);
         Assert.Contains("KW-DOC-TASKS-CLI-002", output, StringComparison.Ordinal);
+    }
+
+    private static DocFixture CanonicalWithoutPlan()
+    {
+        DocFixture fixture = Ready();
+        string plan = Path.Combine(fixture.Root, PlanTaskFileProbe.PlanPath.Replace('/', Path.DirectorySeparatorChar));
+        File.WriteAllText(plan, File.ReadAllText(plan).Replace("**Status: Ready.**", "**Status: Draft.**", StringComparison.Ordinal));
+        return fixture;
+    }
+
+    [Fact]
+    public void ARunFromTheCanonicalCheckoutPrintsThePacketOfTheOneWorktreeThatHasTheTask()
+    {
+        using DocFixture canonical = CanonicalWithoutPlan();
+        using DocFixture worktree = Ready();
+
+        (int exit, string output) = Packet(canonical, "T1", worktrees: worktree.Root);
+
+        Assert.True(exit == 0, output);
+        Assert.Contains("Worktree: " + worktree.Root, output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SeveralWorktreesWithTheTaskAreListedWithTheCommandToRunFromEach()
+    {
+        using DocFixture canonical = CanonicalWithoutPlan();
+        using DocFixture first = Ready();
+        using DocFixture second = Ready();
+
+        (int exit, string output) = Packet(canonical, "T1", worktrees: [first.Root, second.Root]);
+
+        Assert.Equal(1, exit);
+        Assert.Contains("KW-DOC-TASKS-CLI-002", output, StringComparison.Ordinal);
+        Assert.Contains("cd " + first.Root + " && kyber-weave docs packet T1", output, StringComparison.Ordinal);
+        Assert.Contains("cd " + second.Root + " && kyber-weave docs packet T1", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("Worktree:", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AWorktreeWithoutTheTaskIsNotAMatchAndTheFindingNamesTheDirectorySearched()
+    {
+        using DocFixture canonical = CanonicalWithoutPlan();
+        using DocFixture worktree = Ready();
+
+        (int exit, string output) = Packet(canonical, "T9", worktrees: worktree.Root);
+
+        Assert.Equal(1, exit);
+        Assert.Contains("KW-DOC-TASKS-CLI-002", output, StringComparison.Ordinal);
+        Assert.Contains(canonical.Root, output, StringComparison.Ordinal);
     }
 
     [Fact]
