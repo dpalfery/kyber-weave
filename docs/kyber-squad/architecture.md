@@ -2227,6 +2227,36 @@ checks, their ids, and the log line they read are in the [runbook](copilot-promp
 
 ---
 
+### Briefs: only the reference sections a run uses
+
+An agent's `references/*.md` files are progressive disclosure on paper and were read whole in
+practice: a conductor run used one route in one autonomy mode and still read every route's contract.
+The route, the autonomy and the plan's development mode are known before a model reads anything, so
+`kyber-weave squad brief <agent>` selects the sections that apply and prints only those.
+
+- **One map.** `src/KyberWeave.Core.Squad/Briefs/Resources/briefs.yml`, embedded in the binary, lists each
+  agent's reference files in output order. A file carries a condition (`path=plan`, `autonomy=autonomous`,
+  `mode=test-first`, clauses joined by `;`) and each heading in it carries one more. A section carries its
+  sub-headings.
+- **Fail open.** A heading the map does not mention is included and named on the diagnostics line as
+  unmapped; a reference file the map does not list is named as read whole; a fact the run does not know
+  keeps every section that depends on it. Rewriting a reference file can therefore only make a brief
+  longer, never lose an instruction. A mapped heading that a file no longer has fails
+  `SquadBriefMapTests`, naming the heading.
+- **Facts.** Given on the command line, else resolved: autonomy from the prompt, then the root
+  `AGENTS.md` Config Reg, then the configuration, then `supervised`; mode and the `plan` route from
+  `--plan` (resolved by the shared plan resolver, parsed by the plan parser). The plan's frontmatter
+  status labels the header but never cuts a section, because it changes during a run.
+- **Where the files are.** `--from <DIR>`, else the installed copy for `--harness` (every harness when it
+  is not given) at project scope under the run's checkout, then global scope, then the product source
+  tree. Harnesses install references beside the agent file or beside its entry-point skill, as
+  `.markdown` where the harness scans for `*.md`; `SquadReferenceLocator` names those directories and a
+  test renders the squad for every harness to keep them true.
+- **`run start --brief`.** Appends the conductor's brief to the run-start report (a `brief` field under
+  `--json`) for `--path` and `--autonomy`. It is opt-in so the report keeps its shape, and a brief that
+  cannot be built is a warning: the branch exists, the run is ready, and the conductor reads the
+  references whole.
+
 ## Arbiter savings in the roles
 
 The Kyber Arbiter's savings rules change how the Squad roles dispatch work. The Arbiter reads a

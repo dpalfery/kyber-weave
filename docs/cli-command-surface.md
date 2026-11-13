@@ -333,6 +333,7 @@ engine under [Kyber-Squad architecture](kyber-squad/architecture.md).
 | [`squad uninstall`](kyber-squad/onboarding.md#command-reference) | `[path]`, `--path`, `-g\|--global`, `--dry-run`, `--yes` | Remove files recorded in the ownership receipt. |
 | [`squad status`](kyber-squad/onboarding.md#command-reference) | `[path]`, `--path`, `-g\|--global` | Verify deployed files and report drift against the receipt. |
 | [`squad doctor`](kyber-squad/onboarding.md#command-reference) | `[path]`, `--path`, `-g\|--global` | Diagnose prerequisites, toolchain availability, and deployment health. |
+| [`squad brief`](kyber-squad/architecture.md#briefs-only-the-reference-sections-a-run-uses) | `<agent>`, `--path <intake\|plan\|spec\|escalation>`, `--autonomy <supervised\|autonomous>`, `--mode <test-first\|standard>`, `--plan <FILE>`, `--harness <TOKEN>`, `--from <DIR>`, `--format <text\|json>` | Print only the sections of an agent's installed reference files that apply to the run's facts, with a header naming the facts used and the headings left out. Read-only. Exit `0` printed, `2` refused input or reference files not found. |
 | [`squad pack`](kyber-squad/onboarding.md#packaging-squad-pack) | `-f\|--format <FORMAT>` (`apm` \| `plugins` \| `all`; default `all`), `-o\|--out <DIR>`, `-v\|--version` | Package agents and skills into distribution archives. |
 | [`squad copilot-prompt install`](kyber-squad/onboarding.md#copilot-system-prompt-override-opt-in) | `--flavour <stable\|insiders>`, `--dry-run`, `--yes` | Opt in to replacing Copilot's top-level system prompt in VS Code. Writes the prompt to `~/.kyber-weave/copilot/system-prompt.yaml` and one `*` entry in each build's user `settings.json`. Machine-wide: affects every Copilot chat on the machine. `--flavour` narrows to one build; `--dry-run` reports and writes nothing; `--yes` skips the confirmation. |
 | [`squad copilot-prompt uninstall`](kyber-squad/onboarding.md#copilot-system-prompt-override-opt-in) | `--flavour <stable\|insiders>`, `--dry-run`, `--yes` | Remove only the `*` entry that names this prompt file, then delete the prompt file. A foreign `*` entry is left in place and refuses the run. |
@@ -350,11 +351,12 @@ with the settings it reads in [Configuration § Onboarding](configuration.md#onb
 
 | Verb | Flags | What it does |
 |---|---|---|
-| [`run start`](kyber-squad/architecture.md#run-start-fetch-and-branch-first) | `--harness <TOKEN>` (required), `--type <TYPE>` (required), `--slug <SLUG>` (required), `--resume <BRANCH>`, `--failing-version <VERSION>`, `--json` | The step before anyone investigates or plans: fetch `origin`, resolve the base, compare the failing build's version against `HEAD` and the base, and put the work on the branch it belongs on — in the checkout or in a worktree of its own. |
+| [`run start`](kyber-squad/architecture.md#run-start-fetch-and-branch-first) | `--harness <TOKEN>` (required), `--type <TYPE>` (required), `--slug <SLUG>` (required), `--resume <BRANCH>`, `--failing-version <VERSION>`, `--json`, `--brief`, `--path <PATH>`, `--autonomy <MODE>` | The step before anyone investigates or plans: fetch `origin`, resolve the base, compare the failing build's version against `HEAD` and the base, and put the work on the branch it belongs on — in the checkout or in a worktree of its own. |
 
 ```bash
 kyber-weave run start --harness <token> --type <type> --slug <slug> \
-  [--resume <branch-or-pr>] [--failing-version <version>] [--json]
+  [--resume <branch-or-pr>] [--failing-version <version>] [--json] \
+  [--brief --path <intake|plan|spec> [--autonomy <supervised|autonomous>]]
 ```
 
 **What it does, in order.**

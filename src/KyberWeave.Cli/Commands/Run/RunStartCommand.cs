@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Doctor;
+using System.Text.Json.Nodes;
+using KyberWeave.Cli.Commands.Squad.Brief;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Configuration;
@@ -8,6 +10,7 @@ using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Doctor;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.RunStart;
+using KyberWeave.Core.Squad.Briefs;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -91,6 +94,16 @@ public sealed class RunStartCommand : Command<RunStartSettings>
                 out string refusal))
         {
             return Refuse(refusal);
+        }
+
+        if (!settings.Brief && (settings.Path is not null || settings.Autonomy is not null))
+        {
+            return Refuse("--path and --autonomy only apply with --brief.");
+        }
+
+        if (settings.Brief && !SquadBriefBuilder.AcceptsFacts(settings.Path, settings.Autonomy, out string briefRefusal))
+        {
+            return Refuse(briefRefusal);
         }
 
         IProcessExecutor executor = _executor ?? ProcessExecutor.WithTimeout(ToolTimeout);
@@ -365,11 +378,14 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         if (index.Status is WorktreeIndexStatus.Failed or WorktreeIndexStatus.BinaryMissing)
             ReportIndexWarning(settings.Json, indexTree, index);
 
+        BriefResult? brief = settings.Brief
+            ? BuildBrief(settings, config, indexTree, repositoryRoot, worktreePath is not null, runHarness: settings.Harness)
+            : null;
+
         if (settings.Json)
         {
-            Console.Out.WriteLine(JsonSerializer.Serialize(
-                new
-                {
+            object facts = new
+            {
                     @base = baseBranch,
                     baseRef = startRef,
                     branch = target,
@@ -398,8 +414,15 @@ public sealed class RunStartCommand : Command<RunStartSettings>
                             ? ahead == 0 && behind == 0
                             : (bool?)null
                     }
-                },
-                JsonOptions));
+            };
+
+            JsonNode document = JsonSerializer.SerializeToNode(facts, JsonOptions)!;
+            if (brief is not null)
+            {
+                document["brief"] = JsonNode.Parse(BriefFormatter.ToJson(brief));
+            }
+
+            Console.Out.WriteLine(document.ToJsonString(JsonOptions));
             return Ready;
         }
 
@@ -421,7 +444,56 @@ public sealed class RunStartCommand : Command<RunStartSettings>
             completedWarning,
             indexLabel);
 
+        if (brief is not null)
+        {
+            Console.Out.Write("\n" + BriefFormatter.ToText(brief));
+        }
+
         return Ready;
+    }
+
+    /// <summary>
+    ///     Builds the conductor's brief for the run just set up. The branch already exists, so a brief that
+    ///     cannot be built is a warning and the run is still ready: the conductor falls back to reading the
+    ///     reference files whole.
+    /// </summary>
+    private BriefResult? BuildBrief(
+        RunStartSettings settings,
+        KyberWeaveConfig config,
+        string runTree,
+        string repositoryRoot,
+        bool inWorktree,
+        string? runHarness)
+    {
+        string[] roots = inWorktree ? [runTree, repositoryRoot] : [repositoryRoot];
+        SquadBriefRequest request = new(
+            "conductor",
+            settings.Path,
+            settings.Autonomy,
+            null,
+            null,
+            runHarness,
+            null,
+            runTree,
+            roots,
+            config);
+
+        if (SquadBriefBuilder.TryBuild(request, out BriefResult? result, out string error))
+        {
+            return result;
+        }
+
+        string warning = $"the conductor's brief could not be built ({error}); read its reference files whole.";
+        if (settings.Json)
+        {
+            Console.Error.WriteLine($"{CommandName}: warn: {warning}");
+        }
+        else
+        {
+            AnsiConsole.MarkupLine($"[yellow]warn[/] {Markup.Escape(warning)}");
+        }
+
+        return null;
     }
 
     /// <summary>The index state as the <c>index</c> JSON field and the report line name it.</summary>

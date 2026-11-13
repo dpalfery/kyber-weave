@@ -1,0 +1,100 @@
+# Which parts of each agent's reference files apply to a run, keyed by the facts the machine knows before
+# the model reads anything. Read by `kyber-weave squad brief` and `kyber-weave run start --brief`.
+#
+# A `when` is `always`, or clauses joined by `;` that must all hold. A clause is `fact=a|b`. Facts:
+#   path      intake | plan | spec | escalation   which route the dispatch is on
+#   autonomy  supervised | autonomous             who answers the gates
+#   mode      test-first | standard               the plan's development mode
+# A fact the run does not know satisfies every clause on it, so a missing fact never drops text.
+#
+# `file` is the authored file name under agents/<agent>/references. A file's `when` gates the whole file.
+# `sections` maps a heading to the extra condition for that section and everything beneath it. Headings are
+# matched ignoring case, punctuation and level. A heading missing from this map is INCLUDED and reported as
+# unmapped, so rewriting a reference file can never silently drop its instructions.
+schema: kyber-squad.briefs/v1
+agents:
+  conductor:
+    - file: intake-path.md
+      when: path=intake
+      sections:
+        Todo and Open-Request Intake Path: always
+        Run start: always
+        Intent first: always
+        Defect diagnosis: always
+        Assessment: always
+        Arbiter intake shortcut: always
+        Promotion: always
+        Planner dispatches: always
+    - file: plan-path.md
+      when: path=plan
+      sections:
+        Plan Path: always
+        Run start: always
+        Route by lifecycle: always
+        Draft and approval protocol: always
+        Planner dispatches: always
+        Review and its command: always
+        Mode contract: always
+    - file: spec-path.md
+      when: path=spec
+      sections:
+        Spec Path: always
+        Route by persisted state: always
+        Headless phase protocol: always
+        Gate collapse in autonomous mode: autonomy=autonomous
+        Revisions and mode changes: always
+        Planner dispatches: always
+    - file: autonomy.md
+      when: always
+      sections:
+        Autonomy: always
+        Resolution: always
+        Autonomous behaviour: autonomy=autonomous
+        Hard-block escalation: autonomy=autonomous
+        Gaps and open questions: autonomy=autonomous
+        Delivery: always
+        Hard stops: autonomy=autonomous
+        Circuit-breakers are non-fatal: always
+        Final report: always
+  architect:
+    - file: plan-authoring.md
+      when: path=plan
+      sections:
+        Plan Authoring: always
+        Start or resume: always
+        Required plan contract: always
+        Task granularity: always
+        Session groups: always
+        Task file: always
+        Decisions: always
+        Documentation gates after plan writes: always
+        Ready and finalization: always
+        Planning inside a worktree: always
+    - file: intake-assessment.md
+      when: path=intake
+      sections:
+        Intake Assessment: always
+        Diagnosed Ready-task assessment: always
+        Intent check: always
+        Classification: always
+    - file: arbiter-escalation.md
+      when: path=escalation
+      sections:
+        Arbiter Escalation: always
+        Outcomes: always
+        Investigator dispatches: always
+        Ledger loss and attestation (D31): always
+    - file: test-first-contract.md
+      when: mode=test-first
+      sections:
+        Test-First Contract: always
+    - file: standard-verification.md
+      when: mode=standard
+      sections:
+        Standard Verification Contract: always
+    - file: autonomy-decisions.md
+      when: autonomy=autonomous
+      sections:
+        Autonomous Decisions: always
+        Three checks per open decision: always
+        Escalation (hard block): always

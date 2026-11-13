@@ -29,6 +29,8 @@
       this project is the shape that rule permits.
     -->
     <EmbeddedResource Include="Deployment\Resources\response-guidance.default.md" LogicalName="Squad.response-guidance.md" />
+    <!-- Which parts of each agent's reference files apply to a run; read by `squad brief`. -->
+    <EmbeddedResource Include="Briefs\Resources\briefs.yml" LogicalName="Squad.briefs.yml" />
   </ItemGroup>
 
   <ItemGroup>
