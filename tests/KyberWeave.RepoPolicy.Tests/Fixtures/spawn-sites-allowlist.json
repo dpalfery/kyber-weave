@@ -848,6 +848,18 @@
       "bound": "Builds only; nothing starts on this line. Started by ProcessRunner.Run at CodeGraphResolverAdapter.cs:203 with SqliteReadTimeout = 60 s."
     },
     {
+      "file": "src/KyberWeave.Core.Docs/Validation/PlanFileScope.cs",
+      "text": "ProcessStartInfo start = new(\"git\") { RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true, UseShellExecute = false, WorkingDirectory = _root };",
+      "count": 1,
+      "bound": "Builds only; nothing starts on this line. Started by ProcessRunner.Run in PlanFileScope.ReadExtensions with a 20 s timeout."
+    },
+    {
+      "file": "src/KyberWeave.Core.Docs/Validation/PlanFileScope.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(start, string.Empty, TimeSpan.FromSeconds(20));",
+      "count": 1,
+      "bound": "ProcessRunner.Run with a 20 s timeout; the tree is killed on expiry. git ls-files reads the index and writes nothing."
+    },
+    {
       "file": "src/KyberWeave.Core.Docs/Analysis/Persistence/AnalysisCacheSafety.cs",
       "text": "ProcessStartInfo startInfo = new ProcessStartInfo(\"git\")",
       "count": 1,
