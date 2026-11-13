@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Doctor;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Doctor;
@@ -332,7 +333,13 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         // hook can read it. The record is auxiliary — the run's own report below still names
         // the base — so a missing home degrades to the hook's default base rather than
         // failing a run that is otherwise ready.
-        RecordBase(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), target, startRef);
+        // Where the run works is recorded with it, so the dispatch guard can tell a started run from none.
+        string? repository = GitFacts.GetCommonDirectory(repositoryRoot);
+        RecordBase(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            target,
+            startRef,
+            repository is null ? null : new RunStartPlace(repository, worktreePath ?? repositoryRoot, DateTimeOffset.UtcNow));
 
         // A new worktree has no index of its own, so the index goes where the run works. A failure here does not
         // undo the branch: the operator repairs the index and the run continues in that tree.
@@ -474,7 +481,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
     /// hook can read it. Best effort: false when there is nowhere to record (or the record
     /// cannot be written), in which case the hook falls back to its default base.
     /// </summary>
-    internal static bool RecordBase(string homeDirectory, string branch, string baseRef)
+    internal static bool RecordBase(string homeDirectory, string branch, string baseRef, RunStartPlace? place = null)
     {
         if (string.IsNullOrWhiteSpace(homeDirectory))
         {
@@ -483,7 +490,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
 
         try
         {
-            RunBaseState.Write(homeDirectory, branch, baseRef);
+            RunBaseState.Write(homeDirectory, branch, baseRef, place);
             return true;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)

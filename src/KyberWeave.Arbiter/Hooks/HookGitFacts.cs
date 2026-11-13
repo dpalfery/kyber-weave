@@ -60,6 +60,7 @@ internal sealed class HookGitFacts(
     private const string CommentOnlyFact = "review.comment-only-paths";
     private const string NoCodeChangeFact = "review.no-code-change-paths";
     private const string FindingChangedLinesFact = "finding.changed-lines";
+    private const string RunStartedFact = "run.started";
 
     private const string SnapshotFileName = "snapshots.json";
     private const string SnapshotLockFileName = ".snapshots.lock";
@@ -84,6 +85,7 @@ internal sealed class HookGitFacts(
         bool needsChangeSet = NeedsChangeSet(facts);
         string cwd = !string.IsNullOrWhiteSpace(ev.Cwd) ? ev.Cwd : workingDirectory;
         facts = WithSurroundings(facts, cwd);
+        facts = WithRunStarted(facts, ev, cwd);
 
         if (!isPreWithReturn && !needsSinceDispatch && !needsReviewChangedPaths && !needsChangeSet)
         {
@@ -142,6 +144,27 @@ internal sealed class HookGitFacts(
         }
 
         return facts;
+    }
+
+    /// <summary>
+    /// Fills <c>run.started</c> for a dispatch to a specialist that writes project files: whether a run
+    /// recorded by <c>run start</c> is live for this repository. Left absent (undecidable, so the dispatch
+    /// proceeds) when git cannot name the repository or the run records cannot be read.
+    /// </summary>
+    private ArbiterFactSet WithRunStarted(ArbiterFactSet facts, ArbiterEvent ev, string cwd)
+    {
+        if (!facts.Contains(RunStartedFact)
+            || !string.Equals(ev.Phase, "pre", StringComparison.OrdinalIgnoreCase)
+            || !facts.TryGet("delegation.target-profile", out ArbiterFact? profile)
+            || profile.Value is not string name
+            || !RunStartEvidence.IsWriterProfile(name))
+        {
+            return facts;
+        }
+
+        bool? started = RunStartEvidence.Started(
+            cwd, homeDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        return started is null ? facts : facts.With(RunStartedFact, started.Value, ArbiterFactLabel.Derived);
     }
 
     private static bool NeedsChangeSet(ArbiterFactSet facts) =>

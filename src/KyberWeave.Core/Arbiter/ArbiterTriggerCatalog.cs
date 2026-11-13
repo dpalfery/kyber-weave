@@ -20,6 +20,7 @@ public static class ArbiterTriggerCatalog
         "delegation.prompt",
         "delegation.head",
         "delegation.body-head",
+        "delegation.markers",
         "delegation.paths",
         "delegation.planning-paths",
         "delegation.plan-file",
@@ -46,6 +47,7 @@ public static class ArbiterTriggerCatalog
         "harness.model-override",
         "roster.caller.delegates-to",
         "roster.descriptions",
+        "run.started",
         "rules.<id>.answer",
     };
 
@@ -82,7 +84,10 @@ public static class ArbiterTriggerCatalog
                 "caller",
                 "delegation.target",
                 "delegation.target-class",
+                "delegation.target-profile",
+                "delegation.markers",
                 "roster.caller.delegates-to",
+                "run.started",
             },
             ["investigate.returned"] = new HashSet<string>(StringComparer.Ordinal)
             {

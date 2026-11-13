@@ -4,6 +4,7 @@ using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Arbiter.Providers;
+using KyberWeave.Core.RunStart;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -108,6 +109,10 @@ public sealed class ArbiterPlanWorktreeTests
         using TempDirectory home = new();
         string worktree = AddWorktree(probe, "run-wt");
         WritePlan(worktree);
+        // run start recorded the run, so KW-ARB-RUN-001 sees it live.
+        RunBaseState.Write(
+            home.Path, "run-wt", "origin/main",
+            new RunStartPlace(GitFacts.GetCommonDirectory(probe.Root)!, worktree, DateTimeOffset.UtcNow));
         Directory.CreateDirectory(Path.Combine(probe.Root, ".kyber-weave"));
         File.WriteAllText(
             Path.Combine(probe.Root, ".kyber-weave", "kyber-weave.yml"),

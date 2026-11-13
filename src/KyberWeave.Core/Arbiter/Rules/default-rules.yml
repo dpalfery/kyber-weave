@@ -1,4 +1,4 @@
-# The 32 shipped Arbiter rules. Ids are permanent: suppressions, baselines and
+# The 33 shipped Arbiter rules. Ids are permanent: suppressions, baselines and
 # code-scanning alerts key on them, so a rule is never renumbered or reused.
 #
 #The step-0 predicate set is closed (all, any, not, exists, equals, in, matches,
@@ -203,6 +203,26 @@ rules:
       - when: { fact: caller, exists: true }
         answer: not-listed
     effects: { listed: allow, not-listed: escalate }
+
+  # Machine facts only: the catalog says which callers orchestrate (their delegates-to lists the target)
+  # and which profiles write project files, and run.started is the record run start wrote plus git's
+  # answer for its worktree. Evidence that cannot be read leaves run.started absent, which allows.
+  - id: KW-ARB-RUN-001
+    trigger: [delegate, investigate]
+    question: Has a run been started for this repository before an orchestrator hands a specialist work that writes files?
+    answers: [not-applicable, started, not-started]
+    decide:
+      - when: { not: { fact: delegation.target, in: roster.caller.delegates-to } }
+        answer: not-applicable
+      - when: { not: { fact: delegation.target-profile, in: [worker, documentation] } }
+        answer: not-applicable
+      - when: { fact: delegation.markers, equals: RUN-START }
+        answer: not-applicable
+      - when: { fact: run.started, equals: true }
+        answer: started
+      - when: { fact: run.started, equals: false }
+        answer: not-started
+    effects: { not-applicable: allow, started: allow, not-started: escalate }
 
   - id: KW-ARB-DIFF-001
     trigger: delegate.returned

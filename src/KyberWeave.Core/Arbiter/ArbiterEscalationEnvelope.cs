@@ -1,4 +1,5 @@
 using System.Globalization;
+using KyberWeave.Core.RunStart;
 
 namespace KyberWeave.Core.Arbiter;
 
@@ -146,6 +147,13 @@ public sealed record ArbiterEscalationEnvelope(
         ArgumentNullException.ThrowIfNull(trigger);
         ArgumentNullException.ThrowIfNull(entries);
         ArbiterTriggerFamily family = ArbiterTriggerFamilies.ForTrigger(trigger);
+
+        // A dispatch refused for want of a run has one fix, and the architect cannot supply it.
+        if (entries.Any(entry => string.Equals(entry.RuleId, "KW-ARB-RUN-001", StringComparison.Ordinal)))
+        {
+            return RunStartEvidence.Remedy;
+        }
+
         if (family == ArbiterTriggerFamily.Conductor)
         {
             bool PlannerAnswered(string answer) => entries.Any(entry =>

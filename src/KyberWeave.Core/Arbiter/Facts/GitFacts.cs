@@ -82,6 +82,19 @@ public static class GitFacts
             .Where(path => path.Length > 0)];
     }
 
+    /// <summary>
+    /// Reads the repository's common git directory as an absolute path: the one directory every worktree of
+    /// a repository shares, so it names the repository whichever worktree asks.
+    /// </summary>
+    /// <returns>The directory, or <c>null</c> outside a repository.</returns>
+    public static string? GetCommonDirectory(string workingDirectory, string gitExecutable = "git")
+    {
+        string? output = RunGit(
+            workingDirectory, gitExecutable, string.Empty, "rev-parse", "--path-format=absolute", "--git-common-dir");
+        string directory = output?.Trim() ?? string.Empty;
+        return string.IsNullOrWhiteSpace(directory) ? null : directory;
+    }
+
     /// <summary>Reads the current branch name.</summary>
     /// <returns>The branch, or <c>null</c> on a detached head or outside a repository.</returns>
     public static string? GetCurrentBranch(string workingDirectory, string gitExecutable = "git")

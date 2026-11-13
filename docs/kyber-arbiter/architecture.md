@@ -216,7 +216,7 @@ A task counts as complete on its worker's own report: no separate reviewer confi
 
 ## The rules
 
-Thirty-two rules ship with permanent `KW-ARB-*` ids, tuned by id through `enabled`,
+Thirty-three rules ship with permanent `KW-ARB-*` ids, tuned by id through `enabled`,
 thresholds, `shadow` where the rule supports it, and per-answer `effects`. Host rules use the
 same shape under non-`KW-ARB-` ids and may not use an effect that only a shipped rule may use.
 
@@ -236,6 +236,7 @@ each, what stays at step 0 and which answer only the model can give.
 | `KW-ARB-OWNER-002` | `delegate` | 1 (`choice`, ≥ 0.8) | Which roster specialist owns this task? |
 | `KW-ARB-MODE-001` | `delegate` | 0, then 1 (`choice`, ≥ 0.8) | In test-first mode, were failing tests written first? Step 0: `no-task`, `not-required`, `present`, `returns-unobservable`, `returns-unread`. Model only: `missing` (escalates), reading `ledger.task-returns`. |
 | `KW-ARB-ROSTER-001` | `delegate`, `investigate` | 0 | Is the target in the caller's `delegates-to`? Machine fact: the embedded catalog. |
+| `KW-ARB-RUN-001` | `delegate`, `investigate` | 0 | Has a run been started before an orchestrator hands a specialist that writes files any work? Machine facts: the catalog (the caller's `delegates-to` lists the target, whose profile is `worker` or `documentation`), and `run.started`, a run record under `~/.kyber-weave/runs/` for this repository whose worktree still has its branch checked out. `not-started` escalates; unreadable evidence leaves the fact absent and allows. See the [runbook](runbook.md#reading-a-run-start-refusal). |
 | `KW-ARB-PLANREAD-001` | `delegate` | 0, then 1 (`choice`, ≥ 0.8) | Does the dispatch tell the worker to open a plan, specification or todo file? Step 0: `closeout`, `no-plan`. Model only: `names-plan` (escalates); `mentions-only` allows. |
 | `KW-ARB-DIFF-001` | `delegate.returned` | 0, then 1 (`choice`, ≥ 0.8) | Are all changed files part of the task's work? Step 0: `out-of-scope` (escalates), `no-task`, `no-task-files`, `inside-task`. Model only: `outside-task` (escalates). |
 | `KW-ARB-GATE-REPORT-001` | `delegate.returned` | 0, then 1 (`choice`, ≥ 0.8) | Does the report say the worker ran the task gate? Step 0: `verified`, `disagrees` (escalates, machine), `no-report`. Model only: `missing` (escalates). |

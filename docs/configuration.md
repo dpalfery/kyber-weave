@@ -529,7 +529,7 @@ safely merges the ignore entry for new and existing hosts.
 ## Arbiter configuration
 
 The `arbiter:` section governs the [Kyber Arbiter](kyber-arbiter/architecture.md). With no
-section, the Arbiter is disabled, the provider is `none`, and all 32 shipped rules are
+section, the Arbiter is disabled, the provider is `none`, and all 33 shipped rules are
 enabled. Hooks render only when `enabled` is true.
 
 ```yaml

@@ -86,7 +86,8 @@ question over raw text with calibrated probabilities.
 - **A dispatch no model judges proceeds.** With provider `none`, a dispatch that names no plan,
   waits on an unfinished dependency or skips its failing tests is allowed and logged. Running a
   provider is now how prose rules enforce anything.
-- **Machine-fact blocks remain.** `KW-ARB-ROSTER-001`, `KW-ARB-PLANNER-DIFF-001`,
+- **Machine-fact blocks remain.** `KW-ARB-ROSTER-001`, `KW-ARB-RUN-001` (added 2026-11-12: no run
+  record is live for the repository), `KW-ARB-PLANNER-DIFF-001`,
   `KW-ARB-READONLY-001`, `KW-ARB-GATE-001`, `KW-ARB-LENS-002`, `KW-ARB-LADDER-001`, the
   report-versus-claim contradiction of `KW-ARB-GATE-REPORT-001`, `KW-ARB-DIFF-001`'s
   out-of-scope intersection and `KW-ARB-READY-001`'s in-flight overlap still escalate at step 0.

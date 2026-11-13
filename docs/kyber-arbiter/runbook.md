@@ -133,7 +133,7 @@ never spawning with a possibly-wrong cwd.
 
 When the Arbiter is enabled, the Copilot conductor's agent file runs `kyber-weave-arbiter guard` on `preToolUse` and `userPromptTransformed`. It denies the conductor's own project work and restates the workflow on every model-facing message, because VS Code requires the conductor to hold tools its workers need. See [ADR 0066](../adr/0066-the-copilot-conductor-holds-tools-a-hook-denies-it.md).
 
-A denial names the blocked tool. If the conductor genuinely needs a new Copilot tool, add it to `ConductorGuard`. The guard is rendered only when the Arbiter is enabled at install. Once rendered it reads no configuration, so setting `arbiter.enabled: false` later does not remove it until the agents are rendered again.
+A denial names the blocked tool. If the conductor genuinely needs a new Copilot tool, add it to `ConductorGuard`. The guard also refuses a `task` dispatch of a specialist that writes files while no run is live, as `KW-ARB-RUN-001` does; see [reading a run-start refusal](#reading-a-run-start-refusal). The guard is rendered only when the Arbiter is enabled at install. Once rendered it reads no configuration, so setting `arbiter.enabled: false` later does not remove it until the agents are rendered again.
 
 ## The architect shell guard
 
@@ -303,6 +303,30 @@ code-reviewer calls it once before the lens fan-out and once before the refutati
 fan-out. On Squad-rendered fallback targets the tools are granted through the
 `decision.query` capability, allowed only for the `orchestrator` and `reviewer` profiles —
 the conductor and code-reviewer.
+
+## Reading a run-start refusal
+
+`KW-ARB-RUN-001` stops an orchestrator (`conductor` or `bug-crusher`) handing a specialist that writes
+project files (capability profile `worker` or `documentation`) any work while no run is live for the
+repository. Without it, a conductor that skipped run start sent every developer to edit the canonical
+checkout on the default branch. `NEXT` names the fix: run
+`kyber-weave run start --harness <harness> --type <type> --slug <slug>`, or dispatch `github-devops` with
+`RUN-START: true` and that command, then send the dispatch again.
+
+A run is live when a record under `~/.kyber-weave/runs/` names this repository's common git directory and
+its recorded worktree still has the run's branch checked out. `run start` writes that record. The check
+reads only those facts:
+
+- Planner, read-only and `github-devops` dispatches are never refused, nor is the run-start dispatch itself.
+- A caller that is not a Squad orchestrator is never refused: a developer agent a person invokes directly
+  has no `delegates-to` list.
+- When git cannot name the repository or the records cannot be read, the dispatch is allowed and the
+  answer is `undecidable`.
+- A run left live by an earlier session also counts, because nothing on disk ties a run to a harness
+  session. A record written before `run start` recorded its worktree is skipped.
+
+On Copilot CLI the payload names no caller for the root agent, so the conductor guard below makes the same
+check on the conductor's own `task` calls, and logs instead of denying when it cannot read the evidence.
 
 ## Reading a planner refusal
 

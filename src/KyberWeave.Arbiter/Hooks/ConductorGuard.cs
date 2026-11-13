@@ -1,7 +1,10 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using KyberWeave.Core.Arbiter;
+using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.RunStart;
 
 namespace KyberWeave.Arbiter.Hooks;
 
@@ -69,8 +72,15 @@ public static partial class ConductorGuard
     /// <param name="log">Receives diagnostics.</param>
     /// <param name="allowedMcpServer">An MCP server whose tools the conductor may call, or null.</param>
     /// <param name="copilotHome">Copilot's home directory, or null to resolve it from the environment.</param>
+    /// <param name="homeDirectory">The operator's home, which holds the run records, or null for the user profile.</param>
     /// <returns>The process exit code.</returns>
-    public static int Run(string stdin, TextWriter stdout, TextWriter log, string? allowedMcpServer = null, string? copilotHome = null)
+    public static int Run(
+        string stdin,
+        TextWriter stdout,
+        TextWriter log,
+        string? allowedMcpServer = null,
+        string? copilotHome = null,
+        string? homeDirectory = null)
     {
         ArgumentNullException.ThrowIfNull(stdin);
         ArgumentNullException.ThrowIfNull(stdout);
@@ -80,7 +90,12 @@ public static partial class ConductorGuard
         try
         {
             using JsonDocument document = JsonDocument.Parse(stdin);
-            answer = Decide(document.RootElement, allowedMcpServer, copilotHome ?? ResolveCopilotHome());
+            answer = Decide(
+                document.RootElement,
+                allowedMcpServer,
+                copilotHome ?? ResolveCopilotHome(),
+                homeDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                log);
         }
         catch (Exception ex)
         {
@@ -119,7 +134,7 @@ public static partial class ConductorGuard
     private static string OneLine(string message) =>
         message.Replace("\r\n", " ", StringComparison.Ordinal).Replace('\n', ' ').Replace('\r', ' ');
 
-    private static string? Decide(JsonElement root, string? allowedMcpServer, string copilotHome)
+    private static string? Decide(JsonElement root, string? allowedMcpServer, string copilotHome, string home, TextWriter log)
     {
         List<ToolCall> calls = ReadCalls(root);
         if (calls.Count == 0)
@@ -136,7 +151,59 @@ public static partial class ConductorGuard
 
         string? cwd = TryGetText(root, "cwd", out string? directory) ? directory : null;
         ToolCall? denied = calls.Find(call => !IsPermitted(call, cwd, allowedMcpServer, copilotHome));
-        return denied is null ? null : Deny($"{DenyReason} Blocked tool: {denied.Name}.");
+        if (denied is not null)
+        {
+            return Deny($"{DenyReason} Blocked tool: {denied.Name}.");
+        }
+
+        foreach (ToolCall call in calls)
+        {
+            if (RunStartRefusal(call, cwd, home, log) is { } refusal)
+            {
+                return Deny(refusal);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The conductor-side half of <c>KW-ARB-RUN-001</c>. This hook is scoped to the conductor, so it knows
+    /// the caller even where the harness payload names none (a Copilot CLI root agent). A dispatch of a
+    /// specialist that writes project files is refused while no run is live for the repository; evidence
+    /// that cannot be read allows and is logged.
+    /// </summary>
+    private static string? RunStartRefusal(ToolCall call, string? cwd, string home, TextWriter log)
+    {
+        if (!string.Equals(call.Name, "task", StringComparison.Ordinal)
+            || call.Arguments is not { } arguments
+            || !TryGetText(arguments, "agent_type", out string? target)
+            || !ArbiterSquadCatalog.LoadEmbedded().Agents.TryGetValue(target, out ArbiterSquadAgent? agent)
+            || !RunStartEvidence.IsWriterProfile(agent.CapabilityProfile))
+        {
+            return null;
+        }
+
+        string prompt = TryGetText(arguments, "prompt", out string? text) ? text : string.Empty;
+        if (string.Equals(
+                TriggerClassifier.PlannerMarkerFor(prompt, HeaderBlock.Parse(prompt).Headers),
+                "RUN-START",
+                StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        bool? started = cwd is null ? null : RunStartEvidence.Started(cwd, home);
+        if (started is null)
+        {
+            TryLog(log, $"conductor guard could not read whether a run was started for '{cwd}'; the dispatch to {target} continues.");
+            return null;
+        }
+
+        return started.Value
+            ? null
+            : $"KW-ARB-RUN-001: no run has been started for this repository, so {target} would write into a checkout " +
+              $"with no branch of its own. Next: {RunStartEvidence.Remedy}";
     }
 
     /// <summary>

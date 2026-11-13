@@ -32,6 +32,7 @@ public sealed class ArbiterDefaultRulesTests
         "KW-ARB-OWNER-002",
         "KW-ARB-MODE-001",
         "KW-ARB-ROSTER-001",
+        "KW-ARB-RUN-001",
         "KW-ARB-DIFF-001",
         "KW-ARB-PLANNER-001",
         "KW-ARB-PLANNER-DIFF-001",
