@@ -210,16 +210,16 @@ rules:
     effects: { listed: allow, no-roster: allow, not-listed: escalate }
 
   # Machine facts only: the catalog says which callers orchestrate (their delegates-to lists the target)
-  # and which profiles write project files, and run.started is the record run start wrote plus git's
+  # and which profiles write project files (planners included: plans belong on the run branch), and run.started is the record run start wrote plus git's
   # answer for its worktree. Evidence that cannot be read leaves run.started absent, which allows.
   - id: KW-ARB-RUN-001
-    trigger: [delegate, investigate]
+    trigger: [delegate, delegate.planner, investigate]
     question: Has a run been started for this repository before an orchestrator hands a specialist work that writes files?
     answers: [not-applicable, started, not-started]
     decide:
       - when: { not: { fact: delegation.target, in: roster.caller.delegates-to } }
         answer: not-applicable
-      - when: { not: { fact: delegation.target-profile, in: [worker, documentation] } }
+      - when: { not: { fact: delegation.target-profile, in: [worker, documentation, architect, product-planning] } }
         answer: not-applicable
       - when: { fact: delegation.markers, equals: RUN-START }
         answer: not-applicable

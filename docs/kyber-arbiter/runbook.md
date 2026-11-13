@@ -308,9 +308,10 @@ the conductor and code-reviewer.
 ## Reading a run-start refusal
 
 `KW-ARB-RUN-001` stops an orchestrator (`conductor` or `bug-crusher`) handing a specialist that writes
-project files (capability profile `worker` or `documentation`) any work while no run is live for the
-repository. Without it, a conductor that skipped run start sent every developer to edit the canonical
-checkout on the default branch. `NEXT` names the fix: run
+project files (capability profile `worker` or `documentation`, or a planner: `architect` or
+`product-planning`) any work while no run is live for the repository. Without it, a conductor that skipped
+run start sent every developer to edit the canonical checkout on the default branch, and a conductor that
+planned first left the plan and its task file untracked there. `NEXT` names the fix: run
 `kyber-weave run start --harness <harness> --type <type> --slug <slug>`, or dispatch `github-devops` with
 `RUN-START: true` and that command, then send the dispatch again.
 
@@ -318,7 +319,7 @@ A run is live when a record under `~/.kyber-weave/runs/` names this repository's
 its recorded worktree still has the run's branch checked out. `run start` writes that record. The check
 reads only those facts:
 
-- Planner, read-only and `github-devops` dispatches are never refused, nor is the run-start dispatch itself.
+- Read-only and `github-devops` dispatches are never refused, nor is the run-start dispatch itself.
 - A caller that is not a Squad orchestrator is never refused: a developer agent a person invokes directly
   has no `delegates-to` list.
 - When git cannot name the repository or the records cannot be read, the dispatch is allowed and the

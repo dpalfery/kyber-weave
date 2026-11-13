@@ -132,7 +132,19 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
     }
 
     [Theory]
-    [InlineData("investigate", "conductor", "architect", "Plan the widget.")]
+    [InlineData("architect")]
+    [InlineData("product-owner")]
+    public void Rule_EscalatesAPlannerDispatchFromTheConductorWithNoRun(string target)
+    {
+        Assert.Contains(
+            ArbiterConfig.ProductDefaults.Rules,
+            rule => string.Equals(rule.Id, RuleId, StringComparison.Ordinal)
+                && string.Equals(rule.Trigger, "delegate.planner", StringComparison.Ordinal));
+        Assert.Equal("not-started", Answer("delegate.planner", "conductor", target, "PLAN: true\nPlan the widget.", started: false));
+        Assert.Equal("started", Answer("delegate.planner", "conductor", target, "PLAN: true\nPlan the widget.", started: true));
+    }
+
+    [Theory]
     [InlineData("investigate", "conductor", "github-devops", "RUN-START: true\nkyber-weave run start --harness claude --type feat --slug a")]
     [InlineData("investigate", "conductor", "github-devops", "kyber-weave run start --harness claude --type feat --slug a")]
     [InlineData("investigate", "conductor", "research-agent", "Find the widget.")]
@@ -163,7 +175,17 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
     [Fact]
     public void HookFacts_LeaveRunStartedAbsentForASpecialistThatWritesNothing()
     {
-        Assert.Null(HookFact("architect"));
+        Assert.Null(HookFact("research-agent"));
+    }
+
+    [Fact]
+    public void HookFacts_FillRunStartedForAPlanner()
+    {
+        Assert.Equal(false, HookFact("architect"));
+
+        StartInPlace();
+
+        Assert.Equal(true, HookFact("architect"));
     }
 
     [Fact]
@@ -186,7 +208,21 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
     }
 
     [Theory]
-    [InlineData("architect", "Plan the widget.")]
+    [InlineData("architect")]
+    [InlineData("product-owner")]
+    public void Guard_DeniesTheConductorsPlannerDispatchWithNoRun(string target)
+    {
+        string answer = Guard(Task(target, "Plan the widget."));
+
+        Assert.Contains("deny", answer, StringComparison.Ordinal);
+        Assert.Contains(RuleId, answer, StringComparison.Ordinal);
+
+        StartInPlace();
+
+        Assert.Empty(Guard(Task(target, "Plan the widget.")));
+    }
+
+    [Theory]
     [InlineData("github-devops", "kyber-weave run start --harness copilot --type feat --slug add-widget")]
     [InlineData("research-agent", "Find the widget.")]
     public void Guard_AllowsDispatchesThatWriteNoProjectFiles(string target, string prompt)

@@ -61,7 +61,10 @@ public static class ArbiterTriggerCatalog
         "delegation.plan-file",
         "delegation.plan-file-raw",
         "delegation.plan-file-rejected",
+        "delegation.target-profile",
         "config.planning-dirs",
+        "roster.caller.delegates-to",
+        "run.started",
     };
 
     /// <summary>Trigger name to the facts it supplies.</summary>
