@@ -70,9 +70,9 @@ gate, the refutation pass in step 3, and any in-process council fallback in step
 them reviews against a generic standard instead. If the file is missing or no path is
 declared, the report says so in one line rather than reviewing without notice.
 
-### 2. Start the gates and the council together
+### 2. Run the gates, then seat the council
 
-They are independent. Neither waits on the other.
+The gates run first. Their run writes the evidence every seat starts from, and its results decide which lenses are not seated at all.
 
 **Gates.** Two commands, and they are the only things this skill executes. This section is the only place the review command is written down: the reviewer derives its command from here, and no plan, index entry or task packet restates it, because a copy goes stale the moment the gate list or one of its flags moves.
 
@@ -120,7 +120,7 @@ If the host has declared no gates, the command says so. Record that: a review wi
 executed evidence is a weaker review, and the report must not read as though everything
 passed.
 
-**Council.** In a first full review, seat the council as [references/first-review.md](references/first-review.md) says: one seat per applicable lens, all at once, each with its lens file, the review scope and its review-guidance sections, ending with the attestation line `REVIEW.md sections checked: [<ids>]`. A verifier cycle re-seats only the lenses [references/verifier-cycle.md](references/verifier-cycle.md) names. Either way, every seat reads the diff `code-reviewer` materialized to `.agent_scratchpad/<task-id>/review-diff.patch`, removed once the council completes, and:
+**Council.** In a first full review, seat the council as [references/first-review.md](references/first-review.md) says: one seat per applicable lens, all at once, each with its lens file, the review scope and its review-guidance sections, ending with the attestation line `REVIEW.md sections checked: [<ids>]`. A verifier cycle re-seats only the lenses [references/verifier-cycle.md](references/verifier-cycle.md) names. Either way, every seat starts from the cycle's `evidence.md`, which the council's gate run writes beside `gates.json` with the diff (`review-diff.patch`), the changed files and every gate's result, and prints as `evidence: <path>`; no seat re-runs a gate or rediscovers the change. Under a conductor the reviewer starts no seat itself: it returns `STATUS: COUNCIL_SEATS_NEEDED` with one packet per seat, and the conductor starts them in parallel. And:
 
 Seat one lens per spawn. Save each seat's output unchanged as `<lens>.md` in the cycle's `seats` folder before you adjudicate. The verdict command matches a seat file to a lens by its name alone, so a file named for two lenses at once (`prior-art-performance.md`) keeps its findings but covers no lens and draws a `KW-REVIEW-041` warning; one spawn per lens and one file per lens avoids it. When one lens is split by file across two or more spawns, save their outputs unchanged, one after another, as that lens's one `<lens>.md`; the verdict command sums the repeated `Input sites:` and `Discovery:` lines per counter, and one malformed repeated line makes that count unreadable (`KW-REVIEW-044` or `KW-REVIEW-047`). `Index fallback:` lines are not summed: a repeated identical line is fine, but two different ones draw `KW-REVIEW-044` and only the first is kept. When the parts fell back in different modes, merge them into one line naming each mode, separated by a semicolon (`Index fallback: projectPath: error; projectPath: not-indexed`), so no evidence is discarded. A finding you raise yourself, such as a claim with no gate behind it, goes in `reviewer.md` in the same folder.
 
@@ -186,7 +186,7 @@ kyber-weave review verdict . --seats <cycle>/seats --gates <cycle>/gates.json --
 ```
 
 The command reads the findings from the seat files and writes the surviving findings to
-`findings.json`, so a later audit reads what the verdict read. Record every lens you do not seat with `--not-seated <lens>=<reason>`; the verdict refuses to compute while a lens has neither a seat file nor a reason (KW-REVIEW-041). A lens that needs gate input the run never produced is not seated, for example `--not-seated static-analysis-triage=no analyzer output: build gate not run`. A verifier cycle passes `--prior`, and a lens the prior cycle covered is carried from it, as is a blocking gate this cycle did not run whose inputs are unchanged; one whose inputs changed or that did not pass is refused (KW-REVIEW-049).
+`findings.json`, so a later audit reads what the verdict read. Record every lens you do not seat with `--not-seated <lens>=<reason>`; the verdict refuses to compute while a lens has neither a seat file nor a reason (KW-REVIEW-041). A lens that needs gate input the run never produced is not seated, for example `--not-seated static-analysis-triage=no analyzer output: build gate not run`, and neither is a lens whose whole input is a gate that passed, for example `--not-seated static-analysis-triage=gates build, ts-lint passed`. A verifier cycle passes `--prior`, and a lens the prior cycle covered is carried from it, as is a blocking gate this cycle did not run whose inputs are unchanged; one whose inputs changed or that did not pass is refused (KW-REVIEW-049).
 
 Rules, in evaluation order. The first that fires decides:
 

@@ -74,7 +74,9 @@ fail differently:
   does not pay for a database-migration reviewer to tell it so.
 - **The host's own gates** — build, tests, coverage, analyzers — run as declared commands and
   produce a repeatable artifact. That artifact is what a claim about executed behaviour is
-  allowed to cite. Nothing else counts.
+  allowed to cite. Nothing else counts. The gates run first, and every lens starts from the
+  evidence their run writes, so no lens re-runs a check, and a lens whose whole answer a passing
+  gate already gives is not seated.
 - **A verdict engine** turns findings and gate results into `APPROVE` or `REQUEST_CHANGES` by
   fixed rule. It is ordinary unit-tested code, so the same inputs give the same answer twice
   and every decision names the rule that made it.

@@ -308,10 +308,12 @@ public static partial class TriggerClassifier
         if (string.Equals(marker, RunStartMarker, StringComparison.Ordinal))
             return "investigate";
 
-        // The conductor seats the review council for code-reviewer, which cannot start agents of its own as a
-        // subagent, so a council seat is the same lens or refutation spawn whichever of the two dispatches it.
+        // The session that dispatched code-reviewer (the conductor, or bug-crusher) seats the council for it, because
+        // a dispatched reviewer cannot reliably start agents of its own; a council seat is the same lens or
+        // refutation spawn whichever of them dispatches it.
         bool reviewer = string.Equals(caller, "code-reviewer", StringComparison.Ordinal);
-        if ((reviewer || string.Equals(caller, "conductor", StringComparison.Ordinal))
+        if ((reviewer || string.Equals(caller, "conductor", StringComparison.Ordinal)
+                      || string.Equals(caller, "bug-crusher", StringComparison.Ordinal))
             && CouncilSeat(target, headers) is { } seat)
             return seat;
 

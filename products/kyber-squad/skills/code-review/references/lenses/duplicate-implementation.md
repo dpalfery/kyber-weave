@@ -8,7 +8,8 @@ than searching the tree for duplicates yourself.
 ## Applicability
 
 Applies when the duplicates gate produced a report **and** the diff touches at least one file
-named in at least one cluster. Runs **after** that gate.
+named in at least one cluster. Runs **after** that gate. When no cluster names a changed file the
+reviewer does not seat this lens; the skips below are for a seat started anyway.
 
 Skip, and say which:
 

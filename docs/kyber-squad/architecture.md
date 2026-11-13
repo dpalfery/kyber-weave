@@ -1143,8 +1143,8 @@ and validates.
   delegation would reach every profile rather than the canonical `delegates-to` roster.
   `DevinRenderer` emits neither and records `permission-not-expressible` naming the roster.
   The lowered conductor is unaffected, because it runs in the main session. The delegating roles
-  carry their own fallback: `code-reviewer` applies each lens itself, in turn, and says in its
-  report that the council ran in-process; `architect` gathers its own sweeps and returns a live
+  carry their own fallback: a dispatched `code-reviewer` hands its council seats back to the
+  conductor, which starts them, as on every target; `architect` gathers its own sweeps and returns a live
   Azure question as `STATUS: BLOCKED`, which the conductor puts to `azure-reader` and answers.
   Agents use Devin's directory layout so each resource closure stays inside its own agent's
   directory and authored links resolve verbatim; see the `DevinRenderer` class remarks for the

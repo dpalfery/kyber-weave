@@ -302,10 +302,11 @@ public sealed class SquadPerformanceContractTests
     [InlineData(ReviewLensAgentPath)]
     [InlineData(ReviewTriageAgentPath)]
     [InlineData(ReviewCouncilArchitecturePath)]
-    public void CouncilSurfacesSpecifyMaterializedDiffContract(string relativePath)
+    public void CouncilSurfacesSpecifyTheGateRunsEvidenceContract(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
-        Assert.Contains(".agent_scratchpad/<task-id>/review-diff.patch", content, StringComparison.Ordinal);
+        Assert.Contains("evidence.md", content, StringComparison.Ordinal);
+        Assert.DoesNotContain(".agent_scratchpad/<task-id>/review-diff.patch", content, StringComparison.Ordinal);
         Assert.DoesNotContain("artifacts/review-diff.patch", content, StringComparison.Ordinal);
 
         if (relativePath is ReviewLensAgentPath or ReviewTriageAgentPath)

@@ -10,11 +10,11 @@ copilot-tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/
 # docs-dev for the documentation-impact review. The escalated path adds architect, which
 # plans; test-dev, which writes a failing test when no developer takes the fix; code-reviewer, which judges the finished fix; and
 # every developer agent a task can route to. `review-lens` and `review-triage` are for one
-# situation only: `code-reviewer` returns `STATUS: COUNCIL_SEATS_NEEDED` because its
-# harness gave it no way to start its own seats, and this session starts them and
-# re-invokes it. `root-fixer` grants `delegate` for exactly this; the roster is what keeps
+# situation only: `code-reviewer` returns `STATUS: COUNCIL_SEATS_NEEDED` whenever this
+# session dispatched it, because a dispatched agent cannot reliably start its own seats, and
+# this session starts them and re-invokes it. `root-fixer` grants `delegate` for exactly this; the roster is what keeps
 # the grant scoped to these agents. Discovery stays off it on purpose: the architect owns
-# its own discovery delegates, and the reviewer seats its own lenses.
+# its own discovery delegates, and the reviewer names the lenses this session seats.
 delegates-to: [architect, bug-crusher-investigator, code-reviewer, csharp-dev, dal-dev, docs-dev, github-devops, go-dev, maui-dev, pulumi-dev, python-dev, react-dev, review-lens, review-triage, rust-dev, sql-database-architect, tauri-dev, test-dev, typescript-dev]
 fallback: role-skill
 aliases: []

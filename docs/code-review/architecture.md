@@ -6,7 +6,7 @@ status: current
 component: ReviewCouncil
 source-root: src/KyberWeave.Core/Review
 owner: dpalfery
-last-reviewed: 2026-11-11
+last-reviewed: 2026-11-13
 decided-by:
   - adr/0002-three-layer-review-council-verdict-engine
   - adr/0003-cross-file-duplication-and-prior-art-lenses
@@ -14,6 +14,7 @@ decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
   - adr/0064-project-knowledge-lives-in-gates-and-standards-reached-through-tools
   - adr/0069-the-review-council-loops-until-approve-and-computes-its-verdict-from-seat-output
+  - adr/0077-the-dispatching-session-seats-the-council-from-the-gate-runs-evidence
 code-refs:
   - VerdictEngine
   - GateRunner
@@ -28,6 +29,7 @@ code-refs:
   - ReviewCatalogueCommand
   - SeatOutputParser
   - CitedLineCheck
+  - ReviewEvidence
 sections:
   "#":
     keywords:
@@ -81,7 +83,7 @@ flowchart TD
 
     Scope --> GR
     Scope --> DG
-    Scope --> Council
+    Gates -->|"evidence.md · diff · gate results<br/>seats started by the dispatching session"| Council
 
     subgraph Gates["LAYER 1 — Deterministic gates (no model)"]
         direction LR
@@ -119,11 +121,26 @@ flowchart TD
     Cfg -.-> VE
 ```
 
-Gates and council start **together** — they are independent and neither waits on the other.
-Three lenses are the exception: `test-adequacy` consumes the coverage report,
-`static-analysis-triage` consumes the analyzer output, and `duplicate-implementation` consumes
-the duplicates report, so each is issued when its own gate completes rather than behind a
-barrier on all gates.
+The gates run first, and the council starts from what they recorded. The council's gate run
+writes `evidence.md` into the cycle folder beside `gates.json`: the base, the head, the diff
+(`review-diff.patch`), the changed files and every gate's result. Every seat starts from that
+file, so no seat re-runs a gate or rediscovers the change. Three lenses consume gate output:
+`test-adequacy` the coverage report, `static-analysis-triage` the analyzer output, and
+`duplicate-implementation` the duplicates report.
+
+**No seat for what a gate already proves.** `static-analysis-triage` is not seated when every
+build, lint, format and type-check gate passed, and `duplicate-implementation` is not seated when
+no duplicate cluster names a changed file; the reviewer records each with `--not-seated` and the
+report cites the gate instead. `test-adequacy` is always seated for a change with code or tests:
+whether the tests would catch the change breaking is a judgement no gate makes.
+
+**The dispatching session seats the council.** A `code-reviewer` started by another agent (the
+conductor, or `bug-crusher`) starts no seat and applies no lens itself: after its gates it
+returns `STATUS: COUNCIL_SEATS_NEEDED` with one `SEAT:` block per seat (the routing headers and a
+packet path), the dispatching session starts every seat in one parallel batch, and the reviewer
+is re-invoked to adjudicate and compute the verdict. A refutation spawn comes back the same way.
+Only a reviewer a human started seats its own lenses. The reasons are in
+[ADR 0077](../adr/0077-the-dispatching-session-seats-the-council-from-the-gate-runs-evidence.md).
 
 `review duplicates` is a second command rather than a declared gate entry because its input is
 not a host command at all: it reads the repository's CodeGraph index and clusters symbols whose
@@ -195,9 +212,9 @@ flowchart LR
 ```
 
 Every council path receives this selection. Step 2 gives each seat its rows. The refuter (step 3)
-gets the same sections as the seat it challenges. On a harness that cannot delegate, such as
-Devin, `code-reviewer` applies each lens itself and uses the same selection, and the report says
-the council ran in-process. The developer's pre-push self-review gate walks the recurring defect
+gets the same sections as the seat it challenges. When a top-level `code-reviewer` has no tool to start agents, it
+applies each lens itself and uses the same selection, and the report says the council ran
+in-process. The developer's pre-push self-review gate walks the recurring defect
 classes for the technologies present. If a host has no `REVIEW.md`, the reviewer reports that
 rather than skipping guidance silently, and the portable checks in the skill still run.
 
@@ -458,9 +475,9 @@ stays `deny`. **The role that judges a change never ships it.**
 per-role grant, not a property of being a subagent. The lens seats hold `deny`, so a council
 seat cannot re-enter the council.
 
-### Materialized diff contract (Option A)
+### Review evidence contract
 
-Read-only council seats (`review-lens` and `review-triage`) have `process.execute: deny` and cannot execute `git diff`. Rather than granting git execution permissions across seventeen seats, `code-reviewer` materializes `git diff <base>...<head>` to task-scoped `.agent_scratchpad/<task-id>/review-diff.patch` before council fan-out, passes this path in each `review-lens` and `review-triage` packet, and removes it after the review council completes (including on failure). Seats read `.agent_scratchpad/<task-id>/review-diff.patch` via `view_file` (`filesystem.read: allow`) without executing git commands or mutating files. This preserves the strict capability lattice, prevents `index.lock` contention, and avoids redundant diff subprocess invocations across parallel seats.
+Read-only council seats (`review-lens` and `review-triage`) have `process.execute: deny` and cannot execute `git diff`. Rather than granting git execution permissions across seventeen seats, the council's gate run (`ReviewEvidence`) writes `review-diff.patch`, the diff from the merge base to the files on disk, and `evidence.md` into the cycle folder, and prints `evidence: <path>`. Untracked files are not in the patch; `evidence.md` lists them as untracked, and a seat reads them whole. Each seat's packet names `evidence.md`, and seats read it and the diff via `view_file` (`filesystem.read: allow`) without executing git commands or mutating files. The files stay with the cycle folder until the run ends. This preserves the strict capability lattice, prevents `index.lock` contention, and avoids redundant diff subprocess invocations across parallel seats.
 
 ## Configuration
 
@@ -826,12 +843,11 @@ flowchart TD
 Two facts about how the review is run complete the picture, and neither is enforced by the gate
 command:
 
-- **The reviewer runs its gates and stops when it cannot seat its own lenses.** Where the
-  harness cannot start subagents, `code-reviewer` reports `COUNCIL_SEATS_NEEDED` after its gates
-  finish: the status names the lenses it needs and the role each one takes, the scope, the gate
-  ids and results it already holds, and the findings whose refutation is outstanding. The
-  session above it starts those seats in parallel and re-invokes the reviewer, which still
-  adjudicates and still owns the verdict. Gates are not re-run to seat a lens.
+- **A dispatched reviewer runs its gates and hands its seats back.** A `code-reviewer` that
+  another agent dispatched reports `COUNCIL_SEATS_NEEDED` after its gates finish, with the
+  `evidence:` line, its `--not-seated` reasons and one `SEAT:` block per seat. The session above
+  it starts those seats in parallel and re-invokes the reviewer, which still adjudicates and
+  still owns the verdict. Gates are not re-run to seat a lens.
 - **The review runs alone, last, and in the foreground.** No documentation work and no edits
   land in the reviewed tree while it runs, and the documentation-impact review and any edit it
   causes finish before the council starts. A review racing an edit reviews a tree that no longer
@@ -1133,8 +1149,8 @@ Every other lens is never skipped by this rule. In particular it never skips:
 - `blast-radius-revertibility`: a rename moves callers.
 
 The rule is enforced, not shadowed. Its skips appear in the decision log like any other enforced
-answer. The rule only applies where the hook runs, and code-reviewer's `LENS:` headers are what
-let it judge each spawn.
+answer. The rule only applies where the hook runs, and the `LENS:` headers are what let it judge each
+spawn, whether code-reviewer or the session that seats the council for it dispatches it.
 
 ### Nitpick filter, duplicates and the review run (phase 3)
 
@@ -1155,7 +1171,7 @@ block, with the same id on every seat. The id keys the review's findings in a ru
 
 ## Current limitations
 
-All thirteen declared targets have a registered renderer. On the twelve native targets these permissions lower to their native representations and are enforced; `warp` is a fallback target whose deployed skills carry no capability enforcement, so there the council and the narrowing are instruction-only. On `devin` a subagent cannot delegate, so `code-reviewer` applies each lens itself, one at a time, runs the refutation pass itself, and says in its report that the council ran in-process, which is weaker evidence than independent seats — see
+All thirteen declared targets have a registered renderer. On the twelve native targets these permissions lower to their native representations and are enforced; `warp` is a fallback target whose deployed skills carry no capability enforcement, so there the council and the narrowing are instruction-only. On `devin` a subagent cannot delegate, so a dispatched `code-reviewer` hands its seats back to the session that dispatched it, as on every other target — see
 [rendering](../kyber-squad/architecture.md#8-rendering).
 
 There is no cost measurement and no per-repository ceiling yet. The adversarial confirmation

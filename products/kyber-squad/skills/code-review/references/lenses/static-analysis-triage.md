@@ -8,7 +8,8 @@ Applies whenever the analyzer, linter, compiler, or type-checker gate produced o
 **after** that gate.
 
 Skip only when no such gate is configured for this repository — and say so, because a
-repository with no static analysis is worth the reviewer knowing about.
+repository with no static analysis is worth the reviewer knowing about. The reviewer does not
+seat this lens at all when every one of those gates passed; the report cites the gates instead.
 
 On .NET repositories the machine-produced input is the compiler and analyzer warnings from
 the build gate (`dotnet build` with analyzers, as errors where the host sets

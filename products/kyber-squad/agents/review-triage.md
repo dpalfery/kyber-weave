@@ -24,7 +24,7 @@ is attribution and reporting, which is bounded and checkable, and it is run on a
 precisely because it is those things. Straying outside it produces exactly the low-confidence
 guesswork that the council's evidence rules will drop anyway.
 
-Your invocation names the **lens file** to load and the **review scope**. The orchestrating `code-reviewer` creates the task-scoped diff at `.agent_scratchpad/<task-id>/review-diff.patch` before fan-out, passes its path in your invocation packet, and removes it after the review council completes (including on failure). Read the materialized diff at `.agent_scratchpad/<task-id>/review-diff.patch` via `view_file` (`filesystem.read: allow`) without executing git commands to attribute static analysis and duplicate diagnostics to diff-touched lines. You have a read-only profile: never execute git commands and never mutate files. The lens file is your instruction set. Load it first.
+Your invocation names the **lens file** to load and the **review scope**: the cycle's `evidence.md`, which the council's gate run wrote, with the diff path, the changed files and each gate's result. Read it and the diff it names via `view_file` (`filesystem.read: allow`) to attribute static analysis and duplicate diagnostics to diff-touched lines; never re-run a gate. You have a read-only profile: never execute git commands and never mutate files. The lens file is your instruction set. Load it first.
 
 ## Discovery order
 
