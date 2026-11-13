@@ -1,13 +1,12 @@
-using System.Text.RegularExpressions;
 using Xunit;
 
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Pins the council review loop: the council re-reviews after every fix round until it returns
-/// APPROVE, the loop stops after five cycles or three flat cycles with the open findings listed
-/// for human review, every review after the first is a verifier cycle, a failed blocking gate is
-/// fixed inside the same loop, and minor findings never loop.
+/// Checks the tokens and structure of the council review loop: the severity band that never loops,
+/// the blocking-gate bypass, the retired reserved-path rule ids, and the code-review verdict table.
+/// The loop rules themselves (re-review until APPROVE, the cycle bounds, blocking gates fixed in the
+/// loop, verifier cycles) are graded from the prose rule catalog (<c>Fixtures/prose-rules/catalog.yml</c>).
 /// </summary>
 public sealed class SquadAutonomyRemediationTests
 {
@@ -21,37 +20,16 @@ public sealed class SquadAutonomyRemediationTests
 
     /// <summary>
     /// The council loop lives in the shared execution contract both entry points load,
-    /// so that skill is the surface these pins read.
+    /// so that skill is the surface these checks read.
     /// </summary>
     private static string ExecutionAndReview()
     {
         return Read("skills", "delivery-execution", "SKILL.md");
     }
 
-    private static string CodeReviewer()
-    {
-        return Read("agents", "code-reviewer.md");
-    }
-
     private static string CodeReviewSkill()
     {
         return Read("skills", "code-review", "SKILL.md");
-    }
-
-    private static string Normalise(string text)
-    {
-        string unmarked = text
-            .Replace("`", string.Empty, StringComparison.Ordinal)
-            .Replace("*", string.Empty, StringComparison.Ordinal);
-
-        return Regex.Replace(unmarked, @"\s+", " ").Trim();
-    }
-
-    private static void AssertSentence(string text, string sentence)
-    {
-        Assert.True(
-            Normalise(text).Contains(Normalise(sentence), StringComparison.Ordinal),
-            $"Missing sentence: {Normalise(sentence)}");
     }
 
     private static void AssertAll(string text, params string[] phrases)
@@ -63,54 +41,13 @@ public sealed class SquadAutonomyRemediationTests
     }
 
     /// <summary>
-    /// The council re-reviews after every fix round until it returns APPROVE, so a fix is never
-    /// accepted on the strength of the previous verdict.
+    /// The execution contract names the Minor/Info severity band; the rule that it never starts
+    /// another loop cycle is graded from the catalog (<c>minor-findings-never-loop</c>).
     /// </summary>
     [Fact]
-    public void CouncilReReviewsAfterEveryFixRoundUntilApprove()
+    public void ExecutionContractNamesTheMinorInfoBand()
     {
-        AssertSentence(
-            ExecutionAndReview(),
-            "The council re-reviews after every fix round until it returns APPROVE.");
-    }
-
-    /// <summary>
-    /// The loop has a hard stop: five cycles, or three cycles in a row in which the surviving
-    /// critical and major count does not fall. The findings still open are listed in the pull
-    /// request for human review, and delivery continues rather than parking the change.
-    /// </summary>
-    [Fact]
-    public void LoopStopsAfterFiveCyclesOrThreeFlatCyclesAndListsTheOpenFindings()
-    {
-        AssertSentence(
-            ExecutionAndReview(),
-            "The loop stops after 5 review cycles, or after 3 cycles in a row in which the count of surviving critical and major findings does not fall; the findings still open are then listed in the pull request as pending human review, and delivery continues.");
-    }
-
-    /// <summary>
-    /// A failed blocking gate is not a separate path: it is fixed inside the same loop by the
-    /// worker that owns the failing scope, exactly like a finding.
-    /// </summary>
-    [Fact]
-    public void BlockingGateFailureIsFixedInsideTheSameLoopByItsOwningWorker()
-    {
-        AssertSentence(
-            ExecutionAndReview(),
-            "A failed blocking gate is fixed inside the same loop: it goes to the worker that owns the failing scope, like a finding.");
-    }
-
-    /// <summary>
-    /// A Minor-only council reports and moves on: Minor/Info findings never start another loop
-    /// cycle, so a cosmetic finding cannot hold a change open.
-    /// </summary>
-    [Fact]
-    public void MinorOnlyCouncilNeverLoops()
-    {
-        string execution = ExecutionAndReview();
-
-        AssertAll(execution,
-            "Minor/Info",
-            "never loop");
+        Assert.Contains("Minor/Info", ExecutionAndReview(), StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -130,30 +67,12 @@ public sealed class SquadAutonomyRemediationTests
     }
 
     /// <summary>
-    /// The reviewer side of the contract agrees: every review after the first is a verifier
-    /// cycle that re-checks the prior findings and the fix delta, not a full council.
+    /// The code-review skill keeps its verdict table with the fixed <c>major-count-blocks</c> rule.
     /// </summary>
     [Fact]
-    public void CodeReviewerRunsEveryReviewAfterTheFirstAsAVerifierCycle()
+    public void CodeReviewSkillKeepsTheVerdictTable()
     {
-        AssertSentence(
-            CodeReviewer(),
-            "Every review after the first runs in the verifier mode of the dp-code-reviewer skill: it re-checks the prior findings and the fix delta, not a full council.");
-    }
-
-    /// <summary>
-    /// The skill adjudication states the verifier cycle without rewriting the verdict table: the
-    /// fixed rules still decide, and the verifier rule is stated alongside them.
-    /// </summary>
-    [Fact]
-    public void CodeReviewSkillStatesTheVerifierCycleWhileVerdictTableStillDecides()
-    {
-        string skill = CodeReviewSkill();
-
-        AssertSentence(
-            skill,
-            "Every review after the first runs in the verifier mode of the dp-code-reviewer skill: it re-checks the prior findings and the fix delta, not a full council.");
-        AssertAll(skill,
+        AssertAll(CodeReviewSkill(),
             "Rule",
             "Verdict",
             "major-count-blocks");

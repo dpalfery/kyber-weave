@@ -13,12 +13,12 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Pins the docs-dev harvest closeout contract (Ready plan T4 RED): every completed
-/// change gets a <c>docs-dev</c> documentation-impact review plus plan/spec closeout,
-/// scale and Design harvest are declared at authoring time, and no portable file carries
-/// a literal <c>docs/</c> path. Every fact here fails on the unedited tree until T5-T7
-/// lands, except the two description routing guards, which pass today and pin the floor
-/// the rewritten description must not fall through.
+/// Checks the docs-dev harvest closeout contract's code-computed and structural parts: the
+/// docs-dev description's routing vocabulary, score and lint, the digest and frontmatter tokens,
+/// the bug-crusher roster and render, the Decisions table, docs-dev's shell boundary and
+/// capability profile, and that no portable file carries a literal <c>docs/</c> path. The prose
+/// rules (documentation-impact review, plan and spec closeout, authoring-time scale and Design
+/// harvest) are graded from the prose rule catalog (<c>Fixtures/prose-rules/catalog.yml</c>).
 /// </summary>
 public sealed class SquadDocsHarvestContractTests
 {
@@ -164,34 +164,12 @@ public sealed class SquadDocsHarvestContractTests
     }
 
     /// <summary>
-    /// The documentation-impact review section exists and states its full contract: the
-    /// DOCS_REVIEW rows and RECOMMENDATIONS it returns, that it reviews what it is sent,
-    /// the run record it keeps, routing by component and doc type beside the component's
-    /// existing docs, and the high-confidence bar where a human approves, vocabulary is
-    /// never added, the best existing home wins, and a todo is filed only if the owner
-    /// accepts it.
+    /// The documentation-impact review returns DOCS_REVIEW rows and RECOMMENDATIONS.
     /// </summary>
     [Fact]
-    public void DocsDevDocumentationImpactReviewSectionStatesItsContract()
+    public void DocsDevNamesTheDocumentationImpactReviewDigestRows()
     {
-        string text = ReadProduct("agents", "docs-dev.md");
-
-        AssertAll(
-            text,
-            "documentation-impact review",
-            "DOCS_REVIEW",
-            "RECOMMENDATIONS",
-            "reviews what it is sent",
-            "run record",
-            "component",
-            "doc type",
-            "existing docs",
-            "high confidence",
-            "human approves",
-            "never adds",
-            "vocabulary",
-            "best existing home",
-            "todo only if");
+        AssertAll(ReadProduct("agents", "docs-dev.md"), "DOCS_REVIEW", "RECOMMENDATIONS");
     }
 
     /// <summary>
@@ -207,96 +185,46 @@ public sealed class SquadDocsHarvestContractTests
     }
 
     /// <summary>
-    /// Plan closeout keeps its mapping table and both waiver categories, and gains the
-    /// Design harvest: a Closeout mapping with documentation-impact, impact-components,
-    /// last-reviewed, and an archived status row.
+    /// Plan closeout names the Design harvest frontmatter keys (documentation-impact,
+    /// impact-components, last-reviewed) and the archived status row.
     /// </summary>
     [Fact]
-    public void PlanCloseoutKeepsWaiversAndAddsDesignHarvest()
+    public void PlanCloseoutNamesTheHarvestKeysAndArchivedStatus()
     {
-        string text = ReadProduct("agents", "docs-dev.md");
-
         AssertAll(
-            text,
-            "Plan closeout",
-            "mapping table",
-            "ADR waiver",
-            "Documentation waiver",
-            "do not archive",
-            "Design harvest",
-            "Closeout mapping",
+            ReadProduct("agents", "docs-dev.md"),
             "documentation-impact",
             "impact-components",
             "last-reviewed",
-            "status archived",
             "Status: Archived");
     }
 
     /// <summary>
-    /// Specification closeout migrates durable content before archiving, and names the
-    /// Design harvest, documentation-impact, and archived status alongside it.
+    /// Specification closeout names documentation-impact and the archived status row.
     /// </summary>
     [Fact]
-    public void SpecCloseoutMigratesAndArchivesWithDesignHarvest()
+    public void SpecCloseoutNamesDocumentationImpactAndArchivedStatus()
     {
-        string text = ReadProduct("agents", "docs-dev.md");
-
-        AssertAll(
-            text,
-            "Specification closeout",
-            "Design harvest",
-            "documentation-impact",
-            "Status: Archived");
+        AssertAll(ReadProduct("agents", "docs-dev.md"), "documentation-impact", "Status: Archived");
     }
 
     /// <summary>
-    /// The conductor no longer limits docs-dev to plans and specifications: every
-    /// completed change gets a docs-dev review, and closeout completes the objective.
+    /// The shared execution skill both entry points load names the DOCS_REVIEW rows and the
+    /// Q2 CLOSEOUT_COMPLETE marker.
     /// </summary>
     [Fact]
-    public void ConductorRequiresDocsDevReviewAndCloseoutForEveryCompletedChange()
+    public void ExecutionContractNamesDocsReviewAndCloseoutComplete()
     {
-        string text = ReadProduct("agents", "conductor.md");
-
-        AssertAll(text, "every completed change", "docs-dev review", "closeout");
+        AssertAll(ReadProduct("skills", "delivery-execution", "SKILL.md"), "DOCS_REVIEW", "CLOSEOUT_COMPLETE");
     }
 
     /// <summary>
-    /// The execution contract records the closeout run: a run record, the DOCS_REVIEW
-    /// rows, the Q2 CLOSEOUT_COMPLETE marker, and the PR description that carries them.
-    /// The rules live in the shared execution skill both entry points load.
+    /// Autonomous delivery names the DOCS_REVIEW and CLOSEOUT_COMPLETE evidence it requires.
     /// </summary>
     [Fact]
-    public void ExecutionAndReviewCloseoutRecordsRunRecordAndDocsReview()
+    public void AutonomyNamesDocsReviewAndCloseoutCompleteEvidence()
     {
-        string text = ReadProduct("skills", "delivery-execution", "SKILL.md");
-
-        AssertAll(text, "run record", "DOCS_REVIEW", "CLOSEOUT_COMPLETE", "PR description");
-    }
-
-    /// <summary>
-    /// Autonomous delivery is gated on the documentation contract: it requires
-    /// DOCS_REVIEW and CLOSEOUT_COMPLETE evidence, and the draft PR carries both.
-    /// </summary>
-    [Fact]
-    public void AutonomyDeliveryRequiresDocsReviewAndCloseoutComplete()
-    {
-        string text = ReadProduct("agents", "conductor", "references", "autonomy.md");
-
-        AssertAll(text, "DOCS_REVIEW", "CLOSEOUT_COMPLETE", "PR carries");
-    }
-
-    /// <summary>
-    /// The one-defect path is not exempt from the documentation contract: bug-crusher
-    /// keeps a run record, routes the fix through a docs-dev review, and reports the
-    /// outcome in the report and the pull request.
-    /// </summary>
-    [Fact]
-    public void BugCrusherRecordsRunRecordAndDocsDevReview()
-    {
-        string text = ReadProduct("skills", "bug-crusher", "SKILL.md");
-
-        AssertAll(text, "run record", "docs-dev review", "outcome");
+        AssertAll(ReadProduct("agents", "conductor", "references", "autonomy.md"), "DOCS_REVIEW", "CLOSEOUT_COMPLETE");
     }
 
     /// <summary>
@@ -335,79 +263,45 @@ public sealed class SquadDocsHarvestContractTests
     }
 
     /// <summary>
-    /// The pull-request description contract states its Documentation impact verbatim,
-    /// including the heading fallback when the host supplies no template, and requires
-    /// closeout before delivery rather than after merge.
+    /// Plan authoring names the scale frontmatter keys.
     /// </summary>
     [Fact]
-    public void CreatePullRequestDocumentationImpactRequiresCloseoutBeforeDelivery()
+    public void PlanAuthoringNamesTheScaleKeys()
     {
-        string text = ReadProduct("skills", "create-pull-request", "SKILL.md");
-
-        AssertAll(text, "Documentation impact", "heading fallback", "closeout before delivery");
-    }
-
-    /// <summary>
-    /// Plan authoring declares scale and the Design harvest up front: governed
-    /// frontmatter values, impact-components, a Design harvest table keyed by target
-    /// component and target doc type, and the owner-confirms-scale gate at high
-    /// confidence.
-    /// </summary>
-    [Fact]
-    public void PlanAuthoringDeclaresScaleAndDesignHarvest()
-    {
-        string text = ReadProduct("agents", "architect", "references", "plan-authoring.md");
-
         AssertAll(
-            text,
+            ReadProduct("agents", "architect", "references", "plan-authoring.md"),
             "development-mode",
-            "impact-components",
-            "Design harvest",
-            "Target component",
-            "Target doc type",
-            "owner confirms scale",
-            "high confidence");
+            "impact-components");
     }
 
     /// <summary>
-    /// The design phase keeps its five-column Decisions table intact and adds scale
-    /// plus the Design harvest requirement-group it must satisfy.
+    /// The design phase keeps its five-column Decisions table intact.
     /// </summary>
     [Fact]
-    public void DesignPhaseKeepsDecisionsTableAndNamesDesignHarvest()
+    public void DesignPhaseKeepsTheDecisionsTable()
     {
-        string text = ReadProduct("skills", "product-owner", "references", "design-phase.md");
-
-        AssertAll(
-            text,
+        Assert.Contains(
             "| ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |",
-            "Design harvest",
-            "requirement-group",
-            "scale");
+            ReadProduct("skills", "product-owner", "references", "design-phase.md"),
+            StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// A plan is Ready only when scale and the Design harvest are verified alongside
-    /// the mode contract and documentation checks.
+    /// Plan authoring names the PLAN_READY marker.
     /// </summary>
     [Fact]
-    public void PlanReadyVerifiesScaleAndDesignHarvest()
+    public void PlanAuthoringNamesPlanReady()
     {
-        string text = ReadProduct("agents", "architect", "references", "plan-authoring.md");
-
-        AssertAll(text, "PLAN_READY", "scale", "Design harvest");
+        Assert.Contains("PLAN_READY", ReadProduct("agents", "architect", "references", "plan-authoring.md"), StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// A specification is Ready only when scale and the Design harvest are verified,
-    /// and approve-and-execute restates the scale and components under approval.
+    /// The spec path names the SPEC_READY marker.
     /// </summary>
     [Fact]
-    public void SpecReadyVerifiesScaleAndDesignHarvest()
+    public void SpecPathNamesSpecReady()
     {
-        string text = ReadProduct("agents", "conductor", "references", "spec-path.md");
-
-        AssertAll(text, "SPEC_READY", "scale", "Design harvest", "components");
+        Assert.Contains("SPEC_READY", ReadProduct("agents", "conductor", "references", "spec-path.md"), StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -435,30 +329,23 @@ public sealed class SquadDocsHarvestContractTests
     }
 
     /// <summary>
-    /// The intent-alignment lens pins the archived-specification contract: the D22
-    /// documentation items, and a critical finding for a missing or false PR
-    /// documentation section or an unjustified no-doc-change claim.
+    /// The intent-alignment lens names the D22 documentation items of an archived specification.
     /// </summary>
     [Fact]
-    public void IntentAlignmentPinsArchivedSpecDocsReviewContract()
+    public void IntentAlignmentLensNamesTheD22DocumentationItems()
     {
-        string text = ReadProduct("skills", "code-review", "references", "lenses", "intent-alignment.md");
-
-        AssertAll(
-            text,
-            "critical",
-            "archived specification",
+        Assert.Contains(
             "D22",
-            "no doc change",
-            "PR description");
+            ReadProduct("skills", "code-review", "references", "lenses", "intent-alignment.md"),
+            StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// The plan inventory policy section — not just the active-plan row — requires the
-    /// Design harvest and documentation-impact mapping at authoring time.
+    /// The plan inventory policy section — not just the active-plan row — names the
+    /// documentation-impact mapping.
     /// </summary>
     [Fact]
-    public void PlanIndexPolicySectionNamesDesignHarvest()
+    public void PlanIndexPolicySectionNamesDocumentationImpact()
     {
         string text = ReadRepo("docs", "plans", "README.md");
         int policyStart = text.IndexOf("### Plan Decisions and Closeout Policy", StringComparison.Ordinal);
@@ -466,19 +353,7 @@ public sealed class SquadDocsHarvestContractTests
         int activeStart = text.IndexOf("## Active Plans", policyStart, StringComparison.Ordinal);
         string policy = activeStart < 0 ? text[policyStart..] : text[policyStart..activeStart];
 
-        AssertAll(policy, "Design harvest", "documentation-impact");
-    }
-
-    /// <summary>
-    /// The specification index carries the same authoring-time policy: scale declared,
-    /// Design harvest named, documentation-impact mapped before archival.
-    /// </summary>
-    [Fact]
-    public void SpecIndexPolicySectionNamesDesignHarvest()
-    {
-        string text = ReadRepo("docs", "specs", "README.md");
-
-        AssertAll(text, "Design harvest");
+        Assert.Contains("documentation-impact", policy, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -532,9 +407,9 @@ public sealed class SquadDocsHarvestContractTests
     /// <summary>
     /// docs-dev holds a shell only for the five command classes its packet names: archival
     /// <c>git mv</c>, the artifact task file's <c>git rm</c>, the two documentation checks, and
-    /// targeted doc-pinning tests. The body
-    /// also states the never-commit-or-push rule and that docs-dev is the only archiver, so
-    /// a later edit cannot widen the instruction-scoped boundary silently.
+    /// targeted doc-pinning tests, so a later edit cannot widen the instruction-scoped boundary
+    /// silently. The never-commit-or-push and only-archiver rules are graded from the prose rule
+    /// catalog (<c>docs-dev-shell-commands</c>, <c>docs-dev-only-archiver</c>).
     /// </summary>
     [Fact]
     public void DocsDevBodyNamesItsOnlyShellCommands()
@@ -546,10 +421,7 @@ public sealed class SquadDocsHarvestContractTests
             "## Commands you run",
             "git mv",
             "docs validate . --merge-ready",
-            "docs drift .",
-            "targeted tests that pin documentation",
-            "Never commit or push unless the packet says so",
-            "docs-dev is the only role that archives a plan or spec");
+            "docs drift .");
 
         // Negative check: the section must name exactly the allowed command classes and no others.
         string section = ExtractSection(text, "## Commands you run");

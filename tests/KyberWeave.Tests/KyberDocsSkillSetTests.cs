@@ -6,12 +6,10 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// T14 RED: the Kyber-Docs skill set. <c>second-brain</c> moves out of Squad to
-/// <c>.apm/skills/kyber-docs-onboarding-and-assessment</c> with an owner-started
-/// assessment-and-remediation mode, and the two remaining Kyber-Weave documentation
-/// skills take <c>kyber-docs-*</c> names. Every fact fails on the phase-1 tree until
-/// T15-T17 lands, except <c>NoKyberDocsSkillLivesInSquad</c>, which passes by design
-/// and pins the floor the rename must not fall through.
+/// The Kyber-Docs skill set: <c>second-brain</c> moved out of Squad to
+/// <c>.apm/skills/kyber-docs-onboarding-and-assessment</c>, the two remaining Kyber-Weave
+/// documentation skills take <c>kyber-docs-*</c> names, no Kyber-Docs skill lives in Squad,
+/// the onboarding skill names its report states, and no skill embeds a literal <c>docs/</c> path.
 /// </summary>
 public sealed class KyberDocsSkillSetTests
 {
@@ -102,23 +100,20 @@ public sealed class KyberDocsSkillSetTests
     }
 
     /// <summary>
-    /// The onboarding-and-assessment skill runs owner-started: its contract names the
-    /// per-plan/spec report states the owner triages (<c>harvested</c>, <c>partial</c>,
-    /// <c>not harvested</c>), the batch remediation <c>docs-dev</c> performs, and the
-    /// <c>pull request</c> each batch lands in.
+    /// The onboarding-and-assessment skill names the per-plan/spec report states the owner
+    /// triages (<c>harvested</c>, <c>partial</c>, <c>not harvested</c>) and the <c>docs-dev</c>
+    /// role that remediates. The owner-started assessment mode itself is graded from the prose
+    /// rule catalog (<c>onboarding-assessment-mode</c>).
     /// </summary>
     [Fact]
-    public void OnboardingSkillDefinesOwnerStartedAssessmentMode()
+    public void OnboardingSkillNamesTheAssessmentReportStatesAndRemediator()
     {
         string skill = File.ReadAllText(
             Path.Combine(ApmSkillsRoot, "kyber-docs-onboarding-and-assessment", "SKILL.md"));
 
-        Assert.Contains("owner-started", skill, StringComparison.Ordinal);
         Assert.Contains("harvested", skill, StringComparison.Ordinal);
         Assert.Contains("partial", skill, StringComparison.Ordinal);
         Assert.Contains("not harvested", skill, StringComparison.Ordinal);
-        Assert.Contains("batch", skill, StringComparison.Ordinal);
-        Assert.Contains("pull request", skill, StringComparison.Ordinal);
         Assert.Contains("docs-dev", skill, StringComparison.Ordinal);
     }
 

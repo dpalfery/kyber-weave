@@ -142,8 +142,12 @@ public sealed class SquadAutonomousGatesInventoryTests
         Assert.DoesNotContain("**`KW-REVIEW-008`**", hardStops, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Sections 8 and 10 name the retired rule ids and the two remaining verdicts. That they record
+    /// the retirement is graded from the prose rule catalog (<c>needs-human-retired-recorded</c>).
+    /// </summary>
     [Fact]
-    public void VerdictRulesAndSection10RecordRetirementOfNeedsHumanAndAlwaysHuman()
+    public void VerdictRulesAndSection10NameTheRetiredIdsAndTheTwoVerdicts()
     {
         string text = ReadInventory();
         int s8Start = text.IndexOf("## 8. Verdict rules", StringComparison.Ordinal);
@@ -158,13 +162,10 @@ public sealed class SquadAutonomousGatesInventoryTests
 
         AssertInventoryContains(section8, "KW-REVIEW-008");
         AssertInventoryContains(section8, "KW-REVIEW-009");
-        Assert.Contains("Retired", section8, StringComparison.OrdinalIgnoreCase);
         AssertInventoryContains(section8, "APPROVE");
         AssertInventoryContains(section8, "REQUEST_CHANGES");
 
-        Assert.Contains("Retired", section10, StringComparison.OrdinalIgnoreCase);
         AssertInventoryContains(section10, "NEEDS_HUMAN");
-        AssertInventoryContains(section10, "always-human");
         AssertInventoryContains(section10, "APPROVE");
         AssertInventoryContains(section10, "REQUEST_CHANGES");
     }

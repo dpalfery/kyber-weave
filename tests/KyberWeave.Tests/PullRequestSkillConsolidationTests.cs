@@ -50,18 +50,17 @@ public sealed class PullRequestSkillConsolidationTests
     ];
 
     /// <summary>
-    /// The resolution order both provider-aware skills must state, in this order. Sharing the
-    /// order keeps a repository from being routed to GitHub by one skill and to Azure DevOps by
-    /// the other.
+    /// The provider names and remote hosts both provider-aware skills must list, in this order.
+    /// Sharing the order keeps a repository from being routed to GitHub by one skill and to Azure
+    /// DevOps by the other. The full resolution order, through the MCP server and asking the user,
+    /// is graded from the prose rule catalog (<c>provider-selection-order</c>).
     /// </summary>
     private static readonly string[] ProviderSelectionTokens =
     [
         "`github` / `gh` / `azdo` / `ado` / `azure-devops`",
         "`dev.azure.com`",
         "`visualstudio.com`",
-        "`github.com`",
-        "MCP server",
-        "ask the user"
+        "`github.com`"
     ];
 
     private static readonly string[] ProviderContractHeadings =
@@ -268,8 +267,9 @@ public sealed class PullRequestSkillConsolidationTests
 
     /// <summary>
     /// Prevents the combined skill from stating a convention twice or reintroducing a rule a host
-    /// could not reverse: a fixed base branch, a fixed template path, the retired skill, or
-    /// provider commands that belong in a provider file.
+    /// could not reverse: a fixed template path, the retired skill, or provider commands that
+    /// belong in a provider file. The target-branch rule and its retired fixed develop branch are
+    /// graded from the prose rule catalog (<c>pr-target-branch-asked</c>).
     /// </summary>
     [Fact]
     public void CreatePullRequestResolvesEachConventionOnceInTheNeutralLayer()
@@ -278,14 +278,13 @@ public sealed class PullRequestSkillConsolidationTests
         string body = Assert.Single(source.Skills, candidate => candidate.Name == CombinedSkill).InstructionBody;
         Section[] sections = H2Sections(body);
 
-        AssertSectionStates(sections, "Target branch", "Never assume the default branch", "ask the user");
+        AssertSectionStates(sections, "Target branch");
         AssertSectionStates(sections, "Title", "A host convention wins", "Default:");
         AssertSectionStates(sections, "Linked work", "A host convention wins", "closing");
         AssertSectionStates(sections, "Description", "host's pull request template");
 
         Assert.DoesNotContain(RetiredSkill, body, StringComparison.Ordinal);
         Assert.DoesNotContain(".github/PULL_REQUEST_TEMPLATE.md", body, StringComparison.Ordinal);
-        Assert.DoesNotMatch(new Regex("branch(es)? from `?develop`?", RegexOptions.IgnoreCase), body);
 
         string[] providerCommands = CodeText(body)
             .Where(line => line.StartsWith("gh ", StringComparison.Ordinal) ||
