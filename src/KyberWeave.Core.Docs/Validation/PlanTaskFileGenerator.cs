@@ -189,12 +189,13 @@ public sealed partial class PlanTaskFileGenerator
         }
 
         PlanPacketContext context = PlanPacketContext.Parse(markdown);
+        PlanFileScope fileScope = new(repoRoot);
         List<PlanTaskFileEntry> entries = [];
         foreach (PlanTask task in parsed.Tasks)
         {
             PlanContractRow? row = parsed.ContractRows.FirstOrDefault(
                 candidate => string.Equals(candidate.TaskId, task.Id, StringComparison.Ordinal));
-            PlanTaskFileEntry? entry = BuildEntry(task, row, parsed, context, repoRoot, artifactPath, planningDirectories, report);
+            PlanTaskFileEntry? entry = BuildEntry(task, row, parsed, context, repoRoot, fileScope, artifactPath, planningDirectories, report);
             if (entry is null)
             {
                 gaps = true;
@@ -220,6 +221,7 @@ public sealed partial class PlanTaskFileGenerator
         PlanDocument parsed,
         PlanPacketContext context,
         string? repoRoot,
+        PlanFileScope fileScope,
         string artifactPath,
         IReadOnlyList<string> planningDirectories,
         DiagnosticReport report)
@@ -308,13 +310,26 @@ public sealed partial class PlanTaskFileGenerator
             gap = true;
         }
 
+        (IReadOnlyList<string> keptFiles, IReadOnlyList<string> droppedFiles) = fileScope.Filter(task.Files);
+        if (droppedFiles.Count > 0)
+        {
+            report.Add(new Diagnostic(
+                PlanTaskFileValidator.NotARepositoryPath,
+                Severity.Info,
+                $"Task '{task.Id}': left out of its files because they are not repository paths: {string.Join(", ", droppedFiles)}.",
+                task.Id,
+                artifactPath,
+                Hint: "A file is kept when it exists, or when its top-level folder exists and its extension is one the repository tracks. "
+                      + "List a file the task creates as its repository-relative path in the task's Files line."));
+        }
+
         return gap
             ? null
             : new PlanTaskFileEntry(
                 task.Id,
                 role,
                 [.. task.DependsOn],
-                [.. task.Files],
+                [.. keptFiles],
                 session,
                 prompt);
     }

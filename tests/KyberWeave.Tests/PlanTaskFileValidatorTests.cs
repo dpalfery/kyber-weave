@@ -972,7 +972,9 @@ internal static class PlanTaskFileProbe
 
                 - [Ready tasks](2026-11-07-ready-tasks.md)
                 """)
-            .Write(PlanPath, planMarkdown ?? PlanMarkdown());
+            .Write(PlanPath, planMarkdown ?? PlanMarkdown())
+            .Write("src/Placeholder.cs", "// the repository's existing source")
+            .Write("tests/Placeholder.cs", "// the repository's existing tests");
     }
 
     /// <summary>
@@ -1263,7 +1265,9 @@ internal static class SpecTaskFileProbe
                 """)
             .Write(SpecFolder + "/requirements.md", SpecDocument("requirements", "**Status:** Ready. The requirements are approved."))
             .Write(DesignPath, SpecDocument("design", "**Status:** Ready. The design is approved."))
-            .Write(TasksPath, tasksMarkdown ?? TasksMarkdown());
+            .Write(TasksPath, tasksMarkdown ?? TasksMarkdown())
+            .Write("src/Placeholder.cs", "// the repository's existing source")
+            .Write("tests/Placeholder.cs", "// the repository's existing tests");
     }
 
     /// <summary>

@@ -84,6 +84,7 @@ behind a flag, because the orchestrator has the docs tools and no shell. Rules `
 | `KW-DOC-TASKS-009` | Warning | A task says "see above", "as described in the plan" or the like without naming a decision, contract row or section the packet carries. A worker cannot open the plan, so the detail must be stated in the task or cited by id or heading |
 | `KW-DOC-TASKS-010` | Warning | A test-authoring task is ordered before the task that creates the production file its tests name (no dependency path), or names a production `.cs` file that no task creates and that does not exist. Decided from plan facts only; the hint suggests a stub task or a dependency |
 | `KW-DOC-TASKS-011` | Warning | `docs tasks --check` only, when a model key is configured (skipped with an info line otherwise): the Arbiter model, asked once per packet, answers with at least 0.8 confidence that a developer reading only the packet lacks the files, behaviour, tests or command. The finding names the missing element |
+| `KW-DOC-TASKS-012` | Info | `docs tasks` (write and check): an entry in a task's files that is not a repository path (a URL, a call such as `page.goto('/')`, a route like `/api/drivers`, or a path whose top folder or extension the repository does not have) was left out of the task's file scope. The message lists what was dropped. The overlap check and diff attribution use the kept entries only |
 
 `KW-DOC-TASKS-007` walks the plans folder recursively, skips any `archive` folder, and reads the file system rather than git, so an untracked or git-ignored copy counts.
 

@@ -71,6 +71,9 @@ public sealed partial class PlanTaskFileValidator
     /// <summary>A test task in a compiled test project is not ordered after the task that creates what its tests reference. A warning.</summary>
     public const string CompileUnitOrder = "KW-DOC-TASKS-010";
 
+    /// <summary>Info: text a task listed as files that is not a repository path was left out of its file scope.</summary>
+    public const string NotARepositoryPath = "KW-DOC-TASKS-012";
+
     /// <summary>A model that read only a task's packet says a developer could not do the task from it. A warning.</summary>
     public const string PacketNotSelfContained = "KW-DOC-TASKS-011";
 
@@ -498,7 +501,7 @@ public sealed partial class PlanTaskFileValidator
     }
 
     /// <summary>Reports each task, file scope and dependency on which the file disagrees with the plan.</summary>
-    private static void CheckTasks(
+    private void CheckTasks(
         PlanDocument plan,
         PlanTaskFile file,
         string taskFile,
@@ -551,6 +554,7 @@ public sealed partial class PlanTaskFileValidator
                 Hint: $"The plan is the authority. Run {fix} to drop the entry, or add the task to the plan first and then run it."));
         }
 
+        PlanFileScope fileScope = new(_repoRoot);
         foreach ((string id, PlanTaskFileEntry entry) in declared)
         {
             if (!byId.TryGetValue(id, out PlanTask? task))
@@ -570,13 +574,15 @@ public sealed partial class PlanTaskFileValidator
                     Hint: $"Run {fix}: it copies the plan's file scope and dependencies."));
             }
 
-            if (!SameSet(task.Files, entry.Files ?? []))
+            // The task file keeps the repository paths among the plan's file entries, so that is what it is compared to.
+            IReadOnlyList<string> planFiles = fileScope.Filter(task.Files).Kept;
+            if (!SameSet(planFiles, entry.Files ?? []))
             {
                 report.Add(new Diagnostic(
                     DiffersFromPlan,
                     Severity.Error,
                     $"Task '{id}' declares files {Describe(entry.Files ?? [])} in task file '{taskFile}' and " +
-                    $"{Describe(task.Files)} in the plan.",
+                    $"{Describe(planFiles)} in the plan.",
                     id,
                     taskFile,
                     Hint: $"Run {fix}: it copies the plan's file scope. A narrower scope in the file lets a worker be " +

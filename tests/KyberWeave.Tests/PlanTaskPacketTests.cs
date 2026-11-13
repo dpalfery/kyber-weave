@@ -269,4 +269,44 @@ public sealed class PlanTaskPacketTests
             Directory.Delete(root, true);
         }
     }
+
+    [Fact]
+    public void ProseThatIsNotARepositoryPathIsLeftOutOfAFileScopeAndReportedAtInfoLevel()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "kw-scope-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(root, "src/Widget"));
+        Directory.CreateDirectory(Path.Combine(root, "tests/Widget.Tests"));
+        Directory.CreateDirectory(Path.Combine(root, "5-Test/tests/HotshotLogistics.Tests/Jobs"));
+        File.WriteAllText(Path.Combine(root, "src/Widget/Existing.cs"), "// x");
+        File.WriteAllText(Path.Combine(root, "tests/Widget.Tests/WidgetTests.cs"), "// x");
+        try
+        {
+            string tasks = """
+                ### T1: Widget
+
+                - **Files:** `src/Widget/Existing.cs`, `src/Widget/NewThing.cs`, `src/Widget/`, `tests/page.route`, `https://localhost:5001/api/job`, `/api/drivers`, `/api/billing/invoices/overdue`, `page.goto('/')`, `5-Test/tests/HotshotLogistics.Tests/Jobs/HotshotLogistics.Tests.Jobs`, `tests/Widget.Tests/*.cs`, `elsewhere/Brand.cs`
+                - **Depends on:** none
+                - **Required skills:** `csharp-dev`
+
+                Command: `dotnet build src`
+                Acceptance criteria: it builds.
+                """;
+
+            (PlanTaskFile? file, DiagnosticReport report) = Build(Markdown(Decisions, "| T1 | `x` | `dotnet test x` | y | z | w |", tasks), root);
+
+            Assert.Equal(
+                ["src/Widget/Existing.cs", "src/Widget/NewThing.cs", "src/Widget/**", "tests/Widget.Tests/*.cs"],
+                file!.Tasks![0].Files);
+            Diagnostic dropped = Assert.Single(report.Items, item => item.Code == "KW-DOC-TASKS-012");
+            Assert.Equal(Severity.Info, dropped.Severity);
+            foreach (string text in new[] { "tests/page.route", "https://localhost:5001/api/job", "/api/drivers", "/api/billing/invoices/overdue", "page.goto('/')", "HotshotLogistics.Tests.Jobs", "elsewhere/Brand.cs" })
+            {
+                Assert.Contains(text, dropped.Message, StringComparison.Ordinal);
+            }
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
 }
