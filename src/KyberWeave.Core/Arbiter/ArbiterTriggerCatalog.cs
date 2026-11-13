@@ -101,6 +101,8 @@ public static class ArbiterTriggerCatalog
                 "roster.caller.delegates-to",
                 "git.changed-paths.since-dispatch",
                 "ledger.concurrent.paths",
+                "delegation.target-profile",
+                "checkout.stray-paths",
             },
             ["delegate.model"] = new HashSet<string>(StringComparer.Ordinal)
             {

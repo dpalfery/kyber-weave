@@ -214,9 +214,20 @@ internal sealed class HookGitFacts(
             return facts;
         }
 
-        List<string> stray = [.. GitFacts.GetChangedPathsSinceSnapshot(canonical, baseline).Order(StringComparer.Ordinal)];
+        // Only what the dispatch left behind counts: a path it changed and then restored, or a stray file a
+        // clean-up dispatch put back, is no longer dirty. A commit on the canonical branch keeps every path it
+        // moved. The agent scratchpad is working state, not a change to the checkout.
+        IReadOnlySet<string> changed = GitFacts.GetChangedPathsSinceSnapshot(canonical, baseline);
+        bool headMoved = !string.Equals(GitFacts.GetHead(canonical), baseline.Head, StringComparison.Ordinal);
+        IReadOnlyDictionary<string, string> dirty = GitFacts.GetDirtyStatuses(canonical);
+        List<string> stray = [.. changed
+            .Where(path => (headMoved || dirty.ContainsKey(path)) && !IsScratchpad(path))
+            .Order(StringComparer.Ordinal)];
         return facts.With(StrayPathsFact, stray, ArbiterFactLabel.Derived);
     }
+
+    private static bool IsScratchpad(string path) =>
+        path.StartsWith(".agent_scratchpad/", StringComparison.Ordinal);
 
     private static bool IsRunBranchWriter(ArbiterFactSet facts) =>
         facts.TryGet("delegation.target-profile", out ArbiterFact? profile)

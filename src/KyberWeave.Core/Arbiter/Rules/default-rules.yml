@@ -686,8 +686,10 @@ rules:
   # a snapshot taken at dispatch, recorded only when the dispatch went to a specialist that writes files
   # while a live run of the repository works in a worktree of its own. No snapshot leaves the fact absent,
   # which allows. Subagents start in the canonical checkout, so a worker can edit there by mistake.
+  # investigate.returned is listed because a Copilot CLI root conductor names no caller, so its dispatch to
+  # a developer is classified as investigate.
   - id: KW-ARB-CHECKOUT-001
-    trigger: [delegate.returned, delegate.planner.returned]
+    trigger: [delegate.returned, delegate.planner.returned, investigate.returned]
     question: Did this dispatch leave files in the repository's canonical checkout while its run works in its own worktree?
     answers: [clean, stray]
     decide:

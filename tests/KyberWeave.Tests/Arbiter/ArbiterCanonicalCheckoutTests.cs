@@ -3,6 +3,7 @@ using System.Text.Json;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.RunStart;
@@ -205,6 +206,83 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
     }
 
     [Fact]
+    public void Return_ACleanUpThatRestoresTheStrayFilesIsClean()
+    {
+        StartInWorktree();
+        File.WriteAllText(Path.Combine(_repo, "src", "Job.cs"), "class Job { int Stray; }\n");
+        HookGitFacts facts = new(_repo, _home.Path);
+        Enrich(facts, "pre");
+
+        Git(_repo, "restore", "src/Job.cs");
+
+        ArbiterFactSet returned = Enrich(facts, "post");
+
+        Assert.Equal("clean", RuleEngine.Decide(Rule(), returned));
+    }
+
+    [Fact]
+    public void Return_ACopilotRootConductorsUnnamedDispatchIsCheckedToo()
+    {
+        StartInWorktree();
+        HookGitFacts facts = new(_repo, _home.Path);
+        ArbiterFactSet pre = Enrich(facts, "pre", harness: "copilot-cli", caller: null);
+        Assert.True(pre.TryGet("delegation.target-profile", out _));
+
+        File.WriteAllText(Path.Combine(_repo, "src", "JobDto.cs"), "class JobDto {}\n");
+
+        ArbiterEvent ev = Event("post", "copilot-cli", caller: null);
+        TriggerClassification classification = TriggerClassifier.ClassifySingle(ev, ev.Target, ev.Prompt);
+        Assert.Equal("investigate.returned", classification.Trigger);
+        ArbiterFactSet returned = facts.Enrich(
+            TriggerFactBuilder.Build(classification, ev.Prompt, KyberWeaveConfig.ProductDefaults), classification, ev);
+
+        Assert.Equal("stray", RuleEngine.Decide(Rule(), returned));
+        Assert.Contains(
+            ArbiterConfig.ProductDefaults.Rules,
+            rule => rule.Id == RuleId && rule.Trigger == "investigate.returned");
+    }
+
+    [Fact]
+    public async Task Evaluator_TheEscalationEvidenceListsTheStrayPaths()
+    {
+        StartInWorktree();
+        string arbiterDirectory = Path.Combine(_parent.Path, "arbiter");
+        ArbiterEvaluator evaluator = new(
+            new NoneProvider(),
+            _ => null,
+            new InFlightLedger(arbiterDirectory),
+            new DecisionLog(arbiterDirectory),
+            new HookGitFacts(_repo, _home.Path, arbiterDirectory),
+            new ArbiterEvaluatorFixtures.PlanFacts(),
+            TimeProvider.System);
+        KyberWeaveConfig config = ArbiterEvaluatorFixtures.ConfigWith(ArbiterConfig.ProductDefaults.Rules);
+
+        await evaluator.EvaluateAsync(Event("pre", "claude", "conductor"), config, null, TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(
+            Path.Combine(_repo, "src", "JobDto.cs"), "class JobDto {}\n", TestContext.Current.CancellationToken);
+        ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
+            Event("post", "claude", "conductor") with { ToolOutput = "Done." }, config, null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(RuleEffects.Escalate, result.Outcome);
+        ArbiterDecisionRule rule = new DecisionLog(arbiterDirectory).ReadAll()
+            .SelectMany(record => record.Rules)
+            .Single(candidate => candidate.Id == RuleId);
+        Assert.Equal("stray", rule.Answer);
+        Assert.Contains("src/JobDto.cs", rule.Evidence, StringComparison.Ordinal);
+        Assert.Contains("run worktree", rule.Evidence, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Guard_AllowsTheWriteWhenTheProjectTurnsTheArbiterOff()
+    {
+        StartInWorktree();
+        Directory.CreateDirectory(Path.Combine(_repo, ".kyber-weave"));
+        File.WriteAllText(Path.Combine(_repo, ".kyber-weave", "kyber-weave.yml"), "arbiter:\n  enabled: false\n");
+
+        Assert.Empty(Guard("copilot-cli", CopilotEdit("dal-dev", Path.Combine(_repo, "src", "Job.cs"), subagent: true)));
+    }
+
+    [Fact]
     public void EscalationNext_AsksForTheCleanUpNotTheArchitect()
     {
         string next = ArbiterEscalationEnvelope.NextFor(
@@ -217,19 +295,21 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
         Assert.Contains("do not dispatch architect", next, StringComparison.Ordinal);
     }
 
-    private ArbiterFactSet Enrich(HookGitFacts git, string phase)
+    private ArbiterEvent Event(string phase, string harness, string? caller) => new()
     {
-        ArbiterEvent ev = new()
-        {
-            Harness = "claude",
-            Phase = phase,
-            Target = "dal-dev",
-            Prompt = "Add the job endpoint.",
-            HarnessCaller = "conductor",
-            ToolCallId = "call-1",
-            Cwd = _repo,
-            IsDispatch = true,
-        };
+        Harness = harness,
+        Phase = phase,
+        Target = "dal-dev",
+        Prompt = "Add the job endpoint.",
+        HarnessCaller = caller,
+        ToolCallId = "call-1",
+        Cwd = _repo,
+        IsDispatch = true,
+    };
+
+    private ArbiterFactSet Enrich(HookGitFacts git, string phase, string harness = "claude", string? caller = "conductor")
+    {
+        ArbiterEvent ev = Event(phase, harness, caller);
         TriggerClassification classification = TriggerClassifier.ClassifySingle(ev, ev.Target, ev.Prompt);
         ArbiterFactSet facts = TriggerFactBuilder.Build(classification, ev.Prompt, KyberWeaveConfig.ProductDefaults);
         return git.Enrich(facts, classification, ev);
