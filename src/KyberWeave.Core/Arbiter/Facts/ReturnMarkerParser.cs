@@ -60,7 +60,7 @@ internal static partial class ReturnMarkerParser
     /// A foreground harness hands back its tool response as JSON, where a report's line
     /// breaks are escaped. Every string in it is joined so a marker starts a line again.
     /// </summary>
-    private static string Flatten(string output)
+    internal static string Flatten(string output)
     {
         string trimmed = output.TrimStart();
         if (trimmed.Length == 0 || (trimmed[0] != '{' && trimmed[0] != '['))

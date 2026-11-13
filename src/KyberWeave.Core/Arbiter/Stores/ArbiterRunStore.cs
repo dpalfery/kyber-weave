@@ -24,7 +24,7 @@ public enum ArbiterStoreStatus
 }
 
 /// <summary>
-/// Holds the text of review findings and worker failures under <c>&lt;arbiter-dir&gt;/stores/</c>,
+/// Holds the text of review findings, worker failures and the tails of worker returns under <c>&lt;arbiter-dir&gt;/stores/</c>,
 /// outside the decision log and the ledger, so a rule can read a finding back without the decision
 /// log ever carrying its text.
 /// </summary>
@@ -45,6 +45,7 @@ public sealed class ArbiterRunStore
     private const string StoresDirectoryName = "stores";
     private const string FindingsFileName = "findings.jsonl";
     private const string FailuresFileName = "failures.jsonl";
+    private const string ReturnsFileName = "returns.jsonl";
 
     /// <summary>
     /// The longest retention the sweep honours: ten years. A larger configured value is clamped to this, because a
@@ -140,6 +141,42 @@ public sealed class ArbiterRunStore
     {
         string path = Path.Combine(FailureDirectory(planFile, planDigest, session), FailuresFileName);
         return ReadItems(path);
+    }
+
+    /// <summary>
+    /// Appends the tail of one worker's return to the store of its plan, so a later dispatch's model question can
+    /// read what the worker reported rather than only the markers the ledger parsed from it.
+    /// </summary>
+    /// <param name="planFile">The plan file the return's dispatch named.</param>
+    /// <param name="text">The stored text: the task, the target and the report tail.</param>
+    /// <param name="ct">Cancels the append.</param>
+    /// <returns>Whether the item was stored, refused for size, or the store was unavailable.</returns>
+    public Task<ArbiterStoreStatus> AppendReturnAsync(string planFile, string text, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(planFile);
+        ArgumentNullException.ThrowIfNull(text);
+        return AppendAsync(ReturnsDirectory(planFile), ReturnsFileName, text, ct);
+    }
+
+    /// <summary>Reads the return tails stored for a plan, oldest first; empty when none or unreadable.</summary>
+    /// <param name="planFile">The plan file the returns belong to.</param>
+    /// <returns>The stored texts, in append order.</returns>
+    public IReadOnlyList<string> ReadReturns(string planFile)
+    {
+        ArgumentNullException.ThrowIfNull(planFile);
+        return ReadItems(Path.Combine(ReturnsDirectory(planFile), ReturnsFileName));
+    }
+
+    /// <summary>Keyed by the plan file alone, so an amended plan still sees the returns made before the amendment.</summary>
+    private string ReturnsDirectory(string planFile)
+    {
+        string normalized = planFile.Trim().Replace('\\', '/');
+        if (normalized.StartsWith("./", StringComparison.Ordinal))
+        {
+            normalized = normalized[2..];
+        }
+
+        return Path.Combine(_storesDirectory, "returns-" + Digest(normalized));
     }
 
     private string FailureDirectory(string? planFile, string? planDigest, string? session)

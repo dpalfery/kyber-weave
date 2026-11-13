@@ -333,6 +333,28 @@ public sealed class InFlightLedger
     }
 
     /// <summary>
+    /// The headers of the dispatch a return answers: the return's own, or else its paired pre event's, because a
+    /// specialist's headers are stripped before it runs. Null when the event is unknown or names none.
+    /// </summary>
+    public ArbiterLedgerHeaders? DispatchHeadersFor(string postId)
+    {
+        ArgumentNullException.ThrowIfNull(postId);
+        IReadOnlyList<ArbiterLedgerEvent> events = ReadAll();
+        ArbiterLedgerEvent? post = events.FirstOrDefault(e => string.Equals(e.Id, postId, StringComparison.Ordinal));
+        if (post is null)
+        {
+            return null;
+        }
+
+        if (post.Headers is not null || post.PreId is null)
+        {
+            return post.Headers;
+        }
+
+        return events.FirstOrDefault(e => string.Equals(e.Id, post.PreId, StringComparison.Ordinal))?.Headers;
+    }
+
+    /// <summary>
     /// The completed tasks: a returned worker output whose
     /// <c>^RESULT:\s+(PASS|FAIL)\b</c> marker read <c>PASS</c>, or an
     /// attestation <c>&lt;task&gt;=complete</c> (D31).

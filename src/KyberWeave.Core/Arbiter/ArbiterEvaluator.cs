@@ -258,9 +258,10 @@ public sealed class ArbiterEvaluator
         facts = LedgerFacts.Enrich(facts, _ledger, _decisionLog, ev, ledgerId);
         facts = ModelTargetFacts.Enrich(facts, _ledger, _decisionLog, ledgerId, config.Arbiter.ModelTargeting);
         // D29: a return's TASK_GATE: line is checked against the report it names. Absent
-        // evidence answers absent and the rule escalates; an unexpected failure here
-        // reaches the catch in EvaluateAsync, which escalates with the reason.
+        // evidence answers absent, and the rule asks the model about the raw report instead;
+        // an unexpected failure here reaches the catch in EvaluateAsync, which allows and logs.
         facts = GateReportFacts.Enrich(facts, ev);
+        facts = WithTaskReturns(facts, config);
 
         // The review's REVIEW_RUN names the store its findings sit in. A lens return's first finding is the
         // one the nitpick filter reads; a refutation reads whether the filter dropped the finding it refutes.
@@ -427,6 +428,18 @@ public sealed class ArbiterEvaluator
                 .ConfigureAwait(false);
         }
 
+        // A worker's return keeps its report tail beside the plan, so a later dispatch's model question can read
+        // what the worker said rather than only the markers the ledger parsed. Never the ledger: it holds no text.
+        if (!effective.DryRun
+            && string.Equals(trigger, "delegate.returned", StringComparison.Ordinal)
+            && TextExcerpts.ReturnTail(ev.ToolOutput, ReturnTailChars) is { } tail
+            && _ledger.DispatchHeadersFor(ledgerId) is { PlanFile: { } returnPlan, Task: { } returnTask })
+        {
+            await ReviewStore(config)
+                .AppendReturnAsync(returnPlan, $"task: {returnTask}\ntarget: {classification.Target}\n{tail}", cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         // A refuter's return records its verdict against the finding its REFUTE header names, keyed by the slug.
         // A return that states no recognised verdict records unknown; it never drops the finding it refutes.
         if (!effective.DryRun && reviewRun is not null
@@ -460,6 +473,52 @@ public sealed class ArbiterEvaluator
             && secondaryResults.Any(result => string.Equals(result.Outcome, RuleEffects.SameFailure, StringComparison.Ordinal));
         string dispatchOutcome = answered ? RuleEffects.Answer : advised ? RuleEffects.SameFailure : primaryOutcome;
         return new ArbiterDispatchEvaluation(trigger, dispatchOutcome) { Secondary = secondaryResults };
+    }
+
+    /// <summary>The longest report tail one stored return keeps.</summary>
+    private const int ReturnTailChars = 2000;
+
+    /// <summary>The most stored returns the <c>ledger.task-returns</c> fact carries, newest kept.</summary>
+    private const int MaxTaskReturns = 4;
+
+    /// <summary>
+    /// Adds <c>ledger.task-returns</c>: the stored report tails of earlier returns for this task and the tasks it
+    /// depends on, newest last. The model reads them to judge whether a dependency finished or failing tests exist
+    /// when the parsed markers alone do not say. Absent when the trigger does not declare it or the plan is unknown.
+    /// </summary>
+    private ArbiterFactSet WithTaskReturns(ArbiterFactSet facts, KyberWeaveConfig config)
+    {
+        if (!facts.Contains("ledger.task-returns")
+            || !facts.TryGet("delegation.plan-file", out ArbiterFact? planFact)
+            || planFact.Value is not string { Length: > 0 } planFile)
+        {
+            return facts;
+        }
+
+        HashSet<string> tasks = new(StringComparer.Ordinal);
+        if (facts.TryGet("plan.task", out ArbiterFact? taskFact) && taskFact.Value is string task)
+        {
+            tasks.Add(task);
+        }
+
+        if (facts.TryGet("plan.task.depends-on", out ArbiterFact? dependsOn) && dependsOn.Value is IEnumerable<string> dependencies)
+        {
+            tasks.UnionWith(dependencies);
+        }
+
+        List<string> returns = [.. ReviewStore(config).ReadReturns(planFile)
+            .Where(item => tasks.Contains(StoredTaskOf(item)))
+            .TakeLast(MaxTaskReturns)];
+        return facts.With("ledger.task-returns", returns, ArbiterFactLabel.Derived);
+    }
+
+    /// <summary>The task a stored return names on its first line.</summary>
+    private static string StoredTaskOf(string item)
+    {
+        const string prefix = "task: ";
+        int end = item.IndexOf('\n', StringComparison.Ordinal);
+        string first = end < 0 ? item : item[..end];
+        return first.StartsWith(prefix, StringComparison.Ordinal) ? first[prefix.Length..].Trim() : string.Empty;
     }
 
     /// <summary>Plans one trigger: its step-0 answers, and the step-1 questions the step-0 answers leave open.</summary>
@@ -1031,12 +1090,13 @@ public sealed class ArbiterEvaluator
     }
 
     /// <summary>
-    /// Whether a rule's undecidable step-0 answer is superseded by the step-1 question the same rule asked. Only the
-    /// shortcut and same-failure families hold this shape: their undecidable maps to a spawn or an allow that must
-    /// not stand in for the answer step 1 gives.
+    /// Whether a rule's undecidable step-0 answer is superseded by the step-1 question the same rule asked. The
+    /// shortcut, same-failure, conductor and investigate families hold this shape: their undecidable maps to a
+    /// spawn or an allow that must not stand in for the answer step 1 gives, and the record keeps one row per rule.
     /// </summary>
     private static bool DecidedByStepOne(TriggerPlan plan, ArbiterRuleAnswer answer) =>
-        (plan.Family == ArbiterTriggerFamily.Shortcut || plan.Family == ArbiterTriggerFamily.FailureCluster)
+        plan.Family is ArbiterTriggerFamily.Shortcut or ArbiterTriggerFamily.FailureCluster
+            or ArbiterTriggerFamily.Conductor or ArbiterTriggerFamily.Investigate
         && string.Equals(answer.Answer, RuleEngine.Undecidable, StringComparison.Ordinal)
         && plan.Questions.Any(question => string.Equals(question.RuleId, answer.RuleId, StringComparison.Ordinal));
 

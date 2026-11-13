@@ -20,7 +20,15 @@ public sealed record TriggerClassification(
     string TargetClass,
     IReadOnlyDictionary<string, string> Headers,
     string? Marker,
-    bool PassedWithoutConfig);
+    bool PassedWithoutConfig)
+{
+    /// <summary>
+    /// The raw header values the prompt writes, including the ones <see cref="Headers"/> rejected
+    /// (see <see cref="HeaderBlock.RawValues"/>). Read by the plan lookup and the model questions only.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> RawHeaders { get; init; } =
+        new Dictionary<string, string>(StringComparer.Ordinal);
+}
 
 /// <summary>
 /// Classifies harness-neutral events into triggers (design section 4): target
@@ -185,7 +193,10 @@ public static partial class TriggerClassifier
         return ClassifyOne(ev, target, prompt);
     }
 
-    private static TriggerClassification ClassifyOne(ArbiterEvent ev, string? target, string prompt)
+    private static TriggerClassification ClassifyOne(ArbiterEvent ev, string? target, string prompt) =>
+        ClassifyCore(ev, target, prompt) with { RawHeaders = HeaderBlock.Parse(prompt).RawValues };
+
+    private static TriggerClassification ClassifyCore(ArbiterEvent ev, string? target, string prompt)
     {
         HeaderBlock block = HeaderBlock.Parse(prompt);
         IReadOnlyDictionary<string, string> headers = block.Headers;

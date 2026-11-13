@@ -5,46 +5,73 @@
 # subset-of, intersects, count). An operand that names a fact the rule's trigger
 # supplies is a reference; any other string is a literal.
 #
+# The rule that shapes every rule below (ADR 0072): step 0 decides only what the machine
+# produces itself (git diffs, files on disk, the harness payload, the embedded catalog) and
+# the answers that let a dispatch proceed. A judgment that rests on reading agent-written
+# prose is a step-1 question to the decision model, with a confidence floor. An answer the
+# Arbiter cannot reach (no clause matched, provider none, an error, a timeout, a floor not
+# met) is undecidable, and undecidable allows and is logged in every family. Only a
+# confident violating answer, or a machine fact, escalates.
+#
 # Two answers are decided outside step 0 and left for the runtime evaluator, which
 # joins evidence the closed predicates cannot express:
 # - KW-ARB-GATE-CORROBORATED-001 joins gate output to finding.file:line;
 # - KW-ARB-QUOTE-001 elsewhere/absent compare excerpt text beyond scalar equality.
 # Both still declare their answers and effects here, so validation covers them.
 rules:
+  # Step 0 allows a dispatch whose named plan was found on disk and parsed into tasks. Anything
+  # short of that (no PLAN_FILE header, a path written loosely, a plan the parser read no tasks
+  # from) is a reading of prose, so the model is asked whether the dispatch names a plan at all.
   - id: KW-ARB-PLAN-001
     trigger: delegate
-    question: Does PLAN_FILE name an existing plan or spec task artifact with parseable tasks?
-    answers: [has-tasks, no-tasks, missing, invalid-path]
+    question: Does this dispatch name the plan or specification file its work comes from?
+    answers: [has-tasks, names-plan, no-plan]
     decide:
-      - when: { fact: delegation.plan-file, exists: false }
-        answer: missing
-      - when: { fact: plan.exists, equals: false }
-        answer: invalid-path
-      - when: { fact: plan.tasks.count, equals: 0 }
-        answer: no-tasks
-      - when: { fact: plan.tasks.count, exists: true }
+      - when: { all: [{ fact: plan.tasks.count, exists: true }, { not: { fact: plan.tasks.count, equals: 0 } }] }
         answer: has-tasks
-    effects: { has-tasks: allow, no-tasks: escalate, missing: escalate, invalid-path: escalate }
+    ask:
+      type: choice
+      state: { dispatch: delegation.head, plan-file: delegation.plan-file-raw, plan-file-found-on-disk: plan.exists }
+      criteria:
+        names-plan: The dispatch names a plan or specification file that the worker's task comes from.
+        no-plan: The dispatch names no plan or specification file anywhere; it gives the worker the work with no plan behind it.
+      confidence-at-least: 0.8
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
+    effects: { has-tasks: allow, names-plan: allow, no-plan: escalate }
 
   - id: KW-ARB-SCOPE-001
     trigger: delegate
-    question: Does TASK name a plan task, and do the paths the delegation names stay inside its files?
-    answers: [in-task-files, beyond-files, no-task-files, not-in-plan]
+    question: Is the work this dispatch asks for one of the plan's tasks?
+    answers: [in-task-files, beyond-files, no-task-files, in-plan, not-in-plan]
+    # A TASK that names a task the plan holds is a lookup; whether the dispatch's work is one of
+    # the plan's tasks when the lookup missed is a reading of prose. Asked only once a plan with
+    # tasks was read, so a dispatch with no plan is judged by KW-ARB-PLAN-001 alone.
     decide:
-      - when: { fact: plan.task, exists: false }
-        answer: not-in-plan
-      - when: { fact: plan.task.files, count: 0 }
+      - when: { all: [{ fact: plan.task, exists: true }, { fact: plan.task.files, count: 0 }] }
         answer: no-task-files
-      - when: { fact: delegation.paths, subset-of: plan.task.files }
+      - when: { all: [{ fact: plan.task, exists: true }, { fact: delegation.paths, subset-of: plan.task.files }] }
         answer: in-task-files
-      - when: { fact: delegation.paths, exists: true }
+      - when: { fact: plan.task, exists: true }
         answer: beyond-files
-    effects: { in-task-files: allow, beyond-files: allow, no-task-files: allow, not-in-plan: escalate }
+    ask:
+      type: choice
+      state: { dispatch: delegation.head, task: delegation.task-raw, plan-tasks: plan.task-list }
+      criteria:
+        in-plan: The work the dispatch asks for is one of the plan's tasks, whatever name or number the dispatch uses for it.
+        not-in-plan: The dispatch asks for work that none of the plan's tasks describes.
+      confidence-at-least: 0.8
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
+      when: KW-ARB-PLAN-001=has-tasks
+    effects: { in-task-files: allow, beyond-files: allow, no-task-files: allow, in-plan: allow, not-in-plan: escalate }
 
   - id: KW-ARB-SCOPE-002
     trigger: delegate
     question: Does the delegation ask for work the plan task does not describe?
-    answers: [within-task, adds-work, unrelated]
+    answers: [no-task, within-task, adds-work, unrelated]
+    # With no plan task found there is nothing to compare against, so the question is not asked.
+    decide:
+      - when: { fact: plan.task, exists: false }
+        answer: no-task
     ask:
       type: choice
       state: { task: plan.task.text, delegation: delegation.prompt }
@@ -54,13 +81,17 @@ rules:
         unrelated: The delegation does not concern this task.
       confidence-at-least: 0.8
       tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
-    effects: { within-task: allow, adds-work: escalate, unrelated: escalate }
+    effects: { no-task: allow, within-task: allow, adds-work: escalate, unrelated: escalate }
 
   - id: KW-ARB-READY-001
     trigger: delegate
-    question: Are the task's dependencies complete, and are its files clear of work in flight?
-    answers: [ready, waiting, overlaps-in-flight, unknown-dependency, returns-unobservable]
+    question: Has every task this one depends on finished?
+    answers: [no-task, ready, waiting, overlaps-in-flight, unknown-dependency, returns-unobservable]
+    # Completion read from a return's RESULT: marker is a reading of the worker's prose, so a
+    # dependency the markers do not show complete is asked about, with the stored report tails.
     decide:
+      - when: { fact: plan.task, exists: false }
+        answer: no-task
       - when: { fact: plan.task.files, intersects: ledger.in-flight.paths }
         answer: overlaps-in-flight
       - when: { fact: plan.task.depends-on, exists: false }
@@ -71,28 +102,44 @@ rules:
         answer: ready
       - when: { fact: harness.observes-returns, equals: false }
         answer: returns-unobservable
-      - when: { fact: plan.task.depends-on, exists: true }
-        answer: waiting
+    ask:
+      type: choice
+      state: { depends-on: plan.task.depends-on, completed-by-markers: ledger.completed-tasks, returned-reports: ledger.task-returns, dispatch: delegation.head }
+      criteria:
+        ready: Every task in depends-on is finished, as its returned report or the dispatch shows.
+        waiting: At least one task in depends-on has not finished, or has no returned report at all.
+      confidence-at-least: 0.8
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
     # unknown-dependency (a dependency naming no task in the artifact) needs plan
     # membership the delegate trigger does not supply; it stays declared so the
     # runtime evaluator can answer it once plan parsing reports it.
-    effects: { ready: allow, waiting: escalate, overlaps-in-flight: escalate, unknown-dependency: escalate, returns-unobservable: allow }
+    effects: { no-task: allow, ready: allow, waiting: escalate, overlaps-in-flight: escalate, unknown-dependency: escalate, returns-unobservable: allow }
 
   - id: KW-ARB-OWNER-001
     trigger: delegate
-    question: Is the target the specialist the task names, or the owner its file kinds map to?
-    answers: [owner, not-owner, no-mapping]
+    question: Does the task name the dispatch target as the specialist to do it?
+    answers: [no-task, owner, not-owner, no-mapping]
+    # The skills a task names are read from plan prose, so a target missing from that list is
+    # asked about (a different spelling of the same specialist is common) rather than blocked.
     decide:
+      - when: { fact: plan.task, exists: false }
+        answer: no-task
       - when: { fact: delegation.target, in: plan.task.skills }
         answer: owner
       - when: { all: [{ fact: delegation.target, equals: test-dev }, { fact: plan.development-mode, equals: test-first }] }
         answer: owner
-      - when: { all: [{ not: { fact: plan.task.skills, count: 0 } }, { not: { fact: delegation.target, in: plan.task.skills } }] }
-        answer: not-owner
-      - when: { fact: plan.task, exists: true }
+      - when: { any: [{ fact: plan.task.skills, exists: false }, { fact: plan.task.skills, count: 0 }] }
         answer: no-mapping
+    ask:
+      type: choice
+      state: { task: plan.task.text, skills: plan.task.skills, target: delegation.target }
+      criteria:
+        owner: The task names the target as its specialist, possibly spelled or abbreviated differently.
+        not-owner: The task names only other specialists, and none of them is the target.
+      confidence-at-least: 0.8
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
     # The file-kind map below refines no-mapping at runtime, first match wins.
-    effects: { owner: allow, not-owner: escalate, no-mapping: allow }
+    effects: { no-task: allow, owner: allow, not-owner: escalate, no-mapping: allow }
 
   - id: KW-ARB-OWNER-002
     trigger: delegate
@@ -111,9 +158,13 @@ rules:
 
   - id: KW-ARB-MODE-001
     trigger: delegate
-    question: In test-first mode, does RED evidence exist before an implementation dispatch?
-    answers: [not-required, present, missing, returns-unobservable]
+    question: In test-first mode, were failing tests for this task written before this implementation dispatch?
+    answers: [no-task, not-required, present, missing, returns-unobservable]
+    # RED evidence read from a RED_EVIDENCE: marker is a reading of the test-dev report, so when
+    # the marker is not there the model reads the stored report tails and the dispatch.
     decide:
+      - when: { fact: plan.task, exists: false }
+        answer: no-task
       - when: { fact: plan.development-mode, equals: standard }
         answer: not-required
       - when: { fact: delegation.target, equals: test-dev }
@@ -126,9 +177,15 @@ rules:
         answer: present
       - when: { fact: harness.observes-returns, equals: false }
         answer: returns-unobservable
-      - when: { fact: ledger.red-evidence, exists: false }
-        answer: missing
-    effects: { not-required: allow, present: allow, missing: escalate, returns-unobservable: allow }
+    ask:
+      type: choice
+      state: { task: plan.task.text, returned-reports: ledger.task-returns, dispatch: delegation.head }
+      criteria:
+        present: A returned report or the dispatch shows failing tests for this task were written and run before this dispatch.
+        missing: No returned report and nothing in the dispatch shows that failing tests for this task exist yet.
+      confidence-at-least: 0.8
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
+    effects: { no-task: allow, not-required: allow, present: allow, missing: escalate, returns-unobservable: allow }
 
   - id: KW-ARB-ROSTER-001
     trigger: [delegate, investigate]
@@ -143,35 +200,50 @@ rules:
 
   - id: KW-ARB-DIFF-001
     trigger: delegate.returned
-    question: Did the delegation change only paths inside its task's files?
-    answers: [out-of-scope, no-task-files, inside-task, outside-task]
+    question: Are all the files this delegation changed part of the work its task describes?
+    answers: [out-of-scope, no-task, no-task-files, inside-task, outside-task]
+    # The changed paths are git's; the task's file list is plan prose. A changed path the list does
+    # not cover is asked about, because a task's file list is rarely exhaustive.
     decide:
       - when: { fact: git.changed-paths.since-dispatch, intersects: plan.out-of-scope }
         answer: out-of-scope
+      - when: { fact: plan.task, exists: false }
+        answer: no-task
       - when: { fact: plan.task.files, count: 0 }
         answer: no-task-files
       - when: { fact: git.changed-paths.since-dispatch, subset-of: plan.task.files }
         answer: inside-task
-      - when: { fact: git.changed-paths.since-dispatch, exists: true }
-        answer: outside-task
-    effects: { out-of-scope: escalate, no-task-files: allow, inside-task: allow, outside-task: escalate }
+    ask:
+      type: choice
+      state: { task: plan.task.text, task-files: plan.task.files, changed-files: git.changed-paths.since-dispatch }
+      criteria:
+        inside-task: Every changed file is one the task's work would touch, even where the task's file list does not name it.
+        outside-task: At least one changed file has nothing to do with the work the task describes.
+      confidence-at-least: 0.8
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
+    effects: { out-of-scope: escalate, no-task: allow, no-task-files: allow, inside-task: allow, outside-task: escalate }
 
   - id: KW-ARB-PLANNER-001
     trigger: delegate.planner
-    question: Is this a recognised planner invocation?
-    answers: [recognised, malformed, plan-file-invalid, plan-file-outside-planning-dirs]
+    question: Does this dispatch ask the planner for planning work?
+    answers: [recognised, malformed]
+    # Markers and the PLAN_FILE header are agent-written lines, so step 0 only recognises the
+    # exact forms. Anything else is asked. Where the planner writes is a machine fact checked on
+    # its return by KW-ARB-PLANNER-DIFF-001, so a path here is never blocked on its spelling.
     decide:
-      - when: { fact: delegation.plan-file-rejected, exists: true }
-        answer: plan-file-invalid
-      - when: { fact: delegation.markers, exists: false }
-        answer: malformed
-      - when: { fact: delegation.plan-file, exists: false }
+      - when: { all: [{ fact: delegation.markers, exists: true }, { fact: delegation.plan-file-rejected, exists: false }, { fact: delegation.plan-file, exists: false }] }
         answer: recognised
-      - when: { fact: delegation.plan-file, matches: config.planning-dirs }
+      - when: { all: [{ fact: delegation.markers, exists: true }, { fact: delegation.plan-file, matches: config.planning-dirs }] }
         answer: recognised
-      - when: { fact: delegation.plan-file, exists: true }
-        answer: plan-file-outside-planning-dirs
-    effects: { recognised: allow, malformed: escalate, plan-file-invalid: escalate, plan-file-outside-planning-dirs: escalate }
+    ask:
+      type: choice
+      state: { dispatch: delegation.head, plan-file: delegation.plan-file-raw, planning-dirs: config.planning-dirs }
+      criteria:
+        recognised: The dispatch asks the planner to assess, write, revise or finalise a plan, specification or todo.
+        malformed: The dispatch asks the planner for work that is not planning, such as writing or changing code.
+      confidence-at-least: 0.8
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
+    effects: { recognised: allow, malformed: escalate }
 
   - id: KW-ARB-PLANNER-DIFF-001
     trigger: delegate.planner.returned
@@ -283,16 +355,24 @@ rules:
   # that is an install property, and no predicate here can state it.
   - id: KW-ARB-PLANREAD-001
     trigger: delegate
-    question: Does the dispatch send the worker into a plan, specification or todo path?
-    answers: [names-plan, no-plan, closeout]
+    question: Does the dispatch tell the worker to open or read a plan, specification or todo file?
+    answers: [names-plan, mentions-only, no-plan, closeout]
+    # The path detector reads prose, so a named planning path is asked about: a dispatch may
+    # mention its plan to say which task it serves without sending the worker into it.
     decide:
       - when: { fact: delegation.target-profile, equals: documentation }
         answer: closeout
-      - when: { fact: delegation.planning-paths, count: 0 }
+      - when: { any: [{ fact: delegation.planning-paths, exists: false }, { fact: delegation.planning-paths, count: 0 }] }
         answer: no-plan
-      - when: { fact: delegation.planning-paths, exists: true }
-        answer: names-plan
-    effects: { names-plan: escalate, no-plan: allow, closeout: allow }
+    ask:
+      type: choice
+      state: { dispatch: delegation.body-head, planning-paths: delegation.planning-paths }
+      criteria:
+        names-plan: The dispatch tells the worker to open, read or follow one of the planning-paths files.
+        mentions-only: The dispatch mentions a planning-paths file only to say which plan or task the work serves.
+      confidence-at-least: 0.8
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
+    effects: { names-plan: escalate, mentions-only: allow, no-plan: allow, closeout: allow }
 
   # A dispatch claims what the worker will do; the digest that comes back carries a
   # `TASK_GATE:` line claiming a gate run happened. That line is the worker's own word,
@@ -300,23 +380,32 @@ rules:
   # claim. Joining the claimed status to the report's gates is a two-fact comparison the
   # closed predicate set cannot express, so GateReportFacts makes it and answers the fact:
   # true when the report corroborates the claim, false when it contradicts it, absent
-  # when the line, the path or the file is missing. Both failures escalate, because a
-  # dispatch whose evidence cannot be found is exactly the case this rule exists for;
-  # the two answers stay apart so the envelope says which one happened. Where a harness
-  # cannot observe returns the post-dispatch hook never fires and the rule cannot run;
-  # the end-of-run gates catch that case instead.
+  # when the line, the path or the file cannot be read. A contradiction is a machine
+  # finding and escalates. An absent fact is a line the parser could not read, so the
+  # model reads the report tail and the raw line instead, and only a confident "no gate
+  # was run" escalates. A return with no text at all cannot be judged and allows. Where a
+  # harness cannot observe returns the post-dispatch hook never fires and the rule cannot
+  # run; the end-of-run gates catch that case instead.
   - id: KW-ARB-GATE-REPORT-001
     trigger: delegate.returned
-    question: Does the returned digest's TASK_GATE line agree with the gate report it names?
-    answers: [verified, disagrees, missing]
+    question: Does the worker's report say it ran the task gate on its changes?
+    answers: [verified, disagrees, no-report, ran-gate, missing]
     decide:
-      - when: { fact: gate.report.agrees, exists: false }
-        answer: missing
       - when: { fact: gate.report.agrees, equals: true }
         answer: verified
-      - when: { fact: gate.report.agrees, exists: true }
+      - when: { fact: gate.report.agrees, equals: false }
         answer: disagrees
-    effects: { verified: allow, disagrees: escalate, missing: escalate }
+      - when: { fact: delegation.returned-tail, exists: false }
+        answer: no-report
+    ask:
+      type: choice
+      state: { report: delegation.returned-tail, task-gate-line: gate.report.claim }
+      criteria:
+        ran-gate: The report says the worker ran the task gate on its changes, whatever words or format it uses.
+        missing: The report never mentions running the task gate.
+      confidence-at-least: 0.8
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
+    effects: { verified: allow, disagrees: escalate, no-report: allow, ran-gate: allow, missing: escalate }
 
   # A change with no code in it has nothing for these six lenses to judge. The skip needs
   # positive evidence: every changed path must be one the git read marked no-code, and the

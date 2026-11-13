@@ -15,16 +15,21 @@ namespace KyberWeave.Core.Arbiter.Facts;
 /// <c>TASK_GATE:</c> line names the report its gate run wrote, and the report either
 /// corroborates the claimed status or it does not. The comparison spans two facts — the
 /// claim and the report — which the closed step-0 predicate set cannot express, so it is
-/// made here and the rule reads a single boolean. Every unreadable case answers absent
-/// rather than allow: a claim whose evidence cannot be found is the case the rule exists
-/// for, and the evaluator turns an unexpected exception on this path into an error
-/// result rather than a pass.
+/// made here and the rule reads a single boolean. Every unreadable case answers absent:
+/// the rule cannot decide from the line, so it asks the model whether the return reports a
+/// gate run at all, and reads the raw claim line and the report tail this class also supplies.
 /// </para>
 /// </remarks>
 public static class GateReportFacts
 {
     /// <summary>The fact a returned digest's <c>TASK_GATE:</c> claim is verified into.</summary>
     public const string AgreesFact = "gate.report.agrees";
+
+    /// <summary>The raw <c>TASK_GATE:</c> line a return carries, kept whole for the model question.</summary>
+    public const string ClaimFact = "gate.report.claim";
+
+    /// <summary>The tail of the worker's return, where its digest closes it.</summary>
+    public const string ReturnedTailFact = "delegation.returned-tail";
 
     /// <summary>The digest line whose claim the rule checks.</summary>
     private const string DigestMarker = "TASK_GATE:";
@@ -89,9 +94,27 @@ public static class GateReportFacts
         ArgumentNullException.ThrowIfNull(facts);
         ArgumentNullException.ThrowIfNull(ev);
 
-        return facts.Contains(AgreesFact)
-            ? facts.With(AgreesFact, Agrees(ev.ToolOutput, ev.Cwd), ArbiterFactLabel.Derived)
-            : facts;
+        if (!facts.Contains(AgreesFact))
+            return facts;
+
+        facts = facts.With(AgreesFact, Agrees(ev.ToolOutput, ev.Cwd), ArbiterFactLabel.Derived);
+        if (facts.Contains(ClaimFact))
+            facts = facts.With(ClaimFact, RawClaimLine(ev.ToolOutput), ArbiterFactLabel.Asserted);
+        if (facts.Contains(ReturnedTailFact))
+            facts = facts.With(ReturnedTailFact, TextExcerpts.ReturnTail(ev.ToolOutput), ArbiterFactLabel.Asserted);
+        return facts;
+    }
+
+    /// <summary>The last line that carries <c>TASK_GATE:</c>, as written, or null when none does.</summary>
+    private static string? RawClaimLine(string? returnedText)
+    {
+        if (string.IsNullOrWhiteSpace(returnedText))
+            return null;
+
+        return ReturnMarkerParser.Flatten(returnedText)
+            .Split('\n')
+            .LastOrDefault(line => line.Contains(DigestMarker, StringComparison.Ordinal))
+            ?.Trim();
     }
 
     /// <summary>
@@ -112,8 +135,8 @@ public static class GateReportFacts
     /// <returns>
     /// <c>true</c> when the named report corroborates a <c>PASS</c> claim, <c>false</c> when
     /// it contradicts the claim or the claim is one no report can corroborate, and
-    /// <c>null</c> when there is no claim or no report to read. Every non-true answer
-    /// escalates; none of them is a pass.
+    /// <c>null</c> when there is no claim or no report to read. False is a machine finding and
+    /// escalates; null is undecidable and goes to the model question.
     /// </returns>
     public static bool? Agrees(string? returnedText, string? repositoryRoot)
     {
@@ -125,6 +148,8 @@ public static class GateReportFacts
             return null;
 
         string? path = Resolve(claim.ReportPath, repositoryRoot);
+        if ((path is null || !File.Exists(path)) && claim.WholeLinePath is not null)
+            path = Resolve(claim.WholeLinePath, repositoryRoot) ?? path;
         if (path is null)
             return null;
 
@@ -156,8 +181,14 @@ public static class GateReportFacts
                     status = word;
             }
 
+            // A path with a space splits into words. The rest of the line after report= is kept as a second
+            // reading, tried when the first names no file, so the space does not lose the report.
+            int field = line.IndexOf(ReportField, marker, StringComparison.Ordinal);
+            string? whole = field < 0
+                ? null
+                : line[(field + ReportField.Length)..].Trim().Trim('`', '"', '\'');
             if (reportPath is not null && status is not null)
-                claims.Add(new DigestClaim(status, reportPath));
+                claims.Add(new DigestClaim(status, reportPath, whole != reportPath ? whole : null));
         }
 
         if (claims.Count == 0)
@@ -176,7 +207,7 @@ public static class GateReportFacts
             claims.Any(c => string.Equals(CanonicalReportPath(c.ReportPath), finalCanonical, pathComparison) &&
                             !string.Equals(c.Claimed, PassedStatus, StringComparison.Ordinal)))
         {
-            return new DigestClaim("FAIL", finalClaim.ReportPath);
+            return finalClaim with { Claimed = "FAIL" };
         }
 
         return finalClaim;
@@ -268,6 +299,9 @@ public static class GateReportFacts
             && report.Gates.All(gate => gate is not null && (gate.Passed || gate.NotApplicable));
     }
 
-    /// <summary>The claim a returned digest makes: its status word and its report path.</summary>
-    private sealed record DigestClaim(string Claimed, string ReportPath);
+    /// <summary>
+    /// The claim a returned digest makes: its status word, its report path, and the rest of the line after
+    /// <c>report=</c> when that reads differently (a path with a space).
+    /// </summary>
+    private sealed record DigestClaim(string Claimed, string ReportPath, string? WholeLinePath = null);
 }

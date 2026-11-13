@@ -192,6 +192,12 @@ public static class TriggerFactBuilder
                 "delegation.target-class" => targetClass,
                 "delegation.target-profile" => profile,
                 "delegation.prompt" => stripped,
+                // Bounded excerpts for model questions: the raw head keeps the header block as written, the body
+                // head is the dispatch the worker reads. Raw header values keep what validation rejected.
+                "delegation.head" => TextExcerpts.Head(prompt),
+                "delegation.body-head" => TextExcerpts.Head(stripped),
+                "delegation.plan-file-raw" => block.RawValues.TryGetValue("PLAN_FILE", out string? rawPlan) ? rawPlan : null,
+                "delegation.task-raw" => block.RawValues.TryGetValue("TASK", out string? rawTask) ? rawTask : null,
                 // The shortcut rules' questions read the dispatch body: the defect the investigator was sent to
                 // find, and the intake request the planner was asked to assess.
                 "defect.report" => stripped,
