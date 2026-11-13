@@ -161,11 +161,6 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
         // A --global run writes beneath each selected target's own physical global root,
         // not beneath the home anchor. The same injected resolver the lifecycle plans with
         // names the roots, so the confirmation shows the real destinations.
-        IReadOnlyList<(SquadTarget Target, string GlobalRoot)>? globalTargetRoots =
-            scope == SquadDeploymentScope.Global
-                ? SquadCommandComposition.ResolveGlobalTargetRoots(decision.Targets, _globalRoots, _environmentReader)
-                : null;
-
         SquadLifecycleService lifecycleService = SquadCommandComposition.CreateLifecycleService(
             _userPaths,
             stateStore,
@@ -183,6 +178,14 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
             Adopt: settings.Adopt,
             DryRun: settings.DryRun,
             Arbiter: arbiterWiring);
+
+        // A global install that names a target the install lacks adds it to the existing ones, so the confirmation
+        // lists every root the run writes beneath, not only the new target's.
+        IReadOnlyList<SquadTarget> deployedTargets = lifecycleService.EffectiveInstallTargets(installRequest);
+        IReadOnlyList<(SquadTarget Target, string GlobalRoot)>? globalTargetRoots =
+            scope == SquadDeploymentScope.Global
+                ? SquadCommandComposition.ResolveGlobalTargetRoots(deployedTargets, _globalRoots, _environmentReader)
+                : null;
 
         // The confirmation is the last gate before the lifecycle call — the only
         // side-effecting step — so a decline aborts with zero writes (plan N3/N5);
@@ -216,6 +219,13 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
                 {
                     SquadCommandComposition.WriteLine(
                         $"[green]Successfully installed Kyber-Squad to [bold]{Markup.Escape(targetRoot)}[/].[/]");
+                }
+
+                if (deployedTargets.Count > decision.Targets.Count)
+                {
+                    SquadCommandComposition.WriteLine(
+                        "Extended the existing global install; it now has "
+                        + $"{Markup.Escape(string.Join(", ", deployedTargets.Select(SquadTargetCatalog.GetToken)))}.");
                 }
 
                 // Until trust is granted the hooks stay off (§10.7), so the install names

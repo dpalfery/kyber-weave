@@ -71,12 +71,16 @@ public sealed class SquadLifecycleService
         if (request.Scope == SquadDeploymentScope.Instance && request.Targets.Count != 1)
             throw new ArgumentException("SquadDeploymentScope.Instance requires exactly one target.", nameof(request));
 
-        RequireRenderableTargets(request.Targets);
-
         SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(request.TargetRoot);
         string targetRoot = identity.PhysicalPath;
 
         SquadReceipt? existingReceipt = _stateStore.ReadReceipt(targetRoot, request.Scope);
+
+        // A global install that names a target the install does not have yet adds it: the existing targets stay
+        // and are refreshed with it, so one command covers both.
+        request = request with { Targets = MergeAddedTargets(request, existingReceipt) };
+        RequireRenderableTargets(request.Targets);
+
         if (existingReceipt is not null)
         {
             HashSet<string> existingTargets = existingReceipt.Files
@@ -87,7 +91,8 @@ public sealed class SquadLifecycleService
                 .Select(SquadTargetCatalog.GetToken)
                 .ToHashSet(StringComparer.Ordinal);
 
-            if (!existingTargets.SetEquals(requestedTargets))
+            bool addsTargets = request.Scope == SquadDeploymentScope.Global && existingTargets.IsSubsetOf(requestedTargets);
+            if (!addsTargets && !existingTargets.SetEquals(requestedTargets))
                 throw new SquadDeploymentConflictException(
                     $"Kyber-Squad is already installed at '{targetRoot}' with targets ({string.Join(", ", existingTargets)}). " +
                     $"Requested targets ({string.Join(", ", requestedTargets)}) do not match. Use 'update' to modify targets.");
@@ -296,6 +301,33 @@ public sealed class SquadLifecycleService
         {
             CleanupTempDirectory(tempExtractDir);
         }
+    }
+
+    /// <summary>
+    ///     The targets an install deploys: the requested ones, plus the ones an existing global install already has when
+    ///     the request names at least one more. A request that only repeats or drops existing targets is unchanged, so a
+    ///     project install, an instance install and a narrowing request keep their conflict.
+    /// </summary>
+    /// <param name="request">The install request.</param>
+    /// <returns>The targets the install will deploy.</returns>
+    public IReadOnlyList<SquadTarget> EffectiveInstallTargets(SquadInstallRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        string root = SquadPhysicalRootIdentity.Resolve(request.TargetRoot).PhysicalPath;
+        return MergeAddedTargets(request, _stateStore.ReadReceipt(root, request.Scope));
+    }
+
+    private static IReadOnlyList<SquadTarget> MergeAddedTargets(SquadInstallRequest request, SquadReceipt? existing)
+    {
+        if (existing is null || request.Scope != SquadDeploymentScope.Global)
+            return request.Targets;
+
+        List<string> existingTokens = [.. existing.Files.Select(file => file.Target).Distinct(StringComparer.Ordinal)];
+        List<string> requestedTokens = [.. request.Targets.Select(SquadTargetCatalog.GetToken)];
+        if (requestedTokens.All(existingTokens.Contains))
+            return request.Targets;
+
+        return SquadTargetCatalog.Parse(existingTokens.Concat(requestedTokens.Where(token => !existingTokens.Contains(token))));
     }
 
     /// <summary>
