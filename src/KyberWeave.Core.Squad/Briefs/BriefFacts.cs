@@ -6,7 +6,10 @@ namespace KyberWeave.Core.Squad.Briefs;
 /// The facts a brief is selected by. A null fact is unknown, and an unknown fact keeps every
 /// section that depends on it rather than guessing.
 /// </summary>
-/// <param name="Path">The route: <c>intake</c>, <c>plan</c>, <c>spec</c> or <c>escalation</c>.</param>
+/// <param name="Path">
+/// The route or dispatch: <c>intake</c>, <c>plan</c> (drafting), <c>finalize</c> (an approved plan's finalization),
+/// <c>spec</c> or <c>escalation</c>.
+/// </param>
 /// <param name="Autonomy">Who answers the gates: <c>supervised</c> or <c>autonomous</c>.</param>
 /// <param name="Mode">The plan's development mode: <c>test-first</c> or <c>standard</c>.</param>
 /// <param name="Sources">Where each known fact came from, keyed by fact name, for the header.</param>
@@ -28,7 +31,7 @@ public sealed partial record BriefFacts(
     public static IReadOnlyDictionary<string, IReadOnlyList<string>> Vocabulary { get; } =
         new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal)
         {
-            ["path"] = ["intake", "plan", "spec", "escalation"],
+            ["path"] = ["intake", "plan", "finalize", "spec", "escalation"],
             ["autonomy"] = ["supervised", "autonomous"],
             ["mode"] = ["test-first", "standard"],
         };

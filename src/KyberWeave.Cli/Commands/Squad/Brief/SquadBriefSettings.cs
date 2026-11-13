@@ -11,9 +11,9 @@ public sealed class SquadBriefSettings : CommandSettings
     [Description("The agent whose reference files are read, for example conductor or architect.")]
     public string Agent { get; set; } = string.Empty;
 
-    /// <summary>The route: intake, plan, spec or escalation.</summary>
+    /// <summary>The route or dispatch: intake, plan, finalize, spec or escalation.</summary>
     [CommandOption("--path <PATH>")]
-    [Description("The route the run is on: intake, plan, spec or escalation. Unknown keeps every route's sections.")]
+    [Description("The route the run is on, or the dispatch: intake, plan (drafting), finalize, spec or escalation. Unknown keeps every route's sections.")]
     public string? Path { get; set; }
 
     /// <summary>The autonomy for this run.</summary>

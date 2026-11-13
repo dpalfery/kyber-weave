@@ -2,15 +2,17 @@
 # the model reads anything. Read by `kyber-weave squad brief` and `kyber-weave run start --brief`.
 #
 # A `when` is `always`, or clauses joined by `;` that must all hold. A clause is `fact=a|b`. Facts:
-#   path      intake | plan | spec | escalation   which route the dispatch is on
-#   autonomy  supervised | autonomous             who answers the gates
-#   mode      test-first | standard               the plan's development mode
+#   path      intake | plan | finalize | spec | escalation   which route or dispatch the brief is for
+#   autonomy  supervised | autonomous                        who answers the gates
+#   mode      test-first | standard                          the plan's development mode
 # A fact the run does not know satisfies every clause on it, so a missing fact never drops text.
 #
 # `file` is the authored file name under agents/<agent>/references. A file's `when` gates the whole file.
 # `sections` maps a heading to the extra condition for that section and everything beneath it. Headings are
 # matched ignoring case, punctuation and level. A heading missing from this map is INCLUDED and reported as
 # unmapped, so rewriting a reference file can never silently drop its instructions.
+#
+# The conductor's run-start text is not here: it runs before any brief exists, so it lives in conductor.md.
 schema: kyber-squad.briefs/v1
 agents:
   conductor:
@@ -18,7 +20,6 @@ agents:
       when: path=intake
       sections:
         Todo and Open-Request Intake Path: always
-        Run start: always
         Intent first: always
         Defect diagnosis: always
         Assessment: always
@@ -29,7 +30,6 @@ agents:
       when: path=plan
       sections:
         Plan Path: always
-        Run start: always
         Route by lifecycle: always
         Draft and approval protocol: always
         Planner dispatches: always
@@ -53,22 +53,33 @@ agents:
         Hard-block escalation: autonomy=autonomous
         Gaps and open questions: autonomy=autonomous
         Delivery: always
+        Autonomous approval of the run's delivery: autonomy=autonomous
+        Supervised delivery: autonomy=supervised
         Hard stops: autonomy=autonomous
-        Circuit-breakers are non-fatal: always
+        Circuit-breakers are non-fatal: autonomy=autonomous
+        Circuit-breakers in supervised mode: autonomy=supervised
         Final report: always
+        Autonomous decisions in the report: autonomy=autonomous
   architect:
     - file: plan-authoring.md
-      when: path=plan
+      when: path=plan|finalize
       sections:
         Plan Authoring: always
-        Start or resume: always
-        Required plan contract: always
-        Task granularity: always
-        Session groups: always
-        Task file: always
+        Start or resume: path=plan
+        Status vocabulary: always
+        Required plan contract: path=plan
+        Task granularity: path=plan
+        Session groups: path=plan
         Decisions: always
+        Open decisions while drafting: path=plan
+        Autonomous drafting: autonomy=autonomous
         Documentation gates after plan writes: always
-        Ready and finalization: always
+        With a shell: always
+        With no shell: always
+        Ready: path=plan
+        Finalization: path=finalize
+        Task file: path=finalize
+        Write errors: always
         Planning inside a worktree: always
     - file: intake-assessment.md
       when: path=intake
@@ -85,11 +96,11 @@ agents:
         Investigator dispatches: always
         Ledger loss and attestation (D31): always
     - file: test-first-contract.md
-      when: mode=test-first
+      when: mode=test-first;path=plan|finalize|escalation
       sections:
         Test-First Contract: always
     - file: standard-verification.md
-      when: mode=standard
+      when: mode=standard;path=plan|finalize|escalation
       sections:
         Standard Verification Contract: always
     - file: autonomy-decisions.md

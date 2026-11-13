@@ -453,10 +453,17 @@ public static partial class ConductorGuard
             ["permissionDecisionReason"] = reason,
         }.ToJsonString();
 
-    // Each run start value has its own shape: names and slugs are lowercase tokens, a version has no
-    // slash, and a resume branch may hold slashes but never "..", a leading dot, or a leading slash.
+    // The conductor's whole shell: four kyber-weave commands, one per call, nothing chained, piped or redirected.
+    // Each value has its own token shape: names and slugs are lowercase tokens, a version has no slash, a resume
+    // branch may hold slashes but never "..", a leading dot or a leading slash, and a plan path is a relative or
+    // absolute path of plain characters with no "..". `docs tasks` is allowed only with --list, which writes nothing.
     [GeneratedRegex(
-        @"\A[ \t]*kyber-weave[ \t]+(?:run[ \t]+start(?:[ \t]+(?:--(?:harness|type)[ \t]+[a-z][a-z0-9-]*|--slug[ \t]+[a-z0-9]+(?:-[a-z0-9]+)*|--failing-version[ \t]+(?!\S*\.\.)[A-Za-z0-9][A-Za-z0-9.+-]*|--resume[ \t]+(?!\S*\.\.)(?!\S*//)[A-Za-z0-9_][A-Za-z0-9._/+@-]*))+(?:[ \t]+--json)?|doctor[ \t]+--ensure(?:[ \t]+[A-Za-z0-9._/~:\\][A-Za-z0-9._/~:\\-]*)?)[ \t]*\z",
+        @"\A[ \t]*kyber-weave[ \t]+(?:" +
+        @"run[ \t]+start(?:[ \t]+(?:--(?:harness|type)[ \t]+[a-z][a-z0-9-]*|--slug[ \t]+[a-z0-9]+(?:-[a-z0-9]+)*|--failing-version[ \t]+(?!\S*\.\.)[A-Za-z0-9][A-Za-z0-9.+-]*|--resume[ \t]+(?!\S*\.\.)(?!\S*//)[A-Za-z0-9_][A-Za-z0-9._/+@-]*|--brief|--path[ \t]+(?:intake|plan|spec)|--autonomy[ \t]+(?:supervised|autonomous)))+(?:[ \t]+--json)?" +
+        @"|squad[ \t]+brief[ \t]+[a-z][a-z0-9-]*(?:[ \t]+(?:--path[ \t]+[a-z]+|--autonomy[ \t]+(?:supervised|autonomous)|--mode[ \t]+(?:test-first|standard)|--harness[ \t]+[a-z][a-z0-9-]*|--plan[ \t]+(?!\S*\.\.)[A-Za-z0-9._/~:\\][A-Za-z0-9._/~:\\-]*))*" +
+        @"|docs[ \t]+tasks[ \t]+(?!\S*\.\.)[A-Za-z0-9._/~:\\][A-Za-z0-9._/~:\\-]*[ \t]+--list" +
+        @"|doctor[ \t]+--ensure(?:[ \t]+[A-Za-z0-9._/~:\\][A-Za-z0-9._/~:\\-]*)?" +
+        @")[ \t]*\z",
         RegexOptions.CultureInvariant)]
     private static partial Regex RunStartCommand();
 

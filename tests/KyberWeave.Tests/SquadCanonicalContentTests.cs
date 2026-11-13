@@ -1271,14 +1271,13 @@ public sealed class SquadCanonicalContentTests
     /// <summary>
     /// The run-start step is one command, and every surface that describes it names that command. A
     /// reference that describes the step without naming the command leaves the agent to reconstruct it
-    /// from prose, which is how the two entry points drifted apart in the first place.
+    /// from prose, which is how the two entry points drifted apart in the first place. The conductor's path
+    /// references no longer describe the step: it runs before any brief exists, so it lives in the conductor body.
     /// </summary>
     /// <param name="relativePath">A run-start surface, relative to the canonical Squad source root.</param>
     [Theory]
     [InlineData("agents/conductor.md")]
     [InlineData("skills/bug-crusher/SKILL.md")]
-    [InlineData("agents/conductor/references/intake-path.md")]
-    [InlineData("agents/conductor/references/plan-path.md")]
     public void RunStartSurfacesNameTheRunStartCommand(string relativePath)
     {
         string text = File.ReadAllText(Path.Combine(ProductRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));

@@ -6,13 +6,15 @@ The plan file is durable state. A live agent instance is disposable.
 
 1. Resolve the plans directory and **<plan-index>** through Config Reg, then read the index.
 2. Use a prompt-supplied `PLAN_FILE` only when its canonical path remains beneath the plans directory. If none is supplied, create a date-prefixed Draft plan and its index row before broad discovery. Every new plan file name starts with today's date as `yyyy-MM-dd-`, even when the name was handed to you: if a supplied `PLAN_FILE` names a plan that does not exist yet and lacks the date, add the date in front, create that file, and return the dated path as `PLAN_FILE`. Never rename a plan that already exists. Change an existing file with an in-place edit, never a whole-file rewrite, whenever the harness gives you an edit tool. On harnesses where file editing requires an existing destination file (such as Devin), initialize the file via shell (for example, `touch <file>`) before editing. A note or excuse for why the process was not followed is not a resolution. The process exists to ensure quality; going around it signals bad quality. Do not put such a note in **Active Plans**. A pull request that does will not be approved.
-3. Reconcile body status, frontmatter lifecycle, and index status in the same save. The body status is authoritative when they disagree. The status vocabulary is stated under Status vocabulary below.
+3. Reconcile body status, frontmatter lifecycle, and index status in the same save. The body status is authoritative when they disagree.
 4. Reconcile conductor-supplied answers against the decision ledger before more discovery.
 5. Save after every discovery batch and before every status handoff.
 
 Open only active Draft, Ready, In progress, or Blocked plans. Draft supports planning only. Review required, Completed, Superseded, and archived artifacts are not implementation authority.
 
-**Status vocabulary.** Frontmatter `status` is `draft` while the plan is Draft and `current` from Ready on. Its closed set is `current`, `draft`, `needs-review`, `superseded`; `status: ready` is invalid and fails `KW-DOC-SPEC-002`. The bold body status line and the index row carry Draft, Ready and later states.
+## Status vocabulary
+
+Frontmatter `status` is `draft` while the plan is Draft and `current` from Ready on; `docs validate` names the closed set when a value is outside it. The bold body status line and the index row carry Draft, Ready and later states.
 
 ## Required plan contract
 
@@ -44,6 +46,8 @@ plan carries what the prompt needs:
   zero tests and exits success.
 - **The exact commands** the task runs, complete enough to paste into a shell.
 
+A task may also carry `Session: <group>` (default: the task id) and `Role: <agent>` (default: its first required skill).
+
 ## Session groups
 
 Every task declares a `session` group, and the group is the unit of worker continuity: tasks in one
@@ -52,7 +56,75 @@ rather than paying again to rebuild context it already had.
 
 A session group may continue follow-on fixes and later same-role tasks on the same change.
 
-## Task file
+## Decisions
+
+The `## Decisions` section is permanent state, preserved intact across all lifecycle transitions (Draft -> Ready -> execution -> closeout -> archive). It must NEVER be deleted upon finalization or archival.
+
+Record all decisions in a structured table:
+
+| ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+Persist each question with a stable id (for example, D1, D2 or Q1, Q2), the question or architectural choice, the selected answer or decision, mitigating and supporting context (alternatives considered, trade-offs, constraints), and status/approval provenance.
+
+Do not place an unapproved recommendation in the approved answer column until approved. When answered or approved, update the row in place: record the chosen answer, document any mitigating considerations or constraints, and record the explicit approval provenance (for example, `Approved by Hal <date>` or `User decision <date>`).
+
+## Open decisions while drafting
+
+While in Draft, unapproved questions have status `OPEN` or `RECOMMENDED`. Return every currently independent question, up to four, in one handoff:
+
+```text
+STATUS: NEEDS_DECISION
+PLAN_FILE: <saved path>
+QUESTION: [Qn] <decision>
+OPTIONS: <a> / <b> / ...
+RECOMMENDED: <option> — <reason>
+```
+
+If no interactive questions were needed during planning, the plan must still carry the permanent `## Decisions` table documenting the baseline choices, assumptions, and constraints that govern the implementation, and `PLAN_READY` includes `NO_QUESTIONS` with the concrete reason the request was already decision-complete. `NO_QUESTIONS` does not bypass authoring the permanent `## Decisions` table.
+
+### Autonomous drafting
+
+Under `autonomy: autonomous`, decide per the autonomous-decisions reference and return only hard-block escalations. An autonomous hard-block escalation uses this NEEDS_DECISION shape PLUS `ESCALATION: hard_block`, `SOURCES_SEARCHED`, `COST_OF_WRONG` (and `RECOMMENDED`); see [autonomy-decisions.md](autonomy-decisions.md) for the exact block.
+
+## Documentation gates after plan writes
+
+After every plan save, obtain the two checks. Leave `mergeReady` false while the plan is in the active plans folder. A shell is not permission to implement.
+
+### With a shell
+
+Run `kyber-weave docs validate . --merge-ready` and `kyber-weave docs drift .` in the checkout that holds your plan (the worktree when the run uses one) and report `DOCS_VALIDATE: pass (cli, <path>)`. You may use the kw-docs MCP tools `docs_validate_governed_document_schema` and `docs_detect_drift_between_documents_and_code` instead, only in the canonical checkout and only when each response has `rev=` and `branch=` equal to your `RUN_BASE` and `RUN_BRANCH` and `repo=` equal to `git rev-parse --git-common-dir` in your checkout. `repo=` is the git directory, so a different value is another repository, and a matching one proves nothing alone because every worktree shares it. On any mismatch, or when the result is missing, run the CLI commands.
+
+### With no shell
+
+The MCP result cannot be checked against your checkout, so do not rely on it. Use a conductor-supplied `DOCS_CHECKS: <results>`; with none, return `STATUS: BLOCKED` and name the gap.
+
+## Ready
+
+Return `PLAN_READY` only when the saved Draft has no open decisions (all rows in `## Decisions` have status `ANSWERED` or approved), contains the selected mode and matching approved contract, declares its scale (`documentation-impact` with `impact-components`) and its `Design harvest` table, has a schedulable dependency graph, and both documentation checks pass:
+
+```text
+STATUS: PLAN_READY
+PLAN_FILE: <saved path>
+OPEN_DECISIONS: none
+DOCS_VALIDATE: pass
+DOCS_DRIFT: pass
+```
+
+The conductor presents **approve and execute**, stating the declared scale and components so the owner confirms scale before execution. Proceed at high confidence only when the scale and harvest targets are unambiguous.
+
+## Finalization
+
+On a `FINALIZE` invocation carrying explicit approval, record that approval in the decision rows, preserve the permanent `## Decisions` section intact (do NOT delete it), set the plan and index to Ready, save the task file beside the plan and return its path, rerun both documentation checks, and return:
+
+```text
+STATUS: PLAN_FINALIZED
+PLAN_FILE: <saved path>
+TASK_FILE: <saved tasks.json path>
+DOCS_VALIDATE: pass
+DOCS_DRIFT: pass
+```
+
+### Task file
 
 At finalization the architect saves the task file beside the plan, `<plan>.tasks.json` in the
 directory named by **<plan-index>**, returns its path, and the file is committed with the plan at
@@ -70,67 +142,14 @@ is written.
 Finalization runs in this order:
 
 1. Make every plan edit first: the approval rows, the bold body status line, the frontmatter status (`current`) and the index row.
-2. Run `kyber-weave docs tasks <plan file> --write` in the checkout that holds the plan. It derives the whole file from the plan: file scopes, dependencies, skills, the execution digest, and each prompt from the task's own text plus its command and acceptance criteria. It writes nothing and names the task and the line to add when a task lacks a command (`Command: \`dotnet test --filter ...\``), acceptance criteria (`Acceptance criteria: ...`) or a skill (`Required skills: \`csharp-dev\``), or when a `Depends on` token names no task. Add the line to the plan task and run it again. Run `kyber-weave docs tasks <plan file> --check` before `FINALIZE` and fix every `KW-DOC-TASKS-008` to `-011` warning it prints: each names a task whose packet cannot be understood without the plan, or a worker who cannot open the plan. A task may also carry `Session: <group>` (default: the task id) and `Role: <agent>` (default: its first required skill).
+2. Run `kyber-weave docs tasks <plan file> --write` in the checkout that holds the plan. It derives the whole file from the plan: file scopes, dependencies, skills, the execution digest, and each prompt from the task's own text plus its command and acceptance criteria. When it refuses, it names the task and the line to add to the plan; add it and run it again. Run `kyber-weave docs tasks <plan file> --check` before `FINALIZE` and fix every `KW-DOC-TASKS-008` to `-011` warning it prints: each names a task whose packet cannot be understood without the plan, or a worker who cannot open the plan.
 3. Run both documentation checks. Any `KW-DOC-TASKS-*` finding is fixed by changing the plan and repeating step 2, never by editing the file.
 
 Never write, edit or compute the task file or its digest by hand, with a script, or through a sibling such as a `.new` or `.tmp` copy. An edit to a task, a test contract row, an out-of-scope path or the development mode after step 2 means repeating step 2; a status or Decisions edit does not. `kyber-weave docs tasks <plan file> --check` exits 1 and says what differs without writing.
 
 An architect with no shell cannot run step 2. It returns `STATUS: BLOCKED` naming `task file: run kyber-weave docs tasks <plan file> --write in <checkout>`, and continues when it is re-invoked.
 
-## Decisions
-
-The `## Decisions` section is permanent state, preserved intact across all lifecycle transitions (Draft -> Ready -> execution -> closeout -> archive). It must NEVER be deleted upon finalization or archival.
-
-Record all decisions in a structured table:
-
-| ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
-
-## Documentation gates after plan writes
-
-After every plan save, obtain the two checks. Leave `mergeReady` false while the plan is in the active plans folder. A shell is not permission to implement.
-
-- **With a shell:** run `kyber-weave docs validate . --merge-ready` and `kyber-weave docs drift .` in the checkout that holds your plan (the worktree when the run uses one) and report `DOCS_VALIDATE: pass (cli, <path>)`. You may use the kw-docs MCP tools `docs_validate_governed_document_schema` and `docs_detect_drift_between_documents_and_code` instead, only in the canonical checkout and only when each response has `rev=` and `branch=` equal to your `RUN_BASE` and `RUN_BRANCH` and `repo=` equal to `git rev-parse --git-common-dir` in your checkout. `repo=` is the git directory, so a different value is another repository, and a matching one proves nothing alone because every worktree shares it. On any mismatch, or when the result is missing, run the CLI commands.
-- **With no shell:** the MCP result cannot be checked against your checkout, so do not rely on it. Use a conductor-supplied `DOCS_CHECKS: <results>`; with none, return `STATUS: BLOCKED` and name the gap.
-
-Persist each question with a stable id (for example, D1, D2 or Q1, Q2), the question or architectural choice, the selected answer or decision, mitigating and supporting context (alternatives considered, trade-offs, constraints), and status/approval provenance.
-
-While in Draft, unapproved questions have status `OPEN` or `RECOMMENDED`. Return every currently independent question, up to four, in one handoff:
-
-```text
-STATUS: NEEDS_DECISION
-PLAN_FILE: <saved path>
-QUESTION: [Qn] <decision>
-OPTIONS: <a> / <b> / ...
-RECOMMENDED: <option> — <reason>
-```
-
-Under `autonomy: autonomous`, decide per the autonomous-decisions reference and return only hard-block escalations. An autonomous hard-block escalation uses this NEEDS_DECISION shape PLUS `ESCALATION: hard_block`, `SOURCES_SEARCHED`, `COST_OF_WRONG` (and `RECOMMENDED`); see [autonomy-decisions.md](autonomy-decisions.md) for the exact block.
-
-Do not place an unapproved recommendation in the approved answer column until approved. When answered or approved, update the row in place: record the chosen answer, document any mitigating considerations or constraints, and record the explicit approval provenance (for example, `Approved by Hal <date>` or `User decision <date>`).
-
-If no interactive questions were needed during planning, the plan must still carry the permanent `## Decisions` table documenting the baseline choices, assumptions, and constraints that govern the implementation, and `PLAN_READY` includes `NO_QUESTIONS` with the concrete reason the request was already decision-complete. `NO_QUESTIONS` does not bypass authoring the permanent `## Decisions` table.
-
-## Ready and finalization
-
-Return `PLAN_READY` only when the saved Draft has no open decisions (all rows in `## Decisions` have status `ANSWERED` or approved), contains the selected mode and matching approved contract, declares its scale (`documentation-impact` with `impact-components`) and its `Design harvest` table, has a schedulable dependency graph, and both documentation checks pass:
-
-```text
-STATUS: PLAN_READY
-PLAN_FILE: <saved path>
-OPEN_DECISIONS: none
-DOCS_VALIDATE: pass
-DOCS_DRIFT: pass
-```
-
-The conductor presents **approve and execute**, stating the declared scale and components so the owner confirms scale before execution. Proceed at high confidence only when the scale and harvest targets are unambiguous. On a `FINALIZE` invocation carrying explicit approval, record that approval in the decision rows, preserve the permanent `## Decisions` section intact (do NOT delete it), set the plan and index to Ready, save the task file beside the plan and return its path, rerun both documentation checks, and return:
-
-```text
-STATUS: PLAN_FINALIZED
-PLAN_FILE: <saved path>
-TASK_FILE: <saved tasks.json path>
-DOCS_VALIDATE: pass
-DOCS_DRIFT: pass
-```
+## Write errors
 
 A failed write or check returns `STATUS: PLAN_WRITE_ERROR` with the intended path and exact error. Never report a later lifecycle from unsaved state.
 

@@ -50,6 +50,10 @@ public sealed class ConductorGuardTests
     [InlineData("kyber-weave run start --harness copilot --type fix --slug a --failing-version 1.2.3 --resume copilot/fix/a --json")]
     [InlineData("kyber-weave doctor --ensure")]
     [InlineData("kyber-weave doctor --ensure /repo")]
+    [InlineData("kyber-weave run start --harness copilot --type feat --slug a --brief --path plan --autonomy autonomous")]
+    [InlineData("kyber-weave squad brief conductor --path intake --autonomy supervised")]
+    [InlineData("kyber-weave squad brief architect --path finalize --plan docs/plans/2026-11-13-x.md --mode test-first")]
+    [InlineData("kyber-weave docs tasks docs/plans/2026-11-13-x.md --list")]
     public void RunStartCommands_ArePermitted(string command)
     {
         Assert.Empty(Run(Event("bash", new { command })));
@@ -66,6 +70,21 @@ public sealed class ConductorGuardTests
     [InlineData("kyber-weave run start --slug `id`")]
     [InlineData("kyber-weave run start --slug a | tee x")]
     [InlineData("kyber-weave run start --slug a\nrm x")]
+    [InlineData("kyber-weave run start --slug a --brief > out.txt")]
+    [InlineData("kyber-weave run start --path elsewhere")]
+    [InlineData("kyber-weave squad brief conductor && rm x")]
+    [InlineData("kyber-weave squad brief conductor; rm x")]
+    [InlineData("kyber-weave squad brief conductor | tee x")]
+    [InlineData("kyber-weave squad brief conductor --plan $(id)")]
+    [InlineData("kyber-weave squad brief conductor --plan `id`")]
+    [InlineData("kyber-weave squad brief conductor --plan ../../etc/passwd")]
+    [InlineData("kyber-weave squad brief conductor --from /tmp/evil")]
+    [InlineData("kyber-weave squad brief conductor\nrm x")]
+    [InlineData("kyber-weave docs tasks docs/plans/x.md --write")]
+    [InlineData("kyber-weave docs tasks docs/plans/x.md --check")]
+    [InlineData("kyber-weave docs tasks docs/plans/x.md")]
+    [InlineData("kyber-weave docs tasks docs/plans/x.md --list 2> err")]
+    [InlineData("kyber-weave docs validate .")]
     public void OtherCommands_AreDenied(string command)
     {
         Assert.NotEmpty(ReasonFor(Event("bash", new { command })));

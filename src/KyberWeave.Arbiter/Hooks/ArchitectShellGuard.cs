@@ -37,6 +37,8 @@ public static class ArchitectShellGuard
     /// </summary>
     private const string KyberWeaveCli = "kyber-weave";
 
+    private static readonly HashSet<string> BriefFlags = new(StringComparer.Ordinal) { "--path", "--plan", "--autonomy", "--mode", "--harness" };
+
     private static readonly IReadOnlySet<string> SortSafeLongFlags = new HashSet<string>(StringComparer.Ordinal)
     {
         "--reverse", "--numeric-sort", "--unique", "--key", "--field-separator", "--ignore-case",
@@ -157,6 +159,7 @@ public static class ArchitectShellGuard
             ["kyber-weave arbiter plan <plan file> -f json"] = new("kyber-weave arbiter plan docs/plans/x.md -f json", true),
             ["codegraph explore \"…\""] = new("codegraph explore \"x\"", true),
             ["kyber-weave doctor --ensure"] = new("kyber-weave doctor --ensure", true),
+            ["kyber-weave squad brief architect …"] = new("kyber-weave squad brief architect --path plan --plan docs/plans/x.md --mode test-first", true),
             ["git"] = new("git status", true),
             ["log"] = new("git log -1", true),
             ["diff"] = new("git diff main...HEAD", true),
@@ -962,11 +965,20 @@ public static class ArchitectShellGuard
             && string.Equals(words[4], "-f", StringComparison.Ordinal)
             && string.Equals(words[5], "json", StringComparison.Ordinal);
 
-        return validate || drift || docsTasks || doctor || arbiterPlan
+        // The architect's own brief: read-only, for the architect alone, and only flags that each take one value.
+        bool brief = words.Count >= 4
+            && words.Count % 2 == 0
+            && string.Equals(words[1], "squad", StringComparison.Ordinal)
+            && string.Equals(words[2], "brief", StringComparison.Ordinal)
+            && string.Equals(words[3], "architect", StringComparison.Ordinal)
+            && Enumerable.Range(0, (words.Count - 4) / 2).All(pair =>
+                BriefFlags.Contains(words[4 + (2 * pair)]) && !IsFlag(words[5 + (2 * pair)]));
+
+        return validate || drift || docsTasks || doctor || arbiterPlan || brief
             ? null
             : new Refusal(
                 "is not a kyber-weave form on the architect's list",
-                "Use kyber-weave docs validate <dir> --merge-ready, docs drift <dir>, docs tasks <plan file> --write, doctor --ensure, or arbiter plan <plan file> -f json");
+                "Use kyber-weave docs validate <dir> --merge-ready, docs drift <dir>, docs tasks <plan file> --write, doctor --ensure, arbiter plan <plan file> -f json, or squad brief architect with --path, --plan, --autonomy or --mode");
     }
 
     private static Refusal? CheckGit(List<string> words)

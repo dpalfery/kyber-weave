@@ -49,7 +49,7 @@ public sealed class ArchitectShellGuardSyncTests
 
         // A clause that parsed to nothing would make the set comparison below pass vacuously.
         Assert.NotEmpty(documented);
-        Assert.Equal(28, documented.Count);
+        Assert.Equal(29, documented.Count);
 
         string[] extra = documented.Except(forms, StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
         string[] missing = forms.Except(documented, StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
@@ -66,7 +66,7 @@ public sealed class ArchitectShellGuardSyncTests
     {
         // The member data the per-key theory runs over must be the whole table, not an empty or partial set.
         Assert.NotEmpty(DocumentedKeys());
-        Assert.Equal(28, DocumentedKeys().Count());
+        Assert.Equal(29, DocumentedKeys().Count());
         Assert.Equal(ArchitectShellGuard.DocumentedForms.Count, DocumentedKeys().Count());
     }
 

@@ -2252,6 +2252,14 @@ The route, the autonomy and the plan's development mode are known before a model
   `--json`) for `--path` and `--autonomy`. It is opt-in so the report keeps its shape, and a brief that
   cannot be built is a warning: the branch exists, the run is ready, and the conductor reads the
   references whole.
+- **Who runs it.** The conductor runs `run start … --brief` itself and reads a whole reference only when
+  there is no brief, an error or a diagnostics line; its run-start text lives in `conductor.md`, because it
+  runs before any brief exists. The architect runs `squad brief architect --path <intake|plan|finalize|escalation>`
+  first, the `finalize` path selecting the finalization sections of `plan-authoring.md` and the `plan` path
+  the drafting ones. The Copilot conductor's guard allows exactly `run start`, `squad brief`, `docs tasks
+  <plan> --list` and `doctor --ensure`, one command per call; the architect's shell allowlist
+  (`KW-ARB-SHELL-001`) allows `squad brief architect` with `--path`, `--plan`, `--autonomy`, `--mode` and
+  `--harness`.
 
 ## Arbiter savings in the roles
 

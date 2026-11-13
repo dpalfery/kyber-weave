@@ -43,6 +43,8 @@ Do not relay `GAPS` or `OPEN_QUESTIONS` that carry a recommended option: accept 
 
 Both modes deliver the same way. When the work is ready to leave the machine (with the applicable closeout done), the conductor commits to a feature branch (never the default branch), pushes it, and opens a **draft** pull request. The review council reviews the pushed branch, or the local branch when the push fails; it never waits for a pull request, and its verdict is posted on the pull request when one exists. Delivery never waits for the council.
 
+### Autonomous approval of the run's delivery
+
 **Autonomous mode is the user's approval for the run's own delivery.** `autonomy: autonomous`, set in the prompt or in the Config Reg, is the user's explicit approval for the run's commits on its run branch, the push of that branch, and its draft pull request. A host rule that asks for approval before a commit or push (an `AGENTS.md` line, for example) is satisfied by it, so do not stop to ask. It approves nothing outside the run branch: no commit to the default branch, no force-push, no reset, restore, clean or rebase of work the run did not create, and no merge.
 
 The plan and its task file are committed together before the first dispatch, in both modes, without asking. Delivery never asks, and a pull request that cannot be opened (no supported remote host, no credentials) is not a broken step that stops the run: finish everything local (commits, the push if a remote accepts it, the final council review, closeout) and report `NOT DELIVERED: pull request — <reason>`.
@@ -54,6 +56,8 @@ The council verdict goes in the PR description when there is one. It does not ga
 Human and bot review happens after the pull request is ready. A reviewer asking for changes at that point is ordinary PR review (`kilo-review-loop` or `pr-review-fix-comments`), not a conductor gate.
 
 Delivery requires DOCS_REVIEW: rows and, for plan/spec-backed work, CLOSEOUT_COMPLETE evidence; the draft PR carries both. Assign the PR to the invoking user, and request reviewers when the repository names them, so it is notified. CI minutes triggered by the push are expected cost, not the "spend" hard stop. Never merge.
+
+### Supervised delivery
 
 In supervised mode the conductor runs the same push, draft, and CI-only ready step, then stops and asks the user how to proceed.
 
@@ -76,15 +80,20 @@ A circuit-breaker that `architect` mediation cannot resolve keeps rework on that
 
 Finish every unaffected queued task and the closeout, then deliver as above. A review finding still open when the review loop stops is handled the same way: it is listed in the PR as pending human review, and it never holds back delivery.
 
+## Circuit-breakers in supervised mode
+
 Supervised behaviour is unchanged: an unresolved circuit-breaker finding escalates to the user and blocks completion until the user resolves it.
 
 ## Final report
 
 Add to the completion report:
 
-- every `autonomous: low-confidence` decision: ID, decision, and why no source answered, so the user can overturn it without opening the plan;
-- the count of auto-approved gates;
 - every open circuit-breaker finding, and every review finding still open when the review loop stopped, listed as pending human review;
 - the draft pull request link and its CI state (ready, or what it is waiting for).
+
+### Autonomous decisions in the report
+
+- every `autonomous: low-confidence` decision: ID, decision, and why no source answered, so the user can overturn it without opening the plan;
+- the count of auto-approved gates.
 
 A run-start `doctor --ensure` failure is not a final-report item: under `stop-on-tool-failure` it ends the run with `STATUS: TOOL_FAILURE` before any delivery, and a repository that sets the setting to `false` carries its warning line in the run record.

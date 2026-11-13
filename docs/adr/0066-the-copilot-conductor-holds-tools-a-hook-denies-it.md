@@ -30,7 +30,7 @@ VS Code's documentation says instructions do not guarantee compliance. Copilot's
 
 When the Arbiter is enabled, the Copilot conductor is rendered with `search`, `execute`, `edit` and `web` for its workers, plus an agent-scoped hook running `kyber-weave-arbiter guard`.
 
-- `preToolUse` denies everything except delegation, bookkeeping (its own todo list included), the docs tools, reading contract files (its references and skills, `AGENTS.md`, and any file under the planning directories, such as a plan's task file), and exact `kyber-weave run start` and `kyber-weave doctor --ensure` commands.
+- `preToolUse` denies everything except delegation, bookkeeping (its own todo list included), the docs tools, reading contract files (its references and skills, `AGENTS.md`, and any file under the planning directories, such as a plan's task file), and exact `kyber-weave run start` (with `--brief`, `--path` and `--autonomy`), `kyber-weave squad brief`, `kyber-weave docs tasks <plan> --list` and `kyber-weave doctor --ensure` commands, one per call with nothing chained, piped or redirected (amended 2026-11-13, so the conductor reads its brief without a relay through `github-devops`).
 - `userPromptTransformed` appends an explanation of the workflow to every model-facing message, including HydraFusion handoffs. It says why general single-agent defaults do not apply.
 
 Without the Arbiter, the conductor keeps its narrow tool list, because nothing would enforce the boundary.
