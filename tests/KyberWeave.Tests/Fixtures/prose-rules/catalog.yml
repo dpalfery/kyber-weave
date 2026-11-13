@@ -576,7 +576,7 @@ rules:
       - products/kyber-squad/agents/go-dev.md
     controls:
       - products/kyber-squad/agents/sql-database-architect.md
-      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/agents/research-agent.md
     retired:
       statement: A developer worker leaves test authorship to test-dev and does not write test files.
       example: Hand test authorship to test-dev. Report what needs covering; do not write the test files.
