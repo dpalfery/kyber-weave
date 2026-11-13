@@ -1,5 +1,4 @@
 using System.Globalization;
-using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Closeout;
@@ -41,8 +40,8 @@ public sealed class DocsCloseoutCommand : Command<DocsCloseoutSettings>
             return 1;
         }
 
-        string plan = Path.GetFullPath(settings.Path);
-        string root = RepositoryRootOf(plan);
+        string typed = settings.Path;
+        string root = PlanArguments.RepositoryRootFor(typed, settings.WorkingDirectory);
         settings.Path = root;
         if (!DocsCommandComposition.TryResolveConfig(settings, report, out KyberWeaveConfig config, out OntologyConfig ontology))
         {
@@ -50,30 +49,20 @@ public sealed class DocsCloseoutCommand : Command<DocsCloseoutSettings>
             return 1;
         }
 
-        string relative = Path.GetRelativePath(root, plan).Replace('\\', '/');
-        PlanCloseoutOutcome outcome = new PlanCloseout(root, config.WithOntology(ontology), () => new DocumentLoader(root, ontology))
+        KyberWeaveConfig effective = config.WithOntology(ontology);
+        if (!PlanArguments.TryResolve(root, effective, typed, settings.WorkingDirectory, "docs closeout", report, out string relative))
+        {
+            CommandHelpers.Finish(report, settings, "docs closeout", "Plan");
+            return 1;
+        }
+
+        PlanArguments.Announce(report, settings, relative);
+        PlanCloseoutOutcome outcome = new PlanCloseout(root, effective, () => new DocumentLoader(root, ontology))
             .Run(relative, date, settings.Archive);
         report.AddRange(outcome.Report.Items);
         report.AddMetric("archived", outcome.Archived);
 
         CommandHelpers.Finish(report, settings, "docs closeout", "Plan");
         return report.HasErrors ? 1 : 0;
-    }
-
-    /// <summary>
-    /// The repository holding the plan: the nearest ancestor with a <c>.git</c> entry, else the current directory
-    /// when the plan sits under it.
-    /// </summary>
-    private static string RepositoryRootOf(string plan)
-    {
-        string start = Path.GetDirectoryName(plan) ?? plan;
-        string found = ArbiterRepoRoot.Find(start);
-        if (Directory.Exists(Path.Combine(found, ".git")) || File.Exists(Path.Combine(found, ".git")))
-        {
-            return found;
-        }
-
-        string current = Path.GetFullPath(Directory.GetCurrentDirectory());
-        return plan.StartsWith(current + Path.DirectorySeparatorChar, StringComparison.Ordinal) ? current : found;
     }
 }

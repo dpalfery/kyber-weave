@@ -29,7 +29,14 @@ public sealed class ArbiterPlanCommand : Command<ArbiterSettings>
     public override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new();
-        string resolved = Path.GetFullPath(settings.Path);
+        string root = PlanArguments.RepositoryRootFor(settings.Path, settings.WorkingDirectory);
+        if (!PlanArguments.TryResolve(root, PlanArguments.ConfigForResolving(root, settings.Config), settings.Path, settings.WorkingDirectory, "arbiter plan", report, out string relative))
+        {
+            CommandHelpers.Finish(report, settings, "arbiter plan", "Task");
+            return 1;
+        }
+
+        string resolved = Path.GetFullPath(relative, root);
         if (!File.Exists(resolved))
         {
             report.Add(new Diagnostic(
@@ -97,7 +104,7 @@ public sealed class ArbiterPlanCommand : Command<ArbiterSettings>
         // carry only the rendered report, or a script reading stdout would parse a non-document.
         if (settings.ParsedFormat == OutputFormat.Table)
         {
-            AnsiConsole.MarkupLine($"[bold]Plan:[/] {Markup.Escape(resolved)}");
+            CommandHelpers.WriteUnfolded(() => AnsiConsole.MarkupLine($"[bold]Plan:[/] {Markup.Escape(resolved)}"));
             AnsiConsole.MarkupLine($"[grey]Status: {Markup.Escape(document.Status ?? "—")}; mode: {Markup.Escape(document.DevelopmentMode)}.[/]");
 
             if (digest is { } printed)

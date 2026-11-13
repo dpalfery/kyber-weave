@@ -42,6 +42,31 @@ public sealed class DocsTasksCommandTests
     private static string TaskFileOf(DocFixture fixture, string taskFilePath) =>
         File.ReadAllText(Path.Combine(fixture.Root, taskFilePath.Replace('/', Path.DirectorySeparatorChar)));
 
+    /// <summary>The plan may be named by its slug, with or without the date prefix, or by a name or path from any directory.</summary>
+    [Theory]
+    [InlineData("ready-tasks", ".")]
+    [InlineData("2026-11-07-ready-tasks", "6-Docs/plans")]
+    [InlineData("2026-11-07-ready-tasks.md", "6-Docs/plans")]
+    [InlineData("6-Docs/plans/2026-11-07-ready-tasks.md", "6-Docs/plans")]
+    public void ThePlanCanBeNamedInAnyNaturalSpelling(string typed, string workingDirectory)
+    {
+        using DocFixture fixture = Plan();
+        DocsTasksSettings settings = new()
+        {
+            Path = typed,
+            Format = "json",
+            Check = false,
+            WorkingDirectory = Path.Combine(fixture.Root, workingDirectory.Replace('/', Path.DirectorySeparatorChar))
+        };
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
+            () => new DocsTasksCommand().Execute(null!, settings, CancellationToken.None));
+
+        Assert.True(execution.Result == 0, execution.Output);
+        using JsonDocument report = JsonDocument.Parse(execution.Output);
+        Assert.Equal(PlanTaskFileProbe.PlanPath, report.RootElement.GetProperty("metrics").GetProperty("plan").GetString());
+    }
+
     /// <summary>The generated file is what the validator reads: no task-file finding at all.</summary>
     [Fact]
     public void AGeneratedFilePassesEveryTaskFileRule()

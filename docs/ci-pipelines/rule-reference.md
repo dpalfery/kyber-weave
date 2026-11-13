@@ -58,6 +58,7 @@ Reported only when the `plan-index` or `todo-index` registry property names a do
 | `KW-DOC-CLOSEOUT-003` | Error | The plan index or the archived plan inventory is missing, or the inventory has no `Plan / Status / Date / Archive Date / Canonical Docs / Goal` table to add the row to |
 | `KW-DOC-CLOSEOUT-004` | Info / Warning | A step the command took or, without `--archive`, would take. Warning: `git add` could not stage the touched files |
 | `KW-DOC-CLOSEOUT-005` | Error | `--date` is not `yyyy-MM-dd` |
+| `KW-DOC-PLANREF-001` | Error | A plan or specification argument (to `docs closeout`, `docs tasks` or `arbiter plan`) matches more than one active file; the finding lists the candidates |
 
 A plan whose closeout evidence is incomplete is reported with `KW-DOC-LIFECYCLE-004` and nothing is moved.
 

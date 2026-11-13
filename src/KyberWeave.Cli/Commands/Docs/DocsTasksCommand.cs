@@ -1,4 +1,3 @@
-using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -40,8 +39,8 @@ public sealed class DocsTasksCommand : Command<DocsTasksSettings>
             return 1;
         }
 
-        string plan = Path.GetFullPath(settings.Path);
-        string root = RepositoryRootOf(plan);
+        string typed = settings.Path;
+        string root = PlanArguments.RepositoryRootFor(typed, settings.WorkingDirectory);
         settings.Path = root;
         if (!DocsCommandComposition.TryResolveConfig(settings, report, out KyberWeaveConfig config, out OntologyConfig ontology))
         {
@@ -49,12 +48,19 @@ public sealed class DocsTasksCommand : Command<DocsTasksSettings>
             return 1;
         }
 
-        string relative = Path.GetRelativePath(root, plan).Replace('\\', '/');
+        KyberWeaveConfig effective = config.WithOntology(ontology);
+        if (!PlanArguments.TryResolve(root, effective, typed, settings.WorkingDirectory, "docs tasks", report, out string relative))
+        {
+            CommandHelpers.Finish(report, settings, "docs tasks", "Task file");
+            return 1;
+        }
+
+        PlanArguments.Announce(report, settings, relative);
         PlanTaskFileMode mode = settings.Write ? PlanTaskFileMode.Write
             : settings.Check ? PlanTaskFileMode.Check
             : PlanTaskFileMode.Preview;
 
-        PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(root, config.WithOntology(ontology)).Run(relative, mode);
+        PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(root, effective).Run(relative, mode);
         report.AddRange(outcome.Report.Items);
 
         if (outcome.ExecutionDigest is not null)
@@ -87,22 +93,5 @@ public sealed class DocsTasksCommand : Command<DocsTasksSettings>
         }
 
         return report.HasErrors ? 1 : 0;
-    }
-
-    /// <summary>
-    /// The repository holding the plan: the nearest ancestor with a <c>.git</c> entry, else the current directory
-    /// when the plan sits under it.
-    /// </summary>
-    private static string RepositoryRootOf(string plan)
-    {
-        string start = Path.GetDirectoryName(plan) ?? plan;
-        string found = ArbiterRepoRoot.Find(start);
-        if (Directory.Exists(Path.Combine(found, ".git")) || File.Exists(Path.Combine(found, ".git")))
-        {
-            return found;
-        }
-
-        string current = Path.GetFullPath(Directory.GetCurrentDirectory());
-        return plan.StartsWith(current + Path.DirectorySeparatorChar, StringComparison.Ordinal) ? current : found;
     }
 }

@@ -87,6 +87,22 @@ public sealed class DocsCloseoutCommandTests
         return (run.Result, run.Output);
     }
 
+    /// <summary>Runs the check with the plan spelled as <paramref name="typed"/> from <paramref name="workingDirectory"/>.</summary>
+    private static (int Exit, string Output) RunTyped(DocFixture fixture, string typed, string workingDirectory)
+    {
+        DocsCloseoutSettings settings = new()
+        {
+            Path = typed,
+            Format = "json",
+            Date = Date,
+            WorkingDirectory = Path.Combine(fixture.Root, workingDirectory.Replace('/', Path.DirectorySeparatorChar))
+        };
+
+        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(
+            () => new DocsCloseoutCommand().Execute(null!, settings, CancellationToken.None));
+        return (run.Result, run.Output);
+    }
+
     private static string Read(DocFixture fixture, string relative) =>
         File.ReadAllText(Path.Combine(fixture.Root, relative.Replace('/', Path.DirectorySeparatorChar)));
 
@@ -113,6 +129,43 @@ public sealed class DocsCloseoutCommandTests
         Assert.StartsWith("| [2026-10-20-widget.md](2026-10-20-widget.md) | Archived — complete 2026-11-13 |", rows[0], StringComparison.Ordinal);
         Assert.Contains("[Widget architecture](../../reference/widget.md) (D1, H1)", rows[0], StringComparison.Ordinal);
         Assert.StartsWith("| [older.md]", rows[1], StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("2026-10-20-widget", "6-Docs/plans")]
+    [InlineData("2026-10-20-widget.md", "6-Docs/plans")]
+    [InlineData("widget", ".")]
+    [InlineData("widget.md", "6-Docs/plans")]
+    [InlineData("2026-10-20-widget", ".")]
+    [InlineData("6-Docs/plans/2026-10-20-widget.md", "6-Docs/plans")]
+    [InlineData("6-Docs/plans/2026-10-20-widget.md", ".")]
+    [InlineData("6-Docs/plans/2026-10-20-widget", "6-Docs")]
+    public void EveryNaturalSpellingOfThePlanIsResolvedAndTheResolvedPathIsReported(string typed, string workingDirectory)
+    {
+        using DocFixture fixture = Repository();
+
+        (int exit, string output) = RunTyped(fixture, typed, workingDirectory);
+
+        Assert.True(exit == 0, output);
+        using JsonDocument report = JsonDocument.Parse(output);
+        Assert.Equal(Plan, report.RootElement.GetProperty("metrics").GetProperty("plan").GetString());
+        Assert.DoesNotContain("KW-DOC-CLOSEOUT-001", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ASlugMatchingTwoActivePlansIsAmbiguousAndNothingMoves()
+    {
+        using DocFixture fixture = Repository();
+        fixture.Write("6-Docs/plans/2026-10-25-widget.md", CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready"));
+
+        (int exit, string output) = RunTyped(fixture, "widget", ".");
+
+        Assert.Equal(1, exit);
+        Assert.Contains("KW-DOC-PLANREF-001", output, StringComparison.Ordinal);
+        Assert.Contains("6-Docs/plans/2026-10-20-widget.md", output, StringComparison.Ordinal);
+        Assert.Contains("6-Docs/plans/2026-10-25-widget.md", output, StringComparison.Ordinal);
+        Assert.True(Exists(fixture, Plan));
+        Assert.False(Exists(fixture, Archived));
     }
 
     [Fact]
