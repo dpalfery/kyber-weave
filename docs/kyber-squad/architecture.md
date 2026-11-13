@@ -1922,7 +1922,12 @@ What follows is why it is shaped that way
   exact command and a `RUN-START: true` marker. `KW-ARB-PLAN-001` escalates a `delegate` dispatch
   that names no `PLAN_FILE`, which would refuse the very route the marker exists for, so
   `TriggerClassifier` classifies the marker as `investigate` and the roster check and
-  `KW-ARB-READONLY-001` still apply to the dispatch.
+  `KW-ARB-READONLY-001` still apply to the dispatch. Skipping it is caught on machine facts: the
+  command records the repository's common git directory, the run's worktree and the start time
+  under `~/.kyber-weave/runs/`, and `KW-ARB-RUN-001` refuses a writer dispatch while no recorded
+  run is live ([runbook](../kyber-arbiter/runbook.md#reading-a-run-start-refusal)). A `--type`
+  outside the conventional-commit set exits `2` with the valid types, the closest one when the
+  value looks like a typo of it, and the defaults (`feat` for a feature, `fix` for a defect).
 - **The onboarding answer is checked first after configuration loads, ahead of tool checks and fetch.** A configured repository whose
   configuration carries no `onboarding:` value has never chosen the technologies, gates and
   standards the run will be held to, so the run stops there — before the CodeGraph probe and before
