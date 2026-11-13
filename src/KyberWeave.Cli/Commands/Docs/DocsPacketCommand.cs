@@ -27,8 +27,8 @@ public sealed class DocsPacketCommand : Command<DocsPacketSettings>
 
     /// <summary>
     /// Prints the packet of the named task: the task file's prompt with <c>{worktree}</c> filled in and the
-    /// prior-results slot filled from <c>--prior-results</c>, or labelled as empty. Prints the packet and nothing
-    /// else. The plan comes from <c>--plan</c>, else from the one Ready or In progress plan under the planning
+    /// prior-results slot filled from <c>--prior-results</c>, or labelled as empty, then the host facts section
+    /// (<see cref="PacketHostFacts" />) and nothing else. The plan comes from <c>--plan</c>, else from the one Ready or In progress plan under the planning
     /// folders. The task file is checked against the plan first, so a stale file is refused with the fix.
     /// Exits 0 after printing; exits 1 with the reason and the next command otherwise.
     /// </summary>
@@ -95,7 +95,10 @@ public sealed class DocsPacketCommand : Command<DocsPacketSettings>
             }
         }
 
+        // The host facts are appended at print time, never written into the task file, so the digest is unaffected.
         Console.Out.WriteLine(PlanTaskPacket.Fill(entry, root, prior));
+        Console.Out.WriteLine();
+        Console.Out.WriteLine(PacketHostFacts.Render(root, config, entry.Role, entry.Id));
         return 0;
     }
 
