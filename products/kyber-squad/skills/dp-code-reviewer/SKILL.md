@@ -41,7 +41,7 @@ passes `--prior <prior cycle folder>`.
 
 1. The gate run (step 3) prints the cycle at the top of its output; `kyber-weave review cycle . --task <task-id>` gives the same answer without running gates. Its `prior:` folder
    (`.agent_scratchpad/<task-id>/review/cycle-<n-1>/`) has the `findings.json` to re-check
-   and the `head` file the delta starts from; its `recheck:` lines name the findings.
+   and the `cycle.json` whose `head` the delta starts from; its `recheck:` lines name the findings.
 2. For each surviving finding, re-check that finding and its class. Re-read the code at
    that file and line; do not trust the fix description. A finding is FIXED only when the fix refuses its whole class: state the class in one sentence, name at least three other inputs of that class that the original failure scenario did not name, and trace each through the fix. A fix that
    refuses the named input and lets another input of the class through is not FIXED: the

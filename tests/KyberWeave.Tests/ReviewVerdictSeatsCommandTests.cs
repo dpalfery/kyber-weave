@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Core.Review;
 using Spectre.Console.Cli;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 using static KyberWeave.Tests.ReviewDiagnosticAssert;
 
@@ -41,6 +42,7 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
     public ReviewVerdictSeatsCommandTests()
     {
         _repo = Path.Combine(_temp.Path, "repo");
+        TestGitRepositoryTemplate.CreateReviewGatesCouncilRepository(_repo);
         Directory.CreateDirectory(Path.Combine(_repo, ".kyber-weave"));
         File.WriteAllText(
             Path.Combine(_repo, ".kyber-weave", "kyber-weave.yml"),
@@ -48,6 +50,9 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
 
         _seats = Path.Combine(_temp.Path, "seats");
         Directory.CreateDirectory(_seats);
+
+        // A --prior folder counts only when it records the change it reviewed, so the tests' prior belongs to this repository's.
+        ReviewCycles.WriteIdentity(PriorFolder, ReviewWorkTree.IdentityOf(_repo, null)!);
     }
 
     /// <summary>Deletes the temporary repository and seat folders.</summary>

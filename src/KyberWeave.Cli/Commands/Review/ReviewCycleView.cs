@@ -144,14 +144,14 @@ internal static class ReviewCycleView
     }
 
     /// <summary>The lines that describe a verifier cycle: the prior cycle, the findings to re-check and what each gate does.</summary>
-    public static IEnumerable<string> VerifierLines(string root, ReviewCyclePlan plan, IReadOnlyList<ReviewFinding> recheck)
+    public static IEnumerable<string> VerifierLines(ReviewCyclePlan plan, IReadOnlyList<ReviewFinding> recheck)
     {
         if (plan.Prior is not { } prior)
             yield break;
 
-        yield return $"prior: {Relative(root, prior.Folder)}";
+        yield return $"prior: {prior.Folder}";
         yield return $"prior-head: {prior.Head ?? "unknown"}";
-        yield return $"findings: {Relative(root, prior.FindingsPath)}";
+        yield return $"findings: {prior.FindingsPath}";
         foreach (ReviewFinding finding in recheck)
             yield return $"recheck: {finding.Id} ({SeverityName(finding.Severity)}) {finding.File}:{finding.Line}";
 
@@ -160,6 +160,18 @@ internal static class ReviewCycleView
 
         foreach (GateCycleDecision gate in plan.Gates.Where(gate => gate.Action != GateCycleAction.NotApplicable))
             yield return $"{(gate.Action == GateCycleAction.Rerun ? "rerun" : "carry")}: {gate.GateId} ({gate.Reason})";
+    }
+
+    /// <summary>One <c>ignored:</c> line per recorded cycle that does not belong to this change, with the fact that says so.</summary>
+    public static IEnumerable<string> IgnoredLines(string root, IReadOnlyList<IgnoredCycle> ignored) =>
+        ignored.Select(cycle => $"ignored: {Relative(root, cycle.Record.Folder)} — {cycle.Reason}");
+
+    /// <summary>Whether <paramref name="path"/> is inside <paramref name="folder"/>.</summary>
+    public static bool IsUnder(string folder, string path)
+    {
+        string relative = Path.GetRelativePath(Path.GetFullPath(folder), Path.GetFullPath(path));
+        return relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                                && !Path.IsPathRooted(relative);
     }
 
     /// <summary><c>full</c> for the first cycle, <c>verifier</c> for any later one.</summary>

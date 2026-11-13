@@ -1019,8 +1019,30 @@ the circuit-breaker stays open and counts toward the stop. The loop runs on the 
 request: ready stays decided by required CI alone.
 
 Each cycle keeps its record in `.agent_scratchpad/<task-id>/review/cycle-<n>/` — the `seats`
-folder, `gates.json`, the `findings.json` the verdict command writes, and `head` — until the run
-ends. A verdict-command refusal (`KW-REVIEW-040`, `-041`, `-042`) is the reviewer's to fix in
+folder, `gates.json`, the `findings.json` the verdict command writes, and `cycle.json` — until the run
+ends.
+
+**A recorded cycle is prior only when it belongs to this change.** The scratchpad is git-ignored, so
+a reset or clean leaves the folders of an earlier run behind, and a brand-new change could otherwise read
+another run's `cycle-2` as its own prior and carry most of its gates. `cycle.json` holds the `branch`, the
+`base` (the merge-base commit of the base ref and `HEAD`, so it names where the change forked) and the `head`
+the cycle reviewed. The gate run writes it when `--out` is in a cycle folder, and `review verdict --out` writes
+it into a cycle folder that has none; the older `head` file is read only when `cycle.json` has no head. A
+finished cycle counts as prior when it recorded all three, its `branch` equals the current branch, its `base`
+equals the current base, and its `head` is `HEAD` or an ancestor of it (`git merge-base --is-ancestor`). Any
+other cycle is ignored, listed as `ignored: <folder> — <reason>` in the output of `review gates --council`
+and `review cycle`, and the run is cycle 1 and a full review. A current branch, base or head that git cannot
+name (a detached head, no base ref) ignores every cycle, which is the safe answer. The base ref is `--base`,
+else `origin/HEAD`, else `origin/main`, `origin/master`, `main` or `master`. `review verdict --prior` applies
+the same rule to the folder it is given and refuses a foreign one (`KW-REVIEW-050`).
+
+**The review folder belongs to the worktree the command was run against.** `review gates`, `review cycle` and
+`review verdict` find the git work tree that contains their path argument (a linked worktree's `.git` file counts)
+and read `.agent_scratchpad` there, so a run in a worktree never reads the canonical checkout's folders. The
+folder is printed as an absolute path (`folder:`), and so are `prior:` and `findings:`, so the reviewer
+never resolves a relative path against a different working directory. Run from the repository's canonical checkout
+while a live run (the records `run start` writes under the operator's home, as `KW-ARB-RUN-001` reads them) works
+in a worktree of its own, the output carries one `worktree:` line naming that worktree and its review folder. A verdict-command refusal (`KW-REVIEW-040`, `-041`, `-042`) is the reviewer's to fix in
 the same cycle and never counts as one.
 
 ## Quick review, sibling sweep and seat confidence

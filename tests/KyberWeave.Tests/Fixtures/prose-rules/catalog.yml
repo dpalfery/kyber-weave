@@ -782,6 +782,22 @@ rules:
     controls:
       - products/kyber-squad/skills/task-gate/references/rework.md
       - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: review-cycle-belongs-to-this-change
+    statement: A recorded review cycle counts as a prior cycle only when it belongs to the current change, meaning it reviewed the same branch and base and its head is an ancestor of HEAD; the gate run ignores and lists any other recorded cycle.
+    stated-in:
+      - products/kyber-squad/agents/code-reviewer.md
+      - products/kyber-squad/skills/code-review/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: review-cycle-folder-is-the-printed-absolute-path
+    statement: The code-reviewer writes every review cycle file under the absolute cycle folder the review tooling prints for the tree under review, never under a relative path.
+    stated-in:
+      - products/kyber-squad/agents/code-reviewer.md
+      - products/kyber-squad/skills/code-review/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
   - id: verifier-cycle-delta
     statement: A verifier cycle reviews the diff from the prior head to the new head and re-seats only the lenses that own an outstanding finding or are newly triggered.
     stated-in:

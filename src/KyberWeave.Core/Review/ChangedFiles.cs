@@ -80,6 +80,41 @@ public static class ChangedFiles
         return output.Length == 0 ? string.Empty : output[0].Trim();
     }
 
+    /// <summary>The commit <c>HEAD</c> names.</summary>
+    /// <exception cref="InvalidOperationException">git could not answer.</exception>
+    public static string HeadCommit(string workingDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        string[] output = RunGitPaths(workingDirectory, "rev-parse", "--verify", "HEAD");
+        return output.Length == 0 ? string.Empty : output[0].Trim();
+    }
+
+    /// <summary>The merge-base commit of <paramref name="baseRef"/> and <c>HEAD</c>.</summary>
+    /// <exception cref="InvalidOperationException">git could not answer.</exception>
+    public static string MergeBaseCommit(string workingDirectory, string baseRef)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseRef);
+        string[] output = RunGitPaths(workingDirectory, "merge-base", baseRef, "HEAD");
+        return output.Length == 0 ? string.Empty : output[0].Trim();
+    }
+
+    /// <summary>Whether <paramref name="commit"/> is <c>HEAD</c> or one of its ancestors; false when git does not know it.</summary>
+    public static bool IsAncestorOfHead(string workingDirectory, string commit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(commit);
+        try
+        {
+            RunGitPaths(workingDirectory, "merge-base", "--is-ancestor", commit, "HEAD");
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>
     /// Lists every path the working tree changed since <paramref name="commit"/>, deleted paths included,
     /// together with untracked files.

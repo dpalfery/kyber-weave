@@ -144,7 +144,7 @@ The loop stops after 5 review cycles, or after 3 cycles in a row in which the co
 
 The loop runs on the open pull request: delivery never waits for it, and required CI alone decides ready.
 
-Each cycle writes to `.agent_scratchpad/<task-id>/review/cycle-<n>/`: the `seats` folder, `gates.json`, the `findings.json` the verdict command writes, and `head`; keep it until the run ends. The conductor records each cycle's number and its count of surviving critical and major findings on the execution record, which is how it sees the stop, and passes the prior cycle folder in the next `code-reviewer` packet so the verifier re-checks what that cycle found.
+Each cycle writes to `.agent_scratchpad/<task-id>/review/cycle-<n>/`: the `seats` folder, `gates.json`, the `findings.json` the verdict command writes, and the `cycle.json` the tools write; keep it until the run ends. The conductor records each cycle's number and its count of surviving critical and major findings on the execution record, which is how it sees the stop, and passes the prior cycle folder in the next `code-reviewer` packet so the verifier re-checks what that cycle found.
 
 ## Closeout
 

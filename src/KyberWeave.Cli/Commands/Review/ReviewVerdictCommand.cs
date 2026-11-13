@@ -39,6 +39,7 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
     private const string InputSitesMissing = "KW-REVIEW-047";
     private const string GateCarried = "KW-REVIEW-048";
     private const string GateNotRerun = "KW-REVIEW-049";
+    private const string PriorNotThisChange = "KW-REVIEW-050";
     private const string CorrectnessLens = "correctness";
     private const string ReviewerSeat = "reviewer";
     private const string PriorFindingsFile = "findings.json";
@@ -63,6 +64,9 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
         string root = Path.GetFullPath(settings.Path);
 
         if (!CommandHelpers.TryLoadConfig(root, settings.Config, report, out KyberWeaveConfig config))
+            return Fail(report, settings);
+
+        if (settings.Prior is not null && !PriorBelongsToThisChange(root, settings, report))
             return Fail(report, settings);
 
         if (!TryReadInput(settings, report, out FindingsReport? input) || input is null)
@@ -116,6 +120,7 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
             ReviewJson.Write(input with { Findings = findings }),
             ReportWriteFailed,
             report);
+        RecordCycleIdentity(root, settings);
 
         CommandHelpers.Finish(report, settings, "review verdict", "Review");
         return report.HasErrors && outcome.Verdict == ReviewVerdict.Approve ? 1 : outcome.ExitCode;
@@ -142,7 +147,8 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
             .. config.Review.Gates.Where(gate => gate.Blocking
                                                  && !given.Any(result => string.Equals(result.Id, gate.Id, StringComparison.Ordinal)))
         ];
-        IReadOnlyList<ReviewCycleRecord> history = ReviewCycles.ReadThrough(settings.Prior);
+        IReadOnlyList<ReviewCycleRecord> history =
+            ReviewWorkTree.Prior(ReviewWorkTree.Of(root), settings.BaseRef, ReviewCycles.ReadThrough(settings.Prior)).Valid;
         if (absent.Length == 0 || history.Count == 0)
             return given;
 
@@ -151,7 +157,7 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
                      history,
                      absent,
                      OperatingSystem.IsWindows() ? "windows" : "unix",
-                     commit => TryChangedSince(root, commit)))
+                     commit => TryChangedSince(ReviewWorkTree.Of(root), commit)))
         {
             if (decision is { Action: GateCycleAction.Carry, Carried: { } carried })
             {
@@ -175,6 +181,53 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
         }
 
         return effective;
+    }
+
+    /// <summary>
+    /// Refuses a <c>--prior</c> folder that belongs to another change: carrying its gate results and lens coverage
+    /// would let a stale folder from an earlier run stand in for this change's review.
+    /// </summary>
+    private static bool PriorBelongsToThisChange(string root, ReviewVerdictSettings settings, DiagnosticReport report)
+    {
+        IReadOnlyList<ReviewCycleRecord> history = ReviewCycles.ReadThrough(settings.Prior!);
+        if (history.Count == 0)
+            return true;
+
+        IgnoredCycle? named = ReviewWorkTree.Prior(ReviewWorkTree.Of(root), settings.BaseRef, history).Ignored
+            .FirstOrDefault(cycle => cycle.Record.Number == history[^1].Number && cycle.Record.Folder == history[^1].Folder);
+        if (named is null)
+            return true;
+
+        report.Add(new Diagnostic(
+            PriorNotThisChange,
+            Severity.Error,
+            $"--prior {named.Record.Folder} does not belong to this change: {named.Reason}.",
+            Subject,
+            Hint: "Pass the folder of the cycle this review's own gate run wrote, or leave --prior out for a first cycle."));
+        return false;
+    }
+
+    /// <summary>
+    /// When the findings document is written into a cycle folder that records no change yet, records the branch, base
+    /// and head the verdict was computed on, so the next cycle can tell the folder belongs to this change.
+    /// </summary>
+    private static void RecordCycleIdentity(string root, ReviewVerdictSettings settings)
+    {
+        if (settings.Out is null || !ReviewCycleView.TryFromOutPath(settings.Out, out _, out _))
+            return;
+
+        string folder = Path.GetDirectoryName(Path.GetFullPath(settings.Out))!;
+        if (ReviewCycles.HasIdentity(folder) || ReviewWorkTree.IdentityOf(ReviewWorkTree.Of(root), settings.BaseRef) is not { } identity)
+            return;
+
+        try
+        {
+            ReviewCycles.WriteIdentity(folder, identity);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The findings were written; without the record the next cycle runs in full, which is the safe answer.
+        }
     }
 
     private static IReadOnlyList<string>? TryChangedSince(string root, string commit)

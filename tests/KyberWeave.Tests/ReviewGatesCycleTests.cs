@@ -3,6 +3,7 @@ using System.Text.Json;
 using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review;
+using KyberWeave.Core.RunStart;
 using KyberWeave.Tests.Fakes;
 using Spectre.Console.Cli;
 using Xunit;
@@ -25,6 +26,7 @@ public sealed class ReviewGatesCycleTests : IDisposable
     {
         _repo = Path.Combine(_temp.Path, "repo");
         TestGitRepositoryTemplate.CreateReviewGatesCouncilRepository(_repo);
+        Git("checkout", "--quiet", "-b", "feature");
         Write(".kyber-weave/kyber-weave.yml", """
                                               review:
                                                 gates:
@@ -42,12 +44,14 @@ public sealed class ReviewGatesCycleTests : IDisposable
     public void Dispose() => _temp.Dispose();
 
     [Fact]
-    public void AFirstCycleRunsEveryGateAndPrintsNoCycleHeader()
+    public void AFirstCycleRunsEveryGateAndPrintsAFullHeaderWithItsAbsoluteFolder()
     {
         (int exit, string output) = Gates(1, "--format", "lines");
 
         Assert.Equal(0, exit);
-        Assert.DoesNotContain("mode:", output, StringComparison.Ordinal);
+        Assert.StartsWith("cycle: 1 mode: full", output, StringComparison.Ordinal);
+        Assert.Contains($"folder: {CycleFolder(1)}", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("ignored:", output, StringComparison.Ordinal);
         Assert.Equal(["build", "docs", "always"], ReportedIds(1));
         Assert.DoesNotContain("carried", ReadGates(1), StringComparison.Ordinal);
     }
@@ -112,7 +116,8 @@ public sealed class ReviewGatesCycleTests : IDisposable
 
         (_, string output) = Gates(2, "--full");
 
-        Assert.DoesNotContain("mode:", output, StringComparison.Ordinal);
+        Assert.Contains("mode: full", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("mode: verifier", output, StringComparison.Ordinal);
         Assert.DoesNotContain("carried", ReadGates(2), StringComparison.Ordinal);
     }
 
@@ -146,7 +151,165 @@ public sealed class ReviewGatesCycleTests : IDisposable
 
         (_, string output) = Gates(1);
 
-        Assert.DoesNotContain("mode:", output, StringComparison.Ordinal);
+        Assert.Contains("mode: full", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("mode: verifier", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ACycleRecordedForAnotherBranchIsIgnoredAndTheRunIsFull()
+    {
+        FinishCycle1(branch: "someone-elses-change");
+        Write("src/a.cs", "// fixed\n");
+        Commit("fix");
+
+        (_, string output) = Gates(2);
+
+        Assert.StartsWith("cycle: 1 mode: full", output, StringComparison.Ordinal);
+        Assert.Contains("ignored: .agent_scratchpad/demo-task/review/cycle-1 — it reviewed branch someone-elses-change, this is feature", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("carry:", output, StringComparison.Ordinal);
+        Assert.Equal(["build", "docs", "always"], ReportedIds(2));
+        Assert.DoesNotContain("carried", ReadGates(2), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ACycleRecordedAgainstAnotherBaseIsIgnored()
+    {
+        FinishCycle1(baseCommit: OffBranchCommit());
+
+        (_, string output) = Gates(2);
+
+        Assert.Contains("ignored: .agent_scratchpad/demo-task/review/cycle-1 — its base ", output, StringComparison.Ordinal);
+        Assert.Contains("mode: full", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ACycleWhoseHeadIsNotAnAncestorOfHeadIsIgnored()
+    {
+        string stale = OffBranchCommit();
+        FinishCycle1(head: stale);
+
+        (_, string output) = Gates(2);
+
+        Assert.Contains($"ignored: .agent_scratchpad/demo-task/review/cycle-1 — its head {stale[..12]} is not an ancestor of HEAD", output, StringComparison.Ordinal);
+        Assert.Contains("mode: full", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ACycleThatRecordedNoBranchAndBaseIsIgnored()
+    {
+        FinishCycle1(identity: false);
+
+        (_, string output) = Gates(2);
+
+        Assert.Contains("it recorded no branch, base and head (cycle.json)", output, StringComparison.Ordinal);
+        Assert.Contains("mode: full", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ACycleOfThisBranchWhoseHeadIsAnAncestorCountsAndIsNotListedAsIgnored()
+    {
+        FinishCycle1();
+        Write("src/a.cs", "// fixed\n");
+        Commit("fix");
+
+        (_, string output) = Gates(2);
+
+        Assert.Contains("mode: verifier", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("ignored:", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheGateRunRecordsTheBranchBaseAndHeadInTheCycleFolder()
+    {
+        Gates(1);
+
+        using JsonDocument identity = JsonDocument.Parse(File.ReadAllText(Path.Combine(CycleFolder(1), "cycle.json")));
+        Assert.Equal("feature", identity.RootElement.GetProperty("branch").GetString());
+        Assert.Equal(Git("rev-parse", "HEAD").Trim(), identity.RootElement.GetProperty("head").GetString());
+        Assert.Equal(Git("rev-list", "--max-parents=0", "HEAD").Trim(), identity.RootElement.GetProperty("base").GetString());
+    }
+
+    [Fact]
+    public void TheVerdictRecordsTheChangeInAFolderThatHasNoRecordYet()
+    {
+        Directory.CreateDirectory(CycleFolder(1));
+        CapturedConsoleExecution<int> verdict = ProcessConsoleCapture.Run(() => CreateApp().Run(
+            ["review", "verdict", _repo, "--findings", EmptyFindings(), "--out", Path.Combine(CycleFolder(1), "findings.json")]));
+
+        Assert.True(File.Exists(Path.Combine(CycleFolder(1), "cycle.json")), verdict.Output);
+    }
+
+    [Fact]
+    public void TheVerdictRefusesAPriorFolderThatBelongsToAnotherChange()
+    {
+        FinishCycle1(branch: "someone-elses-change");
+
+        CapturedConsoleExecution<int> verdict = ProcessConsoleCapture.Run(() => CreateApp().Run(
+        [
+            "review", "verdict", _repo, "--findings", EmptyFindings(), "--gates", GatesPath(1),
+            "--prior", CycleFolder(1)
+        ]));
+
+        Assert.NotEqual(0, verdict.Result);
+        Assert.Contains("KW-REVIEW-050", verdict.Output, StringComparison.Ordinal);
+        Assert.Contains("it reviewed branch someone-elses-change, this is feature", verdict.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AWorktreeResolvesItsReviewFolderInsideItselfAndIgnoresTheCanonicalCheckoutsStaleFolder()
+    {
+        // A finished cycle left in the canonical checkout by an earlier run must not be read for the worktree's run.
+        FinishCycle1();
+        string worktree = Path.Combine(_temp.Path, "repo.worktrees", "run");
+        Git("worktree", "add", "--quiet", "-b", "wt-branch", worktree);
+        Directory.CreateDirectory(Path.Combine(worktree, ".kyber-weave"));
+        File.Copy(Path.Combine(_repo, ".kyber-weave", "kyber-weave.yml"), Path.Combine(worktree, ".kyber-weave", "kyber-weave.yml"));
+        string subdirectory = Path.Combine(worktree, "src");
+
+        CapturedConsoleExecution<int> cycle = ProcessConsoleCapture.Run(() => CreateApp().Run(["review", "cycle", subdirectory]));
+
+        string expected = Path.Combine(worktree, ".agent_scratchpad", "wt-branch", "review", "cycle-1");
+        Assert.Contains($"folder: {Path.GetFullPath(expected)}", cycle.Output, StringComparison.Ordinal);
+        Assert.Contains("mode: full", cycle.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain(CycleFolder(1), cycle.Output, StringComparison.Ordinal);
+
+        (_, string output) = GatesIn(worktree, Path.Combine(expected, "gates.json"));
+        Assert.StartsWith("cycle: 1 mode: full", output, StringComparison.Ordinal);
+        Assert.Contains($"folder: {Path.GetFullPath(expected)}", output, StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Combine(expected, "cycle.json")));
+        Assert.False(File.Exists(Path.Combine(CycleFolder(2), "gates.json")));
+    }
+
+    [Fact]
+    public void AReviewRunFromTheCanonicalCheckoutNamesTheLiveRunWorktree()
+    {
+        string worktree = Path.Combine(_temp.Path, "repo.worktrees", "run");
+        Git("worktree", "add", "--quiet", "-b", "run-branch", worktree);
+        string home = Path.Combine(_temp.Path, "home");
+        RunBaseState.Write(home, "run-branch", "master", new RunStartPlace(Path.Combine(_repo, ".git"), worktree, DateTimeOffset.UtcNow));
+
+        string? note = ReviewWorkTree.LiveRunNote(_repo, home);
+
+        Assert.NotNull(note);
+        Assert.Contains(RunCheckout.RealPath(worktree), note, StringComparison.Ordinal);
+        Assert.Contains("run the review there", note, StringComparison.Ordinal);
+        Assert.Null(ReviewWorkTree.LiveRunNote(worktree, home));
+    }
+
+    private (int Exit, string Output) GatesIn(string tree, string outPath)
+    {
+        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() => CreateApp().Run(["review", "gates", tree, "--council", "--out", outPath]));
+        return (run.Result, run.Output);
+    }
+
+    private string OffBranchCommit()
+    {
+        Git("checkout", "--quiet", "-b", "side");
+        Write("side.txt", "side\n");
+        Commit("side");
+        string commit = Git("rev-parse", "HEAD").Trim();
+        Git("checkout", "--quiet", "feature");
+        return commit;
     }
 
     private (int Exit, string Output) Gates(int cycle, params string[] options)
@@ -156,7 +319,7 @@ public sealed class ReviewGatesCycleTests : IDisposable
         return (run.Result, run.Output);
     }
 
-    private void FinishCycle1(int buildExit = 0)
+    private void FinishCycle1(int buildExit = 0, string? branch = null, string? baseCommit = null, string? head = null, bool identity = true)
     {
         GateResult[] gates =
         [
@@ -166,6 +329,12 @@ public sealed class ReviewGatesCycleTests : IDisposable
         ];
         Write($".agent_scratchpad/{Task}/review/cycle-1/gates.json", ReviewJson.Write(new GateReport(GateReport.CurrentSchema, gates)));
         Write($".agent_scratchpad/{Task}/review/cycle-1/head", Git("rev-parse", "HEAD").Trim());
+        if (identity)
+        {
+            ReviewCycleIdentity current = ReviewWorkTree.IdentityOf(_repo, null)!;
+            ReviewCycles.WriteIdentity(CycleFolder(1), new ReviewCycleIdentity(branch ?? current.Branch, baseCommit ?? current.Base, head ?? current.Head));
+        }
+
         Write(
             $".agent_scratchpad/{Task}/review/cycle-1/findings.json",
             ReviewJson.Write(new FindingsReport(
@@ -235,6 +404,7 @@ public sealed class ReviewGatesCycleTests : IDisposable
             {
                 review.AddCommand<ReviewGatesCommand>("gates");
                 review.AddCommand<ReviewVerdictCommand>("verdict");
+                review.AddCommand<ReviewCycleCommand>("cycle");
             });
         });
         return app;

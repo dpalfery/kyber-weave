@@ -28,6 +28,7 @@ public sealed class ReviewCycleTests : IDisposable
     {
         _repo = Path.Combine(_temp.Path, "repo");
         TestGitRepositoryTemplate.CreateReviewGatesCouncilRepository(_repo);
+        Git("checkout", "--quiet", "-b", "feature");
         Write(".kyber-weave/kyber-weave.yml", """
                                               review:
                                                 gates:
@@ -79,8 +80,8 @@ public sealed class ReviewCycleTests : IDisposable
         Assert.Equal(0, exit);
         Assert.Contains("cycle: 2", output, StringComparison.Ordinal);
         Assert.Contains("mode: verifier", output, StringComparison.Ordinal);
-        Assert.Contains("folder: .agent_scratchpad/demo-task/review/cycle-2", output, StringComparison.Ordinal);
-        Assert.Contains("findings: .agent_scratchpad/demo-task/review/cycle-1/findings.json", output, StringComparison.Ordinal);
+        Assert.Contains($"folder: {CycleFolder(2)}", output, StringComparison.Ordinal);
+        Assert.Contains($"findings: {Path.Combine(CycleFolder(1), "findings.json")}", output, StringComparison.Ordinal);
         Assert.Contains("recheck: a/major (major) src/a.cs:1", output, StringComparison.Ordinal);
         Assert.DoesNotContain("a/minor", output, StringComparison.Ordinal);
         Assert.Contains("rerun: build (src/a.cs changed since cycle 1)", output, StringComparison.Ordinal);
@@ -141,17 +142,29 @@ public sealed class ReviewCycleTests : IDisposable
     }
 
     [Fact]
-    public void APriorCycleWithNoUsableHeadStaysAVerifierCycleAndRerunsEveryGate()
+    public void APriorCycleWithNoUsableHeadCannotBeTiedToTheChangeSoItIsIgnoredAndTheRunIsFull()
     {
         FinishCycle(1, [Gate("build"), Gate("docs"), Gate("always")], [], head: "not-a-commit");
 
         (_, string output) = Cycle();
 
-        Assert.Contains("mode: verifier", output, StringComparison.Ordinal);
-        Assert.Contains("prior-head: unknown", output, StringComparison.Ordinal);
-        Assert.Contains("rerun: build (cycle 1 recorded no usable head to compare with)", output, StringComparison.Ordinal);
-        Assert.Contains("rerun: docs", output, StringComparison.Ordinal);
+        Assert.Contains("mode: full", output, StringComparison.Ordinal);
+        Assert.Contains("ignored: .agent_scratchpad/demo-task/review/cycle-1 — it recorded no branch, base and head (cycle.json)", output, StringComparison.Ordinal);
         Assert.DoesNotContain("carry:", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AStaleCycleFromAnotherBranchIsListedAsIgnoredAndTheTaskStartsAtCycleOne()
+    {
+        FinishCycle(1, [Gate("build")], [], branch: "an-earlier-runs-branch");
+        FinishCycle(2, [Gate("build")], [], branch: "an-earlier-runs-branch");
+
+        (_, string output) = Cycle();
+
+        Assert.Contains("cycle: 1", output, StringComparison.Ordinal);
+        Assert.Contains("mode: full", output, StringComparison.Ordinal);
+        Assert.Contains("ignored: .agent_scratchpad/demo-task/review/cycle-1 — it reviewed branch an-earlier-runs-branch, this is feature", output, StringComparison.Ordinal);
+        Assert.Contains("ignored: .agent_scratchpad/demo-task/review/cycle-2 — it reviewed branch an-earlier-runs-branch, this is feature", output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -327,10 +340,12 @@ public sealed class ReviewCycleTests : IDisposable
             ReviewJson.Write(new GateReport(GateReport.CurrentSchema, gates)));
 
     /// <summary>Writes a finished cycle: its head is the repository's current commit unless one is given.</summary>
-    private void FinishCycle(int number, GateResult[] gates, ReviewFinding[] findings, string? head = null)
+    private void FinishCycle(int number, GateResult[] gates, ReviewFinding[] findings, string? head = null, string? branch = null)
     {
         WriteGates(number, gates);
         Write($".agent_scratchpad/{Task}/review/cycle-{number}/head", head ?? Head());
+        ReviewCycleIdentity current = ReviewWorkTree.IdentityOf(_repo, null)!;
+        ReviewCycles.WriteIdentity(CycleFolder(number), new ReviewCycleIdentity(branch ?? current.Branch, current.Base, head ?? current.Head));
         Write(
             $".agent_scratchpad/{Task}/review/cycle-{number}/findings.json",
             ReviewJson.Write(new FindingsReport(FindingsReport.CurrentSchema, findings, [], 0)));

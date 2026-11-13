@@ -10,11 +10,30 @@ namespace KyberWeave.Core.Review;
 /// <param name="Folder">Absolute path of the cycle folder.</param>
 /// <param name="Head">The commit the cycle reviewed, from its <c>head</c> file; null when the file is absent or not a commit id.</param>
 /// <param name="Gates">The cycle's gate report, or null when it wrote none or it cannot be read.</param>
-public sealed record ReviewCycleRecord(int Number, string Folder, string? Head, GateReport? Gates)
+/// <param name="Branch">The branch the cycle reviewed, from <c>cycle.json</c>; null when none was recorded.</param>
+/// <param name="Base">The merge-base commit of the change the cycle reviewed, from <c>cycle.json</c>; null when none was recorded.</param>
+public sealed record ReviewCycleRecord(
+    int Number, string Folder, string? Head, GateReport? Gates, string? Branch = null, string? Base = null)
 {
     /// <summary>The findings document the verdict command wrote for this cycle.</summary>
     public string FindingsPath => Path.Combine(Folder, ReviewCycles.FindingsFile);
 }
+
+/// <summary>The facts that tie a review cycle to one change: the branch, the commit the change forked from, and the commit reviewed.</summary>
+/// <param name="Branch">The checked-out branch.</param>
+/// <param name="Base">The merge-base commit of the base ref and <c>HEAD</c>.</param>
+/// <param name="Head">The commit <c>HEAD</c> named.</param>
+public sealed record ReviewCycleIdentity(string Branch, string Base, string Head);
+
+/// <summary>A recorded cycle that does not belong to the current change, and the fact that says so.</summary>
+/// <param name="Record">The cycle that was set aside.</param>
+/// <param name="Reason">Why it does not belong, in one phrase.</param>
+public sealed record IgnoredCycle(ReviewCycleRecord Record, string Reason);
+
+/// <summary>The finished cycles that belong to the current change, and those that do not.</summary>
+/// <param name="Valid">The cycles that count as prior, oldest first.</param>
+/// <param name="Ignored">The cycles set aside, oldest first.</param>
+public sealed record PriorCycles(IReadOnlyList<ReviewCycleRecord> Valid, IReadOnlyList<IgnoredCycle> Ignored);
 
 /// <summary>What a cycle does about one declared gate.</summary>
 public enum GateCycleAction
@@ -67,10 +86,15 @@ public static partial class ReviewCycles
     /// <summary>The file the verdict command writes into a cycle folder.</summary>
     public const string FindingsFile = "findings.json";
 
+    /// <summary>The file that records which change a cycle reviewed.</summary>
+    public const string IdentityFile = "cycle.json";
+
     private const string GatesFile = "gates.json";
     private const string HeadFile = "head";
     private const string FolderPrefix = "cycle-";
     private const string ScratchpadPrefix = ".agent_scratchpad/";
+
+    private static readonly JsonSerializerOptions IdentityJson = new() { WriteIndented = true };
 
     /// <summary>Lists the finished cycles under a review folder, oldest first.</summary>
     /// <param name="reviewFolder"><c>.agent_scratchpad/&lt;task-id&gt;/review</c>.</param>
@@ -108,6 +132,82 @@ public static partial class ReviewCycles
         string parent = Path.GetDirectoryName(full) ?? full;
         return [.. ReadFinished(parent).Where(cycle => cycle.Number < number), Read(number, full)];
     }
+
+    /// <summary>
+    /// Splits the finished cycles into those that belong to the current change and those that do not. A cycle belongs to
+    /// it only when it recorded a branch, a base and a head, its branch equals the current branch, its base equals the
+    /// current base, and its head is an ancestor of the current <c>HEAD</c>. When the current change cannot be read, no
+    /// cycle belongs to it.
+    /// </summary>
+    /// <param name="finished">The finished cycles, oldest first.</param>
+    /// <param name="current">The current change, or null when git could not name it.</param>
+    /// <param name="isAncestorOfHead">Whether a commit is an ancestor of (or is) the current <c>HEAD</c>.</param>
+    public static PriorCycles Belonging(
+        IReadOnlyList<ReviewCycleRecord> finished,
+        ReviewCycleIdentity? current,
+        Func<string, bool> isAncestorOfHead)
+    {
+        ArgumentNullException.ThrowIfNull(finished);
+        ArgumentNullException.ThrowIfNull(isAncestorOfHead);
+
+        List<ReviewCycleRecord> valid = [];
+        List<IgnoredCycle> ignored = [];
+        foreach (ReviewCycleRecord cycle in finished)
+        {
+            string? reason = NotThisChange(cycle, current, isAncestorOfHead);
+            if (reason is null)
+                valid.Add(cycle);
+            else
+                ignored.Add(new IgnoredCycle(cycle, reason));
+        }
+
+        return new PriorCycles(valid, ignored);
+    }
+
+    private static string? NotThisChange(ReviewCycleRecord cycle, ReviewCycleIdentity? current, Func<string, bool> isAncestorOfHead)
+    {
+        if (current is null)
+            return "the current branch, base or HEAD could not be read, so it cannot be tied to this change";
+
+        if (cycle.Branch is null || cycle.Base is null || cycle.Head is null)
+            return $"it recorded no branch, base and head ({IdentityFile}), so it cannot be tied to this change";
+
+        if (!string.Equals(cycle.Branch, current.Branch, StringComparison.Ordinal))
+            return $"it reviewed branch {cycle.Branch}, this is {current.Branch}";
+
+        if (!string.Equals(cycle.Base, current.Base, StringComparison.Ordinal))
+            return $"its base {Short(cycle.Base)} is not this change's base {Short(current.Base)}";
+
+        return isAncestorOfHead(cycle.Head)
+            ? null
+            : $"its head {Short(cycle.Head)} is not an ancestor of HEAD {Short(current.Head)}";
+    }
+
+    private static string Short(string commit) => commit.Length > 12 ? commit[..12] : commit;
+
+    /// <summary>Records which change a cycle reviewed in <c>cycle.json</c>, replacing an earlier record.</summary>
+    /// <param name="cycleFolder">The <c>cycle-&lt;n&gt;</c> folder; created when missing.</param>
+    /// <param name="identity">The change being reviewed.</param>
+    public static void WriteIdentity(string cycleFolder, ReviewCycleIdentity identity)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(cycleFolder);
+        ArgumentNullException.ThrowIfNull(identity);
+
+        Directory.CreateDirectory(cycleFolder);
+        File.WriteAllText(
+            Path.Combine(cycleFolder, IdentityFile),
+            JsonSerializer.Serialize(
+                new Dictionary<string, string>
+                {
+                    ["branch"] = identity.Branch,
+                    ["base"] = identity.Base,
+                    ["head"] = identity.Head
+                },
+                IdentityJson));
+    }
+
+    /// <summary>Whether a cycle folder already records which change it reviewed.</summary>
+    public static bool HasIdentity(string cycleFolder) => File.Exists(Path.Combine(cycleFolder, IdentityFile));
 
     /// <summary>Decides which cycle is next for a run, and for a later cycle what each gate must do.</summary>
     /// <param name="finished">The finished cycles, oldest first.</param>
@@ -256,6 +356,9 @@ public static partial class ReviewCycles
             head = CommitId().IsMatch(text) ? text : null;
         }
 
+        (string? branch, string? baseCommit, string? recordedHead) = ReadIdentity(folder);
+        head = CommitId().IsMatch(recordedHead ?? string.Empty) ? recordedHead : head;
+
         GateReport? gates = null;
         string gatesPath = Path.Combine(folder, GatesFile);
         if (File.Exists(gatesPath))
@@ -271,7 +374,34 @@ public static partial class ReviewCycles
             }
         }
 
-        return new ReviewCycleRecord(number, folder, head, gates);
+        return new ReviewCycleRecord(number, folder, head, gates, branch, baseCommit);
+    }
+
+    private static (string? Branch, string? Base, string? Head) ReadIdentity(string folder)
+    {
+        string path = Path.Combine(folder, IdentityFile);
+        if (!File.Exists(path))
+            return (null, null, null);
+
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
+            JsonElement root = document.RootElement;
+            string? Text(string name) =>
+                root.ValueKind == JsonValueKind.Object
+                && root.TryGetProperty(name, out JsonElement value)
+                && value.ValueKind == JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(value.GetString())
+                    ? value.GetString()
+                    : null;
+
+            string? commitBase = Text("base");
+            return (Text("branch"), CommitId().IsMatch(commitBase ?? string.Empty) ? commitBase : null, Text("head"));
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+        {
+            return (null, null, null);
+        }
     }
 
     private static int? TryNumber(string name) =>

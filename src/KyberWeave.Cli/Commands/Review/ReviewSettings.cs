@@ -128,6 +128,10 @@ public sealed class ReviewVerdictSettings : AnalysisSettings
                  "counts as covered, carried from that cycle; its findings are not re-read.")]
     public string? Prior { get; set; }
 
+    [CommandOption("--base <REF>")]
+    [Description("With --prior: git ref the change's base is resolved against when checking the prior cycle belongs to this change. Defaults to origin/HEAD.")]
+    public string? BaseRef { get; set; }
+
     [CommandOption("--out <PATH>")]
     [Description("Write the findings document the verdict was computed from (after --drop and the cited-line " +
                  "check), with per-lens coverage, to this path as JSON. The verdict itself is printed, not written.")]
@@ -140,4 +144,8 @@ public sealed class ReviewCycleSettings : AnalysisSettings
     [CommandOption("--task <ID>")]
     [Description("The task id whose review folder, .agent_scratchpad/<task-id>/review, holds the run's cycles. Any spelling: it is lower-cased and matched to the folder. Omitted: the only review folder, or the one named for the current branch.")]
     public string? Task { get; set; }
+
+    [CommandOption("--base <REF>")]
+    [Description("Git ref the change's base is resolved against when deciding which recorded cycles belong to this change. Defaults to origin/HEAD.")]
+    public string? BaseRef { get; set; }
 }

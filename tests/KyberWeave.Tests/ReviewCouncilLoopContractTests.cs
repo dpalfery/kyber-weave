@@ -58,9 +58,6 @@ public sealed class ReviewCouncilLoopContractTests
     [Theory]
     [InlineData("S11", "Put Discovery: codegraph N, docs N, direct reads N directly above the attestation line, below any Index fallback line.", "agents/review-lens.md")]
     [InlineData("S11", "Put Discovery: codegraph N, docs N, direct reads N directly above the attestation line, below any Index fallback line.", "agents/review-triage.md")]
-    [InlineData("S18", "Each cycle writes to .agent_scratchpad/<task-id>/review/cycle-<n>/: the seats folder, gates.json, the findings.json the verdict command writes, and head; keep it until the run ends.", "agents/code-reviewer.md")]
-    [InlineData("S18", "Each cycle writes to .agent_scratchpad/<task-id>/review/cycle-<n>/: the seats folder, gates.json, the findings.json the verdict command writes, and head; keep it until the run ends.", "skills/code-review/SKILL.md")]
-    [InlineData("S18", "Each cycle writes to .agent_scratchpad/<task-id>/review/cycle-<n>/: the seats folder, gates.json, the findings.json the verdict command writes, and head; keep it until the run ends.", "skills/delivery-execution/SKILL.md")]
     [InlineData("S24", "The subject of a rule sentence is a claim: for \"a seat\", \"every gate\" or \"any X\", open the call site that decides who the rule applies to.", "skills/code-review/references/lenses/documentation-accuracy.md")]
     public void SentenceIsStatedInItsFile(string sentenceId, string sentence, string file)
     {

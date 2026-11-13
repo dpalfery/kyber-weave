@@ -175,17 +175,21 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
 
         // A council run in a cycle after the first is a verifier cycle. The recorded review folders say so, so the run
         // itself decides which gates still need to run and carries the rest, instead of relying on the reviewer to ask.
-        CouncilCycle? cycle = settings.Council && !settings.Full && !settings.All && settings.Gate.Length == 0
+        // The header is printed before any gate starts, so the reviewer can re-check findings while the gates run.
+        CouncilCycle? cycle = settings.Council && !settings.All && settings.Gate.Length == 0
             ? DetectCycle(root, config, settings, report)
             : null;
         if (cycle is not null)
         {
-            declared = [.. declared.Where(gate => cycle.Rerun.Contains(gate.Id))];
-            if (ReportRenderer.IsHuman(settings.ParsedFormat))
-                WriteCycleHeader(root, cycle);
+            if (cycle.Verifier)
+                declared = [.. declared.Where(gate => cycle.Rerun.Contains(gate.Id))];
 
+            if (ReportRenderer.IsHuman(settings.ParsedFormat))
+                WriteCycleHeader(cycle);
+
+            RecordCycleIdentity(cycle, report);
             report.AddMetric("cycle", cycle.Plan.Number);
-            report.AddMetric("mode", ReviewCycleView.Mode(cycle.Plan));
+            report.AddMetric("mode", cycle.Mode);
         }
 
         // Before any gate process starts, so a review in a fresh worktree gets an index instead of silently having
@@ -285,7 +289,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
             AddGateDiagnostic(report, gate, settings.Deadline);
 
         GateReport written = gates;
-        if (cycle is not null)
+        if (cycle is { Verifier: true })
         {
             written = WithCarriedGates(config.Review.Gates, gates, cycle, report);
             report.AddMetric("carried", written.Gates.Count - gates.Gates.Count);
@@ -308,56 +312,131 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
     }
 
     /// <summary>The cycle a council run found itself in, and what that decides for each declared gate.</summary>
-    private sealed record CouncilCycle(ReviewCyclePlan Plan, IReadOnlyList<ReviewFinding> Recheck, HashSet<string> Rerun);
+    /// <param name="Plan">The cycle number, the prior cycle and the decision for each gate.</param>
+    /// <param name="Recheck">The prior cycle's findings to re-check.</param>
+    /// <param name="Rerun">The gates a verifier cycle runs again.</param>
+    /// <param name="Ignored">The recorded cycles that do not belong to this change.</param>
+    /// <param name="Tree">The git work tree the review belongs to.</param>
+    /// <param name="Folder">The absolute folder this cycle writes to, when it is known.</param>
+    /// <param name="Notes">Plain lines about where the review runs.</param>
+    /// <param name="Verifier">Whether only the gates that need it run: a later cycle that was not asked for <c>--full</c>.</param>
+    /// <param name="WritesIdentity">Whether this run records the change in the cycle folder.</param>
+    /// <param name="BaseRef">The ref the change's base is resolved against, or null for the default.</param>
+    private sealed record CouncilCycle(
+        ReviewCyclePlan Plan,
+        IReadOnlyList<ReviewFinding> Recheck,
+        HashSet<string> Rerun,
+        IReadOnlyList<IgnoredCycle> Ignored,
+        string Tree,
+        string? Folder,
+        IReadOnlyList<string> Notes,
+        bool Verifier,
+        bool WritesIdentity,
+        string? BaseRef)
+    {
+        public string Mode => Verifier ? "verifier" : "full";
+    }
 
     /// <summary>
-    ///     The verifier cycle this council run is in, or null for a first cycle. The review folder comes from the
-    ///     <c>--out</c> path when it sits in <c>review/cycle-&lt;n&gt;</c>, else from the task's only review folder;
-    ///     a cycle that is already finished, this one included, is never counted as a prior. When nothing says this is a
-    ///     later cycle, the run is a full one, which is the safe answer.
+    ///     The cycle this council run is in, or null when no review folder can be named. The review folder comes from the
+    ///     <c>--out</c> path when it sits in <c>review/cycle-&lt;n&gt;</c>, else from the task's only review folder in
+    ///     the git work tree the command was run against. A cycle counts as prior only when it belongs to this change
+    ///     (<see cref="ReviewCycles.Belonging"/>); one that is finished, this one included, or that belongs to another
+    ///     change is never counted. When nothing says this is a later cycle, the run is a full one, which is the safe answer.
     /// </summary>
     private static CouncilCycle? DetectCycle(
         string root, KyberWeaveConfig config, ReviewGatesSettings settings, DiagnosticReport report)
     {
+        string tree = ReviewWorkTree.Of(root);
+        List<string> notes = [];
+        if (ReviewWorkTree.LiveRunNote(tree, ReviewWorkTree.HomeDirectory()) is { } liveRun)
+            notes.Add(liveRun);
+
         string reviewFolder;
         int? thisCycle = null;
+        string? folder = null;
         if (settings.Out is not null && ReviewCycleView.TryFromOutPath(settings.Out, out string fromOut, out int number))
         {
             reviewFolder = fromOut;
             thisCycle = number;
+            folder = Path.GetDirectoryName(Path.GetFullPath(settings.Out));
+            if (!ReviewCycleView.IsUnder(tree, fromOut))
+                notes.Add($"worktree: --out is outside {tree}, so this review writes to {folder}; use {ReviewWorkTree.Scratchpad(tree)} for this worktree's review folders.");
         }
-        else if (ReviewCycleView.TryChooseTask(root, Path.Combine(root, ".agent_scratchpad"), null, out string task, out _, out _))
+        else if (ReviewCycleView.TryChooseTask(tree, ReviewWorkTree.Scratchpad(tree), null, out string task, out _, out _))
         {
-            reviewFolder = Path.Combine(root, ".agent_scratchpad", task, "review");
+            reviewFolder = Path.Combine(ReviewWorkTree.Scratchpad(tree), task, "review");
         }
         else
         {
             return null;
         }
 
-        IReadOnlyList<ReviewCycleRecord> finished = [.. ReviewCycles.ReadFinished(reviewFolder)
-            .Where(record => thisCycle is null || record.Number < thisCycle)];
-        if (finished.Count == 0)
-            return null;
+        PriorCycles prior = ReviewWorkTree.Prior(
+            tree,
+            settings.BaseRef,
+            [.. ReviewCycles.ReadFinished(reviewFolder).Where(record => thisCycle is null || record.Number < thisCycle)]);
+        IReadOnlyList<ReviewCycleRecord> finished = prior.Valid;
 
         ReviewCyclePlan plan = ReviewCycles.Plan(
-            finished, config.Review.Gates, CurrentOs(), commit => ReviewCycleView.TryChangedSince(root, commit));
+            finished, config.Review.Gates, CurrentOs(), commit => ReviewCycleView.TryChangedSince(tree, commit));
+        folder ??= Path.Combine(reviewFolder, $"cycle-{plan.Number}");
         List<ReviewFinding> recheck = [];
-        if (plan.Prior is { } prior)
-            ReviewCycleView.TryReadRecheck(prior, report, recheck, PriorFindingsUnreadable, Severity.Warning, "review gates");
+        if (plan.Prior is { } priorCycle)
+            ReviewCycleView.TryReadRecheck(priorCycle, report, recheck, PriorFindingsUnreadable, Severity.Warning, "review gates");
 
         return new CouncilCycle(
             plan,
             recheck,
-            [.. plan.Gates.Where(gate => gate.Action == GateCycleAction.Rerun).Select(gate => gate.GateId)]);
+            [.. plan.Gates.Where(gate => gate.Action == GateCycleAction.Rerun).Select(gate => gate.GateId)],
+            prior.Ignored,
+            tree,
+            folder,
+            notes,
+            plan.IsVerifier && !settings.Full,
+            thisCycle is not null,
+            settings.BaseRef);
     }
 
-    /// <summary>The cycle, mode, findings to re-check and gate plan, at the top of the output a reviewer reads first.</summary>
-    private static void WriteCycleHeader(string root, CouncilCycle cycle)
+    /// <summary>Records the branch, base and head this cycle reviews, so a later cycle can tell the cycle belongs to its change.</summary>
+    private static void RecordCycleIdentity(CouncilCycle cycle, DiagnosticReport report)
     {
-        Console.WriteLine($"cycle: {cycle.Plan.Number} mode: {ReviewCycleView.Mode(cycle.Plan)}");
-        foreach (string line in ReviewCycleView.VerifierLines(root, cycle.Plan, cycle.Recheck))
+        if (!cycle.WritesIdentity || cycle.Folder is null || ReviewWorkTree.IdentityOf(cycle.Tree, cycle.BaseRef) is not { } identity)
+            return;
+
+        try
+        {
+            ReviewCycles.WriteIdentity(cycle.Folder, identity);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            report.Add(new Diagnostic(
+                ReportWriteFailed,
+                Severity.Warning,
+                $"Could not record the change in '{cycle.Folder}': {ex.Message}",
+                "review gates",
+                Hint: "Without it the next cycle cannot tell this folder belongs to the change, and runs in full."));
+        }
+    }
+
+    /// <summary>The cycle, mode, folder, ignored cycles, findings to re-check and gate plan, at the top of the output a reviewer reads first.</summary>
+    private static void WriteCycleHeader(CouncilCycle cycle)
+    {
+        Console.WriteLine($"cycle: {cycle.Plan.Number} mode: {cycle.Mode}");
+        if (cycle.Folder is not null)
+            Console.WriteLine($"folder: {cycle.Folder}");
+
+        foreach (string note in cycle.Notes)
+            Console.WriteLine(note);
+
+        foreach (string line in ReviewCycleView.IgnoredLines(cycle.Tree, cycle.Ignored))
             Console.WriteLine(line);
+
+        if (cycle.Verifier)
+        {
+            foreach (string line in ReviewCycleView.VerifierLines(cycle.Plan, cycle.Recheck))
+                Console.WriteLine(line);
+        }
     }
 
     /// <summary>
