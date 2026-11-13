@@ -217,7 +217,11 @@ public static partial class TriggerClassifier
         bool marked = headers.ContainsKey("KYBER-ARBITER");
         bool unidentified = resolved is null;
 
-        if (!marked && unidentified && IsProjectWideHarness(ev.Harness))
+        // A project-wide hook fires for every agent, so an unmarked dispatch from a caller nobody names passes,
+        // unless its target is a Squad agent: the catalog is a machine fact, and routing must not depend on the
+        // orchestrator volunteering headers.
+        if (!marked && unidentified && IsProjectWideHarness(ev.Harness)
+            && string.Equals(targetClass, "not-squad", StringComparison.Ordinal))
             return new TriggerClassification(null, null, ArbiterCallerSources.None, target, targetClass, headers, marker, true);
 
         string? trigger = ClassifyTrigger(resolved, target, targetClass, headers, marker);
@@ -333,6 +337,11 @@ public static partial class TriggerClassifier
             return "investigate";
 
         if (headers.ContainsKey("KYBER-ARBITER"))
+            return "investigate";
+
+        // A Squad target with no caller and no headers: plan and task identity are unknown, so only the
+        // machine-fact rules have anything to judge, and each of them allows a caller it cannot name.
+        if (!string.Equals(targetClass, "not-squad", StringComparison.Ordinal))
             return "investigate";
 
         return null;

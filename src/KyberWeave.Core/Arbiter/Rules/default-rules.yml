@@ -292,15 +292,23 @@ rules:
   - id: KW-ARB-READONLY-001
     trigger: investigate.returned
     question: Did the read-only dispatch leave the tree unchanged?
-    answers: [unchanged, changed]
+    answers: [not-read-only, unchanged, changed]
+    # A specialist the catalog says writes files (a bug-crusher's fix, a writer dispatched by a caller
+    # nobody names) changes the tree by design. The run-start dispatch is the one such dispatch still held
+    # to an unchanged tree.
     decide:
+      - when:
+          all:
+            - { fact: delegation.target-class, equals: implementation }
+            - { not: { fact: delegation.markers, equals: RUN-START } }
+        answer: not-read-only
       - when: { fact: git.changed-paths.since-dispatch, exists: false }
         answer: unchanged
       - when: { fact: git.changed-paths.since-dispatch, count: 0 }
         answer: unchanged
       - when: { fact: git.changed-paths.since-dispatch, exists: true }
         answer: changed
-    effects: { unchanged: allow, changed: escalate }
+    effects: { not-read-only: allow, unchanged: allow, changed: escalate }
 
   - id: KW-ARB-LENS-001
     trigger: lens.spawn

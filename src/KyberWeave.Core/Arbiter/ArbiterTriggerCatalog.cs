@@ -94,6 +94,7 @@ public static class ArbiterTriggerCatalog
                 "caller",
                 "delegation.target",
                 "delegation.target-class",
+                "delegation.markers",
                 "roster.caller.delegates-to",
                 "git.changed-paths.since-dispatch",
                 "ledger.concurrent.paths",

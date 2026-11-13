@@ -23,8 +23,9 @@ namespace KyberWeave.Arbiter.Hooks.Adapters;
 /// Local-schema payload arriving under <c>--harness copilot-cli</c> is logged as
 /// harness <c>copilot-vscode</c>. The payload's caller story differs per schema:
 /// the Local payload carries no caller field, so the rendered <c>--caller</c> is
-/// the caller; the CLI hook is project-wide, so the caller is unidentified and
-/// header inference belongs to the engine. An absent Local <c>agentName</c> means
+/// the caller; the CLI hook is project-wide, so the caller is the subagent's top-level
+/// <c>agentType</c> when the call comes from inside a subagent, and unidentified for a root
+/// agent, where header inference belongs to the engine. An absent Local <c>agentName</c> means
 /// the calling agent, while an absent CLI <c>agent_type</c> on a marked dispatch
 /// leaves the target fact absent for the rules (which answer
 /// <c>undecidable</c>); an unmarked CLI dispatch without a target passes through
@@ -339,9 +340,14 @@ public sealed class CopilotHookAdapter : IHarnessHookAdapter
 
     private string HandleCli(JsonElement payload, string? renderedCaller, KyberWeaveConfig config, HookContext context)
     {
-        // The CLI hook is project-wide: no caller field is documented. A rendered
-        // caller is honoured when present, but the file Squad renders carries none.
-        string caller = string.IsNullOrWhiteSpace(renderedCaller) ? "unidentified" : renderedCaller;
+        // The CLI hook is project-wide. A rendered caller is honoured when present, but the file Squad renders
+        // carries none. Inside a subagent the CLI adds the calling agent's type at the top level, where tool
+        // arguments cannot reach; a root agent's call carries no caller, and stays unidentified.
+        string caller = !string.IsNullOrWhiteSpace(renderedCaller)
+            ? renderedCaller
+            : GetString(payload, "agentType") is { Length: > 0 } camel ? camel
+            : GetString(payload, "agent_type") is { Length: > 0 } snake ? snake
+            : "unidentified";
         JsonObject args = ParseCliArgs(payload);
         string? target = GetNodeString(args, "agent_type");
         string prompt = GetNodeString(args, "prompt")

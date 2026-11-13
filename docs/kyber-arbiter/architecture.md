@@ -242,7 +242,7 @@ each, what stays at step 0 and which answer only the model can give.
 | `KW-ARB-GATE-REPORT-001` | `delegate.returned` | 0, then 1 (`choice`, ≥ 0.8) | Does the report say the worker ran the task gate? Step 0: `verified`, `disagrees` (escalates, machine), `no-report`. Model only: `missing` (escalates). |
 | `KW-ARB-PLANNER-001` | `delegate.planner` | 0, then 1 (`choice`, ≥ 0.8) | Does the dispatch ask the planner for planning work? Step 0: `recognised` for an exact marker and an in-directory or absent `PLAN_FILE`. Model only: `malformed` (escalates). Where the planner writes is checked by PLANNER-DIFF-001. |
 | `KW-ARB-PLANNER-DIFF-001` | `delegate.planner.returned` | 0 | Did the planner write only plan, spec, and todo directories? Machine fact: git. |
-| `KW-ARB-READONLY-001` | `investigate.returned` | 0 | Did the read-only dispatch leave the tree unchanged? |
+| `KW-ARB-READONLY-001` | `investigate.returned` | 0 | Did the read-only dispatch leave the tree unchanged? A target the catalog classes as `implementation` answers `not-read-only` and is allowed, except the `RUN-START: true` dispatch. |
 | `KW-ARB-LENS-001` | `lens.spawn` | 0, then 1 (`noul`, skip below P 0.1) | Does the lens apply to this change? |
 | `KW-ARB-QUOTE-001` | `lens.returned` | 0 | Is each finding's excerpt present at its `file:line`? |
 | `KW-ARB-PREEX-001` | `lens.returned` | 0 | Is the excerpt inside a changed hunk? It reads `finding.changed-lines`. |
@@ -798,7 +798,7 @@ The degradation records these outcomes produce are listed once, in the
 |---|---|---|---|---|---|---|
 | Claude | 1 | `hooks` in each dispatching agent's `.claude/agents/<agent>.md` frontmatter and the `/conductor` entry-point skill | `Agent`, matched exactly so task-list tools do not match | `agent_type` inside sub-agents, rendered `--caller` otherwise | `subagent_type`, `prompt` | Supported: `model` on the `Agent` input; aliases `sonnet`, `opus`, `haiku`, `fable` [CC-SUB], [CC-HOOK] |
 | Copilot in VS Code | 1 | `hooks` in each `.github/agents/<agent>.agent.md` (Preview, Local harness) | `runSubagent` | Rendered `--caller`; the payload carries no caller field | `agentName` (absent means the calling agent), `prompt` | Unsupported (unverified): the custom-agent `model` is agent-level only [GH-HOOK], [GH-AGENT] |
-| Copilot CLI | 1 | `.github/hooks/kyber-arbiter.json`, its own file | `task` | Header inference from the marker | `agent_type`, `prompt` | Unsupported (unverified): the custom-agent `model` is agent-level only [GH-HOOK], [GH-AGENT] |
+| Copilot CLI | 1 | `.github/hooks/kyber-arbiter.json`, its own file | `task` | The top-level `agentType` inside a subagent; a root agent's payload names no caller, so header inference (the conductor's agent-scoped guard makes the run-start check there) | `agent_type`, `prompt` | Unsupported (unverified): the custom-agent `model` is agent-level only [GH-HOOK], [GH-AGENT] |
 | OpenCode | 1 | `.opencode/plugins/kyber-arbiter.ts` shim speaking the plugin envelope | `task` | Header inference from the marker | `args.subagent_type`, `args.prompt` | Unsupported: the task tool documents no per-call model; model is agent config [OC-AGENT] |
 | Pi | 2 | Owned extension file `.pi/extensions/kyber-arbiter.ts` speaking the plugin envelope (`before`/`after`, tool `Agent`) | `Agent` | Header inference from the marker | `args.subagent_type`, `args.prompt` | Unsupported (unverified): no core subagent tool or model field is documented [PI-EXT] |
 | Codex | 2 | Owned block in the shared `.codex/hooks.json` (`PreToolUse`/`PostToolUse` matcher groups) | `spawn_agent` (also matched as `Agent`, under any namespace prefix) | Header inference from the marker | `tool_input.agent_type`, `tool_input.message`; returns pair by `tool_use_id` | Unsupported (unverified): no `spawn_agent` model parameter is documented [CX-HOOK], [CX-SUB] |
@@ -917,14 +917,19 @@ re-read live for this revision, so a changed vendor page is a defect to record, 
 
 ### Delivery and caller notes
 
-Phase 2 and Phase 3 targets are project-wide hooks with no caller identity. They gate only
-dispatches carrying the `KYBER-ARBITER: true` marker, infer the caller from the headers, and
-pass anything else through, logged with `caller: unidentified`.
+Phase 2 and Phase 3 targets are project-wide hooks with no caller identity. They infer the caller from
+the headers. An unmarked dispatch whose caller nothing names passes through, logged with
+`caller: unidentified`, unless its target is a Squad agent: the embedded catalog is a machine fact, so the
+dispatch is classified as `investigate` with no caller, and gating does not depend on the orchestrator
+writing headers. With no headers, plan and task identity are unknown, so only the machine-fact rules
+apply, and each allows a caller it cannot name: `KW-ARB-ROSTER-001` answers `no-roster` and
+`KW-ARB-RUN-001` does not apply. Copilot CLI is the exception for callers: inside a subagent its payload
+carries the calling agent's `agentType` at the top level, and the hook reads that as the harness caller.
 
 Caller inference from a planner target is one of those gates, and it applies only to a
 marked dispatch or on a trusted harness (`claude`, `copilot-vscode`). So an unmarked
-dispatch to a planner passes on `factory` and `antigravity`, and `KW-ARB-AUDIT-002`
-reports it. An unmarked dispatch that carries `PLAN_FILE:` or `TASK:`, or any header that
+dispatch to a planner is evaluated on `factory` and `antigravity` with no caller, never as the
+conductor's, and `KW-ARB-AUDIT-002` reports it. An unmarked dispatch that carries `PLAN_FILE:` or `TASK:`, or any header that
 was rejected, still infers the conductor and stays gated. The cost is that a conductor which drops its marker goes
 ungated on those harnesses. That is the accepted risk the Arbiter design records, and the
 audit rule is how it is seen.

@@ -224,15 +224,17 @@ public sealed class ArbiterClassificationTests
     [Theory]
     [InlineData("factory")]
     [InlineData("antigravity")]
-    public void Classification_UnmarkedPlannerTargetOnProjectWideHarnessPasses(string harness)
+    public void Classification_UnmarkedPlannerTargetOnProjectWideHarness_IsEvaluatedWithNoCallerInvented(string harness)
     {
+        // The catalog names the target, so the dispatch is evaluated; nothing names the caller, so it is
+        // not taken for the conductor and only rules that allow an unnamed caller apply.
         const string Prompt = "Plan the upgrade.";
         TriggerClassification plan = TriggerClassifier.ClassifySingle(
             Dispatch(Prompt, target: "architect", harness: harness),
             "architect",
             Prompt);
 
-        Assert.Null(plan.Trigger);
+        Assert.Equal("investigate", plan.Trigger);
         Assert.Null(plan.Caller);
     }
 
@@ -440,12 +442,26 @@ public sealed class ArbiterClassificationTests
         static KyberWeave.Core.Configuration.KyberWeaveConfig Fail() =>
             throw new InvalidOperationException("must not load .kyber-weave/kyber-weave.yml");
 
-        var ev = Dispatch("Do anything with `src/a.cs`.", target: "csharp-dev", harness: "antigravity");
+        var ev = Dispatch("Do anything with `src/a.cs`.", target: "explore", harness: "antigravity");
         IReadOnlyList<TriggerClassification> rows = TriggerClassifier.Classify(ev, Fail);
 
         TriggerClassification single = Assert.Single(rows);
         Assert.Null(single.Trigger);
         Assert.True(single.PassedWithoutConfig);
+    }
+
+    [Theory]
+    [InlineData("antigravity")]
+    [InlineData("copilot-cli")]
+    [InlineData("claude")]
+    public void Classification_UnmarkedUnidentifiedDispatchToASquadAgent_IsEvaluated(string harness)
+    {
+        var ev = Dispatch("Do anything with `src/a.cs`.", target: "csharp-dev", harness: harness);
+
+        TriggerClassification single = Assert.Single(TriggerClassifier.Classify(ev));
+
+        Assert.Equal("investigate", single.Trigger);
+        Assert.Null(single.Caller);
     }
 
     [Fact]
