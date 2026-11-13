@@ -44,7 +44,7 @@ profiles:
     default: inherit
     antigravity: flash
     claude: claude-sonnet-5-5
-    codex: gpt-5.6-terra
+    codex: gpt-6.1-terra
     copilot: Grok 4.7 (copilot)
     cursor: grok-4.7[]
     devin: swe-2-high
@@ -66,7 +66,7 @@ profiles:
     default: inherit
     antigravity: pro
     claude: sonnet
-    codex: gpt-5.6-terra
+    codex: gpt-6.1-terra
     copilot: Gemini 3.8 Flash (copilot)
     cursor: kimi-k2.7-code[]
     devin: grok-4-7-high
