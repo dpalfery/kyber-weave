@@ -30,7 +30,6 @@ public sealed class ArbiterDefaultRulesTests
         "KW-ARB-READY-001",
         "KW-ARB-OWNER-001",
         "KW-ARB-OWNER-002",
-        "KW-ARB-MODE-001",
         "KW-ARB-ROSTER-001",
         "KW-ARB-RUN-001",
         "KW-ARB-DIFF-001",
@@ -58,6 +57,7 @@ public sealed class ArbiterDefaultRulesTests
         "KW-ARB-TRIM-001",
         "KW-ARB-COMMENT-001",
         "KW-ARB-CHECKOUT-001",
+        "KW-ARB-MODE-002",
     ];
 
     [Fact]
@@ -133,17 +133,28 @@ public sealed class ArbiterDefaultRulesTests
     }
 
     [Fact]
-    public void Mode001_HasNoMissingContractAnswer()
+    public void Mode002_IsDecidedFromMachineFactsAloneAndLogsAMissingFailingRunWithoutStopping()
     {
-        ArbiterRule mode = ArbiterConfig.ProductDefaults.Rules.Single(r => r.Id == "KW-ARB-MODE-001");
+        ArbiterRule mode = ArbiterConfig.ProductDefaults.Rules.Single(r => r.Id == "KW-ARB-MODE-002");
 
-        Assert.DoesNotContain("missing-contract", mode.Answers);
-        Assert.Equal(["no-task", "not-required", "present", "missing", "returns-unobservable", "returns-unread", "in-order"], mode.Answers);
-        // missing and in-order come from the model question only; step 0 never answers them (ADR 0072).
-        Assert.DoesNotContain(mode.Decide!, clause => clause.Answer is "missing" or "in-order");
-        Assert.NotNull(mode.Ask);
-        Assert.Equal(["in-order", "missing"], mode.Ask.Criteria!.Keys.Order(StringComparer.Ordinal));
-        Assert.Equal("allow", mode.Effects["in-order"]);
+        Assert.Equal("delegate.returned", mode.Trigger);
+        Assert.Equal(["no-task", "not-required", "failing-run-first", "no-failing-run"], mode.Answers);
+        // No model question: the proof is two reports on disk, so an unreadable fact is undecidable and allows (ADR 0072).
+        Assert.Null(mode.Ask);
+        // A missing failing run is recorded, not a stop: a worker cannot produce one after implementing (ADR 0076).
+        Assert.All(mode.Effects.Values, effect => Assert.Equal("allow", effect));
+        Assert.Equal("no-failing-run", mode.Decide![^1].Answer);
+    }
+
+    [Fact]
+    public void Mode001_IsRetiredAndOwner001NoLongerHandsTestFirstTasksToTestDev()
+    {
+        Assert.DoesNotContain(ArbiterConfig.ProductDefaults.Rules, r => r.Id == "KW-ARB-MODE-001");
+        Assert.DoesNotContain("ledger.red-evidence", ArbiterTriggerCatalog.FactsByTrigger["delegate"]);
+
+        ArbiterRule owner = ArbiterConfig.ProductDefaults.Rules.Single(r => r.Id == "KW-ARB-OWNER-001");
+        // The one step-0 owner answer is the target named among the task's skills; test-dev is not owner of every test-first task.
+        Assert.Single(owner.Decide!, clause => clause.Answer == "owner");
     }
 
     [Fact]

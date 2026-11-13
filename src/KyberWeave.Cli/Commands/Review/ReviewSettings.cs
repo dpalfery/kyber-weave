@@ -41,10 +41,10 @@ public sealed class ReviewGatesSettings : AnalysisSettings
     public bool Fix { get; set; }
 
     [CommandOption("--red")]
-    [Description("Judge the agent's gate runs as RED evidence for a test-authoring task: they pass when tests ran and " +
+    [Description("Judge the agent's gate runs as a test-first task's failing run, after its tests are written and before it is implemented: they pass when tests ran and " +
                  "failed, or when the build failed only on missing-symbol errors (C# CS0103/CS0117/CS0234/CS0246/CS1061, " +
                  "TypeScript TS2304/TS2305/TS2307/TS2339) in the files the task changed; they fail when the build breaks " +
-                 "for any other reason or every test passes. Prints the RED_EVIDENCE line to paste. Requires --agent.")]
+                 "for any other reason or every test passes. The report written is the proof of the failing run. Requires --agent.")]
     public bool Red { get; set; }
 
     [CommandOption("--all")]

@@ -36,13 +36,11 @@ public static class ArbiterTriggerCatalog
         "plan.task.text",
         "plan.task.files",
         "plan.task.depends-on",
-        "plan.task.dependents",
         "plan.task.skills",
         "plan.out-of-scope",
         "plan.test-contract.row",
         "ledger.in-flight.paths",
         "ledger.completed-tasks",
-        "ledger.red-evidence",
         "ledger.task-returns",
         "harness.observes-returns",
         "harness.model-override",
@@ -77,7 +75,7 @@ public static class ArbiterTriggerCatalog
                 DelegateFacts,
                 [
                     "git.changed-paths.since-dispatch", "git.changed-paths.attributed", "ledger.concurrent.paths", "gate.report.agrees",
-                    "gate.report.claim", "delegation.returned-tail", "checkout.stray-paths", "config.task-gates-declared",
+                    "gate.report.failing-run-first", "gate.report.claim", "delegation.returned-tail", "checkout.stray-paths", "config.task-gates-declared",
                 ]),
             ["delegate.planner"] = DelegatePlannerFacts,
             ["delegate.planner.returned"] = Union(

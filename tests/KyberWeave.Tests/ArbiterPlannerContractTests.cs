@@ -49,7 +49,7 @@ public sealed class ArbiterPlannerContractTests
 
         Assert.Contains("STATUS: NEEDS_DECISION", reference, StringComparison.Ordinal);
         Assert.Contains("ATTESTED:", reference, StringComparison.Ordinal);
-        Assert.Contains("complete|red", reference, StringComparison.Ordinal);
+        Assert.Contains("=complete", reference, StringComparison.Ordinal);
 
         int decisionIndex = reference.IndexOf("STATUS: NEEDS_DECISION", StringComparison.Ordinal);
         int attestedIndex = reference.IndexOf("ATTESTED:", StringComparison.Ordinal);

@@ -23,11 +23,11 @@ Persist:
 
 ### Test-first mode
 
-Include a Test contract for every implementation task: exact test project or file, runner command, observable behavior, expected RED reason, and GREEN acceptance. Sequence RED → GREEN → REFACTOR; implementation cannot start before valid RED evidence exists.
+Each implementation task is one unit of behaviour that one specialist owns, tests and code together; never split it into a test task and an implementation task, or add a stub task so another task's tests compile. Give each task a Test contract row: exact test project or file, runner command, observable behavior, the failing run's expected reason, and passing acceptance. The worker runs the tests failing before implementing, in the same task.
 
 ### Standard mode
 
-Include a verification contract for every implementation task: exact automated test surface and command plus any build, analyzer, package, deployment, or read-only integration evidence. Sequence implementation → verification → review. Historical RED evidence is not required, but appropriate automated tests and current evidence remain mandatory.
+Include a verification contract for every implementation task: exact automated test surface and command plus any build, analyzer, package, deployment, or read-only integration evidence. Sequence implementation → verification → review. The failing run is not required, but appropriate automated tests and current evidence remain mandatory.
 
 Mark any genuinely no-test task explicitly and name its replacement validation. A contract change after approval requires reapproval.
 

@@ -391,18 +391,6 @@ public sealed class InFlightLedger
             .OrderBy(task => task, StringComparer.Ordinal)];
 
     /// <summary>
-    /// The tasks with RED evidence: a returned <c>test-dev</c> output whose
-    /// <c>RED_EVIDENCE:</c> value states evidence, or an
-    /// attestation <c>&lt;task&gt;=red</c> (D31).
-    /// </summary>
-    /// <param name="planFile">When set, only returns for this plan count.</param>
-    public IReadOnlyList<string> RedEvidenceTasks(string? planFile = null) =>
-        [.. ReturnsFor(planFile)
-            .SelectMany(item => RedEvidenceTasksOf(item.Post, item.Task))
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(task => task, StringComparer.Ordinal)];
-
-    /// <summary>
     /// Each post event with the task it answers. A specialist's headers are stripped
     /// before it runs, so its post event names no task and the paired pre event supplies it.
     /// </summary>
@@ -450,21 +438,6 @@ public sealed class InFlightLedger
         }
 
         tasks.AddRange(AttestedTasks(e, "complete"));
-        return tasks;
-    }
-
-    private static IEnumerable<string> RedEvidenceTasksOf(ArbiterLedgerEvent e, string? task)
-    {
-        List<string> tasks = [];
-        string? red = e.Returns?.RedEvidence;
-        if (task is not null
-            && red is not null
-            && !NoRedEvidence.IsStatedBy(red))
-        {
-            tasks.Add(task);
-        }
-
-        tasks.AddRange(AttestedTasks(e, "red"));
         return tasks;
     }
 

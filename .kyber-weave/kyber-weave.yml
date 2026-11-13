@@ -364,22 +364,27 @@ review:
         run: [dotnet, test, tests/KyberWeave.Tests/KyberWeave.Tests.csproj, -c, Release, --no-build, --filter, "{tests}", --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
         timeout: 600
     # Every .NET authoring role carries the suppression gate, not only csharp-dev: a `#pragma`
-    # or a SuppressMessage is the same defect wherever it is written.
+    # or a SuppressMessage is the same defect wherever it is written. Each also runs the tests its
+    # change covers: in test-first mode the worker writes its own tests, and the task gate's
+    # failing run (--red) and passing run are the proof (ADR 0076).
     dal-dev:
       - *fmt-whitespace
       - *fmt-style
       - *dotnet-build
       - *suppressions
+      - *dotnet-tests
     maui-dev:
       - *fmt-whitespace
       - *fmt-style
       - *dotnet-build
       - *suppressions
+      - *dotnet-tests
     pulumi-dev:
       - *fmt-whitespace
       - *fmt-style
       - *dotnet-build
       - *suppressions
+      - *dotnet-tests
     # The three file kinds no language gate selects. A task that edits only a workflow, a shell
     # script, or this file used to select zero gates and report NONE_APPLICABLE — a valid result
     # that is no evidence anything ran. `include` alone decides selection, so these are defined

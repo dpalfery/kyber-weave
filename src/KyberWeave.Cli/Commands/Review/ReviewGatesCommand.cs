@@ -728,7 +728,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
                 Severity.Info,
                 outcome.EvidenceLine,
                 "review gates --red",
-                Hint: "Paste this line as the RED_EVIDENCE line of the completion digest."));
+                Hint: "The failing run is recorded in this run's report; now implement the task and run the task gate again without --red."));
         }
         else
         {

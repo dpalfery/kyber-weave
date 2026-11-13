@@ -87,8 +87,9 @@ ahead of it.
 - Deep concerns (security, authorization, performance at scale, blast radius, duplication,
   analyzer triage, supply chain, coverage-backed test adequacy) are covered once, by the
   end-of-run council, rather than per task.
-- The per-task RED/GREEN-ordering audit is no longer performed by an LLM. The council's
-  test-adequacy lens covers part of it at the end of the run, and the conductor still mechanically
-  checks that a RED digest exists before GREEN is accepted. This loss is accepted.
+- The per-task test-first audit is no longer performed by an LLM. The council's test-adequacy lens
+  covers part of it at the end of the run, and the Arbiter checks on each return that the task
+  gate's failing run preceded its passing run (`KW-ARB-MODE-002`). This loss is accepted. Amended
+  2026-11-13: one worker now owns a task's tests and code ([ADR 0076](0076-test-first-is-one-worker-per-task.md)).
 - The `TASK_GATE:` line is the conductor's evidence that the gate ran; a digest without it is
   rejected rather than trusted.

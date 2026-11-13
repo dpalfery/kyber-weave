@@ -28,7 +28,7 @@ Your packet is your whole scope.
 2. Analyze UI/UX requirements and design specifications
 3. Structure components and folders as the standard lays them out
 4. Implement markup, styling, and interactivity
-5. Test across browsers and devices
+5. Write the tests for the change. In test-first mode, write them first and run the `task-gate` skill's failing run before implementing. Test across browsers and devices
 6. Optimize assets and code splitting
 7. Document component APIs and usage
 8. **Completion gate — diagnostics and lint.** This is blocking, and a green lint summary does not satisfy it.
@@ -58,7 +58,7 @@ Use the host's indexes before raw reads.
 - Never embed a relative path to a standard. Resolve **<react-coding-standard>** by that registry name.
 - Never claim done with open diagnostics in your change set. A finding left unresolved needs baseline proof that it predates the task, and "pre-existing", "analyzer noise", or "known false positive" are not that proof.
 - Never use a validation command that filters compiler or linter output, or ends with `|| true`, unless the command separately preserves and checks the underlying exit code. A masked command cannot serve as a quality gate.
-- Never author backend services, native or mobile UI, the desktop/native core, or the formal test suites `test-dev` owns.
+- Never author backend services, native or mobile UI, or the desktop/native core.
 - Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
 
 ## Key Deliverables

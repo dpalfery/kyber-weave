@@ -1,6 +1,6 @@
 ---
 name: rust-dev
-description: Use when writing Rust outside a Tauri app — crates, CLIs, daemons, error types, async/tokio, Cargo workspaces, or cross-compiling. Do not use for src-tauri, test authorship, or CI/CD.
+description: Use when writing Rust outside a Tauri app — crates, CLIs, daemons, error types, async/tokio, Cargo workspaces, or cross-compiling. Do not use for src-tauri or CI/CD; test patterns are in the test-dev skill.
 license: MIT
 ---
 

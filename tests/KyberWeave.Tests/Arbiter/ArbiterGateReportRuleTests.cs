@@ -32,7 +32,7 @@ public sealed class ArbiterGateReportRuleTests
         KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Core", "Arbiter", "Rules", "default-rules.yml");
 
     /// <summary>
-    /// The eighteen rules the file ships today, pinned so the new one joins without renumbering any.
+    /// The seventeen rules the file shipped before it that it still ships, pinned so the new one joins without renumbering any.
     /// Rule ids are permanent: suppressions, baselines and code-scanning alerts key on them.
     /// </summary>
     private static readonly string[] ShippedBeforeThisSlice =
@@ -43,7 +43,6 @@ public sealed class ArbiterGateReportRuleTests
         "KW-ARB-READY-001",
         "KW-ARB-OWNER-001",
         "KW-ARB-OWNER-002",
-        "KW-ARB-MODE-001",
         "KW-ARB-ROSTER-001",
         "KW-ARB-DIFF-001",
         "KW-ARB-PLANNER-001",

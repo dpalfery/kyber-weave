@@ -98,7 +98,7 @@ question over raw text with calibrated probabilities.
   are no longer produced: the path a planner is told is prose, and where it writes is checked on
   its return by `KW-ARB-PLANNER-DIFF-001` against git.
 - **Return tails are stored.** Each `delegate.returned` keeps the last 2,000 characters of the
-  worker's report in the run store beside the plan, so the readiness and RED-evidence questions
+  worker's report in the run store beside the plan, so the readiness question can
   read what the worker said. The ledger still holds no text.
 - **New thresholds are unmeasured.** The new questions ship at a 0.8 floor and are not in shadow,
   because blocking only on confident answers is already the safe direction. `arbiter tune` reads

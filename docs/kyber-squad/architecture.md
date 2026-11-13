@@ -8,6 +8,7 @@ owner: dpalfery
 last-reviewed: 2026-11-12
 status: current
 decided-by:
+  - adr/0076-test-first-is-one-worker-per-task
   - adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude
   - adr/0068-doctor-owns-a-marked-block-in-the-shared-post-checkout-hook
   - adr/0067-copilot-system-prompt-override-is-machine-wide
@@ -1604,13 +1605,9 @@ and retained sessions stay available until task gates and run-level findings set
 
 **The architect declares the session group, not the conductor.** Each task in a plan's task file
 carries a `session` group, and tasks sharing one continue a single worker session where the harness
-allows it; the conductor does not invent one at dispatch. **RED and GREEN never share a group**,
-because the adversarial split is the reason the two are separate dispatches at all, and the
-separation is what decides whether a task is bundled. A follow-up fix and a later same-role task on
-one change do share a group: changing one assertion took a fresh worker 11 minutes, because the
-fresh worker re-derived context the previous one already had. The architect may therefore merge two
-RED tasks into one group when the later one needs no earlier GREEN, and never merges a RED with its
-GREEN.
+allows it; the conductor does not invent one at dispatch. A follow-up fix and a later same-role task
+on one change share a group: changing one assertion took a fresh worker 11 minutes, because the
+fresh worker re-derived context the previous one already had.
 
 Continuation is a harness capability, not a guarantee made by a renderer or model.
 Stateless delegation uses the recovery brief; resumable delegation uses its returned
@@ -1690,7 +1687,7 @@ execution throughput, conductor does not serialize all task execution or test ru
   symbol scopes do not overlap execute concurrently up to `review.max-concurrent-workers`.
 - **Worktree and artifact isolation**: Each concurrent worker executes in an isolated git
   worktree (`git worktree add`, or harness `Workspace: share`/`branch`) or uses dedicated per-task
-  artifact paths (`dotnet build --artifacts-path .agent_scratchpad/<task-id>/artifacts` for compiler intermediates and `kyber-weave review gates` `--out artifacts/task-gate-<task-id>.json` for gate reports) and direct
+  artifact paths (`dotnet build --artifacts-path .agent_scratchpad/<task-id>/artifacts` for compiler intermediates and `kyber-weave review gates` `--out .agent_scratchpad/<task-id>/task-gate.json` for gate reports) and direct
   assembly runner execution (`-class "<namespace>.<Class>"`). Workers author code and run
   targeted tests simultaneously without mutual interference or file locks.
 - **Worktree MCP canonical binding**: Parallel workers running in ephemeral worktrees bind MCP servers
@@ -1719,23 +1716,17 @@ execution throughput, conductor does not serialize all task execution or test ru
   integration boundary. All read-only tasks, test runs, and non-overlapping task implementations
   run in parallel.
 
-### Adversarial RED/GREEN role boundary and same-role task bundling
+### One worker per test-first task
 
-Quality and verification rigor depend on objective, adversarial test authorship:
-
-- **Strict two-agent adversarial separation**: `test-dev` authors the failing contract test (RED)
-  with a distinct adversarial mindset, and the implementation specialist (`csharp-dev`, etc.)
-  implements production code (GREEN). RED and GREEN are never collapsed into a single worker
-  dispatch; the repository deliberately pays the dispatch and context cost to retain adversarial
-  tension and prevent confirmation bias.
-- **Same-role task bundling**: Conductor avoids unnecessary dispatch latency by bundling small
-  adjacent micro-tasks strictly within the same specialist role (for example, combining all
-  related contract test assertions into one `test-dev` dispatch, or bundling small related
-  implementation edits across 1–3 files within the same specialist role into one dispatch), rather
-  than over-splitting.
-- **Independent verification pass**: Combining small tasks never bypasses verification. The
-  deterministic `task-gate` exit check and final council review execute against the integrated
-  working tree, ensuring all contract tests pass and no false positives or uncommitted changes survive.
+A test-first task is one unit of behaviour owned by one specialist, who writes its tests, runs the
+task gate with `--red` (the failing run), implements, and runs the task gate again (the passing run),
+all in one dispatch ([ADR 0076](../adr/0076-test-first-is-one-worker-per-task.md)). The two reports
+in the task's scratch folder, failing run first, are the proof; `KW-ARB-MODE-002` records on
+each return whether they show it. `test-dev` takes only tasks whose deliverable is tests. The split this replaces —
+`test-dev` writing RED tests in one task and a developer making them pass in another — deadlocked
+compiled test projects and stopped headless runs on stub and evidence rules. What it gave up, an
+independent test author, is covered by the council's `test-adequacy` lens, which reads every added
+test as an outsider; its findings per run are how the decision is monitored.
 
 Operational contracts remain in
 `products/kyber-squad/agents/conductor.md`,
@@ -1766,7 +1757,7 @@ what makes resuming a run somewhere else possible at all.
   its execution digest (a stale file is refused with the fix), and prints only that task's packet with
   `{worktree}` filled in. `--prior-results <file>` fills `{prior_results}` with earlier worker reports as
   they were written; without it that section says none were supplied. No plan can know either slot:
-  the second GREEN prompt in that run needed a cause an earlier worker had found. A conductor that
+  a later prompt in that run needed a cause an earlier worker had found. A conductor that
   could not read a 33 KB file and retyped it through helpers left its worker blocked; the machine
   prints the packet so no one retypes it.
 - **The plan stays authoritative.** The owner approves the plan, it holds the `## Decisions` table,
@@ -1791,7 +1782,7 @@ what makes resuming a run somewhere else possible at all.
   mid-run push carried nothing and a resumed run opened with an architect pass to assess progress
   (225 seconds and 64 tool calls in the measured run).
 - **The session group is the architect's.** See [task session continuity](#task-session-continuity)
-  above: tasks sharing a `session` group continue one worker session, and RED and GREEN never do.
+  above: tasks sharing a `session` group continue one worker session.
 
 ```mermaid
 flowchart TD

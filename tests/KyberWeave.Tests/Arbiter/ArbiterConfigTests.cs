@@ -22,7 +22,6 @@ public sealed class ArbiterConfigTests
         "KW-ARB-READY-001",
         "KW-ARB-OWNER-001",
         "KW-ARB-OWNER-002",
-        "KW-ARB-MODE-001",
         "KW-ARB-ROSTER-001",
         "KW-ARB-RUN-001",
         "KW-ARB-DIFF-001",
@@ -50,6 +49,7 @@ public sealed class ArbiterConfigTests
         "KW-ARB-TRIM-001",
         "KW-ARB-COMMENT-001",
         "KW-ARB-CHECKOUT-001",
+        "KW-ARB-MODE-002",
     ];
 
     [Fact]

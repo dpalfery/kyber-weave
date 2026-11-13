@@ -252,7 +252,7 @@ fact outside those declared states leaves the machine.
   report reads `RESULT: PASS`, because the separate task reviewer the design named no longer
   exists. A worker can therefore mark its own task complete; the final review still judges
   the whole change.
-- **Ledger loss needs attestation.** Completion and RED evidence live in `artifacts/`, which
+- **Ledger loss needs attestation.** Completion lives in `artifacts/`, which
   is not committed. On a fresh clone the readiness question sees no completion and no stored
   report, so a confident `waiting` answer escalates dependent tasks until architect attests,
   after user confirmation, what is complete (D31).

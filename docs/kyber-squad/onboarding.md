@@ -1325,7 +1325,7 @@ Neither entry point restates the rules; if you are editing one of them, the cont
 belongs in the skill.
 
 **What bug-crusher delegates.** Its roster carries the agents its escalated path actually starts:
-`architect` (planning the escalated defect), `test-dev` (establishing RED), `code-reviewer` (the
+`architect` (planning the escalated defect), `test-dev` (a failing test when no developer takes the fix), `code-reviewer` (the
 finished fix), and the twelve developer agents a task routes to, alongside the investigator,
 `docs-dev`, and the two council seats it starts when the reviewer cannot start its own. Discovery
 is the architect's own delegation and the owner is the human, so `research-agent`,
@@ -1359,7 +1359,7 @@ essential items:
 2. **Entry-file table**: Exact relative file paths, roles, key symbols, and assigned actions.
 3. **Acceptance criteria checklist**: Complete checklist that the worker must satisfy before handoff.
 4. **Pre-computed test runner command**: The exact direct assembly runner invocation targeting the assigned test class.
-5. **Test/verification contract**: Required RED evidence, test commands, and exit gate expectations.
+5. **Test/verification contract**: The tests the task writes, what its failing run must show in test-first mode, the test commands, and exit gate expectations.
 
 `docs validate` and the docs MCP validate tool check the file before a run relies on it: it must
 agree with its plan (`KW-DOC-TASKS-002`), carry a digest that still describes the plan (`-003`), hold
@@ -1372,10 +1372,9 @@ the Arbiter reads its tasks.
 **The `session` group keeps related work in one worker session.** Each task's `session` value is the
 architect's decision, not the conductor's. Tasks that share one continue a single worker session
 where the harness allows continuation, so a follow-up fix does not pay to rediscover context a
-previous worker already had. **RED and GREEN never share a group**: the adversarial split between
-test authorship and implementation is the reason those are two dispatches, and bundling them removes
-the independence the split exists for. The architect may merge two RED tasks into one group when the
-later one needs no earlier GREEN.
+previous worker already had. In test-first mode a task's tests and its code are already one
+dispatch: one worker writes the tests, runs its task gate with `--red`, implements, and runs the gate
+again ([ADR 0076](../adr/0076-test-first-is-one-worker-per-task.md)).
 
 **Each finished task commits with `Task: <id>` and its report in the commit body**, and the branch
 is pushed after each integrated task, so `kyber-weave run start --resume <branch>` lists what is done

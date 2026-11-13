@@ -83,12 +83,12 @@ public sealed class SquadTypeScriptSpecialistTests
     }
 
     /// <summary>
-    /// <c>typescript-dev</c> takes non-test <c>.ts</c> outside a React UI and names both
+    /// <c>typescript-dev</c> takes <c>.ts</c> outside a React UI, with its tests, and names both
     /// neighbours it hands work to; <c>react-dev</c> hands Node TypeScript back. Each side names
     /// the other so neither description matches the same file.
     /// </summary>
     [Fact]
-    public void TypeScriptTriggersSplitNodeCodeFromReactUiAndTests()
+    public void TypeScriptTriggersSplitNodeCodeFromReactUi()
     {
         string typescript = LoadAgent("typescript-dev").Description;
         Assert.Contains("(react-dev)", typescript, StringComparison.Ordinal);
@@ -97,9 +97,6 @@ public sealed class SquadTypeScriptSpecialistTests
         string react = LoadAgent("react-dev").Description;
         Assert.Contains(".tsx or .jsx file", react, StringComparison.Ordinal);
         Assert.Contains("(typescript-dev)", react, StringComparison.Ordinal);
-
-        string testDev = LoadAgent("test-dev").Description;
-        Assert.Contains(".test.ts or .spec.ts file", testDev, StringComparison.Ordinal);
     }
 
     /// <summary>

@@ -11,7 +11,7 @@ namespace KyberWeave.Core.Arbiter.Plans;
 /// <param name="TestProjectOrFile">The <c>Test project or file</c> cell.</param>
 /// <param name="RunnerFilter">The <c>Runner filter</c> or <c>Runner command</c> cell.</param>
 /// <param name="ObservableBehaviour">The <c>Observable behaviour</c> (or <c>behavior</c>) cell.</param>
-/// <param name="RedEvidenceRequired">The <c>RED evidence required</c> cell; read by MODE-001.</param>
+/// <param name="RedEvidenceRequired">The <c>RED evidence required</c> cell; read by MODE-002.</param>
 /// <param name="GreenAcceptance">The <c>GREEN acceptance</c> cell.</param>
 /// <remarks>
 /// Headers bind by containment as well as by exact name, because the archive writes

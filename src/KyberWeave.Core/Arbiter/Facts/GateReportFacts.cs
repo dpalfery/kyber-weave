@@ -31,6 +31,19 @@ public static class GateReportFacts
     /// <summary>The tail of the worker's return, where its digest closes it.</summary>
     public const string ReturnedTailFact = "delegation.returned-tail";
 
+    /// <summary>
+    /// Whether the folder of the report a returned digest claims as a pass also holds a failing-run report
+    /// written before it: true when it does, false when the claimed pass has none older, absent when the
+    /// claim or its report cannot be read. <c>KW-ARB-MODE-002</c> reads it as the proof of test-first.
+    /// </summary>
+    public const string FailingRunFirstFact = "gate.report.failing-run-first";
+
+    /// <summary>
+    /// How <c>review gates --red</c> marks a gate it accepted as a failing run: the gate is recorded as passed
+    /// with this summary prefix. A report holding such a gate is a failing-run report, whatever its file name.
+    /// </summary>
+    public const string RedAcceptedSummaryPrefix = "RED accepted";
+
     /// <summary>The digest line whose claim the rule checks.</summary>
     private const string DigestMarker = "TASK_GATE:";
 
@@ -98,6 +111,8 @@ public static class GateReportFacts
             return facts;
 
         facts = facts.With(AgreesFact, Agrees(ev.ToolOutput, ev.Cwd), ArbiterFactLabel.Derived);
+        if (facts.Contains(FailingRunFirstFact))
+            facts = facts.With(FailingRunFirstFact, FailingRunFirst(ev.ToolOutput, ev.Cwd), ArbiterFactLabel.Derived);
         if (facts.Contains(ClaimFact))
             facts = facts.With(ClaimFact, RawClaimLine(ev.ToolOutput), ArbiterFactLabel.Asserted);
         if (facts.Contains(ReturnedTailFact))
@@ -156,6 +171,55 @@ public static class GateReportFacts
         GateReport? report = TryReadFile(path);
         return report is null ? null : Corroborates(claim.Claimed, report);
     }
+
+    /// <summary>
+    /// Whether a returned digest's passing report was preceded by a failing run of the same task gate: the
+    /// worker wrote its tests, ran the gate with <c>--red</c>, then implemented and ran it again. Both runs write
+    /// reports, so the proof is two files in one folder, not a line the worker composes.
+    /// </summary>
+    /// <param name="returnedText">The worker's return text, digest included.</param>
+    /// <param name="repositoryRoot">The root a relative report path resolves against.</param>
+    /// <returns>
+    /// <c>true</c> when the claimed report is a clean pass and a failing-run report in its folder was written
+    /// before it; <c>false</c> when the claimed report is a clean pass with no older failing-run report beside it,
+    /// or is itself the failing-run report; <c>null</c> when there is no claim, no report, or the claimed report
+    /// is not a clean pass (<c>KW-ARB-GATE-REPORT-001</c> judges that).
+    /// </returns>
+    public static bool? FailingRunFirst(string? returnedText, string? repositoryRoot)
+    {
+        if (Agrees(returnedText, repositoryRoot) is not true)
+            return null;
+
+        DigestClaim claim = ReadClaim(returnedText!)!;
+        string? path = Resolve(claim.ReportPath, repositoryRoot);
+        if ((path is null || !File.Exists(path)) && claim.WholeLinePath is not null)
+            path = Resolve(claim.WholeLinePath, repositoryRoot) ?? path;
+        if (path is null || Path.GetDirectoryName(path) is not { } folder)
+            return null;
+
+        try
+        {
+            if (IsFailingRun(TryReadFile(path)))
+                return false;
+
+            DateTime passedAt = File.GetLastWriteTimeUtc(path);
+            return Directory.EnumerateFiles(folder, "*.json", SearchOption.TopDirectoryOnly)
+                .Where(candidate => !string.Equals(Path.GetFullPath(candidate), Path.GetFullPath(path), StringComparison.Ordinal))
+                .Any(candidate => File.GetLastWriteTimeUtc(candidate) < passedAt && IsFailingRun(TryReadFile(candidate)));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Whether <paramref name="report"/> was written by an accepted <c>review gates --red</c> run.</summary>
+    private static bool IsFailingRun(GateReport? report) =>
+        report?.Gates is not null
+        && report.Gates.Any(gate => gate is not null
+            && gate.Passed
+            && gate.Summary is not null
+            && gate.Summary.StartsWith(RedAcceptedSummaryPrefix, StringComparison.Ordinal));
 
     private static DigestClaim? ReadClaim(string returnedText)
     {

@@ -46,6 +46,20 @@ kyber-weave review gates . --agent <self> --paths <files> --task <task-id> --out
 The verification pass is the one whose result counts. A `--fix` run that changed files is
 not a pass until a run without `--fix` reports every declared gate as passing.
 
+## Failing run (test-first)
+
+In a test-first task, after writing the tests and before implementing, run the gate once with
+`--red` and its own report path, so the passing run does not overwrite it:
+
+```bash
+kyber-weave review gates . --agent <self> --paths <files> --task <task-id> --red --out .agent_scratchpad/<task-id>/task-gate-red.json
+```
+
+It passes only when tests ran and failed, or when the build failed only on symbols missing from
+this task's own files; it prints `RED_REJECTED: <reason>` otherwise. Do not add a stub to make the
+tests compile. Fix what it names and run it again, then implement and run the loop below. The two
+reports, failing run first, are the proof the Arbiter reads; the digest names only the passing one.
+
 ## Fix pass for .NET work
 
 When the task changed C# files, the mechanical findings are erased by `dotnet format` and
@@ -125,26 +139,9 @@ TESTS: total=N failed=N passed=N
 COMMIT: <commit-sha | NONE>
 REMOTE_HEAD: <remote-head-sha | UNPUSHED>
 TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE — agent=<name> gates=<n> failed=<ids|none> skipped=<n> report=<path> runs=<k>
-RED_EVIDENCE: <runner filter> — <failing tests> — <reason>
 ```
 
-`RED_EVIDENCE:` is part of the template, not an aside; it follows the six digest fields and is never counted as a seventh. The in-flight ledger reads its value from
-the returned output as its `ledger.red-evidence` fact, and Arbiter rule `KW-ARB-MODE-001` uses
-that fact to gate test-first plans: an implementation dispatch with no RED evidence on record
-escalates. Valid RED is tests that ran and failed on an assertion, or, in a compiled language, a build
-that failed only because the tests name symbols the GREEN task creates (the classic first red);
-a build that breaks for any other reason is not RED. A test-authoring task does not judge this
-by prose: it runs `kyber-weave review gates . --agent test-dev --paths <its test files> --task <slug> --red`,
-which passes only on those two shapes, lists the missing symbols it accepted, skips test gates that
-cannot run on a broken build, ends with a `TASK_GATE:` line and either `RED_REJECTED: <reason>` or the
-line to paste, `RED_EVIDENCE: <filter> — compile: missing <symbols>` or
-`RED_EVIDENCE: <filter> — <failing tests> — <assertion>`. It does not add a production stub to
-make the tests compile. Emit `RED_EVIDENCE: none` when the work
-recorded no RED run, such as a maintenance pass with no failing-first cycle. Anything but a
-literal `none` counts as evidence, so the fields must be the values actually run, never
-placeholders.
-
-Lines that are not one of the six digest fields are never counted or rejected as a seventh field. They are exactly these shapes: the Discovery: codegraph N, docs N, direct reads N header; COVERAGE_GAPS: followed by free text; RED_EVIDENCE: followed by the runner filter, the failing tests and the reason; Input sites: N traced, M files with none; Defect class: followed by one sentence and the inputs it covers; and Artifact: or Baseline: followed by one repository-relative or absolute path. When the circuit breaker trips, return the escalation in
+Lines that are not one of the six digest fields are never counted or rejected as a seventh field. They are exactly these shapes: the Discovery: codegraph N, docs N, direct reads N header; COVERAGE_GAPS: followed by free text; RED_EVIDENCE: as `review gates --red` prints it; Input sites: N traced, M files with none; Defect class: followed by one sentence and the inputs it covers; and Artifact: or Baseline: followed by one repository-relative or absolute path. When the circuit breaker trips, return the escalation in
 [references/rework.md](references/rework.md) instead of this digest.
 
 ## Boundaries
