@@ -147,7 +147,7 @@ public sealed partial class DocsTools
             the first call; repeat the same question with this value to read the next span.
             """)]
         string? cursor = null,
-        [Description("Absolute path of your worktree of this repository. Omit for the server's checkout.")] string? projectPath = null)
+        [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
     {
         if (Redirect(projectPath, tools => tools.Explore(query, cursor)) is { } redirected) return redirected;
         CodeGraphGate gate = CheckCodeGraph();
@@ -225,7 +225,7 @@ public sealed partial class DocsTools
         """)]
     public string ForSymbol(
         [Description("A bare or fully qualified symbol name, e.g. 'DataProtectionHealthCheck' or 'KyberWeave.Core.Docs.Search.DocumentIndex'. Both forms resolve.")] string symbol,
-        [Description("Absolute path of your worktree of this repository. Omit for the server's checkout.")] string? projectPath = null)
+        [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
     {
         if (Redirect(projectPath, tools => tools.ForSymbol(symbol)) is { } redirected) return redirected;
         CodeGraphGate gate = CheckCodeGraph();
@@ -274,7 +274,7 @@ public sealed partial class DocsTools
         [Description("Opaque candidate id taken from the 'next cursor' line of a previous response, to continue after that item. Omit for the first page.")] string? cursor = null,
         [Description("Maximum candidates to return (1-20). Defaults to 20; larger values are capped at 20.")] int limit = 20,
         [Description("Maximum response characters (up to 12000). Defaults to 12000. Evidence per candidate is capped independently, so one candidate cannot consume the whole page.")] int charBudget = 12000,
-        [Description("Absolute path of your worktree of this repository. Omit for the server's checkout.")] string? projectPath = null)
+        [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
     {
         if (Redirect(projectPath, tools => tools.AnalysisCandidates(kind, cursor, limit, charBudget)) is { } redirected) return redirected;
         CodeGraphGate gate = CheckCodeGraph();
@@ -391,7 +391,7 @@ public sealed partial class DocsTools
         """)]
     public string Glossary(
         [Description("A single glossary term, matched case-insensitively. Pass the term alone, not a sentence.")] string term,
-        [Description("Absolute path of your worktree of this repository. Omit for the server's checkout.")] string? projectPath = null)
+        [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
     {
         if (Redirect(projectPath, tools => tools.Glossary(term)) is { } redirected) return redirected;
         CodeGraphGate gate = CheckCodeGraph();
@@ -492,7 +492,7 @@ public sealed partial class DocsTools
             to 12000. The provenance and verdict lines are always emitted whole.
             """)]
         int charBudget = DocumentIndex.DefaultCharBudget,
-        [Description("Absolute path of your worktree of this repository. Omit for the server's checkout.")] string? projectPath = null)
+        [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
     {
         if (Redirect(projectPath, tools => tools.DocsValidate(mergeReady, @base, charBudget)) is { } redirected) return redirected;
         CodeGraphGate gate = CheckCodeGraph();
@@ -543,7 +543,7 @@ public sealed partial class DocsTools
             to 12000. The provenance and verdict lines are always emitted whole.
             """)]
         int charBudget = DocumentIndex.DefaultCharBudget,
-        [Description("Absolute path of your worktree of this repository. Omit for the server's checkout.")] string? projectPath = null)
+        [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
     {
         if (Redirect(projectPath, tools => tools.DocsDrift(charBudget)) is { } redirected) return redirected;
         CodeGraphGate gate = CheckCodeGraph();
@@ -594,7 +594,7 @@ public sealed partial class DocsTools
         Zero documents is not an error; the line still reports the root.
         """)]
     public string DocsStatus(
-        [Description("Absolute path of your worktree of this repository. Omit for the server's checkout.")] string? projectPath = null)
+        [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
     {
         if (Redirect(projectPath, tools => tools.DocsStatus()) is { } redirected) return redirected;
         DocumentIndex index = _host.Current();
@@ -650,7 +650,7 @@ public sealed partial class DocsTools
             12000. A value outside the range is clamped to the nearer bound, so a budget below
             the floor behaves as the floor rather than as an empty answer.
             """)] int charBudget = DocumentIndex.DefaultCharBudget,
-        [Description("Absolute path of your worktree of this repository. Omit for the server's checkout.")] string? projectPath = null)
+        [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
     {
         if (Redirect(projectPath, tools => tools.AgentCodingStandards(technology, topic, charBudget)) is { } redirected) return redirected;
         CodeGraphGate gate = CheckCodeGraph();
