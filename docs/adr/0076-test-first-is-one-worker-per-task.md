@@ -46,10 +46,12 @@ owned by two dispatches.
    symbols missing from the task's own files); implements; and runs the task gate again.
 3. **The proof is two machine-written reports.** The failing-run report, older than the passing-run
    report, in the task's scratch folder. The digest no longer carries a `RED_EVIDENCE:` line.
-   `KW-ARB-MODE-002` checks the two reports on the worker's return, from the folder of the report its
-   `TASK_GATE:` line claims: a missing or later failing run escalates; a plan exemption (standard mode,
-   a `test-dev` or documentation target, a "Not applicable" contract row) or a claim it cannot read
-   allows and is logged ([ADR 0072](0072-the-arbiter-blocks-only-on-machine-facts-and-confident-model-answers.md)).
+   `KW-ARB-MODE-002` reads the two reports on the worker's return, from the folder of the report its
+   `TASK_GATE:` line claims, and records `failing-run-first`, `no-failing-run`, `not-required` (standard
+   mode, a `test-dev` or documentation target, a "Not applicable" contract row) or undecidable. Every
+   answer allows and is logged: a worker cannot produce a failing run after implementing, and a task
+   with no contract row, or an agent whose gates run no tests, has none to show, so a stop there would be
+   the run stop this decision removes. A host that wants the stop overrides the effect to `escalate`.
    A failing-run report is recognised by its `RED accepted` gate summary, not its file name.
 4. **`test-dev` takes test-only work**: characterization tests before a refactor, an end-to-end suite,
    test infrastructure, and a defect's failing test in the bug-crusher flow when no developer takes
@@ -71,7 +73,7 @@ whether it asserts behaviour rather than implementation, and which negative and 
 ## Monitoring
 
 Each run's council findings from the `test-adequacy` lens are the measure, read per run alongside
-`KW-ARB-MODE-002`'s decisions in the Arbiter decision log. A significant rise in surviving
+`KW-ARB-MODE-002`'s `no-failing-run` answers in the Arbiter decision log. A significant rise in surviving
 test-adequacy findings, or in returns with no failing run, reopens this decision.
 
 ## Consequences

@@ -1721,8 +1721,8 @@ execution throughput, conductor does not serialize all task execution or test ru
 A test-first task is one unit of behaviour owned by one specialist, who writes its tests, runs the
 task gate with `--red` (the failing run), implements, and runs the task gate again (the passing run),
 all in one dispatch ([ADR 0076](../adr/0076-test-first-is-one-worker-per-task.md)). The two reports
-in the task's scratch folder, failing run first, are the proof; `KW-ARB-MODE-002` checks them when
-the worker returns. `test-dev` takes only tasks whose deliverable is tests. The split this replaces —
+in the task's scratch folder, failing run first, are the proof; `KW-ARB-MODE-002` records on
+each return whether they show it. `test-dev` takes only tasks whose deliverable is tests. The split this replaces —
 `test-dev` writing RED tests in one task and a developer making them pass in another — deadlocked
 compiled test projects and stopped headless runs on stub and evidence rules. What it gave up, an
 independent test author, is covered by the council's `test-adequacy` lens, which reads every added

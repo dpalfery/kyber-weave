@@ -699,9 +699,12 @@ rules:
   # failing run), implement, run it again (a passing run). Both runs write reports, so the proof is two
   # files, not a line the worker composes. GateReportFacts reads the folder of the report the TASK_GATE
   # line claims as a pass: true when an accepted failing-run report there is older, false when there is
-  # none. Every exemption read from plan prose allows, and a claim or report that cannot be read leaves the
-  # fact absent, which no clause matches, so the return is allowed and logged. It replaces KW-ARB-MODE-001,
-  # retired with the RED/GREEN task split.
+  # none. A claim or report that cannot be read leaves the fact absent, which no clause matches. Every answer
+  # allows and is logged: a worker cannot make a failing run after it has implemented, a task with no Test
+  # contract row or an agent whose gates run no tests has none to show, and a stop there is the run stop the
+  # single-worker model removes (ADR 0076). The log is how the decision is monitored; a host that wants the
+  # stop sets `effects: { no-failing-run: escalate }`. It replaces KW-ARB-MODE-001, retired with the RED/GREEN
+  # task split.
   - id: KW-ARB-MODE-002
     trigger: delegate.returned
     question: In test-first mode, did the worker's task gate fail on its new tests before it passed?
@@ -721,7 +724,7 @@ rules:
         answer: failing-run-first
       - when: { fact: gate.report.failing-run-first, equals: false }
         answer: no-failing-run
-    effects: { no-task: allow, not-required: allow, failing-run-first: allow, no-failing-run: escalate }
+    effects: { no-task: allow, not-required: allow, failing-run-first: allow, no-failing-run: allow }
 
 # The OWNER-001 file-kind map, evaluated first match wins. The order is the
 # decision: specific owners precede the documentation and C# catch-alls.

@@ -133,7 +133,7 @@ public sealed class ArbiterDefaultRulesTests
     }
 
     [Fact]
-    public void Mode002_IsDecidedFromMachineFactsAloneAndEscalatesOnlyAMissingFailingRun()
+    public void Mode002_IsDecidedFromMachineFactsAloneAndLogsAMissingFailingRunWithoutStopping()
     {
         ArbiterRule mode = ArbiterConfig.ProductDefaults.Rules.Single(r => r.Id == "KW-ARB-MODE-002");
 
@@ -141,7 +141,8 @@ public sealed class ArbiterDefaultRulesTests
         Assert.Equal(["no-task", "not-required", "failing-run-first", "no-failing-run"], mode.Answers);
         // No model question: the proof is two reports on disk, so an unreadable fact is undecidable and allows (ADR 0072).
         Assert.Null(mode.Ask);
-        Assert.Equal(["no-failing-run"], mode.Effects.Where(effect => effect.Value == "escalate").Select(effect => effect.Key));
+        // A missing failing run is recorded, not a stop: a worker cannot produce one after implementing (ADR 0076).
+        Assert.All(mode.Effects.Values, effect => Assert.Equal("allow", effect));
         Assert.Equal("no-failing-run", mode.Decide![^1].Answer);
     }
 

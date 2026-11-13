@@ -9,8 +9,8 @@ namespace KyberWeave.Tests.Arbiter;
 /// <summary>
 /// <c>KW-ARB-MODE-002</c>: in test-first mode one worker writes the tests, runs its task gate with <c>--red</c>,
 /// implements, and runs the gate again. The proof is the two reports in the claimed report's folder, a failing-run
-/// report older than the passing one, read by <see cref="GateReportFacts.FailingRunFirst" />. Only that machine
-/// fact escalates; every exemption read from the plan allows, and an unreadable claim leaves the rule undecidable.
+/// report older than the passing one, read by <see cref="GateReportFacts.FailingRunFirst" />. Every answer allows and
+/// is logged; the answer is what the decision log records for monitoring, and an unreadable claim leaves it undecidable.
 /// </summary>
 public sealed class ArbiterMode002FailingRunFirstTests : IDisposable
 {
@@ -120,13 +120,13 @@ public sealed class ArbiterMode002FailingRunFirstTests : IDisposable
     }
 
     [Fact]
-    public void OnlyTheMachineFactThatNoFailingRunPrecededThePassEscalates()
+    public void TheMachineFactDecidesTheAnswerAndAMissingFailingRunIsLoggedNotStopped()
     {
         ArbiterRule rule = Rule();
 
         Assert.Equal("failing-run-first", RuleEngine.Decide(rule, TestFirstReturn(true)));
         Assert.Equal("no-failing-run", RuleEngine.Decide(rule, TestFirstReturn(false)));
-        Assert.Equal(RuleEffects.Escalate, rule.Effects["no-failing-run"]);
+        Assert.Equal(RuleEffects.Allow, rule.Effects["no-failing-run"]);
         Assert.Equal(RuleEngine.Undecidable, RuleEngine.Decide(rule, TestFirstReturn(null)));
     }
 

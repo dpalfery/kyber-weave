@@ -53,7 +53,7 @@ Discover continuation support from the current harness's exposed tools; do not a
 3. implements the behaviour without weakening those tests;
 4. runs the task gate again, and its passing report is the one the digest names.
 
-The proof of test-first is those two machine-written reports in the task's scratch folder, the failing run older than the passing one, and the Arbiter checks them when the worker returns (`KW-ARB-MODE-002`). No task writes only failing tests for another to implement, and no task adds a stub so another task's tests compile; `test-dev` takes only tasks whose deliverable is tests. A worker whose test project does not compile because of another task's tests reports the `NOT VERIFIED` line its task gate prints (`KW-REVIEW-053`) and never builds a private runner project.
+The proof of test-first is those two machine-written reports in the task's scratch folder, the failing run older than the passing one, and the Arbiter records on each return whether they show it (`KW-ARB-MODE-002`). No task writes only failing tests for another to implement, and no task adds a stub so another task's tests compile; `test-dev` takes only tasks whose deliverable is tests. A worker whose test project does not compile because of another task's tests reports the `NOT VERIFIED` line its task gate prints (`KW-REVIEW-053`) and never builds a private runner project.
 
 Follow the build once, test many pattern for rapid iteration: build or compile once, then execute targeted tests using the pre-computed direct assembly test runner the host's test standard gives in its `## Completion` section:
 `dotnet <path-to-test-assembly>.dll -class "<Namespace>.<TestClass>"`

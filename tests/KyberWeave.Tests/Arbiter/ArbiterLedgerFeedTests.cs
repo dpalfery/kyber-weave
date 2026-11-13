@@ -4,6 +4,7 @@ using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Review;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -337,6 +338,56 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
             ContractRows: [new PlanContractRow("T5", RedEvidenceRequired: cell)]);
 
         Assert.Equal(expected, document.RedEvidenceRequirement("T5"));
+    }
+
+    private string WriteReport(string name, string summary, DateTime writtenAt)
+    {
+        string folder = Path.Combine(_root, ".agent_scratchpad", "T5");
+        Directory.CreateDirectory(folder);
+        string path = Path.Combine(folder, name);
+        File.WriteAllText(path, ReviewJson.Write(new GateReport(GateReport.CurrentSchema, [new GateResult("tests", true, 0, summary)])));
+        File.SetLastWriteTimeUtc(path, writtenAt);
+        return path;
+    }
+
+    /// <summary>
+    /// A return whose prompt still carries its routing headers reaches <c>KW-ARB-MODE-002</c> with the task, the mode
+    /// and the claimed report, and the two reports on disk decide the answer.
+    /// </summary>
+    [Theory]
+    [InlineData(true, "failing-run-first")]
+    [InlineData(false, "no-failing-run")]
+    public async Task AReturnIsJudgedByTheTaskGatesTwoReports(bool failedFirst, string expected)
+    {
+        DateTime earlier = new(2026, 11, 13, 10, 0, 0, DateTimeKind.Utc);
+        if (failedFirst)
+        {
+            WriteReport("task-gate-red.json", GateReportFacts.RedAcceptedSummaryPrefix + ": 1 test failed", earlier);
+        }
+
+        string pass = WriteReport("task-gate.json", "3 passed", earlier.AddMinutes(10));
+        await Dispatch("csharp-dev", Prompt("T5"));
+        await Evaluator().EvaluateAsync(
+            Event("post", "csharp-dev", Prompt("T5"), output: $"{PassReport}TASK_GATE: PASS — agent=csharp-dev gates=1 failed=none skipped=0 report={pass} runs=2\n"),
+            Config(),
+            null,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(expected, Answer("KW-ARB-MODE-002"));
+    }
+
+    /// <summary>
+    /// A return whose headers the harness stripped names no plan task, so the return-side plan rules answer
+    /// <c>no-task</c>. Recovering the task from the paired dispatch would also start <c>KW-ARB-DIFF-001</c>'s model
+    /// question on those harnesses, so it is left for a decision of its own.
+    /// </summary>
+    [Fact]
+    public async Task AReturnWithItsHeadersStrippedIsNotJudgedByTheFailingRunRule()
+    {
+        await Dispatch("csharp-dev", Prompt("T5"));
+        await Return("csharp-dev", Prompt("T5"), PassReport);
+
+        Assert.Equal("no-task", Answer("KW-ARB-MODE-002"));
     }
 
     [Fact]
