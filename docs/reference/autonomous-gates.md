@@ -4,7 +4,7 @@ title: Autonomous gates inventory
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-11
+last-reviewed: 2026-11-12
 ---
 
 # Autonomous gates inventory
@@ -170,7 +170,10 @@ conductor returns `STATUS: NEEDS_DECISION`.
   CI minutes triggered by the push are expected cost, not the spend hard stop.
 - **Unresolvable `STATUS: BLOCKED` or write errors** (`PLAN_WRITE_ERROR`,
   `SPEC_WRITE_ERROR`), such as missing credentials or access — relay the
-  evidence and stop.
+  evidence and stop. A check that a missing local dependency stops (a database
+  not running, an unset environment variable) is not one: it is recorded as
+  `NOT VERIFIED: <command> — <reason>` and delivery continues to a draft pull
+  request ([autonomy contract](../../products/kyber-squad/agents/conductor/references/autonomy.md#hard-stops)).
 - **`RECOMMENDED: none` hard blocks** — the only item relayed mid-run, batched
   with `SOURCES_SEARCHED` + `COST_OF_WRONG`. A hard block carrying a real
   `RECOMMENDED` option is decided as
