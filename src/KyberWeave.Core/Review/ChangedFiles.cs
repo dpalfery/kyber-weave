@@ -214,6 +214,21 @@ public static class ChangedFiles
     }
 
     /// <summary>
+    /// The unified diff from the merge base of <paramref name="baseRef"/> and <c>HEAD</c> to the files on disk, so
+    /// staged and uncommitted edits are in it. Untracked files are not: <see cref="ResolveSinceMergeBase"/> lists them.
+    /// </summary>
+    /// <returns>The merge-base commit and the patch text.</returns>
+    /// <exception cref="InvalidOperationException">No merge base resolves, or git could not produce the diff.</exception>
+    public static (string MergeBase, string Patch) DiffSinceMergeBase(string workingDirectory, string baseRef)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseRef);
+
+        string mergeBase = ResolveMergeBase(workingDirectory, baseRef);
+        return (mergeBase, RunGit(workingDirectory, "diff", "--no-color", "--relative", mergeBase, "--"));
+    }
+
+    /// <summary>
     /// Resolves the merge base of <paramref name="baseRef"/> and <c>HEAD</c>, failing
     /// closed with a fetch hint when the history on disk cannot answer.
     /// </summary>
@@ -258,7 +273,10 @@ public static class ChangedFiles
         };
     }
 
-    private static string[] RunGitPaths(string workingDirectory, params string[] arguments)
+    private static string[] RunGitPaths(string workingDirectory, params string[] arguments) =>
+        RunGit(workingDirectory, arguments).Split('\0', StringSplitOptions.RemoveEmptyEntries);
+
+    private static string RunGit(string workingDirectory, params string[] arguments)
     {
         ProcessStartInfo startInfo = new("git")
         {
@@ -280,6 +298,6 @@ public static class ChangedFiles
                 $"git {string.Join(' ', arguments)} exited with code {result.ExitCode}: {result.StandardError.Trim()}");
         }
 
-        return result.StandardOutput.Split('\0', StringSplitOptions.RemoveEmptyEntries);
+        return result.StandardOutput;
     }
 }

@@ -57,6 +57,29 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
+    public void TheCouncilRunWritesTheEvidenceTheSeatsStartFrom()
+    {
+        string baseCommit = Git("rev-parse", "HEAD").Trim();
+        Write("src/a.cs", "// changed\n");
+        Commit("work");
+        Write("src/new.cs", "// untracked\n");
+
+        (int exit, string output) = Gates(1, "--base", baseCommit);
+
+        Assert.Equal(0, exit);
+        string evidencePath = Path.Combine(CycleFolder(1), ReviewEvidence.FileName);
+        Assert.Contains($"evidence: {evidencePath}", output, StringComparison.Ordinal);
+        string evidence = File.ReadAllText(evidencePath);
+        Assert.Contains($"- Diff: {Path.Combine(CycleFolder(1), ReviewEvidence.DiffFileName)}", evidence, StringComparison.Ordinal);
+        Assert.Contains($"- Gate report: {GatesPath(1)}", evidence, StringComparison.Ordinal);
+        Assert.Contains("passed 2, failed 0, not run 0, not applicable 0", evidence, StringComparison.Ordinal);
+        Assert.Contains("- build: passed", evidence, StringComparison.Ordinal);
+        Assert.Contains("- untracked src/new.cs", evidence, StringComparison.Ordinal);
+        Assert.Contains("src/a.cs", evidence, StringComparison.Ordinal);
+        Assert.Contains("+// changed", File.ReadAllText(Path.Combine(CycleFolder(1), ReviewEvidence.DiffFileName)), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ASecondCycleRunsOnlyTheGateTheFixTouchedAndCarriesTheRestIntoACompleteReport()
     {
         FinishCycle1();

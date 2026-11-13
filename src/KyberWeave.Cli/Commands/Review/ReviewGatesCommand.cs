@@ -314,10 +314,15 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
             report.AddMetric("not-run", gates.Gates.Count(VerdictEngine.IsStoppedForTime));
 
         CommandHelpers.TryWriteReport(settings.Out, ReviewJson.Write(written), ReportWriteFailed, report);
+        string? evidence = cycle is { WritesIdentity: true } && settings.Out is not null
+            ? WriteEvidence(cycle, root, settings, written, report)
+            : null;
 
         CommandHelpers.Finish(report, settings, "review gates", "Gate");
         if (cycle is not null && ReportRenderer.IsHuman(settings.ParsedFormat))
         {
+            if (evidence is not null)
+                Console.WriteLine($"evidence: {evidence}");
             Console.WriteLine(
                 $"cycle: {cycle.Plan.Number} mode: {cycle.Mode} ran: {gates.Gates.Count} carried: {written.Gates.Count - gates.Gates.Count} " +
                 $"failed: {gates.Gates.Count(g => !g.Passed && g.NotApplicableReason is null && !(settings.Deadline && VerdictEngine.IsStoppedForTime(g)))}");
@@ -415,6 +420,33 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
             plan.IsVerifier && !settings.Full,
             thisCycle is not null,
             settings.BaseRef);
+    }
+
+    /// <summary>
+    ///     Writes the diff, the changed files and the gate results into the cycle folder, so the seats and the lead
+    ///     reviewer start from them instead of re-running a gate or rediscovering the change.
+    /// </summary>
+    /// <returns>The evidence file's path, or null when it could not be written.</returns>
+    private static string? WriteEvidence(
+        CouncilCycle cycle, string root, ReviewGatesSettings settings, GateReport written, DiagnosticReport report)
+    {
+        try
+        {
+            string path = ReviewEvidence.Write(
+                cycle.Folder!, root, settings.BaseRef ?? CouncilDefaultBase, written, settings.Out!);
+            report.AddMetric("evidence", path);
+            return path;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            report.Add(new Diagnostic(
+                ReportWriteFailed,
+                Severity.Warning,
+                $"Could not write the review evidence to '{cycle.Folder}': {ex.Message}",
+                "review gates",
+                Hint: "The seats then have no diff or gate summary to start from; fix the folder and run the gates again."));
+            return null;
+        }
     }
 
     /// <summary>Records the branch, base and head this cycle reviews, so a later cycle can tell the cycle belongs to its change.</summary>

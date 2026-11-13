@@ -282,6 +282,18 @@ public static partial class TriggerClassifier
         return (null, ArbiterCallerSources.None);
     }
 
+    /// <summary>A lens seat or a refutation seat of the review council, or null when the dispatch is neither.</summary>
+    private static string? CouncilSeat(string? target, IReadOnlyDictionary<string, string> headers)
+    {
+        bool lensTarget = string.Equals(target, "review-lens", StringComparison.Ordinal)
+            || string.Equals(target, "review-triage", StringComparison.Ordinal);
+        if (lensTarget && headers.ContainsKey("LENS"))
+            return "lens.spawn";
+        if (string.Equals(target, "review-lens", StringComparison.Ordinal) && headers.ContainsKey("REFUTE"))
+            return "refute.spawn";
+        return null;
+    }
+
     private static string? ClassifyTrigger(
         string? caller,
         string? target,
@@ -296,6 +308,13 @@ public static partial class TriggerClassifier
         if (string.Equals(marker, RunStartMarker, StringComparison.Ordinal))
             return "investigate";
 
+        // The conductor seats the review council for code-reviewer, which cannot start agents of its own as a
+        // subagent, so a council seat is the same lens or refutation spawn whichever of the two dispatches it.
+        bool reviewer = string.Equals(caller, "code-reviewer", StringComparison.Ordinal);
+        if ((reviewer || string.Equals(caller, "conductor", StringComparison.Ordinal))
+            && CouncilSeat(target, headers) is { } seat)
+            return seat;
+
         // A rework dispatch (FAILURE-CLUSTER marker) is classified as the ordinary delegation: its failure rule
         // rides as a secondary trigger, derived by SecondaryTriggers.For.
         if (string.Equals(caller, "conductor", StringComparison.Ordinal))
@@ -309,16 +328,8 @@ public static partial class TriggerClassifier
             return "investigate";
         }
 
-        if (string.Equals(caller, "code-reviewer", StringComparison.Ordinal))
-        {
-            bool lensTarget = string.Equals(target, "review-lens", StringComparison.Ordinal)
-                || string.Equals(target, "review-triage", StringComparison.Ordinal);
-            if (lensTarget && headers.ContainsKey("LENS"))
-                return "lens.spawn";
-            if (string.Equals(target, "review-lens", StringComparison.Ordinal) && headers.ContainsKey("REFUTE"))
-                return "refute.spawn";
+        if (reviewer)
             return "investigate";
-        }
 
         if (string.Equals(caller, "architect", StringComparison.Ordinal)
             || string.Equals(caller, "product-owner", StringComparison.Ordinal))

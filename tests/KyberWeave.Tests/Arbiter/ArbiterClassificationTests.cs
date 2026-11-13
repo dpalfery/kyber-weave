@@ -355,6 +355,21 @@ public sealed class ArbiterClassificationTests
         Assert.Equal("lens.returned", post.Trigger);
     }
 
+    [Theory]
+    [InlineData("review-lens", "LENS: security", "lens.spawn")]
+    [InlineData("review-triage", "LENS: static-analysis-triage", "lens.spawn")]
+    [InlineData("review-lens", "REFUTE: security/key-in-argv", "refute.spawn")]
+    public void Classification_ConductorSeatingTheCouncilIsTheSameSpawnAsTheReviewers(string target, string header, string trigger)
+    {
+        string prompt = Marked("Apply lens.", header);
+        TriggerClassification seat = TriggerClassifier.ClassifySingle(
+            Dispatch(prompt, target: target, harness: "copilot-cli", harnessCaller: "conductor"),
+            target,
+            prompt);
+
+        Assert.Equal(trigger, seat.Trigger);
+    }
+
     [Fact]
     public void Classification_CodeReviewerRefuteIsRefuteSpawn()
     {
