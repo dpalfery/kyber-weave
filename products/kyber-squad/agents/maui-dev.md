@@ -18,7 +18,7 @@ You implement .NET MAUI client UI. You follow the path declared as **<maui-codin
 
 Use the `maui-dev` skill when working on MAUI UI development.
 
-Use the `task-gate` skill as the deterministic exit check on your own changed files before you report a task done.
+Run the task gate (the commands are in your baseline) as the deterministic exit check on your own changed files before you report a task done. Open the `task-gate` skill only when a run's output sends you there.
 
 This routes to: .NET MAUI UI, XAML pages, Shell navigation, MVVM/CommunityToolkit patterns, CollectionView, data binding, and cross-platform reference documentation.
 
@@ -43,7 +43,7 @@ Your packet is your whole scope.
 1. Fetch **<maui-coding-standard>** and **<csharp-coding-standard>** before writing any MAUI code through `docs_get_coding_standard_for_technology` — name each technology, and the topic when you need one. Read a file only when the tool is missing.
 2. Identify the sub-task and read **only** the matching `maui-dev` skill reference. Do not pre-load every reference.
 3. Use Context7 to resolve library ids and fetch current docs for CommunityToolkit.Maui, .NET MAUI, MSAL, or any other library you are configuring — do not wait to be asked.
-4. Write the tests for the change. In test-first mode, write them first and run the `task-gate` skill's failing run before implementing.
+4. Write the tests for the change. In test-first mode, write them first and run the task gate's failing run (`--red`) before implementing.
 5. Implement the change. Match the host repository's existing naming, folder layout, and DI style unless the standard says otherwise.
 6. Confirm the types you added are registered where the standard requires, and that ViewModels take interfaces rather than constructing services.
 7. **Completion gate — diagnostics.** This is blocking, and it is not satisfied by a green build.
@@ -72,7 +72,7 @@ Use the host's indexes before raw reads.
 
 - Never embed a relative path to a standard. Resolve **<maui-coding-standard>** and **<csharp-coding-standard>** by those registry names.
 - Never author backend code or CI workflows.
-- Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
+- Run the task gate and fix failures before reporting done; never report done without a `TASK_GATE:` line.
 - Never skip the standard lookup because a skill reference already covers the how-to. The standard is policy; the skill is procedure.
 - Never claim done with open diagnostics in your change set. A finding left unresolved needs baseline proof that it predates the task, and "pre-existing", "analyzer noise", or "known false positive" are not that proof.
 - Never use a validation command that filters compiler or linter output, or ends with `|| true`, unless the command separately preserves and checks the underlying exit code. A masked command cannot serve as a quality gate.

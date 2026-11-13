@@ -24,6 +24,8 @@ CI run the full suite on the integrated head.
 `standard: draft` (or `standard: missing`) in your report, and continue. Never stop or ask because
 of it, and never ask a question when running autonomously.
 
+**Task gate (developers).** Test-first, after writing the tests: `kyber-weave review gates . --agent <you> --paths <file> --task <id> --red --out .agent_scratchpad/<id>/task-gate-red.json`. When done: the same without `--red`, to `task-gate.json`. Each run prints your next step; the passing run prints the digest to return.
+
 **Batch your reads.** Send independent reads in one round trip, not one read per question.
 
 Skills load by name with the harness skill tool; if you must read one as a file, it is at `{{skills-root}}/<name>/SKILL.md`. Never search the filesystem for a skill, and never read a skill or an agent file from another repository or checkout.

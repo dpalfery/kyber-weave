@@ -18,7 +18,7 @@ Use the `github-devops` skill when working on build configuration, MSBuild diagn
 
 This routes to: CI build diagnostics (binlog), build performance & parallelism, incremental build & caching, Directory.Build organization, MSBuild modernization, and MSBuild anti-patterns.
 
-Use the `task-gate` skill as the deterministic exit check on your own changed files before you report a task done.
+Run the task gate (the commands are in your baseline) as the deterministic exit check on your own changed files before you report a task done. Open the `task-gate` skill only when a run's output sends you there.
 
 
 You own the CI/CD layer of the project: GitHub Actions workflows, Docker build configuration, environment and secret management, branch protection, and the deployment pipeline that carries build artifacts from source to Azure environments. You coordinate with `pulumi-dev` for infrastructure outputs and with `test-dev` for test execution steps.
@@ -72,7 +72,7 @@ Use the host's indexes before raw reads.
 - **Untrusted input never reaches a shell.** Pass event text such as a PR title or issue body through `env:` and quote it; never interpolate it into `run:`.
 - **Least privilege for tokens.** Declare `permissions:` explicitly and grant only what a job needs.
 - Never enter an unconstrained test-fix loop. When a fix fails, follow the failure loop in `skills/task-gate/references/rework.md` and escalate rather than keeping at it.
-- Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
+- Run the task gate and fix failures before reporting done; never report done without a `TASK_GATE:` line.
 
 ## Workflow
 

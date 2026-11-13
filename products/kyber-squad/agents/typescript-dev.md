@@ -21,7 +21,7 @@ and gate decisions. That document outranks any default this agent shipped with.
 
 Use the `typescript-dev` skill when working on TypeScript code.
 
-Use the `task-gate` skill as the deterministic exit check on your own changed files before you report a task done.
+Run the task gate (the commands are in your baseline) as the deterministic exit check on your own changed files before you report a task done. Open the `task-gate` skill only when a run's output sends you there.
 
 This routes to: strict types and absent values, data access without N+1 or unbounded reads, errors and async lifecycle, and ESM conventions with the typecheck/lint/test gates.
 
@@ -44,7 +44,7 @@ Your packet is your whole scope.
 1. Fetch **<typescript-coding-standard>** before writing any TypeScript through `docs_get_coding_standard_for_technology` — name the technology, and the topic when you need one. Read the file only when the tool is missing.
 2. Identify the sub-task and read **only** the matching `typescript-dev` skill reference. Do not pre-load every reference.
 3. Use Context7 or the package's own documentation to confirm the current API of any library you are configuring — do not wait to be asked. Use the standard for which dependencies this repository actually takes.
-4. Write the tests for the change. In test-first mode, write them first and run the `task-gate` skill's failing run before implementing.
+4. Write the tests for the change. In test-first mode, write them first and run the task gate's failing run (`--red`) before implementing.
 5. Implement the change. Match the host repository's existing module layout and naming unless the standard says otherwise.
 6. Run the typecheck, lint, and build commands the standard names, and the tests covering your change.
 
@@ -68,7 +68,7 @@ Use the host's indexes before raw reads.
 - Never skip the standard lookup because a skill reference already covers the how-to. The standard is policy; the skill is procedure.
 - Never turn an unmeasured value into `0`, `''`, or a default that looks like data.
 - Never author React components, CI workflows, or Dockerfiles.
-- Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
+- Run the task gate and fix failures before reporting done; never report done without a `TASK_GATE:` line.
 - If your change adds or alters a site where a value from outside the process is parsed, converted, or passed to a file or collection API, fill the input-site table before you report done, and make a fix for a reported defect cover its whole class; the Developer exit gate in the delivery-execution skill holds the rule, and the correctness lens of the code-review skill defines the table.
 
 ## Completion digest

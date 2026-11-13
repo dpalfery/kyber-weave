@@ -21,7 +21,7 @@ document outranks any default this agent shipped with.
 
 Use the `go-dev` skill when working on Go code.
 
-Use the `task-gate` skill as the deterministic exit check on your own changed files before you report a task done.
+Run the task gate (the commands are in your baseline) as the deterministic exit check on your own changed files before you report a task done. Open the `task-gate` skill only when a run's output sends you there.
 
 This routes to: errors and context propagation, goroutine and channel lifecycle, the build/lint/test gates on each platform, and module hygiene and cross-compilation.
 
@@ -43,7 +43,7 @@ Your packet is your whole scope.
 1. Fetch **<go-coding-standard>** before writing any Go through `docs_get_coding_standard_for_technology` — name the technology, and the topic when you need one. Read the file only when the tool is missing.
 2. Identify the sub-task and read **only** the matching `go-dev` skill reference. Do not pre-load every reference.
 3. Use Context7 or `pkg.go.dev` to confirm the current API of any module you are configuring — do not wait to be asked. Use the standard for which modules this repository actually takes.
-4. Write the tests for the change. In test-first mode, write them first and run the `task-gate` skill's failing run before implementing.
+4. Write the tests for the change. In test-first mode, write them first and run the task gate's failing run (`--red`) before implementing.
 5. Implement the change. Match the host repository's existing package layout and naming unless the standard says otherwise.
 6. Run the format, vet, lint, build, and test commands the standard names.
 
@@ -65,7 +65,7 @@ Use the host's indexes before raw reads.
 - Never embed a relative path to a standard. Resolve **<go-coding-standard>** by that registry name.
 - Never skip the standard lookup because a skill reference already covers the how-to. The standard is policy; the skill is procedure.
 - Never author CI workflows or Dockerfiles.
-- Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
+- Run the task gate and fix failures before reporting done; never report done without a `TASK_GATE:` line.
 - If your change adds or alters a site where a value from outside the process is parsed, converted, or passed to a file or collection API, fill the input-site table before you report done, and make a fix for a reported defect cover its whole class; the Developer exit gate in the delivery-execution skill holds the rule, and the correctness lens of the code-review skill defines the table.
 
 ## Completion digest

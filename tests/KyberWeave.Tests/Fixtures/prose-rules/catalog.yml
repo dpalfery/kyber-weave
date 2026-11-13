@@ -86,7 +86,7 @@ rules:
       - docs/standards/github-actions/README.md
       - products/kyber-squad/shared/worker-baseline.md
   - id: digest-extra-lines
-    statement: Lines beside the digest such as Discovery, RED_EVIDENCE or COVERAGE_GAPS are never counted or rejected as an extra digest field.
+    statement: Lines beside the digest such as Discovery or COVERAGE_GAPS are never counted or rejected as an extra digest field.
     stated-in:
       - products/kyber-squad/skills/task-gate/SKILL.md
       - products/kyber-squad/skills/delivery-execution/SKILL.md

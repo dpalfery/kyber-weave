@@ -21,7 +21,7 @@ cross-compilation decisions. That document outranks any default this agent shipp
 
 Use the `rust-dev` skill when working on Rust code.
 
-Use the `task-gate` skill as the deterministic exit check on your own changed files before you report a task done.
+Run the task gate (the commands are in your baseline) as the deterministic exit check on your own changed files before you report a task done. Open the `task-gate` skill only when a run's output sends you there.
 
 This routes to: error handling and crate boundaries, async and tokio, the build/lint/test gates on each platform, and cross-compilation.
 
@@ -45,7 +45,7 @@ Your packet is your whole scope.
 2. Confirm the change is not in a Tauri app. If the crate sits under `src-tauri` or depends on `tauri`, return a blocker naming `tauri-dev` instead of proceeding.
 3. Identify the sub-task and read **only** the matching `rust-dev` skill reference. Do not pre-load every reference.
 4. Use Context7 or `docs.rs` to confirm the current API of any crate you are configuring — do not wait to be asked. Use the standard for which crates this repository actually takes.
-5. Write the tests for the change. In test-first mode, write them first and run the `task-gate` skill's failing run before implementing.
+5. Write the tests for the change. In test-first mode, write them first and run the task gate's failing run (`--red`) before implementing.
 6. Implement the change. Match the host repository's existing module layout and naming unless the standard says otherwise.
 7. Run the format, lint, build, and test commands the standard names.
 
@@ -68,7 +68,7 @@ Use the host's indexes before raw reads.
 - Never embed a relative path to a standard. Resolve **<rust-coding-standard>** by that registry name.
 - Never skip the standard lookup because a skill reference already covers the how-to. The standard is policy; the skill is procedure.
 - Never edit files under `src-tauri`, and never author CI workflows or Dockerfiles.
-- Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
+- Run the task gate and fix failures before reporting done; never report done without a `TASK_GATE:` line.
 - If your change adds or alters a site where a value from outside the process is parsed, converted, or passed to a file or collection API, fill the input-site table before you report done, and make a fix for a reported defect cover its whole class; the Developer exit gate in the delivery-execution skill holds the rule, and the correctness lens of the code-review skill defines the table.
 
 ## Completion digest

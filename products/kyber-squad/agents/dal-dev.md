@@ -18,7 +18,7 @@ You implement the persistence layer. You follow the path declared as **<data-acc
 
 Use the `dal-dev` skill when working on the persistence layer.
 
-Use the `task-gate` skill as the deterministic exit check on your own changed files before you report a task done.
+Run the task gate (the commands are in your baseline) as the deterministic exit check on your own changed files before you report a task done. Open the `task-gate` skill only when a run's output sends you there.
 
 This routes to: schema-contract consumption, ADO.NET repositories, and FluentMigrator reference documentation.
 
@@ -53,7 +53,7 @@ Deliver `IRepository<T>` implementations that satisfy the interfaces in the Cont
 1. Fetch **<data-access-layer-coding-standard>**, **<csharp-coding-standard>**, and **<sql-coding-standard>** before writing persistence code through `docs_get_coding_standard_for_technology` — name each technology, and the topic when you need one. Read a file only when the tool is missing.
 2. Identify the sub-task and read **only** the matching `dal-dev` skill reference. Do not pre-load every reference.
 3. Use Context7 for current `Microsoft.Data.SqlClient` and FluentMigrator docs — do not wait to be asked.
-4. Write the tests for the change. In test-first mode, write them first and run the `task-gate` skill's failing run before implementing.
+4. Write the tests for the change. In test-first mode, write them first and run the task gate's failing run (`--red`) before implementing.
 5. Implement the change. Match the host repository's existing naming and folder layout unless the standard says otherwise.
 6. **Completion gate — diagnostics.** This is blocking, and it is not satisfied by a green build.
 
@@ -79,7 +79,7 @@ Use the host's indexes before raw reads.
 - Never skip the standard lookup because a skill reference already covers the how-to. The standard is policy; the skill is procedure.
 - Never design schemas or author unmanaged DDL. FluentMigrator migration scripts that implement an approved schema contract are allowed.
 - Never author application services.
-- Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
+- Run the task gate and fix failures before reporting done; never report done without a `TASK_GATE:` line.
 - Never claim done with open diagnostics in your change set. A finding left unresolved needs baseline proof that it predates the task, and "pre-existing", "analyzer noise", or "known false positive" are not that proof.
 - Never use a validation command that filters compiler or linter output, or ends with `|| true`, unless the command separately preserves and checks the underlying exit code. A masked command cannot serve as a quality gate.
 - If your change adds or alters a site where a value from outside the process is parsed, converted, or passed to a file or collection API, fill the input-site table before you report done, and make a fix for a reported defect cover its whole class; the Developer exit gate in the delivery-execution skill holds the rule, and the correctness lens of the code-review skill defines the table.

@@ -586,7 +586,7 @@ by anyone's prose: the run is RED when tests ran and at least one failed, or whe
 missing-symbol errors (C# `CS0103`, `CS0117`, `CS0234`, `CS0246`, `CS1061`; TypeScript `TS2304`, `TS2305`, `TS2307`,
 `TS2339`) in the files the task changed. A syntax or type error, a missing symbol in a file the task did not change, a
 restore error, or tests that all pass reject it (`KW-REVIEW-052`). The accepted gates are reported as passed with the
-reason, and `KW-REVIEW-051` carries the `RED_EVIDENCE:` line to paste. Without `--red`, the same classifier tells a
+reason, and `KW-REVIEW-051` carries the `RED_EVIDENCE:` summary; the report, not the line, is the proof. Without `--red`, the same classifier tells a
 worker its build fails only on another task's tests' missing symbols (`KW-REVIEW-053`). Languages and test runners are records in
 `RedLanguages`, so a new one needs no change to the classifier.
 
@@ -595,7 +595,7 @@ not applicable with the reason `not run — RED build (missing symbols …)`, wh
 `TASK_GATE: PASS` claim (`KW-ARB-GATE-REPORT-001`). A test gate that exits non-zero because tests failed is accepted as RED; zero tests
 run (the filter matched nothing, with the project the host's `review.task-gates` do not cover named), a server that did not start, a
 crashed runner or a collection error is rejected with that reason. The run ends with `TASK_GATE: PASS|FAIL …` and `RED_EVIDENCE: …` or
-`RED_REJECTED: <reason>`, ready to paste.
+`RED_REJECTED: <reason>`, then a `next:` line: the passing-run command, or what to fix first.
 
 | Runner | Tests ran and failed, read from | Zero tests | Infrastructure failures named |
 |---|---|---|---|

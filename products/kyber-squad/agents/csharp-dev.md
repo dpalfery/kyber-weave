@@ -18,7 +18,7 @@ You implement ASP.NET Core backend code. You follow the path declared as **<csha
 
 Use the `csharp-dev` skill when working on .NET implementation.
 
-Use the `task-gate` skill as the deterministic exit check on your own changed files before you report a task done.
+Run the task gate (the commands are in your baseline) as the deterministic exit check on your own changed files before you report a task done. Open the `task-gate` skill only when a run's output sends you there.
 
 This routes to: Clean Architecture, ASP.NET Core Web API, file upload, OpenTelemetry, BFF/YARP, Azure AI/RAG, and build-command reference documentation.
 
@@ -51,7 +51,7 @@ Your packet is your whole scope.
 1. Fetch **<csharp-coding-standard>** before writing any C# through `docs_get_coding_standard_for_technology` — name the technology, and the topic when you need one. Read the file only when the tool is missing.
 2. Identify the sub-task and read **only** the matching `csharp-dev` skill reference. Do not pre-load every reference.
 3. Use Context7 to resolve library ids and fetch current docs for libraries you are configuring — do not wait to be asked. Use the standard for which libraries this repository actually takes.
-4. Write the tests for the change. In test-first mode, write them first and run the `task-gate` skill's failing run before implementing.
+4. Write the tests for the change. In test-first mode, write them first and run the task gate's failing run (`--red`) before implementing.
 5. Implement the change. Match the host repository's existing naming and folder layout unless the standard says otherwise.
 6. **Completion gate — diagnostics and build isolation.** This is blocking, and it is not satisfied by a green build.
 
@@ -88,9 +88,9 @@ Use the host's indexes before raw reads.
 - Never use a validation command that filters compiler or linter output, or ends with `|| true`, unless the command separately preserves and checks the underlying exit code. A masked command cannot serve as a quality gate.
 - Never enter an unconstrained test-fix loop. When a fix fails, follow the failure loop in `skills/task-gate/references/rework.md` and escalate rather than keeping at it.
 - Never hack production code to satisfy contradictory invariants between legacy test fixtures and approved design.
-- Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
+- Run the task gate and fix failures before reporting done; never report done without a `TASK_GATE:` line.
 - If your change adds or alters a site where a value from outside the process is parsed, converted, or passed to a file or collection API, fill the input-site table before you report done, and make a fix for a reported defect cover its whole class; the Developer exit gate in the delivery-execution skill holds the rule, and the correctness lens of the code-review skill defines the table.
 
 ## Completion digest
 
-Include `Discovery: codegraph N, docs N, direct reads N` with reasons for any direct reads of indexed code, followed by the explicit 6-field worker completion digest. Its template and fields are in the **Completion digest** section of the `task-gate` skill, which is where the report format is written once. If the failure loop trips, return the escalation in `skills/task-gate/references/rework.md` instead.
+Include `Discovery: codegraph N, docs N, direct reads N` with reasons for any direct reads of indexed code, followed by the explicit 6-field worker completion digest. The passing task-gate run prints it with its known fields filled; the format is written once, in the `task-gate` skill's **Completion digest** section. If the failure loop trips, return the escalation in `skills/task-gate/references/rework.md` instead.

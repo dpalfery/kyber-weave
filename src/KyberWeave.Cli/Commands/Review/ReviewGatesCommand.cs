@@ -578,6 +578,8 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
                 ReportWriteFailed,
                 report);
             CommandHelpers.Finish(report, settings, "review gates", "Gate");
+            if (ReportRenderer.IsHuman(settings.ParsedFormat))
+                WriteLines(TaskGateNextStep.NoneDeclared(agent, settings.Paths, settings.Out));
             return report.HasErrors ? 1 : 0;
         }
 
@@ -669,15 +671,38 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
         CommandHelpers.TryWriteReport(settings.Out, ReviewJson.Write(finalReport), ReportWriteFailed, report);
 
         CommandHelpers.Finish(report, settings, "review gates", "Gate");
-        if (redOutcome is not null && ReportRenderer.IsHuman(settings.ParsedFormat))
-            WriteRedLines(redOutcome, agent, finalReport, settings.Out);
+        if (ReportRenderer.IsHuman(settings.ParsedFormat))
+        {
+            if (redOutcome is not null)
+            {
+                WriteRedLines(redOutcome, agent, finalReport, settings.Out);
+                WriteLines(TaskGateNextStep.AfterFailingRun(redOutcome.Passed, agent, changed, settings.TaskSlug));
+            }
+            else
+            {
+                IReadOnlyList<ReviewTaskGateView> views =
+                [
+                    .. agentGates.Select(gate => new ReviewTaskGateView(
+                        gate.Id, !gate.Run.Any(arg => arg.Contains("{changed}", StringComparison.Ordinal)))),
+                ];
+                WriteLines(TaskGateNextStep.AfterRun(finalReport, views, settings.Fix, agent, changed, settings.Out));
+            }
+        }
 
         return report.HasErrors ? 1 : 0;
     }
 
+    private static void WriteLines(IReadOnlyList<string> lines)
+    {
+        foreach (string line in lines)
+            Console.WriteLine(line);
+        Console.Out.Flush();
+    }
+
     /// <summary>
-    ///     The last lines of a RED run, ready to paste into the digest: the task-gate status for the report just written,
-    ///     then <c>RED_EVIDENCE:</c> when the run is valid RED or <c>RED_REJECTED:</c> with the reason when it is not.
+    ///     The last lines of a RED run: the task-gate status for the report just written, then <c>RED_EVIDENCE:</c>,
+    ///     the classifier's summary, when the run is a valid failing run, or <c>RED_REJECTED:</c> with the reason when it
+    ///     is not. The report is the proof; neither line goes into the completion digest.
     /// </summary>
     private static void WriteRedLines(RedOutcome outcome, string agent, GateReport report, string? reportPath)
     {
@@ -693,7 +718,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
 
     /// <summary>
     ///     Judges a RED task's gate runs. A failed gate the classifier accepts is reported as passed with the reason, one
-    ///     it rejects keeps its failure, and the verdict is one diagnostic carrying the line for the digest or the next step.
+    ///     it rejects keeps its failure, and the verdict is one diagnostic carrying the classifier's summary or the next step.
     /// </summary>
     private static (GateReport Report, RedOutcome Outcome) ApplyRed(
         GateReport ran,

@@ -55,7 +55,7 @@ Your packet is your whole scope.
    signatures and payload types before implementing, so the frontend agent can build in
    parallel.
 5. **Test first, then implement.** Write the tests for the change; in test-first mode, run
-   the `task-gate` skill's failing run before implementing. Use the layout and error types
+   the task gate's failing run (`--red`) before implementing. Use the layout and error types
    **<tauri-coding-standard>** names.
 6. **Wire permissions.** Every capability the command needs goes into `capabilities/` with
    the **least** permission and scope required.
@@ -66,7 +66,7 @@ Your packet is your whole scope.
 
 ## Skills
 
-Use the `task-gate` skill as the deterministic exit check on your own changed files before you report a task done.
+Run the task gate (the commands are in your baseline) as the deterministic exit check on your own changed files before you report a task done. Open the `task-gate` skill only when a run's output sends you there.
 
 ## Discovery order
 
@@ -166,7 +166,7 @@ Use the host's indexes before raw reads.
 
 ### Completion gate
 
-- Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
+- Run the task gate and fix failures before reporting done; never report done without a `TASK_GATE:` line.
 
 ## How to handle common requests
 

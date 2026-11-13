@@ -52,7 +52,7 @@ Instance) before giving version-sensitive guidance.
 
 ## Skills
 
-Use the `task-gate` skill as the deterministic exit check on your own changed files before you report a task done.
+Run the task gate (the commands are in your baseline) as the deterministic exit check on your own changed files before you report a task done. Open the `task-gate` skill only when a run's output sends you there.
 
 ## Discovery order
 
@@ -113,7 +113,7 @@ These are engine behaviour, not project style, and no standard reverses them:
 
 ### Completion gate
 
-- Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
+- Run the task gate and fix failures before reporting done; never report done without a `TASK_GATE:` line.
 
 ## Data Layer Handoff — dal-dev and csharp-dev
 

@@ -20,7 +20,7 @@ Use the `azure-naming` skill before creating any Azure resource name. It resolve
 
 There is no dedicated `pulumi-dev` skill. Procedure for Pulumi itself lives in the standard and in current Pulumi docs (via Context7), not in a skill reference folder.
 
-Use the `task-gate` skill as the deterministic exit check on your own changed files before you report a task done.
+Run the task gate (the commands are in your baseline) as the deterministic exit check on your own changed files before you report a task done. Open the `task-gate` skill only when a run's output sends you there.
 
 ## Scope
 
@@ -43,7 +43,7 @@ Your packet is your whole scope.
 1. Fetch **<pulumi-coding-standard>** and **<csharp-coding-standard>** before writing any infrastructure through `docs_get_coding_standard_for_technology` — name each technology, and the topic when you need one. Read a file only when the tool is missing.
 2. Construct every Azure resource name through the `azure-naming` skill. Do not improvise a name.
 3. Use Context7 to resolve library ids and fetch current docs for Pulumi, `azure-native`, and any helper package you configure — do not wait to be asked. Pin registry docs to the package version in use when behavior matters.
-4. Write the tests for the change. In test-first mode, write them first and run the `task-gate` skill's failing run before implementing.
+4. Write the tests for the change. In test-first mode, write them first and run the task gate's failing run (`--red`) before implementing.
 5. Implement the change. Match the host repository's existing project/stack layout unless the standard says otherwise.
 6. Run `pulumi preview` and keep the diff small, reviewable, and idempotent. Call out replacement risk, data-loss risk, and cross-stack impact before proposing apply.
 7. **Completion gate — diagnostics.** This is blocking, and it is not satisfied by a green build or a clean `pulumi preview`.
@@ -76,7 +76,7 @@ Use the host's indexes before raw reads.
 - Never apply a change whose preview you have not inspected, and never hide a replacement inside an unreviewed apply.
 - Never print, log, serialize, or write decrypted secret values.
 - Never author CI workflows, application code, or schema DDL.
-- Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
+- Run the task gate and fix failures before reporting done; never report done without a `TASK_GATE:` line.
 - Never claim done with open diagnostics in your change set. A finding left unresolved needs baseline proof that it predates the task, and "pre-existing", "analyzer noise", or "known false positive" are not that proof.
 - Never use a validation command that filters compiler or linter output, or ends with `|| true`, unless the command separately preserves and checks the underlying exit code. A masked command cannot serve as a quality gate.
 
