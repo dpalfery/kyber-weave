@@ -1747,7 +1747,7 @@ Regression pins live in `tests/KyberWeave.Tests/SquadCanonicalContentTests.cs` a
 ### The tracked task file and the paste-and-fill dispatch
 
 The conductor no longer derives its own prompts from the plan. Each prompt goes into a tracked
-task file at finalization: the architect writes a plan's — `docs/plans/<plan>.tasks.json` beside the plan — and `product-owner` writes a specification's — `<spec-folder>/tasks.json` inside the specification folder — each committed with its artifact
+task file at finalization: `kyber-weave docs tasks` derives a plan's — `docs/plans/<plan>.tasks.json` beside the plan — and a specification's — `<spec-folder>/tasks.json` inside the specification folder — from the plan or `tasks.md`, each committed with its artifact. No agent writes the file: it is a machine format, with a hash in it
 ([ADR 0063](../adr/0063-the-task-file-is-tracked-and-the-plan-stays-authoritative.md)). Tracking it
 rather than keeping it in `artifacts/` is what lets a push carry it to another machine, which is
 what makes resuming a run somewhere else possible at all.
@@ -1774,9 +1774,7 @@ what makes resuming a run somewhere else possible at all.
   title, text, files, dependencies, skills), the test contract rows, the out-of-scope paths and the
   development mode. A status flip or an edit to a Decisions row is therefore not stale; any task
   edit is. Stale means the conductor refuses the file until the architect regenerates it. The
-  architect takes the digest from `kyber-weave arbiter plan -f json` after its last plan edit, only when the command exits 0 with no `KW-ARB-PARSE-001` and no `KW-ARB-PLAN-001` finding, writes
-  the task file, then validates, and returns `PLAN_FINALIZED` only with no `KW-DOC-TASKS-*` finding;
-  a shell-less architect gets the digest from the conductor as `PLAN_DIGEST`. The task file is written in place at its final path, never through a sibling or temporary file such as a `.new` or `.tmp` copy. A specification's digest is over its `tasks.md`: the conductor runs `kyber-weave arbiter plan` and passes the digest to `product-owner` as `SPEC_DIGEST` before finalization. The parser ends a Depends value at the next bullet at the same or a shallower indent (deeper sub-bullets stay in the value), and ends a Files bullet list at the next bold-labelled bullet, so a spec item's `_Requirements:_` line and `**Acceptance:**` bullet are not taken as dependencies or files.
+  architect runs `kyber-weave docs tasks <plan> --write` after its last plan edit: the command derives every field, the digest (SHA-256 over the parsed document, `PlanDocumentParser.ExecutionDigest`) and each prompt from the plan, writes the file in place, leaves it untouched when already current, and returns `PLAN_FINALIZED` only with no `KW-DOC-TASKS-*` finding. A prompt is the plan task's own text plus a `Command:` and an `Acceptance criteria:` line taken from the task or its test contract row, the `{worktree}` slot and the `{prior_results}` slot. When the plan lacks one, the command writes nothing and names the task and the line to add (`-004`). `--check` exits 1 and names each difference without writing. A shell-less architect has the conductor run the command. A specification's digest is over its `tasks.md`: the conductor runs the same command on it before finalization. The parser ends a Depends value at the next bullet at the same or a shallower indent (deeper sub-bullets stay in the value), and ends a Files bullet list at the next bold-labelled bullet, so a spec item's `_Requirements:_` line and `**Acceptance:**` bullet are not taken as dependencies or files.
 - **Each finished task commits with a `Task:` line.** The worker commits on the feature branch with
   `Task: <id>` and its report in the commit body, and the branch is pushed after each integrated
   task, so `run start --resume` can read the completed tasks and their results from the commits

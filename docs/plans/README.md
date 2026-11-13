@@ -46,8 +46,8 @@ the parsed tasks, files, dependencies, skills, test rows, out-of-scope paths and
 flip or a Decisions edit does not mark it stale while any task edit does. A file that disagrees
 with its plan, a stale digest, a prompt without a command or acceptance criteria, and a prompt
 that tells a worker to open a plan each fail validation (`KW-DOC-TASKS-002` to `-005`). A malformed
-or wrong-schema file fails `-001`, and a Ready plan with no file warns `-006`. The architect reads the
-digest from `kyber-weave arbiter plan <plan> -f json` after its last plan edit, and writes the file in place; a copy left beside it under another name, such as `<plan>.tasks.json.new`, fails `-007`.
+or wrong-schema file fails `-001`, and a Ready plan with no file warns `-006`. The architect runs
+`kyber-weave docs tasks <plan> --write` after its last plan edit, which derives the file and its digest from the plan, in place, and never writes either by hand (`--check` reports what differs); a copy left beside it under another name, such as `<plan>.tasks.json.new`, fails `-007`.
 
 The task file is transient. Closeout removes it with `git rm` in the same commit that archives the
 plan, so it never reaches `main` — this repository squash merges, and nothing durable is lost

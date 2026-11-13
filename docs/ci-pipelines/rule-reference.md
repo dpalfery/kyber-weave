@@ -51,8 +51,8 @@ Reported only when the `plan-index` or `todo-index` registry property names a do
 
 ### Plan task files — `docs validate` and the docs MCP validate tool
 
-A plan's task file is the tracked file the architect writes at finalization so the conductor can
-dispatch without reading the plan: `docs/plans/<plan>.tasks.json` beside the plan. (The merge-time rule
+A plan's task file is the tracked file `kyber-weave docs tasks <plan> --write` derives at finalization so the conductor can
+dispatch without reading the plan: `docs/plans/<plan>.tasks.json` beside the plan. The command writes the schema version, plan path, execution digest and every task entry (kebab-case `id`, `role`, `depends-on`, `files`, `session`, `prompt`); `--check` exits `1` and names each difference. Nobody writes the file by hand, and every finding below names the command that fixes it, or the plan line to add first. (The merge-time rule
 `KW-DOC-LIFECYCLE-005` also covers `<spec-folder>/tasks.json` inside a specification.) The plan stays the
 authority, so every rule here is a disagreement between the file and the plan it sits beside, or a prompt
 that cannot be acted on, or a leftover copy of the file. All seven run in `docs validate` and in `docs_validate_governed_document_schema`, not
@@ -62,8 +62,8 @@ behind a flag, because the orchestrator has the docs tools and no shell. Rules `
 |---|---|---|
 | `KW-DOC-TASKS-001` | Error | The file is not the JSON this build reads, or declares a schema version it does not read |
 | `KW-DOC-TASKS-002` | Error | The file's plan, tasks, files or dependencies disagree with the plan's or specification task list's |
-| `KW-DOC-TASKS-003` | Error | The execution digest is stale: the plan moved after the file was written. A status or Decisions edit does not move it; a task edit does. Produce the digest with `kyber-weave arbiter plan <plan> -f json` after the last plan edit (or `<spec-folder>/tasks.md` for a specification) |
-| `KW-DOC-TASKS-004` | Error | A prompt carries no command, or no acceptance criteria |
+| `KW-DOC-TASKS-003` | Error | The execution digest is stale: the plan moved after the file was written. A status or Decisions edit does not move it; a task edit does. Run `kyber-weave docs tasks <plan> --write` after the last plan edit (or on `<spec-folder>/tasks.md` for a specification); never type a digest |
+| `KW-DOC-TASKS-004` | Error | A prompt carries no command, or no acceptance criteria. `docs tasks` also reports it, for the plan task, naming the line to add (`Command: ` backticked program and argument, `Acceptance criteria: ...`) |
 | `KW-DOC-TASKS-005` | Error | A prompt tells the worker to open a plan, specification or todo — the authoring-time half of `KW-ARB-PLANREAD-001` |
 | `KW-DOC-TASKS-006` | Warning | A Ready plan or specification task list has no task file beside it. Advisory: it never fails a merge, because every plan or specification task list sits in that state until its architect or product-owner writes one |
 | `KW-DOC-TASKS-007` | Error / Warning | A copy of a task file left in the plans folder under another name, such as `<plan>.tasks.json.new` or `.tmp`, with or without its plan beside it. The name selects the file and its content decides: its top-level JSON keys must include the task file's `execution-digest`, or `schema-version` beside `plan` or `tasks` (a file that cannot be read is reported). Error for a copy. Names ending in `.tasks.json` are `KW-DOC-LIFECYCLE-005`'s. Warning, same code, when `plan-index` names no plans folder (a root-level file), because nothing was checked, and when a plans subfolder cannot be read |

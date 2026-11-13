@@ -33,18 +33,17 @@ Mark any genuinely no-test task explicitly and name its replacement validation. 
 
 ## Task file
 
-Beside `tasks.md`, the tracked task file `<spec-folder>/tasks.json` is the specification form of the same contract a plan uses, and it is written only at finalization (see below). It carries a schema version, the specification's path, the execution digest, and one entry per task: id, role, dependencies, file scope, `session` group and the full prompt, each prompt naming files by path plus symbol, the full test class names and the exact commands.
+Beside `tasks.md`, the tracked task file `<spec-folder>/tasks.json` is the specification form of the same contract a plan uses, and the conductor writes it with `kyber-weave docs tasks` before finalization (see below). It carries a schema version, the specification's path, the execution digest, and one entry per task: id, role, dependencies, file scope, `session` group and the full prompt, each prompt naming files by path plus symbol, the full test class names and the exact commands.
 
 Only two slots stay unfilled — `{worktree}` and `{prior_results}` — because the conductor fills them at dispatch from what no authoring phase can know.
 
-The file is written at finalization, not during the tasks phase: write it in place at its final path with the edit tools, never through a sibling or temporary file. Its `plan` field holds the repository-relative path of `tasks.md`. `product-owner` has no shell, so the conductor passes the execution digest as `SPEC_DIGEST`. Never compute the digest by hand or with a script.
+The conductor writes the file with `kyber-weave docs tasks <spec-folder>/tasks.md --write` before the finalization invocation; it derives every field, the digest and each prompt from `tasks.md`, so `product-owner` never writes, edits or computes `tasks.json`. Put what each prompt needs in the task itself: its `Command:` line (a backticked program and argument) and its `Acceptance criteria:` line, or the test contract row's runner and acceptance cells. Optional `Session:` and `Role:` lines set the worker session group and agent (default: the task id and the first required skill).
 
 Finalization runs in this order:
 
-1. Check the digest before anything is written. A finalization invocation without `SPEC_DIGEST`, or one made after a task, contract-row, out-of-scope or mode edit since the digest was computed, returns `STATUS: BLOCKED` naming `task-file digest: run kyber-weave arbiter plan <spec-folder>/tasks.md -f json in <checkout>`. `product-owner` has no shell, so it cannot recompute the digest: the conductor must run the producer immediately before every finalization invocation and pass that fresh value, never one carried over from before a `tasks.md` edit; the owner blocks only when `SPEC_DIGEST` is absent, and `KW-DOC-TASKS-003` in validation catches a stale one. Nothing else is written, so the spec is not left Ready without a task file.
-2. Record the approval rows, write the spec Ready line (`**Status:** Ready`) in `tasks.md`, and synchronize the index.
-3. Write `tasks.json` with the digest from the conductor's `SPEC_DIGEST` as `execution-digest`.
-4. Return `SPEC_FINALIZED` with `TASK_FILE: <spec-folder>/tasks.json`.
+1. Check that `tasks.json` exists beside `tasks.md`. If not, return `STATUS: BLOCKED` naming `task file: run kyber-weave docs tasks <spec-folder>/tasks.md --write in <checkout>`. Nothing else is written, so the spec is not left Ready without a task file.
+2. Record the approval rows, write the spec Ready line (`**Status:** Ready`) in `tasks.md`, and synchronize the index. A status edit does not move the digest.
+3. Return `SPEC_FINALIZED` with `TASK_FILE: <spec-folder>/tasks.json`.
 
 ## Gaps and coverage
 
