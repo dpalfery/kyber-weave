@@ -53,7 +53,7 @@ the path declared as **.agent_scratchpad** where the repository declares one. Su
 | Full-solution inspection | `dotnet jb inspectcode <solution> --output=<scratchpad>/inspectcode.xml --format=Xml` |
 | Project-scoped inspection | `dotnet jb inspectcode <solution> --project="<ProjectName>" --output=<scratchpad>/inspect-<project>.xml --format=Xml` |
 | SARIF for CI or automated scanning | `dotnet jb inspectcode <solution> --output=<scratchpad>/results.sarif --format=Sarif --severity=WARNING` |
-| Formatting and cleanup | `dotnet jb cleanupcode <solution>` |
+| Formatting and cleanup | the bounded form in step 2 below; never a bare `dotnet jb cleanupcode` |
 
 Scope the run to the affected projects when the solution is large and you are iterating by
 hand. The once-per-review-cycle review gate takes the full solution: it is the only inspection pass in
@@ -95,8 +95,19 @@ have made for free. Erasing them here is the whole point.
    ```bash
    dotnet format <solution> --include <changed files>
    dotnet format <solution> analyzers --include <changed files>
-   dotnet jb cleanupcode <solution> --profile="<cleanup profile>" --include="<changed files>" --no-build
+   perl -e 'setpgrp; $p=fork; exec @ARGV unless $p; $SIG{ALRM}=sub{kill "KILL",-$$}; alarm 120; waitpid $p,0; exit $?>>8' -- dotnet jb cleanupcode <solution> --profile="<cleanup profile>" --include='**/<dir>/<File>.cs;**/<dir>/<Other>.cs' --no-build
    ```
+
+   `cleanupcode` can hang at exit with no output (a .NET socket-close deadlock seen on macOS), so
+   this is the only form: `perl` is the portable `timeout` that also kills the tool's child
+   processes. `<solution>` is the solution file's absolute path. `--include` takes `;`-separated
+   masks matched against absolute paths, where `**` spans directories: write each as `**/` plus the
+   path from its folder, never a bare relative path (it matches nothing: "No items were found").
+   Any path option (`--LogFile`, `--caches-home`) must be absolute. Never poll a silent process.
+   At 120 s the process group is killed (exit 137): run `git diff` on your files. Changed means the
+   cleanup ran and only the exit hung, so continue; unchanged means record
+   `NOT VERIFIED: cleanupcode — timed out` and move on.
+   Masks: <https://www.jetbrains.com/help/resharper/CleanupCode.html>.
 
    `--no-build` skips the tool's own restore and build, so the solution must already be restored
    into its default `obj/`: run `dotnet restore <solution>` first when nothing has. A restore
@@ -215,7 +226,7 @@ dotnet format Hauling.sln --include 2-Application/Hauling.Application/Dispatch/L
 dotnet format Hauling.sln analyzers --include 2-Application/Hauling.Application/Dispatch/LoadPlanner.cs \
   -p:BaseIntermediateOutputPath=.agent_scratchpad/T3/artifacts/obj/
 dotnet restore Hauling.sln
-dotnet jb cleanupcode Hauling.sln --profile="<cleanup profile>" --include="2-Application/Hauling.Application/Dispatch/LoadPlanner.cs" --no-build
+perl -e 'setpgrp; $p=fork; exec @ARGV unless $p; $SIG{ALRM}=sub{kill "KILL",-$$}; alarm 120; waitpid $p,0; exit $?>>8' -- dotnet jb cleanupcode "$PWD/Hauling.sln" --profile="<cleanup profile>" --include='**/Dispatch/LoadPlanner.cs' --no-build
 ```
 
 Formatting, redundant qualifiers, and unused usings are gone. The multiple enumeration is not —
