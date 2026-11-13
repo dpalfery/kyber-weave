@@ -32,11 +32,10 @@ internal static class ModelTargetFacts
     internal const string PriorResult = "model-targeting.prior-result";
     private const string PriorProfile = "model-targeting.prior-profile";
     private const string LadderNext = "model-targeting.ladder.next";
-    private const string TestOwner = "test-dev";
     private const string BudgetExceeded = "BUDGET_EXCEEDED";
 
     private static readonly IReadOnlyList<string> TestPatterns = ArbiterConfig.ProductDefaults.OwnerFileKindMap
-        .Where(entry => string.Equals(entry.Owner, TestOwner, StringComparison.Ordinal))
+        .Where(entry => string.Equals(entry.Owner, ArbiterFileKindMapEntry.TaskOwner, StringComparison.Ordinal))
         .SelectMany(entry => entry.Patterns)
         .ToList();
 

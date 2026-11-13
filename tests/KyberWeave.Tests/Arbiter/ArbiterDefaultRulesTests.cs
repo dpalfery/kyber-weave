@@ -172,7 +172,7 @@ public sealed class ArbiterDefaultRulesTests
             (["**/Migrations/**", "**/*Repository.cs"], "dal-dev"),
             (["**/*.xaml"], "maui-dev"),
             (["**/Pulumi.yaml", "**/Pulumi.*.yaml"], "pulumi-dev"),
-            (["tests/**", "**/*.test.*", "**/*.spec.*", "**/*Tests.cs"], "test-dev"),
+            (["tests/**", "**/*.test.*", "**/*.spec.*", "**/*Tests.cs"], ArbiterFileKindMapEntry.TaskOwner),
             (["**/*.md"], "docs-dev"),
             (["**/*.cs"], "csharp-dev"),
         ];
@@ -188,11 +188,11 @@ public sealed class ArbiterDefaultRulesTests
     [Fact]
     public void Owner001_MapIsFirstMatchWins()
     {
-        // tests/foo.md matches both tests/** (test-dev) and **/*.md (docs-dev):
+        // tests/foo.md matches both tests/** (the task's owner) and **/*.md (docs-dev):
         // the earlier row wins, which is what "first match wins" means.
         string owner = FirstMapOwner("tests/foo.md");
 
-        Assert.Equal("test-dev", owner);
+        Assert.Equal(ArbiterFileKindMapEntry.TaskOwner, owner);
         Assert.Equal("react-dev", FirstMapOwner("src/ui/App.tsx"));
         Assert.Equal("csharp-dev", FirstMapOwner("src/Impl.cs"));
     }

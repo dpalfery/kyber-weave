@@ -727,7 +727,9 @@ rules:
     effects: { no-task: allow, not-required: allow, failing-run-first: allow, no-failing-run: allow }
 
 # The OWNER-001 file-kind map, evaluated first match wins. The order is the
-# decision: specific owners precede the documentation and C# catch-alls.
+# decision: specific owners precede the documentation and C# catch-alls. Test
+# files belong to the task's own owner (one worker writes a test-first task's
+# tests and code, ADR 0076), so their row names task-owner, not test-dev.
 owner-file-kind-map:
   - patterns: ["**/*.tsx", "**/*.jsx"]
     owner: react-dev
@@ -746,7 +748,7 @@ owner-file-kind-map:
   - patterns: ["**/Pulumi.yaml", "**/Pulumi.*.yaml"]
     owner: pulumi-dev
   - patterns: ["tests/**", "**/*.test.*", "**/*.spec.*", "**/*Tests.cs"]
-    owner: test-dev
+    owner: task-owner
   - patterns: ["**/*.md"]
     owner: docs-dev
   - patterns: ["**/*.cs"]

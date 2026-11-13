@@ -33,8 +33,15 @@ public sealed record ArbiterProviderConfig(
 /// owns it. Data, not code, so a host reading the rule sees the whole map.
 /// </summary>
 /// <param name="Patterns">Glob patterns for this owner, in match order.</param>
-/// <param name="Owner">The Squad agent owning matching files.</param>
-public sealed record ArbiterFileKindMapEntry(IReadOnlyList<string> Patterns, string Owner);
+/// <param name="Owner">
+///     The Squad agent owning matching files, or <see cref="TaskOwner"/> for test files, which belong to whichever
+///     specialist owns the task.
+/// </param>
+public sealed record ArbiterFileKindMapEntry(IReadOnlyList<string> Patterns, string Owner)
+{
+    /// <summary>The owner a test-file row names: the task's own specialist, not a dedicated test agent.</summary>
+    public const string TaskOwner = "task-owner";
+}
 
 /// <summary>
 /// One <c>LENS-001</c> step-0 row: when every changed path matches one of

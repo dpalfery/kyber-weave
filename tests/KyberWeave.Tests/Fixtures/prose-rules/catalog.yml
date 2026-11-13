@@ -498,7 +498,7 @@ rules:
       - products/kyber-squad/skills/task-gate/references/rework.md
       - products/kyber-squad/agents/conductor/references/autonomy.md
   - id: D6
-    statement: A worker that must read a skill as a file reads it from the skills directory its harness installed it to, and never searches the filesystem for it or reads one from another repository.
+    statement: A worker that must read a skill as a file reads it from the skills directory its harness installed it to, and never searches the filesystem for it or reads a skill or an agent file from another repository or checkout.
     stated-in:
       - products/kyber-squad/shared/worker-baseline.md
     controls:
@@ -2328,3 +2328,10 @@ rules:
     controls:
       - products/kyber-squad/skills/code-review/references/lenses/performance.md
       - products/kyber-squad/skills/code-review/references/lenses/correctness.md
+  - id: in-process-lens-reads-the-installed-charter
+    statement: A code-reviewer that applies the lenses itself reads each lens's charter from the installed code-review skill's references, never from a review-lens agent file or another checkout's copy.
+    stated-in:
+      - products/kyber-squad/agents/code-reviewer.md
+    controls:
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md

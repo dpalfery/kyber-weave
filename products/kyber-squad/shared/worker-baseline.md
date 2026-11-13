@@ -26,5 +26,5 @@ of it, and never ask a question when running autonomously.
 
 **Batch your reads.** Send independent reads in one round trip, not one read per question.
 
-Skills load by name with the harness skill tool; if you must read one as a file, it is at `{{skills-root}}/<name>/SKILL.md`. Never search the filesystem for a skill, and never read one from another repository.
+Skills load by name with the harness skill tool; if you must read one as a file, it is at `{{skills-root}}/<name>/SKILL.md`. Never search the filesystem for a skill, and never read a skill or an agent file from another repository or checkout.
 </worker-baseline>

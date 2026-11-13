@@ -38,7 +38,8 @@ A plan delivered by a conductor may carry a tracked task file, `docs/plans/<plan
 written by `architect` at finalization and committed with the plan at once. Each task carries its
 id, role, dependencies, file scope, a `session` group and the full prompt, and each prompt carries
 files as path plus symbol, full test class names, exact commands, acceptance criteria and the
-standards to fetch. The conductor validates the file, pastes each prompt unchanged and fills only
+standards to fetch. The conductor validates the file and dispatches by task id; each worker
+fetches its prompt unchanged with `kyber-weave docs packet <task id>`, which fills only
 `{worktree}` and `{prior_results}`. **The plan stays authoritative**: it is what the owner
 approves, it holds the `## Decisions` table, and the Arbiter reads task ids, files, dependencies,
 skills, task text, test rows and out-of-scope items from it. The file's execution digest covers
