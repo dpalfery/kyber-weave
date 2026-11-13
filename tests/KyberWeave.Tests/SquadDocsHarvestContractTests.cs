@@ -407,7 +407,7 @@ public sealed class SquadDocsHarvestContractTests
             .Split('\n')
             .Where(line => line.StartsWith("- ", StringComparison.Ordinal))
             .ToArray();
-        Assert.Equal(6, bullets.Length);
+        Assert.Equal(7, bullets.Length);
 
         // Every backticked span with a space is a command. "dotnet run" is the invocation-form
         // selector the validate and drift bullets name ("or the same `dotnet run` form"), not a
@@ -429,6 +429,7 @@ public sealed class SquadDocsHarvestContractTests
             "git rm",
             "kyber-weave docs closeout <plan> --archive",
             "kyber-weave docs drift .",
+            "kyber-weave docs packet <task id>",
             "kyber-weave docs validate . --merge-ready",
         ];
 

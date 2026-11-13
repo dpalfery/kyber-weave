@@ -34,12 +34,13 @@ You do **not** own:
 - CI/CD pipelines or DevOps configuration
 - Database schemas or migrations
 
-Your packet is your whole scope, with one exception: a plan or spec closeout task may read the plan or spec it is closing out. For all other work, the baseline's plan-read rule covers it.
+A dispatch with a task id gets its scope from its packet. A closeout or archive dispatch carries no task id and has no packet: skip the baseline's packet step and work from its `PLAN_FILE:`, running `kyber-weave docs closeout <PLAN_FILE> --archive` for the archive. Your packet is your whole scope, with one exception: a plan or spec closeout task may read the plan or spec it is closing out. For all other work, the baseline's plan-read rule covers it.
 
 ## Commands you run
 
-The only processes you run are these six command classes:
-- `kyber-weave docs closeout <plan> --archive`: archives the plan named by the packet, and only after its closeout steps are complete. It refuses, naming what is missing, otherwise sets the status, moves the plan to `<docs-root>/archive/plans/`, removes its `<plan>.tasks.json`, takes its row out of the plan index and adds its line to the archived plan inventory; never do those steps by hand.
+The only processes you run are these seven command classes:
+- `kyber-weave docs packet <task id>`: your brief for a dispatch that carries a task id, run from the worktree the dispatch names.
+- `kyber-weave docs closeout <plan> --archive`: archives the plan named by the dispatch's `PLAN_FILE:` (or by the packet), and only after its closeout steps are complete. It refuses, naming what is missing, otherwise sets the status, moves the plan to `<docs-root>/archive/plans/`, removes its `<plan>.tasks.json`, takes its row out of the plan index and adds its line to the archived plan inventory; never do those steps by hand.
 - `git mv` of the specification directory you close out to `<docs-root>/archive/specs/`, only after its closeout steps are complete.
 - `git rm` of that specification's `<spec-folder>/tasks.json` in the same commit that archives it, so the file never reaches the main branch. Nothing durable is lost: the archived artifact keeps its decisions, tasks and test contract.
 - `kyber-weave docs validate . --merge-ready`, or, when the tool is not on `PATH`, the source-run form the host's `AGENTS.md` declares (`dotnet run --project <the CLI project> -- docs validate . --merge-ready`). Run it after every corpus edit and every archival move.

@@ -150,7 +150,7 @@ Each cycle writes to `.agent_scratchpad/<task-id>/review/cycle-<n>/`: the `seats
 
 After approval, assign `docs-dev` the closeout named by the execution artifact:
 
-- Plan-backed work migrates durable facts, synchronizes the plan index, and archives the plan.
+- Plan-backed work migrates durable facts, synchronizes the plan index, and archives the plan. The archive is not a plan task: send that dispatch with `PLAN_FILE:` and no `TASK:`, and no task id in the text; docs-dev runs `kyber-weave docs closeout <PLAN_FILE> --archive` and needs no packet. Never invent a task id for it.
 - Spec-backed work verifies requirements, migrates durable facts, synchronizes the specification index, and archives the specification.
 
 ### Documentation-impact review
