@@ -49,6 +49,18 @@ Reported only when the `plan-index` or `todo-index` registry property names a do
 | `KW-DOC-LIFECYCLE-004` | Error | An archived entry the change touches without closeout evidence (`C0`–`C9`) — raised only by `docs validate --merge-ready` |
 | `KW-DOC-LIFECYCLE-005` | Error | A task file (`<plan>.tasks.json` beside a plan, `tasks.json` in a specification folder) is left behind, under the active folders or under the archive — raised only by `docs validate --merge-ready` |
 
+### Plan closeout — `docs closeout`
+
+| Id | Severity | Meaning |
+|---|---|---|
+| `KW-DOC-CLOSEOUT-001` | Error | The path is not an active plan: it does not exist, is not a `.md` file directly under the plans folder, or is the plan index |
+| `KW-DOC-CLOSEOUT-002` | Error | The archive already holds a file with the plan's name |
+| `KW-DOC-CLOSEOUT-003` | Error | The plan index or the archived plan inventory is missing, or the inventory has no `Plan / Status / Date / Archive Date / Canonical Docs / Goal` table to add the row to |
+| `KW-DOC-CLOSEOUT-004` | Info / Warning | A step the command took or, without `--archive`, would take. Warning: `git add` could not stage the touched files |
+| `KW-DOC-CLOSEOUT-005` | Error | `--date` is not `yyyy-MM-dd` |
+
+A plan whose closeout evidence is incomplete is reported with `KW-DOC-LIFECYCLE-004` and nothing is moved.
+
 ### Plan task files — `docs validate` and the docs MCP validate tool
 
 A plan's task file is the tracked file `kyber-weave docs tasks <plan> --write` derives at finalization so the conductor can

@@ -38,9 +38,10 @@ Your packet is your whole scope, with one exception: a plan or spec closeout tas
 
 ## Commands you run
 
-The only processes you run are these five command classes:
-- `git mv` of the plan or spec you close out: a plan file moves to `<docs-root>/archive/plans/`, and a specification directory moves to `<docs-root>/archive/specs/`. Archive only the artifact named by the packet, and only after its closeout steps are complete.
-- `git rm` of that artifact's task file — `<plan>.tasks.json` beside a plan, or `<spec-folder>/tasks.json` in a specification folder — in the same commit that archives the artifact, so the file never reaches the main branch. Nothing durable is lost: the archived plan keeps its decisions, tasks and test contract.
+The only processes you run are these six command classes:
+- `kyber-weave docs closeout <plan> --archive`: archives the plan named by the packet, and only after its closeout steps are complete. It refuses, naming what is missing, otherwise sets the status, moves the plan to `<docs-root>/archive/plans/`, removes its `<plan>.tasks.json`, takes its row out of the plan index and adds its line to the archived plan inventory; never do those steps by hand.
+- `git mv` of the specification directory you close out to `<docs-root>/archive/specs/`, only after its closeout steps are complete.
+- `git rm` of that specification's `<spec-folder>/tasks.json` in the same commit that archives it, so the file never reaches the main branch. Nothing durable is lost: the archived artifact keeps its decisions, tasks and test contract.
 - `kyber-weave docs validate . --merge-ready`, or, when the tool is not on `PATH`, the source-run form the host's `AGENTS.md` declares (`dotnet run --project <the CLI project> -- docs validate . --merge-ready`). Run it after every corpus edit and every archival move.
 - `kyber-weave docs drift .` (or the same `dotnet run` form the host's AGENTS.md declares).
 - Run the targeted tests that pin documentation, named by the packet.
@@ -66,13 +67,13 @@ When assigned a plan closeout:
 4. Establish and record explicit waivers where an item is not migrated:
    - **ADR waiver**: State `no ADR — ADR waiver: <reason>` when a decision refines existing architecture, applies established patterns, or represents implementation detail that does not warrant a new ADR.
    - **Documentation waiver**: Permitted ONLY when an item is purely transient, historical, or test-fixture scoped with zero surviving architectural, operational, or behavioral invariants that future engineers or agents need to consult. "No ADR" is NOT a documentation waiver. "No existing doc describes it" is explicitly rejected as an invalid documentation waiver: canonical documentation must be created or updated.
-5. Update canonical documentation to describe the verified behavior, then remove the plan's row from the plan index and add one line for it at the top of the table in `<docs-root>/archive/plans/README.md` (newest first) with the canonical doc destinations and archive date; evidence belongs in the plan's completion summary, not in that row. A note or excuse for why the process was not followed is not a resolution. The process exists to ensure quality; going around it signals bad quality. Do not put such a note in **Active Plans**. A pull request that does will not be approved.
-6. Change the plan status to `Archived` and move it to `<docs-root>/archive/plans/` with `git mv`, only when the verification, closeout mapping table, and documentation updates are complete. Remove its `<plan>.tasks.json` with `git rm` in that same commit, so the file is gone from the branch that archives the plan.
+5. Update canonical documentation to describe the verified behavior; evidence belongs in the plan's completion summary. A note or excuse for why the process was not followed is not a resolution. The process exists to ensure quality; going around it signals bad quality. Do not put such a note in **Active Plans**. A pull request that does will not be approved.
+6. Run `kyber-weave docs closeout <plan> --archive` only when the verification, closeout mapping table, and documentation updates are complete. It sets the status to `Archived`, moves the plan to `<docs-root>/archive/plans/`, removes its `<plan>.tasks.json`, takes its row out of the plan index and adds its line at the top of the archived plan inventory; its refusal names the closeout evidence still missing.
 7. If any criterion, durable decision harvest, or documentation update is unresolved, do not archive. Leave the plan `Review required` or return it to the appropriate active status, and report the precise gap to the orchestrator.
 
 8. Harvest the plan's Design harvest declared at authoring time: every Design harvest requirement-group at its declared scale migrates into canonical documentation alongside the decisions. Record the documentation-impact of each migrated item.
-9. Record a Closeout mapping for every harvested item with its documentation-impact, impact-components, last-reviewed date, and status archived row. Set the plan artifact header to `Status: Archived` only after the mapping is complete.
-10. After the `git mv` archival and the plan index update, run `kyber-weave docs validate . --merge-ready` and `kyber-weave docs drift .`. Report any finding as a blocker; do not report `CLOSEOUT_COMPLETE` while either check reports one.
+9. Record a Closeout mapping for every harvested item with its documentation-impact, impact-components, last-reviewed date, and status archived row. The closeout command sets the plan to `Status: Archived`, so the mapping must be complete before you run it.
+10. After the closeout command, run `kyber-weave docs validate . --merge-ready` and `kyber-weave docs drift .`. Report any finding as a blocker; do not report `CLOSEOUT_COMPLETE` while either check reports one.
 
 ## Specification closeout
 

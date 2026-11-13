@@ -669,7 +669,7 @@ public sealed partial class ArchiveCloseoutValidator
     }
 
     /// <summary>Data rows of the first pipe table under <paramref name="heading"/>, if any.</summary>
-    private static List<string[]>? TableRows(DocumentModel archived, string heading)
+    internal static List<string[]>? TableRows(DocumentModel archived, string heading)
     {
         DocumentSection? section = archived.Sections
             .FirstOrDefault(candidate => string.Equals(candidate.Heading, heading, StringComparison.OrdinalIgnoreCase));

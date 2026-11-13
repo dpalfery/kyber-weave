@@ -405,8 +405,8 @@ public sealed class SquadDocsHarvestContractTests
     }
 
     /// <summary>
-    /// docs-dev holds a shell only for the five command classes its packet names: archival
-    /// <c>git mv</c>, the artifact task file's <c>git rm</c>, the two documentation checks, and
+    /// docs-dev holds a shell only for the six command classes its packet names: the plan
+    /// closeout command, a specification's archival <c>git mv</c>, its task file's <c>git rm</c>, the two documentation checks, and
     /// targeted doc-pinning tests, so a later edit cannot widen the instruction-scoped boundary
     /// silently. The never-commit-or-push and only-archiver rules are graded from the prose rule
     /// catalog (<c>docs-dev-shell-commands</c>, <c>docs-dev-only-archiver</c>).
@@ -430,7 +430,7 @@ public sealed class SquadDocsHarvestContractTests
             .Split('\n')
             .Where(line => line.StartsWith("- ", StringComparison.Ordinal))
             .ToArray();
-        Assert.Equal(5, bullets.Length);
+        Assert.Equal(6, bullets.Length);
 
         // Every backticked span with a space is a command. "dotnet run" is the invocation-form
         // selector the validate and drift bullets name ("or the same `dotnet run` form"), not a
@@ -450,6 +450,7 @@ public sealed class SquadDocsHarvestContractTests
             "dotnet run --project <the CLI project> -- docs validate . --merge-ready",
             "git mv",
             "git rm",
+            "kyber-weave docs closeout <plan> --archive",
             "kyber-weave docs drift .",
             "kyber-weave docs validate . --merge-ready",
         ];

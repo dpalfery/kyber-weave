@@ -116,6 +116,11 @@ app.Configure(config =>
             .WithExample("docs", "tasks", "docs/plans/2026-11-12-my-plan.md", "--write")
             .WithExample("docs", "tasks", "docs/plans/2026-11-12-my-plan.md", "--check");
 
+        docs.AddCommand<DocsCloseoutCommand>("closeout")
+            .WithDescription(DocsCloseoutCommand.Description)
+            .WithExample("docs", "closeout", "docs/plans/2026-11-12-my-plan.md")
+            .WithExample("docs", "closeout", "docs/plans/2026-11-12-my-plan.md", "--archive");
+
         docs.AddCommand<DocsDriftCommand>("drift")
             .WithDescription("Resolve documented code references against the CodeGraph index (KW-DOC-DRIFT-*).")
             .WithExample("docs", "drift", ".");

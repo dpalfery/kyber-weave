@@ -1404,6 +1404,42 @@
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);",
       "count": 1,
       "bound": "ProcessRunner timeout kills the child tree on expiry; GitTimeout; read-only git argv."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReviewCycleTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "Builds only; started by the ProcessRunner.Run below. git argv only, in a temporary repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReviewCycleTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temporary repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/DocsCloseoutCommandTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "Builds only; started by the ProcessRunner.Run below. git argv only, in a temporary repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/DocsCloseoutCommandTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temporary repository."
+    },
+    {
+      "file": "src/KyberWeave.Core.Docs/Closeout/PlanCloseout.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "Builds only; started by the ProcessRunner.Run below with GitTimeout = 60 s."
+    },
+    {
+      "file": "src/KyberWeave.Core.Docs/Closeout/PlanCloseout.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);",
+      "count": 1,
+      "bound": "ProcessRunner.Run with GitTimeout = 60 s; the process tree is killed on expiry. git add argv only, for the paths the closeout touched."
     }
   ]
 }

@@ -1762,12 +1762,21 @@ rules:
       - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/skills/task-gate/references/rework.md
   - id: docs-dev-shell-commands
-    statement: docs-dev runs only a closed list of commands, archival git mv, git rm of the task file, docs validate, docs drift and targeted documentation tests, and nothing else.
+    statement: docs-dev runs only a closed list of commands, the plan closeout command, a specification's archival git mv and git rm of its task file, docs validate, docs drift and targeted documentation tests, and nothing else.
     stated-in:
       - path: products/kyber-squad/agents/docs-dev.md
         section: Commands you run
     controls:
       - products/kyber-squad/agents/go-dev.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: plan-closeout-by-command
+    statement: Plan closeout archives the plan by running the kyber-weave docs closeout command, which sets the status, moves the plan, removes its task file and updates both indexes, rather than doing those steps by hand.
+    stated-in:
+      - path: products/kyber-squad/agents/docs-dev.md
+        section: Plan closeout
+    controls:
+      - path: products/kyber-squad/agents/docs-dev.md
+        without-section: Plan closeout
       - products/kyber-squad/skills/task-gate/references/rework.md
   - id: docs-dev-only-archiver
     statement: docs-dev is the only role that archives a plan or a specification.
