@@ -180,6 +180,22 @@ rules:
     controls:
       - products/kyber-squad/skills/task-gate/references/rework.md
       - products/kyber-squad/shared/worker-baseline.md
+  - id: resume-counts-as-rework
+    statement: Resuming a worker's session for rework counts as a rework dispatch in the per-cluster tally.
+    stated-in:
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Iteration circuit-breaker and loop detection
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
+  - id: loop-detection
+    statement: The conductor detects loops in rework, so the same failure cannot be dispatched over and over.
+    stated-in:
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Iteration circuit-breaker and loop detection
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
   - id: G7
     statement: An A/B oscillation in a failure cluster trips the conductor's circuit breaker immediately.
     stated-in:
@@ -223,6 +239,13 @@ rules:
       absent-from:
         - products/kyber-squad/agents/conductor.md
         - products/kyber-squad/skills/delivery-execution/SKILL.md
+  - id: task-gate-none-applicable
+    statement: TASK_GATE NONE_APPLICABLE means gates are declared for the agent but every declared gate was skipped because none applies.
+    stated-in:
+      - products/kyber-squad/skills/task-gate/SKILL.md
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
   - id: task-gate-two-cycle-cap
     statement: The task gate allows at most two fix-and-rerun cycles and then stops even if a gate still fails.
     stated-in:
@@ -1483,6 +1506,9 @@ rules:
         - products/kyber-squad/skills/delivery-execution/SKILL.md
         - products/kyber-squad/agents/code-reviewer.md
         - products/kyber-squad/skills/code-review/SKILL.md
+        - products/kyber-squad/agents/conductor/references/intake-path.md
+        - products/kyber-squad/agents/conductor/references/plan-path.md
+        - products/kyber-squad/agents/conductor/references/spec-path.md
   - id: ready-on-required-ci
     statement: The pull request is marked ready once required CI passes; no review has to happen first.
     stated-in:
@@ -1498,6 +1524,13 @@ rules:
       absent-from:
         - products/kyber-squad/agents/conductor/references/autonomy.md
         - products/kyber-squad/skills/delivery-execution/SKILL.md
+  - id: ci-wait-bound
+    statement: Required CI is waited for at most 60 minutes; when it is not done by then, the pull request stays a draft.
+    stated-in:
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
   - id: final-report-autonomy-items
     statement: The autonomous final report lists every low-confidence decision with why no source answered it, and the count of gates approved automatically.
     stated-in:
@@ -1896,6 +1929,14 @@ rules:
     controls:
       - products/kyber-squad/agents/conductor/references/autonomy.md
       - products/kyber-squad/agents/architect/references/arbiter-escalation.md
+  - id: approve-and-execute-gate
+    statement: Execution starts only after the final approve and execute gate.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+      - products/kyber-squad/agents/conductor/references/plan-path.md
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
   - id: three-intake-paths
     statement: The conductor has three intake paths, the plan path, the spec path and the intake path.
     stated-in:

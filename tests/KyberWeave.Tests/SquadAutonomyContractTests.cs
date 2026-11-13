@@ -103,6 +103,22 @@ public sealed class SquadAutonomyContractTests
         Assert.DoesNotContain("parked NEEDS_HUMAN", ConductorContract(), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The retired hold-until-council wording, on the one conductor file the prose grader could not judge
+    /// reliably for that retired rule (catalog rule draft-pr-before-council covers the rest).
+    /// </summary>
+    [Fact]
+    public void ConductorBodyCarriesNoHoldUntilCouncilWording()
+    {
+        string conductor = Read("agents", "conductor.md");
+
+        Assert.DoesNotContain("Do not commit, push, publish, or open a pull request until the council returns", conductor, StringComparison.Ordinal);
+        Assert.DoesNotContain("leave it unpushed", conductor, StringComparison.Ordinal);
+        Assert.DoesNotContain("Do not mark the pull request ready", conductor, StringComparison.Ordinal);
+        Assert.DoesNotContain("Park that change or task", conductor, StringComparison.Ordinal);
+        Assert.DoesNotContain("at least one review", conductor, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void AutonomyCarriesTheLowConfidenceMarker()
     {

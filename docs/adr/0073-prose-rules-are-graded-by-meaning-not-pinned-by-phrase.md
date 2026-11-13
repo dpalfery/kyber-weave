@@ -63,10 +63,15 @@ answers the Arbiter's questions through `SystemOneClient`
   graded run.
 - The graded run costs about $0.13, 3 million input tokens and 30 seconds for some 1,100 questions. It
   runs only where the secret exists, so a fork's pull request is checked structurally only.
-- Calibration: across the first full run, 9% of answers fell below the floor and none was a confident
-  error the text did not justify; questions were rewritten, weak controls replaced and 46 homes
-  anchored until three consecutive runs passed. A rule near the floor can still flake; the remedy is a
-  better statement or an anchor, never a lower floor.
+- Calibration: the first full run (1,214 questions) put 9% of answers below the floor and 8 confident
+  answers against the expected one; on reading the text, 7 of the 8 were the grader right and the catalog
+  wrong (a stale statement or a control that also stated the rule). The 100% pass that followed is partly
+  selection: statements were rewritten, weak controls replaced with plainly unrelated documents, absent-from
+  files the grader stayed unsure about dropped, and 46 of 427 homes (17 of 213 rules entirely) anchored,
+  several on a single word. Three consecutive runs of the final catalog then passed, with 1 to 4 passes
+  per run within 0.06 of the floor, so a rule near the floor can still flake; the remedy is a better
+  statement or an anchor, never a lower floor. Cutting a rule's section from its home was caught with
+  confidence in 39 of 59 cases; most of the rest repeat the rule in another section of the same file.
 - Pins on rules outside the catalog, or on files a rule does not name, stay until a rule covers them.
 
 ## Related
