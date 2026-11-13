@@ -281,7 +281,7 @@ receipts and logs key on them, so an id is never reused or renumbered.
 | `KW-ARB-OWNER-001` | `delegate` | 0, then 1 | Target is the specialist the task names; only a confident model `not-owner` escalates |
 | `KW-ARB-OWNER-002` | `delegate` | 1 | Roster specialist owning this task |
 | `KW-ARB-MODE-001` | `delegate` | 0, then 1 | Failing tests exist before an implementation dispatch in test-first mode; only a confident model `missing` escalates |
-| `KW-ARB-ROSTER-001` | `delegate`, `investigate` | 0 | Target is in the caller's `delegates-to` |
+| `KW-ARB-ROSTER-001` | `delegate`, `investigate` | 0 | Target is in the caller's `delegates-to`. Judged only for a caller the catalog names with a `delegates-to` list; any other caller answers `no-roster`, which allows |
 | `KW-ARB-RUN-001` | `delegate`, `investigate` | 0 | A run is live for the repository before an orchestrator hands a specialist that writes files (`worker` or `documentation` profile) any work. `not-started` escalates and names `kyber-weave run start`; the run-start dispatch, `github-devops`, planners and read-only targets are exempt, and unreadable evidence allows |
 | `KW-ARB-PLANREAD-001` | `delegate` | 0, then 1 | The dispatch does not tell the worker to open a plan, specification or todo file; a documentation-profile target is exempt, and only a confident model `names-plan` escalates |
 | `KW-ARB-DIFF-001` | `delegate.returned` | 0, then 1 | Delegation changed only files of its task's work. `out-of-scope` escalates at step 0; only a confident model `outside-task` escalates otherwise |

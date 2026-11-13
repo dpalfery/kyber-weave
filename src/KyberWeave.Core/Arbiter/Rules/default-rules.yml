@@ -193,16 +193,21 @@ rules:
       tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
     effects: { no-task: allow, not-required: allow, present: allow, missing: escalate, returns-unobservable: allow, returns-unread: allow }
 
+  # The roster is the catalog's delegates-to list, so it judges only a caller the catalog names with one.
+  # An unidentified caller, a helper agent outside the Squad, and a Squad agent that delegates to no one
+  # answer no-roster and are allowed: their dispatches are not the Arbiter's business.
   - id: KW-ARB-ROSTER-001
     trigger: [delegate, investigate]
     question: Is the target in the caller's delegates-to?
-    answers: [listed, not-listed]
+    answers: [listed, no-roster, not-listed]
     decide:
       - when: { fact: delegation.target, in: roster.caller.delegates-to }
         answer: listed
+      - when: { fact: roster.caller.delegates-to, count: 0 }
+        answer: no-roster
       - when: { fact: caller, exists: true }
         answer: not-listed
-    effects: { listed: allow, not-listed: escalate }
+    effects: { listed: allow, no-roster: allow, not-listed: escalate }
 
   # Machine facts only: the catalog says which callers orchestrate (their delegates-to lists the target)
   # and which profiles write project files, and run.started is the record run start wrote plus git's
