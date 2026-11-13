@@ -1966,7 +1966,7 @@ council re-reviews until it returns `APPROVE`; every cycle after the first is a 
 the fix delta. The hard stop is 5 cycles, or 3 cycles in a row in which the count of surviving
 critical and major findings does not fall: the findings still open are then listed in the pull
 request as pending human review, and delivery continues. Each cycle keeps its seat files,
-`gates.json`, the `findings.json` the verdict command writes, and `head` in
+`gates.json`, the `findings.json` the verdict command writes, and `cycle.json` (the branch, base and head it reviewed) in
 `.agent_scratchpad/<task-id>/review/cycle-<n>/` until the run ends, and the conductor passes the
 prior cycle folder to the next review. The loop runs on the open pull request, so ready stays
 decided by required CI alone. The procedure is in

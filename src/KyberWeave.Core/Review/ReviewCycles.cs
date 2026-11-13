@@ -206,6 +206,13 @@ public static partial class ReviewCycles
                 IdentityJson));
     }
 
+    /// <summary>The change a cycle folder recorded, or null when it recorded none or the record is incomplete.</summary>
+    public static ReviewCycleIdentity? ReadRecordedIdentity(string cycleFolder)
+    {
+        (string? branch, string? baseCommit, string? head) = ReadIdentity(cycleFolder);
+        return branch is null || baseCommit is null || head is null ? null : new ReviewCycleIdentity(branch, baseCommit, head);
+    }
+
     /// <summary>Whether a cycle folder already records which change it reviewed.</summary>
     public static bool HasIdentity(string cycleFolder) => File.Exists(Path.Combine(cycleFolder, IdentityFile));
 

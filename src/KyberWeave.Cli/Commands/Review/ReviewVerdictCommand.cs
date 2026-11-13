@@ -148,7 +148,7 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
                                                  && !given.Any(result => string.Equals(result.Id, gate.Id, StringComparison.Ordinal)))
         ];
         IReadOnlyList<ReviewCycleRecord> history =
-            ReviewWorkTree.Prior(ReviewWorkTree.Of(root), settings.BaseRef, ReviewCycles.ReadThrough(settings.Prior)).Valid;
+            ReviewWorkTree.Prior(ReviewWorkTree.Of(root), settings.BaseRef, ReviewCycles.ReadThrough(settings.Prior), CurrentCycleFolder(settings)).Valid;
         if (absent.Length == 0 || history.Count == 0)
             return given;
 
@@ -193,7 +193,7 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
         if (history.Count == 0)
             return true;
 
-        IgnoredCycle? named = ReviewWorkTree.Prior(ReviewWorkTree.Of(root), settings.BaseRef, history).Ignored
+        IgnoredCycle? named = ReviewWorkTree.Prior(ReviewWorkTree.Of(root), settings.BaseRef, history, CurrentCycleFolder(settings)).Ignored
             .FirstOrDefault(cycle => cycle.Record.Number == history[^1].Number && cycle.Record.Folder == history[^1].Folder);
         if (named is null)
             return true;
@@ -205,6 +205,18 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
             Subject,
             Hint: "Pass the folder of the cycle this review's own gate run wrote, or leave --prior out for a first cycle."));
         return false;
+    }
+
+    /// <summary>The folder of the cycle this verdict belongs to: the one <c>--out</c> or <c>--gates</c> sits in, when it records its change.</summary>
+    private static string? CurrentCycleFolder(ReviewVerdictSettings settings)
+    {
+        foreach (string? path in new[] { settings.Out, settings.Gates })
+        {
+            if (path is not null && Path.GetDirectoryName(Path.GetFullPath(path)) is { } folder && ReviewCycles.HasIdentity(folder))
+                return folder;
+        }
+
+        return null;
     }
 
     /// <summary>

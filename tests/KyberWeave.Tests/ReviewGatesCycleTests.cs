@@ -258,6 +258,30 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
+    public void TheVerdictTakesTheBaseFromItsOwnCycleSoItNeedsNoBaseFlagOnAStackedBranch()
+    {
+        // The gate runs were given a base other than the one a bare ref guess finds, as on a stacked branch.
+        Write("src/b.cs", "// b\n");
+        Commit("stack");
+        string stackBase = Git("rev-parse", "HEAD").Trim();
+        Write("src/c.cs", "// c\n");
+        Commit("work");
+        Gates(1, "--base", stackBase);
+        FinishFindings(1);
+        Write("src/c.cs", "// fixed\n");
+        Commit("fix");
+        Gates(2, "--base", stackBase);
+
+        CapturedConsoleExecution<int> verdict = ProcessConsoleCapture.Run(() => CreateApp().Run(
+        [
+            "review", "verdict", _repo, "--findings", EmptyFindings(), "--gates", GatesPath(2),
+            "--prior", CycleFolder(1), "--out", Path.Combine(CycleFolder(2), "findings.json"), "--format", "json"
+        ]));
+
+        Assert.DoesNotContain("KW-REVIEW-050", verdict.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TheVerdictRefusesAPriorFolderThatBelongsToAnotherChange()
     {
         FinishCycle1(branch: "someone-elses-change");
@@ -361,6 +385,11 @@ public sealed class ReviewGatesCycleTests : IDisposable
                 [],
                 0)));
     }
+
+    private void FinishFindings(int cycle) =>
+        Write(
+            $".agent_scratchpad/{Task}/review/cycle-{cycle}/findings.json",
+            ReviewJson.Write(new FindingsReport(FindingsReport.CurrentSchema, [], [], 0)));
 
     private string EmptyFindings()
     {

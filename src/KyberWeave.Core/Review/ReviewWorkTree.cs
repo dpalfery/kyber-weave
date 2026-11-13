@@ -42,8 +42,10 @@ public static class ReviewWorkTree
     /// <summary>The branch, base and head of the change checked out in <paramref name="workTree"/>; null when git cannot name them.</summary>
     /// <remarks>
     /// The base is the merge-base commit of the base ref and <c>HEAD</c>, so it names where the change forked and stays
-    /// put as the branch grows. Without a named ref, <see cref="DefaultBase"/> is tried and then the usual default
-    /// branches, because a repository with no <c>origin/HEAD</c> would otherwise never recognise a prior cycle.
+    /// put as the branch grows. Without a named ref, the base <c>run start</c> recorded for the branch is tried first,
+    /// since a stacked branch forked from another branch, not from the default one; then <see cref="DefaultBase"/> and
+    /// the usual default branches, because a repository with no <c>origin/HEAD</c> would otherwise never recognise a
+    /// prior cycle. A caller therefore never has to repeat the <c>--base</c> the gate run was given.
     /// </remarks>
     /// <param name="workTree">The work tree.</param>
     /// <param name="baseRef">The ref the base is resolved against; the defaults are tried when null.</param>
@@ -53,7 +55,9 @@ public static class ReviewWorkTree
         {
             string branch = ChangedFiles.CurrentBranch(workTree);
             string head = ChangedFiles.HeadCommit(workTree);
-            string[] candidates = string.IsNullOrWhiteSpace(baseRef) ? [DefaultBase, .. FallbackBases] : [baseRef.Trim()];
+            string[] candidates = string.IsNullOrWhiteSpace(baseRef)
+                ? [.. RunRecordedBase(branch), DefaultBase, .. FallbackBases]
+                : [baseRef.Trim()];
             foreach (string candidate in candidates)
             {
                 string mergeBase;
@@ -78,14 +82,43 @@ public static class ReviewWorkTree
         }
     }
 
+    private static IEnumerable<string> RunRecordedBase(string branch)
+    {
+        if (branch.Length > 0
+            && RunBaseState.TryReadBaseRef(HomeDirectory(), branch, out string? recorded)
+            && !string.IsNullOrWhiteSpace(recorded)
+            && ChangedFiles.ValidateBase(recorded) is null)
+        {
+            yield return recorded.Trim();
+        }
+    }
+
     /// <summary>Splits the finished cycles of <paramref name="workTree"/> into those that belong to its change and those that do not.</summary>
-    public static PriorCycles Prior(string workTree, string? baseRef, IReadOnlyList<ReviewCycleRecord> finished)
+    /// <param name="workTree">The work tree.</param>
+    /// <param name="baseRef">The ref the base is resolved against; see <see cref="IdentityOf"/> when null.</param>
+    /// <param name="finished">The finished cycles to judge.</param>
+    /// <param name="currentCycleFolder">
+    /// The folder of the cycle being run, when the caller knows it. With no <paramref name="baseRef"/>, the base its
+    /// own gate run recorded for this branch is the current base: that run was given the <c>--base</c> the others were not.
+    /// </param>
+    public static PriorCycles Prior(
+        string workTree,
+        string? baseRef,
+        IReadOnlyList<ReviewCycleRecord> finished,
+        string? currentCycleFolder = null)
     {
         ArgumentNullException.ThrowIfNull(finished);
-        return ReviewCycles.Belonging(
-            finished,
-            IdentityOf(workTree, baseRef),
-            commit => ChangedFiles.IsAncestorOfHead(workTree, commit));
+        ReviewCycleIdentity? current = IdentityOf(workTree, baseRef);
+        if (current is not null
+            && string.IsNullOrWhiteSpace(baseRef)
+            && currentCycleFolder is not null
+            && ReviewCycles.ReadRecordedIdentity(currentCycleFolder) is { } own
+            && string.Equals(own.Branch, current.Branch, StringComparison.Ordinal))
+        {
+            current = current with { Base = own.Base };
+        }
+
+        return ReviewCycles.Belonging(finished, current, commit => ChangedFiles.IsAncestorOfHead(workTree, commit));
     }
 
     /// <summary>
