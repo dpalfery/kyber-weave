@@ -69,7 +69,7 @@ kyber-weave review gates . --base <ref> --gate <gate-id> --out artifacts/gates.j
 kyber-weave review duplicates . --out artifacts/duplicates.json
 ```
 
-The end-of-run council (`code-reviewer`) runs the second form in every review cycle, writing straight into the cycle folder: `--council` admits the full-suite gates, and only the council and CI may pass it. Anyone else running this procedure, including the pre-push self-review gate, uses the first form and never adds either flag.
+The end-of-run council (`code-reviewer`) runs the second form in every review cycle, writing straight into the cycle folder: `--council` admits the full-suite gates, and only the council and CI may pass it. It also reads the cycle folders: in the first cycle it runs every gate, and in a later (verifier) cycle it prints `cycle: <n> mode: verifier`, the `recheck:` findings and the `rerun:`/`carry:` gates at the top of its output, runs only the `rerun:` gates, and writes the `carry:` gates' earlier passing results into the report as carried, so no separate command has to be asked for the cycle. `--full` runs every gate instead. Anyone else running this procedure, including the pre-push self-review gate, uses the first form and never adds either flag.
 
 `--deadline` stops the council waiting for its gates at `review.council-deadline-seconds` (default 600): at the deadline every gate still running is cut (a `concurrent` gate declared earlier included) and every gate not yet started is not started, and all of them are reported as not run (`KW-REVIEW-039`), and the council goes on to a verdict with the evidence it has. A gate that times out, or that the council deadline stops, is NOT RUN: it is listed as unverified, and it is never a blocking failure. That holds for the council's verdict and for a `--deadline` run's exit code. Without `--deadline` nothing changes for CI, task gates, the pre-push gate or a `--gate` re-check: there is no run deadline, and a blocking gate stopped by its own `timeout-seconds` fails `review gates` (`KW-REVIEW-022`). `--deadline` is refused with `--gate` and with `--agent`.
 
@@ -233,10 +233,9 @@ The reviewer applies the checks no individual lens can, because no lens sees the
 
 ### 5. Compute the verdict
 
-Each cycle writes to `.agent_scratchpad/<task-id>/review/cycle-<n>/`: the `seats` folder, `gates.json`, the `findings.json` the verdict command writes, and `head`; keep it until the run ends. `head` holds the commit the cycle reviewed, which is where the next cycle's fix delta starts. `review cycle` reads the folders and prints `cycle`, `mode: full|verifier`, the prior `findings:` file, the `recheck:` findings and the `rerun:`/`carry:` gates; run it first, and a `mode: verifier` cycle re-seats and re-runs only what it lists. This is the only place the verdict command is written down:
+Each cycle writes to `.agent_scratchpad/<task-id>/review/cycle-<n>/`: the `seats` folder, `gates.json`, the `findings.json` the verdict command writes, and `head`; keep it until the run ends. `head` holds the commit the cycle reviewed, which is where the next cycle's fix delta starts. The council's gate run reads the folders and prints the cycle, its mode (`full` or `verifier`), the `recheck:` findings and the `rerun:`/`carry:` gates, and a verifier cycle re-seats and re-runs only what it lists; `review cycle` asks the same question without running anything. This is the only place the verdict command is written down:
 
 ```bash
-kyber-weave review cycle . --task <task-id>
 kyber-weave review verdict . --seats <cycle>/seats --gates <cycle>/gates.json --out <cycle>/findings.json [--drop <id>=<reason>]... [--not-seated <lens>=<reason>]... [--prior <prior cycle>]
 ```
 

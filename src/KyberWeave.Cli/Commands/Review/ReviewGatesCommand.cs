@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using KyberWeave.Cli.Commands.Doctor;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Doctor;
@@ -27,6 +28,8 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
     private const string FixFailed = "KW-REVIEW-029";
     private const string GateNotStarted = "KW-REVIEW-033";
     private const string ChangedSetUnknown = "KW-REVIEW-034";
+    private const string PriorFindingsUnreadable = "KW-REVIEW-023";
+    private const string GateCarried = "KW-REVIEW-048";
     private const string CouncilDefaultBase = "origin/HEAD";
     private const int ClientInputExitCode = 2;
 
@@ -170,6 +173,21 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
             }
         }
 
+        // A council run in a cycle after the first is a verifier cycle. The recorded review folders say so, so the run
+        // itself decides which gates still need to run and carries the rest, instead of relying on the reviewer to ask.
+        CouncilCycle? cycle = settings.Council && !settings.Full && !settings.All && settings.Gate.Length == 0
+            ? DetectCycle(root, config, settings, report)
+            : null;
+        if (cycle is not null)
+        {
+            declared = [.. declared.Where(gate => cycle.Rerun.Contains(gate.Id))];
+            if (ReportRenderer.IsHuman(settings.ParsedFormat))
+                WriteCycleHeader(root, cycle);
+
+            report.AddMetric("cycle", cycle.Plan.Number);
+            report.AddMetric("mode", ReviewCycleView.Mode(cycle.Plan));
+        }
+
         // Before any gate process starts, so a review in a fresh worktree gets an index instead of silently having
         // none. A repository without governed docs has no index to keep and is not checked.
         // The index belongs to the tree, so a run pointed at a subdirectory still checks the tree's root.
@@ -266,6 +284,13 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
         foreach (GateResult gate in gates.Gates)
             AddGateDiagnostic(report, gate, settings.Deadline);
 
+        GateReport written = gates;
+        if (cycle is not null)
+        {
+            written = WithCarriedGates(config.Review.Gates, gates, cycle, report);
+            report.AddMetric("carried", written.Gates.Count - gates.Gates.Count);
+        }
+
         report.AddMetric("gates", gates.Gates.Count);
         report.AddMetric("failed", gates.Gates.Count(g => !g.Passed && g.NotApplicableReason is null
                                                          && !(settings.Deadline && VerdictEngine.IsStoppedForTime(g))));
@@ -273,13 +298,100 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
         if (settings.Deadline)
             report.AddMetric("not-run", gates.Gates.Count(VerdictEngine.IsStoppedForTime));
 
-        CommandHelpers.TryWriteReport(settings.Out, ReviewJson.Write(gates), ReportWriteFailed, report);
+        CommandHelpers.TryWriteReport(settings.Out, ReviewJson.Write(written), ReportWriteFailed, report);
 
         CommandHelpers.Finish(report, settings, "review gates", "Gate");
         // Blocking failures are already Error diagnostics; a failed --out write is too.
         // Non-blocking gate failures stay Warning and do not fail the process. Gates that
         // did not apply are Info and never fail it either.
         return report.HasErrors ? 1 : 0;
+    }
+
+    /// <summary>The cycle a council run found itself in, and what that decides for each declared gate.</summary>
+    private sealed record CouncilCycle(ReviewCyclePlan Plan, IReadOnlyList<ReviewFinding> Recheck, HashSet<string> Rerun);
+
+    /// <summary>
+    ///     The verifier cycle this council run is in, or null for a first cycle. The review folder comes from the
+    ///     <c>--out</c> path when it sits in <c>review/cycle-&lt;n&gt;</c>, else from the task's only review folder;
+    ///     a cycle that is already finished, this one included, is never counted as a prior. When nothing says this is a
+    ///     later cycle, the run is a full one, which is the safe answer.
+    /// </summary>
+    private static CouncilCycle? DetectCycle(
+        string root, KyberWeaveConfig config, ReviewGatesSettings settings, DiagnosticReport report)
+    {
+        string reviewFolder;
+        int? thisCycle = null;
+        if (settings.Out is not null && ReviewCycleView.TryFromOutPath(settings.Out, out string fromOut, out int number))
+        {
+            reviewFolder = fromOut;
+            thisCycle = number;
+        }
+        else if (ReviewCycleView.TryChooseTask(root, Path.Combine(root, ".agent_scratchpad"), null, out string task, out _, out _))
+        {
+            reviewFolder = Path.Combine(root, ".agent_scratchpad", task, "review");
+        }
+        else
+        {
+            return null;
+        }
+
+        IReadOnlyList<ReviewCycleRecord> finished = [.. ReviewCycles.ReadFinished(reviewFolder)
+            .Where(record => thisCycle is null || record.Number < thisCycle)];
+        if (finished.Count == 0)
+            return null;
+
+        ReviewCyclePlan plan = ReviewCycles.Plan(
+            finished, config.Review.Gates, CurrentOs(), commit => ReviewCycleView.TryChangedSince(root, commit));
+        List<ReviewFinding> recheck = [];
+        if (plan.Prior is { } prior)
+            ReviewCycleView.TryReadRecheck(prior, report, recheck, PriorFindingsUnreadable, Severity.Warning, "review gates");
+
+        return new CouncilCycle(
+            plan,
+            recheck,
+            [.. plan.Gates.Where(gate => gate.Action == GateCycleAction.Rerun).Select(gate => gate.GateId)]);
+    }
+
+    /// <summary>The cycle, mode, findings to re-check and gate plan, at the top of the output a reviewer reads first.</summary>
+    private static void WriteCycleHeader(string root, CouncilCycle cycle)
+    {
+        Console.WriteLine($"cycle: {cycle.Plan.Number} mode: {ReviewCycleView.Mode(cycle.Plan)}");
+        foreach (string line in ReviewCycleView.VerifierLines(root, cycle.Plan, cycle.Recheck))
+            Console.WriteLine(line);
+    }
+
+    /// <summary>
+    ///     The gate report with an earlier passing result in place of each gate this cycle did not run, in declaration
+    ///     order, so the report is complete and the verdict reads the same evidence it would from a full run.
+    /// </summary>
+    private static GateReport WithCarriedGates(
+        IReadOnlyList<ReviewGate> declared, GateReport ran, CouncilCycle cycle, DiagnosticReport report)
+    {
+        List<GateResult> results = [];
+        foreach (ReviewGate gate in declared)
+        {
+            if (ran.Gates.FirstOrDefault(result => string.Equals(result.Id, gate.Id, StringComparison.Ordinal)) is { } own)
+            {
+                results.Add(own);
+                continue;
+            }
+
+            GateCycleDecision? decision = cycle.Plan.Gates.FirstOrDefault(
+                candidate => candidate is { Action: GateCycleAction.Carry, Carried: not null }
+                             && string.Equals(candidate.GateId, gate.Id, StringComparison.Ordinal));
+            if (decision?.Carried is not { } carried)
+                continue;
+
+            results.Add(carried with { Summary = $"carried from cycle {decision.FromCycle}: {carried.Summary}" });
+            report.Add(new Diagnostic(
+                GateCarried,
+                Severity.Info,
+                $"{gate.Id}: carried from cycle {decision.FromCycle} ({decision.Reason}).",
+                gate.Id));
+        }
+
+        results.AddRange(ran.Gates.Where(result => !results.Contains(result)));
+        return ran with { Gates = results };
     }
 
     private static string? BaseRef(string? baseRef) =>

@@ -775,7 +775,7 @@ rules:
       - products/kyber-squad/skills/task-gate/references/rework.md
       - products/kyber-squad/agents/conductor/references/autonomy.md
   - id: review-cycle-asked-of-the-tool
-    statement: The code-reviewer runs `kyber-weave review cycle` first and follows its answer for the cycle's mode, so a verifier cycle re-checks only the findings it lists and re-runs only the gates it lists.
+    statement: The code-reviewer's council gate run detects the review cycle itself from the recorded review folders and prints it, so in a verifier cycle the reviewer re-checks only the findings it lists, and the run executes only the gates whose inputs changed or that did not pass.
     stated-in:
       - products/kyber-squad/agents/code-reviewer.md
       - products/kyber-squad/skills/code-review/SKILL.md

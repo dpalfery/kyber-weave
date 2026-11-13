@@ -62,6 +62,12 @@ public sealed class ReviewGatesSettings : AnalysisSettings
                  "no run deadline applies and a timed-out blocking gate fails the run. Not with --gate or --agent.")]
     public bool Deadline { get; set; }
 
+    [CommandOption("--full")]
+    [Description("With --council, run every declared gate even in a verifier cycle. Without it, a council run in a " +
+                 "cycle after the first runs only the gates whose inputs changed or that did not pass, and carries " +
+                 "the others' earlier passing results into the report.")]
+    public bool Full { get; set; }
+
     /// <summary>
     ///     Whether an option that only makes sense for one agent was given. <c>--paths</c> and <c>--base</c> also
     ///     scope the repository-wide council gates, so they are not agent-only.

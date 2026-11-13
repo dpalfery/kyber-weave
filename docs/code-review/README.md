@@ -114,7 +114,7 @@ kyber-weave review gates .                                          # run the de
 kyber-weave review suppressions .                                   # fail an added suppression with no reason
 kyber-weave review duplicates .                                     # cluster duplicate bodies
 kyber-weave review verdict . --seats seats --gates gates.json --out findings.json  # verdict from the seat files
-kyber-weave review cycle . --task my-task                           # which cycle this run is in, and what it re-checks
+kyber-weave review cycle . --task my-task                           # which cycle this run is in, and what it re-checks (read-only; the council's gate run does it itself)
 kyber-weave review catalogue                                        # print the shipped per-technology gates
 ```
 
