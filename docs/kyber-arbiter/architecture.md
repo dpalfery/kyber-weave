@@ -261,7 +261,7 @@ each, what stays at step 0 and which answer only the model can give.
 | `KW-ARB-FAILURE-001` | `delegate.failure` | 0, then 1 | Is the current rework failure the same failure as the previous attempt of its cluster? Shadow. |
 | `KW-ARB-TRIM-001` | `sections.select` | 1 | Does this section of a document bear on the task? Shadow. |
 | `KW-ARB-COMMENT-001` | `comment.triage` | 1 | Is this bot review comment a real defect, a nitpick, or already fixed? Shadow. |
-| `KW-ARB-CHECKOUT-001` | `delegate.returned`, `delegate.planner.returned` | 0 | Did the dispatch leave files in the repository's canonical checkout while its run works in its own worktree? Machine fact: `checkout.stray-paths`, git's diff of the canonical checkout against a snapshot `HookGitFacts` takes at dispatch, only for a target that writes files while a live run works in a separate worktree. No snapshot leaves the fact absent, which allows. The step-0 evidence lists the paths. See the [runbook](runbook.md#reading-a-canonical-checkout-refusal). |
+| `KW-ARB-CHECKOUT-001` | `delegate.returned`, `delegate.planner.returned`, `investigate.returned` | 0 | Did the dispatch leave files in the repository's canonical checkout while its run works in its own worktree? Machine fact: `checkout.stray-paths`, git's diff of the canonical checkout against a snapshot `HookGitFacts` takes at dispatch, only for a target that writes files while a live run works in a separate worktree. No snapshot leaves the fact absent, which allows. The step-0 evidence lists the paths. See the [runbook](runbook.md#reading-a-canonical-checkout-refusal). |
 
 **The plan-read ban is enforced at dispatch (`KW-ARB-PLANREAD-001`).** Workers treat their dispatch
 packet as their whole context and do not open plan or specification files, and until this rule the
@@ -331,6 +331,16 @@ rule engine evaluates dispatch triggers only, every decision becomes a ledger ev
 claim key, so a global and a project hook could both record one call. Hosts cannot tune or disable a guard by id; the only off switch is `arbiter.enabled: false`, which turns the whole
 Arbiter off, and with it the guard. Each `ArchitectShellGuard` decision writes a hook-log line rather than a ledger event. The rule-engine count above is unchanged. See the [runbook](runbook.md#the-architect-shell-guard) and
 [ADR 0071](../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md).
+
+`WorkerGuard` (`kyber-weave-arbiter worker-guard`) is the hook guard on a Squad subagent's own tool calls. It
+runs on every Copilot CLI and Claude tool call from the user-level hook file or settings block, the only
+places those harnesses report a subagent's calls with its id and type, and it acts only on a call from inside
+a Squad subagent. It denies a write into the canonical checkout while a live run works in its own worktree
+(`KW-ARB-CHECKOUT-001`, the same id as the return rule) and every call of a developer or `docs-dev` dispatch
+past `arbiter.dispatch-budget` (`KW-ARB-BUDGET-001`). It reads the run records, the checkout's git files and
+one append-only counter file per subagent under `~/.kyber-weave/arbiter/budgets/`, starts no process, calls no
+model, and allows anything it cannot read. A shell command that writes a file is not seen by it; the return
+rule catches that. See the [runbook](runbook.md#reading-a-canonical-checkout-refusal).
 
 ## Secondary triggers, families and effects
 

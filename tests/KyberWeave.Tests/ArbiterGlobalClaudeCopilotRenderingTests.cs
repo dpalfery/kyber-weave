@@ -75,6 +75,7 @@ public sealed class ArbiterGlobalClaudeCopilotRenderingTests : IDisposable
         Assert.True(hooks.TryGetProperty("preToolUse", out JsonElement preToolUse));
         Assert.Equal(2, preToolUse.GetArrayLength());
         JsonElement entry = preToolUse[0];
+        Assert.Equal(".*", preToolUse[1].GetProperty("matcher").GetString());
         Assert.Equal(
             "kyber-weave-arbiter worker-guard --harness copilot-cli",
             preToolUse[1].GetProperty("bash").GetString());

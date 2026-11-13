@@ -63,6 +63,27 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
         Assert.NotEmpty(Guard("copilot-cli", Copilot("dal-dev", "agent-1"), Start, budget));
     }
 
+    [Fact]
+    public void Budget_StartsAFreshWindowWhenTheSameSubagentIsResumedForARework()
+    {
+        ArbiterDispatchBudgetConfig budget = new(Minutes: 60, ToolCalls: 1);
+
+        Assert.Empty(Guard("copilot-cli", Copilot("dal-dev", "agent-1"), Start, budget));
+        Assert.NotEmpty(Guard("copilot-cli", Copilot("dal-dev", "agent-1"), Start.AddSeconds(10), budget));
+
+        Assert.Empty(Guard("copilot-cli", Copilot("dal-dev", "agent-1"), Start.AddMinutes(3), budget));
+    }
+
+    [Fact]
+    public void Budget_StartsAFreshWindowAfterAnIdleGapLongerThanTheBudget()
+    {
+        ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 1000);
+
+        Assert.Empty(Guard("claude", Claude("csharp-dev", "a-1"), Start, budget));
+        Assert.Empty(Guard("claude", Claude("csharp-dev", "a-1"), Start.AddMinutes(40), budget));
+        Assert.Empty(Guard("claude", Claude("csharp-dev", "a-1"), Start.AddMinutes(50), budget));
+    }
+
     [Theory]
     [InlineData("code-reviewer")]
     [InlineData("architect")]

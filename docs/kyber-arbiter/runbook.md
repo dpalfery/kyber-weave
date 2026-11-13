@@ -337,16 +337,21 @@ in prose, so it can write to the wrong one. `KW-ARB-CHECKOUT-001` catches that o
 places:
 
 - **Before the write, where the harness hooks it.** `kyber-weave-arbiter worker-guard` runs on every Copilot
-  CLI tool call (the user-level hook file) and every Claude tool call (the user-level settings block), and
+  CLI tool call (the user-level `~/.copilot/hooks/kyber-arbiter.json` only, because the CLI runs the project
+  file too and a call would count twice) and every Claude tool call (the user-level settings block), and
   checks Copilot CLI's `edit` and `create` and Claude's `Edit`, `Write`, `MultiEdit` and `NotebookEdit`. It denies a Squad subagent's write into the canonical
   checkout while a live run of that repository works in a worktree of its own, and the reason names the same
-  path in the run worktree. A root agent (a person's own session) is never checked. The guard reads only the
-  run records and the checkout's git files, starts no process, and allows anything it cannot read.
+  path in the run worktree. A root agent (a person's own session) is never checked, and a project that sets
+  `arbiter.enabled: false` is never refused. The guard reads only the run records and the checkout's git
+  files, starts no process, and allows anything it cannot read. A shell command that writes a file is not
+  seen by it; the return check below catches that.
 - **On the return, everywhere returns are observed.** Before a dispatch to a specialist that writes files,
   the hook snapshots the canonical checkout; on the return it diffs it. Paths that changed are listed in the
   escalation's evidence, and `NEXT` asks for the same specialist to move them into the run worktree and
-  restore them in the canonical checkout. A person editing the canonical checkout during the dispatch is
-  counted too, because git cannot tell who wrote a file.
+  restore them in the canonical checkout. Only paths still dirty there count, so the clean-up dispatch
+  passes, and `.agent_scratchpad/` never counts. A person editing the canonical checkout during the dispatch
+  is counted too, because git cannot tell who wrote a file. On Copilot CLI a root conductor names no caller,
+  so its dispatch to a developer returns as `investigate.returned`, which the rule also covers.
 
 A run that branched in place works in the canonical checkout, so neither check applies to it.
 
@@ -354,7 +359,9 @@ A run that branched in place works in the canonical checkout, so neither check a
 
 `KW-ARB-BUDGET-001` ends a developer or `docs-dev` dispatch that thrashes. The worker guard counts each
 subagent's tool calls and minutes from its first call, keyed by the harness's subagent id, in append-only
-files under `~/.kyber-weave/arbiter/budgets/` (swept after two days). Past `arbiter.dispatch-budget`
+files under `~/.kyber-weave/arbiter/budgets/` (swept after two days). A harness may resume the same subagent
+for a rework under the same id, so a window ends when the subagent has been idle longer than the budget's
+minutes, or for a minute after it was stopped; the resumed dispatch starts a fresh one. Past `arbiter.dispatch-budget`
 (default 15 minutes or 150 tool calls) it denies every further call and tells the worker to return
 `STATUS: BUDGET_EXCEEDED` with what is done and what is not. Reviewers, planners and `github-devops` are not
 budgeted, because a full test run or a CI wait is long by design.

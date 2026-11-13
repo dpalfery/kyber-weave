@@ -426,8 +426,8 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
     /// <remarks>
     /// The CLI discovers <c>.github/hooks/*.json</c> and expects Copilot hook format: a
     /// numeric <c>version</c>, camelCase events, and per-shell command fields ([F3]). The
-    /// dispatch matcher compiles to <c>^(?:task)$</c>, so only subagent dispatches reach the hook; the
-    /// worker guard's matcher admits every tool.
+    /// dispatch matcher compiles to <c>^(?:task)$</c>, so only subagent dispatches reach the hook. The user-level
+    /// file also carries the worker guard, whose matcher admits every tool.
     /// Every produced hook carries the same wiring timeout, so the first hook's value
     /// stands for the file.
     /// </remarks>
@@ -444,7 +444,13 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
             writer.WriteStartObject("hooks");
             writer.WriteStartArray("preToolUse");
             WriteCliHookEntry(writer, "task", ArbiterHookWiring.HookCommandLine(CliHarnessToken, scope), timeoutSeconds);
-            WriteCliHookEntry(writer, WorkerGuardCliMatcher, ArbiterHookWiring.WorkerGuardCommandLine(CliHarnessToken), timeoutSeconds);
+            if (scope == SquadDeploymentScope.Global)
+            {
+                // The CLI runs the project and the user file both, so the guard lives in one of them: a call
+                // counted twice would spend the budget twice as fast.
+                WriteCliHookEntry(writer, WorkerGuardCliMatcher, ArbiterHookWiring.WorkerGuardCommandLine(CliHarnessToken), timeoutSeconds);
+            }
+
             writer.WriteEndArray();
             writer.WriteStartArray("postToolUse");
             WriteCliHookEntry(writer, "task", ArbiterHookWiring.HookCommandLine(CliHarnessToken, scope), timeoutSeconds);

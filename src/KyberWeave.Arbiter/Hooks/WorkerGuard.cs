@@ -90,14 +90,39 @@ public static class WorkerGuard
         return 0;
     }
 
-    private static string? WriteRefusal(ToolCall call, string home) =>
-        call.WritePath is null ? null : RunCheckout.StrayWriteRefusal(call.WritePath, call.Cwd ?? string.Empty, home);
+    /// <summary>
+    /// The stray-write refusal, unless the project turns the Arbiter off. The configuration is read only when
+    /// there is something to refuse, so an ordinary write costs no YAML parse.
+    /// </summary>
+    private static string? WriteRefusal(ToolCall call, string home)
+    {
+        string? refusal = call.WritePath is null
+            ? null
+            : RunCheckout.StrayWriteRefusal(call.WritePath, call.Cwd ?? string.Empty, home);
+        return refusal is not null && ArbiterTurnedOff(call.Cwd) ? null : refusal;
+    }
+
+    private static bool ArbiterTurnedOff(string? workingDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(workingDirectory))
+        {
+            return false;
+        }
+
+        KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(workingDirectory);
+        return loaded.Success && loaded.Config?.Arbiter.ExplicitlyEnabled == false;
+    }
 
     /// <summary>
     /// Counts this call against the subagent's budget and refuses it once the count or the elapsed time is past
-    /// the limit. The first call writes the header (start time and limits); every call appends one line, so
-    /// parallel hook processes never lose a count.
+    /// the limit. The first call writes the header (start time and limits); every call appends one timestamped
+    /// line, so parallel hook processes never lose a count.
     /// </summary>
+    /// <remarks>
+    /// A harness may resume the same subagent for a rework, under the same id. A window therefore ends when the
+    /// subagent has been idle longer than the budget's minutes, or for a minute after it ran past its budget
+    /// (the worker returned): the resumed dispatch starts a fresh window.
+    /// </remarks>
     private static string? BudgetRefusal(
         ToolCall call,
         string home,
@@ -112,6 +137,11 @@ public static class WorkerGuard
         string directory = BudgetDirectory(home);
         Directory.CreateDirectory(directory);
         string path = Path.Combine(directory, KeyOf(call.Harness, call.AgentId) + ".log");
+        if (File.Exists(path) && WindowEnded(File.ReadAllLines(path), now))
+        {
+            File.Delete(path);
+        }
+
         if (!File.Exists(path))
         {
             ArbiterDispatchBudgetConfig? budget = budgetLoader(call.Cwd ?? string.Empty);
@@ -137,22 +167,20 @@ public static class WorkerGuard
 
         using (FileStream append = new(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
         {
-            append.Write("c\n"u8);
+            append.Write(Encoding.UTF8.GetBytes(string.Create(CultureInfo.InvariantCulture, $"{now.ToUnixTimeMilliseconds()}\n")));
         }
 
         string[] lines = File.ReadAllLines(path);
-        string[] header = lines.Length > 0 ? lines[0].Split(' ') : [];
-        if (header.Length < 3
-            || !long.TryParse(header[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out long startMs)
-            || !int.TryParse(header[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int minutes)
-            || !int.TryParse(header[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out int maxCalls))
+        if (Window.Read(lines) is not { } window)
         {
             return null;
         }
 
-        int calls = lines.Length - 1;
-        TimeSpan elapsed = now - DateTimeOffset.FromUnixTimeMilliseconds(startMs);
-        if (calls <= maxCalls && elapsed <= TimeSpan.FromMinutes(minutes))
+        int calls = window.Calls;
+        int minutes = window.Minutes;
+        int maxCalls = window.MaxCalls;
+        TimeSpan elapsed = now - window.Start;
+        if (!window.IsOver(now))
         {
             return null;
         }
@@ -160,6 +188,18 @@ public static class WorkerGuard
         return $"{BudgetRuleId}: this dispatch has made {calls} tool calls in {(int)elapsed.TotalMinutes} minutes, past its " +
                $"budget of {maxCalls} calls or {minutes} minutes. Stop now: make no more tool calls. Return a report whose " +
                $"first line is {BudgetExceededStatus}, then what is done, what is not, and the last failure you saw.";
+    }
+
+    private static bool WindowEnded(string[] lines, DateTimeOffset now)
+    {
+        if (Window.Read(lines) is not { } window)
+        {
+            // An empty file is one another hook process is still creating; anything else unreadable starts over.
+            return lines.Length > 0;
+        }
+
+        TimeSpan idle = now - window.LastCall;
+        return idle > TimeSpan.FromMinutes(window.Minutes) || (window.IsOver(window.LastCall) && idle > TimeSpan.FromMinutes(1));
     }
 
     private static ToolCall? Read(string harness, string stdin)
@@ -326,6 +366,38 @@ public static class WorkerGuard
 
     private static string OneLine(string message) =>
         message.Replace("\r\n", " ", StringComparison.Ordinal).Replace('\n', ' ').Replace('\r', ' ');
+
+    /// <summary>One budget window as its file records it: the header, then one timestamp per call.</summary>
+    private sealed record Window(DateTimeOffset Start, int Minutes, int MaxCalls, int Calls, DateTimeOffset LastCall)
+    {
+        public bool IsOver(DateTimeOffset at) => Calls > MaxCalls || at - Start > TimeSpan.FromMinutes(Minutes);
+
+        public static Window? Read(string[] lines)
+        {
+            string[] header = lines.Length > 0 ? lines[0].Split(' ') : [];
+            if (header.Length < 3
+                || !long.TryParse(header[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out long startMs)
+                || !int.TryParse(header[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int minutes)
+                || !int.TryParse(header[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out int maxCalls))
+            {
+                return null;
+            }
+
+            long lastMs = startMs;
+            if (lines.Length > 1
+                && long.TryParse(lines[^1], NumberStyles.Integer, CultureInfo.InvariantCulture, out long parsed))
+            {
+                lastMs = parsed;
+            }
+
+            return new Window(
+                DateTimeOffset.FromUnixTimeMilliseconds(startMs),
+                minutes,
+                maxCalls,
+                lines.Length - 1,
+                DateTimeOffset.FromUnixTimeMilliseconds(lastMs));
+        }
+    }
 
     private sealed record ToolCall(string Harness, string AgentId, ArbiterSquadAgent Agent, string? Cwd, string? WritePath);
 }
