@@ -213,6 +213,10 @@ public static class TriggerFactBuilder
                 "delegation.task" => task,
                 "delegation.markers" => marker,
                 "config.planning-dirs" => planningDirs,
+                // A machine fact: whether the host's review.task-gates lists any gate for the agent that returned.
+                "config.task-gates-declared" => target is not null
+                                                && config.Review.TaskGates.TryGetValue(target, out IReadOnlyList<ReviewTaskGate>? gates)
+                                                && gates.Count > 0,
                 "lens.name" => lens,
                 "lens.applicability" => applicability,
                 "finding.id" => finding is null ? null : refute,

@@ -55,10 +55,17 @@ rules:
         answer: beyond-files
     ask:
       type: choice
-      state: { dispatch: delegation.head, task: delegation.task-raw, plan-tasks: plan.task-list }
+      state: { dispatch: delegation.head, task: delegation.task-raw, plan-tasks: plan.task-list, target-profile: delegation.target-profile }
       criteria:
-        in-plan: The work the dispatch asks for is one of the plan's tasks, whatever name or number the dispatch uses for it.
-        not-in-plan: The dispatch asks for work that none of the plan's tasks describes.
+        in-plan: >-
+          The work the dispatch asks for is one of the plan's tasks, whatever name or number the dispatch uses for it.
+          A documentation closeout or documentation impact review of the plan's change (checking the closeout evidence,
+          mapping decisions to documents, archiving the plan) sent to a target whose profile is documentation is the
+          plan's own closeout. It is not one of the numbered tasks and it is not outside the plan, so it is in-plan,
+          with or without a TASK header and even once the plan has been archived.
+        not-in-plan: >-
+          The dispatch asks for work that none of the plan's tasks describes and that is not that documentation
+          closeout. Other new documentation unrelated to the plan's change is not-in-plan.
       confidence-at-least: 0.8
       tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
       when: KW-ARB-PLAN-001=has-tasks
@@ -453,7 +460,7 @@ rules:
   - id: KW-ARB-GATE-REPORT-001
     trigger: delegate.returned
     question: Does the worker's report say it ran the task gate on its changes?
-    answers: [verified, disagrees, no-report, ran-gate, missing]
+    answers: [verified, disagrees, no-report, no-gates-declared, ran-gate, missing]
     decide:
       - when: { fact: gate.report.agrees, equals: true }
         answer: verified
@@ -461,6 +468,10 @@ rules:
         answer: disagrees
       - when: { fact: delegation.returned-tail, exists: false }
         answer: no-report
+      # The host declares no task gate for this agent (the documentation developer has none), so a
+      # report with no TASK_GATE claim is expected, not a skipped gate.
+      - when: { fact: config.task-gates-declared, equals: false }
+        answer: no-gates-declared
     ask:
       type: choice
       state: { report: delegation.returned-tail, task-gate-line: gate.report.claim }
@@ -469,7 +480,7 @@ rules:
         missing: The report never mentions running the task gate.
       confidence-at-least: 0.8
       tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
-    effects: { verified: allow, disagrees: escalate, no-report: allow, ran-gate: allow, missing: escalate }
+    effects: { verified: allow, disagrees: escalate, no-report: allow, no-gates-declared: allow, ran-gate: allow, missing: escalate }
 
   # A change with no code in it has nothing for these six lenses to judge. The skip needs
   # positive evidence: every changed path must be one the git read marked no-code, and the

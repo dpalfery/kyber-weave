@@ -77,7 +77,7 @@ public static class ArbiterTriggerCatalog
                 DelegateFacts,
                 [
                     "git.changed-paths.since-dispatch", "git.changed-paths.attributed", "ledger.concurrent.paths", "gate.report.agrees",
-                    "gate.report.claim", "delegation.returned-tail", "checkout.stray-paths",
+                    "gate.report.claim", "delegation.returned-tail", "checkout.stray-paths", "config.task-gates-declared",
                 ]),
             ["delegate.planner"] = DelegatePlannerFacts,
             ["delegate.planner.returned"] = Union(

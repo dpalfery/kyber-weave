@@ -106,6 +106,54 @@ public sealed class ArbiterGateReportRuleTests
         Assert.Equal(RuleEffects.Allow, Rule().Effects["ran-gate"]);
     }
 
+    /// <summary>
+    /// The documentation developer has no task gate, so its return carries no TASK_GATE claim by design. When the host
+    /// declares no task gate for the returning agent, step 0 allows before any model question is asked.
+    /// </summary>
+    [Fact]
+    public void AReturnFromAnAgentWithNoDeclaredTaskGateIsAllowedAtStepZero()
+    {
+        ArbiterFactSet facts = new ArbiterFactSet()
+            .With(GateReportFacts.ReturnedTailFact, "Closeout done. No gate run.", ArbiterFactLabel.Asserted)
+            .With("config.task-gates-declared", false, ArbiterFactLabel.Derived);
+
+        Assert.Equal("no-gates-declared", RuleEngine.Decide(Rule(), facts));
+        Assert.Equal(RuleEffects.Allow, EffectFor(facts));
+    }
+
+    [Fact]
+    public void AReturnFromAnAgentWithADeclaredTaskGateStillReachesTheModelQuestion()
+    {
+        ArbiterFactSet facts = new ArbiterFactSet()
+            .With(GateReportFacts.ReturnedTailFact, "Done. Tests pass.", ArbiterFactLabel.Asserted)
+            .With("config.task-gates-declared", true, ArbiterFactLabel.Derived);
+
+        Assert.Equal(RuleEngine.Undecidable, RuleEngine.Decide(Rule(), facts));
+    }
+
+    /// <summary>The fact is read from the host's <c>review.task-gates</c> for the agent that returned, not guessed.</summary>
+    [Theory]
+    [InlineData("dev", true)]
+    [InlineData("docs-dev", false)]
+    public void TheDeclaredTaskGateFactComesFromTheHostConfiguration(string returningAgent, bool declared)
+    {
+        ReviewTaskGate gate = new("unit", ["**"], null, ["dotnet", "test"], []);
+        KyberWeaveConfig config = new()
+        {
+            Review = new ReviewConfig
+            {
+                TaskGates = new Dictionary<string, IReadOnlyList<ReviewTaskGate>>(StringComparer.Ordinal) { ["dev"] = [gate] }
+            }
+        };
+
+        ArbiterFactSet facts = TriggerFactBuilder.Build(
+            "delegate.returned", returningAgent, "KYBER-ARBITER: true\n\nDo the work.", "conductor",
+            ArbiterCallerSources.Harness, config);
+
+        Assert.True(facts.TryGet("config.task-gates-declared", out ArbiterFact? fact));
+        Assert.Equal(declared, fact.Value);
+    }
+
     [Fact]
     public void AnAgreeingReportAllowsTheDispatch()
     {
