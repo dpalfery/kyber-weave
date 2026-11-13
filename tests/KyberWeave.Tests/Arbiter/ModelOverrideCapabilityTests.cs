@@ -52,8 +52,6 @@ public sealed class ModelOverrideCapabilityTests
             return string.Empty;
         }
 
-        public string RenderFailClosed(string detail, string? renderedCaller, string rawStdin, string decisionId) =>
-            string.Empty;
     }
 
     /// <summary>A decision engine that always allows, so the Claude allow document is what the test reads.</summary>

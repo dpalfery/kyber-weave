@@ -193,8 +193,4 @@ public interface IHarnessHookAdapter
         string? renderedCaller,
         KyberWeaveConfig config,
         HookContext context);
-
-    /// <summary>Renders a block for <paramref name="detail"/>; the hook host no longer calls it on its own fault (ADR 0072). Carrying
-    /// <c>KW-ARB-HOOK-001</c>. Never throws: the host falls back further if it does.</summary>
-    string RenderFailClosed(string detail, string? renderedCaller, string rawStdin, string decisionId);
 }

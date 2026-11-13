@@ -115,33 +115,6 @@ public sealed class CopilotHookAdapter : IHarnessHookAdapter
             : HandleCli(payload, renderedCaller, config, context);
     }
 
-    /// <inheritdoc/>
-    public string RenderFailClosed(string detail, string? renderedCaller, string rawStdin, string decisionId)
-    {
-        try
-        {
-            CopilotSchema schema = SchemaOfStdin(rawStdin);
-            string envelope = FailClosedEnvelope(detail, renderedCaller, decisionId, schema);
-
-            if (schema == CopilotSchema.Local)
-            {
-                return IsPostStdin(rawStdin) ? RenderLocalPostBlock(envelope) : RenderLocalPreDeny(envelope);
-            }
-
-            return RenderCliDeny(envelope);
-        }
-        catch (Exception)
-        {
-            // The block renderer never throws by contract; this is the last resort so a
-            // host failure still fails closed when the renderer itself breaks.
-            return string.Equals(_harnessToken, CliToken, StringComparison.Ordinal)
-                ? "{\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\""
-                    + HookCommand.FailClosedCode
-                    + ": hook host failed (copilot-cli).\"}"
-                : """{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"KW-ARB-HOOK-001: hook host failed (copilot-vscode)."}}""";
-        }
-    }
-
     private HookOutcome DecidePre(
         string harness,
         JsonElement payload,
@@ -490,80 +463,6 @@ public sealed class CopilotHookAdapter : IHarnessHookAdapter
 
         throw new InvalidOperationException(
             "Malformed Copilot hook event: neither hook_event_name (Local schema) nor toolName (CLI schema) is present.");
-    }
-
-    private CopilotSchema SchemaOfStdin(string rawStdin)
-    {
-        try
-        {
-            using JsonDocument doc = JsonDocument.Parse(rawStdin);
-            if (doc.RootElement.ValueKind == JsonValueKind.Object)
-            {
-                return DetectSchema(doc.RootElement);
-            }
-        }
-        catch (JsonException)
-        {
-            // Best effort only: the fall-through answers in this adapter's schema.
-        }
-
-        return string.Equals(_harnessToken, CliToken, StringComparison.Ordinal)
-            ? CopilotSchema.Cli
-            : CopilotSchema.Local;
-    }
-
-    private static bool IsPostStdin(string rawStdin)
-    {
-        try
-        {
-            using JsonDocument doc = JsonDocument.Parse(rawStdin);
-            return doc.RootElement.ValueKind == JsonValueKind.Object
-                && string.Equals(GetString(doc.RootElement, "hook_event_name"), "PostToolUse", StringComparison.Ordinal);
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
-    }
-
-    private string FailClosedEnvelope(string detail, string? renderedCaller, string decisionId, CopilotSchema schema)
-    {
-        string safe = (detail ?? string.Empty)
-            .Replace("\r\n", " ", StringComparison.Ordinal)
-            .Replace('\n', ' ')
-            .Replace('\r', ' ');
-        if (string.IsNullOrWhiteSpace(safe))
-        {
-            safe = "unknown error";
-        }
-
-        // The host throws config errors with the code already prefixed; strip it so the
-        // envelope carries the code exactly once, in both ANSWER and EVIDENCE.
-        string message = safe.StartsWith(
-            HookCommand.FailClosedCode + ": ", StringComparison.Ordinal)
-            ? safe.Substring((HookCommand.FailClosedCode + ": ").Length)
-            : safe;
-        string evidence = $"{HookCommand.FailClosedCode}: {message}";
-
-        string caller = string.IsNullOrWhiteSpace(renderedCaller) ? "unidentified" : renderedCaller;
-        string trigger = string.Equals(caller, "conductor", StringComparison.Ordinal)
-            ? "delegate"
-            : "investigate";
-        string callerText = schema == CopilotSchema.Local ? $"{caller} (copilot-vscode)" : $"{caller} (copilot-cli)";
-        ArbiterEscalationEnvelope envelope = new(
-            trigger,
-            callerText,
-            null,
-            null,
-            null,
-            [new ArbiterEnvelopeEntry(
-                HookCommand.FailClosedCode,
-                "Did the hook host fail before evaluation completed?",
-                ArbiterAnswerText.Error(HookCommand.FailClosedCode, message),
-                evidence)],
-            string.IsNullOrWhiteSpace(decisionId) ? "unknown" : decisionId,
-            1);
-        return envelope.Render();
     }
 
     private static bool IsLocalDispatchTool(string? tool) =>

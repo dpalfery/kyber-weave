@@ -110,63 +110,6 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
             : HandleAfter(envelope, caller, target, config, context);
     }
 
-    /// <inheritdoc/>
-    public string RenderFailClosed(string detail, string? renderedCaller, string rawStdin, string decisionId)
-    {
-        _ = rawStdin;
-        try
-        {
-            string safe = (detail ?? string.Empty)
-                .Replace("\r\n", " ", StringComparison.Ordinal)
-                .Replace('\n', ' ')
-                .Replace('\r', ' ');
-            if (string.IsNullOrWhiteSpace(safe))
-            {
-                safe = "unknown error";
-            }
-
-            // The host throws config errors with the code already prefixed; strip it so
-            // the envelope carries the code exactly once, in both ANSWER and EVIDENCE.
-            string message = safe.StartsWith(
-                HookCommand.FailClosedCode + ": ", StringComparison.Ordinal)
-                ? safe.Substring((HookCommand.FailClosedCode + ": ").Length)
-                : safe;
-            string evidence = $"{HookCommand.FailClosedCode}: {message}";
-
-            string caller = string.IsNullOrWhiteSpace(renderedCaller) ? "unidentified" : renderedCaller;
-            string trigger = string.Equals(caller, "conductor", StringComparison.Ordinal)
-                ? "delegate"
-                : "investigate";
-
-            // The harness token is recorded in the caller line, mirroring the command
-            // adapters' "(harness)" suffix: the block says which shim was answered.
-            string callerText = $"{caller} ({_harnessToken})";
-            ArbiterEscalationEnvelope envelope = new(
-                trigger,
-                callerText,
-                null,
-                null,
-                null,
-                [new ArbiterEnvelopeEntry(
-                    HookCommand.FailClosedCode,
-                    "Did the hook host fail before evaluation completed?",
-                    ArbiterAnswerText.Error(HookCommand.FailClosedCode, message),
-                    evidence)],
-                string.IsNullOrWhiteSpace(decisionId) ? "unknown" : decisionId,
-                1);
-
-            return RenderBlock(envelope.Render());
-        }
-        catch (Exception)
-        {
-            // The block renderer never throws by contract; this is the last resort so a
-            // host failure still fails closed when the renderer itself breaks.
-            return "{\"decision\":\"block\",\"reason\":\""
-                + HookCommand.FailClosedCode
-                + ": hook host failed (" + _harnessToken + ").\"}";
-        }
-    }
-
     private string HandleBefore(PluginEnvelope envelope, string caller, string target, KyberWeaveConfig config, HookContext context)
     {
         string? prompt = ArgString(envelope.Args, _promptArgument);

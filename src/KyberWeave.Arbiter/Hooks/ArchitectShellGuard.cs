@@ -1512,10 +1512,6 @@ public static class ArchitectShellGuard
 
     private static bool IsFlag(string word) => word.StartsWith('-');
 
-    private static bool IsOption(string argument, string option) =>
-        string.Equals(argument, option, StringComparison.Ordinal)
-        || argument.StartsWith(option + "=", StringComparison.Ordinal);
-
     private static bool HasShortFlag(string argument, char flag) =>
         argument.Length > 1 && argument[0] == '-' && argument[1] != '-' && argument.IndexOf(flag, 1) > 0;
 

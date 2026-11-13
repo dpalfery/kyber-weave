@@ -34,7 +34,7 @@ One top-level catch in `HookCommand` turns any exception into an allow: it logs
 `KW-ARB-HOOK-001` with the reason to stderr and writes the harness's allow document.
 Malformed stdin, missing or malformed configuration on a classified event, an engine
 crash and a guard fault all allow and log. Only a machine fact or a confident model
-answer blocks. `RenderFailClosed` and `LastResortBlock` are no longer called by the host.
+answer blocks.
 
 ## The MCP fallback (`serve`)
 
