@@ -29,18 +29,6 @@ public sealed class ReviewCycleCommand : Command<ReviewCycleSettings>
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        if (string.IsNullOrWhiteSpace(settings.Task))
-        {
-            WriteClientInputError($"{InvalidInput}: --task is required. Name the task id whose review folder to read.");
-            return ClientInputExitCode;
-        }
-
-        if (TaskGateSelection.ValidateTask(settings.Task) is { } taskProblem)
-        {
-            WriteClientInputError($"{InvalidInput}: {taskProblem}");
-            return ClientInputExitCode;
-        }
-
         string root = Path.GetFullPath(settings.Path);
         DiagnosticReport report = new();
         if (!CommandHelpers.TryLoadConfig(root, settings.Config, report, out KyberWeaveConfig config))
@@ -49,7 +37,14 @@ public sealed class ReviewCycleCommand : Command<ReviewCycleSettings>
             return 1;
         }
 
-        string reviewFolder = Path.Combine(root, ".agent_scratchpad", settings.Task, "review");
+        string scratchpad = Path.Combine(root, ".agent_scratchpad");
+        if (!TryChooseTask(root, scratchpad, settings.Task, out string task, out string? chosen))
+            return ClientInputExitCode;
+
+        if (chosen is not null)
+            Console.WriteLine(chosen);
+
+        string reviewFolder = Path.Combine(scratchpad, task, "review");
         IReadOnlyList<ReviewCycleRecord> finished = ReviewCycles.ReadFinished(reviewFolder);
         ReviewCyclePlan plan = ReviewCycles.Plan(
             finished,
@@ -71,6 +66,60 @@ public sealed class ReviewCycleCommand : Command<ReviewCycleSettings>
             WriteLines(root, plan, folder, recheck);
 
         return 0;
+    }
+
+    /// <summary>
+    /// The task folder name: the given id normalised and matched to an existing folder without regard to case; with
+    /// no id, the one review folder there is, or the one named for the current branch.
+    /// </summary>
+    private static bool TryChooseTask(string root, string scratchpad, string? given, out string task, out string? chosen)
+    {
+        chosen = null;
+        if (!string.IsNullOrWhiteSpace(given))
+        {
+            task = TaskSlug.FindFolder(scratchpad, given) ?? TaskSlug.Normalise(given);
+            if (task.Length > 0)
+                return true;
+
+            WriteClientInputError($"{InvalidInput}: --task '{given}' has no letters or digits to name a folder with.");
+            return false;
+        }
+
+        IReadOnlyList<string> folders = TaskSlug.Folders(scratchpad);
+        string branch = TaskSlug.Normalise(CurrentBranch(root));
+        string[] named = [.. folders.Where(folder => branch.Length > 0 && TaskSlug.Normalise(folder) == branch)];
+        if (folders.Count == 1 || named.Length == 1)
+        {
+            task = named.Length == 1 ? named[0] : folders[0];
+            chosen = $"task: {task} (the only review folder{(named.Length == 1 ? " for this branch" : string.Empty)}; pass --task to choose another)";
+            return true;
+        }
+
+        if (folders.Count == 0 && branch.Length > 0)
+        {
+            task = branch;
+            chosen = $"task: {task} (no review folder yet; named for the current branch)";
+            return true;
+        }
+
+        task = string.Empty;
+        WriteClientInputError($"{InvalidInput}: --task is needed: " + (folders.Count == 0
+            ? "there is no review folder and no current branch."
+            : $"several review folders exist ({string.Join(", ", folders)})."));
+        return false;
+    }
+
+    private static string CurrentBranch(string root)
+    {
+        try
+        {
+            return ChangedFiles.CurrentBranch(root);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception
+                                       or TimeoutException)
+        {
+            return string.Empty;
+        }
     }
 
     private static IReadOnlyList<string>? TryChangedSince(string root, string commit)

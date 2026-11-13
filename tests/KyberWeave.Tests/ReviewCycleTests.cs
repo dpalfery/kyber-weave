@@ -172,16 +172,67 @@ public sealed class ReviewCycleTests : IDisposable
     }
 
     [Theory]
-    [InlineData("")]
-    [InlineData("../escape")]
-    [InlineData("Not A Slug")]
-    public void ATaskIdThatIsNotASlugIsRefusedBeforeAnythingIsRead(string task)
+    [InlineData("Demo_Task")]
+    [InlineData("DEMO-TASK")]
+    [InlineData("demo task")]
+    public void ATaskIdInAnySpellingFindsTheFolderWithoutRegardToCase(string task)
+    {
+        FinishCycle(1, [Gate("build")], []);
+
+        (int exit, string output) = Cycle(task);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("cycle: 2", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnIdWithNothingToNameAFolderIsRefused()
     {
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(
-            () => CreateApp().Run(["review", "cycle", _repo, "--task", task]));
+            () => CreateApp().Run(["review", "cycle", _repo, "--task", "___"]));
 
         Assert.Equal(2, run.Result);
         Assert.Contains("KW-REVIEW-028", run.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WithoutTaskTheOnlyReviewFolderIsUsedAndSaid()
+    {
+        FinishCycle(1, [Gate("build")], []);
+
+        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(
+            () => CreateApp().Run(["review", "cycle", _repo]));
+
+        Assert.Equal(0, run.Result);
+        Assert.Contains("task: demo-task", run.Output, StringComparison.Ordinal);
+        Assert.Contains("cycle: 2", run.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WithoutTaskSeveralFoldersAreAnErrorListingThem()
+    {
+        FinishCycle(1, [Gate("build")], []);
+        Directory.CreateDirectory(Path.Combine(_repo, ".agent_scratchpad", "other-task", "review"));
+
+        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(
+            () => CreateApp().Run(["review", "cycle", _repo]));
+
+        Assert.Equal(2, run.Result);
+        Assert.Contains("demo-task, other-task", run.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WithoutTaskSeveralFoldersPickTheOneNamedForTheBranch()
+    {
+        FinishCycle(1, [Gate("build")], []);
+        Directory.CreateDirectory(Path.Combine(_repo, ".agent_scratchpad", "other-task", "review"));
+        Git("checkout", "-q", "-b", "Demo_Task");
+
+        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(
+            () => CreateApp().Run(["review", "cycle", _repo]));
+
+        Assert.Equal(0, run.Result);
+        Assert.Contains("task: demo-task", run.Output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -242,7 +293,9 @@ public sealed class ReviewCycleTests : IDisposable
 
     private (int Exit, string Output) Cycle(params string[] options)
     {
-        string[] arguments = ["review", "cycle", _repo, "--task", Task, .. options];
+        string[] arguments = options.Length == 1 && !options[0].StartsWith('-')
+            ? ["review", "cycle", _repo, "--task", options[0]]
+            : ["review", "cycle", _repo, "--task", Task, .. options];
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() => CreateApp().Run(arguments));
         return (run.Result, run.Output);
     }

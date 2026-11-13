@@ -71,6 +71,15 @@ public static class ChangedFiles
             .ToArray();
     }
 
+    /// <summary>The checked-out branch name, or an empty string on a detached head.</summary>
+    /// <exception cref="InvalidOperationException">git could not answer.</exception>
+    public static string CurrentBranch(string workingDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        string[] output = RunGitPaths(workingDirectory, "branch", "--show-current");
+        return output.Length == 0 ? string.Empty : output[0].Trim();
+    }
+
     /// <summary>
     /// Lists every path the working tree changed since <paramref name="commit"/>, deleted paths included,
     /// together with untracked files.

@@ -132,6 +132,6 @@ public sealed class ReviewVerdictSettings : AnalysisSettings
 public sealed class ReviewCycleSettings : AnalysisSettings
 {
     [CommandOption("--task <ID>")]
-    [Description("The task id whose review folder, .agent_scratchpad/<task-id>/review, holds the run's cycles.")]
+    [Description("The task id whose review folder, .agent_scratchpad/<task-id>/review, holds the run's cycles. Any spelling: it is lower-cased and matched to the folder. Omitted: the only review folder, or the one named for the current branch.")]
     public string? Task { get; set; }
 }

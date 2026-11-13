@@ -303,6 +303,9 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
         if (settings.BaseRef is not null && ChangedFiles.ValidateBase(settings.BaseRef) is { } baseProblem)
             refusals.Add(baseProblem);
 
+        if (settings.TaskSlug is not null && TaskSlug.Normalise(settings.TaskSlug) is { Length: > 0 } normalised)
+            settings.TaskSlug = normalised;
+
         if (TaskGateSelection.ValidateTask(settings.TaskSlug) is { } taskProblem)
             refusals.Add(taskProblem);
 
