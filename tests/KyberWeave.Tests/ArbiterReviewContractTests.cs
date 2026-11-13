@@ -5,8 +5,9 @@ namespace KyberWeave.Tests;
 /// <summary>
 /// Pins the review council's Arbiter contract (packet 7.3): the <c>LENS</c> and
 /// <c>REFUTE</c> routing headers on the reviewer's dispatches, the handling of each
-/// Arbiter review note by status, the gate, verdict and audit commands the run
-/// executes, and <c>review-lens</c>'s refutation framing.
+/// Arbiter review note status, the gate, verdict and audit commands the run executes, and
+/// <c>review-lens</c>'s refutation header. How each note and blocked spawn is handled, and
+/// the refuter's default, are graded from the prose rule catalog.
 /// </summary>
 public sealed class ArbiterReviewContractTests
 {
@@ -67,32 +68,15 @@ public sealed class ArbiterReviewContractTests
     }
 
     [Fact]
-    public void ArbiterVerifiedNotes_KeepTheFindingAndRecordItsRefutationAsSkipped()
+    public void ArbiterVerifiedNotes_AreHandledByStatus()
     {
-        string contract = ReviewerContract;
-
-        Assert.Contains("STATUS: ARBITER_VERIFIED", contract, StringComparison.Ordinal);
-        Assert.Contains("Keep the finding", contract, StringComparison.Ordinal);
-        Assert.Contains("refutation as skipped", contract, StringComparison.Ordinal);
+        Assert.Contains("STATUS: ARBITER_VERIFIED", ReviewerContract, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void ArbiterAnnotationNotes_FeedTheQuoteCheck()
+    public void ArbiterAnnotationNotes_AreHandledByStatus()
     {
-        string contract = ReviewerContract;
-
-        Assert.Contains("STATUS: ARBITER_ANNOTATION", contract, StringComparison.Ordinal);
-        Assert.Contains("quote check", contract, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Spawns_BlockedByAnInternalErrorAreReportedAsNotRunNeverAsSkipped()
-    {
-        string contract = ReviewerContract;
-
-        Assert.Contains("not run", contract, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("never as `SKIPPED`", contract, StringComparison.Ordinal);
-        Assert.Contains("drops a finding only through the enforced nitpick filter", contract, StringComparison.Ordinal);
+        Assert.Contains("STATUS: ARBITER_ANNOTATION", ReviewerContract, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -136,13 +120,11 @@ public sealed class ArbiterReviewContractTests
     }
 
     [Fact]
-    public void RefutationRuns_ArgueTheFindingIsWrongAndDefaultToRefuted()
+    public void RefutationRuns_CarryTheRefuteHeaderAndFindingYamlFollowsTheHeaderBlock()
     {
         string contract = LensContract;
 
         Assert.Contains("REFUTE: <lens>/<slug>", contract, StringComparison.Ordinal);
-        Assert.Contains("argue the finding is wrong", contract, StringComparison.Ordinal);
-        Assert.Contains("default to refuted", contract, StringComparison.Ordinal);
         Assert.Contains("after the header block", contract, StringComparison.Ordinal);
     }
 }

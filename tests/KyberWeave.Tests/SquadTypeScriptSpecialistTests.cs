@@ -9,14 +9,15 @@ namespace KyberWeave.Tests;
 
 /// <summary>
 /// Pins the TypeScript specialist (#237): it renders on every approved target, the conductor
-/// delegates and routes non-test <c>.ts</c> to it, its trigger splits Node TypeScript from React
-/// UI and from tests, and it runs on a mid-tier model rather than the fast tier.
+/// delegates to it, its trigger names the file shapes and hand-off agents that split Node
+/// TypeScript from React UI and from tests, and it runs on a mid-tier model rather than the fast tier.
 /// </summary>
 /// <remarks>
 /// Before this agent existed, non-test <c>.ts</c> matched no delegate, so conductors sent it to a
 /// general-purpose agent or to <c>react-dev</c>, whose trigger is <c>.tsx</c>/<c>.jsx</c>. The
-/// description wording is the routing table; these assertions pin the phrases that keep
-/// <c>.ts</c>, <c>.tsx</c>, and <c>.test.ts</c> each matching exactly one delegate.
+/// description wording is the routing table; these assertions pin the file shapes and agent names
+/// that keep <c>.ts</c>, <c>.tsx</c>, and <c>.test.ts</c> each matching exactly one delegate, and
+/// the "do not use for" routing rules are graded from the prose rule catalog.
 /// </remarks>
 public sealed class SquadTypeScriptSpecialistTests
 {
@@ -68,25 +69,17 @@ public sealed class SquadTypeScriptSpecialistTests
     }
 
     /// <summary>
-    /// The conductor both lists the specialist as a delegate and names the routing rule in its
-    /// own body, so a non-test <c>.ts</c> task is not left to a general-purpose fallback.
+    /// The conductor lists the specialist and both of its neighbours as delegates. The routing
+    /// rule in its body is graded from the prose rule catalog.
     /// </summary>
     [Fact]
-    public void ConductorDelegatesAndRoutesNonTestTypeScriptToTheSpecialist()
+    public void ConductorDelegatesToTheTypeScriptReactAndTestSpecialists()
     {
         SquadAgent conductor = LoadAgent("conductor");
 
         Assert.Contains("typescript-dev", conductor.DelegatesTo);
         Assert.Contains("react-dev", conductor.DelegatesTo);
         Assert.Contains("test-dev", conductor.DelegatesTo);
-        Assert.Contains(
-            "non-test `.ts` outside a React UI to `typescript-dev`",
-            conductor.InstructionBody,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "general-purpose agent only when no delegate's trigger matches",
-            conductor.InstructionBody,
-            StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -98,14 +91,11 @@ public sealed class SquadTypeScriptSpecialistTests
     public void TypeScriptTriggersSplitNodeCodeFromReactUiAndTests()
     {
         string typescript = LoadAgent("typescript-dev").Description;
-        Assert.Contains("non-test .ts, .mts, or .cts file outside a React UI", typescript, StringComparison.Ordinal);
-        Assert.Contains("Do not use for .test.ts or .spec.ts files (test-dev)", typescript, StringComparison.Ordinal);
         Assert.Contains("(react-dev)", typescript, StringComparison.Ordinal);
         Assert.Contains("(github-devops)", typescript, StringComparison.Ordinal);
 
         string react = LoadAgent("react-dev").Description;
         Assert.Contains(".tsx or .jsx file", react, StringComparison.Ordinal);
-        Assert.Contains("Do not use for .ts outside a React UI", react, StringComparison.Ordinal);
         Assert.Contains("(typescript-dev)", react, StringComparison.Ordinal);
 
         string testDev = LoadAgent("test-dev").Description;
@@ -113,22 +103,18 @@ public sealed class SquadTypeScriptSpecialistTests
     }
 
     /// <summary>
-    /// The defect classes that motivated the agent — coerced zeros for unmeasured values, wide
-    /// and unbounded reads, N+1 queries — are policy in the standard template, so a host that
-    /// adopts it gets them as rules rather than as skill advice.
+    /// The standard template carries its lookup token and the <c>Absent is not zero</c> section.
+    /// The other defect-class rules that motivated the agent (N+1 queries, unbounded and wide
+    /// reads, floating promises) are graded from the prose rule catalog.
     /// </summary>
     [Fact]
-    public void StandardTemplateCarriesTheDefectClassesThatMotivatedTheAgent()
+    public void StandardTemplateCarriesItsLookupTokenAndTheAbsentIsNotZeroSection()
     {
         string standard = File.ReadAllText(
             Path.Combine(ProductRoot, "standards", "typescript", "README.md"));
 
         Assert.Contains("`<typescript-coding-standard>`", standard, StringComparison.Ordinal);
         Assert.Contains("## Absent is not zero", standard, StringComparison.Ordinal);
-        Assert.Contains("**No N+1.**", standard, StringComparison.Ordinal);
-        Assert.Contains("**Bound every read.**", standard, StringComparison.Ordinal);
-        Assert.Contains("**Select the columns you use.**", standard, StringComparison.Ordinal);
-        Assert.Contains("No floating promises", standard, StringComparison.Ordinal);
     }
 
     /// <summary>

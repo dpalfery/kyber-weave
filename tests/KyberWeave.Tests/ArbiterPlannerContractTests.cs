@@ -3,9 +3,10 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Pins the planner Arbiter contract (packet 7.2): the architect escalation route,
-/// the three escalation outcomes, attestation only after <c>NEEDS_DECISION</c>,
-/// and investigator-dispatch markers on both planners.
+/// Pins the planner Arbiter contract's tokens and structure (packet 7.2): the architect
+/// escalation route, the escalation return statuses, attestation only after
+/// <c>NEEDS_DECISION</c>, and investigator-dispatch markers on both planners. What the three
+/// escalation outcomes mean is graded from the prose rule catalog.
 /// </summary>
 public sealed class ArbiterPlannerContractTests
 {
@@ -33,16 +34,12 @@ public sealed class ArbiterPlannerContractTests
     }
 
     [Fact]
-    public void EscalationReference_DefinesThreeOutcomes()
+    public void EscalationReference_NamesBothReturnStatuses()
     {
         string reference = EscalationReference;
 
         Assert.Contains("STATUS: ESCALATION_RESOLVED", reference, StringComparison.Ordinal);
         Assert.Contains("STATUS: NEEDS_DECISION", reference, StringComparison.Ordinal);
-        Assert.Contains("amendment", reference, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("corrected", reference, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("approved plan", reference, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("cannot authorise", reference, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

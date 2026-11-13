@@ -14,9 +14,9 @@ namespace KyberWeave.Tests;
 /// </summary>
 /// <remarks>
 /// The conductor routes by matching a change against each delegate's description, so the
-/// description wording <em>is</em> the routing table. These assertions pin the trigger phrases a
-/// router needs to tell <c>src-tauri</c> Rust from any other Rust; loosening one silently sends
-/// work to the wrong agent.
+/// description wording <em>is</em> the routing table. These assertions pin the file shapes and
+/// hand-off agent names a router matches on, and the <c>tauri-dev</c> side of the split; the
+/// <c>rust-dev</c> and <c>go-dev</c> "do not use for" rules are graded from the prose rule catalog.
 /// </remarks>
 public sealed class SquadRustGoSpecialistTests
 {
@@ -73,8 +73,6 @@ public sealed class SquadRustGoSpecialistTests
         Assert.Contains(".rs file", rust, StringComparison.Ordinal);
         Assert.Contains("Cargo.toml", rust, StringComparison.Ordinal);
         Assert.Contains("build.rs", rust, StringComparison.Ordinal);
-        Assert.Contains("outside a Tauri app", rust, StringComparison.Ordinal);
-        Assert.Contains("Do not use for src-tauri", rust, StringComparison.Ordinal);
         Assert.Contains("(tauri-dev)", rust, StringComparison.Ordinal);
         Assert.Contains("(test-dev)", rust, StringComparison.Ordinal);
 
@@ -92,7 +90,6 @@ public sealed class SquadRustGoSpecialistTests
         Assert.Contains(".go file", go, StringComparison.Ordinal);
         Assert.Contains("go.mod", go, StringComparison.Ordinal);
         Assert.Contains("go.sum", go, StringComparison.Ordinal);
-        Assert.Contains("Do not use for _test.go", go, StringComparison.Ordinal);
         Assert.Contains("(test-dev)", go, StringComparison.Ordinal);
     }
 

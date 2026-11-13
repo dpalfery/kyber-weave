@@ -8,9 +8,11 @@ namespace KyberWeave.Tests;
 /// <c>products/kyber-squad/</c>: the four language checklists exist as pointers to their declared
 /// coding standard, every council entry point loads <c>REVIEW.md</c>, the review lens reports a
 /// guidance attribute per finding and lists the guidance sections it checked on a
-/// <c>NO FINDINGS</c> report, the code reviewer records a missing attestation as a coverage gap,
-/// the correctness and test-adequacy lenses carry the portable technique, and the
-/// <c>REVIEW.md</c> lens map names only lenses that exist.
+/// <c>NO FINDINGS</c> report, the test-adequacy lens names the file types it covers, the
+/// test-infrastructure and documentation-accuracy lenses exist and are mapped, and the
+/// <c>REVIEW.md</c> lens map names only lenses that exist. The prose rules (the no-standard
+/// fallback, the missing-attestation coverage gap, the correctness lens's input technique,
+/// strictness to every seat) are graded from the prose rule catalog.
 /// </summary>
 /// <remarks>
 /// This is the RED half of a test-first task. Each assertion names the missing token or file it
@@ -41,8 +43,8 @@ public sealed class ReviewGuidanceCouncilContractTests
 
     /// <summary>
     /// Prevents a language or framework the council meets from being reviewed with no checklist at
-    /// all. Each new checklist is a pointer to its declared coding standard, never a rule of its own,
-    /// and says so when no standard is declared rather than reporting the gap as clean.
+    /// all. Each new checklist is a pointer to its declared coding standard, never a rule of its own.
+    /// What a checklist says when no standard is declared is graded from the prose rule catalog.
     /// </summary>
     [Theory]
     [InlineData("typescript.md")]
@@ -58,9 +60,6 @@ public sealed class ReviewGuidanceCouncilContractTests
         Assert.True(
             text.Contains("coding-standard>", StringComparison.Ordinal),
             $"'{fileName}' must point at a declared <...-coding-standard> rather than state its own rules.");
-        Assert.True(
-            text.Contains("standard declared", StringComparison.OrdinalIgnoreCase),
-            $"'{fileName}' must say what happens when no standard is declared, not report the gap as clean.");
     }
 
     /// <summary>
@@ -126,18 +125,14 @@ public sealed class ReviewGuidanceCouncilContractTests
     /// Prevents a council entry point from naming the review guidance without applying it. A bare
     /// mention of <c>REVIEW.md</c> or the <c>&lt;review-guidance&gt;</c> path was already present in
     /// code-reviewer.md before the change, so each entry point must carry the token that proves it
-    /// applies the guidance: the attestation line, the refuter and in-process sentences, or the
-    /// apply-the-guidance instruction.
+    /// applies the guidance: the attestation line, or the skill's guidance-file token. The refuter,
+    /// in-process and apply-the-guidance sentences are graded from the prose rule catalog.
     /// </summary>
     [Theory]
     [InlineData("skills/code-review/SKILL.md", "REVIEW.md sections checked: [<ids>]")]
     [InlineData("skills/code-review/SKILL.md", "(`REVIEW.md`)")]
     [InlineData("agents/code-reviewer.md", "REVIEW.md sections checked: [<ids>]")]
-    [InlineData("agents/code-reviewer.md", "The refuter receives the same REVIEW.md sections")]
-    [InlineData("agents/code-reviewer.md", "Each in-process lens applies the same REVIEW.md sections")]
-    [InlineData("agents/review-lens.md", "**Apply the review guidance.**")]
     [InlineData("agents/review-lens.md", "REVIEW.md sections checked: [<rule ids")]
-    [InlineData("agents/review-triage.md", "**Apply the review guidance.**")]
     [InlineData("agents/review-triage.md", "REVIEW.md sections checked: [Ground rules]")]
     public void EveryCouncilEntryPointAppliesTheReviewGuidance(string relativePath, string token)
     {
@@ -182,17 +177,16 @@ public sealed class ReviewGuidanceCouncilContractTests
     }
 
     /// <summary>
-    /// Prevents a findings-form lens output from omitting the attestation. The findings instruction
-    /// must end with the attestation line, and the attestation form must appear after it.
+    /// Prevents a findings-form lens output from omitting the attestation: the attestation form must
+    /// appear after the findings instruction. That it is the last line is graded from the prose rule catalog.
     /// </summary>
     [Fact]
-    public void ReviewLensFindingsFormEndsWithTheAttestationLine()
+    public void ReviewLensFindingsFormCarriesTheAttestationLine()
     {
         string text = ReadProduct("agents/review-lens.md");
 
         int index = text.IndexOf("Return the YAML findings list", StringComparison.Ordinal);
         Assert.True(index >= 0, "'agents/review-lens.md' must keep its findings-form output instruction.");
-        Assert.Contains("then the attestation line as its last line", text[index..], StringComparison.Ordinal);
         Assert.True(
             text[index..].Contains("REVIEW.md sections checked: [", StringComparison.Ordinal),
             "'agents/review-lens.md' findings form must carry the 'REVIEW.md sections checked: [' attestation line.");
@@ -230,32 +224,6 @@ public sealed class ReviewGuidanceCouncilContractTests
     }
 
     /// <summary>
-    /// Prevents a lens that omitted its guidance attestation from passing silently. A missing
-    /// attestation is recorded as a coverage gap in the report; it is not a verdict input, so the
-    /// reviewer still sees that the guidance was not proven applied.
-    /// </summary>
-    [Fact]
-    public void CodeReviewerRecordsAMissingGuidanceAttestationAsACoverageGap()
-    {
-        string text = ReadProduct("agents/code-reviewer.md");
-
-        AssertContainsAll(text, "agents/code-reviewer.md", "attestation", "coverage gap");
-    }
-
-    /// <summary>
-    /// Prevents the correctness lens from missing the portable input technique: malformed or null
-    /// input, non-finite numbers, and boundary handling across CRLF line endings. These are the
-    /// failures that the earlier council run did not catch.
-    /// </summary>
-    [Fact]
-    public void CorrectnessLensCarriesTheMalformedInputAndBoundaryTechnique()
-    {
-        string text = ReadProduct("skills/code-review/references/lenses/correctness.md");
-
-        AssertContainsAll(text, "correctness.md", "Malformed", "Non-finite", "CRLF");
-    }
-
-    /// <summary>
     /// Prevents a changed <c>.ts</c> or <c>.cs</c> file from passing the test-adequacy lens without
     /// the lens asking whether its behaviour has a test. The lens must name both file types.
     /// </summary>
@@ -274,22 +242,16 @@ public sealed class ReviewGuidanceCouncilContractTests
 
     /// <summary>
     /// Prevents the council strictness setting from reaching the verdict engine but not the lenses:
-    /// the code-review skill must pass <c>review.policy.strictness</c> to every seat, so a strict
-    /// host gets lower-confidence findings reported instead of silently dropped at source.
+    /// the code-review skill names <c>review.policy.strictness</c> and the review lens names each level.
+    /// That the skill passes it to every seat is graded from the prose rule catalog.
     /// </summary>
     [Fact]
-    public void TheCodeReviewSkillPassesTheStrictnessToEverySeat()
+    public void TheCodeReviewSkillAndLensNameTheStrictnessSettingAndLevels()
     {
         string skill = File.ReadAllText(Path.Combine(ProductRoot, "skills", "code-review", "SKILL.md"));
         Assert.True(
             skill.Contains("review.policy.strictness", StringComparison.Ordinal),
             "The code-review skill must document review.policy.strictness.");
-        Assert.True(
-            Regex.IsMatch(
-                skill,
-                @"Pass\s+the\s+strictness\s+and\s+the\s+effective\s+`min-confidence`\s+to\s+\*\*every\s+seat\*\*",
-                RegexOptions.CultureInvariant),
-            "The code-review skill must tell the reviewer to pass the strictness and effective floor to every seat.");
 
         string lens = File.ReadAllText(Path.Combine(ProductRoot, "agents", "review-lens.md"));
         Assert.True(
