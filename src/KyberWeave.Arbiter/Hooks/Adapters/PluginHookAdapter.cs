@@ -16,8 +16,9 @@ namespace KyberWeave.Arbiter.Hooks.Adapters;
 /// <remarks>
 /// The adapter is parameterised by harness token, dispatch tool, target argument
 /// and prompt argument because every plugin harness renames the same shape:
-/// OpenCode dispatches on <c>task</c> with the target at
-/// <c>args.subagent_type</c> and the prompt at <c>args.prompt</c>. An event whose
+/// OpenCode before 2.2 dispatches on <c>task</c> with the target at
+/// <c>args.subagent_type</c>; OpenCode 2.2.5 dispatches on <c>subagent</c> with the target at
+/// <c>args.agent</c>. Both carry the prompt at <c>args.prompt</c>. An event whose
 /// tool is not the dispatch tool, or whose args name no target, is not a dispatch
 /// and passes through before configuration loads. <c>args</c> is answered only
 /// when the header block was stripped, as the complete arguments: the shim
@@ -26,8 +27,8 @@ namespace KyberWeave.Arbiter.Hooks.Adapters;
 public sealed class PluginHookAdapter : IHarnessHookAdapter
 {
     private readonly string _harnessToken;
-    private readonly string _dispatchTool;
-    private readonly string _targetArgument;
+    private readonly IReadOnlyList<string> _dispatchTools;
+    private readonly IReadOnlyList<string> _targetArguments;
     private readonly string _promptArgument;
     private readonly IHookDecisionEngine _engine;
 
@@ -40,15 +41,35 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
         string targetArgument,
         string promptArgument,
         IHookDecisionEngine engine)
+        : this(harnessToken, [dispatchTool], [targetArgument], promptArgument, engine)
+    {
+    }
+
+    /// <summary>
+    /// Creates an adapter that accepts several dispatch shapes: a harness that renamed its
+    /// dispatch tool or its target argument between versions lists the old and the new.
+    /// </summary>
+    public PluginHookAdapter(
+        string harnessToken,
+        IReadOnlyList<string> dispatchTools,
+        IReadOnlyList<string> targetArguments,
+        string promptArgument,
+        IHookDecisionEngine engine)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(harnessToken);
-        ArgumentException.ThrowIfNullOrWhiteSpace(dispatchTool);
-        ArgumentException.ThrowIfNullOrWhiteSpace(targetArgument);
+        ArgumentNullException.ThrowIfNull(dispatchTools);
+        ArgumentNullException.ThrowIfNull(targetArguments);
         ArgumentException.ThrowIfNullOrWhiteSpace(promptArgument);
         ArgumentNullException.ThrowIfNull(engine);
+        if (dispatchTools.Count == 0 || dispatchTools.Any(string.IsNullOrWhiteSpace)
+            || targetArguments.Count == 0 || targetArguments.Any(string.IsNullOrWhiteSpace))
+        {
+            throw new ArgumentException("An adapter needs at least one non-blank dispatch tool and target argument.");
+        }
+
         _harnessToken = harnessToken;
-        _dispatchTool = dispatchTool;
-        _targetArgument = targetArgument;
+        _dispatchTools = dispatchTools;
+        _targetArguments = targetArguments;
         _promptArgument = promptArgument;
         _engine = engine;
     }
@@ -72,7 +93,7 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
             return false;
         }
 
-        if (!string.Equals(envelope.Tool, _dispatchTool, StringComparison.OrdinalIgnoreCase))
+        if (!IsDispatchTool(envelope.Tool))
         {
             return true;
         }
@@ -93,7 +114,7 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
         _ = rawJson;
 
         PluginEnvelope envelope = PluginEnvelope.Parse(payload);
-        if (!string.Equals(envelope.Tool, _dispatchTool, StringComparison.OrdinalIgnoreCase))
+        if (!IsDispatchTool(envelope.Tool))
         {
             return string.Empty;
         }
@@ -201,7 +222,11 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
         return _engine.DecidePostDispatch(caller, target, toolOutput, config);
     }
 
-    private string? TargetOf(PluginEnvelope envelope) => ArgString(envelope.Args, _targetArgument);
+    private bool IsDispatchTool(string? tool) =>
+        _dispatchTools.Any(candidate => string.Equals(tool, candidate, StringComparison.OrdinalIgnoreCase));
+
+    private string? TargetOf(PluginEnvelope envelope) =>
+        _targetArguments.Select(name => ArgString(envelope.Args, name)).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
 
     private static string? ArgString(JsonElement args, string name) =>
         args.ValueKind == JsonValueKind.Object

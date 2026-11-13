@@ -96,6 +96,64 @@ public sealed class PluginHookAdapterTests
         return (exit, stdout.ToString());
     }
 
+    private static (int Exit, string Stdout) RunProduction(string harness, string stdin, ScriptedEngine engine)
+    {
+        HookCommand command = new(
+            new HarnessAdapterRegistry(PluginHookAdapters.All(engine)),
+            _ => EnabledConfig(),
+            () => "decision-test-1");
+        using StringWriter stdout = new();
+        using StringWriter log = new();
+        int exit = command.Run(harness, "conductor", stdin, stdout, log);
+        return (exit, stdout.ToString());
+    }
+
+    /// <summary>OpenCode 2.2.5 dispatches with tool <c>subagent</c> and <c>args.agent</c>; the Arbiter must gate it.</summary>
+    [Fact]
+    public void OpenCode225SubagentShapeIsGatedAndItsHeaderBlockStripped()
+    {
+        ScriptedEngine engine = new();
+        JsonObject args = new()
+        {
+            ["description"] = "Implement T4",
+            ["prompt"] = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: 4.3\n\nImplement the parser.",
+            ["agent"] = "csharp-dev",
+        };
+
+        (int exit, string stdout) = RunProduction("opencode", Envelope("before", "subagent", args), engine);
+
+        Assert.Equal(0, exit);
+        Assert.Equal("csharp-dev", engine.SeenPreTarget);
+        using JsonDocument doc = JsonDocument.Parse(stdout);
+        JsonElement returned = doc.RootElement.GetProperty("args");
+        Assert.Equal("csharp-dev", returned.GetProperty("agent").GetString());
+        Assert.Equal("Implement the parser.", returned.GetProperty("prompt").GetString());
+    }
+
+    [Fact]
+    public void OpenCode225SubagentShapeIsBlockedWhenTheEngineDenies()
+    {
+        ScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Deny, Reason: "not in plan") };
+        JsonObject args = new() { ["prompt"] = "Do it.", ["agent"] = "csharp-dev" };
+
+        (_, string stdout) = RunProduction("opencode", Envelope("before", "subagent", args), engine);
+
+        using JsonDocument doc = JsonDocument.Parse(stdout);
+        Assert.Equal("block", doc.RootElement.GetProperty("decision").GetString());
+    }
+
+    [Fact]
+    public void OpenCodeStillGatesTheOlderTaskShapeAndKiloKeepsItsOwn()
+    {
+        ScriptedEngine engine = new();
+        RunProduction("opencode", Envelope("before", "task", TaskArgs("csharp-dev", "Do it.")), engine);
+        Assert.Equal("csharp-dev", engine.SeenPreTarget);
+
+        ScriptedEngine kilo = new();
+        RunProduction("kilo", Envelope("before", "subagent", new JsonObject { ["prompt"] = "Do it.", ["agent"] = "csharp-dev" }, harness: "kilo"), kilo);
+        Assert.Null(kilo.SeenPreTarget);
+    }
+
     [Fact]
     public void Before_Allow_SpecialistTarget_StripsHeaderBlockAndReturnsCompleteArgs()
     {

@@ -14,11 +14,13 @@ namespace KyberWeave.Arbiter.Hooks;
 public static class PluginHookAdapters
 {
     // One row per plugin harness: its token and the tool its shim dispatches on.
-    private static readonly (string Token, string DispatchTool)[] Entries =
+    // OpenCode 2.2.5 renamed the dispatch tool to subagent and its target argument to agent (its own
+    // migration note: "The subagent tool takes agent instead of subagent_type"), so it lists both shapes.
+    private static readonly (string Token, string[] DispatchTools, string[] TargetArguments)[] Entries =
     [
-        ("opencode", "task"),
-        ("kilo", "task"),
-        ("pi", "Agent"),
+        ("opencode", ["task", "subagent"], ["subagent_type", "agent"]),
+        ("kilo", ["task"], ["subagent_type"]),
+        ("pi", ["Agent"], ["subagent_type"]),
     ];
 
     /// <summary>The plugin-hook adapters: OpenCode and Kilo dispatch on <c>task</c>; Pi dispatches on <c>Agent</c>.</summary>
@@ -29,8 +31,8 @@ public static class PluginHookAdapters
         [
             .. Entries.Select(entry => (IHarnessHookAdapter)new PluginHookAdapter(
                 entry.Token,
-                entry.DispatchTool,
-                "subagent_type",
+                entry.DispatchTools,
+                entry.TargetArguments,
                 "prompt",
                 resolved)),
         ];
