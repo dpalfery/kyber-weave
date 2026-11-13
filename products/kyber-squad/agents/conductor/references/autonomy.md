@@ -43,6 +43,8 @@ Do not relay `GAPS` or `OPEN_QUESTIONS` that carry a recommended option: accept 
 
 Both modes deliver the same way. When the work is ready to leave the machine (with the applicable closeout done), the conductor commits to a feature branch (never the default branch), pushes it, and opens a **draft** pull request. The draft pull request is pushed before the review council runs, so the council reviews a pull request that already exists. Delivery never waits for the council.
 
+The plan and its task file are committed together before the first dispatch, in both modes, without asking. Delivery never asks: when the pull request cannot be opened (no supported remote host, no credentials), finish everything local (commits, the push if a remote accepts it, the final council review) and report `NOT DELIVERED: pull request — <reason>`.
+
 The draft is marked ready once required CI passes. The `create-pull-request` skill, run by `github-devops`, waits at most 60 minutes for CI. If CI fails or is not done in that time, the pull request stays draft and the report says what it is waiting for. No review or human approval is needed before ready.
 
 The council verdict goes in the PR description. It does not gate ready: required CI does. The council re-reviews after every fix round until it returns APPROVE. The loop runs on the open pull request: delivery never waits for it, and required CI alone decides ready. The loop stops after 5 review cycles, or after 3 cycles in a row in which the count of surviving critical and major findings does not fall; the findings still open are then listed in the pull request as pending human review, and delivery continues. The `delivery-execution` skill owns the loop itself.
