@@ -46,11 +46,11 @@ public sealed class ReviewCycleCommand : Command<ReviewCycleSettings>
             return ClientInputExitCode;
         }
 
-        if (chosen is not null)
+        bool json = settings.ParsedFormat == KyberWeave.Cli.Rendering.OutputFormat.Json;
+        if (chosen is not null && !json)
             Console.WriteLine(chosen);
 
         string? liveRun = ReviewWorkTree.LiveRunNote(tree, ReviewWorkTree.HomeDirectory());
-        bool json = settings.ParsedFormat == KyberWeave.Cli.Rendering.OutputFormat.Json;
         if (liveRun is not null && !json)
             Console.WriteLine(liveRun);
 
@@ -70,15 +70,16 @@ public sealed class ReviewCycleCommand : Command<ReviewCycleSettings>
         }
 
         string folder = Path.Combine(reviewFolder, $"cycle-{plan.Number}");
+        string command = ReviewCycleView.GatesCommand(root, Path.Combine(folder, "gates.json"), settings.BaseRef);
         if (json)
-            Console.WriteLine(ToJson(tree, plan, folder, recheck, prior.Ignored, liveRun));
+            Console.WriteLine(ToJson(tree, plan, folder, recheck, prior.Ignored, liveRun, command));
         else
-            WriteLines(tree, plan, folder, recheck, prior.Ignored);
+            WriteLines(tree, plan, folder, recheck, prior.Ignored, command);
 
         return 0;
     }
 
-    private static void WriteLines(string tree, ReviewCyclePlan plan, string folder, List<ReviewFinding> recheck, IReadOnlyList<IgnoredCycle> ignored)
+    private static void WriteLines(string tree, ReviewCyclePlan plan, string folder, List<ReviewFinding> recheck, IReadOnlyList<IgnoredCycle> ignored, string command)
     {
         Say($"cycle: {plan.Number}");
         Say($"mode: {ReviewCycleView.Mode(plan)}");
@@ -87,24 +88,26 @@ public sealed class ReviewCycleCommand : Command<ReviewCycleSettings>
             Say(line);
 
         if (plan.Prior is null)
-        {
             Say("gates: run every declared gate");
-            return;
+        else
+        {
+            foreach (string line in ReviewCycleView.VerifierLines(plan, recheck))
+                Say(line);
         }
 
-        foreach (string line in ReviewCycleView.VerifierLines(plan, recheck))
-            Say(line);
+        Say($"run: {command}");
     }
 
     private static void Say(string line) => Console.WriteLine(line);
 
-    private static string ToJson(string tree, ReviewCyclePlan plan, string folder, List<ReviewFinding> recheck, IReadOnlyList<IgnoredCycle> ignored, string? liveRun)
+    private static string ToJson(string tree, ReviewCyclePlan plan, string folder, List<ReviewFinding> recheck, IReadOnlyList<IgnoredCycle> ignored, string? liveRun, string command)
     {
         JsonObject answer = new()
         {
             ["cycle"] = plan.Number,
             ["mode"] = ReviewCycleView.Mode(plan),
             ["folder"] = folder,
+            ["command"] = command,
             ["ignored"] = new JsonArray([.. ignored.Select(cycle => (JsonNode?)new JsonObject
             {
                 ["folder"] = ReviewCycleView.Relative(tree, cycle.Record.Folder),

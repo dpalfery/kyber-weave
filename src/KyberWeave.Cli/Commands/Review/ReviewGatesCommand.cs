@@ -295,6 +295,14 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
             report.AddMetric("carried", written.Gates.Count - gates.Gates.Count);
         }
 
+        // Gates named one run at a time into the same report add to it. Replacing the file would lose the earlier
+        // runs' results, so a reviewer could never finish a verifier cycle gate by gate.
+        if (settings.Gate.Length > 0 && settings.Out is not null)
+        {
+            written = MergedWithExisting(config.Review.Gates, written, settings.Out);
+            report.AddMetric("kept", written.Gates.Count - gates.Gates.Count);
+        }
+
         report.AddMetric("gates", gates.Gates.Count);
         report.AddMetric("failed", gates.Gates.Count(g => !g.Passed && g.NotApplicableReason is null
                                                          && !(settings.Deadline && VerdictEngine.IsStoppedForTime(g))));
@@ -480,6 +488,40 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
         }
 
         results.AddRange(ran.Gates.Where(result => !results.Contains(result)));
+        return ran with { Gates = results };
+    }
+
+    /// <summary>
+    ///     The report already at <paramref name="path"/>, with each result this run produced in place of the earlier
+    ///     result for the same gate and the rest kept, in declaration order. An unreadable or missing report is nothing
+    ///     to keep.
+    /// </summary>
+    private static GateReport MergedWithExisting(IReadOnlyList<ReviewGate> declared, GateReport ran, string path)
+    {
+        GateReport existing;
+        try
+        {
+            if (!File.Exists(path))
+                return ran;
+
+            existing = ReviewJson.ReadGates(File.ReadAllText(path));
+        }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or ArgumentException or NotSupportedException
+                                       or InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            return ran;
+        }
+
+        List<GateResult> results = [];
+        foreach (ReviewGate gate in declared)
+        {
+            GateResult? pick = ran.Gates.FirstOrDefault(result => string.Equals(result.Id, gate.Id, StringComparison.Ordinal))
+                               ?? existing.Gates.FirstOrDefault(result => string.Equals(result.Id, gate.Id, StringComparison.Ordinal));
+            if (pick is not null)
+                results.Add(pick);
+        }
+
+        results.AddRange(existing.Gates.Where(old => results.All(kept => !string.Equals(kept.Id, old.Id, StringComparison.Ordinal))));
         return ran with { Gates = results };
     }
 

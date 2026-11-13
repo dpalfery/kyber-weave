@@ -153,11 +153,15 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
             return given;
 
         List<GateResult> effective = [.. given];
-        foreach (GateCycleDecision decision in ReviewCycles.DecideGates(
-                     history,
-                     absent,
-                     OperatingSystem.IsWindows() ? "windows" : "unix",
-                     commit => TryChangedSince(ReviewWorkTree.Of(root), commit)))
+        List<GateCycleDecision> decisions = [.. ReviewCycles.DecideGates(
+            history,
+            absent,
+            OperatingSystem.IsWindows() ? "windows" : "unix",
+            commit => TryChangedSince(ReviewWorkTree.Of(root), commit))];
+        string[] outstanding =
+            [.. decisions.Where(decision => decision is { Action: GateCycleAction.Rerun, FromCycle: not null }).Select(decision => decision.GateId)];
+        string command = ReviewCycleView.GatesCommand(root, Path.GetFullPath(settings.Gates!), settings.BaseRef);
+        foreach (GateCycleDecision decision in decisions)
         {
             if (decision is { Action: GateCycleAction.Carry, Carried: { } carried })
             {
@@ -174,9 +178,10 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
                     GateNotRerun,
                     Severity.Error,
                     $"{decision.GateId}: this cycle's gate report has no result for it, and cycle {decision.FromCycle}'s " +
-                    $"result cannot be carried ({decision.Reason}).",
+                    $"result cannot be carried ({decision.Reason}). Gates still outstanding: {string.Join(", ", outstanding)}. " +
+                    $"One command runs them all: {command}",
                     decision.GateId,
-                    Hint: $"Run 'review gates --gate {decision.GateId}' into this cycle's gates.json, then compute the verdict again."));
+                    Hint: $"Run this once, then compute the verdict again: {command}"));
             }
         }
 

@@ -338,6 +338,99 @@ public sealed class ReviewGatesCycleTests : IDisposable
         Assert.Null(ReviewWorkTree.LiveRunNote(worktree, home));
     }
 
+    [Fact]
+    public void ReviewCycleEndsWithTheOneCommandThatRunsTheGatesIntoThisCyclesFolder()
+    {
+        FinishCycle1();
+        Write("src/a.cs", "// fixed\n");
+        Write("README.md", "# changed\n");
+        Commit("fix");
+
+        CapturedConsoleExecution<int> cycle = ProcessConsoleCapture.Run(() => CreateApp().Run(["review", "cycle", _repo]));
+
+        string last = cycle.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries)[^1];
+        Assert.Equal($"run: kyber-weave review gates {_repo} --council --out {GatesPath(2)}", last);
+        Assert.Contains("rerun: build", cycle.Output, StringComparison.Ordinal);
+        Assert.Contains("rerun: docs", cycle.Output, StringComparison.Ordinal);
+
+        CapturedConsoleExecution<int> json = ProcessConsoleCapture.Run(() => CreateApp().Run(["review", "cycle", _repo, "--format", "json"]));
+        using JsonDocument document = JsonDocument.Parse(json.Output);
+        Assert.Equal(last["run: ".Length..], document.RootElement.GetProperty("command").GetString());
+    }
+
+    [Fact]
+    public void RunningTheCommandReviewCycleSuggestsLeavesNothingOutstandingForTheVerdict()
+    {
+        FinishCycle1();
+        Write("src/a.cs", "// fixed\n");
+        Write("README.md", "# changed\n");
+        Commit("fix");
+
+        (int exit, _) = Gates(2);
+        CapturedConsoleExecution<int> verdict = ProcessConsoleCapture.Run(() => CreateApp().Run(
+        [
+            "review", "verdict", _repo, "--findings", EmptyFindings(), "--gates", GatesPath(2), "--prior", CycleFolder(1),
+            "--format", "json"
+        ]));
+
+        Assert.Equal(0, exit);
+        Assert.DoesNotContain("KW-REVIEW-049", verdict.Output, StringComparison.Ordinal);
+        Assert.Equal(["build", "docs", "always"], ReportedIds(2));
+    }
+
+    [Fact]
+    public void GatesRunOneAtATimeIntoTheSameReportAreMergedNotReplaced()
+    {
+        string path = GatesPath(2);
+
+        CapturedConsoleExecution<int> first = ProcessConsoleCapture.Run(() => CreateApp().Run(["review", "gates", _repo, "--gate", "docs", "--out", path]));
+        CapturedConsoleExecution<int> second = ProcessConsoleCapture.Run(() => CreateApp().Run(["review", "gates", _repo, "--gate", "build", "--out", path]));
+        CapturedConsoleExecution<int> again = ProcessConsoleCapture.Run(() => CreateApp().Run(["review", "gates", _repo, "--gate", "docs", "--out", path]));
+
+        Assert.Equal([0, 0, 0], new[] { first.Result, second.Result, again.Result });
+        Assert.Equal(["build", "docs"], ReportedIds(2));
+    }
+
+    [Fact]
+    public void EveryOutstandingGateRefusalNamesAllOutstandingGatesAndTheSingleCommandThatRunsThem()
+    {
+        FinishCycle1();
+        Write("src/a.cs", "// fixed\n");
+        Write("README.md", "# changed\n");
+        Commit("fix");
+        Write(
+            $".agent_scratchpad/{Task}/review/cycle-2/gates.json",
+            ReviewJson.Write(new GateReport(GateReport.CurrentSchema, [new GateResult("always", true, 0, "ok")])));
+
+        CapturedConsoleExecution<int> verdict = ProcessConsoleCapture.Run(() => CreateApp().Run(
+        [
+            "review", "verdict", _repo, "--findings", EmptyFindings(), "--gates", GatesPath(2), "--prior", CycleFolder(1),
+            "--format", "json"
+        ]));
+
+        Assert.NotEqual(0, verdict.Result);
+        using JsonDocument document = JsonDocument.Parse(verdict.Output);
+        string[] messages =
+        [
+            .. document.RootElement.GetProperty("findings").EnumerateArray()
+                .Where(item => item.GetProperty("code").GetString() == "KW-REVIEW-049")
+                .Select(item => item.GetProperty("message").GetString()!)
+        ];
+        Assert.Equal(2, messages.Length);
+        string command = $"kyber-weave review gates {_repo} --council --out {GatesPath(2)}";
+        Assert.All(messages, message =>
+        {
+            Assert.Contains("Gates still outstanding: build, docs", message, StringComparison.Ordinal);
+            Assert.Contains(command, message, StringComparison.Ordinal);
+            Assert.DoesNotContain("--gate ", message, StringComparison.Ordinal);
+        });
+
+        // The command in the message does what it says.
+        (int exit, _) = Gates(2);
+        Assert.Equal(0, exit);
+        Assert.Equal(["build", "docs", "always"], ReportedIds(2));
+    }
+
     private (int Exit, string Output) GatesIn(string tree, string outPath)
     {
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() => CreateApp().Run(["review", "gates", tree, "--council", "--out", outPath]));

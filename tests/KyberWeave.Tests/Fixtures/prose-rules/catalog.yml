@@ -782,6 +782,14 @@ rules:
     controls:
       - products/kyber-squad/skills/task-gate/references/rework.md
       - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: review-cycle-one-gate-command
+    statement: The code-reviewer runs a review cycle's gates with the single command that the review cycle report prints on its run line, which runs every gate the cycle needs into the cycle folder, instead of running the gates one at a time.
+    stated-in:
+      - products/kyber-squad/agents/code-reviewer.md
+      - products/kyber-squad/skills/code-review/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
   - id: review-cycle-belongs-to-this-change
     statement: A recorded review cycle counts as a prior cycle only when it belongs to the current change, meaning it reviewed the same branch and base and its head is an ancestor of HEAD; the gate run ignores and lists any other recorded cycle.
     stated-in:

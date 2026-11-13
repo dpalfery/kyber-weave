@@ -174,6 +174,18 @@ internal static class ReviewCycleView
                                 && !Path.IsPathRooted(relative);
     }
 
+    /// <summary>
+    ///     The one command that runs every gate this cycle needs and writes the complete report. In a verifier cycle the
+    ///     council run runs only the gates that must run again and carries the rest, so the same line serves both modes.
+    /// </summary>
+    public static string GatesCommand(string root, string gatesPath, string? baseRef)
+    {
+        string command = $"kyber-weave review gates {Quote(root)} --council --out {Quote(gatesPath)}";
+        return string.IsNullOrWhiteSpace(baseRef) ? command : $"{command} --base {Quote(baseRef.Trim())}";
+    }
+
+    private static string Quote(string value) => value.Contains(' ', StringComparison.Ordinal) ? $"\"{value}\"" : value;
+
     /// <summary><c>full</c> for the first cycle, <c>verifier</c> for any later one.</summary>
     public static string Mode(ReviewCyclePlan plan) => plan.IsVerifier ? "verifier" : "full";
 
