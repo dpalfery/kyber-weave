@@ -1,6 +1,7 @@
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
@@ -192,16 +193,25 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         IDisposable? owned = provider as IDisposable;
         try
         {
+            // The plan, its task file and the git facts are read in the worktree that holds the plan, which in a
+            // conductor run is often not the checkout the hook runs in. The ledger stays with the hook's directory
+            // so a dispatch and its return still pair.
+            string evaluationRoot = PlanRootResolver.Resolve(repoRoot, prompt);
+            if (!string.Equals(evaluationRoot, repoRoot, StringComparison.Ordinal))
+            {
+                context.Log.WriteLine($"Arbiter: evaluating against worktree '{evaluationRoot}', which holds the dispatch's plan.");
+            }
+
             IArbiterGitFacts gitFacts = _gitFactsFactory is not null
-                ? _gitFactsFactory(repoRoot)
-                : new HookGitFacts(repoRoot, _homeDirectory(), arbiterDirectory);
+                ? _gitFactsFactory(evaluationRoot)
+                : new HookGitFacts(evaluationRoot, _homeDirectory(), arbiterDirectory);
             ArbiterEvaluator evaluator = new(
                 provider,
                 KeyResolverFor(effective),
                 new InFlightLedger(arbiterDirectory),
                 new DecisionLog(arbiterDirectory),
                 gitFacts,
-                _planReaderFactory(repoRoot),
+                _planReaderFactory(evaluationRoot),
                 _clock);
             ArbiterEvent ev = new()
             {
@@ -218,7 +228,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
                 Prompt = prompt,
                 ToolCallId = toolCallId,
                 Session = sessionId,
-                Cwd = repoRoot,
+                Cwd = evaluationRoot,
                 ObservesReturns = context.ObservesReturns,
                 ModelOverrideField = context.ModelOverride is { Supported: true } capability ? capability.Field : null,
                 ModelOverrideAliases = context.ModelOverride is { Supported: true } aliases ? aliases.AcceptedAliases : null,

@@ -39,6 +39,7 @@ code-refs:
   - CommentSyntax
   - RuleEffects
   - PlanFacts
+  - PlanRootResolver
   - TextExcerpts
   - ArbiterHookTimeout
 ---
@@ -148,6 +149,13 @@ block. The raw values are evidence, never a gate:
   repository and exists is a machine fact, so a path with a space or an absolute path inside
   the repository reads its plan. A `TASK` that is not an exact id matches the task whose id is
   its first word (`T3 — add the parser` names `T3`).
+- **`PlanRootResolver`** finds the working tree the plan lives in. A conductor run writes its plan in
+  a git worktree, untracked, while some harnesses run the hook in the main checkout. When the plan is
+  not under the hook's directory, the resolver lists the repository's worktrees
+  (`git worktree list --porcelain`) and uses the one that holds the plan for the plan, the task file
+  and the git facts of that decision; several holding it prefer the one the dispatch names, then the
+  newest plan. A return whose headers were stripped follows the worktree its body names. The ledger
+  stays in the hook's directory, so a dispatch and its return still pair.
 - **`delegation.plan-file-raw`** and **`delegation.task-raw`** carry the raw values to the model
   questions.
 

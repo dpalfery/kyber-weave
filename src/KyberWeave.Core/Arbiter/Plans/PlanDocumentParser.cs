@@ -76,11 +76,11 @@ public static partial class PlanDocumentParser
     private static partial Regex SpecTaskIdRegex();
 
     [GeneratedRegex(
-        @"\b(?:files\b(?:(?:\s*/\s*|\s)symbols)?(?:\s+owned)?|scope)[ \t]*:",
+        @"\b(?:files\b(?:(?:\s*/\s*|\s)symbols)?(?:\s+owned)?|files[ \t]+to[ \t]+change|file|paths|scope)[ \t]*:",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex FilesLabelRegex();
 
-    [GeneratedRegex(@"\bdepend(?:encies|s[ \t]*-?[ \t]*on)\b[ \t]*:", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\bdepend(?:encies|s(?:[ \t]*-?[ \t]*on)?)\b[ \t]*:", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex DependsLabelRegex();
 
     [GeneratedRegex(@"\b(?:required[ \t]+skills?|skills)\b[ \t]*:", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]

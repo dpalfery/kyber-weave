@@ -169,7 +169,7 @@ runs a command in the worktree, and `git -C <dir>` does the same for git. `cd` c
 in place of `.`. `sort` accepts only the flags on its allowlist, and `rg` accepts any flag except the ones on its
 denylist. `touch` operands resolve as described in the list above. `codegraph explore` takes exactly one query, and `doctor --ensure` takes no operand. `rg` refuses `--pre`, `--pre-glob`, `-z`, `--search-zip`, `--hostname-bin` and `--hyperlink-format`, and abbreviations of them; `--pretty` is allowed. `kyber-weave arbiter plan <plan file> -f json` is read-only
 and is the architect's one way to read a task file's execution digest; it is on the architect's command list and in
-the guard. The command list itself lives in `architect.md`, which the sync test binds to the guard.
+the guard. `kyber-weave docs tasks <plan> --write` writes a plan's task file and is on the list too. The command list itself lives in `architect.md`, which the sync test binds to the guard.
 
 **Reading a denial.** A denial names the command the architect tried. The architect is told to return
 `STATUS: BLOCKED` with that command rather than work around it, so a denial is the list working. Find
