@@ -74,7 +74,6 @@ Use the host's indexes before raw reads.
 ## Hard rules
 
 - Never embed a relative path to a standard. Resolve **<maui-coding-standard>** and **<csharp-coding-standard>** by those registry names.
-- If a standard named above is not declared, or the document it names is still `status: draft`, say so and ask the human whether to proceed before writing code. Running headless, return that question to your orchestrator instead. Never fill the gap with a built-in default.
 - Never author test files, backend code, or CI workflows.
 - Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
 - Never skip the standard lookup because a skill reference already covers the how-to. The standard is policy; the skill is procedure.
@@ -89,7 +88,7 @@ When done, return:
 STATUS: READY_FOR_REVIEW
 ARTIFACTS: <list of MAUI file paths changed or created>
 SUMMARY: <2–4 sentences: what was implemented, pages/ViewModels touched, and any hand-offs>
-DIAGNOSTICS: clean on <paths> | fix pass: <format, format analyzers, cleanupcode — all applied> | artifacts: <isolated artifacts path> | baseline: <scratchpad path> | remaining: <none, or list with baseline proof>
+DIAGNOSTICS: clean on <paths> | fix pass: <format, format analyzers — all applied> | artifacts: <isolated artifacts path> | baseline: <scratchpad path> | remaining: <none, or list with baseline proof>
 TASK_GATE: <PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE> — agent=maui-dev gates=<n> failed=<ids|none> skipped=<n> report=<path> runs=<k>
 OPEN_QUESTIONS: <bullets, or "none">
 ```

@@ -2060,3 +2060,51 @@ rules:
     controls:
       - products/kyber-squad/skills/task-gate/references/rework.md
       - products/kyber-squad/shared/worker-baseline.md
+  # ---------------------------------------------------------------- draft standards, plan order and delivery
+  - id: draft-standard-is-guidance
+    statement: A draft or missing coding standard is guidance and not a gate, so the worker follows the existing code, notes the standard status in its report and carries on without stopping or asking.
+    stated-in:
+      - products/kyber-squad/shared/worker-baseline.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+    retired:
+      statement: A worker whose coding standard is draft or missing stops and asks the human whether to proceed, or returns the question to its orchestrator.
+      example: If the standard is not declared, or the document it names is still status draft, say so and ask the human whether to proceed before writing code. Running headless, return that question to your orchestrator instead.
+      seed-into: products/kyber-squad/skills/task-gate/references/rework.md
+      absent-from:
+        - products/kyber-squad/agents/csharp-dev.md
+        - products/kyber-squad/agents/sql-database-architect.md
+        - products/kyber-squad/agents/tauri-dev.md
+  - id: plan-orders-red-green-per-compile-unit
+    statement: When tests of several layers share one compiled test project, the plan orders the tasks RED then GREEN per layer, so the project compiles after every GREEN, and runs RED in parallel only where each task has its own test project or one task adds the stubs the project needs.
+    stated-in:
+      - path: products/kyber-squad/agents/architect/references/plan-authoring.md
+        section: Session groups
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: green-reports-not-verified-instead-of-private-runner
+    statement: A GREEN worker whose test project does not compile because of other tasks' tests builds the production projects it touched and reports NOT VERIFIED, and never builds a private runner project.
+    stated-in:
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Test-first mode
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: plan-and-task-file-committed-unasked
+    statement: The conductor commits the plan and its task file together before the first dispatch, in both modes, without asking.
+    stated-in:
+      - path: products/kyber-squad/agents/conductor/references/autonomy.md
+        section: Delivery
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: unopenable-pull-request-reports-not-delivered
+    statement: When the pull request cannot be opened, the conductor finishes everything local without asking and reports NOT DELIVERED with the reason.
+    stated-in:
+      - path: products/kyber-squad/agents/conductor/references/autonomy.md
+        section: Delivery
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/skills/task-gate/references/rework.md

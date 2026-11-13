@@ -49,11 +49,11 @@ The ordering follows from the cost of being wrong at each layer:
 
 | Layer | Cost of catching a defect here |
 |---|---|
-| Deterministic fix (`dotnet format`, analyzer code fixes, `cleanupcode`) | One command. The defect is corrected, not reported. |
+| Deterministic fix (`dotnet format`, analyzer code fixes) | One command. The defect is corrected, not reported. |
 | `code-reviewer` | The full council, plus the gate suite. |
 
 A mechanical defect that reaches a reviewer costs a pass to write it up, a rework cycle to
-apply the fix, and another pass to confirm it — to arrive at an edit `cleanupcode` would have
+apply the fix, and another pass to confirm it — to arrive at an edit `dotnet format` would have
 made for free. So the machine layer runs first, as the developer's exit gate, and a mechanical
 finding in the council's review is evidence the gate did not run, and *that* is the finding.
 
@@ -86,7 +86,7 @@ individual task, and paying the council's price to ask it was the problem this s
 
 | Layer | Who | Scope | Cost |
 |---|---|---|---|
-| **Developer exit gate** | The developer agent running `task-gate`: `dotnet format`, analyzer code fixes, `cleanupcode --include`, build and tests | The files one task changed | No model at all |
+| **Developer exit gate** | The developer agent running `task-gate`: `dotnet format`, analyzer code fixes, build and tests | The files one task changed | No model at all |
 | **Run review** | `code-reviewer` | The whole run at the end, then each fix round | The full council, then verifier cycles |
 
 **The bottom layer has no model in it.** Each developer's exit gate applies fixes and then

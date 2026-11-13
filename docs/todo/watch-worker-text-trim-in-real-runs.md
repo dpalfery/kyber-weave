@@ -25,7 +25,7 @@ runs recorded before the trim:
 - **Rework dispatches per run**, and what they were for. The trim's own estimate is that a rule lost
   to a worker shows up here first, as a second dispatch for something the old text stated.
 - **InspectCode findings at the end-of-run review**, and specifically redundant qualifiers. The
-  mechanical `dotnet jb cleanupcode` pass left the task-end text in the same change, so a rise here is
+  mechanical `dotnet format` pass left the task-end text in the same change, so a rise here is
   the signal it was carrying real work rather than the ban on it.
 - **Task-gate failures by gate id**, to see whether a failure a worker used to fix by reading the agent
   body now arrives at the review instead.

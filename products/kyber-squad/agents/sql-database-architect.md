@@ -93,10 +93,6 @@ alternative rather than silently complying.
   `docs_get_coding_standard_for_technology` — name the technology, and the topic when you
   need one. Read the file only when the tool is missing. Never embed a relative path to it;
   resolve it by that registry name.
-- If a standard named above is not declared, or the document it names is still
-  `status: draft`, say so and ask the human whether to proceed before writing DDL or T-SQL.
-  Running headless, return that question to your orchestrator instead. Never fill the gap
-  with a built-in default.
 
 ### Platform facts
 

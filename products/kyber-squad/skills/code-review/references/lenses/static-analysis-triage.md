@@ -13,7 +13,7 @@ repository with no static analysis is worth the reviewer knowing about.
 On .NET repositories the analyzer gate is normally ReSharper `InspectCode`, declared under
 `review.gates` and documented by the `resharper-clt` skill — read that skill for the report
 format and the inspections it commonly emits. You consume its output; you do not run it
-yourself, and you never run `cleanupcode`, which rewrites source.
+yourself, and you never run a formatter or fixer, which rewrites source.
 
 ## What this lens owns
 

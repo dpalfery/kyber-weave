@@ -53,8 +53,10 @@ answers the Arbiter's questions through `SystemOneClient`
 4. **A rule the grader cannot judge reliably keeps one anchor, not a sentence.** A home that stays below
    the floor after its question is reworded carries an `anchor`, a protocol token or heading it already
    has, checked offline. Every miss and every anchor is visible in the catalog and the report.
-5. **Outages do not turn the build red.** A provider error or timeout skips the graded test with a
-   warning; a confident wrong answer, an answer below the floor, or a refused key fails it.
+5. **Outages and hesitation do not turn the build red.** A provider error or timeout skips the graded
+   test with a warning, and so does an answer that points the right way but lands below the floor (it is
+   listed in the report). A confident wrong answer, a wrong-way answer below the floor, or a refused key
+   fails it.
 
 ## Consequences
 

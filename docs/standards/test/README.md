@@ -138,15 +138,17 @@ entry fails there.
 question per rule and document. A home passes at the catalog's `confidence-floor` (0.8); a control or an
 absent-from file must be judged not to state the rule at the same floor. A home is sent whole; a file over
 the model's budget is sent as the section the catalog names, and the report says so. An absent-from file is
-judged one part (one or a few `##` sections) at a time. Outcomes: a confident wrong answer or an answer
-below the floor fails, a provider error or timeout skips the test with a warning, a refused key fails.
+judged one part (one or a few `##` sections) at a time. Outcomes: an answer that points the right way but
+lands below the floor is a warning, listed in the report and not a failure; a confident wrong answer, or a
+wrong-way answer below the floor, fails; a provider error or timeout skips the test with a warning; a
+refused key fails.
 
 **Adding a rule.** Write the statement as one narrow judgment, in the documents' own terms (split an "and"
 into two rules). Name the homes, and give the section heading for any file over about 60 KB. Pick a control
 that plainly does not state it (cutting the home's section with `without-section` works only when no other
-section repeats the rule). Run the grader on the rule. If a home stays below the floor after a rewording,
+section repeats the rule). Run the grader on the rule. If a home keeps drawing warnings after a rewording,
 give that home an `anchor` (a protocol token or heading it already carries, never a sentence of the rule)
-instead of a grade; if an absent-from file stays below the floor, drop it and say why in the commit.
+instead of a grade; if an absent-from file keeps drawing warnings, drop it and say why in the commit.
 
 **Running it locally.** The key comes from `TYPESAFE_API_KEY` or the OS credential store entry for the
 endpoint's origin:

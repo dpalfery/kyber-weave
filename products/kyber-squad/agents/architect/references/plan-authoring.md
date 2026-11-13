@@ -56,6 +56,10 @@ The boundary is exact:
 - It may merge RED tasks when a later one does not need an earlier GREEN.
 - It may never merge a RED task into its GREEN. Those stay two workers, because the implementation
   specialist's passing run only proves the contract while someone else wrote it.
+- Tests of several layers in one compiled test project must not all run RED first: order the
+  tasks RED then GREEN per layer (dependency: next layer's RED on the previous GREEN), so the
+  project compiles after every GREEN. Parallel RED is allowed only where each task has its own
+  test project, or one RED task adds the stubs the project needs to compile.
 
 ## Task file
 

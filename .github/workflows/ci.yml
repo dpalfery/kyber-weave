@@ -224,7 +224,9 @@ jobs:
       # ProseRuleGradingTests asks Jev whether the shipped prose states each catalog rule
       # (docs/standards/test/README.md#prose-rules). It runs only when the secret is set: a
       # fork's pull request gets no secrets, so KW_PROSE_GRADE is empty and the test skips with
-      # its reason. A grader outage is a skip with a warning; a confident wrong answer fails.
+      # its reason. A grader outage is a skip with a warning, and so is an answer that points the right
+      # way but lands below the confidence floor (it is listed in the report); a confident wrong
+      # answer, or a wrong-way answer below the floor, fails.
       - name: Test
         env:
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}

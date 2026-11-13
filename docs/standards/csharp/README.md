@@ -158,19 +158,7 @@ scripts/proc-guard.sh run -- dotnet format KyberWeave.sln whitespace --verify-no
 scripts/proc-guard.sh run -- dotnet format KyberWeave.sln style --verify-no-changes --severity warn -v minimal
 ```
 
-The cleanupcode fix pass is optional and off by default. Run it only after the two `dotnet format`
-steps above, which restore the solution that `--no-build` needs. On this machine `dotnet jb
-cleanupcode` never exits, so the command runs under a wrapper that stops it once the log shows its
-finish line, and fails with exit 124 after 300 seconds. Remove the wrapper when the tool exits on its
-own. Replace `<task>` with a scratch folder name and `<changed files>` with the files you changed.
-The tool logs its finish line after a failed cleanup too, so a log holding `Failed to run cleanup` fails the command.
-The profile rewrites the whole of each included file, not only the changed lines, so revert edits to members you did not touch.
-
-```bash
-mkdir -p ".agent_scratchpad/<task>"
-scripts/report-gate.sh --report "$PWD/.agent_scratchpad/<task>/cleanupcode.log" --contains "Close solution instance" --grace 5 --timeout 300 -- dotnet jb cleanupcode KyberWeave.sln --profile=KyberWeave --include="<changed files>" --no-build "--LogFile=$PWD/.agent_scratchpad/<task>/cleanupcode.log" --LogLevel=VERBOSE \
-  && ! grep -q "Failed to run cleanup" "$PWD/.agent_scratchpad/<task>/cleanupcode.log"
-```
+`dotnet format` is the only formatter. ReSharper `cleanupcode` is not used: it can finish its work and then never exit (ADR 0074).
 
 - **Build first, and let the later runs reuse it.** The build is where the analyzers run, so a
   warning stops here rather than at review; `--no-build` on the test line is safe only after it.

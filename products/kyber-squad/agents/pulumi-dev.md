@@ -75,7 +75,6 @@ Use the host's indexes before raw reads.
 ## Hard rules
 
 - Never embed a relative path to a standard. Resolve **<pulumi-coding-standard>** and **<csharp-coding-standard>** by those registry names.
-- If a standard named above is not declared, or the document it names is still `status: draft`, say so and ask the human whether to proceed before writing code. Running headless, return that question to your orchestrator instead. Never fill the gap with a built-in default.
 - Never skip the standard lookup because a preview looks clean or a skill already covers naming. The standard is policy; preview is verification.
 - Never apply a change whose preview you have not inspected, and never hide a replacement inside an unreviewed apply.
 - Never print, log, serialize, or write decrypted secret values.
@@ -92,7 +91,7 @@ When done, return:
 STATUS: READY_FOR_REVIEW
 ARTIFACTS: <list of Pulumi/C# file paths changed or created>
 SUMMARY: <2–4 sentences: stacks/components touched, preview outcome, replacement or cross-stack risk, and any hand-offs>
-DIAGNOSTICS: clean on <paths> | fix pass: <format, format analyzers, cleanupcode — all applied> | artifacts: <isolated artifacts path> | baseline: <scratchpad path> | remaining: <none, or list with baseline proof>
+DIAGNOSTICS: clean on <paths> | fix pass: <format, format analyzers — all applied> | artifacts: <isolated artifacts path> | baseline: <scratchpad path> | remaining: <none, or list with baseline proof>
 STACK_OUTPUTS: <output names github-devops must consume, or "none">
 TASK_GATE: <PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE> — agent=pulumi-dev gates=<n> failed=<ids|none> skipped=<n> report=<path> runs=<k>
 OPEN_QUESTIONS: <bullets, or "none">

@@ -72,7 +72,10 @@ public sealed class ProseRuleGradingTests
         string report = ProseReport.Format(results)
             + string.Create(CultureInfo.InvariantCulture,
                 $"\n{model} at {endpoint}: {cases.Count} questions over {rules.Count} rules, floor {catalog.ConfidenceFloor}, "
-                + $"{grader.InputTokens} input + {grader.OutputTokens} output tokens, ${grader.CostUsd:0.0000}, {clock.Elapsed.TotalSeconds:0}s.");
+                + $"{grader.InputTokens} input + {grader.OutputTokens} output tokens, ${grader.CostUsd:0.0000}, {clock.Elapsed.TotalSeconds:0}s."
+                + $"\n{results.Count(item => item.Outcome == ProseOutcome.Pass)} passed, {results.Count(item => item.Outcome == ProseOutcome.Warning)} warnings "
+                + $"(right way, below the floor), {results.Count(item => item.Outcome is ProseOutcome.Wrong or ProseOutcome.Unsure or ProseOutcome.OverBudget)} failed, "
+                + $"{results.Count(item => item.Outcome == ProseOutcome.Outage)} unanswered.");
         TestContext.Current.TestOutputHelper?.WriteLine(report);
         await WriteOutputAsync(results, report, cancellationToken);
 
@@ -126,9 +129,20 @@ public sealed class ProseRuleGradingTests
     }
 
     [Fact]
-    public async Task Grade_ReportsARightAnswerBelowTheFloorAsUnsure()
+    public async Task Grade_ReportsARightAnswerBelowTheFloorAsAWarning()
     {
         using StubHandler handler = new(HttpStatusCode.OK, Answer(ProseGrader.StatedAnswer, 0.6));
+        using ProseGrader grader = new(handler, ProbeEndpoint, DefaultModel, "key", 0.8, 5_000);
+
+        ProseResult result = await grader.GradeAsync(Case(ProseCaseKind.Stated), TestContext.Current.CancellationToken);
+
+        Assert.Equal(ProseOutcome.Warning, result.Outcome);
+    }
+
+    [Fact]
+    public async Task Grade_ReportsAWrongAnswerBelowTheFloorAsUnsure()
+    {
+        using StubHandler handler = new(HttpStatusCode.OK, Answer(ProseGrader.NotStatedAnswer, 0.6));
         using ProseGrader grader = new(handler, ProbeEndpoint, DefaultModel, "key", 0.8, 5_000);
 
         ProseResult result = await grader.GradeAsync(Case(ProseCaseKind.Stated), TestContext.Current.CancellationToken);

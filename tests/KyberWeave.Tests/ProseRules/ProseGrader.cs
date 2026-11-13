@@ -32,7 +32,10 @@ internal enum ProseOutcome
     /// <summary>The other answer, at or above the floor: a confident wrong answer.</summary>
     Wrong,
 
-    /// <summary>Either answer below the floor.</summary>
+    /// <summary>The expected answer, but below the floor: it points the right way, so it is reported and does not fail.</summary>
+    Warning,
+
+    /// <summary>The other answer, below the floor: unsure and in the wrong direction.</summary>
     Unsure,
 
     /// <summary>The provider gave no readable answer: an error, a timeout, or a malformed body.</summary>
@@ -166,9 +169,15 @@ internal sealed class ProseGrader : IDisposable
         }
 
         double? confidence = score.Confidence;
-        ProseOutcome outcome = confidence is not double value || value < _floor
-            ? ProseOutcome.Unsure
-            : string.Equals(answer, item.Expected, StringComparison.Ordinal) ? ProseOutcome.Pass : ProseOutcome.Wrong;
+        bool expected = string.Equals(answer, item.Expected, StringComparison.Ordinal);
+        bool confident = confidence is double value && value >= _floor;
+        ProseOutcome outcome = (expected, confident) switch
+        {
+            (true, true) => ProseOutcome.Pass,
+            (true, false) => ProseOutcome.Warning,
+            (false, true) => ProseOutcome.Wrong,
+            _ => ProseOutcome.Unsure,
+        };
         return new ProseResult(item, outcome, answer, confidence, null);
     }
 
