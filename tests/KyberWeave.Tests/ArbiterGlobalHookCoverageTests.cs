@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -64,13 +63,13 @@ public sealed class ArbiterGlobalHookCoverageTests
         string payload = ArbiterGlobalHookScenario.Dispatch(
             scenario.ProjectRoot, ToolUseId, "csharp-dev", "csharp-dev", "Implement the plan parser.");
 
-        Stopwatch clock = Stopwatch.StartNew();
         HookRun run = await scenario.RunGlobal(payload);
-        clock.Stop();
 
+        // The log, not the clock: a hook that waited for a claim says the candidates did not fire, and
+        // elapsed time under a loaded test run says nothing about whether it waited.
         Assert.Contains(ArbiterGlobalHookScenario.EvaluatingLog, run.Stderr, StringComparison.Ordinal);
-        Assert.True(clock.Elapsed < TimeSpan.FromMilliseconds(1000),
-            $"A non-candidate agent file must not make the user-level hook wait. Elapsed {clock.ElapsedMilliseconds} ms.");
+        Assert.False(run.Stderr.Contains("candidate hooks did not fire", StringComparison.Ordinal),
+            $"A non-candidate agent file must not make the user-level hook wait. {run.Stderr}");
     }
 
     [Fact]
@@ -88,13 +87,13 @@ public sealed class ArbiterGlobalHookCoverageTests
         string payload = ArbiterGlobalHookScenario.Dispatch(
             scenario.ProjectRoot, ToolUseId, null, "architect", ArbiterGlobalHookScenario.UnmarkedPrompt);
 
-        Stopwatch clock = Stopwatch.StartNew();
         HookRun run = await scenario.RunGlobal(payload);
-        clock.Stop();
 
+        // The log, not the clock: a hook that waited for a claim says the candidates did not fire, and
+        // elapsed time under a loaded test run says nothing about whether it waited.
         Assert.Contains(ArbiterGlobalHookScenario.EvaluatingLog, run.Stderr, StringComparison.Ordinal);
-        Assert.True(clock.Elapsed < TimeSpan.FromMilliseconds(1000),
-            $"An agent file that is not effective for a main-thread dispatch must not make the hook wait. Elapsed {clock.ElapsedMilliseconds} ms.");
+        Assert.False(run.Stderr.Contains("candidate hooks did not fire", StringComparison.Ordinal),
+            $"An agent file that is not effective for a main-thread dispatch must not make the hook wait. {run.Stderr}");
     }
 
     [Fact]
@@ -114,13 +113,13 @@ public sealed class ArbiterGlobalHookCoverageTests
         string payload = ArbiterGlobalHookScenario.Dispatch(
             scenario.ProjectRoot, ToolUseId, null, "architect", ArbiterGlobalHookScenario.UnmarkedPrompt);
 
-        Stopwatch clock = Stopwatch.StartNew();
         HookRun run = await scenario.RunGlobal(payload);
-        clock.Stop();
 
+        // The log, not the clock: a hook that waited for a claim says the candidates did not fire, and
+        // elapsed time under a loaded test run says nothing about whether it waited.
         Assert.Contains(ArbiterGlobalHookScenario.EvaluatingLog, run.Stderr, StringComparison.Ordinal);
-        Assert.True(clock.Elapsed < TimeSpan.FromMilliseconds(1000),
-            $"A project skill shadowed by a personal skill must not make the hook wait. Elapsed {clock.ElapsedMilliseconds} ms.");
+        Assert.False(run.Stderr.Contains("candidate hooks did not fire", StringComparison.Ordinal),
+            $"A project skill shadowed by a personal skill must not make the hook wait. {run.Stderr}");
     }
 
     [Theory]
