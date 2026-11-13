@@ -153,6 +153,7 @@ public static class ArchitectShellGuard
         {
             ["kyber-weave docs validate . --merge-ready"] = new("kyber-weave docs validate . --merge-ready", true),
             ["kyber-weave docs drift ."] = new("kyber-weave docs drift .", true),
+            ["kyber-weave docs tasks <plan file> --write"] = new("kyber-weave docs tasks docs/plans/x.md --write", true),
             ["kyber-weave arbiter plan <plan file> -f json"] = new("kyber-weave arbiter plan docs/plans/x.md -f json", true),
             ["codegraph explore \"…\""] = new("codegraph explore \"x\"", true),
             ["kyber-weave doctor --ensure"] = new("kyber-weave doctor --ensure", true),
@@ -939,6 +940,14 @@ public static class ArchitectShellGuard
             && words.Count == 4
             && string.Equals(words[2], "drift", StringComparison.Ordinal)
             && !IsFlag(words[3]);
+        // The task file writer: exactly one path operand, then --write or --check. The command derives the file from
+        // the plan and writes only <plan>.tasks.json beside it, so the guard needs no path rule of its own.
+        bool docsTasks = docs
+            && words.Count == 5
+            && string.Equals(words[2], "tasks", StringComparison.Ordinal)
+            && !IsFlag(words[3])
+            && (string.Equals(words[4], "--write", StringComparison.Ordinal)
+                || string.Equals(words[4], "--check", StringComparison.Ordinal));
         // doctor --ensure takes no operand: an extra path would be a second target the form does not name.
         bool doctor = words.Count == 3
             && string.Equals(words[1], "doctor", StringComparison.Ordinal)
@@ -953,11 +962,11 @@ public static class ArchitectShellGuard
             && string.Equals(words[4], "-f", StringComparison.Ordinal)
             && string.Equals(words[5], "json", StringComparison.Ordinal);
 
-        return validate || drift || doctor || arbiterPlan
+        return validate || drift || docsTasks || doctor || arbiterPlan
             ? null
             : new Refusal(
                 "is not a kyber-weave form on the architect's list",
-                "Use kyber-weave docs validate <dir> --merge-ready, docs drift <dir>, doctor --ensure, or arbiter plan <plan file> -f json");
+                "Use kyber-weave docs validate <dir> --merge-ready, docs drift <dir>, docs tasks <plan file> --write, doctor --ensure, or arbiter plan <plan file> -f json");
     }
 
     private static Refusal? CheckGit(List<string> words)
