@@ -29,16 +29,37 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
 
     public void Dispose() => Directory.Delete(_root, recursive: true);
 
-    private sealed class FirstAnswerProvider : IArbiterProvider
+    /// <summary>
+    /// The answer a rule records when step 0 could not decide it from the ledger and the question went to a model
+    /// that did not answer: the prose reading is the model's, never step 0's (ADR 0072).
+    /// </summary>
+    private const string Asked = ArbiterStep1BatchResult.NotEvaluated;
+
+    /// <summary>Answers the scripted rules with high confidence and leaves every other question unevaluated.</summary>
+    private sealed class ScriptedProvider : IArbiterProvider
     {
+        public Dictionary<string, string> Answers { get; } = new(StringComparer.Ordinal);
+
         public Task<ArbiterStep1BatchResult> AskStep1Async(
             IReadOnlyList<ArbiterRule> rules,
             ArbiterFactSet facts,
             IReadOnlyDictionary<string, string>? step0Answers = null,
             CancellationToken cancellationToken = default) =>
             Task.FromResult(new ArbiterStep1BatchResult(
-                rules.ToDictionary(rule => rule.Id, rule => rule.Answers[0], StringComparer.Ordinal), "stub", null, true));
+                rules.ToDictionary(
+                    rule => rule.Id,
+                    rule => Answers.TryGetValue(rule.Id, out string? answer) ? answer : ArbiterStep1BatchResult.NotEvaluated,
+                    StringComparer.Ordinal),
+                "stub",
+                null,
+                true,
+                rules.ToDictionary(
+                    rule => rule.Id,
+                    rule => new ArbiterStep1Score(null, 0.95, rule.Ask?.ConfidenceAtLeast),
+                    StringComparer.Ordinal)));
     }
+
+    private readonly ScriptedProvider _provider = new();
 
     private sealed class NoGitFacts : IArbiterGitFacts
     {
@@ -68,7 +89,7 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     }
 
     private ArbiterEvaluator Evaluator() => new(
-        new FirstAnswerProvider(),
+        _provider,
         _ => null,
         new InFlightLedger(ArbiterDirectory),
         new DecisionLog(ArbiterDirectory),
@@ -132,8 +153,8 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     {
         await Dispatch("csharp-dev", Prompt("T2"));
 
-        Assert.Equal("waiting", Answer("KW-ARB-READY-001"));
-        Assert.Equal("missing", Answer("KW-ARB-MODE-001"));
+        Assert.Equal(Asked, Answer("KW-ARB-READY-001"));
+        Assert.Equal(Asked, Answer("KW-ARB-MODE-001"));
     }
 
     [Fact]
@@ -156,8 +177,8 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
 
         await Dispatch("csharp-dev", Prompt("T2"));
 
-        Assert.Equal("waiting", Answer("KW-ARB-READY-001"));
-        Assert.Equal("missing", Answer("KW-ARB-MODE-001"));
+        Assert.Equal(Asked, Answer("KW-ARB-READY-001"));
+        Assert.Equal(Asked, Answer("KW-ARB-MODE-001"));
     }
 
     [Fact]
@@ -168,7 +189,7 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
 
         await Dispatch("csharp-dev", Prompt("T2"));
 
-        Assert.Equal("waiting", Answer("KW-ARB-READY-001"));
+        Assert.Equal(Asked, Answer("KW-ARB-READY-001"));
     }
 
     [Fact]
@@ -179,7 +200,7 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
 
         await Dispatch("csharp-dev", Prompt("T2"));
 
-        Assert.Equal("waiting", Answer("KW-ARB-READY-001"));
+        Assert.Equal(Asked, Answer("KW-ARB-READY-001"));
     }
 
     [Fact]
@@ -190,7 +211,7 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
 
         await Dispatch("csharp-dev", Prompt("T2"));
 
-        Assert.Equal("waiting", Answer("KW-ARB-READY-001"));
+        Assert.Equal(Asked, Answer("KW-ARB-READY-001"));
     }
 
     [Fact]
@@ -228,7 +249,7 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
 
         await Dispatch("csharp-dev", Prompt("T2"));
 
-        Assert.Equal("missing", Answer("KW-ARB-MODE-001"));
+        Assert.Equal(Asked, Answer("KW-ARB-MODE-001"));
     }
 
     [Fact]
@@ -268,7 +289,10 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     [Fact]
     public async Task RefusedDispatch_HoldsNothing()
     {
+        // A confident "no failing tests yet" from the model refuses the dispatch.
+        _provider.Answers["KW-ARB-MODE-001"] = "missing";
         await Dispatch("csharp-dev", Prompt("T5"));
+        _provider.Answers.Clear();
         Assert.Equal("escalate", LastPrimary().Outcome);
 
         await Dispatch("test-dev", Prompt("T1"));
@@ -326,6 +350,7 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     {
         ArbiterRule mode = Assert.Single(ArbiterConfig.ProductDefaults.Rules, rule => rule.Id == "KW-ARB-MODE-001");
         ArbiterFactSet facts = new ArbiterFactSet()
+            .With("plan.task", "T4", ArbiterFactLabel.Derived)
             .With("plan.development-mode", "test-first", ArbiterFactLabel.Derived)
             .With("delegation.target", "typescript-dev", ArbiterFactLabel.Derived)
             .With("plan.test-contract.row", "Not applicable", ArbiterFactLabel.Derived);

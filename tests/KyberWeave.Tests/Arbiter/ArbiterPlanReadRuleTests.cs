@@ -68,6 +68,9 @@ public sealed class ArbiterPlanReadRuleTests
             });
     }
 
+    /// <summary>The shipped rule's step-0 answer for those facts.</summary>
+    private static string Answer(string prompt, string target = "csharp-dev") => RuleEngine.Decide(Rule(), Facts(prompt, target));
+
     /// <summary>The effect the shipped rule produces for those facts.</summary>
     private static string Effect(string prompt, string target = "csharp-dev")
     {
@@ -80,30 +83,35 @@ public sealed class ArbiterPlanReadRuleTests
     /// that cannot stop the read is replaced by a dispatch that does not happen.
     /// </summary>
     [Fact]
-    public void APromptThatNamesAPlanningPathEscalatesTheDispatch()
+    public void APromptThatNamesAPlanningPathGoesToTheModel()
     {
+        // The detector reads prose, so a named planning path is undecidable at step 0 and the model is asked
+        // whether the worker is told to read it (ADR 0072). Only a confident names-plan escalates.
         string prompt = Prompt(
             "Read `docs/plans/2026-11-07-ready-tasks.md` and implement the task it describes in " +
             "`src/KyberWeave.Core/RunStart/RunStartPlanner.cs`.");
 
-        Assert.Equal(RuleEffects.Escalate, Effect(prompt));
+        Assert.Equal(RuleEngine.Undecidable, Answer(prompt));
+        Assert.Equal(RuleEffects.Allow, Effect(prompt));
+        Assert.Equal(RuleEffects.Escalate, Rule().Effects["names-plan"]);
+        Assert.Contains("names-plan", Rule().Ask!.Criteria!.Keys);
     }
 
     /// <summary>
     /// Lexical variations (leading ./, duplicate slashes, /./, /../) must still be identified as
-    /// planning paths and escalate rather than bypassing the rule.
+    /// planning paths and reach the model question rather than bypassing the rule.
     /// </summary>
     [Theory]
     [InlineData("./docs/plans/2026-11-07-ready-tasks.md")]
     [InlineData("docs//plans/2026-11-07-ready-tasks.md")]
     [InlineData("docs/./plans/2026-11-07-ready-tasks.md")]
     [InlineData("docs/sub/../plans/2026-11-07-ready-tasks.md")]
-    public void APromptThatNamesALexicallyVariantPlanningPathEscalatesTheDispatch(string path)
+    public void APromptThatNamesALexicallyVariantPlanningPathGoesToTheModel(string path)
     {
         string prompt = Prompt(
             $"Read `{path}` and implement the task it describes in `src/KyberWeave.Core/RunStart/RunStartPlanner.cs`.");
 
-        Assert.Equal(RuleEffects.Escalate, Effect(prompt));
+        Assert.Equal(RuleEngine.Undecidable, Answer(prompt));
     }
 
     /// <summary>
@@ -117,6 +125,7 @@ public sealed class ArbiterPlanReadRuleTests
         string prompt = Prompt(
             "Implement the reader in `src/KyberWeave.Core/RunStart/RunStartPlanner.cs` and report the total.");
 
+        Assert.Equal("no-plan", Answer(prompt));
         Assert.Equal(RuleEffects.Allow, Effect(prompt));
     }
 

@@ -257,16 +257,13 @@ public sealed class PluginHookAdapterTests
     [InlineData("")]
     [InlineData("{\"schema\":\"nope\",\"harness\":\"opencode\",\"phase\":\"before\",\"tool\":\"task\"}")]
     [InlineData("{\"schema\":\"kyber-arbiter.plugin-event/v1\",\"harness\":\"opencode\",\"phase\":\"middle\",\"tool\":\"task\"}")]
-    public void MalformedEnvelope_BlocksFailClosedWithHarnessToken(string stdin)
+    public void MalformedEnvelope_AllowsAndLogsWithHarnessToken(string stdin)
     {
         (int exit, string stdout) = Run(stdin, "conductor", new ScriptedEngine());
 
+        // ADR 0072: an envelope the host cannot read allows, with the code and the harness in the log.
         Assert.Equal(0, exit);
-        using JsonDocument doc = JsonDocument.Parse(stdout);
-        Assert.Equal("block", doc.RootElement.GetProperty("decision").GetString());
-        string reason = doc.RootElement.GetProperty("reason").GetString() ?? string.Empty;
-        Assert.Contains(HookCommand.FailClosedCode, reason, StringComparison.Ordinal);
-        Assert.Contains("opencode", reason, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, stdout);
     }
 
     [Fact]

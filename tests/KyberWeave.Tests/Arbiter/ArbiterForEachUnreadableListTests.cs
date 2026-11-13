@@ -52,12 +52,13 @@ public sealed class ArbiterForEachUnreadableListTests : IDisposable
             .EvaluateAsync(DelegateEvent(), config);
 
         Assert.Empty(provider.Asked);
-        Assert.Equal(RuleEffects.Escalate, result.Outcome);
+        // Undecidable allows in every family (ADR 0072); the record still shows the undecidable answer.
+        Assert.Equal(RuleEffects.Allow, result.Outcome);
         ArbiterDecisionRecord record = Assert.Single(Records(_root));
         ArbiterDecisionRule entry = Assert.Single(record.Rules);
         Assert.Equal(RuleId, entry.Id);
         Assert.Equal(RuleEngine.Undecidable, entry.Answer);
-        Assert.Equal(RuleEffects.Escalate, entry.Effect);
+        Assert.Equal(RuleEffects.Allow, entry.Effect);
         Assert.Null(entry.Candidate);
     }
 }

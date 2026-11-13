@@ -81,11 +81,13 @@ public sealed class ArbiterPlannerRuleTests
     }
 
     [Fact]
-    public void Planner001_PlanFileOutsideThePlanningDirectories_AnswersOutside()
+    public void Planner001_PlanFileOutsideThePlanningDirectories_GoesToTheModel()
     {
+        // Where the planner writes is checked on its return by PLANNER-DIFF-001 against git; the path it is told
+        // is prose, so step 0 does not block on it (ADR 0072).
         ArbiterFactSet facts = PlannerFacts(PlannerPrompt("docs/adr/0001-arbiter-one-command-install.md"));
 
-        Assert.Equal("plan-file-outside-planning-dirs", RuleEngine.Decide(Shipped("KW-ARB-PLANNER-001"), facts));
+        Assert.Equal(RuleEngine.Undecidable, RuleEngine.Decide(Shipped("KW-ARB-PLANNER-001"), facts));
     }
 
     [Theory]
@@ -94,11 +96,14 @@ public sealed class ArbiterPlannerRuleTests
     [InlineData("KYBER-ARBITER: true\nPLAN_FILE: docs/plans/a.md\nPLAN_FILE: docs/plans/b.md\n\nWrite the plan.")]
     [InlineData("KYBER-ARBITER: true\nPLAN_FILE: /tmp/evil/docs/plans/x.md\n\nINTAKE: docs/todo/item.md")]
     [InlineData("KYBER-ARBITER: true\nPLAN_FILE: /Users/x/docs/plans/plan.md\n\nFINALIZE")]
-    public void Planner001_RejectedPlanFile_AnswersPlanFileInvalid(string prompt)
+    public void Planner001_RejectedPlanFile_GoesToTheModelWithTheRawValue(string prompt)
     {
         ArbiterFactSet facts = PlannerFacts(prompt);
 
-        Assert.Equal("plan-file-invalid", RuleEngine.Decide(Shipped("KW-ARB-PLANNER-001"), facts));
+        Assert.Equal(RuleEngine.Undecidable, RuleEngine.Decide(Shipped("KW-ARB-PLANNER-001"), facts));
+        Assert.True(facts.TryGet("delegation.plan-file-raw", out ArbiterFact? raw));
+        // The rejected value is kept for the model rather than dropped.
+        Assert.StartsWith("docs/plans/", (raw!.Value as string ?? string.Empty).Replace("/Users/x/repo/", string.Empty, StringComparison.Ordinal).Replace("/Users/x/", string.Empty, StringComparison.Ordinal).Replace("/tmp/evil/", string.Empty, StringComparison.Ordinal), StringComparison.Ordinal);
     }
 
     [Theory]
@@ -114,26 +119,30 @@ public sealed class ArbiterPlannerRuleTests
     }
 
     [Fact]
-    public void Planner001_NoMarkerAtAll_AnswersMalformed()
+    public void Planner001_NoMarkerAtAll_GoesToTheModel()
     {
         ArbiterFactSet facts = PlannerFacts("KYBER-ARBITER: true\n\nWrite the plan.");
 
-        Assert.Equal("malformed", RuleEngine.Decide(Shipped("KW-ARB-PLANNER-001"), facts));
+        Assert.Equal(RuleEngine.Undecidable, RuleEngine.Decide(Shipped("KW-ARB-PLANNER-001"), facts));
+        Assert.Equal(RuleEffects.Escalate, Shipped("KW-ARB-PLANNER-001").Effects["malformed"]);
     }
 
     [Fact]
     public void Ready001_EmptyDependencyListWithoutCompletedTaskFact_AnswersReady()
     {
-        ArbiterFactSet facts = Facts(("plan.task.depends-on", Array.Empty<string>()));
+        ArbiterFactSet facts = Facts(("plan.task", "T2"), ("plan.task.depends-on", Array.Empty<string>()));
 
         Assert.Equal("ready", RuleEngine.Decide(Shipped("KW-ARB-READY-001"), facts));
     }
 
     [Fact]
-    public void Ready001_UnsatisfiedDependencyWithoutCompletion_AnswersWaiting()
+    public void Ready001_UnsatisfiedDependencyWithoutCompletion_GoesToTheModel()
     {
-        ArbiterFactSet facts = Facts(("plan.task.depends-on", UnsatisfiedDependency));
+        // Completion read from return markers is a reading of the worker's prose, so a dependency the markers do
+        // not show complete is asked about (ADR 0072); the model's confident waiting answer escalates.
+        ArbiterFactSet facts = Facts(("plan.task", "T2"), ("plan.task.depends-on", UnsatisfiedDependency));
 
-        Assert.Equal("waiting", RuleEngine.Decide(Shipped("KW-ARB-READY-001"), facts));
+        Assert.Equal(RuleEngine.Undecidable, RuleEngine.Decide(Shipped("KW-ARB-READY-001"), facts));
+        Assert.Equal(RuleEffects.Escalate, Shipped("KW-ARB-READY-001").Effects["waiting"]);
     }
 }

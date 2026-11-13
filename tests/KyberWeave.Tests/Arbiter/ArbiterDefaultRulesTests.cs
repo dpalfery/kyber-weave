@@ -136,7 +136,10 @@ public sealed class ArbiterDefaultRulesTests
         ArbiterRule mode = ArbiterConfig.ProductDefaults.Rules.Single(r => r.Id == "KW-ARB-MODE-001");
 
         Assert.DoesNotContain("missing-contract", mode.Answers);
-        Assert.Equal(["not-required", "present", "missing", "returns-unobservable"], mode.Answers);
+        Assert.Equal(["no-task", "not-required", "present", "missing", "returns-unobservable"], mode.Answers);
+        // missing comes from the model question only; step 0 never answers it (ADR 0072).
+        Assert.DoesNotContain(mode.Decide!, clause => string.Equals(clause.Answer, "missing", StringComparison.Ordinal));
+        Assert.NotNull(mode.Ask);
     }
 
     [Fact]
@@ -185,10 +188,14 @@ public sealed class ArbiterDefaultRulesTests
         ArbiterRule owner = ArbiterConfig.ProductDefaults.Rules.Single(r => r.Id == "KW-ARB-OWNER-001");
 
         Assert.NotNull(owner.Decide);
-        // The Skills-label owner clause leads; the file-kind fallback answers no-mapping last.
-        Assert.Equal("owner", owner.Decide[0].Answer);
+        // The no-task guard leads, then the Skills-label owner clause; the file-kind fallback answers no-mapping last.
+        // not-owner reads plan prose, so only the model question answers it (ADR 0072).
+        Assert.Equal("no-task", owner.Decide[0].Answer);
+        Assert.Equal("owner", owner.Decide[1].Answer);
         Assert.Equal("no-mapping", owner.Decide[^1].Answer);
-        Assert.Contains(owner.Decide, clause => string.Equals(clause.Answer, "not-owner", StringComparison.Ordinal));
+        Assert.DoesNotContain(owner.Decide, clause => string.Equals(clause.Answer, "not-owner", StringComparison.Ordinal));
+        Assert.NotNull(owner.Ask);
+        Assert.Contains("not-owner", owner.Ask.Criteria!.Keys);
     }
 
     [Fact]

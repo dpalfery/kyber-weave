@@ -27,7 +27,7 @@ public sealed class ArbiterFix1ContractTests : IDisposable
 
     // F1: a throwing stdin read must block, never exit-1-with-empty-stdout.
     [Fact]
-    public async Task Fix1_ThrowingStdinRead_BlocksFailClosed()
+    public async Task Fix1_ThrowingStdinRead_AllowsAndLogs()
     {
         using ThrowingReader stdin = new();
         using StringWriter stdout = new();
@@ -36,17 +36,15 @@ public sealed class ArbiterFix1ContractTests : IDisposable
         int exit = await Composition.DispatchAsync(
             ["hook", "--harness", "claude", "--caller", "conductor"], stdin, stdout, stderr);
 
+        // ADR 0072: a host that cannot read the event cannot decide, so it allows and logs.
         Assert.Equal(0, exit);
-        using JsonDocument doc = JsonDocument.Parse(stdout.ToString());
-        string reason = doc.RootElement
-            .GetProperty("hookSpecificOutput")
-            .GetProperty("permissionDecisionReason").GetString() ?? string.Empty;
-        Assert.Contains(HookCommand.FailClosedCode, reason, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, stdout.ToString());
+        Assert.Contains(HookCommand.FailClosedCode, stderr.ToString(), StringComparison.Ordinal);
     }
 
-    // F1: a throwing host construction must block too, never exit-1-with-empty-stdout.
+    // F1: a throwing host construction allows too, with the code on stderr and exit 0.
     [Fact]
-    public async Task Fix1_ThrowingConstruction_BlocksFailClosed()
+    public async Task Fix1_ThrowingConstruction_AllowsAndLogs()
     {
         using StringReader stdin = new("{}");
         using StringWriter stdout = new();
@@ -60,8 +58,9 @@ public sealed class ArbiterFix1ContractTests : IDisposable
             _ => throw new InvalidOperationException("registry exploded"));
 
         Assert.Equal(0, exit);
-        Assert.NotEqual(string.Empty, stdout.ToString());
-        Assert.Contains(HookCommand.FailClosedCode, stdout.ToString(), StringComparison.Ordinal);
+        Assert.Equal(string.Empty, stdout.ToString());
+        Assert.Contains(HookCommand.FailClosedCode, stderr.ToString(), StringComparison.Ordinal);
+        Assert.Contains("registry exploded", stderr.ToString(), StringComparison.Ordinal);
     }
 
     // F2: keys with space, quote and backslash must round-trip through the

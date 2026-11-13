@@ -327,7 +327,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
     }
 
     [Fact]
-    public async Task Evaluator_ProviderErrorEscalatesConductorButAllowsReview()
+    public async Task Evaluator_ProviderErrorAllowsConductorAndReview()
     {
         const string DelegatePrompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement.";
         const string LensPrompt = "KYBER-ARBITER: true\nLENS: test-lens\n\nChange.";
@@ -337,7 +337,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
         ]);
         ArbiterEvaluationResult conductor = await conductorEvaluator.EvaluateAsync(
             DelegateEvent(DelegatePrompt), conductorConfig);
-        Assert.Equal(RuleEffects.Escalate, conductor.Outcome);
+        Assert.Equal(RuleEffects.Allow, conductor.Outcome);
 
         ArbiterEvaluator reviewEvaluator = CreateEvaluator(new ThrowingProvider());
         KyberWeaveConfig reviewConfig = ConfigWith([
@@ -357,7 +357,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
     }
 
     [Fact]
-    public async Task Evaluator_ExceptionIsNeverAllowAndCarriesHookError()
+    public async Task Evaluator_ExceptionAllowsAndCarriesHookError()
     {
         const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement.";
         ArbiterEvaluator evaluator = CreateEvaluator(new NoneProvider(), new FailingGitFacts());
@@ -369,7 +369,8 @@ public sealed class ArbiterEvaluatorTests : IDisposable
 
         Assert.True(result.IsError);
         Assert.Equal("KW-ARB-HOOK-001", result.ErrorCode);
-        Assert.NotEqual(RuleEffects.Allow, result.Outcome);
+        Assert.Equal(RuleEffects.Allow, result.Outcome);
+        Assert.False(string.IsNullOrWhiteSpace(result.ErrorMessage));
     }
 
     [Fact]
@@ -538,7 +539,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
     /// verdict is its own and not another delegate rule's.
     /// </summary>
     [Fact]
-    public async Task Evaluator_EscalatesADispatchWhosePromptNamesThePlan()
+    public async Task Evaluator_AsksAboutADispatchWhosePromptNamesThePlanAndAllowsWithoutAModel()
     {
         const string Prompt =
             "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\n" +
@@ -551,8 +552,10 @@ public sealed class ArbiterEvaluatorTests : IDisposable
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(DelegateEvent(Prompt), config);
 
+        // The path detector reads prose, so step 0 leaves the rule undecidable and the model is asked; with no
+        // model the dispatch proceeds (ADR 0072).
         Assert.False(result.IsError, result.ErrorMessage);
-        Assert.Equal(RuleEffects.Escalate, result.Outcome);
+        Assert.Equal(RuleEffects.Allow, result.Outcome);
     }
 
     /// <summary>

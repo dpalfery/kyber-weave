@@ -52,12 +52,13 @@ public sealed class ArbiterNullConfidenceFloorTests : IDisposable
     public async Task AnAnswerWithAFloorAndNoConfidenceIsUndecidable()
     {
         ArbiterEvaluator evaluator = ArbiterEvaluatorFixtures.Evaluator(_root, new FloorWithoutConfidenceProvider());
-        ArbiterRule rule = ArbiterEvaluatorFixtures.AskRule("KW-ARB-ASK-001", "delegate", "within-task", RuleEffects.Allow);
+        // The answer would escalate if it stood; floored to undecidable it allows (ADR 0072).
+        ArbiterRule rule = ArbiterEvaluatorFixtures.AskRule("KW-ARB-ASK-001", "delegate", "within-task", RuleEffects.Escalate);
         KyberWeaveConfig config = ArbiterEvaluatorFixtures.ConfigWith([rule with { Ask = rule.Ask! with { ConfidenceAtLeast = 0.8 } }]);
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(ArbiterEvaluatorFixtures.DelegateEvent(), config);
 
-        Assert.Equal(RuleEffects.Escalate, result.Outcome);
+        Assert.Equal(RuleEffects.Allow, result.Outcome);
     }
 
     /// <summary>

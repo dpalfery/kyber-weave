@@ -389,33 +389,29 @@ public sealed class DevinHookAdapterTests
     }
 
     [Fact]
-    public void InternalError_WritesDenyShape()
+    public void InternalError_AllowsAndLogs()
     {
         ScriptedEngine engine = new() { ThrowOnPre = true };
 
-        (int exit, string stdout, _) = Run(Fixture("pre-run-subagent-dispatch.json"), null, engine);
+        (int exit, string stdout, string log) = Run(Fixture("pre-run-subagent-dispatch.json"), null, engine);
 
+        // ADR 0072: a fault the host cannot decide on allows, with the code in the log.
         Assert.Equal(0, exit);
-        using JsonDocument doc = JsonDocument.Parse(stdout);
-        Assert.Equal("block", doc.RootElement.GetProperty("decision").GetString());
-        string reason = doc.RootElement.GetProperty("reason").GetString() ?? string.Empty;
-        Assert.Contains(HookCommand.FailClosedCode, reason, StringComparison.Ordinal);
-        Assert.Contains("ANSWER: error", reason, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, stdout);
+        Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void InternalError_OnReturn_AlsoWritesDenyShape()
+    public void InternalError_OnReturn_AlsoAllowsAndLogs()
     {
         ScriptedEngine engine = new() { ThrowOnPost = true };
 
-        (int exit, string stdout, _) = Run(Fixture("post-run-subagent-completed.json"), null, engine);
+        (int exit, string stdout, string log) = Run(Fixture("post-run-subagent-completed.json"), null, engine);
 
+        // ADR 0072: a fault the host cannot decide on allows, with the code in the log.
         Assert.Equal(0, exit);
-        using JsonDocument doc = JsonDocument.Parse(stdout);
-        Assert.Equal("block", doc.RootElement.GetProperty("decision").GetString());
-        string reason = doc.RootElement.GetProperty("reason").GetString() ?? string.Empty;
-        Assert.Contains(HookCommand.FailClosedCode, reason, StringComparison.Ordinal);
-        Assert.Contains("ANSWER: error", reason, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, stdout);
+        Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
     }
 
     [Fact]

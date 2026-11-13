@@ -207,9 +207,12 @@ public sealed class LastResortBlockTests
     [Theory]
     [InlineData("cursor", "permission", "deny")]
     [InlineData("pi", "decision", "block")]
-    public void Run_WhenAdapterCannotRenderItsOwnBlock_WritesTheHarnessDialect(
+    public void Run_WhenTheHostFaults_AllowsAndLogsInsteadOfBlocking(
         string harness, string key, string expected)
     {
+        // The host no longer renders a block on its own fault (ADR 0072); the dialect table stays for direct callers.
+        _ = key;
+        _ = expected;
         HarnessAdapterRegistry registry = new([new ThrowingAdapter(harness)]);
         HookCommand command = new(registry, _ => throw new InvalidOperationException("no config"));
         using StringWriter stdout = new();
@@ -218,8 +221,8 @@ public sealed class LastResortBlockTests
         int exit = command.Run(harness, null, """{"tool_name":"Task"}""", stdout, stderr);
 
         Assert.Equal(0, exit);
-        using JsonDocument doc = JsonDocument.Parse(stdout.ToString());
-        Assert.Equal(expected, doc.RootElement.GetProperty(key).GetString());
+        Assert.Equal(string.Empty, stdout.ToString());
+        Assert.Contains(HookCommand.FailClosedCode, stderr.ToString(), StringComparison.Ordinal);
     }
 
     /// <summary>Allows everything; the registry-completeness test never consults an adapter.</summary>

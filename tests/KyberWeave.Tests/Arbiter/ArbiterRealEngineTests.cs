@@ -35,6 +35,11 @@ public sealed class ArbiterRealEngineTests : IDisposable
     {
         public bool Throw { get; set; }
 
+        /// <summary>Rule id to the choice answered for it with confidence <see cref="Confidence"/>; others are not evaluated.</summary>
+        public Dictionary<string, string> Answers { get; } = new(StringComparer.Ordinal);
+
+        public double Confidence { get; set; } = 0.95;
+
         public Task<ArbiterStep1BatchResult> AskStep1Async(
             IReadOnlyList<ArbiterRule> rules,
             ArbiterFactSet facts,
@@ -49,15 +54,26 @@ public sealed class ArbiterRealEngineTests : IDisposable
             // Provider none semantics: step-1 rules are not evaluated, which is
             // not undecidable, so the family combines step-0 effects alone.
             Dictionary<string, string> answers = new(StringComparer.Ordinal);
+            Dictionary<string, ArbiterStep1Score> scores = new(StringComparer.Ordinal);
             foreach (ArbiterRule rule in rules)
             {
-                if (rule.Ask is not null)
+                if (rule.Ask is null)
+                {
+                    continue;
+                }
+
+                if (Answers.TryGetValue(rule.Id, out string? answer))
+                {
+                    answers[rule.Id] = Confidence >= (rule.Ask.ConfidenceAtLeast ?? 0) ? answer : RuleEngine.Undecidable;
+                    scores[rule.Id] = new ArbiterStep1Score(null, Confidence, rule.Ask.ConfidenceAtLeast);
+                }
+                else
                 {
                     answers[rule.Id] = ArbiterStep1BatchResult.NotEvaluated;
                 }
             }
 
-            return Task.FromResult(new ArbiterStep1BatchResult(answers, null, null, false));
+            return Task.FromResult(new ArbiterStep1BatchResult(answers, null, null, Answers.Count > 0, scores));
         }
     }
 
@@ -378,24 +394,18 @@ public sealed class ArbiterRealEngineTests : IDisposable
 
         (int exit, string stdout, string log) = Run(command, Payload("PreToolUse", "csharp-dev", Prompt));
 
-        // A provider crash lets the dispatch continue loudly: the failure is written
-        // to the log and the chat-visible note, never a block.
+        // A provider crash leaves the question undecidable, which allows; the failure is logged, never a block.
         Assert.Equal(0, exit);
-        using JsonDocument doc = JsonDocument.Parse(stdout);
-        JsonElement output = doc.RootElement.GetProperty("hookSpecificOutput");
-        Assert.Equal("allow", output.GetProperty("permissionDecision").GetString());
-        string note = output.GetProperty("permissionDecisionReason").GetString() ?? string.Empty;
-        Assert.Contains(HookCommand.FailClosedCode, note, StringComparison.Ordinal);
-        Assert.Contains("the decision model failed", note, StringComparison.Ordinal);
-        Assert.Contains("judged by no model", note, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"deny\"", stdout, StringComparison.Ordinal);
         Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
+        Assert.Contains("the decision model failed", log, StringComparison.Ordinal);
     }
 
     /// <summary>
     /// Runs one factory <c>PreToolUse</c> <c>Task</c> dispatch to <c>architect</c> through the
     /// production hook command, with the shipped rules active and a <c>kind: none</c> provider.
     /// </summary>
-    private (int Exit, string Stdout, string Log) RunFactory(string prompt, string? sessionId)
+    private (int Exit, string Stdout, string Log) RunFactory(string prompt, string? sessionId, FakeProvider? provider = null)
     {
         Directory.CreateDirectory(Path.Combine(_repo.Path, ".kyber-weave"));
         File.WriteAllText(
@@ -418,7 +428,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
         string stdin = "{\"hook_event_name\":\"PreToolUse\"," + session +
             "\"cwd\":\"" + cwd + "\",\"tool_name\":\"Task\",\"tool_input\":" + toolInput + "}";
 
-        HookCommand command = CreateCommand(new FakeProvider());
+        HookCommand command = CreateCommand(provider ?? new FakeProvider());
         using StringWriter stdout = new();
         using StringWriter log = new();
         int exit = command.Run("factory", null, stdin, stdout, log);
@@ -434,21 +444,48 @@ public sealed class ArbiterRealEngineTests : IDisposable
     }
 
     [Fact]
-    public void RealEngine_Factory_AbsolutePlanFile_DeniesWithTheRealReason()
+    public void RealEngine_Factory_AbsolutePlanFile_NoLongerBlocksByItself()
     {
+        // ADR 0072: an absolute PLAN_FILE is a spelling, not a finding. Step 0 cannot recognise it, the model is
+        // asked, and with no model the dispatch proceeds.
         (int exit, string stdout, _) = RunFactory(
             "KYBER-ARBITER: true\nPLAN_FILE: /Users/x/repo.worktrees/fix/docs/plans/plan.md\n\nWrite the plan.",
             "sess-factory-absolute");
 
         Assert.Equal(0, exit);
-        using JsonDocument doc = JsonDocument.Parse(stdout);
-        JsonElement output = doc.RootElement.GetProperty("hookSpecificOutput");
-        Assert.Equal("deny", output.GetProperty("permissionDecision").GetString());
-        string reason = output.GetProperty("permissionDecisionReason").GetString() ?? string.Empty;
-        Assert.Contains("ANSWER: plan-file-invalid (step 0)", reason, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, stdout);
+    }
+
+    [Fact]
+    public void RealEngine_Factory_ConfidentMalformedAnswer_DeniesWithTheModelReason()
+    {
+        FakeProvider provider = new();
+        provider.Answers["KW-ARB-PLANNER-001"] = "malformed";
+
+        (int exit, string stdout, _) = RunFactory(
+            "KYBER-ARBITER: true\nPLAN_FILE: /Users/x/repo.worktrees/fix/docs/plans/plan.md\n\nRewrite src/Program.cs.",
+            "sess-factory-absolute",
+            provider);
+
+        Assert.Equal(0, exit);
+        string reason = DenyReason(stdout);
+        Assert.Contains("ANSWER: malformed (step 1)", reason, StringComparison.Ordinal);
         Assert.Contains("CALLER: conductor (factory)", reason, StringComparison.Ordinal);
-        Assert.Contains("repository-relative", reason, StringComparison.Ordinal);
-        Assert.DoesNotContain("recognised marker", reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RealEngine_Factory_LowConfidenceMalformedAnswer_Allows()
+    {
+        FakeProvider provider = new() { Confidence = 0.4 };
+        provider.Answers["KW-ARB-PLANNER-001"] = "malformed";
+
+        (int exit, string stdout, _) = RunFactory(
+            "KYBER-ARBITER: true\nPLAN_FILE: /Users/x/repo.worktrees/fix/docs/plans/plan.md\n\nWrite the plan.",
+            "sess-factory-absolute",
+            provider);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(string.Empty, stdout);
     }
 
     [Fact]
@@ -489,9 +526,9 @@ public sealed class ArbiterRealEngineTests : IDisposable
     {
         const string WithoutPlanFile = "KYBER-ARBITER: true\n\nWrite the plan.";
 
-        string first = DenyReason(RunFactory(WithoutPlanFile, "sess-A").Stdout);
-        string second = DenyReason(RunFactory(WithoutPlanFile, "sess-A").Stdout);
-        string otherSession = DenyReason(RunFactory(WithoutPlanFile, "sess-B").Stdout);
+        string first = DenyReason(RunFactory(WithoutPlanFile, "sess-A", Malformed()).Stdout);
+        string second = DenyReason(RunFactory(WithoutPlanFile, "sess-A", Malformed()).Stdout);
+        string otherSession = DenyReason(RunFactory(WithoutPlanFile, "sess-B", Malformed()).Stdout);
 
         Assert.Contains("REPEAT: 1", first, StringComparison.Ordinal);
         Assert.Contains("REPEAT: 2", second, StringComparison.Ordinal);
@@ -506,10 +543,18 @@ public sealed class ArbiterRealEngineTests : IDisposable
     {
         const string WithoutPlanFile = "KYBER-ARBITER: true\n\nWrite the plan.";
 
-        string first = DenyReason(RunFactory(WithoutPlanFile, sessionId).Stdout);
-        string second = DenyReason(RunFactory(WithoutPlanFile, sessionId).Stdout);
+        string first = DenyReason(RunFactory(WithoutPlanFile, sessionId, Malformed()).Stdout);
+        string second = DenyReason(RunFactory(WithoutPlanFile, sessionId, Malformed()).Stdout);
 
         Assert.Contains("REPEAT: 1", first, StringComparison.Ordinal);
         Assert.Contains("REPEAT: 1", second, StringComparison.Ordinal);
+    }
+
+    /// <summary>A provider that confidently answers the planner rule's violating choice, so the dispatch escalates.</summary>
+    private static FakeProvider Malformed()
+    {
+        FakeProvider provider = new();
+        provider.Answers["KW-ARB-PLANNER-001"] = "malformed";
+        return provider;
     }
 }
