@@ -224,8 +224,21 @@ public static class ChangedFiles
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(baseRef);
 
-        string mergeBase = ResolveMergeBase(workingDirectory, baseRef);
-        return (mergeBase, RunGit(workingDirectory, "diff", "--no-color", "--relative", mergeBase, "--"));
+        string[] output = RunGitPaths(workingDirectory, "merge-base", baseRef, "HEAD");
+        if (output.Length == 0)
+            throw new InvalidOperationException($"'{baseRef}' and HEAD have no common commit");
+
+        string mergeBase = output[0].Trim();
+        return (mergeBase, DiffSince(workingDirectory, mergeBase));
+    }
+
+    /// <summary>The unified diff from <paramref name="commit"/> to the files on disk; untracked files are not in it.</summary>
+    /// <exception cref="InvalidOperationException">git could not produce the diff.</exception>
+    public static string DiffSince(string workingDirectory, string commit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(commit);
+        return RunGit(workingDirectory, "diff", "--no-color", "--relative", commit, "--");
     }
 
     /// <summary>

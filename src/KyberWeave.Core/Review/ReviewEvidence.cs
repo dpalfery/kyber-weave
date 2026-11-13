@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Globalization;
 using System.Text;
 
@@ -27,10 +28,15 @@ public static class ReviewEvidence
     /// <param name="baseRef">The ref the change is measured from.</param>
     /// <param name="gates">The complete gate report, carried gates included.</param>
     /// <param name="gatesPath">Where the gate report was written.</param>
+    /// <param name="priorHead">
+    ///     In a verifier cycle, the head the prior cycle reviewed: the diff is then the fix delta from it, while the
+    ///     changed files stay the whole change's.
+    /// </param>
     /// <returns>The evidence file's absolute path.</returns>
     /// <exception cref="IOException">A file could not be written.</exception>
     /// <exception cref="UnauthorizedAccessException">A file could not be written.</exception>
-    public static string Write(string cycleFolder, string tree, string baseRef, GateReport gates, string gatesPath)
+    public static string Write(
+        string cycleFolder, string tree, string baseRef, GateReport gates, string gatesPath, string? priorHead = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(cycleFolder);
         ArgumentException.ThrowIfNullOrWhiteSpace(tree);
@@ -44,10 +50,16 @@ public static class ReviewEvidence
         try
         {
             (string mergeBase, string patch) = ChangedFiles.DiffSinceMergeBase(tree, baseRef);
+            string? deltaSince = FixDelta(tree, priorHead, ref patch);
             File.WriteAllText(diffPath, patch);
-            change = new ReviewChange(mergeBase, ChangedFiles.HeadCommit(tree), ChangedFiles.ResolveSinceMergeBase(tree, baseRef), null);
+            change = new ReviewChange(
+                mergeBase,
+                ChangedFiles.HeadCommit(tree),
+                ChangedFiles.ResolveSinceMergeBase(tree, baseRef),
+                null,
+                deltaSince);
         }
-        catch (InvalidOperationException ex)
+        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or TimeoutException)
         {
             change = new ReviewChange(null, null, [], ex.Message.Trim());
         }
@@ -84,7 +96,10 @@ public static class ReviewEvidence
         {
             text.AppendLine(CultureInfo.InvariantCulture, $"- Base: {baseRef} (merge base {change.MergeBase})");
             text.AppendLine(CultureInfo.InvariantCulture, $"- Head: {change.Head}");
-            text.AppendLine(CultureInfo.InvariantCulture, $"- Diff: {diffPath} (merge base to the files on disk; untracked files are not in it and are new in full)");
+            string scope = change.FixDeltaSince is null
+                ? "merge base to the files on disk; untracked files are not in it and are new in full"
+                : $"the fix delta: the prior cycle's head {change.FixDeltaSince} to the files on disk; the changed files below are the whole change";
+            text.AppendLine(CultureInfo.InvariantCulture, $"- Diff: {diffPath} ({scope})");
         }
 
         text.AppendLine(CultureInfo.InvariantCulture, $"- Gate report: {gatesPath}");
@@ -108,6 +123,27 @@ public static class ReviewEvidence
             text.AppendLine(CultureInfo.InvariantCulture, $"- {KindName(changed.Kind)} {changed.Path}");
 
         return text.ToString();
+    }
+
+    /// <summary>
+    ///     Replaces <paramref name="patch"/> with the fix delta from <paramref name="priorHead"/>. A prior head git no
+    ///     longer knows, as after a rebase, keeps the whole change's diff.
+    /// </summary>
+    /// <returns>The prior head the delta starts from, or null when the patch is the whole change.</returns>
+    private static string? FixDelta(string tree, string? priorHead, ref string patch)
+    {
+        if (string.IsNullOrWhiteSpace(priorHead))
+            return null;
+
+        try
+        {
+            patch = ChangedFiles.DiffSince(tree, priorHead);
+            return priorHead;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
     }
 
     private static string KindName(ChangeKind kind) => kind switch
@@ -140,4 +176,6 @@ public static class ReviewEvidence
 /// <param name="Head">The head commit, or null when unknown.</param>
 /// <param name="Paths">The changed paths, untracked included.</param>
 /// <param name="Unknown">Why git could not name the change, or null when it could.</param>
-public sealed record ReviewChange(string? MergeBase, string? Head, IReadOnlyList<ChangedPath> Paths, string? Unknown);
+/// <param name="FixDeltaSince">In a verifier cycle, the prior head the diff starts from; null for the whole change.</param>
+public sealed record ReviewChange(
+    string? MergeBase, string? Head, IReadOnlyList<ChangedPath> Paths, string? Unknown, string? FixDeltaSince = null);

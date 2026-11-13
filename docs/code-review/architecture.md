@@ -470,7 +470,10 @@ one artifact — its findings — and on harnesses that cannot express `ask` the
 narrows it to `deny` and the findings come back in the response instead. `network.publish`
 stays `deny`. **The role that judges a change never ships it.**
 
-`delegate` on the reviewer is what lets it fan out the council, and it is also what gives
+`delegate` on the reviewer is what lets a reviewer a human started fan out the council; a
+dispatched reviewer hands its seats to the session above it instead
+([ADR 0077](../adr/0077-the-dispatching-session-seats-the-council-from-the-gate-runs-evidence.md)).
+The grant is also what gives
 `delegate: deny` on the other subagent profiles a meaning it previously lacked: delegation is a
 per-role grant, not a property of being a subagent. The lens seats hold `deny`, so a council
 seat cannot re-enter the council.

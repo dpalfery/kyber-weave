@@ -33,11 +33,14 @@ Three things allowed that:
    harness cannot start seats, the reviewer applies each lens in turn, and a second paragraph allowed
    the same when the reviewer is "the top-level review". A dispatched reviewer cannot tell which case
    it is in, and the `STATUS: COUNCIL_SEATS_NEEDED` handback was written as the exception.
-2. **A dispatched agent cannot reliably start agents.** GitHub's documentation says subagents cannot
-   create other subagents. In about 60 recent Copilot CLI sessions on the owner's machine no subagent
-   ever called the CLI's `task` tool, although the rendered `code-reviewer` lists `agent` and its
-   roster. Claude Code withholds its `Task` tool from subagents, and Devin withholds nested delegation.
-   Only the session a human started dispatches reliably on every harness.
+2. **A dispatched agent cannot reliably start agents.** In about 60 recent Copilot CLI sessions on
+   the owner's machine (CLI 1.0.110) no subagent ever called the CLI's `task` tool, although the
+   rendered `code-reviewer` lists `agent` and its roster. GitHub's IDE documentation says subagents
+   cannot create other subagents; its CLI documentation does not say either way. Devin withholds
+   nested delegation (ADR 0025), and the Claude target records its roster as ignored in nested
+   subagents. The session a human started is the one that dispatches on every harness: in the same
+   Copilot sessions, 105 of 490 top-level `task` calls overlapped in time, so its batches run in
+   parallel.
 3. **The review started from nothing.** The conductor retyped the change and asked for "targeted"
    tests, so the reviewer rediscovered the change set and re-ran checks the gates own.
 
@@ -49,12 +52,16 @@ Three things allowed that:
    per seat: the agent, the routing header block and the packet path. The conductor (or `bug-crusher`)
    sends each block unchanged to its agent, every seat in one parallel batch, and re-invokes the
    reviewer, which saves the outputs, adjudicates and computes the verdict. The refutation spawn
-   comes back the same way. A reviewer a human started seats its own lenses; only one with no tool to
+   comes back the same way, with the candidates' YAML in the block itself because the Arbiter reads
+   them from the dispatch. A dispatched reviewer that cannot tell whether a human started it hands
+   back. An Arbiter note on a seat's dispatch reaches the dispatcher, which relays it to the reviewer
+   as that seat's outcome. A reviewer a human started seats its own lenses; only one with no tool to
    start agents runs the council in-process, and says so.
 2. **The gate run writes the evidence.** The council's `review gates` run writes `review-diff.patch`
    (merge base to the files on disk) and `evidence.md` (base, head, diff path, changed files with
    untracked ones marked, and every gate's result) into the cycle folder, and prints
-   `evidence: <path>`. Every packet names that file. The conductor's review dispatch carries only the
+   `evidence: <path>`. In a verifier cycle the diff is the fix delta from the prior cycle's head.
+   Every packet names that file. The conductor's review dispatch carries only the
    tree, the base ref and the prior cycle folder.
 3. **No seat for what a gate already proves.** `static-analysis-triage` is not seated when every
    build, lint, format and type-check gate passed, and `duplicate-implementation` is not seated when

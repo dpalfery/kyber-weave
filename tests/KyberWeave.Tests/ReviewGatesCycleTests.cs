@@ -80,6 +80,39 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
+    public void AVerifierCyclesEvidenceDiffIsTheFixDeltaFromThePriorHead()
+    {
+        string baseCommit = Git("rev-parse", "HEAD").Trim();
+        Write("src/a.cs", "// first\n");
+        Commit("work");
+        string priorHead = Git("rev-parse", "HEAD").Trim();
+        FinishCycle1(baseCommit: ReviewWorkTree.IdentityOf(_repo, baseCommit)!.Base);
+        Write("src/b.cs", "// fix\n");
+        Commit("fix");
+
+        Gates(2, "--base", baseCommit);
+
+        string evidence = File.ReadAllText(Path.Combine(CycleFolder(2), ReviewEvidence.FileName));
+        string diff = File.ReadAllText(Path.Combine(CycleFolder(2), ReviewEvidence.DiffFileName));
+        Assert.Contains($"the prior cycle's head {priorHead}", evidence, StringComparison.Ordinal);
+        Assert.Contains("+// fix", diff, StringComparison.Ordinal);
+        Assert.DoesNotContain("+// first", diff, StringComparison.Ordinal);
+        Assert.Contains("src/a.cs", evidence, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ABaseGitCannotResolveStillWritesTheGatesAndSaysWhyThereIsNoDiff()
+    {
+        (int exit, _) = Gates(1, "--base", "no-such-ref");
+
+        Assert.Equal(0, exit);
+        string evidence = File.ReadAllText(Path.Combine(CycleFolder(1), ReviewEvidence.FileName));
+        Assert.Contains("- Diff: none, because git could not name the change (git merge-base no-such-ref HEAD", evidence, StringComparison.Ordinal);
+        Assert.DoesNotContain("Archive", evidence, StringComparison.Ordinal);
+        Assert.Contains("- build: passed", evidence, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ASecondCycleRunsOnlyTheGateTheFixTouchedAndCarriesTheRestIntoACompleteReport()
     {
         FinishCycle1();

@@ -433,7 +433,12 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
         try
         {
             string path = ReviewEvidence.Write(
-                cycle.Folder!, root, settings.BaseRef ?? CouncilDefaultBase, written, settings.Out!);
+                cycle.Folder!,
+                root,
+                settings.BaseRef ?? CouncilDefaultBase,
+                written,
+                settings.Out!,
+                cycle.Verifier ? cycle.Plan.Prior?.Head : null);
             report.AddMetric("evidence", path);
             return path;
         }
