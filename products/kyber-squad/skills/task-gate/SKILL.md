@@ -46,12 +46,12 @@ kyber-weave review gates . --agent <self> --paths <files> --task <task-id> --out
 The verification pass is the one whose result counts. A `--fix` run that changed files is
 not a pass until a run without `--fix` reports every declared gate as passing.
 
-## Optional fix pass for .NET work
+## Fix pass for .NET work
 
-When the task changed C# files, the mechanical findings can be erased before the gate runs.
-Follow the `resharper-clt` skill's fix pass, scoped with `--include` to this task's files.
-Run only the `cleanupcode` fix pass. Never run `InspectCode` from this gate: inspection is a
-review gate, run once per review cycle, and a per-task run loads the whole solution.
+When the task changed C# files, the mechanical findings are erased by `dotnet format` and
+`dotnet format analyzers`, scoped with `--include` to this task's files. Never run `InspectCode`
+from this gate: inspection is a review gate, run once per review cycle, and a per-task run loads
+the whole solution.
 
 ## Loop and the 2-cycle cap
 

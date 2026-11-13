@@ -91,7 +91,7 @@ When done, return:
 STATUS: READY_FOR_REVIEW
 ARTIFACTS: <list of Pulumi/C# file paths changed or created>
 SUMMARY: <2–4 sentences: stacks/components touched, preview outcome, replacement or cross-stack risk, and any hand-offs>
-DIAGNOSTICS: clean on <paths> | fix pass: <format, format analyzers, cleanupcode — all applied> | artifacts: <isolated artifacts path> | baseline: <scratchpad path> | remaining: <none, or list with baseline proof>
+DIAGNOSTICS: clean on <paths> | fix pass: <format, format analyzers — all applied> | artifacts: <isolated artifacts path> | baseline: <scratchpad path> | remaining: <none, or list with baseline proof>
 STACK_OUTPUTS: <output names github-devops must consume, or "none">
 TASK_GATE: <PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE> — agent=pulumi-dev gates=<n> failed=<ids|none> skipped=<n> report=<path> runs=<k>
 OPEN_QUESTIONS: <bullets, or "none">

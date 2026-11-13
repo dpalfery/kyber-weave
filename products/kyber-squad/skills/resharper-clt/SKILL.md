@@ -1,17 +1,20 @@
 ---
 name: resharper-clt
-description: Use when running JetBrains ReSharper Command Line Tools over a .NET solution — the CleanupCode/format fix pass an agent runs before claiming C# work complete, or the once-per-review-cycle InspectCode gate whose output a code review triages. Do NOT use for non-.NET languages, for judging design or correctness by reading code, as a substitute for the compiler and test gates, or to run InspectCode from inside a per-task completion gate.
+description: Use when running JetBrains ReSharper InspectCode over a .NET solution — the once-per-review-cycle gate whose output a code review triages. Do NOT use for non-.NET languages, for formatting or cleanup (use dotnet format; CleanupCode is not used here), for judging design or correctness by reading code, as a substitute for the compiler and test gates, or to run InspectCode from inside a per-task completion gate.
 license: MIT
 ---
 
 # ReSharper Command Line Tools
 
 `InspectCode` runs ReSharper's inspection set over a solution and emits a machine-readable
-report. `CleanupCode` applies ReSharper's formatting and cleanup profiles to source files.
-Both are mechanical: the same solution at the same revision produces the same output, which
-is what makes their result citable as evidence rather than an opinion.
+report. It is mechanical: the same solution at the same revision produces the same output, which
+is what makes its result citable as evidence rather than an opinion.
 
-That property is also the boundary. This skill produces and remediates tool output. It does
+`CleanupCode` is deliberately not part of this skill: it can finish its work and then never exit
+(seen on macOS), and a timeout is not an acceptable way for a command to end. Formatting is
+`dotnet format`, and nothing else.
+
+That property is also the boundary. This skill produces and triages tool output. It does
 not judge design, correctness, or intent — those belong to the reviewer and its lenses.
 
 ## Setup
@@ -53,95 +56,22 @@ the path declared as **.agent_scratchpad** where the repository declares one. Su
 | Full-solution inspection | `dotnet jb inspectcode <solution> --output=<scratchpad>/inspectcode.xml --format=Xml` |
 | Project-scoped inspection | `dotnet jb inspectcode <solution> --project="<ProjectName>" --output=<scratchpad>/inspect-<project>.xml --format=Xml` |
 | SARIF for CI or automated scanning | `dotnet jb inspectcode <solution> --output=<scratchpad>/results.sarif --format=Sarif --severity=WARNING` |
-| Formatting and cleanup | the bounded form in step 2 below; never a bare `dotnet jb cleanupcode` |
 
 Scope the run to the affected projects when the solution is large and you are iterating by
 hand. The once-per-review-cycle review gate takes the full solution: it is the only inspection pass in
 the run, so narrowing it drops coverage nothing else replaces.
 
-## Two cadences, and which one you are in
+## Who runs it, and when
 
-This skill has two commands and they run at different times. Getting them the wrong way round is
-the mistake this section exists to prevent.
-
-| | Command | Who runs it | When |
-|---|---|---|---|
-| **Fix pass** | `dotnet format`, `dotnet format analyzers`, `cleanupcode` | the agent that wrote the code | every task, before `READY_FOR_REVIEW` |
-| **Inspection** | `inspectcode` | the review gate runner | once per review cycle, over the whole accumulated change |
-
-The reason is contention and cost. `inspectcode` loads the entire solution; run at baseline and
-again at the end by every worker, it was both the slowest part of a completion gate and the part
-most likely to collide with a concurrent worker's build output. Run once, on a quiescent tree, it
-costs a single solution load and reports against a change that is finished. **A worker that runs
+`inspectcode` is run by the review gate runner, once per review cycle, over the whole accumulated
+change. It is never run by a worker. It loads the entire solution; run at baseline and again at
+the end by every worker, it was both the slowest part of a completion gate and the part most
+likely to collide with a concurrent worker's build output. Run once, on a quiescent tree, it costs
+a single solution load and reports against a change that is finished. **A worker that runs
 `inspectcode` is doing the council's job at N times the price.**
 
-## Running the fix pass before you claim work is complete
-
-Any agent implementing, modifying, or refactoring C# MUST run this before reporting
-`READY_FOR_REVIEW`.
-
-**Fix mechanically, then stop.** A defect a machine can fix is not a defect worth a reviewer's
-attention. Every mechanical finding that reaches a reviewer costs a review pass to report, a
-rework cycle to fix, and another pass to confirm — to arrive at the same edit `cleanupcode` would
-have made for free. Erasing them here is the whole point.
-
-1. **Baseline.** Before the first edit, collect language diagnostics for the files you are
-   permitted to change and keep the output. Without it you cannot distinguish a diagnostic you
-   introduced from one that was already there, and "pre-existing" is a claim that needs proof.
-   Do **not** take an `inspectcode` baseline; that comparison now belongs to the review gate.
-2. **Fix deterministically, scoped to the files you changed.** Three commands, in this order,
-   each applying rather than verifying:
-
-   ```bash
-   dotnet format <solution> --include <changed files>
-   dotnet format <solution> analyzers --include <changed files>
-   perl -e 'setpgrp; $p=fork; exec @ARGV unless $p; $SIG{ALRM}=sub{kill "KILL",-$$}; alarm 120; waitpid $p,0; exit $?>>8' -- dotnet jb cleanupcode <solution> --profile="<cleanup profile>" --include='**/<dir>/<File>.cs;**/<dir>/<Other>.cs' --no-build
-   ```
-
-   `cleanupcode` can hang at exit with no output (a .NET socket-close deadlock seen on macOS), so
-   this is the only form: `perl` is the portable `timeout` that also kills the tool's child
-   processes. `<solution>` is the solution file's absolute path. `--include` takes `;`-separated
-   masks matched against absolute paths, where `**` spans directories: write each as `**/` plus the
-   path from its folder, never a bare relative path (it matches nothing: "No items were found").
-   Any path option (`--LogFile`, `--caches-home`) must be absolute. Never poll a silent process.
-   At 120 s the process group is killed (exit 137): run `git diff` on your files. Changed means the
-   cleanup ran and only the exit hung, so continue; unchanged means record
-   `NOT VERIFIED: cleanupcode — timed out` and move on.
-   Masks: <https://www.jetbrains.com/help/resharper/CleanupCode.html>.
-
-   `--no-build` skips the tool's own restore and build, so the solution must already be restored
-   into its default `obj/`: run `dotnet restore <solution>` first when nothing has. A restore
-   redirected with `BaseIntermediateOutputPath` does not count.
-
-   When the host's C# coding standard gives its own cleanupcode command in its `## Completion` section, run that command instead of this line.
-
-   `--include` is not optional. Unscoped, these rewrite files the task never touched, and the
-   change under review stops being the change you made. The pass is idempotent: running it twice
-   produces no second diff, so a re-run after a rework cycle is safe.
-
-   All three load MSBuild and write into `obj/`. Where concurrent workers may run them against the
-   same projects, give each an isolated artifacts path — see the host's per-agent completion gate.
-
-3. **Re-collect diagnostics over the files you changed** — whole file, not only the changed
-   members. Not workspace-wide: while other workers are in flight, a workspace-wide pass reads
-   their half-finished state and attributes it to you.
-4. **Fix every finding in your change set that step 2 could not.** What survives the fix pass is
-   the genuinely non-mechanical remainder, and that is the part worth your judgement.
-5. **Report the result.** The fix pass applied, diagnostics clean on your files, and the isolated
-   artifacts path you used — or an explicit list of what remains with baseline proof.
-
-### What the cleanup profile should and should not do
-
-Fix what the repository's own standards and analyzers already require: predefined type keywords,
-explicit types where the standard forbids `var`, redundant qualifiers and parentheses, unused
-usings, fields that can be `readonly`, formatting. Those are settled decisions, and re-arguing one
-in review is waste.
-
-Leave everything the repository has **not** declared. Brace style with no `.editorconfig` rule
-behind it, member reordering, and file layout are the tool's opinion rather than the project's
-standard — and reordering members in particular buries the actual change under churn a reviewer
-then has to read past. A cleanup profile that imposes undeclared preferences trades review cost
-for diff noise, which is not the trade this gate exists to make.
+A worker's own fix pass is `dotnet format` and `dotnet format analyzers`, scoped with `--include`
+to the files it changed; that belongs to the host's completion gate, not to this skill.
 
 A green build is not the same measurement. The compiler and ReSharper's inspection set overlap
 partially and disagree at the edges by design — a suggestion-severity inspection is invisible
@@ -216,27 +146,9 @@ The reviewer's own obligations around that output:
 ## Worked example
 
 A change adds a service that filters an `IEnumerable<Load>` and iterates the result twice.
-`dotnet build` is green — nothing here is a compiler error.
+`dotnet build` is green — nothing here is a compiler error, and `dotnet format` has nothing to say.
 
-**At the task.** The worker runs the fix pass, scoped to its own files and its own build output:
-
-```bash
-dotnet format Hauling.sln --include 2-Application/Hauling.Application/Dispatch/LoadPlanner.cs \
-  -p:BaseIntermediateOutputPath=.agent_scratchpad/T3/artifacts/obj/
-dotnet format Hauling.sln analyzers --include 2-Application/Hauling.Application/Dispatch/LoadPlanner.cs \
-  -p:BaseIntermediateOutputPath=.agent_scratchpad/T3/artifacts/obj/
-dotnet restore Hauling.sln
-perl -e 'setpgrp; $p=fork; exec @ARGV unless $p; $SIG{ALRM}=sub{kill "KILL",-$$}; alarm 120; waitpid $p,0; exit $?>>8' -- dotnet jb cleanupcode "$PWD/Hauling.sln" --profile="<cleanup profile>" --include='**/Dispatch/LoadPlanner.cs' --no-build
-```
-
-Formatting, redundant qualifiers, and unused usings are gone. The multiple enumeration is not —
-no formatter can decide that materializing the sequence is the right fix. The worker reports:
-
-```text
-DIAGNOSTICS: clean on 2-Application/Hauling.Application/Dispatch/LoadPlanner.cs | fix pass: format, format analyzers, cleanupcode — all applied | artifacts: .agent_scratchpad/T3/artifacts | baseline: .agent_scratchpad/T3/diagnostics-baseline.md | remaining: none
-```
-
-**At the end of the run.** The `inspectcode` gate runs once per review cycle over the whole solution:
+The `inspectcode` gate runs once per review cycle over the whole solution:
 
 ```xml
 <Issue TypeId="PossibleMultipleEnumeration"
@@ -248,19 +160,16 @@ DIAGNOSTICS: clean on 2-Application/Hauling.Application/Dispatch/LoadPlanner.cs 
 change, and reports it by rule id and location. It becomes a review finding routed back to a
 worker of that type — `.ToList()` before the first iteration — rather than something every worker
 paid a solution load to look for. Findings on lines the run did not touch are pre-existing and the
-lens drops them; that attribution, not the worker's baseline, is what "pre-existing" now means.
+lens drops them; that attribution is what "pre-existing" means.
 
 ## Boundaries
 
 - .NET solutions only. There is no ReSharper CLT for other languages; say so rather than
   substituting a different tool under this skill's name.
-- `cleanupcode` rewrites source. It belongs to the completion gate above, run by the agent that
-  wrote the code, before any reviewer sees it — and NEVER as part of a review itself. A reviewer
-  that edits the code it is judging has stopped being a reviewer.
-- `inspectcode` is the mirror image: it belongs to the review gate, once per review cycle, and NEVER to a
+- `inspectcode` belongs to the review gate, once per review cycle, and NEVER to a
   per-task completion gate. A worker that runs it loads the whole solution to analyze a tree its
   peers are still editing, and pays that cost once per task instead of once per review cycle.
-- Formatter output is not a review finding. Whitespace differences belong to `cleanupcode`, not
-  to the findings list. A reviewer that finds mechanical issues is looking at a change whose
+- Formatter output is not a review finding. Whitespace differences belong to `dotnet format`,
+  not to the findings list. A reviewer that finds mechanical issues is looking at a change whose
   completion gate did not run: the correct report is that single fact, not a list of nits the
   gate would have erased.

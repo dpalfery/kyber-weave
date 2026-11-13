@@ -5,7 +5,7 @@ source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
 selected-baseline: .github/agents/maui-dev.agent.md
 sources:
   .github/agents/maui-dev.agent.md: d275ca8508a007832e6c00bb77f38735f1f849ac4bd8eb7a554ee1b05e371a2f
-final-body-sha256: 9800e1c1abf2517e8e98a3994ae33a6f352f43eb0387d44c7c32f0fb3d6dfd50
+final-body-sha256: 14317800cb8357907226ea8383e7f6f31c08574fec6d5a091545e50fa12a8c4a
 ---
 # maui-dev migration
 

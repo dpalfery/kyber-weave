@@ -834,14 +834,6 @@ script must stay bash 3.2 compatible, the `/bin/bash` on macOS. Its contract tes
 A hang before the report is complete still runs to `timeout-seconds` and is reported as timed out when no
 `--timeout` is set, and a zero exit with no complete report fails.
 
-This repository's optional `cleanupcode` fix pass runs `--no-build` through this wrapper, keyed on the
-`Close solution instance` line of a `--LogFile` log, because the tool never exits on this machine and
-`--no-build` skips the pre-build step where the first hang occurs; that finish line is also written after a
-failed cleanup, so the command adds `! grep -q "Failed to run cleanup"` on the same log and fails when the
-line is present, and a finish line alone never proves the cleanup succeeded, so the task gate's verify passes
-stay the judge. The C# coding standard's `## Completion` section holds the exact command, and the wrapper
-workaround is removed once the tool exits on its own.
-
 #### Test and build gates run under the process watchdog
 
 The two gates that run test suites declare their argv through `scripts/proc-guard.sh run --`:
@@ -981,7 +973,7 @@ entire point of the split.
 
 **Ahead of the council sits a layer with no model in it at all.** Each developer agent ends its
 task with the `task-gate` skill: it runs the `review.task-gates` entry for that agent (formatting,
-analyzer fixes, `cleanupcode` scoped to the changed files, build and tests), fixes what a machine
+analyzer fixes, build and tests), fixes what a machine
 can fix, and verifies. The worker reports a `TASK_GATE:` line in its digest. The conductor rejects
 a missing or `FAIL` line back to the same worker; after two reworks for the same
 `task-gate/<gate-id>` key the circuit-breaker trips and the failure enters the conductor's

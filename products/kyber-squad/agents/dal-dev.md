@@ -94,7 +94,7 @@ When done, return:
 STATUS: READY_FOR_REVIEW
 ARTIFACTS: <list of persistence file paths changed or created>
 SUMMARY: <2–4 sentences: repositories/migrations touched, and any hand-offs>
-DIAGNOSTICS: clean on <paths> | fix pass: <format, format analyzers, cleanupcode — all applied> | artifacts: <isolated artifacts path> | baseline: <scratchpad path> | remaining: <none, or list with baseline proof>
+DIAGNOSTICS: clean on <paths> | fix pass: <format, format analyzers — all applied> | artifacts: <isolated artifacts path> | baseline: <scratchpad path> | remaining: <none, or list with baseline proof>
 TASK_GATE: <PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE> — agent=dal-dev gates=<n> failed=<ids|none> skipped=<n> report=<path> runs=<k>
 OPEN_QUESTIONS: <bullets, or "none">
 ```

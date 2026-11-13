@@ -10,8 +10,8 @@ namespace KyberWeave.Tests;
 /// <para>
 /// The rule map itself (<c>docs/kyber-squad/worker-rule-map.md</c>) is task T49's deliverable and
 /// carries one row per sentence removed. Until it exists, the rows this class can state without it
-/// are the two the plan's Design table fixes by name: the <c>cleanupcode</c> pass is off by default
-/// (D43) and stays in the skill that runs it, and the failure-loop rules live in the reference a
+/// are the two the plan's Design table fixes by name: the <c>cleanupcode</c> pass is removed from the
+/// squad (ADR 0073), and the failure-loop rules live in the reference a
 /// worker loads after a failed fix, not in each developer agent's body. Every other row waits for
 /// the map, which is why <see cref="TheRuleMapRecordsAHomeForEveryRuleThatMoved"/> fails until T49
 /// lands as well.
@@ -36,28 +36,27 @@ public sealed class WorkerRuleSingleHomeTests
     private static string RuleMapPath => Path.Combine(ToolRoot, "docs", "kyber-squad", "worker-rule-map.md");
 
     /// <summary>
-    ///     The task-end pass decision D43 turns off. It rewrote existing code in the first RED task of
-    ///     this programme and the worker reverted it, so no agent body may instruct it any more; the
-    ///     skill that runs it on request keeps the command.
+    ///     The cleanupcode pass is removed from the squad (ADR 0073): it never exits on the reference
+    ///     machine, so no agent body may mention it and the skill no longer carries the command.
     /// </summary>
     [Fact]
     public void TheCleanupCodePassIsNotRequiredInAnyAgentBody()
     {
-        string[] repeating = AgentsContaining("dotnet jb cleanupcode");
+        string[] repeating = AgentsContaining("cleanupcode");
 
         Assert.True(
             repeating.Length == 0,
-            "The cleanupcode pass is off by default (D43) and lives in the skill that runs it, not in an " +
-            "agent body. Still instructing it: " + string.Join(", ", repeating));
+            "The cleanupcode pass was removed from the squad because it never exits (ADR 0073); no agent " +
+            "body may mention it. Still mentioning it: " + string.Join(", ", repeating));
     }
 
-    /// <summary>The skill that owns the pass on request still spells it, so the rule kept a home.</summary>
+    /// <summary>The skill no longer carries a cleanupcode command, so no agent can be told to run one.</summary>
     [Fact]
-    public void TheCleanupCodePassKeepsItsHomeInTheSkillThatRunsIt()
+    public void TheCleanupCodeCommandIsAbsentFromTheSkill()
     {
         string skill = ReadProductFile("skills/resharper-clt/SKILL.md");
 
-        Assert.Contains("cleanupcode", skill, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("jb cleanupcode", skill, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
