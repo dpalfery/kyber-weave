@@ -4,6 +4,7 @@ using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Deployment;
 using YamlDotNet.Core;
@@ -180,6 +181,11 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         {
             // A malformed user override leaves no provider to decide with: the dispatch continues loudly.
             return AllowLoudly(harness, ex.Message, context.NewDecisionId(), context);
+        }
+
+        foreach (Diagnostic warning in RuleValidator.CheckProviderTimeout(config.Arbiter.Provider, effective.Arbiter.Provider))
+        {
+            context.Log.WriteLine($"{warning.Code}: {warning.Message} {warning.Hint}");
         }
 
         IArbiterProvider provider = _providerFactory(effective);

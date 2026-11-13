@@ -71,6 +71,9 @@ public static class RuleValidator
     /// <summary>A savings value out of range or in a forbidden place: a store limit, a bot login, a shipped-only effect or key.</summary>
     public const string SavingsValueInvalid = "KW-ARB-CONFIG-015";
 
+    /// <summary>The provider timeout in force cannot finish inside the hook timeout the hooks were rendered with.</summary>
+    public const string ProviderTimeoutExceedsHook = "KW-ARB-CONFIG-016";
+
     /// <summary>The CLI scope conflict <c>--global</c> and <c>--project</c> attempted together.</summary>
     public const string InstallScopeConflict = "KW-ARB-INSTALL-001";
 
@@ -248,6 +251,35 @@ public static class RuleValidator
         }
 
         return diagnostics;
+    }
+
+    /// <summary>
+    /// The <c>KW-ARB-CONFIG-016</c> warning: the provider timeout in force (after the user override) leaves no room
+    /// inside the hook timeout the repository's configuration renders. A warning, never a failure: when the harness
+    /// kills a slow hook the dispatch proceeds undecided, and the operator needs to know why.
+    /// </summary>
+    /// <param name="repository">The repository's provider, which the rendered hook timeout is derived from.</param>
+    /// <param name="effective">The provider in force at evaluation.</param>
+    public static IReadOnlyList<Diagnostic> CheckProviderTimeout(ArbiterProviderConfig repository, ArbiterProviderConfig effective)
+    {
+        ArgumentNullException.ThrowIfNull(repository);
+        ArgumentNullException.ThrowIfNull(effective);
+        if (effective.Kind == ArbiterProviderKind.None || ArbiterHookTimeout.Fits(repository.TimeoutMs, effective.TimeoutMs))
+            return [];
+
+        int seconds = ArbiterHookTimeout.SecondsFor(repository.TimeoutMs);
+        return
+        [
+            new Diagnostic(
+                ProviderTimeoutExceedsHook,
+                Severity.Warning,
+                $"arbiter.provider.timeout-ms {effective.TimeoutMs} plus {ArbiterHookTimeout.HeadroomSeconds}s of evaluation " +
+                $"does not fit in the {seconds}s hook timeout rendered from timeout-ms {repository.TimeoutMs}; the harness " +
+                "may kill the hook before the provider answers.",
+                "arbiter.provider.timeout-ms",
+                null,
+                "Lower the user override's timeout-ms, or set the repository's timeout-ms to match and re-render the hooks."),
+        ];
     }
 
     /// <summary>
