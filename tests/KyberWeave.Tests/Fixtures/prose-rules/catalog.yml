@@ -1066,6 +1066,13 @@ rules:
     controls:
       - products/kyber-squad/skills/task-gate/references/rework.md
       - products/kyber-squad/agents/review-triage.md
+  - id: council-handback-reuses-gates
+    statement: A reviewer re-invoked with the seats' output after a COUNCIL_SEATS_NEEDED handback finds gates.json already in the cycle folder and does not run the gates again.
+    stated-in:
+      - products/kyber-squad/agents/code-reviewer.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/review-triage.md
   - id: pre-push-self-review
     statement: The pre-push self-review gate does not block the push; its verdict is evidence for the pull request description.
     stated-in:
