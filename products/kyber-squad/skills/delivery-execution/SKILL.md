@@ -51,7 +51,7 @@ Discover continuation support from the current harness's exposed tools; do not a
 `test-first` is the default. Every implementation task carries a Test contract naming the test surface, runner, and observable behavior.
 
 1. **RED:** `test-dev` authors or identifies the contract test and records a failing run for the intended missing behavior. No implementation begins before valid RED evidence exists. Never use `git stash` to record RED proof runs: zero-stash RED proofs are strictly mandated (forbid git stash). Proofs must run against a clean base checkout, throwaway copy, or isolated worktree.
-2. **GREEN:** the implementation specialist makes that same contract pass without weakening it and records current passing evidence.
+2. **GREEN:** the implementation specialist makes that same contract pass without weakening it and records current passing evidence. If its test project does not compile because of other tasks' tests, it builds the production projects it touched and reports `NOT VERIFIED: <command> — sibling RED tests do not compile yet`; it never builds a private runner project.
 3. **REFACTOR:** cleanup and the developer exit gate preserve GREEN.
 
 Follow the build once, test many pattern for rapid iteration: build or compile once, then execute targeted tests using the pre-computed direct assembly test runner the host's test standard gives in its `## Completion` section:
