@@ -60,39 +60,9 @@ review:
     # tell those survivors from fresh outputs. Forcing a rebuild here keeps the `--no-build`
     # test gate that follows it from running against binaries no longer executable.
     - id: build
-      include: &net-test-paths ["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets", "**/*.sln*", "**/NuGet.config", "**/.editorconfig", "global.json", ".config/dotnet-tools.json", ".kyber-weave/kyber-weave.yml", "apm.yml", ".apm/**", "products/**", "REVIEW.md", "scripts/**"]
+      include: &net-test-paths ["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets", "**/*.sln*", "**/NuGet.config", "**/.editorconfig", "global.json", ".kyber-weave/kyber-weave.yml", "apm.yml", ".apm/**", "products/**", "REVIEW.md", "scripts/**"]
       run: [dotnet, build, KyberWeave.sln, -c, Release, --no-incremental, -nr:false, -p:UseSharedCompilation=false]
       blocking: true
-    # ReSharper InspectCode. The `resharper-clt` skill owns how to read this; the
-    # `static-analysis-triage` lens reads the report at the --output path below and
-    # attributes each diagnostic to the diff. InspectCode exits 0 whether or not it finds
-    # anything, so "blocking" here means the analyzer must have *run* — a review that
-    # skipped it silently would read as one that passed it. Scoped to WARNING and above:
-    # the suggestion tier is dominated by style inspections this repository settles in
-    # .editorconfig, and burying 500 real warnings under 1200 of those helps nobody.
-    # Declared here, straight after `build`, and `concurrent`, so it starts on a restored tree
-    # and runs alongside the test run instead of after it: declared last and run in turn, a
-    # review waited for the full suite and then for the analyzer.
-    # `--no-build` because `build` has just restored and compiled the tree: the analyzer's own
-    # Debug build added nothing to its findings and wrote into obj/ beside the gates below.
-    # `requires-paths` keeps that honest when the gate is run on its own: without a restore the
-    # analyzer would resolve nothing, exit 0 and read as a clean run, so it does not start.
-    # The path proves a restore happened, not that it is current: in the declared order `build`
-    # has just restored. Run alone with `--gate inspectcode` after package references changed,
-    # run `--gate build` with it.
-    # `--jobs=4` because the full test run beside it is load-sensitive: on an 18-core machine
-    # four analysis threads took 108 seconds against 91 unbounded, with the same findings.
-    # `scripts/report-gate.sh` because on macOS 27.3 Beta the analyzer writes its whole report
-    # and then never exits. The wrapper removes any earlier report, and stops the analyzer only
-    # once this run's report is complete and has not changed for 20 seconds. A hang before that
-    # still runs to the time limit and is reported as timed out.
-    # Not measured: this gate beside the full test run. A dev agent may not run that suite.
-    - id: inspectcode
-      include: *net-source-paths
-      run: [scripts/report-gate.sh, --report, artifacts/inspectcode.xml, --ends-with, "</Report>", --grace, "20", --, dotnet, jb, inspectcode, KyberWeave.sln, --output=artifacts/inspectcode.xml, --format=Xml, --severity=WARNING, "--caches-home=artifacts/inspectcode-cache", "--jobs=4", --no-build]
-      requires-paths: ["src/KyberWeave.Core/obj/project.assets.json"]
-      blocking: true
-      concurrent: true
     # coverlet.MTP writes Cobertura under artifacts/coverage so GateRunner can populate
     # the coverage floor. xUnit 4 uses Microsoft Testing Platform, whose coverage
     # extension uses `--coverlet` instead of VSTest's `--collect` data-collector option.
@@ -224,11 +194,10 @@ review:
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, docs, drift, .]
       blocking: true
     # Cross-file duplicate bodies, from the CodeGraph index. Nothing else in the chain
-    # answers this: JetBrains retired `dupfinder`, and the inspections InspectCode still
-    # ships that touch duplication are scoped to one statement or one method group. The
-    # `duplicate-implementation` lens reads the report at the --out path below and decides
-    # which clusters this change is responsible for. Like the analyzer gate it exits 0
-    # whether or not it finds anything, so "blocking" means it must have *run*.
+    # answers this: JetBrains retired `dupfinder`, and the compiler and analyzers only see one
+    # statement or one method group. The `duplicate-implementation` lens reads the report at
+    # the --out path below and decides which clusters this change is responsible for. It
+    # exits 0 whether or not it finds anything, so "blocking" means it must have *run*.
     - id: duplicates
       include: *net-source-paths
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, review, duplicates, ., --out, artifacts/duplicates.json]

@@ -739,9 +739,7 @@ order, so every gate declared before it has finished, and then runs alongside th
 instead of holding them up. The report still lists it at its declared place. It is stopped at its own
 `timeout-seconds` like any gate and reported as timed out, never as passed. A run given `--stop-on-failure`
 that meets a blocking failure stops a concurrent gate that is still running and leaves it out of the report,
-as it does the gates that never started. The `inspectcode` gate here sets it: it is declared straight after
-`build` and overlaps the test run, and it runs through `scripts/report-gate.sh`, described in
-[the code review architecture](code-review/architecture.md#repository-gate-scoping-and-caching-in-this-repository). Set it only on a gate that neither reads nor writes what later gates
+as it does the gates that never started. No gate in this repository sets it. Set it only on a gate that neither reads nor writes what later gates
 produce; the runner does not check that.
 
 ## Harness profiles

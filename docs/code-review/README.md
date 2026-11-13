@@ -41,8 +41,8 @@ it is wrong, however reasonable the trigger sounds.
 
 ### 2. Review cost is a budget, and determinism is cheaper than judgement
 
-**Reduce the passes the reviewer makes, and use deterministic tooling — the ReSharper command
-line tools and the Roslyn compiler checks — to find *and fix* formatting and code-quality
+**Reduce the passes the reviewer makes, and use deterministic tooling — `dotnet format` and the
+Roslyn compiler and analyzer checks — to find *and fix* formatting and code-quality
 issues before the reviewer is invoked.**
 
 The ordering follows from the cost of being wrong at each layer:

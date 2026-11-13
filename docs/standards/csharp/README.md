@@ -39,9 +39,9 @@ Consequences worth stating:
   Measured on Linux, Windows and macOS for all three verbs. Those globs in a gate's `include`
   buy **selection** — a change to one of those files makes the gate run instead of selecting
   nothing — and never coverage of the project file itself.
-- **Persistent InspectCode AST caching.** Whole-solution ReSharper InspectCode
-  (`inspectcode`) runs with `--caches-home=artifacts/inspectcode-cache` to persist AST
-  caches across runs, cutting warm inspection duration by ~35% wall-clock and ~68% CPU.
+- **No ReSharper command-line tools.** InspectCode is not a gate here: it can write its
+  report and then never exit ([ADR 0075](../../adr/0075-inspectcode-is-removed-from-the-squad.md)).
+  Static analysis is the compiler and analyzer warnings from the build gate.
 
 ## Style the analyzers already enforce
 
@@ -50,8 +50,8 @@ coming from other .NET repositories.
 
 - **Explicit types, never `var`** — including where the type is apparent. `csharp_style_var_*`
   is `false:warning` in all three positions. `KyberWeave.sln.DotSettings` sets ReSharper's
-  var preferences to `UseExplicitType` to match, so the `KyberWeave` cleanup profile rewrites
-  `var` to explicit types rather than the reverse.
+  var preferences to `UseExplicitType` to match, so Rider and ReSharper in the editor suggest
+  explicit types rather than `var`. The file only configures the editor now; no gate reads it.
 - **File-scoped namespaces.**
 - **Predefined type keywords** — `string`, `int`, `bool`, never `String` or `Int32`.
 - **Allman braces**, and a new line before `else`, `catch` and `finally`.

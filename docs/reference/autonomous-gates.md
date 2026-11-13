@@ -235,8 +235,8 @@ inventory.
 - Per-task LLM audits — replaced by the deterministic `task-gate` exit gate
   per ADR 0005 and the 2026-10-20 task-gate plan. Removed by #424 — not
   reinstated.
-- Per-task `inspectcode` runs — the analyzer now runs in the whole-change
-  gate suite, once per review cycle, not per task. Removed by #424 — not reinstated.
+- Per-task `inspectcode` runs — removed by #424; the tool itself was later removed from
+  the squad and this repository ([ADR 0075](../adr/0075-inspectcode-is-removed-from-the-squad.md)).
 - Duplicate per-phase re-approvals collapsed by #424 — the remaining phase
   gates above are the post-#424 baseline. Removed by #424 — not reinstated.
 

@@ -68,7 +68,7 @@ public sealed record DuplicateReport(
 /// <remarks>
 /// <para>
 /// This exists because nothing else in the chain can answer the question. JetBrains retired
-/// <c>dupfinder</c>, and the inspections InspectCode still ships that touch duplication —
+/// <c>dupfinder</c>, and the ReSharper inspections that touch duplication —
 /// <c>DuplicatedStatements</c>, <c>RedundantOverload</c> — are scoped to one statement or one
 /// method group. Neither sees across files, which is where duplication that matters lives.
 /// </para>

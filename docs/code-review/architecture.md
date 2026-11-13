@@ -820,41 +820,17 @@ command:
   causes finish before the council starts. A review racing an edit reviews a tree that no longer
   exists by the time its verdict is read.
 
-### Repository gate scoping and caching in this repository
+### Repository gate scoping in this repository
 
-This repository configures `include:` globs on all 30 council gates in `.kyber-weave/kyber-weave.yml`,
+This repository configures `include:` globs on all 29 council gates in `.kyber-weave/kyber-weave.yml`,
 partitioned by ecosystem:
 
-- **Pure C# formatting and static analysis** (`format-whitespace`, `format-style`, `inspectcode`, `duplicates`): scoped to `&net-source-paths` (`["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets", "**/*.sln*", "**/NuGet.config", "**/.editorconfig"]`).
-- **.NET build and test** (`build`, `test`): scoped to `&net-test-paths`, which extends C# source paths to cover tested non-C# repository assets and build/test configuration: `products/**` (tested by Squad canonical content, rendering, and preset tests, and verified by `KyberWeave.Core.csproj`'s pre-build SHA-256 hash guard), `REVIEW.md` (tested by review guidance council contract tests), `.kyber-weave/kyber-weave.yml`, `apm.yml`, `.apm/**`, `global.json`, `.config/dotnet-tools.json`, and `scripts/**` — while strictly excluding `dash/**` and `docs/**`. When `net-test-paths` match, the full .NET test suite runs to preserve ADR 0005 guarantees across solution dependencies.
+- **Pure C# formatting and duplicate detection** (`format-whitespace`, `format-style`, `duplicates`): scoped to `&net-source-paths` (`["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets", "**/*.sln*", "**/NuGet.config", "**/.editorconfig"]`).
+- **.NET build and test** (`build`, `test`): scoped to `&net-test-paths`, which extends C# source paths to cover tested non-C# repository assets and build/test configuration: `products/**` (tested by Squad canonical content, rendering, and preset tests, and verified by `KyberWeave.Core.csproj`'s pre-build SHA-256 hash guard), `REVIEW.md` (tested by review guidance council contract tests), `.kyber-weave/kyber-weave.yml`, `apm.yml`, `.apm/**`, `global.json`, and `scripts/**` — while strictly excluding `dash/**` and `docs/**`. When `net-test-paths` match, the full .NET test suite runs to preserve ADR 0005 guarantees across solution dependencies.
 - **APM skill gates** (`skill-*`, 15 gates): scoped to their respective `.apm/skills/<skill-name>/**`, `src/KyberWeave.Cli/**`, and `src/KyberWeave.Core/Skills/**`.
 - **Documentation gates**: `docs-validate` scoped to `["docs/**", "**/*.md", ".kyber-weave/kyber-weave.yml", "src/**"]`; `docs-drift` adds `"dash/**"` so `KyberDash` `code-refs` and `api-endpoints` drift is caught when `dash/` changes (~0.8s).
 - **TypeScript gates** (`ts-*`): scoped to `["dash/**"]` (which also keeps `display-layer.test.ts` active when `dash/tray/**` changes).
 - **Rust gates** (`cargo-*`): scoped to `["dash/tray/src-tauri/**"]`.
-
-ReSharper InspectCode (`inspectcode`) passes `--caches-home=artifacts/inspectcode-cache` (gitignored),
-persisting the AST and project caches across local runs and reducing warm inspection duration by ~35% wall-clock and ~68% CPU.
-
-The gate is declared straight after `build` and is `concurrent`, so it overlaps the test run. It passes
-`--no-build`, because `build` has already restored and compiled the tree, and `--jobs=4`, to keep load off
-the test run beside it. It declares `requires-paths` on a restore output, so run on its own on an unrestored
-tree it does not start instead of exiting zero having resolved nothing. That check proves a restore
-happened, not that it is current: a run of `--gate inspectcode` alone after package references changed
-needs `--gate build` with it.
-
-Its argv starts with `scripts/report-gate.sh`. On macOS 27.3 Beta the analyzer writes its whole report and
-then never exits, because .NET does not return from closing a listening socket while another thread is
-blocked accepting on it. The wrapper removes any report an earlier run left, then stops the analyzer once this run's report is
-complete, and exits zero. The argv names exactly one finish mode. `--ends-with <text>` (this gate) completes
-when the report ends with `</Report>` and stops once it has not changed for `--grace` seconds (default 20).
-`--contains <text>` completes when a fixed-string search of the whole report finds the text and stops
-`--grace` seconds after the text is first seen, whether or not the report keeps growing, because a log that
-keeps writing after its finish line would otherwise never settle. An optional `--timeout <seconds>` limits
-the whole run: when it elapses before the run counts as done, the wrapper stops the command's whole process
-tree, says so on standard error, and exits 124, while a run already done before the limit still passes. The
-script must stay bash 3.2 compatible, the `/bin/bash` on macOS. Its contract tests run it under `/bin/bash`, which is 3.2 only on macOS.
-A hang before the report is complete still runs to `timeout-seconds` and is reported as timed out when no
-`--timeout` is set, and a zero exit with no complete report fails.
 
 #### Test and build gates run under the process watchdog
 

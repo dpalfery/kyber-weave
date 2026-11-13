@@ -4,13 +4,13 @@ namespace KyberWeave.Tests;
 
 /// <summary>
 /// Pins the operational pointers and tokens the root <c>AGENTS.md</c> slim must keep: the .NET
-/// gate argv lives in the review catalogue, the InspectCode report path, the staged and unstaged
+/// gate argv lives in the review catalogue, the staged and unstaged
 /// diffs CodeGraph init records, the KyberDash rows' paths, and the area documents the Commands
 /// section points at.
 /// </summary>
 /// <remarks>
 /// Assertions match stable tokens in the hand-authored sections, not the generated Config Reg
-/// block. The rules those sections state in prose (InspectCode's exit code, the display layers,
+/// block. The rules those sections state in prose (the display layers,
 /// the full-suite ban, the quick-review threshold) are checked by the prose rule catalog,
 /// <c>tests/KyberWeave.Tests/Fixtures/prose-rules/catalog.yml</c>.
 /// </remarks>
@@ -47,20 +47,6 @@ public sealed class RootAgentsOperationalPointerTests
                 catalogue.Contains(gateId, StringComparison.Ordinal),
                 $"review.gates is missing '{gateId}', so the AGENTS.md pointer would be another empty target.");
         }
-    }
-
-    /// <summary>
-    /// InspectCode exits zero with findings still in the XML. An agent that treats that exit
-    /// code as clean never hands <c>artifacts/inspectcode.xml</c> to the triage lens.
-    /// </summary>
-    [Fact]
-    public void InspectCodeReportPathIsNamed()
-    {
-        string commands = Section(ReadAgents(), "## Commands", "## Exploration order");
-
-        Assert.True(
-            commands.Contains("artifacts/inspectcode.xml", StringComparison.Ordinal),
-            "The Commands section must name artifacts/inspectcode.xml as the InspectCode result.");
     }
 
     /// <summary>

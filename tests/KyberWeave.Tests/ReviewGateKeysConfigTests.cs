@@ -239,7 +239,7 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
                 - id: build
                   run: [dotnet, build]
                 - id: analyze
-                  run: [dotnet, jb, inspectcode]
+                  run: [dotnet, build, -warnaserror]
                   concurrent: true
             """).Review;
 
