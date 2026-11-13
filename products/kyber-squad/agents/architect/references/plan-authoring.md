@@ -59,7 +59,10 @@ The boundary is exact:
 - Tests of several layers in one compiled test project must not all run RED first: order the
   tasks RED then GREEN per layer (dependency: next layer's RED on the previous GREEN), so the
   project compiles after every GREEN. Parallel RED is allowed only where each task has its own
-  test project, or one RED task adds the stubs the project needs to compile.
+  test project, or where the plan adds a stub task.
+- A plan adds a stub task only when its Decisions table records the decision to, because the
+  shared test project must keep compiling for parallel work. Without that row there is no stub
+  task: RED is by missing symbol. The row is also the answer to a host rule against stubs.
 
 ## Task file
 

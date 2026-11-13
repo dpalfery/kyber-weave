@@ -40,6 +40,13 @@ public sealed class ReviewGatesSettings : AnalysisSettings
     [Description("Run each task gate's fix command before its verify command. Requires --agent.")]
     public bool Fix { get; set; }
 
+    [CommandOption("--red")]
+    [Description("Judge the agent's gate runs as RED evidence for a test-authoring task: they pass when tests ran and " +
+                 "failed, or when the build failed only on missing-symbol errors (C# CS0103/CS0117/CS0234/CS0246/CS1061, " +
+                 "TypeScript TS2304/TS2305/TS2307/TS2339) in the files the task changed; they fail when the build breaks " +
+                 "for any other reason or every test passes. Prints the RED_EVIDENCE line to paste. Requires --agent.")]
+    public bool Red { get; set; }
+
     [CommandOption("--all")]
     [Description("Run all declared repository gates on the host OS without include path filtering.")]
     public bool All { get; set; }
@@ -72,7 +79,7 @@ public sealed class ReviewGatesSettings : AnalysisSettings
     ///     Whether an option that only makes sense for one agent was given. <c>--paths</c> and <c>--base</c> also
     ///     scope the repository-wide council gates, so they are not agent-only.
     /// </summary>
-    public bool HasAgentOnlyOptions => TaskSlug is not null || Fix;
+    public bool HasAgentOnlyOptions => TaskSlug is not null || Fix || Red;
 }
 
 /// <summary>Settings for <c>review suppressions</c>.</summary>

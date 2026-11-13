@@ -30,6 +30,9 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
     private const string ChangedSetUnknown = "KW-REVIEW-034";
     private const string PriorFindingsUnreadable = "KW-REVIEW-023";
     private const string GateCarried = "KW-REVIEW-048";
+    private const string RedAccepted = "KW-REVIEW-051";
+    private const string RedRejected = "KW-REVIEW-052";
+    private const string SiblingTestsMissingSymbols = "KW-REVIEW-053";
     private const string CouncilDefaultBase = "origin/HEAD";
     private const int ClientInputExitCode = 2;
 
@@ -104,7 +107,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
             if (settings.HasAgentOnlyOptions)
             {
                 WriteClientInputError(
-                    "--task and --fix apply only with --agent. Name the agent whose task " +
+                    "--task, --fix and --red apply only with --agent. Name the agent whose task " +
                     "gates to run, or drop those options.");
                 return ClientInputExitCode;
             }
@@ -617,10 +620,26 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
                 $"{skip.Id}: skipped, {skip.Reason}.",
                 skip.Id));
 
-        TaskGateRun run = GateRunner.RunTaskGates(plan.Gates, root, settings.Fix, settings.StopOnFailure);
+        // The classifiers read what each verify command printed, so a build that fails on missing symbols is told
+        // apart from one that fails on anything else.
+        Dictionary<string, string> outputs = new(StringComparer.Ordinal);
+        TaskGateRun run = GateRunner.RunTaskGates(
+            plan.Gates, root, settings.Fix, settings.StopOnFailure && !settings.Red,
+            (id, output) => outputs[id] = output);
 
-        foreach (GateResult gate in run.Report.Gates)
+        GateReport finalReport = run.Report;
+        if (settings.Red)
+        {
+            finalReport = ApplyRed(run.Report, plan.Gates, outputs, changed, report);
+        }
+
+        foreach (GateResult gate in finalReport.Gates)
             AddGateDiagnostic(report, gate, timeIsNotRun: false);
+
+        if (!settings.Red)
+        {
+            AddSiblingNotes(report, plan.Gates, run.Report, outputs, changed);
+        }
 
         foreach (GateResult fix in run.FixFailures)
             report.Add(new Diagnostic(
@@ -629,13 +648,96 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
                 $"{fix.Id}: fix did not succeed ({fix.Summary}). The verify step still decides.",
                 fix.Id));
 
-        report.AddMetric("gates", run.Report.Gates.Count);
-        report.AddMetric("failed", run.Report.Gates.Count(g => !g.Passed));
+        report.AddMetric("gates", finalReport.Gates.Count);
+        report.AddMetric("failed", finalReport.Gates.Count(g => !g.Passed));
 
-        CommandHelpers.TryWriteReport(settings.Out, ReviewJson.Write(run.Report), ReportWriteFailed, report);
+        CommandHelpers.TryWriteReport(settings.Out, ReviewJson.Write(finalReport), ReportWriteFailed, report);
 
         CommandHelpers.Finish(report, settings, "review gates", "Gate");
         return report.HasErrors ? 1 : 0;
+    }
+
+    /// <summary>
+    ///     Judges a RED task's gate runs. A failed gate the classifier accepts is reported as passed with the reason, one
+    ///     it rejects keeps its failure, and the verdict is one diagnostic carrying the line for the digest or the next step.
+    /// </summary>
+    private static GateReport ApplyRed(
+        GateReport ran,
+        IReadOnlyList<PlannedTaskGate> planned,
+        Dictionary<string, string> outputs,
+        IReadOnlyList<string> changed,
+        DiagnosticReport report)
+    {
+        List<RedGateObservation> observations = [];
+        foreach (GateResult gate in ran.Gates)
+        {
+            PlannedTaskGate? plannedGate = planned.FirstOrDefault(candidate => string.Equals(candidate.Id, gate.Id, StringComparison.Ordinal));
+            if (plannedGate is not null && outputs.TryGetValue(gate.Id, out string? output))
+                observations.Add(new RedGateObservation(gate.Id, string.Join(' ', plannedGate.Run), gate.ExitCode, output));
+        }
+
+        RedOutcome outcome = RedClassifier.Evaluate(observations, changed);
+        List<GateResult> results = [];
+        foreach (GateResult gate in ran.Gates)
+        {
+            if (outcome.AcceptedGates.TryGetValue(gate.Id, out string? why))
+                results.Add(gate with { ExitCode = 0, Summary = "RED accepted: " + why });
+            else
+                results.Add(gate);
+        }
+
+        if (outcome.Passed)
+        {
+            report.Add(new Diagnostic(
+                RedAccepted,
+                Severity.Info,
+                outcome.EvidenceLine,
+                "review gates --red",
+                Hint: "Paste this line as the RED_EVIDENCE line of the completion digest."));
+        }
+        else
+        {
+            report.Add(new Diagnostic(
+                RedRejected,
+                Severity.Error,
+                $"Not valid RED evidence: {outcome.Reason}",
+                "review gates --red",
+                Hint: "Valid RED is tests that ran and failed on an assertion, or a build that failed only on missing-symbol "
+                      + "errors in the files this task changed. Fix what the message names, then run the same command again."));
+        }
+
+        return ran with { Gates = results };
+    }
+
+    /// <summary>
+    ///     Tells a developer whose build fails only because other tasks' tests name symbols nobody has created that this
+    ///     is the cause, in the exact words to report, so it does not have to guess.
+    /// </summary>
+    private static void AddSiblingNotes(
+        DiagnosticReport report,
+        IReadOnlyList<PlannedTaskGate> planned,
+        GateReport ran,
+        Dictionary<string, string> outputs,
+        IReadOnlyList<string> changed)
+    {
+        foreach (GateResult gate in ran.Gates.Where(result => !result.Passed))
+        {
+            PlannedTaskGate? plannedGate = planned.FirstOrDefault(candidate => string.Equals(candidate.Id, gate.Id, StringComparison.Ordinal));
+            if (plannedGate is null || !outputs.TryGetValue(gate.Id, out string? output))
+                continue;
+
+            RedGateObservation observation = new(gate.Id, string.Join(' ', plannedGate.Run), gate.ExitCode, output);
+            if (RedClassifier.SiblingSymbols(observation, changed) is not { Count: > 0 } symbols)
+                continue;
+
+            report.Add(new Diagnostic(
+                SiblingTestsMissingSymbols,
+                Severity.Warning,
+                $"NOT VERIFIED: {observation.Command} — sibling RED tests reference symbols no task has created yet: {string.Join(", ", symbols)}",
+                gate.Id,
+                Hint: "Every compiler error is a missing symbol in a file this task did not change. Build the production projects "
+                      + "this task touched, report the line above in the digest, and do not edit those tests."));
+        }
     }
 
     /// <summary>

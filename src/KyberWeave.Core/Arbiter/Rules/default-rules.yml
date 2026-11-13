@@ -201,8 +201,8 @@ rules:
         returned-reports: ledger.task-returns
         dispatch: delegation.head
       criteria:
-        in-order: Either a returned report or the dispatch says failing tests for this behaviour were run and failed, or the task adds only declarations, interfaces, stubs or contracts with no working logic, so that tests a later task writes can compile.
-        missing: The dispatch asks for working logic, and no returned report or dispatch text says a failing test for it was run and failed. A test task listed in the plan, or tests that passed, are not that evidence.
+        in-order: Either a returned report or the dispatch says failing tests for this behaviour were run and failed, or says the tests' build failed only because they name symbols that do not exist yet (a compile-form RED, such as every error being CS0246 or CS0103 for the types the next task creates), or the task adds only declarations, interfaces, stubs or contracts with no working logic, so that tests a later task writes can compile.
+        missing: The dispatch asks for working logic, and no returned report or dispatch text says a failing test for it was run and failed. A test task listed in the plan, tests that passed, or a build that broke on a syntax or type error, are not that evidence.
       confidence-at-least: 0.8
       tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
     effects: { no-task: allow, not-required: allow, present: allow, missing: escalate, returns-unobservable: allow, returns-unread: allow, in-order: allow }

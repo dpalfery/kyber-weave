@@ -302,6 +302,22 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
         Assert.Equal("present", Answer("KW-ARB-MODE-001"));
     }
 
+    [Theory]
+    [InlineData("FullyQualifiedName~WidgetTests — compile: missing WidgetRepository, WidgetDto.Id")]
+    [InlineData("dotnet build tests/Widget.Tests — compile: missing WidgetRepository")]
+    [InlineData("NotificationTests — compile: missing NotificationSender")]
+    [InlineData("tests/widget.test.ts — compile: missing WidgetPanel, ../src/widget")]
+    public async Task CompileFormRedEvidence_IsEvidenceAndLetsTheGreenDispatchThrough(string value)
+    {
+        await Dispatch("test-dev", Prompt("T1"));
+        await Return("test-dev", Prompt("T1"), $"STATUS: PASS\nRESULT: PASS\nRED_EVIDENCE: {value}\n");
+
+        await Dispatch("csharp-dev", Prompt("T2"));
+
+        Assert.Equal("present", Answer("KW-ARB-MODE-001"));
+        AssertLastAllowed();
+    }
+
     [Fact]
     public async Task UnfinishedDispatch_HoldsItsFiles()
     {

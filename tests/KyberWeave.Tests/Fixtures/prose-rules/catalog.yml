@@ -2189,7 +2189,7 @@ rules:
         - products/kyber-squad/agents/sql-database-architect.md
         - products/kyber-squad/agents/tauri-dev.md
   - id: plan-orders-red-green-per-compile-unit
-    statement: When tests of several layers share one compiled test project, the plan orders the tasks RED then GREEN per layer, so the project compiles after every GREEN, and runs RED in parallel only where each task has its own test project or one task adds the stubs the project needs.
+    statement: When tests of several layers share one compiled test project, the plan orders the tasks RED then GREEN per layer, so the project compiles after every GREEN, and runs RED in parallel only where each task has its own test project or the plan's Decisions table records a decision to add a stub task.
     stated-in:
       - path: products/kyber-squad/agents/architect/references/plan-authoring.md
         section: Session groups
@@ -2237,6 +2237,24 @@ rules:
     stated-in:
       - path: products/kyber-squad/agents/architect/references/plan-authoring.md
         section: Task file
+    controls:
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: red-by-missing-symbol-is-valid-and-stubs-are-not-the-default
+    statement: In a compiled language a test-authoring task's RED may be a build that fails only because its tests name symbols the GREEN task creates, judged by running the task gate with --red; the worker does not add a production stub to make the tests compile.
+    stated-in:
+      - path: products/kyber-squad/skills/task-gate/SKILL.md
+        section: Completion digest
+      - path: products/kyber-squad/agents/test-dev.md
+        anchor: "are valid RED"
+    controls:
+      - products/kyber-squad/agents/csharp-dev.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: stub-task-needs-a-recorded-plan-decision
+    statement: A plan adds a production stub task for the test project only when its Decisions table records that decision, which also answers a host rule against stubs.
+    stated-in:
+      - path: products/kyber-squad/agents/architect/references/plan-authoring.md
+        section: Session groups
     controls:
       - products/kyber-squad/agents/conductor/references/autonomy.md
       - products/kyber-squad/shared/worker-baseline.md

@@ -133,8 +133,14 @@ RED_EVIDENCE: <runner filter> — <failing tests> — <reason>
 `RED_EVIDENCE:` is part of the template, not an aside; it follows the six digest fields and is never counted as a seventh. The in-flight ledger reads its value from
 the returned output as its `ledger.red-evidence` fact, and Arbiter rule `KW-ARB-MODE-001` uses
 that fact to gate test-first plans: an implementation dispatch with no RED evidence on record
-escalates. The line names the runner filter that was run, the tests that failed, and the
-assertion the RED run failed on — not a build error. Emit `RED_EVIDENCE: none` when the work
+escalates. Valid RED is tests that ran and failed on an assertion, or, in a compiled language, a build
+that failed only because the tests name symbols the GREEN task creates (the classic first red);
+a build that breaks for any other reason is not RED. A test-authoring task does not judge this
+by prose: it runs `kyber-weave review gates . --agent test-dev --paths <its test files> --task <slug> --red`,
+which passes only on those two shapes, lists the missing symbols it accepted, and prints the
+line to paste, `RED_EVIDENCE: <filter> — compile: missing <symbols>` or
+`RED_EVIDENCE: <filter> — <failing tests> — <assertion>`. It does not add a production stub to
+make the tests compile. Emit `RED_EVIDENCE: none` when the work
 recorded no RED run, such as a maintenance pass with no failing-first cycle. Anything but a
 literal `none` counts as evidence, so the fields must be the values actually run, never
 placeholders.

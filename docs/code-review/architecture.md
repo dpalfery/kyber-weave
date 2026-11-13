@@ -576,6 +576,19 @@ on every Go version even when it lists files, and `gofmt -d` exits 1 on a diff o
 gate that judged the exit code alone could not fail on older toolchains; any listed file fails this one
 on all of them.
 
+
+#### RED mode
+
+`review gates --agent test-dev --paths <test files> --task <slug> --red` runs the agent's gates and judges them as
+test-first RED evidence instead of as a pass or fail. The gates' output is classified by compiler diagnostic code, not
+by anyone's prose: the run is RED when tests ran and at least one failed, or when every failing gate failed only on
+missing-symbol errors (C# `CS0103`, `CS0117`, `CS0234`, `CS0246`, `CS1061`; TypeScript `TS2304`, `TS2305`, `TS2307`,
+`TS2339`) in the files the task changed. A syntax or type error, a missing symbol in a file the task did not change, a
+restore error, or tests that all pass reject it (`KW-REVIEW-052`). The accepted gates are reported as passed with the
+reason, and `KW-REVIEW-051` carries the `RED_EVIDENCE:` line to paste. Without `--red`, the same classifier tells a GREEN
+worker its build fails only on sibling RED tests' missing symbols (`KW-REVIEW-053`). Languages are records in
+`RedLanguages`, so a new one needs no change to the classifier.
+
 ### The tests a task gate runs
 
 A build that compiles is not evidence the change still passes its tests, and the product suite is too

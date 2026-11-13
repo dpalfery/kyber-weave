@@ -172,11 +172,13 @@ public static class GateRunner
     /// <param name="workingDirectory">The repository root the gates run against.</param>
     /// <param name="fix">Whether to run each gate's fix command before its verify command.</param>
     /// <param name="stopOnBlockingFailure">Whether to skip the remaining gates once a blocking one fails.</param>
+    /// <param name="captureOutput">Receives each verify command's gate id and its output, for a caller that classifies it.</param>
     public static TaskGateRun RunTaskGates(
         IReadOnlyList<PlannedTaskGate> gates,
         string workingDirectory,
         bool fix,
-        bool stopOnBlockingFailure = false)
+        bool stopOnBlockingFailure = false,
+        Action<string, string>? captureOutput = null)
     {
         ArgumentNullException.ThrowIfNull(gates);
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
@@ -200,7 +202,8 @@ public static class GateRunner
             }
 
             GateResult result = RunArgv(
-                gate.Id, gate.Blocking, gate.Run, gate.TimeoutSeconds, gateDirectory, gate.FailOnOutput);
+                gate.Id, gate.Blocking, gate.Run, gate.TimeoutSeconds, gateDirectory, gate.FailOnOutput,
+                captureOutput: captureOutput);
             results.Add(result);
 
             if (stopOnBlockingFailure && gate.Blocking && !result.Passed)
@@ -334,7 +337,7 @@ public static class GateRunner
     {
         string gateDirectory = ResolveWorkingDirectory(workingDirectory, gate.WorkingDirectory);
         return RunArgv(
-            gate.Id, gate.Blocking, gate.Run, gate.TimeoutSeconds, gateDirectory, gate.FailOnOutput, budget, stop);
+            gate.Id, gate.Blocking, gate.Run, gate.TimeoutSeconds, gateDirectory, gate.FailOnOutput, budget, stop: stop);
     }
 
     /// <summary>The run deadline and the time left on it when a gate starts.</summary>
@@ -360,6 +363,7 @@ public static class GateRunner
         string workingDirectory,
         bool failOnOutput,
         RunBudget? budget = null,
+        Action<string, string>? captureOutput = null,
         CancellationToken stop = default)
     {
         if (!Directory.Exists(workingDirectory))
@@ -394,6 +398,7 @@ public static class GateRunner
         try
         {
             ProcessResult process = ProcessRunner.Run(startInfo, string.Empty, timeout, cancellationToken: stop);
+            captureOutput?.Invoke(id, process.StandardOutput + "\n" + process.StandardError);
 
             // A tool that reports by listing (gofmt -l exits 0 on Go before 1.26 even when files differ) can
             // only fail through its output. The exit code is rewritten to 1 so GateResult.Passed stays the single
