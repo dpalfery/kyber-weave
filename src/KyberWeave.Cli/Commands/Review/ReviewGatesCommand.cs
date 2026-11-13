@@ -274,7 +274,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
             ? TimeSpan.FromSeconds(config.Review.CouncilDeadlineSeconds)
             : null;
         GateReport gates = GateRunner.Run(
-            new ReviewConfig { Gates = fullSuite.Admitted },
+            new ReviewConfig { Gates = fullSuite.Admitted, Parallelism = config.Review.Parallelism },
             root,
             settings.StopOnFailure,
             changed,

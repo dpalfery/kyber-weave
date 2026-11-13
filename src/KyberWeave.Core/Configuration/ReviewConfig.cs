@@ -245,6 +245,15 @@ public sealed class ReviewConfig
     /// </remarks>
     public int CouncilDeadlineSeconds { get; init; } = 600;
 
+    /// <summary>The most gates a <c>review gates</c> run has running at one time.</summary>
+    /// <remarks>
+    /// Read from <c>review.parallelism</c>. Gates still start in declaration order and each waits for the one before
+    /// it unless it is declared <c>concurrent</c>, so a host that declares none sees no change. The bound is on the
+    /// gates in flight, concurrent or not: a host that marks several independent gates <c>concurrent</c> cannot
+    /// pile them onto one machine's cores at once. Two matches one sequential gate beside one concurrent gate.
+    /// </remarks>
+    public int Parallelism { get; init; } = 2;
+
     /// <summary>The rules the verdict engine may not override.</summary>
     public ReviewPolicy Policy { get; init; } = ReviewPolicy.ProductDefaults;
 

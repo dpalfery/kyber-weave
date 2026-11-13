@@ -687,6 +687,15 @@ shipped catalogue, `include`, `os`, `working-directory`, `fail-on-output`, `full
 | `requires-paths` | no | `[]`, which requires nothing | Repository-relative paths the gate needs before it can start. When one is absent the gate does not start: it is reported under `KW-REVIEW-033` with `exitCode: -1`, `passed: false` and `outcome: "notStarted"`, at Error when the gate is blocking and at Warning otherwise, and its summary carries the install hint. Never a pass, and never `KW-REVIEW-022` |
 | `concurrent` | no | `false` | When `true`, the gate starts at its place in the declared order and runs alongside the gates declared after it instead of holding them up. Its result keeps its declared place in the report, and it is still stopped at its own `timeout-seconds` and reported as timed out. Only for a gate that neither reads nor writes what later gates produce; the runner does not check that |
 
+Gates run one after another in declaration order, except a gate marked `concurrent`. The runner cannot tell
+whether two gates share build output or a lock file, so it never overlaps gates on its own: a host that knows
+two gates are independent (a Node lint and a .NET test run, say) declares the first `concurrent`, ahead of the
+longer gates it can overlap. `review.parallelism` (default `2`) bounds the gates running at one time,
+`concurrent` or not, so marking several gates `concurrent` cannot pile them onto one machine's cores; the
+`proc-guard` machine slot a gate such as `test` takes still applies on top. A gate waits for a free slot before it
+starts, and a gate the council deadline passed while it waited is reported as not started, exactly as before. The
+report lists results in declaration order and the verdict reads the same results whatever the bound.
+
 `CouncilGateSelection` plans the run against the changed set and the host OS: a gate
 whose `os` does not match is skipped, a gate whose `include` matches no changed file is
 skipped (`KW-REVIEW-026`), and a gate with no `include` runs on every change.

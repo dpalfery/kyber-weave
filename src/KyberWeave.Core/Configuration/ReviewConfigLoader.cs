@@ -62,6 +62,7 @@ public static class ReviewConfigLoader
                 ParseMaxConcurrentWorkers(section.MaxConcurrentWorkers, defaults.MaxConcurrentWorkers),
             CouncilDeadlineSeconds =
                 ParseCouncilDeadlineSeconds(section.CouncilDeadlineSeconds, defaults.CouncilDeadlineSeconds),
+            Parallelism = ParseParallelism(section.Parallelism, defaults.Parallelism),
             Policy = ParsePolicy(section.Policy, defaults.Policy),
             Warnings = warnings ?? defaults.Warnings
         };
@@ -781,6 +782,17 @@ public static class ReviewConfigLoader
             throw new YamlException("review.council-deadline-seconds must be greater than zero.");
 
         return seconds;
+    }
+
+    private static int ParseParallelism(int? configured, int defaults)
+    {
+        if (configured is not { } gates)
+            return defaults;
+
+        if (gates <= 0)
+            throw new YamlException("review.parallelism must be greater than zero.");
+
+        return gates;
     }
 
     private static ReviewPolicy ParsePolicy(ReviewPolicyYaml? policy, ReviewPolicy defaults)

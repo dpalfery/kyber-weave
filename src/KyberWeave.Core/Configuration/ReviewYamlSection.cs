@@ -22,6 +22,9 @@ internal sealed class ReviewYamlSection
 
     /// <summary>Seconds the full council gate run may take before the deadline stops it.</summary>
     public int? CouncilDeadlineSeconds { get; init; }
+
+    /// <summary>The most gates a run has running at one time.</summary>
+    public int? Parallelism { get; init; }
 }
 
 /// <summary>The <c>review.duplicates</c> mapping.</summary>
