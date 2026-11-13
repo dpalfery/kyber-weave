@@ -135,7 +135,8 @@ escalates. Valid RED is tests that ran and failed on an assertion, or, in a comp
 that failed only because the tests name symbols the GREEN task creates (the classic first red);
 a build that breaks for any other reason is not RED. A test-authoring task does not judge this
 by prose: it runs `kyber-weave review gates . --agent test-dev --paths <its test files> --task <slug> --red`,
-which passes only on those two shapes, lists the missing symbols it accepted, and prints the
+which passes only on those two shapes, lists the missing symbols it accepted, skips test gates that
+cannot run on a broken build, ends with a `TASK_GATE:` line and either `RED_REJECTED: <reason>` or the
 line to paste, `RED_EVIDENCE: <filter> — compile: missing <symbols>` or
 `RED_EVIDENCE: <filter> — <failing tests> — <assertion>`. It does not add a production stub to
 make the tests compile. Emit `RED_EVIDENCE: none` when the work

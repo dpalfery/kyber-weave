@@ -172,13 +172,13 @@ public static class GateRunner
     /// <param name="workingDirectory">The repository root the gates run against.</param>
     /// <param name="fix">Whether to run each gate's fix command before its verify command.</param>
     /// <param name="stopOnBlockingFailure">Whether to skip the remaining gates once a blocking one fails.</param>
-    /// <param name="captureOutput">Receives each verify command's gate id and its output, for a caller that classifies it.</param>
+    /// <param name="observer">Sees each verify command's output and result, and may skip a later gate, for a caller that classifies them.</param>
     public static TaskGateRun RunTaskGates(
         IReadOnlyList<PlannedTaskGate> gates,
         string workingDirectory,
         bool fix,
         bool stopOnBlockingFailure = false,
-        Action<string, string>? captureOutput = null)
+        TaskGateObserver? observer = null)
     {
         ArgumentNullException.ThrowIfNull(gates);
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
@@ -201,10 +201,17 @@ public static class GateRunner
                     fixFailures.Add(applied);
             }
 
+            if (observer?.SkipReason?.Invoke(gate) is { } skipReason)
+            {
+                results.Add(new GateResult(gate.Id, gate.Blocking, 0, skipReason, 0, skipReason));
+                continue;
+            }
+
             GateResult result = RunArgv(
                 gate.Id, gate.Blocking, gate.Run, gate.TimeoutSeconds, gateDirectory, gate.FailOnOutput,
-                captureOutput: captureOutput);
+                captureOutput: observer?.Output);
             results.Add(result);
+            observer?.After?.Invoke(gate, result);
 
             if (stopOnBlockingFailure && gate.Blocking && !result.Passed)
                 break;
@@ -472,4 +479,17 @@ public static class GateRunner
             ? $"exit code {process.ExitCode}"
             : string.Join(" | ", lines.TakeLast(3));
     }
+}
+
+/// <summary>What a caller sees while task gates run: each command's output and result, and a say in skipping later gates.</summary>
+public sealed class TaskGateObserver
+{
+    /// <summary>Receives a verify command's gate id and its standard output followed by standard error.</summary>
+    public Action<string, string>? Output { get; init; }
+
+    /// <summary>Called after a gate's verify command has run, with its result.</summary>
+    public Action<PlannedTaskGate, GateResult>? After { get; init; }
+
+    /// <summary>Called before a gate starts; a non-null reason skips it and is recorded as the gate's not-applicable reason.</summary>
+    public Func<PlannedTaskGate, string?>? SkipReason { get; init; }
 }

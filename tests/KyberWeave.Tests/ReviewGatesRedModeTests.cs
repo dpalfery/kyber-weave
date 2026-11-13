@@ -1,3 +1,6 @@
+using System.Runtime.CompilerServices;
+using System.Text.Json;
+using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Review;
 using KyberWeave.Tests.Fakes;
 using Xunit;
@@ -166,9 +169,117 @@ public sealed class ReviewGatesRedModeTests : IDisposable
         Assert.Null(RedClassifier.SiblingSymbols(gate with { ExitCode = 0 }, ["src/Widget/Panel.cs"]));
     }
 
+    // ---- the first live run's reports (fixtures), and the runner patterns -----------------------------
+
+    private static string Fixture(string name, [CallerFilePath] string source = "") =>
+        File.ReadAllText(Path.Combine(Path.GetDirectoryName(source)!, "Fixtures", "red-gate-reports", name));
+
+    private static string GateSummary(string fixture, string gateId)
+    {
+        using JsonDocument report = JsonDocument.Parse(Fixture(fixture));
+        return report.RootElement.GetProperty("gates").EnumerateArray()
+            .Single(gate => gate.GetProperty("id").GetString() == gateId).GetProperty("summary").GetString()!;
+    }
+
+    [Fact]
+    public void ARunnerCrashWithNoFailingTestIsNamedAsInfrastructureNotRed()
+    {
+        // t2 of the live run: dotnet test on a project that could not build.
+        RedOutcome outcome = Judge(GateSummary("t2-task-gate.json", "tests"), 1);
+
+        Assert.False(outcome.Passed);
+        Assert.Contains("infrastructure failure, not RED", outcome.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ZeroTestsRanIsNamedWithTheFilterAndTheProjectTheHostGatesDoNotCover()
+    {
+        // t1 of the live run: exit code 8, the filter matched nothing because the class is in another test project.
+        string root = Path.Combine(_temp.Path, "zero-root");
+        Directory.CreateDirectory(Path.Combine(root, "tests/Other.IntegrationTests"));
+        File.WriteAllText(Path.Combine(root, "tests/Other.IntegrationTests/Other.IntegrationTests.csproj"), "<Project />");
+        const string file = "tests/Other.IntegrationTests/JobTests.cs";
+        File.WriteAllText(Path.Combine(root, file), "// test");
+
+        RedOutcome outcome = RedClassifier.Evaluate(
+            [new RedGateObservation("tests", "dotnet test --filter FullyQualifiedName~JobTests", 8, GateSummary("t1-task-gate.json", "tests"))],
+            [file],
+            root);
+
+        Assert.False(outcome.Passed);
+        Assert.Contains("zero tests", outcome.Reason, StringComparison.Ordinal);
+        Assert.Contains("FullyQualifiedName~JobTests", outcome.Reason, StringComparison.Ordinal);
+        Assert.Contains("does not cover tests/Other.IntegrationTests/Other.IntegrationTests.csproj", outcome.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PlaywrightTestsThatRanAndFailedAreRedAndAServerThatDidNotStartIsNot()
+    {
+        const string failed = """
+            Running 3 tests using 1 worker
+
+              1) [chromium] › 1-Presentation/admin-dashboard/tests/job-status-cards.spec.ts:7:5 › shows four status cards ───
+
+                Error: expect(locator).toHaveCount(expected)
+
+                Expected: 4
+                Received: 0
+
+              1 failed
+              2 passed (6.1s)
+            """;
+        RedOutcome red = Judge(failed, 1);
+        Assert.True(red.Passed, red.Reason);
+        Assert.Contains("shows four status cards", red.EvidenceLine, StringComparison.Ordinal);
+        Assert.Contains("expect(locator).toHaveCount", red.EvidenceLine, StringComparison.Ordinal);
+
+        RedOutcome infrastructure = Judge("Error: Timed out waiting 60000ms from config.webServer.", 1);
+        Assert.False(infrastructure.Passed);
+        Assert.Contains("web server", infrastructure.Reason, StringComparison.Ordinal);
+
+        RedOutcome none = Judge("Error: No tests found", 1);
+        Assert.False(none.Passed);
+        Assert.Contains("zero tests", none.Reason, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("pytest tests/test_widget.py", "tests/test_widget.py::test_panel FAILED\nFAILED tests/test_widget.py::test_panel - AssertionError: assert 1 == 2\n=========== 1 failed, 2 passed in 0.12s ===========", "tests/test_widget.py::test_panel")]
+    [InlineData("cargo test widget", "test widget::panel ... FAILED\ntest result: FAILED. 2 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out", "widget::panel")]
+    [InlineData("go test ./widget", "--- FAIL: TestPanel (0.00s)\n    panel_test.go:12: got 1, want 2\nFAIL\tgithub.com/x/widget\t0.004s", "TestPanel")]
+    [InlineData("npx vitest run widget", "FAIL  tests/widget.test.ts > panel renders\nAssertionError: expected 1 to be 2\n Tests  1 failed | 2 passed (3)", "tests/widget.test.ts > panel renders")]
+    public void EachRunnersFailingSummaryIsRedAndNamesTheTest(string command, string output, string testName)
+    {
+        RedOutcome outcome = RedClassifier.Evaluate([new RedGateObservation("tests", command, 1, output.Replace("\\n", "\n", StringComparison.Ordinal))], [TestFile]);
+
+        Assert.True(outcome.Passed, outcome.Reason);
+        Assert.Contains(testName, outcome.EvidenceLine, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("pytest tests", "============ no tests ran in 0.01s ============", 5)]
+    [InlineData("cargo test nothing", "running 0 tests\ntest result: ok. 0 passed; 0 failed", 0)]
+    [InlineData("go test ./none", "?   \tgithub.com/x/none\t[no test files]", 0)]
+    public void EachRunnersZeroTestsOutputIsNotRed(string command, string output, int exit)
+    {
+        RedOutcome outcome = RedClassifier.Evaluate([new RedGateObservation("tests", command, exit == 0 ? 1 : exit, output.Replace("\\n", "\n", StringComparison.Ordinal))], [TestFile]);
+
+        Assert.False(outcome.Passed);
+        Assert.Contains("zero tests", outcome.Reason, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("dotnet test tests/Widget.Tests", true)]
+    [InlineData("npx playwright test --project=chromium", true)]
+    [InlineData("npm run test", true)]
+    [InlineData("pytest -q", true)]
+    [InlineData("dotnet build tests/Widget.Tests", false)]
+    [InlineData("dotnet format whitespace --verify-no-changes", false)]
+    public void TheTestCommandMarkersSeparateTestGatesFromBuildGates(string command, bool isTests) =>
+        Assert.Equal(isTests, RedClassifier.IsTestCommand(command));
+
     // ---- the command, against a real C# project --------------------------------------------------
 
-    private string Project(string testSource, string? siblingSource = null)
+    private string Project(string testSource, string? siblingSource = null, bool withTestGate = false)
     {
         string root = Path.Combine(_temp.Path, "repo");
         Directory.CreateDirectory(Path.Combine(root, ".kyber-weave"));
@@ -187,7 +298,12 @@ public sealed class ReviewGatesRedModeTests : IDisposable
                   - id: dotnet-build
                     include: ["**/*.cs"]
                     run: [dotnet, build, tests/Widget.Tests/Widget.Tests.csproj, -nologo, -nr:false, -p:UseSharedCompilation=false]
-            """);
+            """ + (withTestGate ? """
+
+                  - id: tests
+                    include: ["**/*.cs"]
+                    run: [dotnet, test, tests/Widget.Tests/Widget.Tests.csproj, --no-build]
+            """ : string.Empty));
         return root;
     }
 
@@ -209,6 +325,38 @@ public sealed class ReviewGatesRedModeTests : IDisposable
         Assert.Contains("RED_EVIDENCE: ", output, StringComparison.Ordinal);
         Assert.Contains("compile: missing WidgetRepository", output, StringComparison.Ordinal);
         Assert.Contains("KW-REVIEW-051", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ABuildAcceptedAsRedSkipsTheLaterTestGateAndTheReportCorroboratesAPassClaim()
+    {
+        string root = Project("namespace Widget.Tests; public class WidgetTests { public void T() { var r = new WidgetRepository(); } }", withTestGate: true);
+        string report = Path.Combine(root, "gates.json");
+
+        (int exit, string output) = Run(root, "--red", "--out", report);
+
+        Assert.True(exit == 0, output);
+        Assert.Contains("TASK_GATE: PASS", output, StringComparison.Ordinal);
+        Assert.Contains("skipped=1", output, StringComparison.Ordinal);
+        Assert.Contains("RED_EVIDENCE: ", output, StringComparison.Ordinal);
+        using JsonDocument json = JsonDocument.Parse(File.ReadAllText(report));
+        JsonElement tests = json.RootElement.GetProperty("gates").EnumerateArray().Single(gate => gate.GetProperty("id").GetString() == "tests");
+        Assert.Contains("not run — RED build (missing symbols WidgetRepository)", tests.GetProperty("summary").GetString(), StringComparison.Ordinal);
+        Assert.True(tests.GetProperty("notApplicable").GetBoolean());
+        // KW-ARB-GATE-REPORT-001 reads the claim against this report: it must corroborate, not disagree.
+        Assert.True(GateReportFacts.Agrees($"TASK_GATE: PASS — agent=test-dev gates=2 failed=none skipped=1 report={report} runs=1", root));
+    }
+
+    [Fact]
+    public void ARejectedRedRunPrintsTheRejectionLineAndFailsTheTaskGateStatus()
+    {
+        string root = Project("namespace Widget.Tests; public class WidgetTests { public void T() { var r = new WidgetRepository() } }");
+
+        (int exit, string output) = Run(root, "--red");
+
+        Assert.Equal(1, exit);
+        Assert.Contains("TASK_GATE: FAIL", output, StringComparison.Ordinal);
+        Assert.Contains("RED_REJECTED: ", output, StringComparison.Ordinal);
     }
 
     [Fact]

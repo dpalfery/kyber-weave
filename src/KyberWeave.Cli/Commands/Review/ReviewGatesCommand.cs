@@ -623,14 +623,29 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
         // The classifiers read what each verify command printed, so a build that fails on missing symbols is told
         // apart from one that fails on anything else.
         Dictionary<string, string> outputs = new(StringComparer.Ordinal);
+        IReadOnlyList<string>? brokenBuildSymbols = null;
+        TaskGateObserver observer = new()
+        {
+            Output = (id, output) => outputs[id] = output,
+            After = (gate, result) =>
+            {
+                // A build accepted as RED on missing symbols leaves nothing for a later test gate to run against.
+                if (settings.Red && !result.Passed && brokenBuildSymbols is null && outputs.TryGetValue(gate.Id, out string? output))
+                    brokenBuildSymbols = RedClassifier.AcceptedMissingSymbols(
+                        new RedGateObservation(gate.Id, string.Join(' ', gate.Run), result.ExitCode, output), changed);
+            },
+            SkipReason = gate => settings.Red && brokenBuildSymbols is not null && RedClassifier.IsTestCommand(string.Join(' ', gate.Run))
+                ? RedClassifier.BuildSkipReason(brokenBuildSymbols)
+                : null,
+        };
         TaskGateRun run = GateRunner.RunTaskGates(
-            plan.Gates, root, settings.Fix, settings.StopOnFailure && !settings.Red,
-            (id, output) => outputs[id] = output);
+            plan.Gates, root, settings.Fix, settings.StopOnFailure && !settings.Red, observer);
 
         GateReport finalReport = run.Report;
+        RedOutcome? redOutcome = null;
         if (settings.Red)
         {
-            finalReport = ApplyRed(run.Report, plan.Gates, outputs, changed, report);
+            (finalReport, redOutcome) = ApplyRed(run.Report, plan.Gates, outputs, changed, repoRoot, report);
         }
 
         foreach (GateResult gate in finalReport.Gates)
@@ -649,23 +664,43 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
                 fix.Id));
 
         report.AddMetric("gates", finalReport.Gates.Count);
-        report.AddMetric("failed", finalReport.Gates.Count(g => !g.Passed));
+        report.AddMetric("failed", finalReport.Gates.Count(g => !g.Passed && !g.NotApplicable));
 
         CommandHelpers.TryWriteReport(settings.Out, ReviewJson.Write(finalReport), ReportWriteFailed, report);
 
         CommandHelpers.Finish(report, settings, "review gates", "Gate");
+        if (redOutcome is not null && ReportRenderer.IsHuman(settings.ParsedFormat))
+            WriteRedLines(redOutcome, agent, finalReport, settings.Out);
+
         return report.HasErrors ? 1 : 0;
+    }
+
+    /// <summary>
+    ///     The last lines of a RED run, ready to paste into the digest: the task-gate status for the report just written,
+    ///     then <c>RED_EVIDENCE:</c> when the run is valid RED or <c>RED_REJECTED:</c> with the reason when it is not.
+    /// </summary>
+    private static void WriteRedLines(RedOutcome outcome, string agent, GateReport report, string? reportPath)
+    {
+        int skipped = report.Gates.Count(gate => gate.NotApplicable);
+        string failed = outcome.Passed
+            ? "none"
+            : string.Join(",", report.Gates.Where(gate => !gate.Passed && !gate.NotApplicable).Select(gate => gate.Id).DefaultIfEmpty("none"));
+        Console.WriteLine(
+            $"TASK_GATE: {(outcome.Passed ? "PASS" : "FAIL")} — agent={agent} gates={report.Gates.Count} failed={failed} skipped={skipped} report={reportPath ?? "<none>"} runs=1");
+        Console.WriteLine(outcome.Passed ? outcome.EvidenceLine : $"RED_REJECTED: {outcome.Reason}");
+        Console.Out.Flush();
     }
 
     /// <summary>
     ///     Judges a RED task's gate runs. A failed gate the classifier accepts is reported as passed with the reason, one
     ///     it rejects keeps its failure, and the verdict is one diagnostic carrying the line for the digest or the next step.
     /// </summary>
-    private static GateReport ApplyRed(
+    private static (GateReport Report, RedOutcome Outcome) ApplyRed(
         GateReport ran,
         IReadOnlyList<PlannedTaskGate> planned,
         Dictionary<string, string> outputs,
         IReadOnlyList<string> changed,
+        string repositoryRoot,
         DiagnosticReport report)
     {
         List<RedGateObservation> observations = [];
@@ -676,7 +711,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
                 observations.Add(new RedGateObservation(gate.Id, string.Join(' ', plannedGate.Run), gate.ExitCode, output));
         }
 
-        RedOutcome outcome = RedClassifier.Evaluate(observations, changed);
+        RedOutcome outcome = RedClassifier.Evaluate(observations, changed, repositoryRoot);
         List<GateResult> results = [];
         foreach (GateResult gate in ran.Gates)
         {
@@ -706,7 +741,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
                       + "errors in the files this task changed. Fix what the message names, then run the same command again."));
         }
 
-        return ran with { Gates = results };
+        return (ran with { Gates = results }, outcome);
     }
 
     /// <summary>

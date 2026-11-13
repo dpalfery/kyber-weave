@@ -586,8 +586,24 @@ missing-symbol errors (C# `CS0103`, `CS0117`, `CS0234`, `CS0246`, `CS1061`; Type
 `TS2339`) in the files the task changed. A syntax or type error, a missing symbol in a file the task did not change, a
 restore error, or tests that all pass reject it (`KW-REVIEW-052`). The accepted gates are reported as passed with the
 reason, and `KW-REVIEW-051` carries the `RED_EVIDENCE:` line to paste. Without `--red`, the same classifier tells a GREEN
-worker its build fails only on sibling RED tests' missing symbols (`KW-REVIEW-053`). Languages are records in
+worker its build fails only on sibling RED tests' missing symbols (`KW-REVIEW-053`). Languages and test runners are records in
 `RedLanguages`, so a new one needs no change to the classifier.
+
+Once a build gate is accepted as RED on missing symbols, every later gate whose command runs tests is not run: the report records it as
+not applicable with the reason `not run — RED build (missing symbols …)`, which never counts as failed, so the report corroborates a
+`TASK_GATE: PASS` claim (`KW-ARB-GATE-REPORT-001`). A test gate that exits non-zero because tests failed is accepted as RED; zero tests
+run (the filter matched nothing, with the project the host's `review.task-gates` do not cover named), a server that did not start, a
+crashed runner or a collection error is rejected with that reason. The run ends with `TASK_GATE: PASS|FAIL …` and `RED_EVIDENCE: …` or
+`RED_REJECTED: <reason>`, ready to paste.
+
+| Runner | Tests ran and failed, read from | Zero tests | Infrastructure failures named |
+|---|---|---|---|
+| dotnet test (Microsoft.Testing.Platform and VSTest) | `total:`/`failed:` summary, `Failed!  - Failed: N` | exit code 8, "Zero tests ran", no test matches the filter | host crash, runner failure with no test |
+| Playwright | `N failed` / `N passed` lines | "No tests found" | web server timeout, port in use, connection refused, browser missing |
+| vitest, jest | `Tests  N failed`, `Tests: N failed` | "No test files found", "No tests found" | none |
+| pytest | `N failed, M passed in Xs` | exit code 5, "no tests ran" | collection error |
+| cargo test | `test result: FAILED. P passed; F failed` | `running 0 tests` | could not compile |
+| go test | `--- FAIL: TestName` | `[no test files]`, `[no tests to run]` | none |
 
 ### The tests a task gate runs
 
