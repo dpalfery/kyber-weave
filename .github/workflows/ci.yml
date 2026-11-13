@@ -221,7 +221,16 @@ jobs:
         with:
           bun-version: "1.3.14"
 
+      # ProseRuleGradingTests asks Jev whether the shipped prose states each catalog rule
+      # (docs/standards/test/README.md#prose-rules). It runs only when the secret is set: a
+      # fork's pull request gets no secrets, so KW_PROSE_GRADE is empty and the test skips with
+      # its reason. A grader outage is a skip with a warning; a confident wrong answer fails.
       - name: Test
+        env:
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+          KW_PROSE_GRADE: ${{ secrets.TYPESAFE_API_KEY != '' && '1' || '' }}
+          KW_PROSE_GRADE_ENDPOINT: https://openrouter.ai/api/v1
+          KW_PROSE_GRADE_MODEL: typesafe/jev-1.14
         run: >
           dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj
           -c ${{ env.CONFIGURATION }}

@@ -76,6 +76,9 @@ public sealed class ProseRuleGradingTests
         TestContext.Current.TestOutputHelper?.WriteLine(report);
         await WriteOutputAsync(results, report, cancellationToken);
 
+        int[] refused = grader.FailedStatuses.Where(status => status is 401 or 403).Distinct().ToArray();
+        Assert.True(refused.Length == 0, $"The provider refused the key (HTTP {string.Join(", ", refused)}): fix the secret; this is not an outage.");
+
         List<ProseResult> failures = results.Where(item => item.Outcome is ProseOutcome.Wrong or ProseOutcome.Unsure or ProseOutcome.OverBudget).ToList();
         int outages = results.Count(item => item.Outcome == ProseOutcome.Outage);
         Assert.True(failures.Count == 0, $"{failures.Count} graded checks failed; {outages} got no answer.\n{report}");
