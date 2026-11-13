@@ -394,7 +394,7 @@ public sealed partial class DocumentIndex
         double body = BodyWeight * _corpus.ScoreBody(doc, queryVector, coverageTerms);
 
         double partial = exact > 0 || title > 0 || body > 0
-            ? ScorePartialIdentity(doc, queryVector)
+            ? ScorePartialIdentity(doc, queryVector, _corpus)
             : 0;
 
         double identity = exact + partial + title + body;
@@ -626,7 +626,7 @@ public sealed partial class DocumentIndex
         DocumentCorpus corpus,
         IReadOnlyList<string> coverageTerms)
     {
-        return ScorePartialIdentity(doc, queryVector)
+        return ScorePartialIdentity(doc, queryVector, corpus)
                + TitleWeight * ScoreTitle(doc, titleQuery)
                + BodyWeight * corpus.ScoreBody(doc, queryVector, coverageTerms);
     }

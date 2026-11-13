@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-11-08
+last-reviewed: 2026-11-12
 decided-by:
   - adr/0010-keywords-prefix-coverage-and-oov-idf
   - adr/0046-docs-explore-section-answer
@@ -30,7 +30,7 @@ passage that answers, plus enough signal to know whether to trust it.
 Every document is scored on independent identity, title, and body contributions, then scaled by authority:
 
 ```
-score = exact-identity + partial-identity + (2.0 x title similarity) + body relevance
+score = exact-identity + partial-identity + (4.0 x title similarity) + body relevance
 score = score x authority
 ```
 
@@ -44,16 +44,26 @@ prefix ranks the documents a question touches; it never introduces one.
 | Exact `code-refs` match | 5.0 | the query is a symbol the document claims |
 | Exact `api-endpoints` match | 5.0 | the query is a route the document claims |
 | Exact `keywords` match | 4.0 | the query equals a declared keyword or alias |
-| Partial `id` coverage | up to 4.5 | the query names part of the id slug |
+| Partial `id` coverage | up to 4.5 | the query names part of the id slug, each slug word counting by how rarely the corpus uses it |
 | Partial `keywords` coverage | up to 4.5 | keyword coverage × 3.0, capped at a 1.5 multiplier |
 | Exact `component` match | 3.0 | the query is a component name |
 | Partial `component` coverage | up to 2.5 | the query names part of a component |
-| Title similarity | up to 2.0 | cosine overlap with the title, ignoring question scaffolding |
+| Title similarity | up to 4.0 | cosine overlap with the title, ignoring question scaffolding |
 | Body relevance | up to 1.0 | BM25 over the prose, squashed to 0..1 |
 
 Frontmatter identity deliberately outranks prose. A document that *formally claims* the
 query term is a better answer than one that merely discusses it — and only the ontology
 carries that claim, which is the entire reason retrieval is built on it.
+
+Coverage is **weighted by rarity**. Each word of an id, component or keyword counts by its
+inverse document frequency over the document bodies, with a floor of 0.15 so a word every
+page uses still counts for something. A question about "the arbiter and its rules" therefore
+covers most of `kyber-arbiter/architecture` (the word `arbiter` carries it) and little of
+`squad/worker-rule-map` (`rule` is a word the whole corpus uses). Counting every word equally
+had the generic word win: the arbiter's own architecture, runbook and README lost to a page
+about worker rules. The title weight is 4.0 for the same reason: a title is a curated label
+for what the page is about, and it was the one identity signal too small to settle a close
+call.
 
 Partial identity exists because ids are structured slugs (`docgraph/architecture`,
 `context-hygiene/skills`), which makes them the closest thing the corpus has to a
