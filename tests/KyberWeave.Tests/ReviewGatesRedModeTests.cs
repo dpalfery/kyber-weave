@@ -307,11 +307,29 @@ public sealed class ReviewGatesRedModeTests : IDisposable
         return root;
     }
 
-    private static (int ExitCode, string Output) Run(string root, params string[] options)
+    private static (int ExitCode, string Output) Run(string root, params string[] options) => RunAs("test-dev", root, options);
+
+    private static (int ExitCode, string Output) RunAs(string agent, string root, params string[] options)
     {
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
-            () => CommandAppFixture.ReviewGates().Run(["review", "gates", root, "--agent", "test-dev", "--paths", TestFile, .. options]));
+            () => CommandAppFixture.ReviewGates().Run(["review", "gates", root, "--agent", agent, "--paths", TestFile, .. options]));
         return (execution.Result, execution.Output);
+    }
+
+    [Theory]
+    [InlineData("csharp-dev")]
+    [InlineData("dal-dev")]
+    [InlineData("react-dev")]
+    public void RedModeWorksForAnyAgentsTaskGatesNotOnlyTestDev(string agent)
+    {
+        string root = Project("namespace Widget.Tests; public class WidgetTests { public void T() { var r = new WidgetRepository(); r.Load(); } }");
+        string config = Path.Combine(root, ".kyber-weave/kyber-weave.yml");
+        File.WriteAllText(config, File.ReadAllText(config).Replace("  test-dev:", $"  {agent}:", StringComparison.Ordinal));
+
+        (int exit, string output) = RunAs(agent, root, "--red");
+
+        Assert.True(exit == 0, output);
+        Assert.Contains("RED_EVIDENCE: ", output, StringComparison.Ordinal);
     }
 
     [Fact]
