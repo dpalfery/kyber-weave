@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Text.Json;
 using KyberWeave.Arbiter.Hooks;
+using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Rendering;
 using Xunit;
 
@@ -320,6 +322,59 @@ public sealed class ConductorGuardTests
         Assert.EndsWith(ConductorGuard.WorkflowReminder, modified, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void APlanInTheRunsOwnWorktree_IsPermittedFromTheCanonicalCheckout()
+    {
+        using TempDirectory parent = new();
+        string repo = Path.Combine(parent.Path, "repo");
+        string other = Path.Combine(parent.Path, "other");
+        Directory.CreateDirectory(repo);
+        Directory.CreateDirectory(Path.Combine(other, "docs", "plans"));
+        Git(repo, "init", "-q", "-b", "main");
+        Git(repo, "-c", "user.email=a@example.com", "-c", "user.name=A", "commit", "-q", "--allow-empty", "-m", "initial");
+        string worktree = Path.Combine(parent.Path, "repo.worktrees", "run");
+        Git(repo, "worktree", "add", "-q", "-b", "claude/feat/run", worktree);
+        string root = GitRoot(worktree);
+        Directory.CreateDirectory(Path.Combine(root, "docs", "plans"));
+
+        Assert.Empty(RunIn(repo, Path.Combine(root, "docs", "plans", "2026-11-13-widget.md")));
+        Assert.Empty(RunIn(repo, Path.Combine(root, "docs", "plans", "2026-11-13-widget.tasks.json")));
+        Assert.NotEmpty(RunIn(repo, Path.Combine(root, "src", "App.cs")));
+        Assert.NotEmpty(RunIn(repo, Path.Combine(other, "docs", "plans", "x.md")));
+    }
+
+    [Fact]
+    public void ARunRecord_IsPermittedAndTheRestOfHomeIsNot()
+    {
+        using TempDirectory home = new();
+        string runs = Path.Combine(home.Path, ".kyber-weave", "runs");
+        Directory.CreateDirectory(runs);
+
+        Assert.Empty(RunIn(Cwd, Path.Combine(runs, "claude-feat-run.json"), home.Path));
+        Assert.NotEmpty(RunIn(Cwd, Path.Combine(home.Path, ".kyber-weave", "credentials.json"), home.Path));
+        Assert.NotEmpty(RunIn(Cwd, Path.Combine(runs, "..", "secrets.json"), home.Path));
+    }
+
+    private static string GitRoot(string directory) =>
+        KyberWeave.Core.Arbiter.Facts.GitFacts.GetRoot(directory) ?? throw new InvalidOperationException("no git root");
+
+    private static void Git(string directory, params string[] arguments)
+    {
+        ProcessStartInfo startInfo = new("git")
+        {
+            WorkingDirectory = directory,
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+        };
+        foreach (string argument in arguments) startInfo.ArgumentList.Add(argument);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        Assert.True(result.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {result.StandardError}");
+    }
+
     private static string Event(string tool, object arguments) =>
         JsonSerializer.Serialize(new { cwd = Cwd, toolName = tool, toolArgs = arguments });
 
@@ -330,14 +385,15 @@ public sealed class ConductorGuardTests
         return stdout.ToString();
     }
 
-    private static string RunIn(string cwd, string path)
+    private static string RunIn(string cwd, string path, string? home = null)
     {
         using StringWriter stdout = new();
         ConductorGuard.Run(
             JsonSerializer.Serialize(new { cwd, toolName = "view", toolArgs = new { path } }),
             stdout,
             TextWriter.Null,
-            copilotHome: CopilotHome);
+            copilotHome: CopilotHome,
+            homeDirectory: home);
         return stdout.ToString();
     }
 

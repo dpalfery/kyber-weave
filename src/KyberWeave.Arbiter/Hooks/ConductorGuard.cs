@@ -157,7 +157,7 @@ public static partial class ConductorGuard
         }
 
         string? cwd = TryGetText(root, "cwd", out string? directory) ? directory : null;
-        ToolCall? denied = calls.Find(call => !IsPermitted(call, cwd, allowedMcpServer, copilotHome));
+        ToolCall? denied = calls.Find(call => !IsPermitted(call, cwd, allowedMcpServer, copilotHome, home));
         if (denied is not null)
         {
             return Deny($"{DenyReason} Blocked tool: {denied.Name}.");
@@ -283,7 +283,7 @@ public static partial class ConductorGuard
         return parsed.RootElement.Clone();
     }
 
-    private static bool IsPermitted(ToolCall call, string? cwd, string? allowedMcpServer, string copilotHome)
+    private static bool IsPermitted(ToolCall call, string? cwd, string? allowedMcpServer, string copilotHome, string home)
     {
         if (PermittedTools.Contains(call.Name)
             || DocsServerPrefixes.Any(prefix => call.Name.StartsWith(prefix, StringComparison.Ordinal))
@@ -300,18 +300,20 @@ public static partial class ConductorGuard
 
         return call.Name switch
         {
-            "view" => TryGetText(arguments, "path", out string? path) && IsContractPath(path, cwd, copilotHome),
+            "view" => TryGetText(arguments, "path", out string? path) && IsContractPath(path, cwd, copilotHome, home),
             "bash" or "powershell" => TryGetText(arguments, "command", out string? command) && RunStartCommand().IsMatch(command),
             _ => false,
         };
     }
 
     /// <summary>
-    /// A file the conductor may read: its own references and skills, an <c>AGENTS.md</c>, anything under the
-    /// configured planning directories, and a <c>.md</c> or <c>.json</c> file under a <c>plans</c>, <c>specs</c>
-    /// or <c>todo</c> directory, such as a plan's <c>.tasks.json</c>. Reading is all <c>view</c> does.
+    /// A file the conductor may read: its own references and skills, the run records under
+    /// <c>~/.kyber-weave/runs</c>, and, in the working directory or any other worktree of the same repository (a run
+    /// works in a worktree of its own), an <c>AGENTS.md</c>, anything under the configured planning directories, and
+    /// a <c>.md</c> or <c>.json</c> file under a <c>plans</c>, <c>specs</c> or <c>todo</c> directory, such as a plan's
+    /// <c>.tasks.json</c>. Reading is all <c>view</c> does.
     /// </summary>
-    private static bool IsContractPath(string path, string? cwd, string copilotHome)
+    private static bool IsContractPath(string path, string? cwd, string copilotHome, string home)
     {
         if (cwd is null && !Path.IsPathRooted(path))
         {
@@ -327,17 +329,35 @@ public static partial class ConductorGuard
             return !HasLinkBelow(DirectoryPrefix(copilotHome), fullPath);
         }
 
+        if (Path.IsPathRooted(home)
+            && fullPath.StartsWith(DirectoryPrefix(Path.Combine(home, ".kyber-weave", "runs")), StringComparison.OrdinalIgnoreCase))
+        {
+            return !HasLinkBelow(DirectoryPrefix(home), fullPath);
+        }
+
         if (cwd is null)
         {
             return false;
         }
 
-        string root = DirectoryPrefix(cwd);
-        if (!fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+        if (fullPath.StartsWith(DirectoryPrefix(cwd), StringComparison.OrdinalIgnoreCase))
         {
-            return false;
+            return IsContractUnder(DirectoryPrefix(cwd), fullPath);
         }
 
+        // Started only for a path outside the working directory: git names the repository's other worktrees, so a
+        // directory that merely looks like one is never trusted. The deepest match wins, for a nested worktree.
+        string? worktree = GitFacts.ListWorktrees(cwd)
+            .Select(DirectoryPrefix)
+            .Where(root => fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(root => root.Length)
+            .FirstOrDefault();
+        return worktree is not null && IsContractUnder(worktree, fullPath);
+    }
+
+    /// <summary>Whether <paramref name="fullPath"/>, inside the worktree <paramref name="root"/>, is a contract file there.</summary>
+    private static bool IsContractUnder(string root, string fullPath)
+    {
         string relative = fullPath[root.Length..];
         string[] segments = relative.Split('/');
         bool contract = relative.StartsWith(".github/agents/conductor/", StringComparison.OrdinalIgnoreCase)
@@ -345,7 +365,7 @@ public static partial class ConductorGuard
             || string.Equals(segments[^1], "AGENTS.md", StringComparison.OrdinalIgnoreCase)
             || (segments[..^1].Any(segment => ContractDirectories.Contains(segment, StringComparer.OrdinalIgnoreCase))
                 && ContractExtensions.Contains(Path.GetExtension(relative), StringComparer.OrdinalIgnoreCase))
-            || ConfiguredPlanningDirectories(cwd).Any(directory => relative.StartsWith(directory, StringComparison.OrdinalIgnoreCase));
+            || ConfiguredPlanningDirectories(root).Any(directory => relative.StartsWith(directory, StringComparison.OrdinalIgnoreCase));
         return contract && !HasLinkBelow(root, fullPath);
     }
 
