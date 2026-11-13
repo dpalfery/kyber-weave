@@ -1,0 +1,2021 @@
+# The prose rule catalog: the one list of rules the shipped agent and docs prose must state.
+#
+# Every rule is checked two ways (docs/standards/test/README.md, "Prose rules"):
+#   - offline, by ProseRuleCatalogTests: every document named here exists, every section heading is
+#     a heading in its document, every rule has a home and a negative control;
+#   - by Jev, by ProseRuleGradingTests (KW_PROSE_GRADE=1): each `stated-in` document must be judged to
+#     state the rule, each control must be judged not to, and each `absent-from` document must be
+#     judged not to state the retired rule, while a copy with the retired `example` inserted must.
+#
+# Ids A1 to G7 are the worker rule map's (docs/kyber-squad/worker-rule-map.md); the rest are named
+# for what they protect. A statement is one narrow, checkable judgment: split "and" into two rules.
+# Paths are repository-relative; `*` and `**` globs are allowed. A `section` names the heading the
+# rule lives under: it is sent instead of the whole file only when the file is over the model's budget.
+version: 1
+confidence-floor: 0.8
+rules:
+  # ---------------------------------------------------------------- report formats and the digest
+  - id: A1
+    statement: A developer worker ends its task with a completion digest of six fields in this order, STATUS, FILES, TESTS, COMMIT, REMOTE_HEAD and TASK_GATE.
+    stated-in:
+      - path: products/kyber-squad/skills/task-gate/SKILL.md
+        section: Completion digest
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Developer exit gate
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: A2
+    statement: The completion digest carries a RED_EVIDENCE line that names the runner filter, the failing tests and the reason, or says none when there was no RED run.
+    stated-in:
+      - path: products/kyber-squad/skills/task-gate/SKILL.md
+        section: Completion digest
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: A3
+    statement: When the circuit breaker trips, the worker returns STATUS ESCALATION with one CIRCUIT_BREAKER_TRIGGER token instead of the completion digest.
+    stated-in:
+      - path: products/kyber-squad/skills/task-gate/references/rework.md
+        section: The escalation
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: A4
+    statement: A developer whose change reads input from outside the process fills an input-site table for that input and fixes every cell where the code throws or does the wrong thing.
+    stated-in:
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Developer exit gate
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: A4-whole-class
+    statement: A fix for a reported defect covers the defect's whole class, naming the class and testing at least three other inputs of it.
+    stated-in:
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Developer exit gate
+      - path: products/kyber-squad/agents/test-dev.md
+        anchor: "Defect class:"
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: A4-input-site-tests
+    statement: A test of code that parses outside input has one case per input-site column and asserts that the bad input is refused.
+    stated-in:
+      - path: docs/standards/test/README.md
+        section: Test the decision, not the implementation
+    controls:
+      - docs/standards/github-actions/README.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: parsers-fail-closed
+    statement: A parser refuses input it does not recognise with a diagnostic that names it, and never silently drops, defaults or coerces that input.
+    stated-in:
+      - docs/standards/csharp/README.md
+      - docs/standards/go/README.md
+      - docs/standards/rust/README.md
+      - docs/standards/typescript/README.md
+    controls:
+      - docs/standards/github-actions/README.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: digest-extra-lines
+    statement: Lines beside the digest such as Discovery, RED_EVIDENCE or COVERAGE_GAPS are never counted or rejected as an extra digest field.
+    stated-in:
+      - products/kyber-squad/skills/task-gate/SKILL.md
+      - products/kyber-squad/skills/delivery-execution/SKILL.md
+      - path: docs/kyber-squad/requirements.md
+        section: Conductor execution and worker invariants
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: E4
+    statement: Artifact and baseline paths go in the message body beside the completion digest, not inside the digest.
+    stated-in:
+      - products/kyber-squad/agents/csharp-dev.md
+      - path: products/kyber-squad/agents/test-dev.md
+        anchor: "Baseline:"
+    controls:
+      - products/kyber-squad/agents/go-dev.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: coverage-gaps-in-message-body
+    statement: Coverage gaps are reported in the message body beside the completion digest, not as a digest field.
+    stated-in:
+      - path: products/kyber-squad/agents/test-dev.md
+        anchor: "COVERAGE_GAPS:"
+    controls:
+      - products/kyber-squad/agents/go-dev.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: six-field-rejection
+    statement: The conductor rejects a completion digest that is missing a required field or whose STATUS or TASK_GATE is FAIL.
+    stated-in:
+      - path: docs/kyber-squad/onboarding.md
+        section: Standardized 6-field completion digest
+      - path: docs/kyber-squad/requirements.md
+        section: Conductor execution and worker invariants
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - docs/kyber-arbiter/jev-decision-model.md
+  - id: six-field-phased-rollout
+    statement: During the phased rollout only csharp-dev and test-dev must return the full six-field digest; other developer workers return their own completion plus a TASK_GATE line.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+      - products/kyber-squad/skills/delivery-execution/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: commit-with-task-line
+    statement: A finished task is committed with a "Task:" line naming the task, so a resumed run can find where work stopped.
+    stated-in:
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Task commits and resumption
+    controls:
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        without-section: Task commits and resumption
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  # ---------------------------------------------------------------- the failure loop
+  - id: B1
+    statement: A worker stops after 3 test-fix iterations against one failing test or failure cluster and trips the circuit breaker.
+    stated-in:
+      - path: products/kyber-squad/skills/task-gate/references/rework.md
+        section: The iteration cap
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: B2
+    statement: If a fix needs files outside the authorised scope, the worker halts and raises BLAST_RADIUS_EXCEEDED.
+    stated-in:
+      - path: products/kyber-squad/skills/task-gate/references/rework.md
+        section: The three JEV checkpoints
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: B3
+    statement: An A-to-B-to-A oscillation or a repeating failure signature raises THRASH_OSCILLATION_DETECTED.
+    stated-in:
+      - path: products/kyber-squad/skills/task-gate/references/rework.md
+        section: The three JEV checkpoints
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: B4
+    statement: A worker never bends production code to satisfy a legacy test that contradicts the approved design; it raises INVARIANT_CONTRADICTION instead.
+    stated-in:
+      - path: products/kyber-squad/skills/task-gate/references/rework.md
+        section: The three JEV checkpoints
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: B5
+    statement: A worker never enters an unconstrained test-fix loop; when fixes do not converge it escalates instead of continuing to try.
+    stated-in:
+      - path: products/kyber-squad/skills/task-gate/references/rework.md
+        section: Never enter an unconstrained test-fix loop
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
+  - id: B6
+    statement: The conductor allows at most 2 rework dispatches per failure cluster before its circuit breaker trips.
+    stated-in:
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Iteration circuit-breaker and loop detection
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: G7
+    statement: An A/B oscillation in a failure cluster trips the conductor's circuit breaker immediately.
+    stated-in:
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        anchor: "oscillation"
+        section: Iteration circuit-breaker and loop detection
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: G5
+    statement: A valid STATUS ESCALATION from a worker is exempt from the six-field digest rejection.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Iteration circuit-breaker and loop detection
+      - path: docs/kyber-squad/requirements.md
+        section: Conductor execution and worker invariants
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: G6
+    statement: Rework for a task goes back to the original worker session that did the task, and a fresh worker is used only when that session cannot be continued.
+    stated-in:
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Task session continuity
+    controls:
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: task-gate-reject-to-worker
+    statement: A failing TASK_GATE line sends the task back to its worker as rework.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+      - products/kyber-squad/skills/delivery-execution/SKILL.md
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+    retired:
+      statement: Each finished task gets a three-pass audit by a task reviewer.
+      example: After each task, run the three-pass task audit with the task reviewer before accepting it.
+      seed-into: products/kyber-squad/agents/conductor/references/autonomy.md
+      absent-from:
+        - products/kyber-squad/agents/conductor.md
+        - products/kyber-squad/skills/delivery-execution/SKILL.md
+  - id: task-gate-two-cycle-cap
+    statement: The task gate allows at most two fix-and-rerun cycles and then stops even if a gate still fails.
+    stated-in:
+      - products/kyber-squad/skills/task-gate/SKILL.md
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  # ---------------------------------------------------------------- the full-suite ban and test runs
+  - id: C1
+    statement: A developer agent, or worker, never runs the full test suite.
+    stated-in:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/skills/go-dev/references/gates-and-platforms.md
+      - products/kyber-squad/skills/rust-dev/references/gates-and-platforms.md
+      - products/kyber-squad/skills/typescript-dev/references/esm-and-gates.md
+      - products/kyber-squad/standards/go/README.md
+      - products/kyber-squad/standards/rust/README.md
+      - products/kyber-squad/standards/typescript/README.md
+      - path: AGENTS.md
+        section: The inner loop
+    controls:
+      - path: products/kyber-squad/skills/bug-crusher/SKILL.md
+        without-section: 3. TRIVIAL path — fix, verify, review
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+    retired:
+      statement: The reader may run the full test suite in some situations, for example once at the end to prove nothing else broke.
+      example: Run the full test suite locally once, at the end, to prove your change broke nothing else.
+      seed-into: products/kyber-squad/skills/code-review/references/lenses/performance.md
+      absent-from:
+        - docs/standards/test/README.md
+        - products/kyber-squad/skills/kilo-review-loop/SKILL.md
+        - products/kyber-squad/skills/go-dev/references/gates-and-platforms.md
+        - products/kyber-squad/skills/rust-dev/references/gates-and-platforms.md
+        - products/kyber-squad/skills/typescript-dev/references/esm-and-gates.md
+  - id: C1-primary-sessions
+    statement: The reader must never run the full test suite.
+    stated-in:
+      - path: products/kyber-squad/skills/bug-crusher/SKILL.md
+        section: 3. TRIVIAL path — fix, verify, review
+      - products/kyber-squad/skills/kilo-review-loop/SKILL.md
+    controls:
+      - path: products/kyber-squad/skills/bug-crusher/SKILL.md
+        without-section: 3. TRIVIAL path — fix, verify, review
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
+  - id: conductor-never-dispatches-full-run
+    statement: The conductor never dispatches a full test-suite run, not even for a cross-cutting change.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Test-first mode
+    controls:
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+    retired:
+      statement: The conductor may dispatch one full test-suite run, for example when shared test infrastructure changes.
+      example: When a change reaches shared test infrastructure, the conductor alone dispatches one full run of the test suite.
+      seed-into: products/kyber-squad/shared/worker-baseline.md
+      absent-from:
+        - products/kyber-squad/agents/conductor.md
+  - id: task-end-touched-classes-only
+    statement: At the end of a task, a worker runs only the test classes its task touched.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Test-first mode
+      - products/kyber-squad/agents/csharp-dev.md
+      - products/kyber-squad/agents/test-dev.md
+      - docs/standards/test/README.md
+      - path: docs/kyber-squad/onboarding.md
+        section: Fast assembly runner invocation
+      - path: docs/kyber-squad/requirements.md
+        section: Conductor execution and worker invariants
+    controls:
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+    retired:
+      statement: The full test suite runs at the end of each task, in the task exit gate.
+      example: Reserve full test suite execution for task end, where the exit gate runs it once per task.
+      seed-into: products/kyber-squad/shared/worker-baseline.md
+      absent-from:
+        - products/kyber-squad/agents/conductor.md
+        - products/kyber-squad/skills/delivery-execution/SKILL.md
+        - docs/standards/test/README.md
+        - path: docs/kyber-squad/onboarding.md
+          section: Fast assembly runner invocation
+        - path: docs/kyber-squad/requirements.md
+          section: Conductor execution and worker invariants
+  - id: full-suite-in-first-council-review
+    statement: The full test suite runs in the review council's first full review, on the integrated head, and in CI.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Test-first mode
+      - docs/standards/test/README.md
+    controls:
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: review-fix-reruns-touched-gates
+    statement: A review-fix round re-runs only the gates whose inputs the fix touched, not the full test suite.
+    stated-in:
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Review loop (critical and major findings, failed blocking gates)
+    controls:
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+      - docs/kyber-arbiter/jev-decision-model.md
+  - id: shared-infra-targeted-set
+    statement: A worker whose change reaches shared test infrastructure still runs a targeted set of tests, not the full suite.
+    stated-in:
+      - products/kyber-squad/agents/csharp-dev.md
+      - products/kyber-squad/agents/test-dev.md
+      - docs/standards/test/README.md
+    controls:
+      - products/kyber-squad/agents/go-dev.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+    retired:
+      statement: A worker whose change reaches shared test infrastructure asks the conductor for one full test-suite run.
+      example: If your change touches shared test infrastructure, ask the conductor for one full run of the suite.
+      seed-into: products/kyber-squad/shared/worker-baseline.md
+      absent-from:
+        - products/kyber-squad/agents/csharp-dev.md
+        - products/kyber-squad/agents/test-dev.md
+        - docs/standards/test/README.md
+  - id: shared-test-infra-definition
+    statement: Shared test infrastructure is anything referenced by more than one test class.
+    stated-in:
+      - docs/standards/test/README.md
+    controls:
+      - docs/standards/csharp/README.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: F1
+    statement: A worker in a shared checkout isolates its build output per task with --artifacts-path.
+    stated-in:
+      - path: products/kyber-squad/agents/conductor.md
+        anchor: "--artifacts-path"
+      - products/kyber-squad/agents/csharp-dev.md
+      - products/kyber-squad/agents/test-dev.md
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        anchor: "--artifacts-path"
+      - products/kyber-squad/skills/test-dev/SKILL.md
+      - path: docs/kyber-squad/architecture.md
+        anchor: "--artifacts-path"
+        section: Concurrency and scheduling model (worktree and artifact isolation)
+    controls:
+      - products/kyber-squad/agents/go-dev.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: F2
+    statement: A worker in its own git worktree does not need --artifacts-path, because the worktree already isolates its build output.
+    stated-in:
+      - products/kyber-squad/agents/csharp-dev.md
+      - products/kyber-squad/agents/test-dev.md
+    controls:
+      - products/kyber-squad/agents/go-dev.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: F3
+    statement: Build once and test many times, reusing the build with --no-build or running the compiled test assembly directly.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+      - products/kyber-squad/agents/csharp-dev.md
+      - products/kyber-squad/agents/test-dev.md
+      - products/kyber-squad/skills/delivery-execution/SKILL.md
+      - products/kyber-squad/skills/test-dev/SKILL.md
+      - docs/standards/test/README.md
+    controls:
+      - products/kyber-squad/agents/go-dev.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: fully-qualified-test-class
+    statement: A direct test-assembly run names each test class fully qualified, because a short name runs zero tests and still exits 0.
+    stated-in:
+      - docs/standards/test/README.md
+      - products/kyber-squad/skills/delivery-execution/SKILL.md
+    controls:
+      - docs/standards/github-actions/README.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: runner-in-test-standard
+    statement: The exact command for running tests directly lives in the host test standard's Completion section.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+      - products/kyber-squad/agents/csharp-dev.md
+      - products/kyber-squad/agents/test-dev.md
+      - products/kyber-squad/skills/delivery-execution/SKILL.md
+      - products/kyber-squad/skills/test-dev/SKILL.md
+    controls:
+      - products/kyber-squad/agents/go-dev.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: runner-dotnet-only
+    statement: The direct test-assembly runner applies to .NET; other languages use their own way of targeting tests.
+    stated-in:
+      - products/kyber-squad/skills/test-dev/SKILL.md
+    controls:
+      - products/kyber-squad/agents/go-dev.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: F4
+    statement: A RED proof never uses git stash; it is proved on a clean base checkout, a throwaway copy or an isolated worktree.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+      - products/kyber-squad/agents/test-dev.md
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Test-first mode
+      - products/kyber-squad/skills/test-dev/SKILL.md
+    controls:
+      - products/kyber-squad/agents/go-dev.md
+      - products/kyber-squad/shared/worker-baseline.md
+  # ---------------------------------------------------------------- discovery, packets, and parallel work
+  - id: D1
+    statement: Before reading or searching files directly, the reader asks the code index (codegraph_explore) and the documentation tools.
+    stated-in:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/agents/architect.md
+      - products/kyber-squad/agents/azure-reader.md
+      - products/kyber-squad/agents/bug-crusher-investigator.md
+      - products/kyber-squad/agents/code-reviewer.md
+      - products/kyber-squad/agents/csharp-dev.md
+      - products/kyber-squad/agents/dal-dev.md
+      - products/kyber-squad/agents/docs-dev.md
+      - products/kyber-squad/agents/github-devops.md
+      - products/kyber-squad/agents/go-dev.md
+      - products/kyber-squad/agents/maui-dev.md
+      - products/kyber-squad/agents/pulumi-dev.md
+      - products/kyber-squad/agents/python-dev.md
+      - products/kyber-squad/agents/react-dev.md
+      - products/kyber-squad/agents/review-lens.md
+      - products/kyber-squad/agents/review-triage.md
+      - products/kyber-squad/agents/rust-dev.md
+      - products/kyber-squad/agents/sql-database-architect.md
+      - products/kyber-squad/agents/tauri-dev.md
+      - products/kyber-squad/agents/test-dev.md
+      - products/kyber-squad/agents/typescript-dev.md
+      - products/kyber-squad/skills/product-owner/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: D3
+    statement: A worker does not open plan or specification files; its task packet is its whole brief.
+    stated-in:
+      - products/kyber-squad/shared/worker-baseline.md
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Worker packets
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: D4
+    statement: Independent reads are sent together in one round trip, not one read per question.
+    stated-in:
+      - products/kyber-squad/shared/worker-baseline.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: G1
+    statement: Every worker receives a self-contained task packet with an inlined entry-file table, acceptance criteria and pre-computed test commands.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+      - products/kyber-squad/skills/delivery-execution/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: G2
+    statement: Parallel workers each get their own git worktree and their own per-task artifact paths.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Ready queue
+      - path: docs/kyber-squad/architecture.md
+        anchor: "git worktree"
+        section: Concurrency and scheduling model (worktree and artifact isolation)
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: G2-serialized-integration
+    statement: Final branch-head integration of parallel workers' changes is serialized before git push.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Ready queue
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: worktree-cleanup
+    statement: Every worktree is removed with git worktree remove --force and pruned, on every exit path.
+    stated-in:
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Ready queue
+    controls:
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        without-section: Ready queue
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: integration-conflict-rework
+    statement: On an integration conflict the cherry-pick or merge is aborted and conflict-reconciliation rework is dispatched.
+    stated-in:
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Ready queue
+    controls:
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        without-section: Ready queue
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: G3
+    statement: RED tests and the GREEN implementation are written by different workers, kept adversarially separate.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+      - products/kyber-squad/agents/csharp-dev.md
+      - products/kyber-squad/agents/test-dev.md
+      - products/kyber-squad/skills/delivery-execution/SKILL.md
+      - products/kyber-squad/skills/test-dev/SKILL.md
+    controls:
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: G3-bundle-same-role
+    statement: Small tasks for the same role are bundled into one dispatch.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+      - products/kyber-squad/skills/delivery-execution/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
+  - id: green-against-red
+    statement: csharp-dev verifies its GREEN implementation against the RED tests that test-dev wrote independently.
+    stated-in:
+      - products/kyber-squad/agents/csharp-dev.md
+    controls:
+      - products/kyber-squad/agents/go-dev.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: G4
+    statement: The Discovery line reporting codegraph, docs and direct-read counts comes before the completion digest.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+      - products/kyber-squad/skills/delivery-execution/SKILL.md
+      - products/kyber-squad/skills/test-dev/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: G4-review-seats
+    statement: A review seat reports its Discovery line directly above its attestation line.
+    stated-in:
+      - products/kyber-squad/agents/review-lens.md
+      - products/kyber-squad/agents/review-triage.md
+    controls:
+      - docs/kyber-arbiter/jev-decision-model.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+    retired:
+      statement: A review seat that reports findings does not need to report its discovery counts.
+      example: Discovery reporting is exempt for review seats; a seat that returns findings writes no Discovery line.
+      seed-into: products/kyber-squad/shared/worker-baseline.md
+      absent-from:
+        - products/kyber-squad/agents/review-lens.md
+        - products/kyber-squad/agents/review-triage.md
+        - products/kyber-squad/agents/conductor.md
+        - products/kyber-squad/skills/delivery-execution/SKILL.md
+  - id: paste-prompts-unchanged
+    statement: The conductor pastes each task prompt unchanged and fills only the worktree and prior-results slots.
+    stated-in:
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Task file and dispatch
+    controls:
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        without-section: Task file and dispatch
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: task-file-validated
+    statement: The conductor validates the plan's task file before dispatching any task from it.
+    stated-in:
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Task file and dispatch
+    controls:
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: standards-via-tool
+    statement: The reader gets its coding standard through the docs_get_coding_standard_for_technology tool, and reads the standard's file only when that tool is unavailable.
+    stated-in:
+      - products/kyber-squad/agents/csharp-dev.md
+      - products/kyber-squad/agents/dal-dev.md
+      - products/kyber-squad/agents/github-devops.md
+      - products/kyber-squad/agents/go-dev.md
+      - products/kyber-squad/agents/maui-dev.md
+      - products/kyber-squad/agents/pulumi-dev.md
+      - products/kyber-squad/agents/python-dev.md
+      - products/kyber-squad/agents/react-dev.md
+      - products/kyber-squad/agents/rust-dev.md
+      - products/kyber-squad/agents/sql-database-architect.md
+      - products/kyber-squad/agents/tauri-dev.md
+      - products/kyber-squad/agents/test-dev.md
+      - products/kyber-squad/agents/typescript-dev.md
+      - products/kyber-squad/skills/go-dev/SKILL.md
+      - products/kyber-squad/skills/maui-dev/SKILL.md
+      - products/kyber-squad/skills/python-dev/SKILL.md
+      - products/kyber-squad/skills/rust-dev/SKILL.md
+      - products/kyber-squad/skills/test-dev/SKILL.md
+      - products/kyber-squad/skills/typescript-dev/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+    retired:
+      statement: The reader opens the coding standard file by its path directly, without first using the coding-standard tool.
+      example: Before you start, open docs/standards/<technology>/README.md directly and read the coding standard; do not use a tool for it.
+      seed-into: products/kyber-squad/shared/worker-baseline.md
+      absent-from:
+        - products/kyber-squad/agents/csharp-dev.md
+        - products/kyber-squad/agents/go-dev.md
+        - products/kyber-squad/agents/python-dev.md
+        - products/kyber-squad/agents/test-dev.md
+        - products/kyber-squad/skills/go-dev/SKILL.md
+        - products/kyber-squad/skills/test-dev/SKILL.md
+  # ---------------------------------------------------------------- the review loop and the council
+  - id: council-loop-until-approve
+    statement: The review council re-reviews after every fix round until it returns APPROVE.
+    stated-in:
+      - products/kyber-squad/agents/code-reviewer.md
+      - products/kyber-squad/agents/conductor.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+      - products/kyber-squad/skills/bug-crusher/SKILL.md
+      - products/kyber-squad/skills/code-review/SKILL.md
+      - products/kyber-squad/skills/delivery-execution/SKILL.md
+      - products/kyber-squad/skills/dp-code-reviewer/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/shared/worker-baseline.md
+    retired:
+      statement: The review council reviews the finished work only once.
+      example: The council reviews the run exactly once over the accumulated changes, then the run ends.
+      seed-into: products/kyber-squad/shared/worker-baseline.md
+      absent-from:
+        - products/kyber-squad/agents/code-reviewer.md
+        - products/kyber-squad/agents/conductor.md
+        - products/kyber-squad/agents/conductor/references/autonomy.md
+        - products/kyber-squad/skills/bug-crusher/SKILL.md
+        - products/kyber-squad/skills/code-review/SKILL.md
+        - products/kyber-squad/skills/delivery-execution/SKILL.md
+  - id: review-loop-bounds
+    statement: The review loop stops after 5 review cycles, or after 3 cycles in a row in which the count of surviving critical and major findings does not fall.
+    stated-in:
+      - products/kyber-squad/skills/delivery-execution/SKILL.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+      - products/kyber-squad/skills/dp-code-reviewer/SKILL.md
+    controls:
+      - path: products/kyber-squad/agents/conductor/references/autonomy.md
+        without-section: Delivery
+      - products/kyber-squad/shared/worker-baseline.md
+    retired:
+      statement: After the council requests changes there is one bounded remediation pass, and failing a second council review stops the run.
+      example: A run whose council requests changes earns one bounded remediation pass; if it fails a second council review, stop and hand the run to a human.
+      seed-into: products/kyber-squad/shared/worker-baseline.md
+      absent-from:
+        - products/kyber-squad/agents/conductor/references/autonomy.md
+        - products/kyber-squad/skills/dp-code-reviewer/SKILL.md
+        - products/kyber-squad/agents/code-reviewer.md
+  - id: review-loop-open-findings-listed
+    statement: When the review loop stops, the findings still open are listed in the pull request as pending human review and delivery continues.
+    stated-in:
+      - products/kyber-squad/skills/delivery-execution/SKILL.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: failed-gate-fixed-in-loop
+    statement: A failed blocking gate is fixed inside the same review loop by the worker that owns the failing scope, like a finding.
+    stated-in:
+      - products/kyber-squad/skills/delivery-execution/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: minor-findings-never-loop
+    statement: Minor and Info findings never start another review cycle.
+    stated-in:
+      - products/kyber-squad/skills/delivery-execution/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: loop-on-open-pr
+    statement: The review loop runs on the open pull request, and delivery never waits for it.
+    stated-in:
+      - products/kyber-squad/skills/delivery-execution/SKILL.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: verifier-mode-after-first
+    statement: Every review after the first runs in the verifier mode of the dp-code-reviewer skill, re-checking the prior findings and the fix delta instead of running a full council.
+    stated-in:
+      - products/kyber-squad/agents/code-reviewer.md
+      - products/kyber-squad/skills/bug-crusher/SKILL.md
+      - products/kyber-squad/skills/code-review/SKILL.md
+      - products/kyber-squad/skills/delivery-execution/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: verifier-cycle-delta
+    statement: A verifier cycle reviews the diff from the prior head to the new head and re-seats only the lenses that own an outstanding finding or are newly triggered.
+    stated-in:
+      - products/kyber-squad/skills/code-review/SKILL.md
+      - products/kyber-squad/skills/dp-code-reviewer/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+    retired:
+      statement: A verifier cycle re-checks only the one finding that was fixed.
+      example: In a verifier cycle, re-check only that finding and nothing else.
+      seed-into: products/kyber-squad/shared/worker-baseline.md
+      absent-from:
+        - products/kyber-squad/skills/code-review/SKILL.md
+        - products/kyber-squad/skills/dp-code-reviewer/SKILL.md
+  - id: review-fix-ships-test
+    statement: A fix for a review finding verified as real ships with a test that fails without the fix.
+    stated-in:
+      - products/kyber-squad/skills/code-review-loop/SKILL.md
+      - products/kyber-squad/skills/code-review-loop/code-review-loop.md
+      - products/kyber-squad/skills/code-review/SKILL.md
+      - products/kyber-squad/skills/delivery-execution/SKILL.md
+      - products/kyber-squad/skills/kilo-review-loop/SKILL.md
+      - products/kyber-squad/skills/pr-review-fix-comments/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: review-fix-red-first
+    statement: In test-first mode the test for a review fix is a RED task for test-dev, dispatched before the owning worker's fix.
+    stated-in:
+      - products/kyber-squad/skills/delivery-execution/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: final-review-alone-last
+    statement: The final review council runs last and alone, in the foreground, with no docs work or edits in the reviewed tree while it runs.
+    stated-in:
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Findings and final council
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: finding-line-is-file-line
+    statement: A finding's line number is the line in the file as read, never an offset in the patch.
+    stated-in:
+      - products/kyber-squad/agents/review-lens.md
+      - products/kyber-squad/agents/review-triage.md
+      - products/kyber-squad/skills/code-review/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: fixed-means-whole-class
+    statement: A finding counts as fixed only when the fix refuses its whole class of defect, not just the one reported input.
+    stated-in:
+      - products/kyber-squad/agents/code-reviewer.md
+      - products/kyber-squad/skills/code-review/SKILL.md
+      - products/kyber-squad/skills/dp-code-reviewer/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: gate-timeout-not-run
+    statement: A review gate that timed out or was stopped at a deadline is reported as not run and unverified, never as a blocking failure.
+    stated-in:
+      - products/kyber-squad/agents/code-reviewer.md
+      - products/kyber-squad/skills/code-review/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: correctness-seat-input-sites
+    statement: The correctness seat writes, for every changed code file, either "no input site" or one row per site where a value from outside the process is parsed.
+    stated-in:
+      - products/kyber-squad/agents/review-lens.md
+      - products/kyber-squad/skills/code-review/references/lenses/correctness.md
+    controls:
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: materialized-diff
+    statement: The code reviewer writes the diff to a file under the scratchpad before the council fans out, and passes that path to the seats.
+    stated-in:
+      - products/kyber-squad/agents/code-reviewer.md
+      - products/kyber-squad/skills/code-review/SKILL.md
+      - path: docs/code-review/architecture.md
+        section: Materialized diff contract (Option A)
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: seats-read-supplied-diff
+    statement: A review seat reads the diff file it was given and never runs git itself.
+    stated-in:
+      - products/kyber-squad/agents/review-lens.md
+      - products/kyber-squad/agents/review-triage.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: materialized-diff-cleanup
+    statement: The code reviewer removes the materialized diff file once the council is done.
+    stated-in:
+      - products/kyber-squad/agents/code-reviewer.md
+      - products/kyber-squad/skills/code-review/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/go-dev.md
+  - id: seat-min-confidence
+    statement: A review seat reports only findings at or above the effective minimum confidence.
+    stated-in:
+      - products/kyber-squad/agents/review-lens.md
+      - products/kyber-squad/agents/review-triage.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: verdict-engine-drops-low-confidence
+    statement: The verdict engine, not the reviewer, drops findings below the minimum confidence.
+    stated-in:
+      - products/kyber-squad/agents/code-reviewer.md
+      - products/kyber-squad/skills/code-review/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
+    retired:
+      statement: The reviewer itself drops findings below confidence 7.
+      example: Drop anything below confidence 7 yourself before you adjudicate; findings below 7 are noise.
+      seed-into: products/kyber-squad/shared/worker-baseline.md
+      absent-from:
+        - products/kyber-squad/agents/code-reviewer.md
+        - products/kyber-squad/skills/code-review/SKILL.md
+  - id: never-change-severity
+    statement: The reviewer never changes a finding's severity; it keeps the finding or drops it with a stated reason.
+    stated-in:
+      - products/kyber-squad/agents/code-reviewer.md
+      - products/kyber-squad/skills/code-review/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/review-triage.md
+  - id: no-own-hunt-list
+    statement: The reviewer adds no hunt list of its own to a seat's packet.
+    stated-in:
+      - products/kyber-squad/agents/code-reviewer.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - docs/kyber-arbiter/jev-decision-model.md
+  - id: not-seated-recorded
+    statement: Every lens that is not seated is recorded with its reason, and the verdict refuses to run otherwise.
+    stated-in:
+      - products/kyber-squad/agents/code-reviewer.md
+      - products/kyber-squad/skills/code-review/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/review-triage.md
+  - id: seat-output-saved-unchanged
+    statement: Each seat's output is saved unchanged in the cycle's seats folder before adjudication.
+    stated-in:
+      - products/kyber-squad/agents/code-reviewer.md
+      - products/kyber-squad/skills/code-review/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/review-triage.md
+  - id: verdict-refusal-not-a-cycle
+    statement: When the verdict command refuses, the reviewer fixes the cause in the same cycle, and the refusal does not count as a review cycle.
+    stated-in:
+      - products/kyber-squad/agents/code-reviewer.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/review-triage.md
+  - id: batched-refutation
+    statement: Refutation runs as one batched review-lens spawn over only the refutation candidates the verdict lists.
+    stated-in:
+      - products/kyber-squad/agents/code-reviewer.md
+      - products/kyber-squad/skills/code-review/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/review-triage.md
+  - id: refutation-never-refutes-cleanup
+    statement: A refutation never refutes a finding about a missing cleanup path in the operational lifecycle.
+    stated-in:
+      - products/kyber-squad/agents/code-reviewer.md
+      - products/kyber-squad/skills/code-review/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/review-triage.md
+  - id: refuter-defaults-to-refuted
+    statement: A refutation run argues that the finding is wrong and defaults to refuted.
+    stated-in:
+      - products/kyber-squad/agents/review-lens.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/review-triage.md
+  - id: test-adequacy-malformed-input-owner
+    statement: The test-adequacy seat says what the code does with each malformed input it names, and when the refusal is unproven it files a finding owned by the correctness lens.
+    stated-in:
+      - products/kyber-squad/skills/code-review/references/lenses/test-adequacy.md
+    controls:
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: quick-review-threshold
+    statement: A change of at most 300 changed lines gets the quick review before its pull request is opened, and a larger change gets the full pre-push council.
+    stated-in:
+      - path: AGENTS.md
+        section: Before opening a PR
+      - products/kyber-squad/skills/code-review/SKILL.md
+      - products/kyber-squad/skills/create-pull-request/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: sibling-rule-staleness
+    statement: When a change rewords a rule in one file, every sibling file that carries the same rule is checked and a stale one is reported.
+    stated-in:
+      - products/kyber-squad/skills/code-review/SKILL.md
+      - products/kyber-squad/skills/code-review/references/lenses/documentation-accuracy.md
+    controls:
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: rule-statements-side-by-side
+    statement: For each rule the changed prose states, the documentation-accuracy lens quotes every document that states it side by side, and any difference is a finding.
+    stated-in:
+      - products/kyber-squad/skills/code-review/references/lenses/documentation-accuracy.md
+    controls:
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: cross-document-contract-parity
+    statement: The documentation-accuracy lens checks that invariants, schemas and rejection rules agree across the modified documents, not only between docs and code.
+    stated-in:
+      - products/kyber-squad/skills/code-review/references/lenses/documentation-accuracy.md
+    controls:
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: weak-contract-assertions-flagged
+    statement: A review flags weak contract assertions, such as a bare single-word Assert.Contains.
+    stated-in:
+      - REVIEW.md
+      - products/kyber-squad/skills/code-review/references/lenses/test-adequacy.md
+    controls:
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: literal-prompt-parsing
+    statement: A reviewer reads agent prompts literally, never charitably, and flags instructions that deadlock or contradict themselves.
+    stated-in:
+      - REVIEW.md
+      - products/kyber-squad/skills/code-review/references/lenses/correctness.md
+    controls:
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: operational-lifecycle-walk
+    statement: The lens walks the operational lifecycle of the change, from create through execute and integrate to cleanup, including conflict and rollback.
+    stated-in:
+      - products/kyber-squad/skills/code-review/references/lenses/correctness.md
+      - products/kyber-squad/skills/code-review/references/lenses/supportability.md
+    controls:
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: binary-review-verdict
+    statement: The review verdict is either APPROVE or REQUEST_CHANGES; there is no third verdict.
+    stated-in:
+      - products/kyber-squad/agents/code-reviewer.md
+      - products/kyber-squad/skills/code-review/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/shared/worker-baseline.md
+    retired:
+      statement: A review can return a NEEDS_HUMAN verdict that stops the run for a person.
+      example: When a change touches a reserved path, return NEEDS_HUMAN and stop the run until a person reviews it.
+      seed-into: products/kyber-squad/skills/code-review/references/lenses/performance.md
+      absent-from:
+        - products/kyber-squad/agents/code-reviewer.md
+        - products/kyber-squad/skills/code-review/SKILL.md
+        - products/kyber-squad/agents/conductor/references/autonomy.md
+        - products/kyber-squad/skills/delivery-execution/SKILL.md
+  - id: reviewer-owns-review-command
+    statement: The reviewer chooses the kyber-weave review gates command itself; a plan never prescribes it.
+    stated-in:
+      - products/kyber-squad/skills/code-review/SKILL.md
+      - path: products/kyber-squad/agents/conductor/references/plan-path.md
+        anchor: "## Review and its command"
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: single-gate-recheck
+    statement: To re-check one gate, the reviewer runs review gates with --gate and that gate's id instead of re-running every gate.
+    stated-in:
+      - products/kyber-squad/agents/code-reviewer.md
+      - products/kyber-squad/skills/code-review/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: council-seats-needed
+    statement: A reviewer that cannot start the council's seats stops after its gates and returns STATUS COUNCIL_SEATS_NEEDED, listing the lenses to run.
+    stated-in:
+      - products/kyber-squad/agents/code-reviewer.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/review-triage.md
+  - id: pre-push-self-review
+    statement: The pre-push self-review gate does not block the push; its verdict is evidence for the pull request description.
+    stated-in:
+      - path: products/kyber-squad/skills/code-review/SKILL.md
+        section: Pre-push self-review gate
+    controls:
+      - products/kyber-squad/agents/go-dev.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: council-applies-review-guidance
+    statement: Every council seat applies the repository's review guidance in REVIEW.md.
+    stated-in:
+      - path: products/kyber-squad/agents/code-reviewer.md
+        anchor: "REVIEW.md"
+      - products/kyber-squad/agents/review-lens.md
+      - path: products/kyber-squad/agents/review-triage.md
+        anchor: "REVIEW.md"
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: attestation-last-line
+    statement: A review-lens findings report ends with the attestation line naming the REVIEW.md sections checked.
+    stated-in:
+      - path: products/kyber-squad/agents/review-lens.md
+        anchor: "REVIEW.md sections checked:"
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: missing-attestation-coverage-gap
+    statement: The code reviewer records a seat's missing guidance attestation as a coverage gap, not as a verdict input.
+    stated-in:
+      - products/kyber-squad/agents/code-reviewer.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/review-triage.md
+  - id: strictness-passed-to-every-seat
+    statement: The code-review skill passes the review strictness and the effective minimum confidence to every seat.
+    stated-in:
+      - products/kyber-squad/skills/code-review/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: checklist-no-standard-fallback
+    statement: When the repository declares no coding standard for the language, the checklist says what to do instead of reporting the missing standard as clean.
+    stated-in:
+      - products/kyber-squad/skills/code-review/references/go.md
+      - products/kyber-squad/skills/code-review/references/rust.md
+      - products/kyber-squad/skills/code-review/references/tauri.md
+      - products/kyber-squad/skills/code-review/references/typescript.md
+    controls:
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: correctness-malformed-input
+    statement: The correctness lens checks how the code handles malformed or null input, non-finite numbers and CRLF line endings.
+    stated-in:
+      - products/kyber-squad/skills/code-review/references/lenses/correctness.md
+    controls:
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  # ---------------------------------------------------------------- the Arbiter contract in the prose
+  - id: arbiter-escalation-follow-next
+    statement: On STATUS ARBITER_ESCALATION the conductor follows the NEXT instruction and never retries the blocked dispatch unchanged.
+    stated-in:
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Escalations
+    controls:
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        without-section: Escalations
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: malformed-planner-answer-reissued
+    statement: A planner answer the Arbiter marks malformed is re-issued as planning work with a recognised marker, and the envelope is not sent onward.
+    stated-in:
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Escalations
+    controls:
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        without-section: Escalations
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: arbiter-fallback-replaces-headers
+    statement: Unless the agent holds the arbiter_evaluate_agent_dispatch_or_return tool, its dispatches carry the KYBER-ARBITER routing header.
+    stated-in:
+      - path: products/kyber-squad/agents/conductor/references/intake-path.md
+        anchor: "arbiter_evaluate_agent_dispatch_or_return"
+      - products/kyber-squad/agents/conductor/references/plan-path.md
+      - products/kyber-squad/agents/conductor/references/spec-path.md
+      - products/kyber-squad/skills/delivery-execution/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: plan-file-repository-relative
+    statement: The PLAN_FILE header is always the plan's repository-relative path with forward slashes.
+    stated-in:
+      - products/kyber-squad/agents/conductor/references/plan-path.md
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Arbiter routing headers
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: architect-escalation-outcomes
+    statement: The architect answers an Arbiter escalation with ESCALATION_RESOLVED carrying an amendment or a corrected dispatch, or with NEEDS_DECISION when the approved plan cannot authorise the work.
+    stated-in:
+      - path: products/kyber-squad/agents/architect/references/arbiter-escalation.md
+        anchor: "ESCALATION_RESOLVED"
+    controls:
+      - products/kyber-squad/agents/architect/references/plan-authoring.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: arbiter-verified-keeps-finding
+    statement: On STATUS ARBITER_VERIFIED the reviewer keeps the finding and records its refutation as skipped.
+    stated-in:
+      - products/kyber-squad/agents/code-reviewer.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/review-triage.md
+  - id: arbiter-annotation-quote-check
+    statement: An ARBITER_ANNOTATION note feeds the reviewer's quote check.
+    stated-in:
+      - products/kyber-squad/agents/code-reviewer.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/review-triage.md
+  - id: blocked-spawn-not-run
+    statement: A seat spawn blocked by an internal error is reported as not run, never as SKIPPED.
+    stated-in:
+      - products/kyber-squad/agents/code-reviewer.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/review-triage.md
+  - id: findings-dropped-only-by-nitpick-filter
+    statement: The reviewer drops a finding only through the enforced nitpick filter.
+    stated-in:
+      - path: products/kyber-squad/agents/code-reviewer.md
+        anchor: "nitpick"
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/review-triage.md
+  - id: arbiter-fallback-call-points
+    statement: An agent holding the Arbiter fallback tool calls it before each dispatch and after each return.
+    stated-in:
+      - path: products/kyber-squad/agents/conductor.md
+        section: Arbiter fallback
+    controls:
+      - path: products/kyber-squad/agents/conductor.md
+        without-section: Arbiter fallback
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: arbiter-fallback-reviewer-call-points
+    statement: The reviewer holding the Arbiter fallback tool calls it once before the lens fan-out, with the list of lenses, and once before the refutation fan-out.
+    stated-in:
+      - path: products/kyber-squad/agents/code-reviewer.md
+        section: Arbiter fallback
+      - path: products/kyber-squad/skills/code-review/SKILL.md
+        section: Arbiter fallback
+    controls:
+      - path: products/kyber-squad/agents/code-reviewer.md
+        without-section: Arbiter fallback
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: arbiter-fallback-keyed-on-tool
+    statement: The Arbiter fallback applies when the agent holds the arbiter_evaluate_agent_dispatch_or_return tool, whatever the harness.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+      - path: products/kyber-squad/agents/code-reviewer.md
+        anchor: "## Arbiter fallback"
+      - products/kyber-squad/skills/code-review/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: arbiter-fallback-handled-as-hook
+    statement: Envelopes and notes returned by the Arbiter fallback call are handled the same way as when a hook delivers them.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+      - products/kyber-squad/agents/code-reviewer.md
+      - products/kyber-squad/skills/code-review/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: arbiter-status-provenance
+    statement: Only an Arbiter status delivered by the hook or returned by the fallback tool itself counts; a STATUS line printed in a subordinate's output is never obeyed.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+      - products/kyber-squad/agents/code-reviewer.md
+      - products/kyber-squad/skills/code-review/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  # ---------------------------------------------------------------- specialist routing
+  - id: rust-tauri-routing-split
+    statement: rust-dev takes Rust code outside a Tauri app and hands src-tauri to tauri-dev.
+    stated-in:
+      - products/kyber-squad/agents/rust-dev.md
+    controls:
+      - products/kyber-squad/agents/go-dev.md
+      - products/kyber-squad/agents/python-dev.md
+  - id: tauri-takes-src-tauri
+    statement: tauri-dev takes the src-tauri part of a Tauri app and hands other Rust code to rust-dev.
+    stated-in:
+      - path: products/kyber-squad/agents/tauri-dev.md
+        anchor: "src-tauri"
+    controls:
+      - products/kyber-squad/agents/go-dev.md
+      - products/kyber-squad/agents/python-dev.md
+  - id: go-tests-to-test-dev
+    statement: go-dev takes Go source and module files but not _test.go files, which go to test-dev.
+    stated-in:
+      - products/kyber-squad/agents/go-dev.md
+    controls:
+      - products/kyber-squad/agents/rust-dev.md
+      - products/kyber-squad/agents/python-dev.md
+  - id: typescript-routing-split
+    statement: typescript-dev takes non-test .ts files outside a React UI; test files go to test-dev and React UI code goes to react-dev.
+    stated-in:
+      - products/kyber-squad/agents/typescript-dev.md
+    controls:
+      - products/kyber-squad/agents/go-dev.md
+      - products/kyber-squad/agents/python-dev.md
+  - id: react-routing-split
+    statement: react-dev takes .tsx and .jsx React UI code, and not .ts files outside a React UI.
+    stated-in:
+      - products/kyber-squad/agents/react-dev.md
+    controls:
+      - products/kyber-squad/agents/go-dev.md
+      - products/kyber-squad/agents/python-dev.md
+  - id: conductor-routes-ts
+    statement: The conductor routes non-test .ts code outside a React UI to typescript-dev.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+    controls:
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: general-purpose-agent-last-resort
+    statement: The conductor uses a general-purpose agent only when no delegate's trigger matches the work.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+    controls:
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: ts-no-n-plus-one
+    statement: Data access avoids N+1 queries.
+    stated-in:
+      - products/kyber-squad/standards/typescript/README.md
+    controls:
+      - products/kyber-squad/standards/github-actions/README.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: ts-bound-every-read
+    statement: Every read is bounded; nothing reads an unbounded result set.
+    stated-in:
+      - products/kyber-squad/standards/typescript/README.md
+    controls:
+      - products/kyber-squad/standards/github-actions/README.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: ts-select-used-columns
+    statement: A query selects only the columns the code uses.
+    stated-in:
+      - products/kyber-squad/standards/typescript/README.md
+    controls:
+      - products/kyber-squad/standards/github-actions/README.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: ts-no-floating-promises
+    statement: No promise is left floating; every promise is awaited or handled.
+    stated-in:
+      - products/kyber-squad/standards/typescript/README.md
+    controls:
+      - products/kyber-squad/standards/github-actions/README.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: ts-absent-is-not-zero
+    statement: A value that was not measured is reported as absent, never coerced to zero.
+    stated-in:
+      - products/kyber-squad/standards/typescript/README.md
+    controls:
+      - products/kyber-squad/standards/github-actions/README.md
+      - products/kyber-squad/shared/worker-baseline.md
+  # ---------------------------------------------------------------- worktrees and the code index
+  - id: worktree-mcp-canonical-splice
+    statement: Worktree MCP setup splices --repo-root and --path to absolute canonical paths, so the MCP servers stay bound to the canonical checkout.
+    stated-in:
+      - path: products/kyber-squad/agents/conductor.md
+        anchor: "--repo-root"
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Ready queue
+      - path: docs/docgraph/mcp-runbook.md
+        section: Git worktrees and MCP binding
+      - path: docs/kyber-squad/architecture.md
+        section: Concurrency and scheduling model (worktree and artifact isolation)
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: no-codegraph-symlink
+    statement: Worktree setup fails closed and never creates a symlink to the .codegraph folder.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Ready queue
+      - path: docs/docgraph/mcp-runbook.md
+        section: Git worktrees and MCP binding
+      - path: docs/kyber-squad/architecture.md
+        section: Concurrency and scheduling model (worktree and artifact isolation)
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: isolated-mcp-config-paths
+    statement: Worktree setup writes per-task scratch copies of every tracked MCP configuration it touches and never rewrites a tracked configuration in place.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Ready queue
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: worktree-indexes-itself
+    statement: Every new worktree builds its own code index with kyber-weave doctor --ensure, because it does not share the canonical checkout's index.
+    stated-in:
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Ready queue
+      - products/kyber-squad/agents/conductor.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: shell-roles-query-worktree-index
+    statement: A worker with a shell runs codegraph explore in its own worktree instead of using the MCP codegraph_explore bound to the canonical checkout.
+    stated-in:
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Ready queue
+      - products/kyber-squad/agents/conductor.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: shell-less-projectpath
+    statement: A role with no shell passes the worktree's path as codegraph_explore's projectPath, which answers from the worktree's own index.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Ready queue
+      - path: products/kyber-squad/agents/architect.md
+        anchor: "projectPath"
+      - products/kyber-squad/agents/azure-reader.md
+      - products/kyber-squad/agents/product-owner.md
+      - products/kyber-squad/agents/research-agent.md
+      - products/kyber-squad/agents/review-lens.md
+      - products/kyber-squad/agents/review-triage.md
+      - products/kyber-squad/skills/product-owner/SKILL.md
+      - path: docs/docgraph/mcp-runbook.md
+        section: The worktree limitation, per role
+      - path: docs/kyber-squad/onboarding.md
+        section: The worktree limitation, per role
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+    retired:
+      statement: A role with no shell reads the worktree's files directly instead of asking the code index.
+      example: A shell-less role reads the worktree path directly; it does not use the code index there.
+      seed-into: products/kyber-squad/shared/worker-baseline.md
+      absent-from:
+        - products/kyber-squad/skills/delivery-execution/SKILL.md
+        - products/kyber-squad/agents/architect.md
+        - products/kyber-squad/skills/product-owner/SKILL.md
+  - id: run-start-check-shell-or-dispatch
+    statement: The run-start check runs in the orchestrator's own shell, or is dispatched to a worker when the harness gives the orchestrator no shell.
+    stated-in:
+      - path: products/kyber-squad/agents/conductor.md
+        anchor: "doctor --ensure"
+      - products/kyber-squad/skills/bug-crusher/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  # ---------------------------------------------------------------- the operator channel
+  - id: operator-channel-three-events
+    statement: The operator channel sends only three events, a hard-block question, the final report and a blocked or failed run status.
+    stated-in:
+      - products/kyber-squad/agents/conductor/overlays/operator-channel.md
+    controls:
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: operator-channel-receive-bounds
+    statement: Each receive on the operator channel waits up to 5 minutes, and at most 6 receive calls are made.
+    stated-in:
+      - products/kyber-squad/agents/conductor/overlays/operator-channel.md
+    controls:
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: operator-channel-autonomous-only
+    statement: The operator channel is used only in autonomous mode; supervised mode never uses it.
+    stated-in:
+      - products/kyber-squad/agents/conductor/overlays/operator-channel.md
+    controls:
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  # ---------------------------------------------------------------- autonomy
+  - id: autonomy-resolution-order
+    statement: Autonomy is resolved once per run from the prompt's autonomy value, then the autonomy value in the root AGENTS.md, then supervised when neither is set.
+    stated-in:
+      - path: products/kyber-squad/agents/conductor/references/autonomy.md
+        section: Resolution
+    controls:
+      - path: products/kyber-squad/agents/conductor/references/autonomy.md
+        without-section: Resolution
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: autonomy-change-no-reapproval
+    statement: Changing the autonomy setting does not reopen approval; it takes effect at the next gate.
+    stated-in:
+      - path: products/kyber-squad/agents/conductor/references/autonomy.md
+        section: Resolution
+    controls:
+      - path: products/kyber-squad/agents/conductor/references/autonomy.md
+        without-section: Resolution
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: autonomous-accepts-recommendations
+    statement: In autonomous mode the conductor asks the user nothing; it accepts the recommended option at each gate and records it as "autonomous, recommendation accepted".
+    stated-in:
+      - path: products/kyber-squad/agents/conductor/references/autonomy.md
+        section: Autonomous behaviour
+    controls:
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: hard-block-only-relayed-item
+    statement: In autonomous mode the only item relayed to the user mid-run is a hard-block escalation, a NEEDS_DECISION with ESCALATION hard_block and RECOMMENDED none.
+    stated-in:
+      - path: products/kyber-squad/agents/conductor/references/autonomy.md
+        anchor: "ESCALATION: hard_block"
+      - path: products/kyber-squad/agents/architect/references/autonomy-decisions.md
+        anchor: "ESCALATION: hard_block"
+      - path: products/kyber-squad/skills/product-owner/references/autonomy-decisions.md
+        anchor: "ESCALATION: hard_block"
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: hard-block-repaired-once
+    statement: A hard-block escalation that is missing a field is sent back once to be repaired, and if it is still incomplete the specialist decides it as low-confidence; the user is never asked a malformed block.
+    stated-in:
+      - path: products/kyber-squad/agents/conductor/references/autonomy.md
+        section: Hard-block escalation
+      - path: products/kyber-squad/skills/bug-crusher/SKILL.md
+        anchor: "hard_block"
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/shared/worker-baseline.md
+    retired:
+      statement: A malformed hard-block escalation goes straight back to the specialist to decide, with no repair round.
+      example: When a hard-block escalation is missing a field, send it back to the specialist to decide on its own; do not ask for a repaired block.
+      seed-into: products/kyber-squad/shared/worker-baseline.md
+      absent-from:
+        - products/kyber-squad/agents/conductor/references/autonomy.md
+        - products/kyber-squad/skills/bug-crusher/SKILL.md
+  - id: autonomous-hard-stops
+    statement: In autonomous mode only these stay with a person, a hard block with no recommendation, a merge, publish, delete or spend, and an unresolvable block or write error.
+    stated-in:
+      - path: products/kyber-squad/agents/conductor/references/autonomy.md
+        anchor: "## Hard stops"
+        section: Hard stops
+    controls:
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: never-merge
+    statement: The run never merges a pull request; it may commit, push and open a draft pull request on a feature branch.
+    stated-in:
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: tool-failure-hard-stop
+    statement: STATUS TOOL_FAILURE is a hard stop in autonomous mode.
+    stated-in:
+      - path: products/kyber-squad/agents/conductor/references/autonomy.md
+        section: Hard stops
+    controls:
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: circuit-breaker-non-fatal
+    statement: In autonomous mode a tripped circuit breaker is reported as a finding listed in the pull request as pending human review, and delivery continues.
+    stated-in:
+      - path: products/kyber-squad/agents/conductor/references/autonomy.md
+        section: Circuit-breakers are non-fatal
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: draft-pr-before-council
+    statement: The draft pull request is pushed before the review council runs.
+    stated-in:
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+      - products/kyber-squad/skills/delivery-execution/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/shared/worker-baseline.md
+    retired:
+      statement: Nothing is pushed and no pull request is opened until the review council returns.
+      example: Do not commit, push, publish, or open a pull request until the council returns; leave the change unpushed until then.
+      seed-into: products/kyber-squad/shared/worker-baseline.md
+      absent-from:
+        - products/kyber-squad/agents/conductor/references/autonomy.md
+        - products/kyber-squad/skills/delivery-execution/SKILL.md
+        - products/kyber-squad/agents/code-reviewer.md
+        - products/kyber-squad/skills/code-review/SKILL.md
+  - id: ready-on-required-ci
+    statement: The pull request is marked ready once required CI passes; no review has to happen first.
+    stated-in:
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+      - products/kyber-squad/skills/delivery-execution/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/shared/worker-baseline.md
+    retired:
+      statement: The pull request stays a draft until at least one review has approved it.
+      example: Do not mark the pull request ready until it has at least one review.
+      seed-into: products/kyber-squad/shared/worker-baseline.md
+      absent-from:
+        - products/kyber-squad/agents/conductor/references/autonomy.md
+        - products/kyber-squad/skills/delivery-execution/SKILL.md
+  - id: final-report-autonomy-items
+    statement: The autonomous final report lists every low-confidence decision with why no source answered it, and the count of gates approved automatically.
+    stated-in:
+      - path: products/kyber-squad/agents/conductor/references/autonomy.md
+        section: Final report
+    controls:
+      - path: products/kyber-squad/agents/conductor/references/autonomy.md
+        without-section: Final report
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: specialist-three-checks
+    statement: In autonomous mode a specialist decides each open item by three checks, whether it is covered, whether an authoritative source answers it, and how cheap it is to reverse.
+    stated-in:
+      - path: products/kyber-squad/agents/architect/references/autonomy-decisions.md
+        anchor: "## Three checks per open decision"
+      - path: products/kyber-squad/skills/product-owner/references/autonomy-decisions.md
+        anchor: "## Three checks per open decision"
+    controls:
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: bug-crusher-follows-autonomy
+    statement: bug-crusher follows the same autonomy rules as the conductor, accepting recommendations in autonomous mode and relaying only hard-block escalations.
+    stated-in:
+      - path: products/kyber-squad/skills/bug-crusher/SKILL.md
+        anchor: "AUTONOMOUS_APPROVAL"
+    controls:
+      - products/kyber-squad/skills/kilo-review-loop/SKILL.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: supervised-keeps-every-gate
+    statement: Supervised mode keeps every human gate, including the final approve and execute.
+    stated-in:
+      - path: products/kyber-squad/agents/conductor/references/autonomy.md
+        anchor: "approve and execute"
+      - path: products/kyber-squad/agents/conductor/references/spec-path.md
+        anchor: "approve and execute"
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: specialists-never-prompt-user
+    statement: The specialist never asks the user directly; it returns a digest that the conductor relays.
+    stated-in:
+      - products/kyber-squad/agents/architect.md
+      - products/kyber-squad/skills/product-owner/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
+  - id: autonomous-approval-by-specialist
+    statement: The conductor never writes an approval itself; it re-invokes the owning specialist with AUTONOMOUS_APPROVAL, and the specialist records it.
+    stated-in:
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+      - products/kyber-squad/agents/conductor/references/plan-path.md
+      - path: products/kyber-squad/agents/conductor/references/spec-path.md
+        anchor: "AUTONOMOUS_APPROVAL"
+      - path: products/kyber-squad/agents/architect.md
+        anchor: "AUTONOMOUS_APPROVAL"
+      - path: products/kyber-squad/skills/product-owner/SKILL.md
+        anchor: "AUTONOMOUS_APPROVAL"
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/shared/worker-baseline.md
+    retired:
+      statement: In autonomous mode the conductor supplies and records the approval itself.
+      example: In autonomous mode the conductor supplies the approval and records it in the plan itself.
+      seed-into: products/kyber-squad/shared/worker-baseline.md
+      absent-from:
+        - products/kyber-squad/agents/conductor/references/plan-path.md
+  - id: needs-human-retired-recorded
+    statement: The NEEDS_HUMAN verdict and the always-human reserved-path stop are retired.
+    stated-in:
+      - docs/reference/autonomous-gates.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - docs/kyber-arbiter/jev-decision-model.md
+  - id: spec-gate-collapse
+    statement: In autonomous mode, a tasks-phase review with no gaps and no open questions may be shown as one consolidated review covering tasks approval and approve and execute.
+    stated-in:
+      - products/kyber-squad/agents/conductor/references/spec-path.md
+      - products/kyber-squad/skills/product-owner/references/tasks-phase.md
+    controls:
+      - products/kyber-squad/agents/conductor/references/plan-path.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: spec-gate-collapse-disabled
+    statement: Any gap or open question disables the consolidated review, and the conductor falls back to separate gates.
+    stated-in:
+      - products/kyber-squad/agents/conductor/references/spec-path.md
+    controls:
+      - products/kyber-squad/agents/conductor/references/plan-path.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: spec-finalized-after-consolidated-review
+    statement: A consolidated review still ends at SPEC_FINALIZED with validation evidence.
+    stated-in:
+      - products/kyber-squad/agents/conductor/references/spec-path.md
+    controls:
+      - products/kyber-squad/agents/conductor/references/plan-path.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  # ---------------------------------------------------------------- docs-dev, closeout and the design harvest
+  - id: docs-review-every-change
+    statement: Every completed change gets a documentation-impact review by docs-dev.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+    controls:
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: delivery-requires-docs-evidence
+    statement: Delivery requires the DOCS_REVIEW rows and, for plan or spec work, CLOSEOUT_COMPLETE evidence, and the draft pull request carries both.
+    stated-in:
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: run-record-carries-docs-review
+    statement: The run record keeps the DOCS_REVIEW rows and the CLOSEOUT_COMPLETE evidence, and the pull request description carries them.
+    stated-in:
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        anchor: "CLOSEOUT_COMPLETE"
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: docs-impact-review-contract
+    statement: docs-dev's documentation-impact review acts on its own only at high confidence, and otherwise a person approves the change.
+    stated-in:
+      - path: products/kyber-squad/agents/docs-dev.md
+        section: Documentation-impact review
+    controls:
+      - path: products/kyber-squad/agents/docs-dev.md
+        without-section: Documentation-impact review
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: docs-dev-adds-no-vocabulary
+    statement: docs-dev never adds new vocabulary to the documentation ontology and prefers the best existing home for content.
+    stated-in:
+      - products/kyber-squad/agents/docs-dev.md
+    controls:
+      - products/kyber-squad/agents/go-dev.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: plan-closeout-waivers
+    statement: Plan closeout keeps the mapping table and the ADR and Documentation waivers, and a plan without them is not archived.
+    stated-in:
+      - path: products/kyber-squad/agents/docs-dev.md
+        section: Plan closeout
+    controls:
+      - path: products/kyber-squad/agents/docs-dev.md
+        without-section: Plan closeout
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: plan-closeout-design-harvest
+    statement: Plan closeout applies the plan's Design harvest before setting the plan's status to archived.
+    stated-in:
+      - path: products/kyber-squad/agents/docs-dev.md
+        anchor: "Design harvest"
+        section: Plan closeout
+    controls:
+      - products/kyber-squad/agents/go-dev.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: spec-closeout-migrates-before-archive
+    statement: Specification closeout migrates the durable content through the Design harvest before the specification is archived.
+    stated-in:
+      - products/kyber-squad/agents/docs-dev.md
+    controls:
+      - products/kyber-squad/agents/go-dev.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: docs-dev-shell-commands
+    statement: docs-dev runs only a closed list of commands, archival git mv, git rm of the task file, docs validate, docs drift and targeted documentation tests, and nothing else.
+    stated-in:
+      - path: products/kyber-squad/agents/docs-dev.md
+        section: Commands you run
+    controls:
+      - products/kyber-squad/agents/go-dev.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: docs-dev-only-archiver
+    statement: docs-dev is the only role that archives a plan or a specification.
+    stated-in:
+      - products/kyber-squad/agents/docs-dev.md
+    controls:
+      - products/kyber-squad/agents/go-dev.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: bug-crusher-docs-review
+    statement: bug-crusher routes its fix through a docs-dev documentation-impact review and reports the outcome.
+    stated-in:
+      - products/kyber-squad/skills/bug-crusher/SKILL.md
+    controls:
+      - products/kyber-squad/skills/kilo-review-loop/SKILL.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: pr-documentation-impact-section
+    statement: The pull request description carries a Documentation impact section.
+    stated-in:
+      - products/kyber-squad/skills/create-pull-request/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: closeout-before-delivery
+    statement: For plan-backed work, a docs-dev closeout is required before delivery.
+    stated-in:
+      - products/kyber-squad/skills/create-pull-request/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: scale-declared-at-authoring
+    statement: The design scale, documentation-impact with its impact-components, is declared at authoring time.
+    stated-in:
+      - products/kyber-squad/agents/architect/references/plan-authoring.md
+      - products/kyber-squad/skills/product-owner/references/design-phase.md
+    controls:
+      - products/kyber-squad/agents/architect/references/arbiter-escalation.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: design-harvest-at-authoring
+    statement: The Design harvest table, keyed by target component and target doc type, is written when the plan or design is authored.
+    stated-in:
+      - products/kyber-squad/agents/architect/references/plan-authoring.md
+      - path: products/kyber-squad/skills/product-owner/references/design-phase.md
+        anchor: "## Design harvest"
+      - path: docs/plans/README.md
+        section: Plan Decisions and Closeout Policy
+      - path: docs/specs/README.md
+        anchor: "Design harvest"
+    controls:
+      - products/kyber-squad/agents/architect/references/arbiter-escalation.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: ready-verifies-scale-and-harvest
+    statement: A plan or specification is marked ready only when its scale and its Design harvest have been verified.
+    stated-in:
+      - path: products/kyber-squad/agents/architect/references/plan-authoring.md
+        anchor: "PLAN_READY"
+      - path: products/kyber-squad/agents/conductor/references/spec-path.md
+        anchor: "SPEC_READY"
+    controls:
+      - products/kyber-squad/agents/architect/references/arbiter-escalation.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: intent-alignment-docs-items
+    statement: The intent-alignment lens raises a critical finding when an archived specification's documentation items are missing or the pull request's documentation section is missing or false.
+    stated-in:
+      - products/kyber-squad/skills/code-review/references/lenses/intent-alignment.md
+    controls:
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: onboarding-assessment-mode
+    statement: The onboarding skill has an owner-started assessment mode that reports each plan or specification as harvested, partial or not harvested.
+    stated-in:
+      - .apm/skills/kyber-docs-onboarding-and-assessment/SKILL.md
+    controls:
+      - .apm/skills/kyber-docs-authoring/SKILL.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: doc-type-from-ontology
+    statement: The authoring skill reads the closed set of document types from the documentation ontology rather than from a list of its own.
+    stated-in:
+      - .apm/skills/kyber-docs-authoring/SKILL.md
+    controls:
+      - .apm/skills/kyber-docs-onboarding-and-assessment/SKILL.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+    retired:
+      statement: When no document type fits, the answer is reference, the catch-all fallback.
+      example: If no other doc type fits, the answer is `reference`, which is the correct fallback.
+      seed-into: products/kyber-squad/shared/worker-baseline.md
+      absent-from:
+        - .apm/skills/kyber-docs-authoring/SKILL.md
+  - id: misplaced-technology-remedy
+    statement: When the technology key sits on a document that is not a coding standard or does not match its folder, the remedy is to set it to the folder's name for a registered standard, and to clear it anywhere else.
+    stated-in:
+      - path: .apm/skills/kyber-docs-authoring/references/rules.md
+        anchor: "KW-DOC-SPEC-007"
+    controls:
+      - .apm/skills/kyber-docs-onboarding-and-assessment/SKILL.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: provider-selection-order
+    statement: The pull-request provider is chosen in this order, an explicit provider name, then the remote host, then a configured MCP server, and otherwise the user is asked.
+    stated-in:
+      - products/kyber-squad/skills/create-pull-request/SKILL.md
+      - products/kyber-squad/skills/pr-review-fix-comments/SKILL.md
+    controls:
+      - products/kyber-squad/skills/kilo-review-loop/SKILL.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: pr-target-branch-asked
+    statement: The skill never assumes the pull request's default target branch; it follows the host's convention or asks the user.
+    stated-in:
+      - products/kyber-squad/skills/create-pull-request/SKILL.md
+    controls:
+      - products/kyber-squad/skills/kilo-review-loop/SKILL.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+    retired:
+      statement: A pull request always branches from and targets the develop branch.
+      example: Always branch from develop and open the pull request against develop.
+      seed-into: products/kyber-squad/shared/worker-baseline.md
+      absent-from:
+        - products/kyber-squad/skills/create-pull-request/SKILL.md
+  # ---------------------------------------------------------------- the conductor's intake and relay
+  - id: response-shape-order
+    statement: A response opens with a title, then a bottom line of at most three sentences, then what needs a decision, in that order.
+    stated-in:
+      - products/kyber-squad/response-guidance.default.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/shared/worker-baseline.md
+    retired:
+      statement: The response opens with a title line and then a bottom line of at most three sentences.
+      example: Open every reply with a one-line title, then a bottom line of no more than three sentences.
+      seed-into: products/kyber-squad/shared/worker-baseline.md
+      absent-from:
+        - products/kyber-squad/agents/conductor.md
+        - products/kyber-squad/agents/code-reviewer.md
+        - products/kyber-squad/skills/bug-crusher/SKILL.md
+        - products/kyber-squad/skills/code-review/SKILL.md
+        - products/kyber-squad/skills/delivery-execution/SKILL.md
+  - id: format-never-named
+    statement: A response never labels, names or mentions the format it follows.
+    stated-in:
+      - products/kyber-squad/response-guidance.default.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: session-title-set
+    statement: The agent sets the session title to name the work being done.
+    stated-in:
+      - products/kyber-squad/response-guidance.default.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/shared/worker-baseline.md
+    retired:
+      statement: Setting the session title is optional.
+      example: Setting the session title is optional; leave it alone when in doubt.
+      seed-into: products/kyber-squad/shared/worker-baseline.md
+      absent-from:
+        - products/kyber-squad/response-guidance.default.md
+  - id: session-title-factory-exception
+    statement: Factory is the one harness that cannot set the session title, because it takes the title from the first message.
+    stated-in:
+      - products/kyber-squad/response-guidance.default.md
+      - path: docs/kyber-squad/architecture.md
+        section: Response preferences injected at deploy
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: session-title-tracks-pr
+    statement: Once a pull request is submitted, the session title becomes the pull request's number and title, and it changes when the pull request is retitled.
+    stated-in:
+      - products/kyber-squad/response-guidance.default.md
+      - path: docs/kyber-squad/architecture.md
+        section: Response preferences injected at deploy
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: digest-relay-in-response-shape
+    statement: A specialist digest relayed to the person is presented in the shape the response preferences set.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+    controls:
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
+  - id: digest-relay-keeps-content
+    statement: Relaying a specialist digest changes only its presentation; every status, id, path, count, gap, open question and evidence value survives unchanged.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+    controls:
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: intake-assessment-opt-in
+    statement: The intake assessment runs only when the repository's configuration turns it on; otherwise the conductor skips it and takes the plan path.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+      - products/kyber-squad/agents/conductor/references/intake-path.md
+    controls:
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+      - products/kyber-squad/agents/conductor/references/spec-path.md
+  - id: plan-path-announced
+    statement: When the conductor takes the plan path because the assessment is off, it says so in one line and offers a specification instead of routing silently.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+      - path: products/kyber-squad/agents/conductor/references/intake-path.md
+        anchor: "## Assessment"
+    controls:
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+      - products/kyber-squad/agents/conductor/references/spec-path.md
+  - id: diagnosis-route-gated
+    statement: A diagnosed defect with no stated plan or spec choice goes to the architect's intake recommendation only when the repository turned the assessment on; otherwise it proceeds with the plan choice.
+    stated-in:
+      - products/kyber-squad/agents/conductor/references/intake-path.md
+    controls:
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+      - products/kyber-squad/agents/conductor/references/spec-path.md
+    retired:
+      statement: A diagnosed defect with no stated choice is always sent to the intake assessment.
+      example: If choice is UNSTATED, always send the diagnosis to architect for an intake recommendation.
+      seed-into: products/kyber-squad/shared/worker-baseline.md
+      absent-from:
+        - products/kyber-squad/agents/conductor/references/intake-path.md
+  - id: defect-first
+    statement: A concrete failure is diagnosed first, before an explicit plan or specification choice is routed.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+      - products/kyber-squad/agents/conductor/references/intake-path.md
+    controls:
+      - docs/kyber-arbiter/jev-decision-model.md
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
+  - id: ready-task-defect-assessment
+    statement: A failure in an existing Ready task that needs architecture goes to a read-only assessment by the architect, which answers with the contract unchanged or a revision required.
+    stated-in:
+      - products/kyber-squad/agents/conductor/references/intake-path.md
+      - path: products/kyber-squad/agents/architect/references/intake-assessment.md
+        anchor: "TASK_ASSESSED"
+    controls:
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+      - products/kyber-squad/agents/architect/references/arbiter-escalation.md
+  - id: three-intake-paths
+    statement: The conductor has three intake paths, the plan path, the spec path and the intake path.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: mode-aware-execution
+    statement: Execution follows the plan's development mode, test-first or standard.
+    stated-in:
+      - path: products/kyber-squad/agents/conductor.md
+        anchor: "development-mode"
+    controls:
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: test-first-is-default-mode
+    statement: A plan that does not name its development mode gets test-first as the default.
+    stated-in:
+      - products/kyber-squad/agents/conductor/references/plan-path.md
+    controls:
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: superseded-not-executed
+    statement: A Superseded or Completed plan or specification is not executed.
+    stated-in:
+      - products/kyber-squad/agents/conductor/references/plan-path.md
+    controls:
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: permanent-decisions-table
+    statement: Every plan carries a permanent Decisions table, even when there were no questions.
+    stated-in:
+      - products/kyber-squad/agents/architect/references/plan-authoring.md
+      - path: products/kyber-squad/agents/conductor/references/plan-path.md
+        anchor: "## Decisions"
+    controls:
+      - products/kyber-squad/agents/architect/references/arbiter-escalation.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: product-owner-headless
+    statement: The product owner never asks the person directly; it returns a status with its gaps and open questions.
+    stated-in:
+      - products/kyber-squad/skills/product-owner/SKILL.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/go-dev.md
+    retired:
+      statement: The reader asks the person directly, verbatim, to approve each phase at a numbered gate.
+      example: At each numbered phase gate, ask the person directly, in these exact words, whether they approve the phase, and wait for their answer.
+      seed-into: products/kyber-squad/shared/worker-baseline.md
+      absent-from:
+        - products/kyber-squad/agents/product-owner.md
+        - products/kyber-squad/skills/product-owner/SKILL.md
+  - id: plan-prompt-precision
+    statement: A worker prompt in a plan names files by path plus symbol, test classes by their fully qualified names, and the exact command to run.
+    stated-in:
+      - products/kyber-squad/agents/architect/references/plan-authoring.md
+    controls:
+      - products/kyber-squad/agents/architect/references/arbiter-escalation.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: session-group-follow-on
+    statement: A follow-on fix uses a session group so it runs in the session that did the original work.
+    stated-in:
+      - products/kyber-squad/agents/architect/references/plan-authoring.md
+    controls:
+      - products/kyber-squad/agents/architect/references/arbiter-escalation.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: task-file-saved-and-returned
+    statement: At finalization the architect saves the plan's tasks.json file and returns its path.
+    stated-in:
+      - products/kyber-squad/agents/architect/references/plan-authoring.md
+    controls:
+      - products/kyber-squad/agents/architect/references/arbiter-escalation.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: compare-repo-not-root
+    statement: A docs-tool answer is trusted only when its repo= value equals the checkout's git common directory and its rev= and branch= match the run's base and branch.
+    stated-in:
+      - products/kyber-squad/agents/architect.md
+      - products/kyber-squad/agents/architect/references/plan-authoring.md
+    controls:
+      - products/kyber-squad/agents/architect/references/arbiter-escalation.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: tool-failure-stops-run
+    statement: At run start the docs tooling is ensured, and when that fails the run stops instead of warning and continuing.
+    stated-in:
+      - path: products/kyber-squad/agents/conductor.md
+        anchor: "stop-on-tool-failure"
+      - path: products/kyber-squad/skills/bug-crusher/SKILL.md
+        anchor: "stop-on-tool-failure"
+    controls:
+      - products/kyber-squad/agents/go-dev.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: run-start-before-work
+    statement: A run starts with kyber-weave run start before any writer is dispatched.
+    stated-in:
+      - products/kyber-squad/agents/conductor.md
+      - products/kyber-squad/skills/bug-crusher/SKILL.md
+    controls:
+      - products/kyber-squad/skills/kilo-review-loop/SKILL.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  # ---------------------------------------------------------------- the root AGENTS.md
+  - id: codegraph-init-records-diffs
+    statement: Before running codegraph init, record git status and both the staged and the unstaged tracked diffs.
+    stated-in:
+      - path: AGENTS.md
+        section: Exploration order
+    controls:
+      - path: AGENTS.md
+        without-section: Exploration order
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: inspectcode-exit-zero
+    statement: InspectCode exits zero whether or not it finds anything, so its exit code is not a clean report.
+    stated-in:
+      - AGENTS.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: kyberdash-display-layer
+    statement: The KyberDash web and tray apps are display layers only, with no feature logic of their own.
+    stated-in:
+      - AGENTS.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/shared/worker-baseline.md
