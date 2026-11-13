@@ -37,6 +37,8 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
     private const string HandBuiltFindings = "KW-REVIEW-045";
     private const string RefutationCandidates = "KW-REVIEW-046";
     private const string InputSitesMissing = "KW-REVIEW-047";
+    private const string GateCarried = "KW-REVIEW-048";
+    private const string GateNotRerun = "KW-REVIEW-049";
     private const string CorrectnessLens = "correctness";
     private const string ReviewerSeat = "reviewer";
     private const string PriorFindingsFile = "findings.json";
@@ -76,6 +78,10 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
             return Fail(report, settings);
         }
 
+        IReadOnlyList<GateResult> gateResults = WithCarriedGates(root, config, settings, gates, report);
+        if (report.HasErrors)
+            return Fail(report, settings);
+
         List<DroppedFinding> dropped = [];
         List<ReviewFinding> findings = ApplyDrops(input.Findings, settings.Drop, report, dropped);
         if (report.HasErrors)
@@ -83,7 +89,6 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
 
         findings = CheckCitedLines(root, findings, report, dropped);
 
-        IReadOnlyList<GateResult> gateResults = gates?.Gates ?? [];
         ReviewOutcome outcome = VerdictEngine.Evaluate(
             findings,
             gateResults,
@@ -114,6 +119,75 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
 
         CommandHelpers.Finish(report, settings, "review verdict", "Review");
         return report.HasErrors && outcome.Verdict == ReviewVerdict.Approve ? 1 : outcome.ExitCode;
+    }
+
+    /// <summary>
+    /// The gate results the verdict is computed from. With <c>--prior</c>, a declared blocking gate this cycle did not
+    /// run keeps the result of the cycle that last ran it, unless a file changed since that cycle matches the gate's
+    /// inputs or the gate had not passed: then the cycle is refused, because dropping the gate would read as a pass.
+    /// </summary>
+    private static IReadOnlyList<GateResult> WithCarriedGates(
+        string root,
+        KyberWeaveConfig config,
+        ReviewVerdictSettings settings,
+        GateReport? gates,
+        DiagnosticReport report)
+    {
+        IReadOnlyList<GateResult> given = gates?.Gates ?? [];
+        if (settings.Prior is null || gates is null)
+            return given;
+
+        ReviewGate[] absent =
+        [
+            .. config.Review.Gates.Where(gate => gate.Blocking
+                                                 && !given.Any(result => string.Equals(result.Id, gate.Id, StringComparison.Ordinal)))
+        ];
+        IReadOnlyList<ReviewCycleRecord> history = ReviewCycles.ReadThrough(settings.Prior);
+        if (absent.Length == 0 || history.Count == 0)
+            return given;
+
+        List<GateResult> effective = [.. given];
+        foreach (GateCycleDecision decision in ReviewCycles.DecideGates(
+                     history,
+                     absent,
+                     OperatingSystem.IsWindows() ? "windows" : "unix",
+                     commit => TryChangedSince(root, commit)))
+        {
+            if (decision is { Action: GateCycleAction.Carry, Carried: { } carried })
+            {
+                effective.Add(carried with { Summary = $"carried from cycle {decision.FromCycle}: {carried.Summary}" });
+                report.Add(new Diagnostic(
+                    GateCarried,
+                    Severity.Info,
+                    $"{decision.GateId}: carried from cycle {decision.FromCycle} ({decision.Reason}).",
+                    decision.GateId));
+            }
+            else if (decision is { Action: GateCycleAction.Rerun, FromCycle: not null })
+            {
+                report.Add(new Diagnostic(
+                    GateNotRerun,
+                    Severity.Error,
+                    $"{decision.GateId}: this cycle's gate report has no result for it, and cycle {decision.FromCycle}'s " +
+                    $"result cannot be carried ({decision.Reason}).",
+                    decision.GateId,
+                    Hint: $"Run 'review gates --gate {decision.GateId}' into this cycle's gates.json, then compute the verdict again."));
+            }
+        }
+
+        return effective;
+    }
+
+    private static IReadOnlyList<string>? TryChangedSince(string root, string commit)
+    {
+        try
+        {
+            return ChangedFiles.ResolveSince(root, commit);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception
+                                       or TimeoutException)
+        {
+            return null;
+        }
     }
 
     /// <summary>The verdict as printed in the console summary.</summary>

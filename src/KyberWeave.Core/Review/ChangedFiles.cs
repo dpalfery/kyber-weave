@@ -72,6 +72,34 @@ public static class ChangedFiles
     }
 
     /// <summary>
+    /// Lists every path the working tree changed since <paramref name="commit"/>, deleted paths included,
+    /// together with untracked files.
+    /// </summary>
+    /// <remarks>
+    /// A deleted file can break a gate as surely as an edited one, so unlike <see cref="Resolve"/> this keeps it.
+    /// A commit git does not know, such as one a rebase dropped, is an error: the caller then cannot compare.
+    /// </remarks>
+    /// <param name="workingDirectory">The repository root. Paths come back relative to it.</param>
+    /// <param name="commit">The commit to compare the working tree with.</param>
+    /// <exception cref="InvalidOperationException">git could not list the files.</exception>
+    public static IReadOnlyList<string> ResolveSince(string workingDirectory, string commit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(commit);
+
+        string[] changed = RunGitPaths(workingDirectory, "diff", "-z", "--name-only", "--relative", commit, "--");
+        string[] untracked = RunGitPaths(
+            workingDirectory,
+            "ls-files", "-z", "--others", "--exclude-standard", "--");
+
+        return changed
+            .Concat(untracked)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    /// <summary>
     /// Lists the paths changed since the merge base of <paramref name="baseRef"/> and
     /// <c>HEAD</c> with the kind of each change, together with untracked files.
     /// </summary>

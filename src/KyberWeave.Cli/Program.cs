@@ -324,6 +324,10 @@ app.Configure(config =>
             .WithExample("review", "duplicates", ".")
             .WithExample("review", "duplicates", ".", "--out", "duplicates.json");
 
+        review.AddCommand<ReviewCycleCommand>("cycle")
+            .WithDescription(ReviewCycleCommand.Description)
+            .WithExample("review", "cycle", ".", "--task", "my-task");
+
         review.AddCommand<ReviewVerdictCommand>("verdict")
             .WithDescription(ReviewVerdictCommand.Description)
             .WithExample("review", "verdict", ".", "--seats", "seats", "--gates", "gates.json", "--out", "findings.json");

@@ -127,3 +127,11 @@ public sealed class ReviewVerdictSettings : AnalysisSettings
                  "check), with per-lens coverage, to this path as JSON. The verdict itself is printed, not written.")]
     public string? Out { get; set; }
 }
+
+/// <summary>Settings for <c>review cycle</c>.</summary>
+public sealed class ReviewCycleSettings : AnalysisSettings
+{
+    [CommandOption("--task <ID>")]
+    [Description("The task id whose review folder, .agent_scratchpad/<task-id>/review, holds the run's cycles.")]
+    public string? Task { get; set; }
+}
