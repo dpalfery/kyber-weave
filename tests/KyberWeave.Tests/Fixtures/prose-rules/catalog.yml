@@ -568,7 +568,6 @@ rules:
       absent-from:
         - products/kyber-squad/agents/conductor.md
         - products/kyber-squad/agents/csharp-dev.md
-        - products/kyber-squad/agents/test-dev.md
         - products/kyber-squad/skills/test-dev/SKILL.md
   - id: green-against-red
     statement: A developer worker writes the tests for its own change rather than leaving them to test-dev.
@@ -1324,8 +1323,8 @@ rules:
       - products/kyber-squad/agents/python-dev.md
     retired:
       statement: go-dev takes Go source and module files but not _test.go files, which go to test-dev.
-      example: Test files — *_test.go, fuzz targets, and benchmarks are test-dev's. Write testable code; do not author the tests.
-      seed-into: products/kyber-squad/agents/python-dev.md
+      example: "Go routing: go-dev takes non-test .go files, go.mod and go.sum, and never authors _test.go files; every _test.go file goes to test-dev."
+      seed-into: products/kyber-squad/agents/rust-dev.md
       absent-from:
         - products/kyber-squad/agents/go-dev.md
   - id: typescript-routing-split
@@ -1338,7 +1337,6 @@ rules:
     retired:
       statement: typescript-dev takes non-test .ts files outside a React UI; test files go to test-dev.
       example: Test files — *.test.ts, *.spec.ts, fixtures, and test helpers are test-dev's. Write testable code; do not author the tests.
-      seed-into: products/kyber-squad/agents/python-dev.md
       absent-from:
         - products/kyber-squad/agents/typescript-dev.md
   - id: react-routing-split
@@ -2293,7 +2291,7 @@ rules:
       - products/kyber-squad/agents/test-dev.md
       - products/kyber-squad/agents/architect/references/test-first-contract.md
     controls:
-      - products/kyber-squad/agents/go-dev.md
+      - products/kyber-squad/agents/sql-database-architect.md
       - products/kyber-squad/shared/worker-baseline.md
   - id: test-adequacy-is-the-independent-test-check
     statement: Because one worker writes both a task's tests and its code, the test-adequacy lens reads those tests as the independent check on them.

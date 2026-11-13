@@ -776,7 +776,11 @@ with the RED/GREEN split ([ADR 0076](../adr/0076-test-first-is-one-worker-per-ta
 replacement, `KW-ARB-MODE-002`, asks no model. A developer dispatch now includes writing the task's
 tests, so `KW-ARB-SCOPE-002`'s `within-task` criterion says so, and seven cases (`scope-031` to
 `scope-037`) check it: four in which a developer writes and runs its own tests (`within-task`) and
-three in which tests are the vehicle for work the task does not describe (`adds-work`).
+three in which tests are the vehicle for work the task does not describe (`adds-work`), labelled by
+one Claude model and not reviewed by a person. One run per model over all 37 SCOPE-002 cases with the
+new criterion: `typesafe/jev-1.14` 36 right, its one miss (`scope-014`) at 0.25, below the floor;
+`typesafe/jev-1.13` 37 right. No answer was wrong above the floor, and all seven new cases were right
+on both, five of them above 0.8 on `jev-1.13` and all seven on `jev-1.14`.
 
 Confidence on one case can differ noticeably between the models (0.89 and 0.67 on the same
 case), so a floor set for one model is not assumed to hold for another.
