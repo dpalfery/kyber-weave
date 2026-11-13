@@ -33,6 +33,7 @@ internal static class ModelTargetFacts
     private const string PriorProfile = "model-targeting.prior-profile";
     private const string LadderNext = "model-targeting.ladder.next";
     private const string TestOwner = "test-dev";
+    private const string BudgetExceeded = "BUDGET_EXCEEDED";
 
     private static readonly IReadOnlyList<string> TestPatterns = ArbiterConfig.ProductDefaults.OwnerFileKindMap
         .Where(entry => string.Equals(entry.Owner, TestOwner, StringComparison.Ordinal))
@@ -147,7 +148,7 @@ internal static class ModelTargetFacts
         ArbiterPriorAttempt? latest = null;
         foreach (ArbiterLedgerEvent post in events)
         {
-            string? result = post.Returns?.TaskReview;
+            string? result = ResultOf(post.Returns);
             if (post.Phase != ArbiterLedgerPhases.Post || post.PreId is null || post.PreId == ledgerId
                 || result is not ("PASS" or "FAIL")
                 || !pres.TryGetValue(post.PreId, out ArbiterLedgerEvent? pre)
@@ -167,6 +168,14 @@ internal static class ModelTargetFacts
 
         return latest;
     }
+
+    /// <summary>
+    /// The attempt's result: its task-review marker, or <c>FAIL</c> when the worker returned
+    /// <c>STATUS: BUDGET_EXCEEDED</c> after the worker guard stopped it, so its rework climbs one rung.
+    /// </summary>
+    private static string? ResultOf(ArbiterReturnMarkers? returns) =>
+        returns?.TaskReview
+        ?? (string.Equals(returns?.PlannerStatus, BudgetExceeded, StringComparison.Ordinal) ? "FAIL" : null);
 
     /// <summary>
     /// The delivered model block of each ledger event, the first one logged for an event winning. Built once per

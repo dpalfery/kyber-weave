@@ -602,6 +602,9 @@ arbiter:
     retain-days: 14              # at least 1
   comment-triage:
     bot-logins: []               # blank entries are refused
+  dispatch-budget:
+    minutes: 15                  # at least 1
+    tool-calls: 150              # at least 1
   rules:
     - id: KW-ARB-SCOPE-002
       shadow: true               # step-1 shipped rules only
@@ -615,14 +618,16 @@ arbiter:
 | `stores.max-item-bytes` | `16384` | 1 to 1048576 | `KW-ARB-CONFIG-015` |
 | `stores.retain-days` | `14` | At least 1 (values above 3650 are clamped to 3650 when swept) | `KW-ARB-CONFIG-015` |
 | `comment-triage.bot-logins` | `[]` | Non-blank login names | `KW-ARB-CONFIG-015` |
+| `dispatch-budget.minutes` / `tool-calls` | `15` / `150` | At least 1. One developer or docs dispatch may run this long, or make this many tool calls, before the worker guard denies its next call (`KW-ARB-BUDGET-001`) | `KW-ARB-CONFIG-015` |
 | `rules[].shadow` | Per rule | `true` or `false`, on a step-1 shipped rule | `KW-ARB-CONFIG-014` on `KW-ARB-DIFFICULTY-001` and `KW-ARB-LADDER-001`, which take their state from `mode` |
 
 `KW-ARB-CONFIG-015` also refuses a host rule that uses `for-each`, or an effect only a shipped rule
 may use. The profile keys accept only the six semantic profiles above, never a concrete model id.
 
 Limits: `mode` also drives the `KW-ARB-MODEL-001` doctor check, and it is the only switch for the two
-model rules. A bad value in any of these keys makes the config loader throw, so the hook fails closed
-for the whole hook with `KW-ARB-HOOK-001`. It does not skip only the affected rule, as the design intended. This repository's
+model rules. A bad value in any of these keys makes the config loader throw, so the hook allows the dispatch
+undecided and logs `KW-ARB-HOOK-001` ([ADR 0072](adr/0072-the-arbiter-blocks-only-on-machine-facts-and-confident-model-answers.md)).
+It does not skip only the affected rule, as the design intended. This repository's
 own `.kyber-weave/kyber-weave.yml` sets none of these keys.
 
 ### Gate `applies-when`

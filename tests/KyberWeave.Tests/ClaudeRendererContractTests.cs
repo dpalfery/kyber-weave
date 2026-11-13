@@ -1137,7 +1137,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
         [
             "PreToolUse {\"matcher\":\"^(Agent|Task)$\",\"hooks\":" + hooks + "}",
             "PreToolUse {\"matcher\":\"" + SubagentHandbackMatcher + "\",\"hooks\":" + hooks + "}",
-            "PreToolUse {\"matcher\":\"^(Edit|Write|MultiEdit|NotebookEdit)$\",\"hooks\":" +
+            "PreToolUse {\"matcher\":\"*\",\"hooks\":" +
             "[{\"type\":\"command\",\"command\":\"kyber-weave-arbiter worker-guard --harness claude\",\"timeout\":5}]}",
             "PostToolUse {\"matcher\":\"^(Agent|Task)$\",\"hooks\":" + hooks + "}",
         ];

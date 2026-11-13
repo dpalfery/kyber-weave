@@ -133,6 +133,7 @@ public static class ArbiterConfigLoader
             ModelTargeting = modelTargeting,
             Stores = MergeStores(defaults.Stores, section.Stores),
             CommentTriage = MergeCommentTriage(defaults.CommentTriage, section.CommentTriage),
+            DispatchBudget = MergeDispatchBudget(defaults.DispatchBudget, section.DispatchBudget),
         };
     }
 
@@ -172,6 +173,7 @@ public static class ArbiterConfigLoader
             ModelTargeting = merged.ModelTargeting,
             Stores = merged.Stores,
             CommentTriage = merged.CommentTriage,
+            DispatchBudget = merged.DispatchBudget,
         };
     }
 
@@ -876,6 +878,25 @@ public static class ArbiterConfigLoader
             throw new YamlException($"[{RuleValidator.SavingsValueInvalid}] arbiter.stores.retain-days must be at least 1.");
 
         return new ArbiterStoresConfig(maxItemBytes, retainDays);
+    }
+
+    private static ArbiterDispatchBudgetConfig MergeDispatchBudget(
+        ArbiterDispatchBudgetConfig defaults,
+        ArbiterDispatchBudgetYaml? section)
+    {
+        if (section is null)
+            return defaults;
+
+        int minutes = section.Minutes ?? defaults.Minutes;
+        int toolCalls = section.ToolCalls ?? defaults.ToolCalls;
+        if (minutes < 1 || toolCalls < 1)
+        {
+            throw new YamlException(
+                $"[{RuleValidator.SavingsValueInvalid}] arbiter.dispatch-budget.minutes and tool-calls must each be at least 1, " +
+                "e.g. { minutes: 15, tool-calls: 150 }.");
+        }
+
+        return new ArbiterDispatchBudgetConfig(minutes, toolCalls);
     }
 
     private static ArbiterCommentTriageConfig MergeCommentTriage(

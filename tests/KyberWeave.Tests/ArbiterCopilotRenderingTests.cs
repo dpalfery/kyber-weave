@@ -116,7 +116,7 @@ public sealed class ArbiterCopilotRenderingTests : IDisposable
         Assert.Single(hooks.GetProperty("postToolUse").EnumerateArray());
         JsonElement guard = hooks.GetProperty("preToolUse").EnumerateArray().ElementAt(1);
         Assert.Equal(2, hooks.GetProperty("preToolUse").GetArrayLength());
-        Assert.Equal("edit|create", guard.GetProperty("matcher").GetString());
+        Assert.Equal(".*", guard.GetProperty("matcher").GetString());
         Assert.Equal("kyber-weave-arbiter worker-guard --harness copilot-cli", guard.GetProperty("bash").GetString());
         Assert.Equal("kyber-weave-arbiter worker-guard --harness copilot-cli", guard.GetProperty("powershell").GetString());
     }

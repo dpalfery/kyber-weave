@@ -89,6 +89,18 @@ public sealed record ArbiterCommentTriageConfig(IReadOnlyList<string> BotLogins)
     public static ArbiterCommentTriageConfig Defaults { get; } = new([]);
 }
 
+/// <summary>
+/// The <c>arbiter.dispatch-budget</c> block: how long, and for how many tool calls, one developer or docs
+/// dispatch may run before the worker guard stops it (<c>KW-ARB-BUDGET-001</c>).
+/// </summary>
+/// <param name="Minutes">Wall-clock minutes from the dispatch's first tool call.</param>
+/// <param name="ToolCalls">Tool calls the dispatch may make.</param>
+public sealed record ArbiterDispatchBudgetConfig(int Minutes, int ToolCalls)
+{
+    /// <summary>The shipped defaults: 15 minutes or 150 tool calls, whichever comes first.</summary>
+    public static ArbiterDispatchBudgetConfig Defaults { get; } = new(15, 150);
+}
+
 /// <summary>The <c>arbiter:</c> host configuration.</summary>
 public sealed record ArbiterConfig
 {
@@ -122,9 +134,12 @@ public sealed record ArbiterConfig
     /// <summary>The <c>arbiter.comment-triage</c> block.</summary>
     public ArbiterCommentTriageConfig CommentTriage { get; init; } = ArbiterCommentTriageConfig.Defaults;
 
+    /// <summary>The <c>arbiter.dispatch-budget</c> block.</summary>
+    public ArbiterDispatchBudgetConfig DispatchBudget { get; init; } = ArbiterDispatchBudgetConfig.Defaults;
+
     /// <summary>
-    /// Product defaults for an unconfigured host: disabled, no provider, all 32
-    /// shipped rules enabled.
+    /// Product defaults for an unconfigured host: disabled, no provider, every
+    /// shipped rule enabled.
     /// </summary>
     /// <remarks>
     /// Loaded from the embedded <c>default-rules.yml</c> rather than hardcoded so the

@@ -670,6 +670,38 @@ rules:
         - products/kyber-squad/skills/bug-crusher/SKILL.md
         - products/kyber-squad/skills/code-review/SKILL.md
         - products/kyber-squad/skills/delivery-execution/SKILL.md
+  - id: budget-exceeded-climbs
+    statement: When a worker returns STATUS BUDGET_EXCEEDED, the conductor treats it as a failed attempt and sends the rework one model up or to the architect, never the same packet back to the same worker on the same model.
+    stated-in:
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Iteration circuit-breaker and loop detection
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: budget-exceeded-worker-stops
+    statement: A worker whose tool call is refused for an exhausted dispatch budget makes no more tool calls and returns a report starting STATUS BUDGET_EXCEEDED with what is done and what is not.
+    stated-in:
+      - path: products/kyber-squad/skills/task-gate/references/rework.md
+        section: When the Arbiter stops the dispatch
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: fix-round-one-finding
+    statement: Each review fix-round dispatch carries one finding, or one tightly related group, with its file and line.
+    stated-in:
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Review loop (critical and major findings, failed blocking gates)
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: fix-round-no-restore-to-base
+    statement: A fix-round packet never asks the worker to restore a file to its base version and re-apply the change; the fix edits the current tree.
+    stated-in:
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Review loop (critical and major findings, failed blocking gates)
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
   - id: review-loop-bounds
     statement: The review loop stops after 5 review cycles, or after 3 cycles in a row in which the count of surviving critical and major findings does not fall.
     stated-in:

@@ -16,6 +16,16 @@ internal sealed class ArbiterYamlSection
     public ArbiterStoresYaml? Stores { get; set; }
 
     public ArbiterCommentTriageYaml? CommentTriage { get; set; }
+
+    public ArbiterDispatchBudgetYaml? DispatchBudget { get; set; }
+}
+
+/// <summary>The <c>arbiter.dispatch-budget</c> mapping.</summary>
+internal sealed class ArbiterDispatchBudgetYaml
+{
+    public int? Minutes { get; set; }
+
+    public int? ToolCalls { get; set; }
 }
 
 /// <summary>The <c>arbiter.model-targeting</c> mapping.</summary>

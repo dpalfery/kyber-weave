@@ -59,10 +59,11 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
     private const string CliHooksFileRelativePath = ".github/hooks/kyber-arbiter.json";
 
     /// <summary>
-    /// The CLI tools the worker guard checks: the two that write a file by path. The guard itself acts only on a
-    /// Squad subagent's call, which the CLI marks with the subagent's type at the top level of the event.
+    /// The CLI tools the worker guard sees: every one, because it counts a developer dispatch's tool calls against
+    /// its budget, and it checks the two that write a file by path. The guard itself acts only on a Squad
+    /// subagent's call, which the CLI marks with the subagent's type at the top level of the event.
     /// </summary>
-    private const string WorkerGuardCliMatcher = "edit|create";
+    private const string WorkerGuardCliMatcher = ".*";
     private const string VsCodeHarnessToken = "copilot-vscode";
     private const string CliHarnessToken = "copilot-cli";
     private const int MaxAgentBodyCharacters = 30_000;
@@ -426,7 +427,7 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
     /// The CLI discovers <c>.github/hooks/*.json</c> and expects Copilot hook format: a
     /// numeric <c>version</c>, camelCase events, and per-shell command fields ([F3]). The
     /// dispatch matcher compiles to <c>^(?:task)$</c>, so only subagent dispatches reach the hook; the
-    /// worker guard's matcher admits the <c>edit</c> and <c>create</c> tools.
+    /// worker guard's matcher admits every tool.
     /// Every produced hook carries the same wiring timeout, so the first hook's value
     /// stands for the file.
     /// </remarks>

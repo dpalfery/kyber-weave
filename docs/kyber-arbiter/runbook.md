@@ -336,9 +336,9 @@ A subagent starts in the repository's canonical checkout (its main worktree) and
 in prose, so it can write to the wrong one. `KW-ARB-CHECKOUT-001` catches that on machine facts, in two
 places:
 
-- **Before the write, where the harness hooks it.** `kyber-weave-arbiter worker-guard` runs on Copilot CLI's
-  `edit` and `create` tools (the user-level hook file) and on Claude's `Edit`, `Write`, `MultiEdit` and
-  `NotebookEdit` (the user-level settings block). It denies a Squad subagent's write into the canonical
+- **Before the write, where the harness hooks it.** `kyber-weave-arbiter worker-guard` runs on every Copilot
+  CLI tool call (the user-level hook file) and every Claude tool call (the user-level settings block), and
+  checks Copilot CLI's `edit` and `create` and Claude's `Edit`, `Write`, `MultiEdit` and `NotebookEdit`. It denies a Squad subagent's write into the canonical
   checkout while a live run of that repository works in a worktree of its own, and the reason names the same
   path in the run worktree. A root agent (a person's own session) is never checked. The guard reads only the
   run records and the checkout's git files, starts no process, and allows anything it cannot read.
@@ -349,6 +349,24 @@ places:
   counted too, because git cannot tell who wrote a file.
 
 A run that branched in place works in the canonical checkout, so neither check applies to it.
+
+## Reading a budget stop
+
+`KW-ARB-BUDGET-001` ends a developer or `docs-dev` dispatch that thrashes. The worker guard counts each
+subagent's tool calls and minutes from its first call, keyed by the harness's subagent id, in append-only
+files under `~/.kyber-weave/arbiter/budgets/` (swept after two days). Past `arbiter.dispatch-budget`
+(default 15 minutes or 150 tool calls) it denies every further call and tells the worker to return
+`STATUS: BUDGET_EXCEEDED` with what is done and what is not. Reviewers, planners and `github-devops` are not
+budgeted, because a full test run or a CI wait is long by design.
+
+The conductor treats the return as a failed attempt, never sends the same packet back to the same worker on
+the same model, and sends the rework one model up or to `architect` (the `delivery-execution` skill). The
+ladder rule reads `STATUS: BUDGET_EXCEEDED` as `fail`, so under `model-targeting.mode: enforce` the rework
+dispatch climbs one rung, but only where the harness takes a per-dispatch model (Claude); elsewhere the
+conductor's prose carries the escalation.
+
+Only Copilot CLI and Claude run the worker guard: they are the harnesses whose user-level hooks see a
+subagent's own tool calls with its id and type. Every other harness hooks only the dispatch and its return.
 
 ## Reading a planner refusal
 
