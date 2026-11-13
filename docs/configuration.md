@@ -605,6 +605,7 @@ arbiter:
   dispatch-budget:
     minutes: 15                  # at least 1
     tool-calls: 150              # at least 1
+    call-minutes: 5              # at least 1
   rules:
     - id: KW-ARB-SCOPE-002
       shadow: true               # step-1 shipped rules only
@@ -619,6 +620,7 @@ arbiter:
 | `stores.retain-days` | `14` | At least 1 (values above 3650 are clamped to 3650 when swept) | `KW-ARB-CONFIG-015` |
 | `comment-triage.bot-logins` | `[]` | Non-blank login names | `KW-ARB-CONFIG-015` |
 | `dispatch-budget.minutes` / `tool-calls` | `15` / `150` | At least 1. One developer or docs dispatch may run this long, or make this many tool calls, before the worker guard denies its next call (`KW-ARB-BUDGET-001`) | `KW-ARB-CONFIG-015` |
+| `dispatch-budget.call-minutes` | `5` | At least 1. A gap longer than this between two tool calls of one such dispatch means the earlier call hung: the guard denies the next call once, telling the worker to stop the process and record it as not verified (`KW-ARB-BUDGET-001`) | `KW-ARB-CONFIG-015` |
 | `rules[].shadow` | Per rule | `true` or `false`, on a step-1 shipped rule | `KW-ARB-CONFIG-014` on `KW-ARB-DIFFICULTY-001` and `KW-ARB-LADDER-001`, which take their state from `mode` |
 
 `KW-ARB-CONFIG-015` also refuses a host rule that uses `for-each`, or an effect only a shipped rule

@@ -26,6 +26,8 @@ internal sealed class ArbiterDispatchBudgetYaml
     public int? Minutes { get; set; }
 
     public int? ToolCalls { get; set; }
+
+    public int? CallMinutes { get; set; }
 }
 
 /// <summary>The <c>arbiter.model-targeting</c> mapping.</summary>

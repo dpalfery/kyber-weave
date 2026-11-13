@@ -889,14 +889,15 @@ public static class ArbiterConfigLoader
 
         int minutes = section.Minutes ?? defaults.Minutes;
         int toolCalls = section.ToolCalls ?? defaults.ToolCalls;
-        if (minutes < 1 || toolCalls < 1)
+        int callMinutes = section.CallMinutes ?? defaults.CallMinutes;
+        if (minutes < 1 || toolCalls < 1 || callMinutes < 1)
         {
             throw new YamlException(
-                $"[{RuleValidator.SavingsValueInvalid}] arbiter.dispatch-budget.minutes and tool-calls must each be at least 1, " +
-                "e.g. { minutes: 15, tool-calls: 150 }.");
+                $"[{RuleValidator.SavingsValueInvalid}] arbiter.dispatch-budget.minutes, tool-calls and call-minutes must each be at least 1, " +
+                "e.g. { minutes: 15, tool-calls: 150, call-minutes: 5 }.");
         }
 
-        return new ArbiterDispatchBudgetConfig(minutes, toolCalls);
+        return new ArbiterDispatchBudgetConfig(minutes, toolCalls, callMinutes);
     }
 
     private static ArbiterCommentTriageConfig MergeCommentTriage(

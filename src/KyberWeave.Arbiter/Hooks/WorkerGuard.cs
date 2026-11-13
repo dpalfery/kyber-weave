@@ -13,7 +13,7 @@ namespace KyberWeave.Arbiter.Hooks;
 /// The guard on a Squad subagent's own tool calls, from machine facts only. It refuses a write into the
 /// repository's canonical checkout while a live run works in a worktree of its own
 /// (<c>KW-ARB-CHECKOUT-001</c>), and it ends a developer dispatch that has run past its budget of tool calls
-/// or minutes (<c>KW-ARB-BUDGET-001</c>).
+/// or minutes, and tells a developer dispatch once that a tool call ran past its limit (<c>KW-ARB-BUDGET-001</c>).
 /// </summary>
 /// <remarks>
 /// It runs on every tool call a harness reports, so it starts no process and calls no model: the run records,
@@ -137,10 +137,16 @@ public static class WorkerGuard
         string directory = BudgetDirectory(home);
         Directory.CreateDirectory(directory);
         string path = Path.Combine(directory, KeyOf(call.Harness, call.AgentId) + ".log");
-        if (File.Exists(path) && WindowEnded(File.ReadAllLines(path), now))
+        string[] earlier = File.Exists(path) ? File.ReadAllLines(path) : [];
+        if (earlier.Length > 0 && WindowEnded(earlier, now))
         {
             File.Delete(path);
+            earlier = [];
         }
+
+        // The guard sees only the start of each call, so the gap since the previous one is how long that call (and
+        // the model's turn after it) ran. Read before this call's line is appended.
+        DateTimeOffset? previousCall = earlier.Length > 1 && Window.Read(earlier) is { } before ? before.LastCall : null;
 
         if (!File.Exists(path))
         {
@@ -156,7 +162,7 @@ public static class WorkerGuard
                 using FileStream created = new(path, FileMode.CreateNew, FileAccess.Write, FileShare.ReadWrite);
                 byte[] headerBytes = Encoding.UTF8.GetBytes(string.Create(
                     CultureInfo.InvariantCulture,
-                    $"{now.ToUnixTimeMilliseconds()} {budget.Minutes} {budget.ToolCalls} {call.Agent.Name}\n"));
+                    $"{now.ToUnixTimeMilliseconds()} {budget.Minutes} {budget.ToolCalls} {call.Agent.Name} {budget.CallMinutes}\n"));
                 created.Write(headerBytes);
             }
             catch (IOException) when (File.Exists(path))
@@ -182,13 +188,25 @@ public static class WorkerGuard
         TimeSpan elapsed = now - window.Start;
         if (!window.IsOver(now))
         {
-            return null;
+            return previousCall is { } previous && now - previous > TimeSpan.FromMinutes(window.CallMinutes)
+                ? StalledCallRefusal(now - previous, window.CallMinutes)
+                : null;
         }
 
         return $"{BudgetRuleId}: this dispatch has made {calls} tool calls in {(int)elapsed.TotalMinutes} minutes, past its " +
                $"budget of {maxCalls} calls or {minutes} minutes. Stop now: make no more tool calls. Return a report whose " +
                $"first line is {BudgetExceededStatus}, then what is done, what is not, and the last failure you saw.";
     }
+
+    /// <summary>
+    /// The one-time deny after a call that ran past the per-call limit. The denied call is counted like any other, so
+    /// the retry that follows comes right after it and is allowed.
+    /// </summary>
+    private static string StalledCallRefusal(TimeSpan gap, int limit) =>
+        $"{BudgetRuleId}: your previous tool call ran for about {(int)gap.TotalMinutes} minutes, past the {limit}-minute " +
+        "limit for one call. If it started a process that is still running (a hung test run, server or watcher), stop " +
+        "that process now. Record NOT VERIFIED: <the command> — timed out in your report, do not run it again unchanged, " +
+        "and move on to the rest of your task. This call was denied once; make it again to continue.";
 
     private static bool WindowEnded(string[] lines, DateTimeOffset now)
     {
@@ -368,7 +386,7 @@ public static class WorkerGuard
         message.Replace("\r\n", " ", StringComparison.Ordinal).Replace('\n', ' ').Replace('\r', ' ');
 
     /// <summary>One budget window as its file records it: the header, then one timestamp per call.</summary>
-    private sealed record Window(DateTimeOffset Start, int Minutes, int MaxCalls, int Calls, DateTimeOffset LastCall)
+    private sealed record Window(DateTimeOffset Start, int Minutes, int MaxCalls, int Calls, DateTimeOffset LastCall, int CallMinutes)
     {
         public bool IsOver(DateTimeOffset at) => Calls > MaxCalls || at - Start > TimeSpan.FromMinutes(Minutes);
 
@@ -383,6 +401,13 @@ public static class WorkerGuard
                 return null;
             }
 
+            // A header written before the per-call limit existed has four fields; it gets the shipped limit.
+            int callMinutes = header.Length >= 5
+                && int.TryParse(header[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedCall)
+                && parsedCall > 0
+                    ? parsedCall
+                    : ArbiterDispatchBudgetConfig.Defaults.CallMinutes;
+
             long lastMs = startMs;
             if (lines.Length > 1
                 && long.TryParse(lines[^1], NumberStyles.Integer, CultureInfo.InvariantCulture, out long parsed))
@@ -395,7 +420,8 @@ public static class WorkerGuard
                 minutes,
                 maxCalls,
                 lines.Length - 1,
-                DateTimeOffset.FromUnixTimeMilliseconds(lastMs));
+                DateTimeOffset.FromUnixTimeMilliseconds(lastMs),
+                callMinutes);
         }
     }
 

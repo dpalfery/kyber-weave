@@ -366,6 +366,12 @@ minutes, or for a minute after it was stopped; the resumed dispatch starts a fre
 `STATUS: BUDGET_EXCEEDED` with what is done and what is not. Reviewers, planners and `github-devops` are not
 budgeted, because a full test run or a CI wait is long by design.
 
+A single hung call is caught sooner. The guard sees only the start of each call, so when the gap since the
+dispatch's previous call is past `dispatch-budget.call-minutes` (default 5; the gap includes the model's own
+time after that call), it denies the next call once: the worker is told to stop the hung process, record
+`NOT VERIFIED: <command> — timed out` and move on. The denied call is counted, so the retry that follows is
+allowed. A gap longer than the budget's minutes starts a fresh window instead, as above.
+
 The conductor treats the return as a failed attempt, never sends the same packet back to the same worker on
 the same model, and sends the rework one model up or to `architect` (the `delivery-execution` skill). The
 ladder rule reads `STATUS: BUDGET_EXCEEDED` as `fail`, so under `model-targeting.mode: enforce` the rework

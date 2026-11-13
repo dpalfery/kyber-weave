@@ -95,10 +95,14 @@ public sealed record ArbiterCommentTriageConfig(IReadOnlyList<string> BotLogins)
 /// </summary>
 /// <param name="Minutes">Wall-clock minutes from the dispatch's first tool call.</param>
 /// <param name="ToolCalls">Tool calls the dispatch may make.</param>
-public sealed record ArbiterDispatchBudgetConfig(int Minutes, int ToolCalls)
+/// <param name="CallMinutes">
+/// Minutes between two consecutive tool calls of the dispatch past which the earlier call is taken to have hung:
+/// the guard sees only the start of each call, so the gap is the earlier call's run time plus the model's own time.
+/// </param>
+public sealed record ArbiterDispatchBudgetConfig(int Minutes, int ToolCalls, int CallMinutes = 5)
 {
-    /// <summary>The shipped defaults: 15 minutes or 150 tool calls, whichever comes first.</summary>
-    public static ArbiterDispatchBudgetConfig Defaults { get; } = new(15, 150);
+    /// <summary>The shipped defaults: 15 minutes or 150 tool calls, whichever comes first, and 5 minutes for one call.</summary>
+    public static ArbiterDispatchBudgetConfig Defaults { get; } = new(15, 150, 5);
 }
 
 /// <summary>The <c>arbiter:</c> host configuration.</summary>

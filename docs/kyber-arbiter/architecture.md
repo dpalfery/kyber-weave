@@ -337,7 +337,8 @@ runs on every Copilot CLI and Claude tool call from the user-level hook file or 
 places those harnesses report a subagent's calls with its id and type, and it acts only on a call from inside
 a Squad subagent. It denies a write into the canonical checkout while a live run works in its own worktree
 (`KW-ARB-CHECKOUT-001`, the same id as the return rule) and every call of a developer or `docs-dev` dispatch
-past `arbiter.dispatch-budget` (`KW-ARB-BUDGET-001`). It reads the run records, the checkout's git files and
+past `arbiter.dispatch-budget` (`KW-ARB-BUDGET-001`), and denies once the call after one that ran past
+`dispatch-budget.call-minutes`, measured as the gap between the dispatch's consecutive calls. It reads the run records, the checkout's git files and
 one append-only counter file per subagent under `~/.kyber-weave/arbiter/budgets/`, starts no process, calls no
 model, and allows anything it cannot read. A shell command that writes a file is not seen by it; the return
 rule catches that. See the [runbook](runbook.md#reading-a-canonical-checkout-refusal).
