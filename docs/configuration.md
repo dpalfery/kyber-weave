@@ -251,6 +251,9 @@ stop-on-tool-failure: false
   between `STATUS: TOOL_FAILURE` and a `warning:` line; the conductor and `bug-crusher` instructions
   route the exit code rather than interpreting it. `kyber-weave run start` reads it for the index of
   the tree it places the branch in.
+- **What stops a run.** Only machine evidence: a non-zero `doctor --ensure` exit, or the literal line
+  `STATUS: TOOL_FAILURE` in a tool response or worker report. A worker's note that it fell back to direct
+  reads is a warning, not a failure.
 - **What it never covers.** A read-only run is never stopped by it. A repository with no governed
   docs skips the check. `doctor --check` ignores it, because a caller that asked for a verdict gets
   one. And a missing `codegraph` binary is exit `3` under either value: installing it is the user's

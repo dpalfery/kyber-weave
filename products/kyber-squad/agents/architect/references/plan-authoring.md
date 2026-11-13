@@ -64,7 +64,7 @@ directory named by **<plan-index>**, returns its path, and the file is committed
 once.
 
 It carries a schema version, the plan's path, the execution digest, and one entry per task: id,
-role, dependencies, file scope, `session` group and the full prompt. The execution digest covers the
+role, dependencies, file scope, `session` group and the full prompt. The command writes all of it. The execution digest covers the
 parsed tasks, file scopes, dependencies, skills, test rows and mode, so flipping a task's status or
 editing a decisions row leaves it valid while editing a task makes it stale.
 
@@ -74,14 +74,13 @@ is written.
 
 Finalization runs in this order:
 
-1. Make every plan edit first: the approval rows, the bold body status line, the frontmatter status and the index row.
-2. Run `kyber-weave arbiter plan <plan file> -f json` in the checkout that holds the plan, and take `metrics.execution-digest` from its one JSON document only when the command exits 0 and reports no `KW-ARB-PARSE-001` and no `KW-ARB-PLAN-001` finding, since a plan with no tasks has no digest either. A task without a Files line is reported as `KW-ARB-PARSE-002` and does not withhold the digest. Otherwise fix the plan and re-run this step.
-3. Write the task file at its final path with the edit tools, with that value as `execution-digest`, in place. Never write it through a sibling or temporary file such as a `.new` or `.tmp` copy.
-4. Run both documentation checks. Any `KW-DOC-TASKS-*` finding is fixed, and the order is repeated from step 2.
+1. Make every plan edit first: the approval rows, the bold body status line, the frontmatter status (`current`) and the index row.
+2. Run `kyber-weave docs tasks <plan file> --write` in the checkout that holds the plan. It derives the whole file from the plan: file scopes, dependencies, skills, the execution digest, and each prompt from the task's own text plus its command and acceptance criteria. It writes nothing and names the task and the line to add when a task lacks a command (`Command: \`dotnet test --filter ...\``), acceptance criteria (`Acceptance criteria: ...`) or a skill (`Required skills: \`csharp-dev\``), or when a `Depends on` token names no task. Add the line to the plan task and run it again. A task may also carry `Session: <group>` (default: the task id) and `Role: <agent>` (default: its first required skill).
+3. Run both documentation checks. Any `KW-DOC-TASKS-*` finding is fixed by changing the plan and repeating step 2, never by editing the file.
 
-Never compute the digest by hand or with a script. An edit to a task, a test contract row, an out-of-scope path or the development mode after step 2 means repeating step 2; a status or Decisions edit does not.
+Never write, edit or compute the task file or its digest by hand, with a script, or through a sibling such as a `.new` or `.tmp` copy. An edit to a task, a test contract row, an out-of-scope path or the development mode after step 2 means repeating step 2; a status or Decisions edit does not. `kyber-weave docs tasks <plan file> --check` exits 1 and says what differs without writing.
 
-An architect with no shell cannot run step 2. It returns `STATUS: BLOCKED` naming `task-file digest: run kyber-weave arbiter plan <plan file> -f json in <checkout>`, and continues when it is re-invoked with `PLAN_DIGEST: <hex>`.
+An architect with no shell cannot run step 2. It returns `STATUS: BLOCKED` naming `task file: run kyber-weave docs tasks <plan file> --write in <checkout>`, and continues when it is re-invoked.
 
 ## Decisions
 

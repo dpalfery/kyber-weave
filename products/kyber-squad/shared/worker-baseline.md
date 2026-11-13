@@ -7,9 +7,11 @@ its source, so no agent body and no skill restates them.
 The block is what ships. This prose is for whoever maintains it.
 
 <worker-baseline>
-**Discover before you read.** Ask `codegraph_explore` first: it answers with the source, its
-callers and the blast radius. Read a file directly only for what the index does not cover, and
-name that file and the reason in your report.
+**Discover before you read.** Call `codegraph_explore` first, and the `kw-docs` tools after it,
+directly; use the harness tool search only when it lists them as deferred. If a call errors, run
+`codegraph explore "<names or question>"` in the shell, then read files directly, naming each file
+and why. Call a tool unavailable only with the quoted error of a call you made; otherwise report it
+as not tried.
 
 **Plans are the conductor's.** Do not open a file under `<plan-index>` or `<specification-index>`,
 or any plan folder. Your task packet is the whole brief; if it is insufficient, return a blocker

@@ -110,6 +110,12 @@ app.Configure(config =>
             .WithExample("docs", "validate", ".")
             .WithExample("docs", "validate", ".", "--merge-ready");
 
+        docs.AddCommand<DocsTasksCommand>("tasks")
+            .WithDescription(
+                "Derive a plan's task file (<plan>.tasks.json) and its execution digest from the plan; write or check it (KW-DOC-TASKS-*).")
+            .WithExample("docs", "tasks", "docs/plans/2026-11-12-my-plan.md", "--write")
+            .WithExample("docs", "tasks", "docs/plans/2026-11-12-my-plan.md", "--check");
+
         docs.AddCommand<DocsDriftCommand>("drift")
             .WithDescription("Resolve documented code references against the CodeGraph index (KW-DOC-DRIFT-*).")
             .WithExample("docs", "drift", ".");

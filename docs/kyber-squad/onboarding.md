@@ -1339,9 +1339,9 @@ of `architect` with the gate id, not an edit by the orchestrating session.
 
 ### Inlined task packets (zero plan context hunting)
 
-Conductor task packets are self-contained, and the conductor no longer writes them. `architect` saves
-one prompt per task in the plan's tracked task file at finalization — `docs/plans/<plan>.tasks.json`
-beside a plan — and `product-owner` writes a specification's to `<spec-folder>/tasks.json`, committed with its artifact, so
+Conductor task packets are self-contained, and the conductor no longer writes them. `kyber-weave docs tasks`
+derives one prompt per task from the plan, at finalization, into its tracked task file — `docs/plans/<plan>.tasks.json`
+beside a plan, `<spec-folder>/tasks.json` beside a specification — committed with its artifact, so
 a push carries it to whichever machine resumes the run
 ([ADR 0063](../adr/0063-the-task-file-is-tracked-and-the-plan-stays-authoritative.md)). At dispatch
 the conductor validates that file, **pastes each prompt unchanged**, and fills exactly two slots:

@@ -619,7 +619,7 @@ public sealed class PlanTaskFileValidatorTests
         ReportedFindings run = Validate(fixture);
 
         AssertReports(run, StaleDigest);
-        Assert.Contains("kyber-weave arbiter plan", run.Output, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave docs tasks", run.Output, StringComparison.Ordinal);
         Assert.Contains(PlanTaskFileProbe.PlanPath, run.Output, StringComparison.Ordinal);
     }
 
@@ -657,7 +657,7 @@ public sealed class PlanTaskFileValidatorTests
         ReportedFindings run = Validate(fixture);
 
         AssertReports(run, StaleDigest);
-        Assert.Contains("kyber-weave arbiter plan", run.Output, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave docs tasks", run.Output, StringComparison.Ordinal);
         Assert.Contains(SpecTaskFileProbe.TasksPath, run.Output, StringComparison.Ordinal);
     }
 
