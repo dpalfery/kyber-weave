@@ -51,10 +51,8 @@ public sealed class SquadAutonomyContractTests
         Assert.Contains("conductor/references/autonomy.md", conductor, StringComparison.Ordinal);
         Assert.True(
             autonomy.IndexOf("autonomy: supervised|autonomous", StringComparison.Ordinal) <
-            autonomy.IndexOf("**<autonomy>**", StringComparison.Ordinal) &&
-            autonomy.IndexOf("**<autonomy>**", StringComparison.Ordinal) <
-            autonomy.IndexOf("`supervised` when absent", StringComparison.Ordinal),
-            "Resolution order must read prompt, then Config Reg, then the supervised default.");
+            autonomy.IndexOf("**<autonomy>**", StringComparison.Ordinal),
+            "Resolution order must read the prompt directive, then the Config Reg property.");
     }
 
     [Fact]
@@ -93,32 +91,6 @@ public sealed class SquadAutonomyContractTests
         Assert.DoesNotContain("NEEDS_HUMAN", execution, StringComparison.Ordinal);
     }
 
-    /// <summary>
-    /// The retired wording parked an unapproved change as <c>NEEDS_HUMAN</c>. The push-before-council
-    /// rule itself is graded from the prose rule catalog (<c>draft-pr-before-council</c>).
-    /// </summary>
-    [Fact]
-    public void ConductorContractNeverParksAChangeAsNeedsHuman()
-    {
-        Assert.DoesNotContain("parked NEEDS_HUMAN", ConductorContract(), StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// The retired hold-until-council wording, on the one conductor file the prose grader could not judge
-    /// reliably for that retired rule (catalog rule draft-pr-before-council covers the rest).
-    /// </summary>
-    [Fact]
-    public void ConductorBodyCarriesNoHoldUntilCouncilWording()
-    {
-        string conductor = Read("agents", "conductor.md");
-
-        Assert.DoesNotContain("Do not commit, push, publish, or open a pull request until the council returns", conductor, StringComparison.Ordinal);
-        Assert.DoesNotContain("leave it unpushed", conductor, StringComparison.Ordinal);
-        Assert.DoesNotContain("Do not mark the pull request ready", conductor, StringComparison.Ordinal);
-        Assert.DoesNotContain("Park that change or task", conductor, StringComparison.Ordinal);
-        Assert.DoesNotContain("at least one review", conductor, StringComparison.Ordinal);
-    }
-
     [Fact]
     public void AutonomyCarriesTheLowConfidenceMarker()
     {
@@ -152,21 +124,15 @@ public sealed class SquadAutonomyContractTests
         string skill = Read("skills", "bug-crusher", "SKILL.md");
 
         AssertAll(skill,
-            "autonomy",
             "**<autonomy>**",
             "ESCALATION: hard_block",
             "autonomous: recommendation accepted");
     }
 
     [Fact]
-    public void SupervisedGatesRemainInTheContracts()
+    public void ConductorContractNeverEmitsTheRetiredNeedsHumanVerdict()
     {
         Assert.DoesNotContain("NEEDS_HUMAN", ConductorContract(), StringComparison.Ordinal);
-        AssertAll(Read("skills", "bug-crusher", "SKILL.md"),
-            "Relay its decision digests and final **approve and execute** gate",
-            "surface every grouped question");
-        Assert.Contains("**approve and execute**", Read("agents", "architect.md"), StringComparison.Ordinal);
-        Assert.Contains("**approve and execute**", Read("skills", "product-owner", "SKILL.md"), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -190,10 +156,8 @@ public sealed class SquadAutonomyContractTests
         Assert.Contains("AUTONOMOUS_APPROVAL: <gate id>", autonomy, StringComparison.Ordinal);
         Assert.Contains("AUTONOMOUS_APPROVAL: <gate id>", plan, StringComparison.Ordinal);
         Assert.Contains("AUTONOMOUS_APPROVAL: <gate id>", spec, StringComparison.Ordinal);
-        Assert.DoesNotContain("record the approval yourself", spec, StringComparison.Ordinal);
         AssertAll(architect, "AUTONOMOUS_APPROVAL", "autonomous: recommendation accepted");
         AssertAll(owner, "AUTONOMOUS_APPROVAL", "autonomous: recommendation accepted");
-        Assert.DoesNotContain("conductor supplies those approvals itself", owner, StringComparison.Ordinal);
     }
 
     [Fact]

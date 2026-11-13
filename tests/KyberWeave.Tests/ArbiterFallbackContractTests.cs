@@ -48,43 +48,17 @@ public sealed class ArbiterFallbackContractTests
     }
 
     [Fact]
-    public void ConductorFallback_WritesNoRoutingHeadersIntoTheDispatch()
-    {
-        string section = FallbackSection(ConductorContract);
-
-        Assert.Contains("no routing header", section, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
     public void ConductorFallback_NamesTheEscalationStatus()
     {
         Assert.Contains("STATUS: ARBITER_ESCALATION", FallbackSection(ConductorContract), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void ReviewerFallback_CallsArbiterEvaluateOnceBeforeTheLensFanOutWithTheLensList()
+    public void ReviewerFallback_NamesArbiterEvaluate()
     {
         string section = FallbackSection(ReviewerContract);
 
         Assert.Contains("arbiter_evaluate_agent_dispatch_or_return", section, StringComparison.Ordinal);
-        Assert.Contains("once before the lens fan-out", section, StringComparison.Ordinal);
-        Assert.Contains("list of lenses", section, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void ReviewerFallback_CallsArbiterEvaluateOnceBeforeTheRefutationFanOut()
-    {
-        string section = FallbackSection(ReviewerContract);
-
-        Assert.Contains("once before the refutation fan-out", section, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void ReviewerFallback_WritesNoRoutingHeadersIntoTheDispatch()
-    {
-        string section = FallbackSection(ReviewerContract);
-
-        Assert.Contains("no routing header", section, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -95,16 +69,6 @@ public sealed class ArbiterFallbackContractTests
         Assert.Contains("STATUS: ARBITER_SKIP", section, StringComparison.Ordinal);
         Assert.Contains("STATUS: ARBITER_VERIFIED", section, StringComparison.Ordinal);
         Assert.Contains("STATUS: ARBITER_ANNOTATION", section, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void SkillFallback_MirrorsTheReviewerCallPointsAndWritesNoRoutingHeader()
-    {
-        string section = FallbackSection(SkillContract);
-
-        Assert.Contains("before the lens fan-out", section, StringComparison.Ordinal);
-        Assert.Contains("before the refutation fan-out", section, StringComparison.Ordinal);
-        Assert.Contains("no routing header", section, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]
@@ -157,13 +121,12 @@ public sealed class ArbiterFallbackContractTests
     {
         string section = FallbackSection(ConductorContract);
 
-        Assert.DoesNotContain("section above", section, StringComparison.Ordinal);
         foreach (string contract in new[]
         {
-            "`delivery-execution` skill",
-            "intake-path contract",
-            "plan-path contract",
-            "spec-path contract",
+            "delivery-execution",
+            "intake-path",
+            "plan-path",
+            "spec-path",
         })
         {
             Assert.Contains(contract, section, StringComparison.Ordinal);

@@ -100,20 +100,16 @@ public sealed class KyberDocsSkillSetTests
     }
 
     /// <summary>
-    /// The onboarding-and-assessment skill names the per-plan/spec report states the owner
-    /// triages (<c>harvested</c>, <c>partial</c>, <c>not harvested</c>) and the <c>docs-dev</c>
-    /// role that remediates. The owner-started assessment mode itself is graded from the prose
-    /// rule catalog (<c>onboarding-assessment-mode</c>).
+    /// The onboarding-and-assessment skill names the <c>docs-dev</c> role that remediates. The
+    /// report states and the owner-started assessment mode are graded from the prose rule catalog
+    /// (<c>onboarding-assessment-mode</c>).
     /// </summary>
     [Fact]
-    public void OnboardingSkillNamesTheAssessmentReportStatesAndRemediator()
+    public void OnboardingSkillNamesTheRemediator()
     {
         string skill = File.ReadAllText(
             Path.Combine(ApmSkillsRoot, "kyber-docs-onboarding-and-assessment", "SKILL.md"));
 
-        Assert.Contains("harvested", skill, StringComparison.Ordinal);
-        Assert.Contains("partial", skill, StringComparison.Ordinal);
-        Assert.Contains("not harvested", skill, StringComparison.Ordinal);
         Assert.Contains("docs-dev", skill, StringComparison.Ordinal);
     }
 

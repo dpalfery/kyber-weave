@@ -70,15 +70,12 @@ public sealed class SquadRustGoSpecialistTests
     public void RustTriggersSplitNonTauriRustFromSrcTauri()
     {
         string rust = LoadAgent("rust-dev").Description;
-        Assert.Contains(".rs file", rust, StringComparison.Ordinal);
         Assert.Contains("Cargo.toml", rust, StringComparison.Ordinal);
         Assert.Contains("build.rs", rust, StringComparison.Ordinal);
         Assert.Contains("(tauri-dev)", rust, StringComparison.Ordinal);
         Assert.Contains("(test-dev)", rust, StringComparison.Ordinal);
 
         string tauri = LoadAgent("tauri-dev").Description;
-        Assert.Contains("Use when the change is under src-tauri", tauri, StringComparison.Ordinal);
-        Assert.Contains("Do not use for Rust outside a Tauri app", tauri, StringComparison.Ordinal);
         Assert.Contains("(rust-dev)", tauri, StringComparison.Ordinal);
     }
 
@@ -87,7 +84,6 @@ public sealed class SquadRustGoSpecialistTests
     {
         string go = LoadAgent("go-dev").Description;
 
-        Assert.Contains(".go file", go, StringComparison.Ordinal);
         Assert.Contains("go.mod", go, StringComparison.Ordinal);
         Assert.Contains("go.sum", go, StringComparison.Ordinal);
         Assert.Contains("(test-dev)", go, StringComparison.Ordinal);

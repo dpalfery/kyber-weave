@@ -32,14 +32,6 @@ public sealed class SquadAutonomyRemediationTests
         return Read("skills", "code-review", "SKILL.md");
     }
 
-    private static void AssertAll(string text, params string[] phrases)
-    {
-        foreach (string phrase in phrases)
-        {
-            Assert.Contains(phrase, text, StringComparison.Ordinal);
-        }
-    }
-
     /// <summary>
     /// The execution contract names the Minor/Info severity band; the rule that it never starts
     /// another loop cycle is graded from the catalog (<c>minor-findings-never-loop</c>).
@@ -59,9 +51,7 @@ public sealed class SquadAutonomyRemediationTests
     {
         string execution = ExecutionAndReview();
 
-        AssertAll(execution,
-            "blocking-gate",
-            "bypass");
+        Assert.Contains("blocking-gate", execution, StringComparison.Ordinal);
         Assert.DoesNotContain("KW-REVIEW-008", execution, StringComparison.Ordinal);
         Assert.DoesNotContain("KW-REVIEW-009", execution, StringComparison.Ordinal);
     }
@@ -72,9 +62,6 @@ public sealed class SquadAutonomyRemediationTests
     [Fact]
     public void CodeReviewSkillKeepsTheVerdictTable()
     {
-        AssertAll(CodeReviewSkill(),
-            "Rule",
-            "Verdict",
-            "major-count-blocks");
+        Assert.Contains("major-count-blocks", CodeReviewSkill(), StringComparison.Ordinal);
     }
 }

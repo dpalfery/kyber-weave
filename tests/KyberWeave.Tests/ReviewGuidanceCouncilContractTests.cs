@@ -171,24 +171,22 @@ public sealed class ReviewGuidanceCouncilContractTests
         AssertClosingLinesFollow(
             text,
             "agents/review-lens.md",
-            "NO FINDINGS: <one sentence",
+            "NO FINDINGS:",
             "Discovery: codegraph N, docs N, direct reads N",
             "REVIEW.md sections checked: [");
     }
 
     /// <summary>
-    /// Prevents a findings-form lens output from omitting the attestation: the attestation form must
-    /// appear after the findings instruction. That it is the last line is graded from the prose rule catalog.
+    /// Prevents a findings-form lens output from omitting the attestation. That it is the last line is
+    /// graded from the prose rule catalog.
     /// </summary>
     [Fact]
     public void ReviewLensFindingsFormCarriesTheAttestationLine()
     {
         string text = ReadProduct("agents/review-lens.md");
 
-        int index = text.IndexOf("Return the YAML findings list", StringComparison.Ordinal);
-        Assert.True(index >= 0, "'agents/review-lens.md' must keep its findings-form output instruction.");
         Assert.True(
-            text[index..].Contains("REVIEW.md sections checked: [", StringComparison.Ordinal),
+            text.Contains("REVIEW.md sections checked: [<rule ids", StringComparison.Ordinal),
             "'agents/review-lens.md' findings form must carry the 'REVIEW.md sections checked: [' attestation line.");
     }
 
@@ -205,22 +203,20 @@ public sealed class ReviewGuidanceCouncilContractTests
         AssertClosingLinesFollow(
             text,
             "agents/review-triage.md",
-            "NO FINDINGS: <what artifact",
+            "NO FINDINGS:",
             "Discovery: codegraph N, docs N, direct reads N",
             "REVIEW.md sections checked: [Ground rules]");
     }
 
     /// <summary>
-    /// Prevents the per-finding <c>guidance:</c> field from losing its worked example. The example
-    /// shows the rule-id form the adjudicator and refuter read, so a finding can be checked against
-    /// the exact section it names.
+    /// Prevents the per-finding <c>guidance:</c> field from losing its template slot.
     /// </summary>
     [Fact]
-    public void ReviewLensGuidanceFieldKeepsItsRuleIdExample()
+    public void ReviewLensGuidanceFieldKeepsItsTemplateSlot()
     {
         string text = ReadProduct("agents/review-lens.md");
 
-        AssertContainsAll(text, "agents/review-lens.md", "guidance: <optional", "e.g. [R8, §1]");
+        AssertContainsAll(text, "agents/review-lens.md", "guidance: <optional");
     }
 
     /// <summary>
@@ -272,14 +268,6 @@ public sealed class ReviewGuidanceCouncilContractTests
         string lensPath = Path.Combine(LensesRoot, "test-infrastructure.md");
         Assert.True(File.Exists(lensPath), $"Council lens '{lensPath}' is missing.");
 
-        string lens = File.ReadAllText(lensPath);
-        foreach (string token in new[] { "Task", "Console.Error", "regex", "collapse", "parallel" })
-        {
-            Assert.True(
-                lens.Contains(token, StringComparison.OrdinalIgnoreCase),
-                $"'test-infrastructure.md' must cover '{token}'.");
-        }
-
         string catalogue = File.ReadAllText(Path.Combine(ProductRoot, "skills", "code-review", "SKILL.md"));
         Assert.True(
             catalogue.Contains("references/lenses/test-infrastructure.md", StringComparison.Ordinal),
@@ -304,14 +292,6 @@ public sealed class ReviewGuidanceCouncilContractTests
     {
         string lensPath = Path.Combine(LensesRoot, "documentation-accuracy.md");
         Assert.True(File.Exists(lensPath), $"Council lens '{lensPath}' is missing.");
-
-        string lens = File.ReadAllText(lensPath);
-        foreach (string token in new[] { "count", "enumeration", "absolute", "reverse pass", "archived" })
-        {
-            Assert.True(
-                lens.Contains(token, StringComparison.OrdinalIgnoreCase),
-                $"'documentation-accuracy.md' must cover '{token}'.");
-        }
 
         string catalogue = File.ReadAllText(Path.Combine(ProductRoot, "skills", "code-review", "SKILL.md"));
         Assert.True(

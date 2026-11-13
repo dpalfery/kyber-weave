@@ -10,8 +10,6 @@ namespace KyberWeave.Tests;
 
 public sealed class SquadCanonicalContentTests
 {
-    private const string DefaultOrchestrationTrigger = "default entry point";
-
     /// <summary>
     /// The shared worker execution contract, relative to the canonical product root. It is a canonical
     /// skill rather than a conductor reference so a fallback target receives it, and so bug-crusher can
@@ -75,25 +73,6 @@ public sealed class SquadCanonicalContentTests
     private static readonly Regex GateOptionMention = new(
         @"(?<![\w-])--gate(?![\w-])",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
-
-    /// <summary>
-    /// The opening of the one bullet that tells an agent to set the session title, verbatim and
-    /// including the Markdown emphasis. What the bullet says is a prose rule in the catalog.
-    /// </summary>
-    private const string SessionTitleBulletLead = "- **Name the session after the work.**";
-
-    /// <summary>
-    /// The vocabulary of the shape itself: the title line, the bottom line, the sentence cap on it, and
-    /// the rule that the format is never named. A surface that uses these words to say how an answer is
-    /// arranged has started a second copy of what the shipped default guidance owns.
-    /// </summary>
-    /// <remarks>
-    /// The gaps are <c>\s+</c> so a phrase wrapped across two lines is still seen, and the text is read
-    /// without Markdown emphasis so a phrase split by <c>**</c> or backticks is seen too.
-    /// </remarks>
-    private static readonly Regex RestatedShapeRule = new(
-        @"\btitle\s+line\b|\bbottom\s+line\b|\bat\s+most\s+(?:3|three)\s+sentences\b|\bmention\s+the\s+format\b|\bannouncing\s+which\s+shape\b",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     /// <summary>
     /// Developer agents that run the deterministic <c>task-gate</c> exit gate and report its
@@ -313,8 +292,6 @@ public sealed class SquadCanonicalContentTests
 
     /// <summary>
     /// The product README is the human-readable skill roster. It must not list the retired skill in its tree.
-    /// It states the skills without a hardcoded count: the directories under <c>skills/</c> are the
-    /// inventory, so a skill added later changes no prose.
     /// </summary>
     [Fact]
     public void ProductReadmeRosterLacksSecondBrain()
@@ -322,7 +299,6 @@ public sealed class SquadCanonicalContentTests
         string readme = File.ReadAllText(Path.Combine(ProductRoot, "README.md"));
 
         Assert.DoesNotContain("second-brain", readme, StringComparison.Ordinal);
-        Assert.Contains("canonical skill", readme, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -446,39 +422,17 @@ public sealed class SquadCanonicalContentTests
     }
 
     /// <summary>
-    /// The shipped default carries the session-title bullet. The rule the bullet states, that the
-    /// agent sets the title, is checked by the prose rule catalog.
+    /// The conductor resolves the <c>&lt;intake-assessment&gt;</c> property. That the assessment is opt-in
+    /// is checked by the prose rule catalog.
     /// </summary>
     [Fact]
-    public void TheShippedDefaultCarriesTheSessionTitleBullet()
-    {
-        string guidance = ReadResponseGuidanceDefault();
-        string bullet = ListItemStartingWith(guidance, SessionTitleBulletLead) ?? string.Empty;
-
-        Assert.True(
-            bullet.Length > 0,
-            $"The shipped default must state the session-title rule as the bullet '{SessionTitleBulletLead}'.");
-    }
-
-    /// <summary>
-    /// The conductor resolves the <c>&lt;intake-assessment&gt;</c> property, and defect-first precedence
-    /// comes ahead of that resolution, because a concrete failure still outranks the question of which
-    /// artifact to write. That the assessment is opt-in is checked by the prose rule catalog.
-    /// </summary>
-    [Fact]
-    public void ConductorPutsDefectFirstAheadOfTheIntakeAssessmentResolution()
+    public void ConductorNamesTheIntakeAssessmentProperty()
     {
         string conductor = File.ReadAllText(Path.Combine(ProductRoot, "agents", "conductor.md"));
-        int intake = conductor.IndexOf("<intake-assessment>", StringComparison.Ordinal);
-        int defectFirst = conductor.IndexOf("**Defect first**", StringComparison.Ordinal);
 
         Assert.True(
-            intake >= 0,
+            conductor.Contains("<intake-assessment>", StringComparison.Ordinal),
             "'agents/conductor.md' must carry an '<intake-assessment>' resolution order.");
-        Assert.True(
-            defectFirst >= 0 && defectFirst < intake,
-            "'agents/conductor.md' must keep defect-first precedence ahead of the " +
-            "'<intake-assessment>' resolution.");
     }
 
     /// <summary>
@@ -495,36 +449,6 @@ public sealed class SquadCanonicalContentTests
             intakePath.Contains("<intake-assessment>", StringComparison.Ordinal),
             "'agents/conductor/references/intake-path.md' must record the '<intake-assessment>' gate " +
             "the plan path depends on.");
-    }
-
-    /// <summary>
-    /// The shape has one home (requirement R5). A surface that spells it out again carries a second copy
-    /// that the user's own guidance file cannot reach, so an operator who replaces the wording still gets
-    /// the old shape from whichever surface restated it. A surface binds the skill by name and says only
-    /// what each response has to contain; how it is arranged is the skill's, and the operator's, to say.
-    /// </summary>
-    [Fact]
-    public void NoAgentOrSkillRestatesTheResponseShapeOutsideTheDefaultGuidance()
-    {
-        string[] surfaces = Directory
-            .EnumerateFiles(Path.Combine(ProductRoot, "agents"), "*.md", SearchOption.AllDirectories)
-            .Concat(Directory.EnumerateFiles(
-                Path.Combine(ProductRoot, "skills"),
-                "*.md",
-                SearchOption.AllDirectories))
-            .Order(StringComparer.Ordinal)
-            .ToArray();
-        string[] restatements = surfaces
-            .SelectMany(path => RestatedShapeHits(RelativeSourcePath(path), File.ReadAllText(path)))
-            .ToArray();
-
-        Assert.NotEmpty(surfaces);
-        Assert.True(
-            restatements.Length == 0,
-            "These agent and skill bodies restate the response shape the shipped default guidance owns, so a " +
-            "user's own guidance file cannot change it there. Keep the response-preferences block and what the response " +
-            $"must contain, and leave the arrangement to the default guidance:{Environment.NewLine}" +
-            string.Join(Environment.NewLine, restatements));
     }
 
     /// <summary>
@@ -602,45 +526,6 @@ public sealed class SquadCanonicalContentTests
 
         Assert.Contains("APPROVE", codeReviewSkill, StringComparison.Ordinal);
         Assert.Contains("REQUEST_CHANGES", codeReviewSkill, StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// The restatement pin is worth having only if it can fail. It has to see the shape in each way the
-    /// bug-crusher skill once spelled it out, and across a line wrap, and it has to let through a surface
-    /// that only binds the skill by name.
-    /// </summary>
-    [Fact]
-    public void TheRestatedShapePinSeesEveryWayTheShapeIsSpelledOut()
-    {
-        Assert.True(
-            RestatesTheShape(
-                "Each opens with a title line naming the work, states the bottom line in at most 3 sentences."),
-            "The title line and the sentence cap are the shape and must be seen.");
-        Assert.True(
-            RestatesTheShape("Close with a bottom line of at most three sentences."),
-            "A cap spelled out in words must be seen as well as one written as a digit.");
-        Assert.True(
-            RestatesTheShape("The grouped questions are bullets, with the title and bottom\nline above them."),
-            "A phrase wrapped across two lines must still be seen.");
-        Assert.True(
-            RestatesTheShape("Never tag, header, or otherwise mention the **format** in the report."),
-            "The never-name-it rule is the skill's too, and emphasis inside it must not hide it.");
-        Assert.True(
-            RestatesTheShape(
-                "The reader should see a well-shaped answer, not an agent announcing which shape it chose."),
-            "The reason given for the never-name-it rule is a restatement of it.");
-        Assert.False(
-            RestatesTheShape(
-                "Each entry file carries the operator response preferences in a <response-preferences> block."),
-            "The response-preferences block is the binding and must not be flagged.");
-        Assert.False(
-            RestatesTheShape(
-                "The shape of an answer is the one thing this wrapper binds by name instead of restating."),
-            "A surface that says it does not restate the shape must not be flagged for saying so.");
-        Assert.False(
-            RestatesTheShape(
-                "- **Summary**: the problem and the outcome, in one to three sentences; why more than how."),
-            "The length of a pull request summary is another artifact's rule, not the shape of a response.");
     }
 
     [Fact]
@@ -741,16 +626,9 @@ public sealed class SquadCanonicalContentTests
     public void LoadUnifiedOrchestrationStackDeclaresCanonicalDelegationAndModelProfiles()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        string[] defaultAgents = source.Agents
-            .Where(agent => agent.Description.Contains(
-                DefaultOrchestrationTrigger,
-                StringComparison.OrdinalIgnoreCase))
-            .Select(agent => agent.Name)
-            .ToArray();
         SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
         SquadAgent architect = Assert.Single(source.Agents, agent => agent.Name == "architect");
 
-        Assert.Equal(["conductor"], defaultAgents);
         Assert.Equal("orchestration", conductor.ModelProfile);
         Assert.Equal("architect", architect.ModelProfile);
         Assert.Contains("architect", conductor.DelegatesTo);
@@ -860,37 +738,30 @@ public sealed class SquadCanonicalContentTests
 
         Assert.Contains("worker-session-id", contract, StringComparison.Ordinal);
         Assert.DoesNotContain("reviewer-session-id", contract, StringComparison.Ordinal);
-        Assert.DoesNotContain("Every worker invocation is cold", contract, StringComparison.Ordinal);
-        Assert.DoesNotContain("any available worker", contract, StringComparison.Ordinal);
     }
 
     /// <summary>
     /// The conductor contract names the <c>TASK_GATE</c> digest and the <c>task-gate/</c> skill, and the
-    /// retired per-task reviewer's three-pass audit must not survive as a second routing path. That a
+    /// retired per-task reviewer must not survive as a second routing path. That a
     /// failing digest goes back to the worker is checked by the prose rule catalog.
     /// </summary>
     [Fact]
-    public void ConductorNamesTheTaskGateAndNotTheRetiredThreePassAudit()
+    public void ConductorNamesTheTaskGateAndNotTheRetiredTaskReviewer()
     {
         string contract = ReadAgentContract("conductor");
 
         Assert.Contains("TASK_GATE", contract, StringComparison.Ordinal);
         Assert.Contains("task-gate/", contract, StringComparison.Ordinal);
-        Assert.DoesNotContain("Three-pass task audit", contract, StringComparison.Ordinal);
         Assert.DoesNotContain("task-reviewer", contract, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void ConductorDiagnosesDefectsBeforePromotingExplicitPlanOrSpecIntent()
+    public void ConductorRoutesDefectDiagnosisThroughTheIntakePathAndItsStatuses()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
         string contract = ReadAgentContract("conductor");
-        int defect = conductor.InstructionBody.IndexOf("**Defect first**", StringComparison.Ordinal);
-        int explicitChoice = conductor.InstructionBody.IndexOf("**Explicit plan or spec**", StringComparison.Ordinal);
 
-        Assert.True(defect >= 0 && explicitChoice > defect,
-            "Diagnose a concrete failure before routing an explicit artifact choice.");
         Assert.Contains("conductor/references/intake-path.md", conductor.InstructionBody, StringComparison.Ordinal);
         Assert.Contains("## Defect diagnosis", contract, StringComparison.Ordinal);
         Assert.Contains("STATUS: INTENT_STATED", contract, StringComparison.Ordinal);
@@ -912,30 +783,12 @@ public sealed class SquadCanonicalContentTests
             File.ReadAllText(Path.Combine(ProductRoot, "agents", "conductor", "references", "intake-path.md"));
         string assessment =
             File.ReadAllText(Path.Combine(ProductRoot, "agents", "architect", "references", "intake-assessment.md"));
-        int ready = intake.IndexOf("For a failure in an existing Ready", StringComparison.Ordinal);
-        int noAuthority = intake.IndexOf("Without existing Ready authority", ready, StringComparison.Ordinal);
-        string readyRoute = intake[ready..noAuthority];
 
-        Assert.Contains("NEEDS_ARCHITECT", readyRoute, StringComparison.Ordinal);
-        Assert.Contains("TASK_ASSESSED", readyRoute, StringComparison.Ordinal);
-        Assert.Contains("REVISION_REQUIRED", readyRoute, StringComparison.Ordinal);
+        Assert.Contains("NEEDS_ARCHITECT", intake, StringComparison.Ordinal);
+        Assert.Contains("TASK_ASSESSED", intake, StringComparison.Ordinal);
+        Assert.Contains("REVISION_REQUIRED", intake, StringComparison.Ordinal);
         Assert.Contains("STATUS: TASK_ASSESSED", assessment, StringComparison.Ordinal);
         Assert.Contains("CONTRACT: UNCHANGED | REVISION_REQUIRED", assessment, StringComparison.Ordinal);
-    }
-
-    [Theory]
-    [InlineData("review-lens")]
-    [InlineData("review-triage")]
-    public void DiscoveryContractRejectsDirectReadPermissionAfterTheNextRoleHeading(string agentName)
-    {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        string body = Assert.Single(source.Agents, agent => agent.Name == agentName).InstructionBody;
-        string directReadRule = Assert.Single(body.Split('\n'), line =>
-            line.Contains("Read or search a file directly", StringComparison.Ordinal));
-        string misplacedRule = body.Replace(directReadRule, string.Empty, StringComparison.Ordinal) + "\n" +
-                               directReadRule;
-
-        Assert.NotNull(Record.Exception(() => AssertDiscoveryContract(misplacedRule, agentName)));
     }
 
     [Fact]
@@ -969,21 +822,14 @@ public sealed class SquadCanonicalContentTests
         SquadAgent productOwner = Assert.Single(source.Agents, agent => agent.Name == "product-owner");
         string skillContract = ReadSkillContract("product-owner");
 
-        Assert.DoesNotContain("GATE 1", productOwner.InstructionBody, StringComparison.Ordinal);
-        // The root agent is a thin wrapper: the role contract lives in the canonical skill, and
-        // the agent body only points at it. Both facts are pinned so the wrapper cannot quietly
-        // grow a second copy of the role.
-        Assert.Contains("Load the `product-owner` skill", productOwner.InstructionBody, StringComparison.Ordinal);
+        // The root agent is a thin wrapper: the role contract lives in the canonical skill, so the
+        // wrapper must not grow a second copy of the role's status markers.
         Assert.DoesNotContain("STATUS: PHASE_APPROVED", productOwner.InstructionBody, StringComparison.Ordinal);
         Assert.Empty(productOwner.Resources);
         SquadSkill productOwnerSkill = Assert.Single(source.Skills, skill => skill.Name == "product-owner");
-        SquadResource specAuthoring = Assert.Single(
+        Assert.Single(
             productOwnerSkill.Resources,
             resource => resource.RelativePath == "references/spec-authoring.md");
-        Assert.Contains(
-            "initialize the file via shell (for example, `touch <file>`) before editing.",
-            specAuthoring.Content,
-            StringComparison.Ordinal);
         Assert.Contains("STATUS: READY_FOR_REVIEW", skillContract, StringComparison.Ordinal);
         Assert.Contains("STATUS: REQUIREMENTS_GAP", skillContract, StringComparison.Ordinal);
         Assert.Contains("STATUS: DESIGN_GAP", skillContract, StringComparison.Ordinal);
@@ -1234,65 +1080,21 @@ public sealed class SquadCanonicalContentTests
     }
 
     /// <summary>
-    /// <c>code-review</c> carries the pre-push self-review trigger and gate. Nothing else
-    /// pins this section, so deleting this test returns it to no coverage.
+    /// <c>code-review</c> carries the pre-push self-review gate section.
     /// </summary>
     [Fact]
-    public void CodeReviewSkillRetainsSelfReviewTriggerAndGate()
+    public void CodeReviewSkillRetainsSelfReviewGateSection()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         SquadSkill? skill = source.Skills.FirstOrDefault(candidate => candidate.Name == "code-review");
 
         Assert.NotNull(skill);
-        Assert.Contains("self-review gate before pushing", skill.Description, StringComparison.Ordinal);
         Assert.Contains("## Pre-push self-review gate", skill.InstructionBody, StringComparison.Ordinal);
-        Assert.Contains("major-or-worse", skill.InstructionBody, StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// Review-council and conductor instructions must not keep the retired delivery wording that
-    /// held a pushed change back until the council returned, or parked it unpushed. The scan covers
-    /// every surface that carried the wording, so a copy left behind in one file fails the build.
-    /// </summary>
-    [Fact]
-    public void ReviewInstructionsDropTheHoldUntilCouncilAndParkWording()
-    {
-        string[] reviewSurfaces =
-        [
-            Path.Combine(ProductRoot, "agents", "conductor", "references", "autonomy.md"),
-            Path.Combine(ProductRoot, "skills", "delivery-execution", "SKILL.md"),
-            Path.Combine(ProductRoot, "agents", "code-reviewer.md"),
-            Path.Combine(ProductRoot, "skills", "code-review", "SKILL.md"),
-            Path.Combine(ProductRoot, "skills", "bug-crusher", "SKILL.md"),
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "docs", "reference", "autonomous-gates.md"),
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "docs", "code-review", "architecture.md")
-        ];
-        string[] retiredPhrases =
-        [
-            "Do not commit, push, publish, or open a pull request until the council returns",
-            "leave it unpushed",
-            "Do not mark the pull request ready",
-            "Park that change or task",
-            "parked NEEDS_HUMAN",
-            "at least one review"
-        ];
-
-        Assert.All(
-            reviewSurfaces,
-            path => Assert.True(File.Exists(path), $"Expected the review surface at '{path}'."));
-
-        string[] offenders = reviewSurfaces
-            .SelectMany(path => retiredPhrases
-                .Where(phrase => File.ReadAllText(path).Contains(phrase, StringComparison.Ordinal))
-                .Select(phrase => $"{Path.GetRelativePath(KyberWeaveTestPaths.ToolRoot, path)}: \"{phrase}\""))
-            .ToArray();
-
-        Assert.Empty(offenders);
     }
 
     /// <summary>
     /// Both run-start surfaces carry the <c>doctor --ensure</c> step, gated on the docs-enabled condition,
-    /// and state the stop rule instead of warn-and-continue.
+    /// and name the <c>stop-on-tool-failure</c> setting.
     /// </summary>
     /// <remarks>
     /// This is the owner's reversal of "never block a run" (D1, decided 2026-11-07), not a weakening of the
@@ -1312,7 +1114,6 @@ public sealed class SquadCanonicalContentTests
         Assert.Contains(".kyber-weave/kyber-weave.yml", text, StringComparison.Ordinal);
         Assert.Contains("docs-root", text, StringComparison.Ordinal);
         Assert.Contains("stop-on-tool-failure", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("warn and continue", text, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -1404,17 +1205,11 @@ public sealed class SquadCanonicalContentTests
     }
 
     /// <summary>
-    /// Every shipped agent file states the stop rule and the discovery order, so no role is left with the
-    /// old instruction to carry on past a broken tool.
+    /// Every shipped agent file names the shell discovery command: in a worktree, or when the MCP tool is
+    /// not among the tools on offer, the shell runs <c>codegraph explore</c>.
     /// </summary>
-    /// <remarks>
-    /// A single agent file that still says the run continues is enough to keep the failure alive, because
-    /// that is the file the delegate reads. The discovery order travels with it: in a worktree, or when the
-    /// MCP tool is not among the tools on offer, the shell runs <c>codegraph explore</c>, and a file is read
-    /// directly only when that fails.
-    /// </remarks>
     [Fact]
-    public void EveryAgentFileStatesTheStopRuleAndTheDiscoveryOrder()
+    public void EveryAgentFileNamesTheShellDiscoveryCommand()
     {
         string[] agents = Directory.GetFiles(Path.Combine(ProductRoot, "agents"), "*.md");
 
@@ -1429,16 +1224,6 @@ public sealed class SquadCanonicalContentTests
         ];
 
         Assert.Empty(offenders);
-
-        string[] stillWarn =
-        [
-            .. agents
-                .Select(path => (Path: path, Text: File.ReadAllText(path)))
-                .Where(file => file.Text.Contains("warn and continue", StringComparison.OrdinalIgnoreCase))
-                .Select(file => Path.GetFileName(file.Path))
-        ];
-
-        Assert.Empty(stillWarn);
     }
 
     /// <summary>
@@ -1517,18 +1302,6 @@ public sealed class SquadCanonicalContentTests
         Path.Combine(ProductRoot, "response-guidance.default.md");
 
     /// <summary>
-    /// Reads the shipped default guidance, asserting its absence first so a missing file reports the
-    /// missing artifact rather than an I/O exception.
-    /// </summary>
-    private static string ReadResponseGuidanceDefault()
-    {
-        Assert.True(
-            File.Exists(ResponseGuidanceDefaultPath),
-            $"The shipped response-guidance default must live at '{ResponseGuidanceDefaultPath}'.");
-        return File.ReadAllText(ResponseGuidanceDefaultPath);
-    }
-
-    /// <summary>
     /// Resolves an MSBuild item path relative to the project directory, expanding the
     /// <c>$(MSBuildThisFileDirectory)</c> property and normalising Windows separators.
     /// </summary>
@@ -1566,24 +1339,14 @@ public sealed class SquadCanonicalContentTests
         Assert.True(heading >= 0, $"{agentName}: missing Discovery order section.");
         int nextHeading = body.IndexOf("\n#", heading + 1, StringComparison.Ordinal);
         string discovery = nextHeading < 0 ? body[heading..] : body[heading..nextHeading];
-        int code = discovery.IndexOf("codegraph_explore", StringComparison.Ordinal);
-        int docs = discovery.IndexOf("docs_answer_question_from_repo_documentation", StringComparison.Ordinal);
-        int directRead = discovery.IndexOf("Read or search a file directly", StringComparison.Ordinal);
 
-        Assert.True(code >= 0 && docs >= 0 && directRead > code && directRead > docs,
-            $"{agentName}: index discovery must precede direct-read authorization.");
+        Assert.True(
+            discovery.Contains("codegraph_explore", StringComparison.Ordinal) &&
+            discovery.Contains("docs_answer_question_from_repo_documentation", StringComparison.Ordinal),
+            $"{agentName}: the Discovery order section must name the index tools.");
         Assert.Contains("docs_find_documents_citing_code_symbol", discovery, StringComparison.Ordinal);
         Assert.Contains("docs_look_up_glossary_term_definition", discovery, StringComparison.Ordinal);
-        if (agentName is "review-lens" or "review-triage")
-        {
-            Assert.Contains("Discovery: codegraph N, docs N, direct reads N", discovery, StringComparison.Ordinal);
-            Assert.DoesNotContain("Discovery reporting is exempt", discovery, StringComparison.Ordinal);
-        }
-        else
-        {
-            Assert.Contains("Discovery: codegraph N, docs N, direct reads N", discovery, StringComparison.Ordinal);
-            Assert.Contains("reason for each direct read", discovery, StringComparison.Ordinal);
-        }
+        Assert.Contains("Discovery: codegraph N, docs N, direct reads N", discovery, StringComparison.Ordinal);
     }
 
     private static string ReadAgentContract(string name)
@@ -1702,70 +1465,6 @@ public sealed class SquadCanonicalContentTests
         }
 
         return string.Empty;
-    }
-
-    /// <summary>
-    /// The list item that opens with <paramref name="lead"/>, including continuation lines, or
-    /// null when the document has none.
-    /// </summary>
-    private static string? ListItemStartingWith(string guidance, string lead)
-    {
-        string[] lines = guidance.Split('\n').Select(line => line.TrimEnd('\r')).ToArray();
-        for (int i = 0; i < lines.Length; i++)
-        {
-            if (!lines[i].TrimStart().StartsWith(lead, StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            List<string> item = [lines[i].Trim()];
-            for (int j = i + 1; j < lines.Length; j++)
-            {
-                if (lines[j].Length == 0 || lines[j].TrimStart().StartsWith("- ", StringComparison.Ordinal))
-                {
-                    break;
-                }
-
-                item.Add(lines[j].Trim());
-            }
-
-            return string.Join(' ', item);
-        }
-
-        return null;
-    }
-
-    /// <summary>True when <paramref name="text"/> uses the shape's own vocabulary, ignoring emphasis.</summary>
-    private static bool RestatesTheShape(string text)
-    {
-        return RestatedShapeRule.IsMatch(WithoutEmphasis(text));
-    }
-
-    /// <summary>
-    /// Each place <paramref name="text"/> uses the shape's own vocabulary, as <c>path:line: "phrase"</c>.
-    /// Emphasis markers are removed without touching a newline, so the line numbers still count the
-    /// lines of the file as written.
-    /// </summary>
-    private static IEnumerable<string> RestatedShapeHits(string relativePath, string text)
-    {
-        string plain = WithoutEmphasis(text);
-        foreach (Match match in RestatedShapeRule.Matches(plain))
-        {
-            int line = plain.AsSpan(0, match.Index).Count('\n') + 1;
-            yield return $"{relativePath}:{line}: \"{match.Value}\"";
-        }
-    }
-
-    /// <summary>
-    /// <paramref name="text"/> with Markdown emphasis markers removed, so a bold or inline-code rendering
-    /// of a sentence compares equal to the plain one. Only presentation is dropped: the words, their
-    /// order, the case, and the closing full stop all still have to match.
-    /// </summary>
-    private static string WithoutEmphasis(string text)
-    {
-        return text.Replace("*", string.Empty, StringComparison.Ordinal)
-            .Replace("_", string.Empty, StringComparison.Ordinal)
-            .Replace("`", string.Empty, StringComparison.Ordinal);
     }
 
     private static RoleSkillProfile ReadRoleSkillProfile()

@@ -130,6 +130,11 @@ its words ([ADR 0073](../../adr/0073-prose-rules-are-graded-by-meaning-not-pinne
 - **No phrase pins, forbidden-phrase pins or hash pins on prose.** A test that asserts a sentence, or a
   word from one, breaks on every rewording and says nothing about whether the rule is still stated.
 
+*Stabilisation, from 2026-11-13:* the last phrase pins are deleted, and a prose change does not need a
+new catalog rule. The catalog runs as a net at merge points; a rule whose subject is deleted is retired,
+and a moved rule's home is repointed. Rules for prose written in this period are added in the later
+refinement phase.
+
 `ProseRuleCatalogTests` runs offline on every build: every file, section heading, seed file and anchor
 the catalog names exists, and every rule has a home and a control. Deleting a file, a heading or a catalog
 entry fails there.

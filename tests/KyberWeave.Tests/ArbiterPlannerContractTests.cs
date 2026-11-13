@@ -62,13 +62,11 @@ public sealed class ArbiterPlannerContractTests
     public void Architect_MarksInvestigatorDispatches()
     {
         Assert.Contains("KYBER-ARBITER: true", ArchitectContract, StringComparison.Ordinal);
-        Assert.Contains("investigator", ArchitectContract, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public void ProductOwner_MarksInvestigatorDispatches()
     {
         Assert.Contains("KYBER-ARBITER: true", ProductOwnerContract, StringComparison.Ordinal);
-        Assert.Contains("investigator", ProductOwnerContract, StringComparison.OrdinalIgnoreCase);
     }
 }

@@ -107,46 +107,6 @@ public sealed class SquadWorktreeMcpContractTests
     }
 
     /// <summary>
-    ///     The architecture document states the <c>projectPath</c> rule and its qualified fallback. The prose
-    ///     rule catalog grades this rule in the other surfaces, not in this document.
-    /// </summary>
-    [Fact]
-    public void ArchitectureDocSendsShellLessRolesToTheWorktreeIndexThroughProjectPath()
-    {
-        string content = ReadRepoFile(ArchitectureDocPath);
-
-        // Prose is hard-wrapped, so gaps may cross lines.
-        Assert.Matches(@"(?i)\bpass(?:es|ing)?\b[\s\S]{0,80}?`projectPath`[\s\S]{0,200}?\bown index\b", content);
-        Assert.Matches(@"(?i)\bdirect(?:ly| reads?)\b[\s\S]{0,60}?\bonly when\b[\s\S]{0,60}?\bcan(?:not)? answer\b", content);
-    }
-
-    /// <summary>
-    ///     No shipped role or skill tells a shell-less role to read the worktree directly instead of asking
-    ///     its index. The prose rule catalog checks the retired rule's absence in the execution contract, the
-    ///     architect and the product-owner skill; these surfaces are pinned here.
-    /// </summary>
-    [Theory]
-    [InlineData(ConductorAgentPath)]
-    [InlineData("products/kyber-squad/agents/review-lens.md")]
-    [InlineData("products/kyber-squad/agents/review-triage.md")]
-    [InlineData("products/kyber-squad/agents/azure-reader.md")]
-    [InlineData("products/kyber-squad/agents/research-agent.md")]
-    [InlineData("products/kyber-squad/agents/product-owner.md")]
-    [InlineData(ArchitectureDocPath)]
-    [InlineData(McpRunbookDocPath)]
-    [InlineData("docs/kyber-squad/onboarding.md")]
-    public void ShellLessRoleSurfacesStateNoUnqualifiedDirectRead(string relativePath)
-    {
-        string content = ReadRepoFile(relativePath);
-
-        // The old rule in any of its phrasings: a direct read that is not the qualified fallback.
-        Assert.DoesNotMatch(
-            @"(?i)\b(?:read|reads|read and search)\s+(?:it|that path|the path|the worktree\S*(?:\s+path)?|a file|files|the file|the named\s+file)\s+directly\b(?!\s+only\s+when)",
-            content);
-        Assert.DoesNotMatch(@"(?i)shell-less role reads the worktree path|Direct reads of that path\.", content);
-    }
-
-    /// <summary>
     ///     Verifies that worktree configuration helpers produce absolute paths for <c>--repo-root</c>
     ///     and <c>--path</c>.
     /// </summary>

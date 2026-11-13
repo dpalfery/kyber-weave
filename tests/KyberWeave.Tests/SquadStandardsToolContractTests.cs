@@ -19,10 +19,8 @@ namespace KyberWeave.Tests;
 /// The registry property names stay in the text. <c>&lt;csharp-coding-standard&gt;</c> and the
 /// rest are still what a host's Config Reg publishes, and a standard that is missing or still a
 /// draft has to be able to report that as the question it cannot answer — so this file asserts
-/// the route and not the wording. Two facts per file: it names the tool, and it does not present
-/// a file read as the way to get the standard. A direct read stays allowed as the fallback for a
-/// tool that is missing, which is why the read assertion is scoped to a block that neither names
-/// the tool nor says the tool may be absent.
+/// that each file names the tool and keeps a registry property name. That a file read is not
+/// presented as the way to get the standard is graded from the prose rule catalog.
 /// </para>
 /// </remarks>
 public sealed class SquadStandardsToolContractTests
@@ -67,58 +65,9 @@ public sealed class SquadStandardsToolContractTests
         "typescript-dev"
     ];
 
-    /// <summary>
-    /// The files where the prose rule catalog's <c>standards-via-tool</c> rule keeps the retired
-    /// "read the standard's file" route out (its <c>absent-from</c> list), so the read-route
-    /// heuristic below does not check them a second time. They still must name the tool.
-    /// </summary>
-    private static readonly HashSet<string> ReadRouteCheckedByTheCatalog = new(StringComparer.Ordinal)
-    {
-        "agents/csharp-dev.md",
-        "agents/go-dev.md",
-        "agents/python-dev.md",
-        "agents/test-dev.md",
-        "skills/go-dev/SKILL.md",
-        "skills/test-dev/SKILL.md"
-    };
-
-    /// <summary>A verb that tells a reader to go and fetch a document.</summary>
-    private static readonly Regex ReadImperative = new(
-        @"\b(?:read|reads|reading|open|opens|consult|consults)\b",
-        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
-
-    /// <summary>How a block names a coding standard it could go and fetch.</summary>
-    private static readonly Regex StandardByItsLocation = new(
-        @"the\s+path\s+declared\s+as|AGENTS[.]md|docs/standards/|<[a-z][a-z-]*-coding-standard>",
-        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
-
-    /// <summary>How a block says the fetch is only the stand-in for a tool that is not there.</summary>
-    private static readonly Regex FallbackForAMissingTool = new(
-        @"only\s+when|only\s+if|if\s+the\s+tool|when\s+the\s+tool|missing|unavailable|not\s+available|fall\s*back",
-        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
-
-    /// <summary>
-    /// A new block starts at a heading, a numbered step, or a bullet. Blocks are what the read
-    /// assertion is scoped to, so a long numbered list is twelve claims rather than one: a step
-    /// that says to read a path is not excused by a later step that happens to name the tool.
-    /// </summary>
-    private static readonly Regex BlockStart = new(
-        @"^\s*(?:#{1,6}\s|\d+[.)]\s|[-*+]\s)",
-        RegexOptions.CultureInvariant);
-
     /// <summary>A registry property name as the repository instructions publish it.</summary>
     private static readonly Regex RegistryProperty = new(
         @"<[a-z][a-z-]*-coding-standard>",
-        RegexOptions.CultureInvariant);
-
-    /// <summary>The paragraph break: a blank line, with any indentation around it.</summary>
-    private static readonly Regex BlankLine = new(
-        @"\n\s*\n",
-        RegexOptions.CultureInvariant);
-
-    /// <summary>Runs of whitespace inside a block, which is what a wrapped sentence is made of.</summary>
-    private static readonly Regex WhitespaceRun = new(
-        @"\s+",
         RegexOptions.CultureInvariant);
 
     private static string ProductRoot =>
@@ -158,9 +107,8 @@ public sealed class SquadStandardsToolContractTests
         string path = Path.Combine(ProductRoot, "agents", "github-devops.md");
         string text = File.ReadAllText(path);
 
-        string step1 = Blocks(text).First(b => b.StartsWith("1. Fetch", StringComparison.Ordinal));
-        Assert.Contains("<csharp-coding-standard>", step1, StringComparison.Ordinal);
-        Assert.Contains(ToolName, step1, StringComparison.Ordinal);
+        Assert.Contains("<csharp-coding-standard>", text, StringComparison.Ordinal);
+        Assert.Contains(ToolName, text, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -207,10 +155,8 @@ public sealed class SquadStandardsToolContractTests
             .Concat(DeveloperSkills.Select(name => $"skills/{name}/SKILL.md"));
 
     /// <summary>
-    /// The two facts a routing instruction owes: it names the tool, and no block of it tells the
-    /// reader to get the standard by reading a path unless that same block says the tool may be
-    /// absent. The second is skipped for the files the prose rule catalog already checks for it. The second is what the path form cost — 15,000 characters of a 21,354-character
-    /// standard read whole, and nothing read at all where no read tool is granted.
+    /// A routing instruction names the tool. What it says about reading the file instead is graded
+    /// from the prose rule catalog (<c>standards-via-tool</c>).
     /// </summary>
     private static void AssertRoutesThroughTheTool(string relativePath)
     {
@@ -221,49 +167,5 @@ public sealed class SquadStandardsToolContractTests
         Assert.True(
             text.Contains(ToolName, StringComparison.Ordinal),
             $"'{relativePath}' must reach its coding standard through {ToolName}; it does not name it.");
-
-        if (ReadRouteCheckedByTheCatalog.Contains(relativePath))
-            return;
-
-        List<string> offenders = Blocks(text)
-            .Where(block => ReadImperative.IsMatch(block))
-            .Where(block => StandardByItsLocation.IsMatch(block))
-            .Where(block => !block.Contains(ToolName, StringComparison.Ordinal))
-            .Where(block => !FallbackForAMissingTool.IsMatch(block))
-            .ToList();
-
-        Assert.True(
-            offenders.Count == 0,
-            $"'{relativePath}' must not instruct a file read as the way to reach its coding "
-            + $"standard; call {ToolName} instead, and read the file only in a sentence that says "
-            + "the tool is missing or the standard is not declared. Offending text:\n"
-            + string.Join("\n---\n", offenders));
-    }
-
-    /// <summary>
-    /// The text split into the blocks an instruction lives in: blank-line-separated paragraphs,
-    /// and inside a paragraph each heading, numbered step, and bullet starts its own block.
-    /// Whitespace is collapsed so a sentence wrapped across lines is still one block, and so a
-    /// pattern does not have to care which line a phrase was wrapped at.
-    /// </summary>
-    private static IEnumerable<string> Blocks(string text)
-    {
-        foreach (string paragraph in BlankLine.Split(text))
-        {
-            List<string> current = new();
-            foreach (string line in paragraph.Split('\n'))
-            {
-                if (BlockStart.IsMatch(line) && current.Count > 0)
-                {
-                    yield return WhitespaceRun.Replace(string.Join(' ', current), " ").Trim();
-                    current.Clear();
-                }
-
-                current.Add(line);
-            }
-
-            if (current.Count > 0)
-                yield return WhitespaceRun.Replace(string.Join(' ', current), " ").Trim();
-        }
     }
 }

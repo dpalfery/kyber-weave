@@ -30,7 +30,6 @@ public sealed class ArbiterReviewContractTests
 
         Assert.Contains("KYBER-ARBITER: true", contract, StringComparison.Ordinal);
         Assert.Contains("LENS: <lens>", contract, StringComparison.Ordinal);
-        Assert.Contains("header block", contract, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -38,10 +37,6 @@ public sealed class ArbiterReviewContractTests
     {
         Assert.Contains(
             "REFUTE: <lens>/<slug>",
-            ReviewerContract,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "after the header block",
             ReviewerContract,
             StringComparison.Ordinal);
         // The design pins the <lens>/<slug> form by example; keep one canonical example cited.
@@ -55,7 +50,6 @@ public sealed class ArbiterReviewContractTests
         string contract = ReviewerContract;
 
         Assert.Contains("azure-reader", contract, StringComparison.Ordinal);
-        Assert.Contains("carries the marker and no", contract, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -125,6 +119,5 @@ public sealed class ArbiterReviewContractTests
         string contract = LensContract;
 
         Assert.Contains("REFUTE: <lens>/<slug>", contract, StringComparison.Ordinal);
-        Assert.Contains("after the header block", contract, StringComparison.Ordinal);
     }
 }

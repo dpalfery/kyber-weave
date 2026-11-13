@@ -114,9 +114,6 @@ public sealed class RootAgentsOperationalPointerTests
             Section(ReadAgents(), "## Commands", "## Exploration order"), @"\s+", " ");
 
         Assert.False(
-            commands.Contains("Run `--full` locally", StringComparison.Ordinal),
-            "The Commands section must not tell anyone to run --full locally.");
-        Assert.False(
             commands.Contains("review gates . --out", StringComparison.Ordinal),
             "The Commands section must not hand dev agents a command that runs the test gate.");
     }

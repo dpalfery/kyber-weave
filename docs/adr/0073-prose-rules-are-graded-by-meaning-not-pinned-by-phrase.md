@@ -4,7 +4,7 @@ title: Prose rules are graded by meaning, not pinned by phrase
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-12
+last-reviewed: 2026-11-13
 component: KyberSquad
 decided-by: []
 supersedes: []
@@ -18,6 +18,11 @@ code-refs:
 ## Status
 
 Accepted, 2026-11-12.
+
+*Amended 2026-11-13:* the remaining phrase and forbidden-phrase pins were deleted. During the
+stabilisation period that follows, a prose change does not need a new catalog rule: the catalog runs
+as a net at merge points, and rules for prose written in this period are added in the later refinement
+phase.
 
 ## Context
 

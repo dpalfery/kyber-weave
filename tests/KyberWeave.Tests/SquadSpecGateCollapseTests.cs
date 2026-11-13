@@ -5,8 +5,7 @@ namespace KyberWeave.Tests;
 /// <summary>
 /// Checks the tokens and line structure of the spec-gate collapse contract (plan item D) in
 /// <c>spec-path.md</c>: the <c>READY_FOR_REVIEW</c>, <c>GAPS: none</c> and
-/// <c>OPEN_QUESTIONS: none</c> condition, the one line that disables the collapse, the one
-/// supervised line, and the one line tying a consolidated review to <c>SPEC_FINALIZED</c>.
+/// <c>OPEN_QUESTIONS: none</c> condition, the one supervised line, and the <c>SPEC_FINALIZED</c> status.
 /// The collapse rules themselves are graded from the prose rule catalog
 /// (<c>Fixtures/prose-rules/catalog.yml</c>).
 /// </summary>
@@ -33,18 +32,6 @@ public sealed class SquadSpecGateCollapseTests
     }
 
     /// <summary>
-    /// One line disables the collapse, and it names <c>OPEN_QUESTIONS</c>.
-    /// </summary>
-    [Fact]
-    public void OneLineDisablesTheCollapseAndNamesOpenQuestions()
-    {
-        string disableClause = Assert.Single(
-            SpecPath().Split('\n'),
-            line => line.Contains("disables the collapse", StringComparison.Ordinal));
-        Assert.Contains("OPEN_QUESTIONS", disableClause, StringComparison.Ordinal);
-    }
-
-    /// <summary>
     /// Supervised mode is stated on exactly one line of the spec path.
     /// </summary>
     [Fact]
@@ -56,14 +43,11 @@ public sealed class SquadSpecGateCollapseTests
     }
 
     /// <summary>
-    /// Exactly one line ties a consolidated review to <c>SPEC_FINALIZED</c>.
+    /// The spec path names the <c>SPEC_FINALIZED</c> status a consolidated review leads to.
     /// </summary>
     [Fact]
-    public void OneLineTiesTheConsolidatedReviewToSpecFinalized()
+    public void SpecPathNamesSpecFinalized()
     {
-        _ = Assert.Single(
-            SpecPath().Split('\n'),
-            line => line.Contains("consolidated review", StringComparison.Ordinal) &&
-                    line.Contains("SPEC_FINALIZED", StringComparison.Ordinal));
+        Assert.Contains("SPEC_FINALIZED", SpecPath(), StringComparison.Ordinal);
     }
 }

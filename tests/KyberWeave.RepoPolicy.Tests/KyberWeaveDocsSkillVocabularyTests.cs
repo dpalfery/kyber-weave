@@ -40,7 +40,6 @@ public sealed class KyberWeaveDocsSkillVocabularyTests
         Assert.Contains("`standards/<technology>/README.md` | `coding-standard`", retrofit, StringComparison.Ordinal);
         Assert.Contains("`todo/` | `todo`", retrofit, StringComparison.Ordinal);
         Assert.DoesNotContain("`standards/<technology>/` | `coding-standard`", retrofit, StringComparison.Ordinal);
-        Assert.DoesNotContain("is the correct fallback", retrofit, StringComparison.Ordinal);
     }
 
     [Fact]

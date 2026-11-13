@@ -95,7 +95,6 @@ public sealed class SquadTypeScriptSpecialistTests
         Assert.Contains("(github-devops)", typescript, StringComparison.Ordinal);
 
         string react = LoadAgent("react-dev").Description;
-        Assert.Contains(".tsx or .jsx file", react, StringComparison.Ordinal);
         Assert.Contains("(typescript-dev)", react, StringComparison.Ordinal);
     }
 

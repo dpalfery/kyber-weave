@@ -98,7 +98,6 @@ public sealed class PullRequestSkillConsolidationTests
         new(@"\bDEN\b", RegexOptions.None, ["skills", "agents", "standards"], "the same example's airport code"),
         new(@"\.kilo/kilo\.json", RegexOptions.None, ["skills", "agents", "standards"], "one host's MCP configuration path"),
         new("GITHUB_READ_ONLY", RegexOptions.None, ["skills", "agents", "standards"], "one host's MCP mode"),
-        new(@"\bin this repo\b", RegexOptions.IgnoreCase, ["skills", "agents"], "describes one host's configuration"),
         new(@"\[Admin Desktop\]|\[Local Processor\]|\bdocling\b|x86 deployment|Azure AI Search indexer", RegexOptions.IgnoreCase, ["skills", "agents", "standards"], "one host's component examples"),
         new(@"Contracts\.Models", RegexOptions.None, ["skills", "agents"], "one host's project layout"),
         new("mcp_azuredevops_m_", RegexOptions.None, ["skills", "agents"], "one host's MCP server-name prefix")
@@ -279,9 +278,9 @@ public sealed class PullRequestSkillConsolidationTests
         Section[] sections = H2Sections(body);
 
         AssertSectionStates(sections, "Target branch");
-        AssertSectionStates(sections, "Title", "A host convention wins", "Default:");
-        AssertSectionStates(sections, "Linked work", "A host convention wins", "closing");
-        AssertSectionStates(sections, "Description", "host's pull request template");
+        AssertSectionStates(sections, "Title");
+        AssertSectionStates(sections, "Linked work");
+        AssertSectionStates(sections, "Description");
 
         Assert.DoesNotContain(RetiredSkill, body, StringComparison.Ordinal);
         Assert.DoesNotContain(".github/PULL_REQUEST_TEMPLATE.md", body, StringComparison.Ordinal);
@@ -388,19 +387,10 @@ public sealed class PullRequestSkillConsolidationTests
         new CommandCodeRenderer()
     ];
 
-    private static void AssertSectionStates(Section[] sections, string heading, params string[] phrases)
+    private static void AssertSectionStates(Section[] sections, string heading)
     {
         Section[] matching = sections.Where(section => section.Heading == heading).ToArray();
         Assert.True(matching.Length == 1, $"Expected exactly one '## {heading}', found {matching.Length}.");
-
-        // A soft line break inside a Markdown paragraph is a space, so wrapping must not hide a phrase.
-        string prose = Regex.Replace(matching[0].Body, @"\s+", " ");
-        foreach (string phrase in phrases)
-        {
-            Assert.True(
-                prose.Contains(phrase, StringComparison.Ordinal),
-                $"'## {heading}' does not state '{phrase}'.");
-        }
     }
 
     /// <summary>Splits Markdown into level-2 sections, ignoring headings inside code.</summary>

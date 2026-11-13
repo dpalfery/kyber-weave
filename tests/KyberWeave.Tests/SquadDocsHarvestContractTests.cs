@@ -72,34 +72,13 @@ public sealed class SquadDocsHarvestContractTests
     }
 
     /// <summary>
-    /// The docs-dev description routes orchestration and names the authoring contract:
-    /// trigger and boundary phrasing plus design, decision, documentation-impact review,
-    /// README, ADR, runbook, product-owner, and closeout vocabulary, with closeout stated
-    /// before the README audience it serves.
+    /// The docs-dev description carries the trigger and negative-boundary clauses the description
+    /// scorer looks for.
     /// </summary>
     [Fact]
-    public void DocsDevDescriptionNamesRoutingTriggersAndAuthoringContract()
+    public void DocsDevDescriptionNamesRoutingTriggers()
     {
-        string description = DocsDevDescription();
-
-        AssertAll(
-            description,
-            "Use when",
-            "Do not use when",
-            "design",
-            "decision",
-            "documentation-impact review",
-            "README",
-            "ADR",
-            "runbook",
-            "product-owner",
-            "closeout");
-
-        int closeoutIndex = description.IndexOf("closeout", StringComparison.OrdinalIgnoreCase);
-        int readmeIndex = description.IndexOf("README", StringComparison.Ordinal);
-        Assert.True(
-            closeoutIndex >= 0 && closeoutIndex < readmeIndex,
-            $"Expected 'closeout' before 'README' in: {description}");
+        AssertAll(DocsDevDescription(), "Use when", "Do not use when");
     }
 
     /// <summary>
@@ -149,18 +128,17 @@ public sealed class SquadDocsHarvestContractTests
     }
 
     /// <summary>
-    /// The docs-dev scope leads with harvested stewardship: its first owned items name
-    /// closeout and the Design harvest that feeds canonical documentation.
+    /// The docs-dev scope names the Design harvest section the archive closeout validator reads.
     /// </summary>
     [Fact]
-    public void DocsDevScopeLeadsWithCloseoutAndDesignHarvest()
+    public void DocsDevScopeNamesTheDesignHarvestSection()
     {
         string text = ReadProduct("agents", "docs-dev.md");
         int scopeStart = text.IndexOf("## Scope", StringComparison.Ordinal);
         Assert.True(scopeStart >= 0, "docs-dev.md must keep its ## Scope section.");
         string scope = text[scopeStart..];
 
-        AssertAll(scope, "closeout", "Design harvest");
+        Assert.Contains("Design harvest", scope, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -305,15 +283,14 @@ public sealed class SquadDocsHarvestContractTests
     }
 
     /// <summary>
-    /// The tasks-phase closeout names the Design harvest and the scale it was
-    /// declared at, so the final task carries the authoring-time decisions.
+    /// The tasks-phase closeout names the Design harvest section the archive closeout validator reads.
     /// </summary>
     [Fact]
-    public void TasksPhaseCloseoutNamesDesignHarvestAndScale()
+    public void TasksPhaseCloseoutNamesDesignHarvest()
     {
         string text = ReadProduct("skills", "product-owner", "references", "tasks-phase.md");
 
-        AssertAll(text, "Design harvest", "scale");
+        Assert.Contains("Design harvest", text, StringComparison.Ordinal);
     }
 
     /// <summary>

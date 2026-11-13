@@ -44,7 +44,6 @@ public sealed class ArbiterConductorContractTests
         Assert.Contains("STATUS: ARBITER_ESCALATION", contract, StringComparison.Ordinal);
         Assert.Contains("FEATURE:", contract, StringComparison.Ordinal);
         Assert.Contains("PHASE:", contract, StringComparison.Ordinal);
-        Assert.Contains("never", contract, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
