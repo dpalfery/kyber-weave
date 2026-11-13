@@ -50,7 +50,7 @@ public class ArbiterSettings : AnalysisSettings
 
     /// <summary>The plan file filter for <c>audit</c>.</summary>
     [CommandOption("--plan <FILE>")]
-    [Description("Only report ledger events carrying this plan file.")]
+    [Description("Only report ledger events carrying this plan, written any natural way: path, file name or slug.")]
     public string? Plan { get; set; }
 
     /// <summary>The session filter for <c>audit</c>.</summary>

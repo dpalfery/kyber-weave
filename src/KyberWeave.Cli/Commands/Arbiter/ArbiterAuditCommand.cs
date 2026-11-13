@@ -3,6 +3,7 @@ using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Docs.Closeout;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -65,7 +66,21 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
             since = parsed;
         }
 
-        _ = config;
+        string repositoryRoot = ArbiterCommandComposition.ResolveRepositoryRoot(settings.Path);
+        PlanFilter? planFilter = null;
+        if (!string.IsNullOrWhiteSpace(settings.Plan))
+        {
+            // --plan takes the spellings the plan commands accept, so an agent that types a slug or a bare file name
+            // still matches the repository-relative path the dispatch header carried.
+            if (!PlanArguments.TryResolve(repositoryRoot, config, settings.Plan, settings.WorkingDirectory, "arbiter audit", report, out string relative))
+            {
+                CommandHelpers.Finish(report, settings, "arbiter audit", "Event");
+                return 1;
+            }
+
+            planFilter = new PlanFilter(repositoryRoot, config, relative);
+        }
+
         string arbiterDirectory = ArbiterCommandComposition.ResolveArbiterDirectory(settings.Path);
         InFlightLedger ledger = new(arbiterDirectory);
         DecisionLog decisions = new(arbiterDirectory);
@@ -116,7 +131,7 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
 
         int reported = 0;
         foreach (ArbiterLedgerEvent ev in events
-                     .Where(e => InScope(e, settings, since))
+                     .Where(e => InScope(e, settings, since, planFilter))
                      .OrderBy(e => e.At))
         {
             CheckMissingDecision(ev, decided, report, ref reported);
@@ -126,7 +141,7 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
         }
 
         List<string> attestations = [.. events
-            .Where(e => InScope(e, settings, since) && e.Returns?.Attested is { Count: > 0 })
+            .Where(e => InScope(e, settings, since, planFilter) && e.Returns?.Attested is { Count: > 0 })
             .SelectMany(e => (e.Returns!.Attested ?? []).Select(a => (Event: e, Attested: a)))
             .Select(pair => $"event {pair.Event.Id} attested {pair.Attested}")
             .Distinct(StringComparer.Ordinal)
@@ -152,7 +167,31 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
     public int Execute(CommandContext context, ArbiterSettings settings) =>
         Execute(context, settings, CancellationToken.None);
 
-    private static bool InScope(ArbiterLedgerEvent ev, ArbiterSettings settings, DateTimeOffset? since)
+    /// <summary>The plan <c>--plan</c> named, resolved to its repository-relative path, and the same resolution of a ledger event's plan file.</summary>
+    private sealed class PlanFilter(string root, KyberWeaveConfig config, string relative)
+    {
+        private readonly PlanPathResolver _resolver = new(root, config);
+        private readonly Dictionary<string, string> _seen = new(StringComparer.Ordinal);
+
+        public bool Matches(string? eventPlan)
+        {
+            if (string.IsNullOrWhiteSpace(eventPlan))
+                return false;
+
+            if (!_seen.TryGetValue(eventPlan, out string? canonical))
+            {
+                PlanPathResolution resolution = _resolver.Resolve(eventPlan, root);
+                canonical = resolution.Found
+                    ? resolution.Path!
+                    : Path.GetRelativePath(root, Path.GetFullPath(eventPlan, root)).Replace('\\', '/');
+                _seen[eventPlan] = canonical;
+            }
+
+            return string.Equals(canonical, relative, StringComparison.Ordinal);
+        }
+    }
+
+    private static bool InScope(ArbiterLedgerEvent ev, ArbiterSettings settings, DateTimeOffset? since, PlanFilter? plan)
     {
         if (!string.IsNullOrWhiteSpace(settings.Session)
             && !string.Equals(ev.Session, settings.Session, StringComparison.Ordinal))
@@ -160,11 +199,8 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
             return false;
         }
 
-        if (!string.IsNullOrWhiteSpace(settings.Plan)
-            && !string.Equals(ev.Headers?.PlanFile, settings.Plan, StringComparison.Ordinal))
-        {
+        if (plan is not null && !plan.Matches(ev.Headers?.PlanFile))
             return false;
-        }
 
         if (since is not null && ev.At < since.Value)
         {
