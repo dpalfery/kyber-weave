@@ -1498,7 +1498,11 @@ report; tools are called directly, tool search only when the harness lists them 
 call falls back to the shell form and then direct reads, and a tool is called unavailable only with
 the quoted error text of a call that was made); the plan-read ban (`<plan-index>` and `<specification-index>` are the conductor's, and an
 insufficient packet returns a blocker); the full-suite ban (run the classes the task names, because the
-review council and CI run the full suite on the integrated head); and the batched-reads line. The four
+review council and CI run the full suite on the integrated head); the batched-reads line; and the
+skills-location line, which names the directory this render's skills were installed to
+(`{{skills-root}}` in the source, answered per harness and scope in the render pipeline: repository-relative
+at project scope, `~/…` at global scope) and forbids searching the filesystem for a skill or reading one
+from another repository. A global render with no root resolver omits that line instead of guessing. The
 rules and the check that holds each one are tabulated in [the worker rule map](worker-rule-map.md).
 
 **Where it is injected, and where it is not.** The block is applied in the render pipeline beside the

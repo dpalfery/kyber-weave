@@ -560,16 +560,24 @@ public sealed class SquadRendererRegistry : ISquadRenderer
     /// </summary>
     internal static IReadOnlyList<string> ProjectSkillRoots()
     {
-        const string suffix = "/x/SKILL.md";
-        HashSet<string> none = new(StringComparer.Ordinal);
         return
         [
             .. SquadTargetCatalog.All
-                .Select(target => SkillOutputPath(target, "x", none))
+                .Select(ProjectSkillsRoot)
                 .OfType<string>()
-                .Select(path => path[..^suffix.Length])
                 .Distinct(StringComparer.Ordinal)
         ];
+    }
+
+    /// <summary>
+    /// The directory <paramref name="target"/> installs project-scope skills to, or null when the
+    /// target has no skill directory.
+    /// </summary>
+    internal static string? ProjectSkillsRoot(SquadTarget target)
+    {
+        const string suffix = "/x/SKILL.md";
+        HashSet<string> none = new(StringComparer.Ordinal);
+        return SkillOutputPath(target, "x", none) is { } path ? path[..^suffix.Length] : null;
     }
 
     private static string? SkillOutputPath(

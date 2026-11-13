@@ -76,6 +76,10 @@ public static class TestSquadCorpus
         return ExpectedRenderText(target, canonicalText)
             + Environment.NewLine
             + block[start..end].TrimEnd()
+                .Replace(
+                    SquadWorkerBaselineInjector.SkillsRootPlaceholder,
+                    SquadRendererRegistry.ProjectSkillsRoot(target),
+                    StringComparison.Ordinal)
             + Environment.NewLine
             + "</worker-baseline>";
     }

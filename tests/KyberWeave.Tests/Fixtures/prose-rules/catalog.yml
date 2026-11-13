@@ -500,6 +500,13 @@ rules:
     controls:
       - products/kyber-squad/skills/task-gate/references/rework.md
       - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: D6
+    statement: A worker that must read a skill as a file reads it from the skills directory its harness installed it to, and never searches the filesystem for it or reads one from another repository.
+    stated-in:
+      - products/kyber-squad/shared/worker-baseline.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
   - id: G1
     statement: Every worker receives a self-contained task packet with an inlined entry-file table, acceptance criteria and pre-computed test commands.
     stated-in:

@@ -92,9 +92,17 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
             // The shared worker baseline is applied here for the same reason: it is one paragraph, it
             // reaches every worker on every round trip, and this pipeline is the only step all
             // thirteen harnesses share, so a rule written once cannot reach twelve of them.
+            // The root resolver answers once per target for this render: the worker baseline's skills
+            // path and a harness's own links and probes must read the same root.
+            request = request.GlobalRoots is null
+                ? request
+                : request with { GlobalRoots = new MemoizedGlobalRoots(request.GlobalRoots) };
+
             SquadSource renderSource = SquadWorkerBaselineInjector.Apply(
                 SubstituteHarnessToken(source, Spec.Token),
-                SquadWorkerBaselineInjector.ReadBlock(request.SourceDirectory));
+                SquadWorkerBaselineInjector.BindSkillsRoot(
+                    SquadWorkerBaselineInjector.ReadBlock(request.SourceDirectory),
+                    ResolveSkillsRoot(Spec, request)));
             return Task.FromResult(Render(new SquadHarnessRenderContext(Spec, request, renderSource)));
         }
         catch (OperationCanceledException canceled) when (canceled.CancellationToken.IsCancellationRequested)
@@ -105,6 +113,61 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
         {
             return Task.FromException<SquadRenderResult>(exception);
         }
+    }
+
+    /// <summary>Asks the wrapped resolver once per target, so every consumer in one render sees one answer.</summary>
+    private sealed class MemoizedGlobalRoots(ISquadGlobalRootResolver inner) : ISquadGlobalRootResolver
+    {
+        private readonly Dictionary<SquadTarget, string> _answers = [];
+
+        public string? HomeDirectory => inner.HomeDirectory;
+
+        public string ResolveGlobalRoot(SquadTarget target)
+        {
+            if (!_answers.TryGetValue(target, out string? root))
+            {
+                root = inner.ResolveGlobalRoot(target);
+                _answers[target] = root;
+            }
+
+            return root;
+        }
+    }
+
+    /// <summary>
+    /// The directory this render's skills install to, as a worker can open it: repository-relative at
+    /// project scope, <c>~/…</c> (or absolute outside the home directory) at global scope. It is
+    /// null when a global render has no resolver or the resolver refuses the target; the install step
+    /// reports that failure, and the worker baseline then omits the path rather than guess one.
+    /// </summary>
+    private static string? ResolveSkillsRoot(SquadHarnessSpec spec, SquadRenderRequest request)
+    {
+        string skills = spec.ResolveDirectory("skills", request.Scope);
+        if (request.Scope == SquadDeploymentScope.Project)
+        {
+            return skills;
+        }
+
+        if (request.GlobalRoots is null)
+        {
+            return null;
+        }
+
+        string root;
+        try
+        {
+            root = request.GlobalRoots.ResolveGlobalRoot(spec.Target);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+
+        string path = $"{root.Replace('\\', '/').TrimEnd('/')}/{skills}";
+        string? home = request.GlobalRoots.HomeDirectory?.Replace('\\', '/').TrimEnd('/');
+        return home is { Length: > 0 } && path.StartsWith(home + "/", StringComparison.Ordinal)
+            ? $"~{path[home.Length..]}"
+            : path;
     }
 
     /// <summary>

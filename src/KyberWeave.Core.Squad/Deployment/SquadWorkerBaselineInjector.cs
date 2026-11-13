@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text;
+using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
 
@@ -37,6 +38,12 @@ public static class SquadWorkerBaselineInjector
 
     /// <summary>The tag that makes the injected paragraph findable and countable in a rendered body.</summary>
     public const string TagName = "worker-baseline";
+
+    /// <summary>
+    /// Where the baseline names the directory the harness's skills were installed to; the render
+    /// pipeline answers it per harness and scope through <see cref="BindSkillsRoot"/>.
+    /// </summary>
+    public const string SkillsRootPlaceholder = "{{skills-root}}";
 
     private const string BlockOpen = "<" + TagName + ">";
     private const string BlockClose = "</" + TagName + ">";
@@ -144,6 +151,32 @@ public static class SquadWorkerBaselineInjector
         }
 
         return string.Concat(BlockOpen, "\n", block, "\n", BlockClose);
+    }
+
+    /// <summary>
+    /// Answers <see cref="SkillsRootPlaceholder"/> in <paramref name="block"/> with the directory this
+    /// render's skills install to. With no root, the paragraph that carries the placeholder is
+    /// dropped, so a rendered body never ships an unanswered placeholder or a guessed path.
+    /// </summary>
+    /// <param name="block">The block from <see cref="ReadBlock"/>; null or blank comes back as is.</param>
+    /// <param name="skillsRoot">The install root, or null when this render cannot know it.</param>
+    /// <returns>The block ready for <see cref="Apply"/>.</returns>
+    public static string? BindSkillsRoot(string? block, string? skillsRoot)
+    {
+        if (string.IsNullOrWhiteSpace(block))
+        {
+            return block;
+        }
+
+        if (skillsRoot is not null)
+        {
+            return block.Replace(SkillsRootPlaceholder, skillsRoot, StringComparison.Ordinal);
+        }
+
+        string[] paragraphs = Regex.Split(block, @"(?:\r?\n)[ \t]*(?:\r?\n)");
+        return string.Join(
+            "\n\n",
+            paragraphs.Where(paragraph => !paragraph.Contains(SkillsRootPlaceholder, StringComparison.Ordinal)));
     }
 
     /// <summary>

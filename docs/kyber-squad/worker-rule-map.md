@@ -151,7 +151,7 @@ Two rows that look like this rule but are **not** it, and stay where they are:
 ## Discovery order, the packet rule, and batched reads
 
 Intended single home: the baseline block, whose first and second paragraphs are the Discovery
-order and the plan-read ban, and whose fourth is the batched-read line.
+order and the plan-read ban, whose fourth is the batched-read line, and whose last is the skills-location line.
 
 | ID | Rule — what a worker must do | Homes, and what T52 removed | Single home after | Enforced by |
 |---|---|---|---|---|
@@ -160,6 +160,7 @@ order and the plan-read ban, and whose fourth is the batched-read line.
 | D3 | Plans are the conductor's: do not open a file under `<plan-index>` or `<specification-index>`, or any plan folder; return a blocker when the packet is insufficient. | `## Scope` in 13 developer agent bodies: `csharp-dev`, `dal-dev`, `github-devops`, `go-dev`, `maui-dev`, `pulumi-dev`, `python-dev`, `react-dev`, `rust-dev`, `sql-database-architect`, `tauri-dev`, `test-dev`, `typescript-dev` — the duplicate sentence removed, "Your packet is your whole scope." kept. `docs-dev` keeps only its closeout exception, which is the one part of the rule that is its own | the baseline block ("**Plans are the conductor's.**") | catalog rule `D3`, whose homes are the baseline and `delivery-execution` → `## Worker packets`; `SquadWorkerBaselineInjectionTests`, whose token list includes `<plan-index>`; Arbiter rule `KW-ARB-PLANREAD-001` on the `delegate` trigger refuses a dispatch that sends a worker into a plan |
 | D4 | Batch independent reads into one round trip per question. | nowhere in the agent bodies — it is new text in the baseline | the baseline block | catalog rule `D4`, whose only home is the baseline. Listed so nothing "restores" it into agent bodies |
 | D5 | In a linked worktree, pass `projectPath=<absolute worktree path>` to every kw-docs tool and to `codegraph_explore`; the answer's provenance `root=` must equal the worktree. | nowhere in the agent bodies — it is new text in the baseline | the baseline block | catalog rule `D5`, whose only home is the baseline. Listed so nothing "restores" it into agent bodies |
+| D6 | Read a skill as a file only from the directory the harness installed it to, and never search the filesystem for one or read one from another repository. The path is rendered per harness and scope (`~/.copilot/skills` globally for Copilot, `.github/skills` in a project). | nowhere in the agent bodies — it is new text in the baseline | the baseline block, whose `{{skills-root}}` the render pipeline answers | catalog rule `D6`, whose only home is the baseline; `SquadSkillsRootLineTests` compares the rendered root with where the render and the global-root resolver put a skill, for every target and both scopes. A global render with no root resolver drops the paragraph rather than guess a path |
 
 The two review seats report discovery too. `review-lens` and `review-triage` put
 `Discovery: codegraph N, docs N, direct reads N` directly above their attestation line, below any
