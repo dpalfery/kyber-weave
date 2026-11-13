@@ -10,8 +10,6 @@ namespace KyberWeave.Tests;
 
 public sealed class SquadCanonicalContentTests
 {
-    private const string MigrationSchema = "kyber-squad.migration/v1";
-    private const string MigrationSourceCommit = "677c3a876ba9c62f1083608596b238c9deaff167";
     private const string DefaultOrchestrationTrigger = "default entry point";
 
     /// <summary>
@@ -97,14 +95,6 @@ public sealed class SquadCanonicalContentTests
         @"\btitle\s+line\b|\bbottom\s+line\b|\bat\s+most\s+(?:3|three)\s+sentences\b|\bmention\s+the\s+format\b|\bannouncing\s+which\s+shape\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
-    private static readonly string[] RetiredAgentIdentities =
-    [
-        "architect-v3",
-        "conductor-v3",
-        "task-reviewer",
-        "task-reviewer-v3"
-    ];
-
     /// <summary>
     /// Developer agents that run the deterministic <c>task-gate</c> exit gate and report its
     /// <c>TASK_GATE:</c> digest. Every other canonical agent is non-developer and must never emit one.
@@ -126,15 +116,12 @@ public sealed class SquadCanonicalContentTests
         "typescript-dev"
     ];
 
-    /// <summary>
-    /// Agents imported from the designated Hotshot Copilot golden tree. Each carries a
-    /// migration record naming the exact golden path, source commit, file digest, and
-    /// normalized instruction-body digest.
-    /// </summary>
-    private static readonly string[] ExpectedMigratedAgents =
+    /// <summary>The approved canonical agent roster, in ordinal order.</summary>
+    private static readonly string[] ExpectedAgents =
     [
         "architect",
         "azure-reader",
+        "bug-crusher",
         "bug-crusher-investigator",
         "code-reviewer",
         "conductor",
@@ -142,27 +129,21 @@ public sealed class SquadCanonicalContentTests
         "dal-dev",
         "docs-dev",
         "github-devops",
+        "go-dev",
         "maui-dev",
         "product-owner",
         "pulumi-dev",
         "python-dev",
         "react-dev",
         "research-agent",
+        "review-lens",
+        "review-triage",
+        "rust-dev",
         "sql-database-architect",
         "tauri-dev",
-        "test-dev"
+        "test-dev",
+        "typescript-dev"
     ];
-
-    /// <summary>
-    /// Agents authored after the Hotshot migration — the review-council workers, `bug-crusher`,
-    /// and the Rust, Go, and TypeScript specialists — are canonical-only roles and are deliberately excluded
-    /// from Hotshot migration provenance.
-    /// </summary>
-    private static readonly string[] ExpectedNewAgents =
-        ["bug-crusher", "go-dev", "review-lens", "review-triage", "rust-dev", "typescript-dev"];
-
-    private static readonly string[] ExpectedAgents =
-        [.. ExpectedMigratedAgents.Concat(ExpectedNewAgents).Order(StringComparer.Ordinal)];
 
     private static readonly string[] ExpectedSkills =
     [
@@ -239,12 +220,6 @@ public sealed class SquadCanonicalContentTests
 
     /// <summary>The primary shared identities declared by the <c>role-skill</c> profile.</summary>
     private static readonly string[] ExpectedSharedIdentities = ["bug-crusher", "product-owner"];
-
-    private static readonly IReadOnlyDictionary<string, string> ExpectedBaselines =
-        ExpectedMigratedAgents.ToDictionary(
-            name => name,
-            name => $".github/agents/{name}.agent.md",
-            StringComparer.Ordinal);
 
     [Fact]
     public void LoadFullProductTreeContainsExactlyApprovedAgentIdentities()
@@ -379,16 +354,13 @@ public sealed class SquadCanonicalContentTests
 
     /// <summary>
     /// The retired skill must not survive anywhere in the product tree: a name left behind routes an agent to a
-    /// skill that no longer deploys. The conductor's migration record keeps one historical note about it, so
-    /// that file is the only one exempt.
+    /// skill that no longer deploys.
     /// </summary>
     [Fact]
     public void NoProductFileNamesTheRetiredResponseFormatSkill()
     {
-        string historicalNote = Path.GetFullPath(Path.Combine(ProductRoot, "migration", "conductor.md"));
         string[] offenders = Directory
             .EnumerateFiles(ProductRoot, "*", SearchOption.AllDirectories)
-            .Where(path => !string.Equals(Path.GetFullPath(path), historicalNote, StringComparison.Ordinal))
             .Where(path => File.ReadAllText(path).Contains("response-format", StringComparison.Ordinal))
             .Select(RelativeSourcePath)
             .Order(StringComparer.Ordinal)
@@ -743,18 +715,12 @@ public sealed class SquadCanonicalContentTests
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
             .ToArray();
-        string migrationRoot = Path.Combine(ProductRoot, "migration");
 
         Assert.Empty(aliases);
         Assert.DoesNotContain(source.Agents, agent => IsVersionedIdentity(agent.Name));
         Assert.DoesNotContain(source.Bundle.AgentNames, IsVersionedIdentity);
         Assert.Empty(versionedDelegates);
         Assert.DoesNotContain("test-first-orchestration", source.ModelProfiles.Profiles.Keys);
-        Assert.All(
-            RetiredAgentIdentities,
-            name => Assert.False(
-                File.Exists(Path.Combine(migrationRoot, $"{name}.md")),
-                $"Retired identity '{name}' must not retain an active migration report."));
     }
 
     [Fact]
@@ -1164,11 +1130,11 @@ public sealed class SquadCanonicalContentTests
     }
 
     /// <summary>
-    /// The per-task reviewer is retired outright. Its agent, its reference folder, and its migration
-    /// record must not survive in the squad source, or the orchestrator can still route to it.
+    /// The per-task reviewer is retired outright. Its agent and its reference folder must not survive
+    /// in the squad source, or the orchestrator can still route to it.
     /// </summary>
     [Fact]
-    public void TaskReviewerAgentReferenceFolderAndMigrationRecordAreRemoved()
+    public void TaskReviewerAgentAndReferenceFolderAreRemoved()
     {
         string agentsRoot = Path.Combine(ProductRoot, "agents");
 
@@ -1178,9 +1144,6 @@ public sealed class SquadCanonicalContentTests
         Assert.False(
             Directory.Exists(Path.Combine(agentsRoot, "task-reviewer")),
             "The retired task-reviewer reference folder must be deleted.");
-        Assert.False(
-            File.Exists(Path.Combine(ProductRoot, "migration", "task-reviewer.md")),
-            "The retired task-reviewer migration record must be deleted.");
     }
 
     /// <summary>
@@ -1269,69 +1232,6 @@ public sealed class SquadCanonicalContentTests
     private static string RelativeSourcePath(string path)
     {
         return Path.GetRelativePath(ProductRoot, path).Replace(Path.DirectorySeparatorChar, '/');
-    }
-
-    [Fact]
-    public void LoadMigrationReportsDeclareLockedSourcesAndActualCanonicalDigest()
-    {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        string migrationRoot = Path.Combine(ProductRoot, "migration");
-        Assert.True(
-            Directory.Exists(migrationRoot),
-            $"K2 canonical migration directory is missing: {migrationRoot}");
-
-        string?[] reportNames = Directory.EnumerateFiles(migrationRoot, "*.md", SearchOption.TopDirectoryOnly)
-            .Select(Path.GetFileNameWithoutExtension)
-            .Order(StringComparer.Ordinal)
-            .ToArray();
-        Assert.Equal(ExpectedMigratedAgents, reportNames);
-
-        IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> expectedSources = ParseExpectedSourceHashes();
-        foreach (SquadAgent agent in source.Agents.Where(a =>
-                     ExpectedMigratedAgents.Contains(a.Name, StringComparer.Ordinal)))
-        {
-            string reportPath = Path.Combine(migrationRoot, $"{agent.Name}.md");
-            MigrationReport report = ReadMigrationReport(reportPath);
-
-            Assert.Equal(MigrationSchema, report.Schema);
-            Assert.Equal(agent.Name, report.Agent);
-            Assert.Equal(MigrationSourceCommit, report.SourceCommit);
-            Assert.Equal(ExpectedBaselines[agent.Name], report.SelectedBaseline);
-            Assert.Equal(
-                expectedSources[agent.Name]
-                    .Select(pair => $"{pair.Key}={pair.Value}")
-                    .Order(StringComparer.Ordinal),
-                report.SourceHashes
-                    .Select(pair => $"{pair.Key}={pair.Value}")
-                    .Order(StringComparer.Ordinal));
-            Assert.Equal(agent.BodyDigest, report.FinalBodySha256);
-        }
-    }
-
-    /// <summary>
-    /// The migration directory records one specific event: reconciling the live harness
-    /// copies at the locked source commit. An agent written after that has nothing to
-    /// reconcile, and a record claiming otherwise would be false in exactly the place
-    /// falsehood is least detectable.
-    /// </summary>
-    [Fact]
-    public void LoadNetNewAgentsCarryNoFabricatedMigrationRecord()
-    {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        string migrationRoot = Path.Combine(ProductRoot, "migration");
-
-        Assert.Equal(
-            ExpectedNewAgents,
-            source.Agents
-                .Select(agent => agent.Name)
-                .Where(name => !ExpectedMigratedAgents.Contains(name, StringComparer.Ordinal))
-                .ToArray());
-
-        Assert.All(
-            ExpectedNewAgents,
-            name => Assert.False(
-                File.Exists(Path.Combine(migrationRoot, $"{name}.md")),
-                $"'{name}' was authored after the migration and must not claim a migration baseline."));
     }
 
     /// <summary>
@@ -1899,77 +1799,6 @@ public sealed class SquadCanonicalContentTests
                 .ToArray());
     }
 
-    private static IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> ParseExpectedSourceHashes()
-    {
-        IEnumerable<(string Agent, string Path, string Hash)> entries = ExpectedSourceHashManifest
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
-            .Select(line => line.Split('|'))
-            .Select(parts => (
-                Agent: SourceAgentName(parts[0]),
-                Path: parts[0],
-                Hash: parts[1]
-            ));
-
-        return entries
-            .GroupBy(entry => entry.Agent, StringComparer.Ordinal)
-            .ToDictionary(
-                group => group.Key,
-                group => (IReadOnlyDictionary<string, string>)group.ToDictionary(
-                    entry => entry.Path,
-                    entry => entry.Hash,
-                    StringComparer.Ordinal),
-                StringComparer.Ordinal);
-    }
-
-    private static string SourceAgentName(string sourcePath)
-    {
-        string fileName = Path.GetFileName(sourcePath);
-        string name = fileName.EndsWith(".agent.md", StringComparison.Ordinal)
-            ? fileName[..^".agent.md".Length]
-            : Path.GetFileNameWithoutExtension(fileName);
-        return name switch
-        {
-            "conductor-v2" => "conductor",
-            "architect-v3" => "architect",
-            "conductor-v3" => "conductor",
-            "dotnet-dev" => "csharp-dev",
-            _ => name
-        };
-    }
-
-    private static MigrationReport ReadMigrationReport(string path)
-    {
-        string content = File.ReadAllText(path).Replace("\r\n", "\n", StringComparison.Ordinal);
-        if (!content.StartsWith("---\n", StringComparison.Ordinal))
-        {
-            throw new InvalidDataException($"Migration report '{path}' has no YAML frontmatter.");
-        }
-
-        int end = content.IndexOf("\n---\n", 4, StringComparison.Ordinal);
-        if (end < 0)
-        {
-            throw new InvalidDataException($"Migration report '{path}' has unterminated YAML frontmatter.");
-        }
-
-        YamlStream yaml = new();
-        yaml.Load(new StringReader(content[4..end]));
-        YamlMappingNode root = RequireMapping(yaml.Documents.Single().RootNode, "frontmatter", path);
-        Dictionary<string, string> sources = RequireMapping(RequireNode(root, "sources", path), "sources", path)
-            .Children
-            .ToDictionary(
-                pair => RequireScalar(pair.Key, "source path", path),
-                pair => RequireScalar(pair.Value, "source hash", path),
-                StringComparer.Ordinal);
-
-        return new MigrationReport(
-            RequireScalar(root, "schema", path),
-            RequireScalar(root, "agent", path),
-            RequireScalar(root, "source-commit", path),
-            RequireScalar(root, "selected-baseline", path),
-            sources,
-            RequireScalar(root, "final-body-sha256", path));
-    }
-
     private static YamlNode RequireNode(YamlMappingNode mapping, string key, string path)
     {
         foreach (KeyValuePair<YamlNode, YamlNode> pair in mapping.Children)
@@ -2017,35 +1846,4 @@ public sealed class SquadCanonicalContentTests
         string CollisionIdentity,
         string Prefix,
         IReadOnlyList<string> SharedIdentities);
-
-    private sealed record MigrationReport(
-        string Schema,
-        string Agent,
-        string SourceCommit,
-        string SelectedBaseline,
-        IReadOnlyDictionary<string, string> SourceHashes,
-        string FinalBodySha256);
-
-    private const string ExpectedSourceHashManifest = """
-                                                      .github/agents/architect.agent.md|16afd840a7d528b941e86e4c9c3e050054a8655a423234c0ab484091373bc58c
-                                                      .github/agents/architect-v3.agent.md|5eb0ce098c11a54c9f78f75daaf517d332fedda97f5d9431e6c968b2a9558fcb
-                                                      .github/agents/azure-reader.agent.md|f4f8bf0fe71adc3933808dccf4112a5fa49154069a2ed0977cc92b0d005382ca
-                                                      .github/agents/bug-crusher-investigator.agent.md|e0f68b7e28c9153de337dbb5daba0c756a192714c8906bc5aeb379d54553dbb2
-                                                      .github/agents/code-reviewer.agent.md|98440b62230139ae74e4f1a54d15482db338ab34bf912d98afbc629b249ffd14
-                                                      .github/agents/conductor.agent.md|fe8fa326b83780cafb4a9b8aba06312ddb106eb732de1f7a64f3a88b8fe773c6
-                                                      .github/agents/conductor-v3.agent.md|0392bd1e3dd09ab67f45801cb39aac7d016b5ed43733ee2ae65ac6c5668d7204
-                                                      .github/agents/csharp-dev.agent.md|09cd65841fbb82e81060cbbccdc91c6aac7ee209a84b97e30799cc3281cbe146
-                                                      .github/agents/dal-dev.agent.md|efbd8ed5a6f2f8342a184cf57cba08c3649dba0e736e980257101a1056f3079a
-                                                      .github/agents/docs-dev.agent.md|db63b4d3b09d0d352c5381feb6821e3fb982acdf49ad44f3b5d33861343410b0
-                                                      .github/agents/github-devops.agent.md|52ed73aca2f79ad7f57ccaad94299fa96827f34c5e97133728b037aa3a6d2593
-                                                      .github/agents/maui-dev.agent.md|d275ca8508a007832e6c00bb77f38735f1f849ac4bd8eb7a554ee1b05e371a2f
-                                                      .github/agents/product-owner.agent.md|5193d5e0bdabec19ceb33a646ab1120362e8705dec1bfe5da7af23a361c5d76e
-                                                      .github/agents/pulumi-dev.agent.md|968b2999eb8f998b8fc9863389ddca445661c8c444cecf079b3257dac9ae0040
-                                                      .github/agents/python-dev.agent.md|f058efe4c9f5bd07ff6d908f539265eb5219a59806ac7db8b1be42525eefa944
-                                                      .github/agents/react-dev.agent.md|8c34dadd97cd379d7e7b03c172f297c89ba88d9a540c4d1f0ce43d4cb6018fdd
-                                                      .github/agents/research-agent.agent.md|e0f94800f1c177fec00ff70f977263a61e14b3af1820225b7f7d99f60f66a548
-                                                      .github/agents/sql-database-architect.agent.md|7310fbcad5e1d87b90c9c1d95a031931a028f9a486f8235e52347721e8f74ee6
-                                                      .github/agents/tauri-dev.agent.md|30f08182e6c42869088f2df5cc36aa6162182a97fa6576342b9ca2fff47051ad
-                                                      .github/agents/test-dev.agent.md|b461f218e0645748eb5beec7675c3d5908191d6facf2cb19ac0338fdc638e548
-                                                      """;
 }
