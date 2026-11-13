@@ -257,6 +257,7 @@ public sealed class ArbiterEvaluator
         facts = GovernedPathsFacts.Enrich(facts, config.Ontology.DocsRoots);
         facts = _planReader.Enrich(facts, classification);
         facts = LedgerFacts.Enrich(facts, _ledger, _decisionLog, ev, ledgerId);
+        facts = AttributedChangeFacts.Enrich(facts, _ledger, _decisionLog, ledgerId);
         facts = ModelTargetFacts.Enrich(facts, _ledger, _decisionLog, ledgerId, config.Arbiter.ModelTargeting);
         // D29: a return's TASK_GATE: line is checked against the report it names. Absent
         // evidence answers absent, and the rule asks the model about the raw report instead;

@@ -414,36 +414,54 @@ public sealed class ArbiterLedgerTests : IDisposable
     }
 
     [Fact]
-    public async Task ConcurrentPaths_ReturnsTaskFilesOfOverlappingDispatches()
+    public async Task ConcurrentWriters_ReturnsTaskFilesOfOverlappingWriterDispatches()
     {
         var ledger = new InFlightLedger(ArbiterDirectory);
-        var pre1 = NewEvent(At(0), ArbiterLedgerPhases.Pre, callId: "c1", taskFiles: ["src/f1.cs"]);
-        var pre2 = NewEvent(At(1), ArbiterLedgerPhases.Pre, callId: "c2", taskFiles: ["src/f2.cs"]);
-        var pre3 = NewEvent(At(5), ArbiterLedgerPhases.Pre, callId: "c3", taskFiles: ["src/f3.cs"]);
-        var pre4 = NewEvent(At(1), ArbiterLedgerPhases.Pre, callId: "c4", taskFiles: ["src/f4.cs"]);
+        var pre1 = NewEvent(At(0), ArbiterLedgerPhases.Pre, callId: "c1", trigger: "delegate", taskFiles: ["src/f1.cs"]);
+        var pre2 = NewEvent(At(1), ArbiterLedgerPhases.Pre, callId: "c2", trigger: "delegate", taskFiles: ["src/f2.cs"]);
+        var pre3 = NewEvent(At(5), ArbiterLedgerPhases.Pre, callId: "c3", trigger: "delegate", taskFiles: ["src/f3.cs"]);
+        var pre4 = NewEvent(At(1), ArbiterLedgerPhases.Pre, callId: "c4", trigger: "delegate", taskFiles: ["src/f4.cs"]);
+        var explore = NewEvent(At(1), ArbiterLedgerPhases.Pre, callId: "c5", trigger: "investigate");
         await ledger.AppendAsync(pre1);
         await ledger.AppendAsync(pre2);
         await ledger.AppendAsync(pre3);
         await ledger.AppendAsync(pre4);
+        await ledger.AppendAsync(explore);
         await ledger.AppendAsync(NewEvent(At(2), ArbiterLedgerPhases.Post, callId: "c1"));
         await ledger.AppendAsync(NewEvent(At(3), ArbiterLedgerPhases.Post, callId: "c2"));
         await ledger.AppendAsync(NewEvent(At(6), ArbiterLedgerPhases.Post, callId: "c3"));
 
-        // [t0,t2] overlaps pre2's [t1,t3] and unpaired pre4 (in flight since t1),
-        // not pre3's [t5,t6].
-        string[] concurrentWithPre1 = ["src/f2.cs", "src/f4.cs"];
-        Assert.Equal(
-            concurrentWithPre1,
-            ledger.ConcurrentPaths(pre1.Id, ledger.ReadAll().First(e => e.PreId == pre1.Id).Id));
+        // [t0,t2] overlaps pre2's [t1,t3] and unpaired pre4 (in flight since t1), not pre3's [t5,t6]. The read-only
+        // dispatch writes nothing, so it neither adds paths nor makes the window unattributable.
+        ConcurrentDispatches withPre1 = ledger.ConcurrentWriters(pre1.Id, ledger.ReadAll().First(e => e.PreId == pre1.Id).Id)!;
+        Assert.Equal(["src/f2.cs", "src/f4.cs"], withPre1.Paths);
+        Assert.False(withPre1.AnyWithoutFiles);
 
-        // An unpaired pre event stays in flight with an open-ended interval —
-        // the ledger cannot know a dispatch ended without its return — so pre4
-        // also overlaps pre3's later window, while the completed pre1 and pre2
-        // dispatches (back at t2 and t3) do not.
-        string[] stillInFlightAtPre3 = ["src/f4.cs"];
-        Assert.Equal(
-            stillInFlightAtPre3,
-            ledger.ConcurrentPaths(pre3.Id, ledger.ReadAll().First(e => e.PreId == pre3.Id).Id));
+        // An unpaired pre event stays in flight, so pre4 also overlaps pre3's later window; pre1 and pre2 do not.
+        ConcurrentDispatches withPre3 = ledger.ConcurrentWriters(pre3.Id, ledger.ReadAll().First(e => e.PreId == pre3.Id).Id)!;
+        Assert.Equal(["src/f4.cs"], withPre3.Paths);
+    }
+
+    [Fact]
+    public async Task ConcurrentWriters_FlagsASiblingWithNoFiles_AndSkipsRefusedAndStaleDispatches()
+    {
+        var ledger = new InFlightLedger(ArbiterDirectory);
+        var stale = NewEvent(At(-5 * 3600), ArbiterLedgerPhases.Pre, callId: "old", trigger: "delegate");
+        var refused = NewEvent(At(0), ArbiterLedgerPhases.Pre, callId: "r", trigger: "delegate");
+        var mine = NewEvent(At(1), ArbiterLedgerPhases.Pre, callId: "m", trigger: "delegate", taskFiles: ["src/m.cs"]);
+        await ledger.AppendAsync(stale);
+        await ledger.AppendAsync(refused);
+        await ledger.AppendAsync(mine);
+        await ledger.AppendAsync(NewEvent(At(9), ArbiterLedgerPhases.Post, callId: "m"));
+        string post = ledger.ReadAll().First(e => e.PreId == mine.Id).Id;
+
+        ConcurrentDispatches clean = ledger.ConcurrentWriters(mine.Id, post, new HashSet<string> { refused.Id })!;
+        Assert.Empty(clean.Paths);
+        Assert.False(clean.AnyWithoutFiles);
+
+        ConcurrentDispatches unknown = ledger.ConcurrentWriters(mine.Id, post)!;
+        Assert.True(unknown.AnyWithoutFiles);
+        Assert.Null(ledger.ConcurrentWriters("missing", post));
     }
 
     [Fact]
