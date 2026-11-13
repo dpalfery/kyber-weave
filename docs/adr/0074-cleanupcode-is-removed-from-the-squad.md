@@ -41,13 +41,12 @@ agents, the C# coding standard, the review documents and the `KyberWeave` cleanu
 format` is the only formatter. A timeout around the tool is not accepted as its normal way to end,
 and the pass was optional and gated nothing.
 
-`inspectcode` stays, with its existing `scripts/report-gate.sh` wrapper, which stops it once its
-report is complete.
+`inspectcode` hangs the same way and is removed too, by [ADR 0075](0075-inspectcode-is-removed-from-the-squad.md).
 
 ## Consequences
 
 - Mechanical findings that only the cleanup profile fixed (for example redundant qualifiers) are no
-  longer erased before review; the InspectCode gate reports them once per review cycle.
+  longer erased before review; the `format-style` gate and the build's analyzers report them.
 - The todo about the cleanup profile rewriting untouched expression bodies is deleted with the profile.
 - Revisit when a ReSharper release exits on its own on macOS: add it back with one self-exiting
   command and no timeout in the normal path.
