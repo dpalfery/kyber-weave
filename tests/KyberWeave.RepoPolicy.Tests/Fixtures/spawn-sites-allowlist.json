@@ -1356,6 +1356,54 @@
       "text": "ProcessStartInfo startInfo = new(\"git\")",
       "count": 1,
       "bound": "Started by Run through the fixture's IsolatedChildExecutor, which wraps ProcessExecutor.WithTimeout(60 s): ProcessRunner kills the child tree on expiry; git argv only, in a temp repository under the fixture root."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/DocDriftStaleIndexTests.cs",
+      "text": "ProcessStartInfo startInfo = new(program)",
+      "count": 1,
+      "bound": "ProcessRunner timeout kills the child tree on expiry; started by Run below with a 60 s timeout; program is git or dotnet with fixed argv in a temp repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/DocDriftStaleIndexTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout kills the child tree on expiry; 60 s; git or dotnet argv only, in a temp repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/McpProjectPathTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "ProcessRunner timeout kills the child tree on expiry; started by the Run below with a 60 s timeout; git argv only, in a temp repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/McpProjectPathTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout kills the child tree on expiry; 60 s; git argv only, in a temp repository."
+    },
+    {
+      "file": "src/KyberWeave.Core/CodeGraph/CodeGraphIndexStaleness.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "ProcessRunner timeout kills the child tree on expiry; started by the Run below with GitTimeout; read-only git rev-parse/log argv."
+    },
+    {
+      "file": "src/KyberWeave.Core/CodeGraph/CodeGraphIndexStaleness.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);",
+      "count": 1,
+      "bound": "ProcessRunner timeout kills the child tree on expiry; GitTimeout; read-only git argv."
+    },
+    {
+      "file": "src/KyberWeave.Mcp/DocsRootRegistry.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "ProcessRunner timeout kills the child tree on expiry; started by the Run below with GitTimeout; read-only git rev-parse argv."
+    },
+    {
+      "file": "src/KyberWeave.Mcp/DocsRootRegistry.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);",
+      "count": 1,
+      "bound": "ProcessRunner timeout kills the child tree on expiry; GitTimeout; read-only git argv."
     }
   ]
 }

@@ -230,6 +230,7 @@ public sealed partial class DocumentIndex
         int blockStart = -1;
         int blockEnd = 0;
         bool fenced = false;
+        bool previousWasTableRow = false;
 
         while (position <= body.Length)
         {
@@ -253,9 +254,19 @@ public sealed partial class DocumentIndex
             }
             else
             {
+                bool tableRow = !fenced && trimmed.StartsWith('|');
+                if (blockStart >= 0 && tableRow && previousWasTableRow)
+                {
+                    AddBlock(body, blocks, blockStart, blockEnd);
+                    blockStart = -1;
+                }
+
                 if (blockStart < 0) blockStart = position;
                 blockEnd = next;
+                previousWasTableRow = tableRow;
             }
+
+            if (trimmed.Length == 0) previousWasTableRow = false;
 
             if (lineEnd < 0) break;
             position = lineEnd + 1;

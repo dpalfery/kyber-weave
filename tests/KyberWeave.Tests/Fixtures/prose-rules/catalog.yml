@@ -493,6 +493,13 @@ rules:
     controls:
       - products/kyber-squad/skills/task-gate/references/rework.md
       - products/kyber-squad/agents/conductor/references/autonomy.md
+  - id: D5
+    statement: A worker in a linked worktree passes its worktree's absolute path as projectPath to every documentation tool and to the code index, and checks that the answer's root is that worktree.
+    stated-in:
+      - products/kyber-squad/shared/worker-baseline.md
+    controls:
+      - products/kyber-squad/skills/task-gate/references/rework.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
   - id: G1
     statement: Every worker receives a self-contained task packet with an inlined entry-file table, acceptance criteria and pre-computed test commands.
     stated-in:

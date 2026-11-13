@@ -13,6 +13,8 @@ directly; use the harness tool search only when it lists them as deferred. If a 
 and why. Call a tool unavailable only with the quoted error of a call you made; otherwise report it
 as not tried.
 
+When you work in a linked worktree, pass projectPath=<absolute path of your worktree> to every kw-docs tool and to codegraph_explore; the answer's provenance root= must equal your worktree.
+
 **Plans are the conductor's.** Do not open a file under `<plan-index>` or `<specification-index>`,
 or any plan folder. Your task packet is the whole brief; if it is insufficient, return a blocker
 rather than reading the plan.
