@@ -271,6 +271,9 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
             || string.Equals(result.Outcome, RuleEffects.Applies, StringComparison.Ordinal)
             || string.Equals(result.Outcome, RuleEffects.NotApplicable, StringComparison.Ordinal))
         {
+            // A model that failed or timed out leaves its questions undecidable, and undecidable allows. The
+            // dispatch proceeds, and the failure is logged so an allow nothing judged is never silent.
+            LogProviderFailures(decisions, result.LedgerId, harness, context);
             ArbiterModelBlock? block = ModelBlockFor(decisions, result.LedgerId);
             bool targeting = !string.Equals(config.Arbiter.ModelTargeting.Mode, ModelTargetingOff, StringComparison.Ordinal);
             return new HookOutcome(
@@ -382,6 +385,20 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         return isPost
             ? new HookOutcome(HookOutcomeKind.PostBlock, reason)
             : new HookOutcome(HookOutcomeKind.Deny, reason);
+    }
+
+    /// <summary>Logs <c>KW-ARB-HOOK-001</c> for each decision on the event whose provider call failed.</summary>
+    private static void LogProviderFailures(
+        IReadOnlyList<ArbiterDecisionRecord> decisions, string ledgerId, string harness, HookContext context)
+    {
+        foreach (ArbiterDecisionRecord decision in decisions.Where(decision =>
+            string.Equals(decision.LedgerId, ledgerId, StringComparison.Ordinal)
+            && string.Equals(decision.Provider.Status, ArbiterProviderStatuses.Error, StringComparison.Ordinal)))
+        {
+            context.Log.WriteLine(
+                $"{HookCommand.FailClosedCode}: the decision model failed (provider {decision.Provider.Kind}) on " +
+                $"'{decision.Trigger}' for '{harness}' (decision {decision.Id}); its questions are undecidable and the dispatch proceeds.");
+        }
     }
 
     /// <summary>
