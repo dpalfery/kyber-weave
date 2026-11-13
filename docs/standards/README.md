@@ -64,7 +64,7 @@ both return the worker's own question to put to the human rather than a confiden
 somewhere else. The property name is how a worker knows which question to ask.
 
 The tool's own contract, including its topic match and its budget, is in the
-[DocGraph MCP runbook](../docgraph/mcp-runbook.md#docs_get_coding_standard_for_technologytechnology-topic--null-charbudget--12000).
+[DocGraph MCP runbook](../docgraph/mcp-runbook.md#docs_get_coding_standard_for_technologytechnology-topic--null-charbudget--12000-projectpath--null).
 
 ## What belongs in a standard
 

@@ -81,6 +81,7 @@ its `tasks.json` into the archive is caught rather than kept as dead weight.
 | `KW-DOC-DRIFT-001` | Error / Critical | `code-refs` symbol unresolved. Critical when the index itself is missing. |
 | `KW-DOC-DRIFT-002` | Error | `api-endpoints` route matches no indexed route |
 | `KW-DOC-DRIFT-003` | Warning | `source-root` exists but nothing beneath it is indexed |
+| `KW-DOC-DRIFT-004` | Error | The CodeGraph index is older than the code; unresolved references are reported once instead of one by one. Run `codegraph sync .` |
 
 ### Analysis — `docs integrity-check`
 
@@ -348,6 +349,7 @@ Hook guards are not rules: hosts cannot tune a guard by id, but `arbiter.enabled
 | `KW-ARB-PROJECT-001` | Warning | The project enables Arbiter but a harness is not gated: no project hook, and no live global hook that evaluates under the project. Raised once per ungated harness, naming it; hint is its fix command (`kyber-weave arbiter install --project --target <token>`, or `kyber-weave arbiter install --target claude` for Claude). Reported by `arbiter doctor` |
 | `KW-ARB-GLOBAL-001` | Warning | The global Squad receipt owns a hook block, or a harness's own shim hook file, for a harness missing from `arbiter.global.targets`, so `kyber-weave update` never refreshes it. Agent and skill files do not count. Hint: `kyber-weave arbiter install --target <token>`. Reported by `arbiter doctor` |
 | `KW-ARB-LOG-001` | Warning | `artifacts/arbiter/` is not ignored by git |
+| `KW-SQUAD-SHADOW-001` | Warning | A project skill folder repeats an installed squad skill's name with different content, so a worker may read the project copy. Remedy: delete the project copy, or re-run `squad install`. Reported by `squad doctor` |
 | `KW-ARB-BIN-001` | Warning | `kyber-weave-arbiter` missing from `PATH`, or version differs from the CLI's |
 | `KW-ARB-GUARD-001` | Warning | No plan, spec, or todo index declared, so the Read guard protects nothing |
 | `KW-ARB-PARSE-001` | Warning | A dependency names no task in the artifact |

@@ -20,6 +20,9 @@ public sealed class DocDriftLinter(ICodeGraphResolver resolver)
     public const string UnresolvedEndpoint = "KW-DOC-DRIFT-002";
     private const string SourceRootNotIndexed = "KW-DOC-DRIFT-003";
 
+    /// <summary>The index is older than the code, so its misses say nothing about the documentation.</summary>
+    public const string StaleIndex = "KW-DOC-DRIFT-004";
+
     private readonly ICodeGraphResolver _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
 
     public DiagnosticReport Validate(DocumentSet set)
@@ -40,13 +43,18 @@ public sealed class DocDriftLinter(ICodeGraphResolver resolver)
 
         IReadOnlyList<string> routes = _resolver.AllRoutes();
 
+        // Findings that depend on the index are held back until the index is judged: an index that lags
+        // the code reports renamed or added symbols as missing, and listing each one blames the
+        // documentation for what a re-index would clear.
+        DiagnosticReport indexDependent = new DiagnosticReport();
+
         foreach (DocumentModel doc in set.Documents)
         {
             if (doc.Frontmatter.CodeRefs is not null)
             {
                 foreach (string symbol in doc.Frontmatter.CodeRefs)
                 {
-                    ReportUnresolvedCodeRef(doc, symbol, null, report);
+                    ReportUnresolvedCodeRef(doc, symbol, null, indexDependent);
                 }
             }
 
@@ -61,7 +69,7 @@ public sealed class DocDriftLinter(ICodeGraphResolver resolver)
 
                     foreach (string symbol in entry.Value.CodeRefs)
                     {
-                        ReportUnresolvedCodeRef(doc, symbol, entry.Key, report);
+                        ReportUnresolvedCodeRef(doc, symbol, entry.Key, indexDependent);
                     }
                 }
             }
@@ -71,7 +79,7 @@ public sealed class DocDriftLinter(ICodeGraphResolver resolver)
                 if (_resolver.ResolveRoute(endpoint).Count > 0) continue;
 
                 string? nearest = StringDistance.Nearest(endpoint, routes);
-                report.Add(new Diagnostic(
+                indexDependent.Add(new Diagnostic(
                     UnresolvedEndpoint, Severity.Error,
                     $"api-endpoints entry '{endpoint}' matches no indexed route.",
                     doc.Subject, doc.RelativePath,
@@ -83,7 +91,7 @@ public sealed class DocDriftLinter(ICodeGraphResolver resolver)
             string? sourceRoot = doc.Frontmatter.SourceRoot;
             if (!string.IsNullOrWhiteSpace(sourceRoot) && !_resolver.HasFilesUnder(sourceRoot))
             {
-                report.Add(new Diagnostic(
+                indexDependent.Add(new Diagnostic(
                     SourceRootNotIndexed, Severity.Warning,
                     $"source-root '{sourceRoot}' contains no indexed source files.",
                     doc.Subject, doc.RelativePath,
@@ -91,6 +99,19 @@ public sealed class DocDriftLinter(ICodeGraphResolver resolver)
             }
         }
 
+        if (indexDependent.Items.Count > 0
+            && _resolver is ICodeGraphIndexFreshness freshness
+            && freshness.DescribeStaleness() is { } lag)
+        {
+            report.Add(new Diagnostic(
+                StaleIndex, Severity.Error,
+                $"The CodeGraph index is older than the code ({lag}); {indexDependent.Items.Count} finding(s) that depend on it are not listed.",
+                "codegraph", null,
+                "Run 'codegraph sync .' (or 'kyber-weave doctor --ensure .') and run drift again; findings that remain after that are real."));
+            return report;
+        }
+
+        report.AddRange(indexDependent.Items);
         return report;
     }
 

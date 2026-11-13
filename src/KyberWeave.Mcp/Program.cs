@@ -91,7 +91,7 @@ if (!expectRootFromFlag && !string.IsNullOrWhiteSpace(expectRootEnvironment))
     }
 }
 
-OntologyConfig ontology = ResolveOntology(repoRoot);
+OntologyConfig ontology = DocsRootRegistry.ResolveOntology(repoRoot);
 
 // Composition root: factories for DocumentIndexHost. Core never invents these collaborators.
 builder.Services.AddSingleton(new DocumentIndexHost(
@@ -105,6 +105,10 @@ builder.Services.AddSingleton<IDocsAnalysisReader>(new RepositoryDocsAnalysisRea
 // The refresh schedule is a process-wide decision, made once from this process's own argv. The
 // tools receive it by injection so a test that asks them directly gets the default cadence.
 builder.Services.AddSingleton(new CodeGraphFreshness(repoRoot, codeGraphRefreshEnabled));
+
+// A tool call may name another worktree of this repository with projectPath. Those are served by
+// tools of their own, built on demand and kept in a small least-recently-used set.
+builder.Services.AddSingleton(DocsRootRegistry.ForRepository(repoRoot, codeGraphRefreshEnabled));
 
 builder.Services
     .AddMcpServer(DocsServerInstructions.Configure)
@@ -124,36 +128,6 @@ builder.Services.Replace(ServiceDescriptor.Singleton<ITransport>(services =>
 
 await builder.Build().RunAsync().ConfigureAwait(false);
 return 0;
-
-// The host's ontology from `.kyber-weave/kyber-weave.yml`. Root resolution requires a
-// host config before startup; the default below remains the safe fallback for a config
-// that exists but cannot be parsed.
-//
-// The server reads the same configuration the CLI does. Without this it served the product
-// default root, so every repository that had moved its documentation — the common case,
-// since the default is inherited from one origin repository — got an empty corpus from a
-// server that reported no error, and multi-root configuration would not have reached
-// retrieval at all.
-//
-// A config that cannot be read is reported and then stepped over rather than being fatal.
-// The corpus will be wrong, but a client that has already spawned this process gets a
-// server that answers and says why, instead of a transport that dies at startup.
-static OntologyConfig ResolveOntology(string repoRoot)
-{
-    KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(repoRoot);
-    if (loaded is { Success: true, Config: not null })
-    {
-        return loaded.Config.Ontology;
-    }
-
-    // stderr, never stdout: stdout is the JSON-RPC transport.
-    Console.Error.WriteLine(
-        $"{KyberWeaveConfigLoader.ConfigLoadErrorCode}: Failed to load " +
-        $"'{loaded.ConfigPath ?? "kyber-weave.yml"}': {loaded.Error ?? "unknown error"}. " +
-        "Serving the default ontology; the corpus may be empty.");
-
-    return OntologyConfig.ProductDefaults;
-}
 
 static string GetVersion()
 {

@@ -72,6 +72,14 @@ another branch; only a different `repo=` is the wrong repository. `branch=` says
 answer describes. Adding a field to the header means teaching `McpLiveProbe`'s trailing-metadata
 regex the same field, or `mcp.root` starts failing on a healthy server.
 
+## One root at startup, any worktree per call
+
+Every tool takes an optional `projectPath`. `DocsRootRegistry` resolves it with git to a worktree
+of the same repository as the server root (equal common git directory) and refuses anything else;
+the per-root objects (document host, analysis reader, CodeGraph schedule) live in a `DocsTools`
+built per root, kept in a four-entry least-recently-used set. Omitted means the server root.
+A new tool must take `projectPath` and start with `Redirect(projectPath, ...)`.
+
 ## Staleness is handled for you
 
 `DocumentIndexHost.Current()` rebuilds whichever half has gone stale on each call. Do not
