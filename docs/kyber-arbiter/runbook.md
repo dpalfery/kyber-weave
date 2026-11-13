@@ -10,12 +10,13 @@ decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
   - adr/0054-squad-owned-blocks-in-shared-hook-files
   - adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude
+  - adr/0072-the-arbiter-blocks-only-on-machine-facts-and-confident-model-answers
 ---
 
 # Kyber Arbiter runbook
 
-Operating the Arbiter: wiring hooks, granting trust, staying fail-closed, and diagnosing a
-host. For what it is and why, see the [architecture](architecture.md).
+Operating the Arbiter: wiring hooks, granting trust, reading what it allowed and blocked, and
+diagnosing a host. For what it is and why, see the [architecture](architecture.md).
 
 ## Hooks
 
@@ -84,7 +85,7 @@ owned block in the shared `.codex/hooks.json`), and Cursor (owned entries in the
 `.cursor/hooks.json`). Phase 3 adds Kilo (the `.kilo/plugin/kyber-arbiter.ts` shim),
 Antigravity (the owned `kyber-arbiter` group in `.agents/hooks.json`), Factory (the owned
 block in `.factory/hooks.json`, dropped while the user's hooks live in
-`.factory/settings.json` — see fail-closed behaviour below), and Devin (the owned block
+`.factory/settings.json` — see failure behaviour below), and Devin (the owned block
 in `.devin/hooks.v1.json`). Warp and ZCode render no hooks at project scope: they are
 fallback-only — see the MCP fallback below. The hook binary is invoked as:
 
@@ -223,16 +224,34 @@ observed — so grant trust at install time:
 
 `arbiter install`, `squad install`, and `squad update` print the applicable step for the rendered targets.
 
-## Fail-closed behaviour
+## Failure behaviour: allow and log
 
-Any internal hook error blocks the dispatch with an explicit reason carrying
-`KW-ARB-HOOK-001` — never a silent pass. On conductor triggers the block carries an
-escalation envelope for architect; the conductor dispatches architect with it and never
-retries the blocked dispatch unchanged. The exception is a refused planner dispatch
-(`KW-ARB-PLANNER-001`): its envelope names a corrected dispatch, and the conductor re-issues
-that planner dispatch instead of sending it to architect. Timeouts are bounded by `provider.timeout-ms` plus
-the harness budget; a hook killed mid-evaluation still leaves its ledger event, which
-`audit` reports as a decision-less entry.
+**The Arbiter blocks only on a machine fact or a confident model answer that names a
+violation** ([ADR 0072](../adr/0072-the-arbiter-blocks-only-on-machine-facts-and-confident-model-answers.md)).
+When it cannot decide, the dispatch proceeds and the reason is logged, never a block:
+
+| What happened | What the dispatch sees | Where it is recorded |
+|---|---|---|
+| A header, plan or report line the parser could not read | Allowed, unless the model confidently names a violation | The decision record: the rule's step-1 row and its answer |
+| Provider `none` | Allowed | Step-1 rows read `not-evaluated` |
+| Provider error, timeout, or a request over budget | Allowed | Provider status `error` or `over-budget`; the hook log carries `KW-ARB-HOOK-001` for an error |
+| An answer below the rule's confidence floor | Allowed | The step-1 row reads `undecidable` beside the confidence it scored |
+| An exception in the evaluator, the hook host, or the process | Allowed | The hook log (stderr) carries `KW-ARB-HOOK-001` with the message; the ledger event appended before evaluation stays |
+| A usage error (`--harness` missing or unknown) | Exit 1, which Claude and Copilot treat as non-blocking | stderr |
+
+Look for `KW-ARB-HOOK-001` in the hook output your harness keeps, and for `undecidable` and
+`not-evaluated` rows in `artifacts/arbiter/decisions.jsonl`, to see what went unjudged.
+
+A block is still an escalation envelope. On conductor triggers the conductor dispatches architect
+with it and never retries the blocked dispatch unchanged. The exception is a refused planner dispatch
+(`KW-ARB-PLANNER-001` answered `malformed`): the conductor re-issues that planner dispatch as planning
+work instead of sending it to architect.
+
+Timeouts are bounded by `provider.timeout-ms` plus the harness budget. The hook timeout is rendered
+as `ceil(timeout-ms / 1000) + 2` seconds from the repository's configuration; a user override that
+raises `timeout-ms` without re-rendering the hooks makes the hook log, and `arbiter doctor` report,
+`KW-ARB-CONFIG-016`. A hook the harness kills mid-evaluation still leaves its ledger event, which
+`audit` reports as a decision-less entry, and the dispatch proceeds as the harness treats a killed hook.
 
 Pre-dispatch denies block on every target. Post-dispatch limits differ by harness: some
 targets deliver outcomes only as context, and Antigravity and Devin deliver none. The
@@ -288,22 +307,23 @@ the conductor and code-reviewer.
 ## Reading a planner refusal
 
 A planner refusal is the Arbiter stopping a dispatch to a planner, such as `architect`,
-because the `PLAN_FILE:` or marker it carried was not acceptable. The envelope's `ANSWER`
-line names the cause, `CALLER` shows the caller the Arbiter resolved, and `NEXT` says what
-to do. The conductor re-issues the planner dispatch with the correction; it does not send
-the refused dispatch to `architect`. Rule `KW-ARB-PLANNER-001` gives four answers:
+because its decision model was confident the dispatch asks for something other than planning
+work. The envelope's `ANSWER` line names the cause, `CALLER` shows the caller the Arbiter
+resolved, and `NEXT` says what to do. The conductor re-issues the planner dispatch with the
+correction; it does not send the refused dispatch to `architect`. Rule `KW-ARB-PLANNER-001`
+gives two answers:
 
-- **`malformed`**: the prompt has no recognised marker. Re-issue the dispatch with one, such
-  as `INTAKE:`, `FINDINGS:`, the `STATUS: ARBITER_ESCALATION` envelope, or a `FEATURE:` and
-  `PHASE:` pair. `FINALIZE` only counts with a `PLAN_FILE:` alongside it.
-- **`plan-file-invalid`**: the `PLAN_FILE:` was sent but rejected, so it is treated as a
-  refusal even when the body has a valid marker. The usual cause is an absolute path,
-  such as a worktree path. Re-issue with the plan's repository-relative path: `/`
-  separators, no leading `/`, no `..`, no backslash, no space and no tab.
-- **`plan-file-outside-planning-dirs`**: the path is valid but is not under the plan, spec
-  or todo directories. Re-issue with a `PLAN_FILE:` under one of those directories.
-- **`recognised`** is the pass answer, not a refusal. It is the answer a corrected dispatch
-  gets: a planning-directory `PLAN_FILE:`, or a marker that needs no `PLAN_FILE:`.
+- **`recognised`** is the pass answer. Step 0 gives it for an exact marker (`INTAKE:`,
+  `FINDINGS:`, the `STATUS: ARBITER_ESCALATION` envelope, a `FEATURE:` and `PHASE:` pair, or
+  `FINALIZE` with a `PLAN_FILE:`) with a `PLAN_FILE:` under the plan, spec or todo directories
+  or none at all; the model gives it for anything else that is planning work.
+- **`malformed`** (step 1 only): the model was confident the dispatch asks the planner for
+  work that is not planning, such as writing code. Re-issue the dispatch as planning work with
+  a recognised marker.
+
+A `PLAN_FILE:` that is absolute, has a space, or sits outside the planning directories is no
+longer a refusal by itself. Where the planner actually writes is checked on its return by
+`KW-ARB-PLANNER-DIFF-001` against git.
 
 `REPEAT` counts earlier refusals from the same session when the dispatch has no
 `PLAN_FILE:`, because there is no plan to key on. A refusal that is the first in its session

@@ -274,18 +274,18 @@ receipts and logs key on them, so an id is never reused or renumbered.
 
 | Id | Trigger | Step | Meaning |
 |---|---|---|---|
-| `KW-ARB-PLAN-001` | `delegate` | 0 | `PLAN_FILE` names an artifact with parseable tasks |
-| `KW-ARB-SCOPE-001` | `delegate` | 0 | `TASK` names a plan task; named paths stay inside its files |
-| `KW-ARB-SCOPE-002` | `delegate` | 1 | Delegation asks only for work the task describes |
-| `KW-ARB-READY-001` | `delegate` | 0 | Dependencies complete; files clear of work in flight |
-| `KW-ARB-OWNER-001` | `delegate` | 0 | Target is the named specialist or the file-kind-map owner |
+| `KW-ARB-PLAN-001` | `delegate` | 0, then 1 | The dispatch names the plan or specification its work comes from. Step 0 allows a plan read with tasks; only a confident model `no-plan` escalates |
+| `KW-ARB-SCOPE-001` | `delegate` | 0, then 1 | The work is one of the plan's tasks. Step 0 answers the file-scope answers, all allow; only a confident model `not-in-plan` escalates |
+| `KW-ARB-SCOPE-002` | `delegate` | 0, then 1 | Delegation asks only for work the task describes; not asked when no plan task was found |
+| `KW-ARB-READY-001` | `delegate` | 0, then 1 | Dependencies complete; files clear of work in flight. The in-flight overlap escalates at step 0; only a confident model `waiting` escalates for dependencies |
+| `KW-ARB-OWNER-001` | `delegate` | 0, then 1 | Target is the specialist the task names; only a confident model `not-owner` escalates |
 | `KW-ARB-OWNER-002` | `delegate` | 1 | Roster specialist owning this task |
-| `KW-ARB-MODE-001` | `delegate` | 0 | RED evidence exists before an implementation dispatch in test-first mode |
+| `KW-ARB-MODE-001` | `delegate` | 0, then 1 | Failing tests exist before an implementation dispatch in test-first mode; only a confident model `missing` escalates |
 | `KW-ARB-ROSTER-001` | `delegate`, `investigate` | 0 | Target is in the caller's `delegates-to` |
-| `KW-ARB-PLANREAD-001` | `delegate` | 0 | Prompt names no planning path once the routing header is removed; a documentation-profile target is exempt |
-| `KW-ARB-DIFF-001` | `delegate.returned` | 0 | Delegation changed only its task's files |
-| `KW-ARB-GATE-REPORT-001` | `delegate.returned` | 0 | The digest's `TASK_GATE` line agrees with the gate report it names: `verified` needs a `PASS` claim the report corroborates, `disagrees` and `missing` escalate |
-| `KW-ARB-PLANNER-001` | `delegate.planner` | 0 | Planner invocation, with four answers: `recognised` (a `PLAN_FILE` under a planning directory, or a marker that needs no `PLAN_FILE`); `malformed` (no recognised marker); `plan-file-invalid` (a `PLAN_FILE` the header rejected: absolute, a `..` segment, repeated, or with a space, tab or backslash; checked before any marker); `plan-file-outside-planning-dirs` (a valid `PLAN_FILE` outside the plan, spec and todo directories) |
+| `KW-ARB-PLANREAD-001` | `delegate` | 0, then 1 | The dispatch does not tell the worker to open a plan, specification or todo file; a documentation-profile target is exempt, and only a confident model `names-plan` escalates |
+| `KW-ARB-DIFF-001` | `delegate.returned` | 0, then 1 | Delegation changed only files of its task's work. `out-of-scope` escalates at step 0; only a confident model `outside-task` escalates otherwise |
+| `KW-ARB-GATE-REPORT-001` | `delegate.returned` | 0, then 1 | The worker ran the task gate. A report that contradicts the `TASK_GATE` claim (`disagrees`) escalates at step 0; an unreadable line goes to the model, and only a confident `missing` escalates |
+| `KW-ARB-PLANNER-001` | `delegate.planner` | 0, then 1 | The dispatch asks the planner for planning work. Step 0 recognises an exact marker with an in-directory or absent `PLAN_FILE`; only a confident model `malformed` escalates. The retired `plan-file-invalid` and `plan-file-outside-planning-dirs` answers are no longer produced (ADR 0072) |
 | `KW-ARB-PLANNER-DIFF-001` | `delegate.planner.returned` | 0 | Planner wrote only plan, spec, and todo directories |
 | `KW-ARB-READONLY-001` | `investigate.returned` | 0 | Read-only dispatch left the tree unchanged |
 | `KW-ARB-LENS-001` | `lens.spawn` | 0, then 1 | Lens applies to this change; `correctness` and `test-adequacy` skip only on a non-empty, positively Markdown-only changed set |
@@ -337,6 +337,7 @@ Hook guards are not rules: hosts cannot tune a guard by id, but `arbiter.enabled
 | `KW-ARB-CONFIG-013` | Error | `model-targeting.ladder` is empty, repeats a profile, or names a value that is not a semantic profile. The message shows an example ladder |
 | `KW-ARB-CONFIG-014` | Error | `shadow` is set on `KW-ARB-DIFFICULTY-001` or `KW-ARB-LADDER-001`, whose shadow state `model-targeting.mode` owns |
 | `KW-ARB-CONFIG-015` | Error | A savings value is out of range or in a forbidden place: `stores.max-item-bytes` outside 1 to 1048576, `stores.retain-days` below 1 (a value above 3650 is clamped, not refused), a blank `comment-triage.bot-logins` entry, a host rule using `for-each`, or a host rule mapping an answer to an effect only shipped rules may use |
+| `KW-ARB-CONFIG-016` | Warning | The provider timeout in force (after the user override) plus two seconds of evaluation does not fit the hook timeout rendered from the repository's `timeout-ms` |
 | `KW-ARB-MODEL-001` | Warning | Model targeting is not `off`, a hooked global target is installed, and its `model-targets.<harness>.json` is missing, unreadable, or older than the Squad lock. Remedy: `kyber-weave squad update`. Reported by `arbiter doctor` |
 | `KW-ARB-INSTALL-001` | Error | `--global` and `--project` were used together, or the target-scope input is otherwise invalid for the CLI; the install defaults to global and project scope is opt-in |
 | `KW-ARB-KEY-001` | Warning | Remote provider configured and no key resolves for its origin |
@@ -351,7 +352,7 @@ Hook guards are not rules: hosts cannot tune a guard by id, but `arbiter.enabled
 | `KW-ARB-AUDIT-002` | Warning | Unmarked dispatch to a Squad agent with an unidentified caller |
 | `KW-ARB-AUDIT-003` | Warning | Unpaired event: a `pre` with no `post`, or a `post` with no `pre` |
 | `KW-ARB-AUDIT-004` | Warning | Dispatch to an implementation specialist whose packet body names a planning path |
-| `KW-ARB-HOOK-001` | Error | Internal hook error produced a fail-closed block |
+| `KW-ARB-HOOK-001` | Error | Internal hook or evaluator error; the dispatch is allowed and the error is logged (ADR 0072) |
 
 ## Shared
 
