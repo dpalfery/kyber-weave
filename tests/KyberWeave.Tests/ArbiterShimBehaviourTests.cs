@@ -205,7 +205,9 @@ public sealed class ArbiterShimBehaviourTests : IDisposable
         await File.WriteAllTextAsync(Path.Combine(_temp.Path, "ext.ts"), await RenderPiExtensionAsync(timeoutSeconds: 5));
         await File.WriteAllTextAsync(Path.Combine(_temp.Path, "drive.ts"), PiDriver);
 
-        string output = await RunBunAsync(bun, "drive.ts");
+        // Only bun's own directory and the system directories stay on PATH, so a real
+        // kyber-weave-arbiter installed on the machine cannot answer in place of the missing one.
+        string output = await RunBunAsync(bun, "drive.ts", inheritPath: false);
 
         Assert.StartsWith(Blocked, output, StringComparison.Ordinal);
     }
@@ -379,7 +381,7 @@ public sealed class ArbiterShimBehaviourTests : IDisposable
         MakeExecutable(script);
     }
 
-    private async Task<string> RunBunAsync(string bun, string script)
+    private async Task<string> RunBunAsync(string bun, string script, bool inheritPath = true)
     {
         ProcessStartInfo startInfo = new(bun)
         {
@@ -391,7 +393,9 @@ public sealed class ArbiterShimBehaviourTests : IDisposable
         startInfo.ArgumentList.Add(script);
         // The fake binary shadows any real kyber-weave-arbiter the host may have installed.
         startInfo.Environment["PATH"] = _temp.Path + Path.PathSeparator
-            + Environment.GetEnvironmentVariable("PATH");
+            + (inheritPath
+                ? Environment.GetEnvironmentVariable("PATH")
+                : string.Join(Path.PathSeparator, Path.GetDirectoryName(bun), "/usr/bin", "/bin"));
 
         using Process process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Could not start bun.");
