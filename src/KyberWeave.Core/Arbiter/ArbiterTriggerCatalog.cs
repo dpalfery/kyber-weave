@@ -82,7 +82,7 @@ public static class ArbiterTriggerCatalog
             ["delegate.planner"] = DelegatePlannerFacts,
             ["delegate.planner.returned"] = Union(
                 DelegatePlannerFacts,
-                ["git.changed-paths.since-dispatch", "ledger.concurrent.paths", "checkout.stray-paths"]),
+                ["git.changed-paths.since-dispatch", "git.changed-paths.attributed", "ledger.concurrent.paths", "checkout.stray-paths"]),
             ["investigate"] = new HashSet<string>(StringComparer.Ordinal)
             {
                 "caller",
@@ -101,6 +101,7 @@ public static class ArbiterTriggerCatalog
                 "delegation.markers",
                 "roster.caller.delegates-to",
                 "git.changed-paths.since-dispatch",
+                "git.changed-paths.attributed",
                 "ledger.concurrent.paths",
                 "delegation.target-profile",
                 "checkout.stray-paths",

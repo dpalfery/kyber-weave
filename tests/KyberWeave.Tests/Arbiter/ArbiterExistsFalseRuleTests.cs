@@ -58,6 +58,7 @@ public sealed class ArbiterExistsFalseRuleTests
                 "KW-ARB-OWNER-001",
                 "KW-ARB-MODE-001",
                 "KW-ARB-DIFF-001",
+                "KW-ARB-PLANNER-DIFF-001",
                 "KW-ARB-PLANNER-001",
                 "KW-ARB-PLANREAD-001",
                 "KW-ARB-READONLY-001",

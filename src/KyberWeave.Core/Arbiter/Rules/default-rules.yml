@@ -290,20 +290,28 @@ rules:
   - id: KW-ARB-PLANNER-DIFF-001
     trigger: delegate.planner.returned
     question: Did the planner write only inside the plan, spec and todo directories?
-    answers: [inside, outside]
+    answers: [unattributed, inside, outside]
+    # The changed paths are git's, less those that belong to writer dispatches in flight in the same working tree
+    # during this one (parallel workers share a run worktree). When a sibling declared no files, what is left
+    # outside the planning directories cannot be attributed and the answer is unattributed.
     decide:
       - when: { fact: git.changed-paths.since-dispatch, count: 0 }
         answer: inside
-      - when: { fact: git.changed-paths.since-dispatch, subset-of: config.planning-dirs }
+      - when:
+          all:
+            - { fact: git.changed-paths.since-dispatch, exists: true }
+            - { fact: git.changed-paths.attributed, exists: false }
+        answer: unattributed
+      - when: { fact: git.changed-paths.attributed, subset-of: config.planning-dirs }
         answer: inside
-      - when: { fact: git.changed-paths.since-dispatch, exists: true }
+      - when: { fact: git.changed-paths.attributed, exists: true }
         answer: outside
-    effects: { inside: allow, outside: escalate }
+    effects: { unattributed: allow, inside: allow, outside: escalate }
 
   - id: KW-ARB-READONLY-001
     trigger: investigate.returned
     question: Did the read-only dispatch leave the tree unchanged?
-    answers: [not-read-only, unchanged, changed]
+    answers: [not-read-only, unattributed, unchanged, changed]
     # A specialist the catalog says writes files (a bug-crusher's fix, a writer or planner dispatched by a
     # caller nobody names) changes the tree by design. The run-start dispatch is the one such dispatch
     # still held to an unchanged tree.
@@ -317,9 +325,15 @@ rules:
         answer: unchanged
       - when: { fact: git.changed-paths.since-dispatch, count: 0 }
         answer: unchanged
-      - when: { fact: git.changed-paths.since-dispatch, exists: true }
+      # Writers dispatched in parallel share the worktree: their declared files are set aside first, and when a
+      # sibling declared none, what is left cannot be attributed to this dispatch.
+      - when: { fact: git.changed-paths.attributed, exists: false }
+        answer: unattributed
+      - when: { fact: git.changed-paths.attributed, count: 0 }
+        answer: unchanged
+      - when: { fact: git.changed-paths.attributed, exists: true }
         answer: changed
-    effects: { not-read-only: allow, unchanged: allow, changed: escalate }
+    effects: { not-read-only: allow, unattributed: allow, unchanged: allow, changed: escalate }
 
   - id: KW-ARB-LENS-001
     trigger: lens.spawn

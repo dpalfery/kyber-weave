@@ -102,7 +102,8 @@ public sealed class ArbiterHeaderlessCopilotCliTests : IDisposable
             candidate => string.Equals(candidate.Id, "KW-ARB-READONLY-001", StringComparison.Ordinal));
         ArbiterFactSet facts = TriggerFactBuilder.Build(
                 "investigate.returned", target, prompt, "bug-crusher", ArbiterCallerSources.Harness, KyberWeaveConfig.ProductDefaults)
-            .With("git.changed-paths.since-dispatch", new List<string> { "src/a.ts" }, ArbiterFactLabel.Derived);
+            .With("git.changed-paths.since-dispatch", new List<string> { "src/a.ts" }, ArbiterFactLabel.Derived)
+            .With("git.changed-paths.attributed", new List<string> { "src/a.ts" }, ArbiterFactLabel.Derived);
 
         Assert.Equal(expected, RuleEngine.Decide(rule, facts));
     }

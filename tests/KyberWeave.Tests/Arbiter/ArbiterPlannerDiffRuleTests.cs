@@ -19,6 +19,7 @@ public sealed class ArbiterPlannerDiffRuleTests
 {
     private const string RuleId = "KW-ARB-PLANNER-DIFF-001";
     private const string SinceDispatchFact = "git.changed-paths.since-dispatch";
+    private const string AttributedFact = "git.changed-paths.attributed";
 
     private const string PlannerPrompt =
         "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\n\nPlan prompt";
@@ -67,7 +68,10 @@ public sealed class ArbiterPlannerDiffRuleTests
 
         if (includeChangedPaths)
         {
-            return facts.With(SinceDispatchFact, changedPaths, ArbiterFactLabel.Derived);
+            // Alone in its tree the planner owns every path that changed, so the attributed paths are the same.
+            return facts
+                .With(SinceDispatchFact, changedPaths, ArbiterFactLabel.Derived)
+                .With(AttributedFact, changedPaths, ArbiterFactLabel.Derived);
         }
 
         Dictionary<string, ArbiterFact> dict = facts.Facts
@@ -310,7 +314,8 @@ public sealed class ArbiterPlannerDiffRuleTests
         EnrichPlannerPre(gitFacts, probe.Root, toolCallId: "call-plan-1");
         WriteRepoFile(probe.Root, "docs/plans/2026-11-09-feature-plan.md", "# Plan\n");
 
-        ArbiterFactSet planOnlyReturn = EnrichPlannerReturn(gitFacts, probe.Root, toolCallId: "call-plan-1");
+        ArbiterFactSet planOnlyReturn = AttributedToThePlanner(
+            EnrichPlannerReturn(gitFacts, probe.Root, toolCallId: "call-plan-1"));
         IReadOnlyList<string> planOnlyPaths = Assert.IsAssignableFrom<IReadOnlyList<string>>(
             planOnlyReturn.Facts[SinceDispatchFact].Value);
         Assert.Equal(["docs/plans/2026-11-09-feature-plan.md"], planOnlyPaths);
@@ -320,13 +325,18 @@ public sealed class ArbiterPlannerDiffRuleTests
         EnrichPlannerPre(gitFacts, probe.Root, toolCallId: "call-plan-2");
         WriteRepoFile(probe.Root, "src/Rogue.cs", "// rogue planner edit\n");
 
-        ArbiterFactSet rogueReturn = EnrichPlannerReturn(gitFacts, probe.Root, toolCallId: "call-plan-2");
+        ArbiterFactSet rogueReturn = AttributedToThePlanner(
+            EnrichPlannerReturn(gitFacts, probe.Root, toolCallId: "call-plan-2"));
         IReadOnlyList<string> roguePaths = Assert.IsAssignableFrom<IReadOnlyList<string>>(
             rogueReturn.Facts[SinceDispatchFact].Value);
         Assert.Contains("src/Rogue.cs", roguePaths);
         Assert.Equal("outside", RuleEngine.Decide(rule, rogueReturn));
         Assert.Equal(RuleEffects.Escalate, EffectFor(rule, "outside"));
     }
+
+    /// <summary>With no dispatch in flight beside it, the planner owns every path that changed.</summary>
+    private static ArbiterFactSet AttributedToThePlanner(ArbiterFactSet facts) =>
+        facts.With(AttributedFact, facts.Facts[SinceDispatchFact].Value, ArbiterFactLabel.Derived);
 
     private static void EnrichPlannerPre(HookGitFacts gitFacts, string repoRoot, string? toolCallId)
     {
