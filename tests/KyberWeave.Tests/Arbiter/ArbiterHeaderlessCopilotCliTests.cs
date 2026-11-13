@@ -70,8 +70,29 @@ public sealed class ArbiterHeaderlessCopilotCliTests : IDisposable
         Assert.Equal("bug-crusher", record.Caller);
     }
 
+    [Fact]
+    public void AHeaderlessPlannerThatWroteItsPlan_IsNotEscalatedOnReturn()
+    {
+        const string Prompt = "Plan the status cards.";
+        Run(Payload("architect", Prompt));
+        Directory.CreateDirectory(Path.Combine(_probe.Root, "docs", "plans"));
+        File.WriteAllText(Path.Combine(_probe.Root, "docs", "plans", "cards.md"), "# Plan\n");
+
+        string stdout = Run(Payload(
+            "architect",
+            Prompt,
+            objects: new Dictionary<string, object> { ["toolResult"] = new { resultType = "success", textResultForLlm = "Plan written." } }));
+
+        Assert.DoesNotContain("ARBITER_ESCALATION", stdout, StringComparison.Ordinal);
+        Assert.Contains(
+            Decisions().Where(decision => decision.Trigger == "investigate.returned").SelectMany(decision => decision.Rules),
+            rule => rule.Id == "KW-ARB-READONLY-001" && rule.Answer == "not-read-only");
+        Assert.DoesNotContain(Decisions().SelectMany(decision => decision.Rules), rule => rule.Effect == "escalate");
+    }
+
     [Theory]
     [InlineData("typescript-dev", "Fix the parser.", "not-read-only")]
+    [InlineData("architect", "Plan the parser fix.", "not-read-only")]
     [InlineData("research-agent", "Find the parser.", "changed")]
     [InlineData("Explore", "KYBER-ARBITER: true\n\nMap the repository.", "changed")]
     [InlineData("github-devops", "RUN-START: true\nkyber-weave run start --harness copilot --type fix --slug a", "changed")]
@@ -86,7 +107,11 @@ public sealed class ArbiterHeaderlessCopilotCliTests : IDisposable
         Assert.Equal(expected, RuleEngine.Decide(rule, facts));
     }
 
-    private string Payload(string target, string prompt, Dictionary<string, string>? extra = null)
+    private string Payload(
+        string target,
+        string prompt,
+        Dictionary<string, string>? extra = null,
+        Dictionary<string, object>? objects = null)
     {
         Dictionary<string, object> payload = new()
         {
@@ -97,6 +122,8 @@ public sealed class ArbiterHeaderlessCopilotCliTests : IDisposable
             ["toolArgs"] = JsonSerializer.Serialize(new { agent_type = target, description = "work", prompt }),
         };
         foreach (KeyValuePair<string, string> pair in extra ?? [])
+            payload[pair.Key] = pair.Value;
+        foreach (KeyValuePair<string, object> pair in objects ?? [])
             payload[pair.Key] = pair.Value;
         return JsonSerializer.Serialize(payload);
     }

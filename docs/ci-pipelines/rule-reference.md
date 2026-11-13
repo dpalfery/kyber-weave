@@ -288,7 +288,7 @@ receipts and logs key on them, so an id is never reused or renumbered.
 | `KW-ARB-GATE-REPORT-001` | `delegate.returned` | 0, then 1 | The worker ran the task gate. A report that contradicts the `TASK_GATE` claim (`disagrees`) escalates at step 0; an unreadable line goes to the model, and only a confident `missing` escalates |
 | `KW-ARB-PLANNER-001` | `delegate.planner` | 0, then 1 | The dispatch asks the planner for planning work. Step 0 recognises an exact marker with an in-directory or absent `PLAN_FILE`; only a confident model `malformed` escalates. The retired `plan-file-invalid` and `plan-file-outside-planning-dirs` answers are no longer produced (ADR 0072) |
 | `KW-ARB-PLANNER-DIFF-001` | `delegate.planner.returned` | 0 | Planner wrote only plan, spec, and todo directories |
-| `KW-ARB-READONLY-001` | `investigate.returned` | 0 | Read-only dispatch left the tree unchanged. An `implementation`-class target answers `not-read-only` (allow), except the `RUN-START: true` dispatch |
+| `KW-ARB-READONLY-001` | `investigate.returned` | 0 | Read-only dispatch left the tree unchanged. An `implementation`- or `planner`-class target answers `not-read-only` (allow), except the `RUN-START: true` dispatch |
 | `KW-ARB-LENS-001` | `lens.spawn` | 0, then 1 | Lens applies to this change; `correctness` and `test-adequacy` skip only on a non-empty, positively Markdown-only changed set |
 | `KW-ARB-QUOTE-001` | `lens.returned` | 0 | Finding excerpt present at its `file:line` |
 | `KW-ARB-PREEX-001` | `lens.returned` | 0 | Excerpt inside a changed hunk; reads `finding.changed-lines`, so it answers `in-hunk` or `outside-hunk` (annotate) |

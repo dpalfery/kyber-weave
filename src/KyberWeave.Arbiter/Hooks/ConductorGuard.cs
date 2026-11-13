@@ -14,7 +14,8 @@ namespace KyberWeave.Arbiter.Hooks;
 /// them at run time and restates the workflow on every model-facing message.
 /// </summary>
 /// <remarks>
-/// The hook is scoped to the conductor by the agent file, so it needs no configuration. It
+/// The hook is scoped to the conductor by the agent file, so it needs no configuration; it reads the
+/// repository's, best effort, only for the planning directories its Config Reg names. It
 /// writes nothing for a permitted tool, which leaves Copilot's normal permission flow in charge.
 /// A deny is always explicit: Copilot runs the tool when a hook times out, prints nothing, or
 /// prints invalid JSON, so an unreadable event is denied rather than ignored.
@@ -67,6 +68,10 @@ public static partial class ConductorGuard
     };
 
     private static readonly string[] ContractDirectories = ["plans", "specs", "todo"];
+
+    // A plans/specs/todo segment can also name project code (web/specs/login.spec.ts), so outside the
+    // configured planning directories only plan documents and their task files are readable.
+    private static readonly string[] ContractExtensions = [".md", ".json"];
 
     /// <summary>Answers one hook event. Always returns 0: a deny rides stdout.</summary>
     /// <param name="stdin">The hook event as JSON.</param>
@@ -302,8 +307,9 @@ public static partial class ConductorGuard
     }
 
     /// <summary>
-    /// A file the conductor may read: its own references and skills, an <c>AGENTS.md</c>, and anything under
-    /// the planning directories, such as a plan's <c>.tasks.json</c>. Reading is all <c>view</c> does.
+    /// A file the conductor may read: its own references and skills, an <c>AGENTS.md</c>, anything under the
+    /// configured planning directories, and a <c>.md</c> or <c>.json</c> file under a <c>plans</c>, <c>specs</c>
+    /// or <c>todo</c> directory, such as a plan's <c>.tasks.json</c>. Reading is all <c>view</c> does.
     /// </summary>
     private static bool IsContractPath(string path, string? cwd, string copilotHome)
     {
@@ -337,7 +343,8 @@ public static partial class ConductorGuard
         bool contract = relative.StartsWith(".github/agents/conductor/", StringComparison.OrdinalIgnoreCase)
             || relative.StartsWith(".github/skills/", StringComparison.OrdinalIgnoreCase)
             || string.Equals(segments[^1], "AGENTS.md", StringComparison.OrdinalIgnoreCase)
-            || segments[..^1].Any(segment => ContractDirectories.Contains(segment, StringComparer.OrdinalIgnoreCase))
+            || (segments[..^1].Any(segment => ContractDirectories.Contains(segment, StringComparer.OrdinalIgnoreCase))
+                && ContractExtensions.Contains(Path.GetExtension(relative), StringComparer.OrdinalIgnoreCase))
             || ConfiguredPlanningDirectories(cwd).Any(directory => relative.StartsWith(directory, StringComparison.OrdinalIgnoreCase));
         return contract && !HasLinkBelow(root, fullPath);
     }

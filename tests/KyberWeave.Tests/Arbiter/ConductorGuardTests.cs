@@ -77,7 +77,6 @@ public sealed class ConductorGuardTests
     [InlineData("docs/specs/feature/tasks.md")]
     [InlineData("docs/todo/item.md")]
     [InlineData("docs/plans/2026-11-12-widget.tasks.json")]
-    [InlineData("docs/plans/code.cs")]
     [InlineData("/home/me/.copilot/skills/delivery-execution/SKILL.md")]
     [InlineData("/home/me/.copilot/skills/delivery-execution/references/gate.md")]
     [InlineData(".github/skills/delivery-execution/SKILL.md")]
@@ -93,6 +92,8 @@ public sealed class ConductorGuardTests
     [InlineData("/elsewhere/plans/x.md")]
     [InlineData("/home/me/.copilot/config.json")]
     [InlineData("src/skills/x.cs")]
+    [InlineData("docs/plans/code.cs")]
+    [InlineData("web/specs/login.spec.ts")]
     [InlineData("evil/agents/conductor/secret.md")]
     [InlineData("/tmp/agents/conductor/secret.md")]
     public void OtherFiles_AreDenied(string path)

@@ -242,7 +242,7 @@ each, what stays at step 0 and which answer only the model can give.
 | `KW-ARB-GATE-REPORT-001` | `delegate.returned` | 0, then 1 (`choice`, ≥ 0.8) | Does the report say the worker ran the task gate? Step 0: `verified`, `disagrees` (escalates, machine), `no-report`. Model only: `missing` (escalates). |
 | `KW-ARB-PLANNER-001` | `delegate.planner` | 0, then 1 (`choice`, ≥ 0.8) | Does the dispatch ask the planner for planning work? Step 0: `recognised` for an exact marker and an in-directory or absent `PLAN_FILE`. Model only: `malformed` (escalates). Where the planner writes is checked by PLANNER-DIFF-001. |
 | `KW-ARB-PLANNER-DIFF-001` | `delegate.planner.returned` | 0 | Did the planner write only plan, spec, and todo directories? Machine fact: git. |
-| `KW-ARB-READONLY-001` | `investigate.returned` | 0 | Did the read-only dispatch leave the tree unchanged? A target the catalog classes as `implementation` answers `not-read-only` and is allowed, except the `RUN-START: true` dispatch. |
+| `KW-ARB-READONLY-001` | `investigate.returned` | 0 | Did the read-only dispatch leave the tree unchanged? A target the catalog classes as `implementation` or `planner` answers `not-read-only` and is allowed, except the `RUN-START: true` dispatch. |
 | `KW-ARB-LENS-001` | `lens.spawn` | 0, then 1 (`noul`, skip below P 0.1) | Does the lens apply to this change? |
 | `KW-ARB-QUOTE-001` | `lens.returned` | 0 | Is each finding's excerpt present at its `file:line`? |
 | `KW-ARB-PREEX-001` | `lens.returned` | 0 | Is the excerpt inside a changed hunk? It reads `finding.changed-lines`. |

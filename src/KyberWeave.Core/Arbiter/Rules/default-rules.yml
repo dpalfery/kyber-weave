@@ -293,13 +293,13 @@ rules:
     trigger: investigate.returned
     question: Did the read-only dispatch leave the tree unchanged?
     answers: [not-read-only, unchanged, changed]
-    # A specialist the catalog says writes files (a bug-crusher's fix, a writer dispatched by a caller
-    # nobody names) changes the tree by design. The run-start dispatch is the one such dispatch still held
-    # to an unchanged tree.
+    # A specialist the catalog says writes files (a bug-crusher's fix, a writer or planner dispatched by a
+    # caller nobody names) changes the tree by design. The run-start dispatch is the one such dispatch
+    # still held to an unchanged tree.
     decide:
       - when:
           all:
-            - { fact: delegation.target-class, equals: implementation }
+            - { fact: delegation.target-class, in: [implementation, planner] }
             - { not: { fact: delegation.markers, equals: RUN-START } }
         answer: not-read-only
       - when: { fact: git.changed-paths.since-dispatch, exists: false }
