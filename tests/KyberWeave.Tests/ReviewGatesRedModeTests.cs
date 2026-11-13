@@ -417,6 +417,22 @@ public sealed class ReviewGatesRedModeTests : IDisposable
     }
 
     [Fact]
+    public void APassingRunPrintsTheDigestWhoseTaskGateLineTheReportCorroborates()
+    {
+        string root = Project("namespace Widget.Tests; public class WidgetTests { public void T() { } }");
+        string report = Path.Combine(root, "gates.json");
+
+        (int exit, string output) = Run(root, "--out", report);
+
+        Assert.True(exit == 0, output);
+        Assert.Contains("STATUS: PASS", output, StringComparison.Ordinal);
+        Assert.Contains($"FILES: {TestFile}", output, StringComparison.Ordinal);
+        string claim = output.Split('\n').Select(line => line.Trim()).Single(line => line.StartsWith("TASK_GATE: ", StringComparison.Ordinal));
+        // The worker fills in the run count; the rest of the line is the report's own and must corroborate.
+        Assert.True(GateReportFacts.Agrees(claim.Replace("runs=<k>", "runs=2", StringComparison.Ordinal), root), claim);
+    }
+
+    [Fact]
     public void RedRequiresAnAgent()
     {
         string root = Project("namespace Widget.Tests; public class WidgetTests { }");

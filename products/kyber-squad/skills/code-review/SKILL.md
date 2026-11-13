@@ -28,7 +28,7 @@ that applies, so the choice is a machine fact:
 |---|---|
 | First full review (`cycle: 1 mode: full`), or any review outside the council | [references/first-review.md](references/first-review.md) |
 | Verifier cycle (`mode: verifier`) | [references/verifier-cycle.md](references/verifier-cycle.md) |
-| Quick review of a change of at most 300 lines | [references/quick-review.md](references/quick-review.md) only |
+| Quick review of a change of at most 300 lines | [references/quick-review.md](references/quick-review.md), with the pre-push gate's defect-class checklist |
 | Pre-push self-review of your own change | [references/pre-push.md](references/pre-push.md) |
 
 Lens charters stay in `references/lenses/<lens>.md`, one per lens.
@@ -224,7 +224,7 @@ say so alongside it with the finding that should have changed it.
 
 ## Quick review
 
-A change of at most 300 changed lines (added plus removed, from `git diff --numstat <base>...HEAD`) gets the quick review before its pull request is opened; a larger change gets the full pre-push council. The quick review is one pass by the session that made the change, with no seats, no gates beyond the root `AGENTS.md` and no verdict engine: follow [references/quick-review.md](references/quick-review.md) alone.
+A change of at most 300 changed lines (added plus removed, from `git diff --numstat <base>...HEAD`) gets the quick review before its pull request is opened; a larger change gets the full pre-push council. The quick review is one pass by the session that made the change, with no seats, no gates beyond the root `AGENTS.md` and no verdict engine: follow [references/quick-review.md](references/quick-review.md).
 
 ## Pre-push self-review gate
 

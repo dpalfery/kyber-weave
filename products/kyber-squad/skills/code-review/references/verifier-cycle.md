@@ -1,6 +1,6 @@
 # Verifier cycle
 
-Read this in every review cycle after the first, which the council's gate run prints as `cycle: <n> mode: verifier` and `next: read references/verifier-cycle.md`. The gate run has already printed the `recheck:` findings and the `rerun:`/`carry:` gates, run only the `rerun:` gates and carried the rest into `gates.json`; `--full` runs every gate instead. The refutation pass sends only the candidates no earlier cycle refuted, and the verdict command takes `--prior <prior cycle folder>` (step 5 of `SKILL.md`).
+Read this in every review cycle after the first, which the council's gate run prints as `cycle: <n> mode: verifier` and `next: read references/verifier-cycle.md`. The gate run has already printed the `recheck:` findings and the `rerun:`/`carry:` gates, run only the `rerun:` gates and carried the rest into `gates.json`; `--full` runs every gate instead. The refutation pass sends only the candidates no earlier cycle refuted, and the verdict command takes `--prior <prior cycle folder>` (step 5 of `SKILL.md`). To re-seat a lens, take its file and runner (`review-lens` or `review-triage`) from the lens catalogue in [first-review.md](first-review.md#the-lens-catalogue).
 
 ## Review loop
 
