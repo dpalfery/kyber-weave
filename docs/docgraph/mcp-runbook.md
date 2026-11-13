@@ -1479,7 +1479,8 @@ order matches: provenance, `result: pass` or `result: fail` with counts, then fi
 errors and criticals before warnings.
 
 Warnings such as `KW-DOC-DRIFT-003` do **not** fail the gate; they still appear in the
-findings when present. A missing or unreadable CodeGraph index is reported as critical
+findings when present. An index older than the code collapses the unresolved references into one
+`KW-DOC-DRIFT-004` error naming `codegraph sync .` instead of listing each as drift. A missing or unreadable CodeGraph index is reported as critical
 `KW-DOC-DRIFT-001` with the existing "Drift cannot be verified" message — not as `result:
 pass`.
 

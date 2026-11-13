@@ -81,6 +81,7 @@ its `tasks.json` into the archive is caught rather than kept as dead weight.
 | `KW-DOC-DRIFT-001` | Error / Critical | `code-refs` symbol unresolved. Critical when the index itself is missing. |
 | `KW-DOC-DRIFT-002` | Error | `api-endpoints` route matches no indexed route |
 | `KW-DOC-DRIFT-003` | Warning | `source-root` exists but nothing beneath it is indexed |
+| `KW-DOC-DRIFT-004` | Error | The CodeGraph index is older than the code; unresolved references are reported once instead of one by one. Run `codegraph sync .` |
 
 ### Analysis — `docs integrity-check`
 

@@ -156,10 +156,18 @@ Requires a CodeGraph index and the `sqlite3` CLI on PATH.
 | `KW-DOC-DRIFT-001` | Error | A `code-refs` symbol resolves to nothing in the index |
 | `KW-DOC-DRIFT-002` | Error | An `api-endpoints` route matches no indexed route |
 | `KW-DOC-DRIFT-003` | Warning | `source-root` exists but nothing beneath it is indexed |
+| `KW-DOC-DRIFT-004` | Error | The index is older than the code and the run found references it cannot resolve |
 
 A missing index is reported once as **critical** rather than as a per-document error
 storm, with the remedy: run `codegraph index` at the repository root, or restore the
 cached index in CI.
+
+`-004` replaces the findings above when the index lags the checkout. The index records the commit
+it was built at and each file's time; when git reports an indexed source file changed (or a new one
+added) since, the unresolved references are not listed one by one, because a renamed or new symbol
+looks identical to documentation drift. The one finding names the fix: `codegraph sync .` or
+`kyber-weave doctor --ensure .`. It appears only when there was something to explain, and
+documentation-only changes never make an index stale.
 
 `-003` is a warning rather than an error because the honest cause is ambiguous: either the
 path is wrong, or the index is stale, and the tool cannot tell which.
