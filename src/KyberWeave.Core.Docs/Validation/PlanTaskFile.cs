@@ -50,7 +50,7 @@ public sealed record PlanTaskFile(
 /// <param name="Files">The task's file scope, matching the plan's; null when none.</param>
 /// <param name="Session">
 /// The worker session group: tasks sharing it continue one worker session where the harness
-/// allows it, which is why a plan's RED and GREEN tasks do not share one.
+/// allows it.
 /// </param>
 /// <param name="Prompt">The worker's whole brief, pasted unchanged at dispatch.</param>
 public sealed record PlanTaskFileEntry(

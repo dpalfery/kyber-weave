@@ -56,7 +56,7 @@ public sealed class ArbiterExistsFalseRuleTests
                 "KW-ARB-SCOPE-002",
                 "KW-ARB-READY-001",
                 "KW-ARB-OWNER-001",
-                "KW-ARB-MODE-001",
+                "KW-ARB-MODE-002",
                 "KW-ARB-DIFF-001",
                 "KW-ARB-PLANNER-DIFF-001",
                 "KW-ARB-PLANNER-001",
@@ -82,7 +82,7 @@ public sealed class ArbiterExistsFalseRuleTests
 
         Assert.Equal(RuleEngine.Undecidable, RuleEngine.Decide(plan, facts));
         Assert.NotNull(plan.Ask);
-        foreach (string id in new[] { "KW-ARB-SCOPE-002", "KW-ARB-READY-001", "KW-ARB-OWNER-001", "KW-ARB-MODE-001" })
+        foreach (string id in new[] { "KW-ARB-SCOPE-002", "KW-ARB-READY-001", "KW-ARB-OWNER-001" })
         {
             ArbiterRule rule = Assert.Single(config.Arbiter.Rules, r => r.Id == id);
             Assert.Equal("no-task", RuleEngine.Decide(rule, facts));

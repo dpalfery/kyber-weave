@@ -79,7 +79,6 @@ public static class PlanFacts
             facts = facts.With("plan.task.text", task.Text, ArbiterFactLabel.Derived);
             facts = facts.With("plan.task.files", task.Files.ToList(), ArbiterFactLabel.Derived);
             facts = facts.With("plan.task.depends-on", task.DependsOn.ToList(), ArbiterFactLabel.Derived);
-            facts = facts.With("plan.task.dependents", Dependents(document, task), ArbiterFactLabel.Derived);
             facts = facts.With("plan.task.skills", task.Skills.ToList(), ArbiterFactLabel.Derived);
             facts = facts.With(
                 "plan.test-contract.row",
@@ -131,12 +130,6 @@ public static class PlanFacts
 
     private static List<string> TaskList(PlanDocument document) =>
         [.. document.Tasks.Select(Line)];
-
-    /// <summary>The tasks that name <paramref name="task"/> as a dependency, in plan order, one <c>id: title</c> line each.</summary>
-    private static List<string> Dependents(PlanDocument document, PlanTask task) =>
-        [.. document.Tasks
-            .Where(candidate => candidate.DependsOn.Contains(task.Id, StringComparer.Ordinal))
-            .Select(Line)];
 
     private static string Line(PlanTask task) =>
         task.Title.Length > MaxTitleChars

@@ -47,10 +47,11 @@ public static class TriggerFactBuilder
             && !string.Equals(fact, "delegation.target-profile", StringComparison.Ordinal))
             return ArbiterFactLabel.Asserted;
 
-        // The one gate fact the Arbiter computes rather than receives: it joins a returned
-        // digest to the report it names, so it is derived even though gate.* is usually
+        // The gate facts the Arbiter computes rather than receives: they join a returned
+        // digest to the reports on disk, so they are derived even though gate.* is usually
         // dispatch or lens output.
-        if (string.Equals(fact, GateReportFacts.AgreesFact, StringComparison.Ordinal))
+        if (string.Equals(fact, GateReportFacts.AgreesFact, StringComparison.Ordinal)
+            || string.Equals(fact, GateReportFacts.FailingRunFirstFact, StringComparison.Ordinal))
             return ArbiterFactLabel.Derived;
 
         // Measured by the hook from the changed hunks, not supplied by the lens that returned the finding.

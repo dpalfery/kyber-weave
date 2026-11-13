@@ -169,7 +169,7 @@ public sealed class ArbiterPlanReadRuleTests
 
         Assert.Equal(34, ids.Length);
         Assert.Contains(PlanReadRule, ids);
-        Assert.Equal("KW-ARB-CHECKOUT-001", ids[^1]);
+        Assert.Equal("KW-ARB-MODE-002", ids[^1]);
         Assert.Equal("delegate", Rule().Trigger);
     }
 }

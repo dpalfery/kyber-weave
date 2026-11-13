@@ -149,7 +149,7 @@ public sealed partial class PlanTaskFileGenerator
     /// <param name="markdown">The plan, or specification task list, as authored.</param>
     /// <param name="planningDirectories">The folders holding plans, which no prompt may send a worker into.</param>
     /// <param name="report">Receives every gap found; all of them are reported in one run.</param>
-    /// <param name="repoRoot">The repository root, to tell production files that exist from ones a task must create; null when unknown.</param>
+    /// <param name="repoRoot">The repository root, to tell repository paths in a task's files from other text; null when unknown.</param>
     public static PlanTaskFile? Build(
         string artifactPath,
         string markdown,
@@ -195,7 +195,7 @@ public sealed partial class PlanTaskFileGenerator
         {
             PlanContractRow? row = parsed.ContractRows.FirstOrDefault(
                 candidate => string.Equals(candidate.TaskId, task.Id, StringComparison.Ordinal));
-            PlanTaskFileEntry? entry = BuildEntry(task, row, parsed, context, repoRoot, fileScope, artifactPath, planningDirectories, report);
+            PlanTaskFileEntry? entry = BuildEntry(task, row, context, fileScope, artifactPath, planningDirectories, report);
             if (entry is null)
             {
                 gaps = true;
@@ -218,9 +218,7 @@ public sealed partial class PlanTaskFileGenerator
     private static PlanTaskFileEntry? BuildEntry(
         PlanTask task,
         PlanContractRow? row,
-        PlanDocument parsed,
         PlanPacketContext context,
-        string? repoRoot,
         PlanFileScope fileScope,
         string artifactPath,
         IReadOnlyList<string> planningDirectories,
@@ -290,11 +288,6 @@ public sealed partial class PlanTaskFileGenerator
         string fixCommand = TaskFileCommand.Write(artifactPath);
         InlinedPlanContent inlined = PlanPacketInliner.Build(task, body, context, artifactPath, fixCommand);
         report.AddRange(inlined.Findings);
-        if (PlanCompileUnitOrder.Check(task, parsed, repoRoot, artifactPath, fixCommand) is { } order)
-        {
-            report.Add(order);
-        }
-
         string prompt = ComposePrompt(task, body, inlined.Text, command, acceptance);
         IReadOnlyList<string> instructions = PlanReadInstruction.Find(prompt, planningDirectories);
         if (instructions.Count > 0)

@@ -68,8 +68,8 @@ public sealed partial class PlanTaskFileValidator
     /// <summary>A task points at plan content without saying which ("see above", "as described in the plan"). A warning.</summary>
     public const string VagueReference = "KW-DOC-TASKS-009";
 
-    /// <summary>A test task in a compiled test project is not ordered after the task that creates what its tests reference. A warning.</summary>
-    public const string CompileUnitOrder = "KW-DOC-TASKS-010";
+    // KW-DOC-TASKS-010 (a test task ordered before the code its tests name) is retired: a test-first task's one
+    // worker writes the tests and the code together, so no task's tests wait on another task. The id is not reused.
 
     /// <summary>Info: text a task listed as files that is not a repository path was left out of its file scope.</summary>
     public const string NotARepositoryPath = "KW-DOC-TASKS-012";

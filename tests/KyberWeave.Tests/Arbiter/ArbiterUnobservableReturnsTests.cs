@@ -13,8 +13,8 @@ namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
 /// Contract for task 16.9 (unobservable returns, option (a) of Q17): where a harness
-/// cannot observe sub-agent returns, <c>READY-001</c>'s completion check and
-/// <c>MODE-001</c>'s RED check answer <c>returns-unobservable</c>, which allows. The
+/// cannot observe sub-agent returns, <c>READY-001</c>'s completion check answers
+/// <c>returns-unobservable</c>, which allows. The
 /// in-flight overlap check still escalates. RED: the <c>harness.observes-returns</c>
 /// fact, <c>IHarnessHookAdapter.ObservesReturns</c> and the answer do not exist yet.
 /// </summary>
@@ -116,46 +116,12 @@ public sealed class ArbiterUnobservableReturnsTests
     }
 
     [Fact]
-    public void Mode001_WhenReturnsUnobservable_RedMissing_Allows()
-    {
-        ArbiterRule mode = Shipped("KW-ARB-MODE-001");
-        ArbiterFactSet facts = Facts(
-            ("plan.task", "T2"),
-            ("plan.development-mode", "test-first"),
-            ("delegation.target", "react-dev"),
-            ("plan.test-contract.row", "RED: something"),
-            ("harness.observes-returns", false));
-
-        string answer = RuleEngine.Decide(mode, facts);
-
-        Assert.Equal("returns-unobservable", answer);
-        Assert.Equal(RuleEffects.Allow, mode.Effects["returns-unobservable"]);
-    }
-
-    [Fact]
-    public void Mode001_WhenReturnsObserved_RedMissing_AsksTheModel()
-    {
-        ArbiterRule mode = Shipped("KW-ARB-MODE-001");
-        ArbiterFactSet facts = Facts(
-            ("plan.task", "T2"),
-            ("plan.development-mode", "test-first"),
-            ("delegation.target", "react-dev"),
-            ("plan.test-contract.row", "RED: something"),
-            ("ledger.task-returns", NoPaths),
-            ("harness.observes-returns", true));
-
-        Assert.Equal(RuleEngine.Undecidable, RuleEngine.Decide(mode, facts));
-        Assert.Equal(RuleEffects.Escalate, mode.Effects["missing"]);
-    }
-
-    [Fact]
     public void ShippedRules_KeepTheirIds_AndValidateWithZeroErrors()
     {
         var diagnostics = RuleValidator.Validate(ArbiterConfig.ProductDefaults);
 
         Assert.DoesNotContain(diagnostics, d => d.Severity == KyberWeave.Core.Diagnostics.Severity.Error);
         Assert.Contains(ArbiterConfig.ProductDefaults.Rules, rule => rule.Id == "KW-ARB-READY-001");
-        Assert.Contains(ArbiterConfig.ProductDefaults.Rules, rule => rule.Id == "KW-ARB-MODE-001");
     }
 
     private sealed class NullEngine : IHookDecisionEngine

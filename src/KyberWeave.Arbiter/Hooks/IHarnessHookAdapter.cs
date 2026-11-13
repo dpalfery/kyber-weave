@@ -129,7 +129,7 @@ public interface IHarnessHookAdapter
 
     /// <summary>
     /// Whether the harness delivers a sub-agent's return to the post-dispatch hook. When
-    /// false, <c>READY-001</c> and <c>MODE-001</c> answer <c>returns-unobservable</c>
+    /// false, <c>READY-001</c> answers <c>returns-unobservable</c>
     /// (Q17 option (a)): pre-dispatch gating still runs, completion order is advisory.
     /// </summary>
     bool ObservesReturns => true;

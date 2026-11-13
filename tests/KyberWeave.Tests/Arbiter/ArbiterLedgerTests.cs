@@ -16,7 +16,7 @@ namespace KyberWeave.Tests.Arbiter;
 /// Covers the schemas (fields exactly as designed), locked appends that never
 /// interleave and fail closed on an unavailable lock, partial-line tolerance on
 /// reads, pre/post pairing by call-id then pair-digest, the queries the rules
-/// read (in-flight, concurrent, completed, red evidence, <c>REPEAT</c>) and the
+/// read (in-flight, concurrent, completed, <c>REPEAT</c>) and the
 /// no-secrets rule (prompts and code appear only as digests).
 /// </summary>
 public sealed class ArbiterLedgerTests : IDisposable
@@ -130,7 +130,7 @@ public sealed class ArbiterLedgerTests : IDisposable
             Snapshot = new ArbiterSnapshot(
                 "head-sha", new Dictionary<string, string> { ["src/a.cs"] = "blob-1" }),
             ChangedPaths = ["src/a.cs"],
-            Returns = new ArbiterReturnMarkers("PASS", "3 failing tests", "DONE", ["T3=complete"]),
+            Returns = new ArbiterReturnMarkers("PASS", "DONE", ["T3=complete"]),
             BodyNamesPlanningPath = true,
             DecisionId = "decision-1",
         };
@@ -161,7 +161,7 @@ public sealed class ArbiterLedgerTests : IDisposable
         AssertKeys(doc.RootElement.GetProperty("headers"), "plan-file", "task", "lens", "refute");
         AssertKeys(
             doc.RootElement.GetProperty("returns"),
-            "task-review", "red-evidence", "planner-status", "attested");
+            "task-review", "planner-status", "attested");
         AssertKeys(doc.RootElement.GetProperty("snapshot"), "head", "blobs");
     }
 
@@ -488,24 +488,23 @@ public sealed class ArbiterLedgerTests : IDisposable
         Assert.Equal(completed, ledger.CompletedTasks());
     }
 
+    /// <summary>A ledger written before test-first moved to one worker still carries red-evidence; it reads as before.</summary>
     [Fact]
-    public async Task RedEvidenceTasks_CountsNonNoneEvidenceAndRedAttestations()
+    public void ALedgerLineWithTheRetiredRedEvidenceMarkerStillReads()
     {
-        var ledger = new InFlightLedger(ArbiterDirectory);
-        await ledger.AppendAsync(NewEvent(
+        Directory.CreateDirectory(ArbiterDirectory);
+        string line = ArbiterJson.Serialize(NewEvent(
             At(0), ArbiterLedgerPhases.Post,
             headers: new ArbiterLedgerHeaders(Task: "T2"),
-            returnsMarkers: new ArbiterReturnMarkers(RedEvidence: "3 failing tests in GateRunner")));
-        await ledger.AppendAsync(NewEvent(
-            At(1), ArbiterLedgerPhases.Post,
-            headers: new ArbiterLedgerHeaders(Task: "T8"),
-            returnsMarkers: new ArbiterReturnMarkers(RedEvidence: "none")));
-        await ledger.AppendAsync(NewEvent(
-            At(2), ArbiterLedgerPhases.Post,
-            returnsMarkers: new ArbiterReturnMarkers(Attested: ["T1=red", "T4=complete"])));
+            returnsMarkers: new ArbiterReturnMarkers(TaskReview: "PASS")));
+        string old = line.Replace("\"task-review\":", "\"red-evidence\":\"3 failing tests\",\"task-review\":", StringComparison.Ordinal);
+        Assert.Contains("red-evidence", old, StringComparison.Ordinal);
+        File.WriteAllText(Path.Combine(ArbiterDirectory, InFlightLedger.FileName), old + "\n");
 
-        string[] redEvidence = ["T1", "T2"];
-        Assert.Equal(redEvidence, ledger.RedEvidenceTasks());
+        var ledger = new InFlightLedger(ArbiterDirectory);
+
+        Assert.Single(ledger.ReadAll());
+        Assert.Equal(["T2"], ledger.CompletedTasks());
     }
 
     [Fact]
@@ -535,7 +534,6 @@ public sealed class ArbiterLedgerTests : IDisposable
         Assert.Single(ledger.ReadAll());
         Assert.Empty(ledger.InFlightPaths());
         Assert.Empty(ledger.CompletedTasks());
-        Assert.Empty(ledger.RedEvidenceTasks());
     }
 
     [Fact]

@@ -180,89 +180,29 @@ public sealed class PlanTaskPacketTests
         Assert.Contains(report.Items, item => item.Code == "KW-DOC-TASKS-008" && item.Message.Contains("left out", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// KW-DOC-TASKS-010 is retired: a test-first task's one worker writes the tests and the code they name, so no task's
+    /// tests wait on code another task creates, and the generator no longer judges task order by compile unit.
+    /// </summary>
     [Fact]
-    public void ATestTaskThatPrecedesTheTaskCreatingItsProductionCodeIsAWarning()
+    public void ATaskWhoseTestsNameCodeNoEarlierTaskCreatesIsNotWarnedAboutOrder()
     {
         string tasks = """
-            ### T1: RED widget tests
+            ### T1: Widget repository reads widgets
 
-            - **Files:** `tests/Widget.Tests/WidgetTests.cs`
+            - **Files:** `tests/Widget.Tests/WidgetTests.cs`, `src/Widget/WidgetRepository.cs`
             - **Depends on:** none
-            - **Required skills:** `test-dev`
-
-            Test `src/Widget/WidgetRepository.cs`. Command: `dotnet test tests/Widget.Tests`
-            Acceptance criteria: the tests fail for the right reason.
-
-            ### T2: Widget repository
-
-            - **Files:** `src/Widget/WidgetRepository.cs`
-            - **Depends on:** T1
             - **Required skills:** `csharp-dev`
 
-            Command: `dotnet build src`
-            Acceptance criteria: it builds.
+            Test and implement `src/Widget/WidgetRepository.cs`. Command: `dotnet test tests/Widget.Tests`
+            Acceptance criteria: the tests fail before the repository exists and pass after.
             """;
         string contract = "| T1 | `tests/Widget.Tests/WidgetTests.cs` | `dotnet test tests/Widget.Tests` | Reads widgets | Fails: no repository | Passes. |";
-
-        (_, DiagnosticReport report) = Build(Markdown(Decisions, contract, tasks));
-
-        Diagnostic finding = Assert.Single(report.Items, item => item.Code == "KW-DOC-TASKS-010");
-        Assert.Equal(Severity.Warning, finding.Severity);
-        Assert.Equal("T1", finding.Subject);
-        Assert.Contains("WidgetRepository.cs", finding.Message, StringComparison.Ordinal);
-        Assert.Contains("stub task", finding.Hint, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void ATestTaskThatDependsOnTheTaskCreatingTheCodeIsNotWarned()
-    {
-        string tasks = """
-            ### T1: Widget repository stub
-
-            - **Files:** `src/Widget/WidgetRepository.cs`
-            - **Depends on:** none
-            - **Required skills:** `csharp-dev`
-
-            Command: `dotnet build src`
-            Acceptance criteria: it builds.
-
-            ### T2: RED widget tests
-
-            - **Files:** `tests/Widget.Tests/WidgetTests.cs`
-            - **Depends on:** T1
-            - **Required skills:** `test-dev`
-
-            Test `src/Widget/WidgetRepository.cs`. Command: `dotnet test tests/Widget.Tests`
-            Acceptance criteria: the tests fail for the right reason.
-            """;
-        string contract = "| T2 | `tests/Widget.Tests/WidgetTests.cs` | `dotnet test tests/Widget.Tests` | Reads widgets | Fails: no behaviour | Passes. |";
-
-        (_, DiagnosticReport report) = Build(Markdown(Decisions, contract, tasks));
-
-        Assert.DoesNotContain(report.Items, item => item.Code == "KW-DOC-TASKS-010");
-    }
-
-    [Fact]
-    public void AProductionFileNoTaskCreatesAndThatDoesNotExistIsWarnedOnlyWhenTheRepositoryIsKnown()
-    {
-        string tasks = """
-            ### T1: RED widget tests
-
-            - **Files:** `tests/Widget.Tests/WidgetTests.cs`
-            - **Depends on:** none
-            - **Required skills:** `test-dev`
-
-            Test `src/Widget/Missing.cs`. Command: `dotnet test tests/Widget.Tests`
-            Acceptance criteria: the tests fail for the right reason.
-            """;
-        string contract = "| T1 | `tests/Widget.Tests/WidgetTests.cs` | `dotnet test tests/Widget.Tests` | Reads widgets | Fails: nothing | Passes. |";
-        string markdown = Markdown(Decisions, contract, tasks);
         string root = Path.Combine(Path.GetTempPath(), "kw-packet-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try
         {
-            Assert.DoesNotContain(Build(markdown).Report.Items, item => item.Code == "KW-DOC-TASKS-010");
-            Assert.Contains(Build(markdown, root).Report.Items, item => item.Code == "KW-DOC-TASKS-010");
+            Assert.DoesNotContain(Build(Markdown(Decisions, contract, tasks), root).Report.Items, item => item.Code == "KW-DOC-TASKS-010");
         }
         finally
         {

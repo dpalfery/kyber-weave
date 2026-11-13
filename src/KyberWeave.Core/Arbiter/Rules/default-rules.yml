@@ -83,7 +83,9 @@ rules:
       type: choice
       state: { task: plan.task.text, delegation: delegation.prompt }
       criteria:
-        within-task: Every piece of work the delegation asks for is described by the task.
+        within-task: >-
+          Every piece of work the delegation asks for is described by the task. Writing and running the tests for
+          the task's own behaviour, failing first and then passing, is part of every task that changes behaviour.
         adds-work: The delegation asks for work the task does not describe.
         unrelated: The delegation does not concern this task.
       confidence-at-least: 0.8
@@ -137,8 +139,6 @@ rules:
         answer: no-task
       - when: { fact: delegation.target, in: plan.task.skills }
         answer: owner
-      - when: { all: [{ fact: delegation.target, equals: test-dev }, { fact: plan.development-mode, equals: test-first }] }
-        answer: owner
       - when: { any: [{ fact: plan.task.skills, exists: false }, { fact: plan.task.skills, count: 0 }] }
         answer: no-mapping
     ask:
@@ -166,46 +166,6 @@ rules:
       tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
       when: KW-ARB-OWNER-001=no-mapping
     effects: { target: allow, other: escalate }
-
-  - id: KW-ARB-MODE-001
-    trigger: delegate
-    question: In test-first mode, does this dispatch build working behaviour that a failing test should already exist for, with no failing test on record?
-    answers: [no-task, not-required, present, missing, returns-unobservable, returns-unread, in-order]
-    # RED evidence read from a RED_EVIDENCE: marker is a reading of the test-dev report, so when
-    # the marker is not there the model reads the stored report tails and the dispatch. A plan may
-    # order a stub task (declarations a shared test project needs to compile) before its tests, so
-    # the model also reads the task list in plan order and the tasks that depend on this one.
-    decide:
-      - when: { fact: plan.task, exists: false }
-        answer: no-task
-      - when: { fact: plan.development-mode, equals: standard }
-        answer: not-required
-      - when: { fact: delegation.target, equals: test-dev }
-        answer: not-required
-      - when: { fact: delegation.target-profile, equals: documentation }
-        answer: not-required
-      - when: { fact: plan.test-contract.row, equals: Not applicable }
-        answer: not-required
-      - when: { fact: ledger.red-evidence, exists: true }
-        answer: present
-      - when: { fact: harness.observes-returns, equals: false }
-        answer: returns-unobservable
-      - when: { fact: ledger.task-returns, exists: false }
-        answer: returns-unread
-    ask:
-      type: choice
-      state:
-        task: plan.task.text
-        plan-tasks-in-order: plan.task-list
-        tasks-depending-on-this-one: plan.task.dependents
-        returned-reports: ledger.task-returns
-        dispatch: delegation.head
-      criteria:
-        in-order: Either a returned report or the dispatch says failing tests for this behaviour were run and failed, or says the tests' build failed only because they name symbols that do not exist yet (a compile-form RED, such as every error being CS0246 or CS0103 for the types the next task creates), or the task adds only declarations, interfaces, stubs or contracts with no working logic, so that tests a later task writes can compile.
-        missing: The dispatch asks for working logic, and no returned report or dispatch text says a failing test for it was run and failed. A test task listed in the plan, tests that passed, or a build that broke on a syntax or type error, are not that evidence.
-      confidence-at-least: 0.8
-      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
-    effects: { no-task: allow, not-required: allow, present: allow, missing: escalate, returns-unobservable: allow, returns-unread: allow, in-order: allow }
 
   # The roster is the catalog's delegates-to list, so it judges only a caller the catalog names with one.
   # An unidentified caller, a helper agent outside the Squad, and a Squad agent that delegates to no one
@@ -734,6 +694,34 @@ rules:
       - when: { fact: checkout.stray-paths, exists: true }
         answer: stray
     effects: { clean: allow, stray: escalate }
+
+  # Test-first is one worker's loop inside one task: write the tests, run the task gate with --red (a
+  # failing run), implement, run it again (a passing run). Both runs write reports, so the proof is two
+  # files, not a line the worker composes. GateReportFacts reads the folder of the report the TASK_GATE
+  # line claims as a pass: true when an accepted failing-run report there is older, false when there is
+  # none. Every exemption read from plan prose allows, and a claim or report that cannot be read leaves the
+  # fact absent, which no clause matches, so the return is allowed and logged. It replaces KW-ARB-MODE-001,
+  # retired with the RED/GREEN task split.
+  - id: KW-ARB-MODE-002
+    trigger: delegate.returned
+    question: In test-first mode, did the worker's task gate fail on its new tests before it passed?
+    answers: [no-task, not-required, failing-run-first, no-failing-run]
+    decide:
+      - when: { fact: plan.task, exists: false }
+        answer: no-task
+      - when: { fact: plan.development-mode, equals: standard }
+        answer: not-required
+      - when: { fact: delegation.target, equals: test-dev }
+        answer: not-required
+      - when: { fact: delegation.target-profile, equals: documentation }
+        answer: not-required
+      - when: { fact: plan.test-contract.row, equals: Not applicable }
+        answer: not-required
+      - when: { fact: gate.report.failing-run-first, equals: true }
+        answer: failing-run-first
+      - when: { fact: gate.report.failing-run-first, equals: false }
+        answer: no-failing-run
+    effects: { no-task: allow, not-required: allow, failing-run-first: allow, no-failing-run: escalate }
 
 # The OWNER-001 file-kind map, evaluated first match wins. The order is the
 # decision: specific owners precede the documentation and C# catch-alls.
