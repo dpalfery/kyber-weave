@@ -108,6 +108,7 @@ public sealed class ArbiterUnobservableReturnsTests
             ("plan.task.depends-on", TaskT1),
             ("ledger.completed-tasks", NoPaths),
             ("ledger.in-flight.paths", NoPaths),
+            ("ledger.task-returns", NoPaths),
             ("harness.observes-returns", true));
 
         // The markers do not show the dependency complete, which is a reading of prose: the model is asked.
@@ -140,6 +141,7 @@ public sealed class ArbiterUnobservableReturnsTests
             ("plan.development-mode", "test-first"),
             ("delegation.target", "react-dev"),
             ("plan.test-contract.row", "RED: something"),
+            ("ledger.task-returns", NoPaths),
             ("harness.observes-returns", true));
 
         Assert.Equal(RuleEngine.Undecidable, RuleEngine.Decide(mode, facts));

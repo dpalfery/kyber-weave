@@ -81,8 +81,8 @@ public sealed class PluginEnvelope
 
     /// <summary>
     /// Parses and validates one envelope. Throws <see cref="InvalidOperationException"/>
-    /// describing the defect when the payload is malformed: the hook host turns that
-    /// into the harness's fail-closed block carrying <c>KW-ARB-HOOK-001</c>.
+    /// describing the defect when the payload is malformed: the hook host logs it with
+    /// <c>KW-ARB-HOOK-001</c> and allows.
     /// </summary>
     public static PluginEnvelope Parse(JsonElement payload)
     {

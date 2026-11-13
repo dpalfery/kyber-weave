@@ -286,8 +286,8 @@ public static partial class TriggerClassifier
         string? marker)
     {
         // RUN-START: true is the conductor handing the run-start step to a worker because it has no shell
-        // of its own, so the dispatch carries no PLAN_FILE. KW-ARB-PLAN-001 escalates a delegate with no
-        // plan, which would refuse the very route the marker exists for; investigate keeps the roster check
+        // of its own, so the dispatch carries no PLAN_FILE. KW-ARB-PLAN-001 asks whether a delegate names a
+        // plan, and a confident no would refuse the very route the marker exists for; investigate keeps the roster check
         // and KW-ARB-READONLY-001 doing their work over the dispatch instead.
         if (string.Equals(marker, RunStartMarker, StringComparison.Ordinal))
             return "investigate";

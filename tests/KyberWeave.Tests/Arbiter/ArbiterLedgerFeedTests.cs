@@ -40,12 +40,17 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     {
         public Dictionary<string, string> Answers { get; } = new(StringComparer.Ordinal);
 
+        /// <summary>The facts sent with each call, in call order.</summary>
+        public List<ArbiterFactSet> FactsSent { get; } = [];
+
         public Task<ArbiterStep1BatchResult> AskStep1Async(
             IReadOnlyList<ArbiterRule> rules,
             ArbiterFactSet facts,
             IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new ArbiterStep1BatchResult(
+            CancellationToken cancellationToken = default)
+        {
+            FactsSent.Add(facts);
+            return Task.FromResult(new ArbiterStep1BatchResult(
                 rules.ToDictionary(
                     rule => rule.Id,
                     rule => Answers.TryGetValue(rule.Id, out string? answer) ? answer : ArbiterStep1BatchResult.NotEvaluated,
@@ -57,6 +62,7 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
                     rule => rule.Id,
                     rule => new ArbiterStep1Score(null, 0.95, rule.Ask?.ConfidenceAtLeast),
                     StringComparer.Ordinal)));
+        }
     }
 
     private readonly ScriptedProvider _provider = new();
@@ -155,6 +161,39 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
 
         Assert.Equal(Asked, Answer("KW-ARB-READY-001"));
         Assert.Equal(Asked, Answer("KW-ARB-MODE-001"));
+    }
+
+    [Fact]
+    public async Task AReturnsReportTail_ReachesTheDependentTasksQuestion()
+    {
+        // The report carries no RESULT: marker, so the ledger cannot show T1 complete; the model reads the tail.
+        await Dispatch("csharp-dev", Prompt("T1"));
+        await Return("csharp-dev", Prompt("T1"), "Implemented the parser; all tests pass.");
+        await Dispatch("csharp-dev", Prompt("T2"));
+
+        List<string> tails = [.. _provider.FactsSent
+            .Select(facts => facts.TryGet("ledger.task-returns", out ArbiterFact? fact) ? fact.Value as IEnumerable<string> : null)
+            .Where(value => value is not null)
+            .SelectMany(value => value!)];
+        string stored = Assert.Single(tails);
+        Assert.StartsWith("task: T1\n", stored, StringComparison.Ordinal);
+        Assert.Contains("all tests pass", stored, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ADryRunReturn_StoresNoReportTail()
+    {
+        await Dispatch("csharp-dev", Prompt("T1"));
+        await Evaluator().EvaluateAsync(
+            Event("post", "csharp-dev", HeaderBlock.Strip(Prompt("T1")), "s1", "Implemented the parser."),
+            Config(),
+            new ArbiterEvaluatorOptions(DryRun: true),
+            TestContext.Current.CancellationToken);
+
+        string stores = Path.Combine(ArbiterDirectory, "stores");
+        Assert.False(
+            Directory.Exists(stores) && Directory.EnumerateDirectories(stores, "returns-*").Any(),
+            "A dry run must not store a report tail.");
     }
 
     [Fact]

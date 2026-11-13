@@ -86,9 +86,11 @@ rules:
   - id: KW-ARB-READY-001
     trigger: delegate
     question: Has every task this one depends on finished?
-    answers: [no-task, ready, waiting, overlaps-in-flight, unknown-dependency, returns-unobservable]
+    answers: [no-task, ready, waiting, overlaps-in-flight, unknown-dependency, returns-unobservable, returns-unread]
     # Completion read from a return's RESULT: marker is a reading of the worker's prose, so a
     # dependency the markers do not show complete is asked about, with the stored report tails.
+    # With no stored reports to read (the plan was named loosely, so its returns cannot be
+    # found), the question would judge an absence it cannot see, so it is not asked.
     decide:
       - when: { fact: plan.task, exists: false }
         answer: no-task
@@ -102,6 +104,8 @@ rules:
         answer: ready
       - when: { fact: harness.observes-returns, equals: false }
         answer: returns-unobservable
+      - when: { fact: ledger.task-returns, exists: false }
+        answer: returns-unread
     ask:
       type: choice
       state: { depends-on: plan.task.depends-on, completed-by-markers: ledger.completed-tasks, returned-reports: ledger.task-returns, dispatch: delegation.head }
@@ -113,7 +117,7 @@ rules:
     # unknown-dependency (a dependency naming no task in the artifact) needs plan
     # membership the delegate trigger does not supply; it stays declared so the
     # runtime evaluator can answer it once plan parsing reports it.
-    effects: { no-task: allow, ready: allow, waiting: escalate, overlaps-in-flight: escalate, unknown-dependency: escalate, returns-unobservable: allow }
+    effects: { no-task: allow, ready: allow, waiting: escalate, overlaps-in-flight: escalate, unknown-dependency: escalate, returns-unobservable: allow, returns-unread: allow }
 
   - id: KW-ARB-OWNER-001
     trigger: delegate
@@ -159,7 +163,7 @@ rules:
   - id: KW-ARB-MODE-001
     trigger: delegate
     question: In test-first mode, were failing tests for this task written before this implementation dispatch?
-    answers: [no-task, not-required, present, missing, returns-unobservable]
+    answers: [no-task, not-required, present, missing, returns-unobservable, returns-unread]
     # RED evidence read from a RED_EVIDENCE: marker is a reading of the test-dev report, so when
     # the marker is not there the model reads the stored report tails and the dispatch.
     decide:
@@ -177,6 +181,8 @@ rules:
         answer: present
       - when: { fact: harness.observes-returns, equals: false }
         answer: returns-unobservable
+      - when: { fact: ledger.task-returns, exists: false }
+        answer: returns-unread
     ask:
       type: choice
       state: { task: plan.task.text, returned-reports: ledger.task-returns, dispatch: delegation.head }
@@ -185,7 +191,7 @@ rules:
         missing: No returned report and nothing in the dispatch shows that failing tests for this task exist yet.
       confidence-at-least: 0.8
       tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
-    effects: { no-task: allow, not-required: allow, present: allow, missing: escalate, returns-unobservable: allow }
+    effects: { no-task: allow, not-required: allow, present: allow, missing: escalate, returns-unobservable: allow, returns-unread: allow }
 
   - id: KW-ARB-ROSTER-001
     trigger: [delegate, investigate]

@@ -140,7 +140,8 @@ public sealed class ArbiterPlannerRuleTests
     {
         // Completion read from return markers is a reading of the worker's prose, so a dependency the markers do
         // not show complete is asked about (ADR 0072); the model's confident waiting answer escalates.
-        ArbiterFactSet facts = Facts(("plan.task", "T2"), ("plan.task.depends-on", UnsatisfiedDependency));
+        ArbiterFactSet facts = Facts(
+            ("plan.task", "T2"), ("plan.task.depends-on", UnsatisfiedDependency), ("ledger.task-returns", new List<string>()));
 
         Assert.Equal(RuleEngine.Undecidable, RuleEngine.Decide(Shipped("KW-ARB-READY-001"), facts));
         Assert.Equal(RuleEffects.Escalate, Shipped("KW-ARB-READY-001").Effects["waiting"]);

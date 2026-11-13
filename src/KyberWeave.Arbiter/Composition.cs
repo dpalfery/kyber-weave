@@ -12,10 +12,9 @@ public static class Composition
 {
     /// <summary>Dispatches <c>--version</c> and <c>hook</c>. Streams are parameters so the host contract is testable.</summary>
     /// <remarks>
-    /// The hook path fails closed: the stdin read and the host construction run inside
-    /// the fail-closed path, so any exception yields that harness's deny document
-    /// carrying <c>KW-ARB-HOOK-001</c> rather than an empty-stdout error. Stdout carries
-    /// only the decision document; diagnostics go to <paramref name="stderr"/>.
+    /// The hook path fails open (ADR 0072): an exception in the stdin read or the host
+    /// construction logs <c>KW-ARB-HOOK-001</c> to <paramref name="stderr"/> and allows with
+    /// exit 0. Stdout carries only the decision document.
     /// </remarks>
     public static async Task<int> DispatchAsync(
         string[] args,

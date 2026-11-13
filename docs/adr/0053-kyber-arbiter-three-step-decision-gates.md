@@ -195,7 +195,9 @@ judgement about meaning is made without a confidence attached.
     in full, but contributes the family's neutral effect to the combined outcome. The two
     model-targeting rules take their shadow state from `arbiter.model-targeting.mode` alone, so
     a `shadow` override on either fails `KW-ARB-CONFIG-014`. New step-1 rules ship in shadow
-    until thresholds are measured from the decision log.
+    until thresholds are measured from the decision log. The step-1 questions ADR 0072 added
+    to existing conductor rules enforce at once: they can block only on a confident answer, and
+    the step-0 escalations they replace enforced before them.
 27. **Model profiles resolve at render time (D16, D17).** Squad's render resolves each profile to
     its model token and writes a per-harness model-targets table. The hook host reads that table
     and never references the Squad assemblies, so the layering rule holds and no hook process

@@ -18,8 +18,8 @@ namespace KyberWeave.Arbiter.Hooks;
 /// <para>
 /// Outside a repository or without <c>git</c> on <c>PATH</c>, <see cref="GitFacts.GetHead"/>
 /// returns <c>null</c> and every git-derived fact stays absent (<c>null</c>) so rules that
-/// require git evidence fail closed (<c>undecidable</c>) rather than mistaking an
-/// unobservable repository for an empty diff.
+/// require git evidence answer <c>undecidable</c>, which allows and is logged, rather than
+/// mistaking an unobservable repository for an empty diff.
 /// </para>
 /// <para>
 /// On a pre-dispatch trigger whose return trigger declares
