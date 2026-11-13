@@ -186,9 +186,8 @@ the `KW-ARB-SHELL-001` line in the hook log. If the command is one the planner r
    `DocumentedForms` key;
 3. the sync test `KyberWeave.Tests.Arbiter.ArchitectShellGuardSyncTests`, which binds those spans to the keys.
 
-Changing `architect.md` also changes its body digest, so update `final-body-sha256` in
-`products/kyber-squad/migration/architect.md` from the value `SquadCanonicalContentTests` prints, then
-re-render with `kyber-weave squad update` (add `--global` for the user-scope copy).
+After changing `architect.md`, re-render with `kyber-weave squad update` (add `--global` for the
+user-scope copy).
 
 **Harness matrix.** The guard is enforced on Claude only, for the `Bash` and `PowerShell` tools at project and
 user scope. Every other harness keeps the list as instruction only, and the architect keeps it by its own

@@ -1515,8 +1515,8 @@ and the shipped corpus still cannot go quiet.
 
 **One source, not one copy per audience.** The block is read from the source directory rather than
 embedded in the binary, so the shipped text and this repository's text cannot differ. The rendered
-body's digest is deliberately untouched by the injection, so a migration report still describes the
-authored body a host migrated from. A standard template keeps its own test-runner line: a standard
+body's digest is deliberately untouched by the injection, so it still identifies the authored body
+rather than the render-time projection. A standard template keeps its own test-runner line: a standard
 ships into a host repository, is read on its own, and has no Squad render around it, so that line is
 the host's copy of the rule rather than a duplicate of this one.
 

@@ -27,7 +27,7 @@ namespace KyberWeave.Core.Squad.Deployment;
 /// </para>
 /// <para>
 /// <see cref="SquadAgent.BodyDigest"/> is deliberately not recomputed. It identifies the authored
-/// body that migration reports and degradation records record, not the render-time projection.
+/// body, which degradation records cite, not the render-time projection.
 /// </para>
 /// </remarks>
 public static class SquadWorkerBaselineInjector

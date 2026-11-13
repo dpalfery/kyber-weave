@@ -272,8 +272,8 @@ provably ours), and neither finding changes the verb's exit code.
 canonical raw `SKILL.md` except the five explicitly evolved skills (`bug-crusher`, `code-review`,
 `product-owner`, `create-pull-request`, and `pr-review-fix-comments`) matches the
 canonical bytes, as does every non-evolved agent body. The retired `create-pull-request-github`
-skill is folded into `create-pull-request`, and the three retired `-v3` agent identities survive
-only as folded provenance in their canonical migration reports. Renderers project every file an
+skill is folded into `create-pull-request`, and the three retired `-v3` agent identities are
+folded into their canonical counterparts and no longer exist as separate agents. Renderers project every file an
 owner's Markdown links reach beside its principal output, so a fresh Copilot render emits 149
 files with no dangling link; every skill resource reaches this render except
 `skills/setup-dev-environment/agents/openai.yaml`, which stays packaged-only Codex skill-UI

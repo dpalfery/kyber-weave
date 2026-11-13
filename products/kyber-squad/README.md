@@ -59,38 +59,36 @@ products/kyber-squad/
 │   ├── tauri-dev.md
 │   ├── test-dev.md
 │   └── typescript-dev.md
-├── skills/                             # canonical skill directories and their resources
-│   ├── app-docs-standard/
-│   ├── architecture-decision-record/
-│   ├── azure-cli/
-│   ├── azure-naming/
-│   ├── bug-crusher/
-│   ├── code-review/
-│   ├── code-review-loop/
-│   ├── create-pull-request/
-│   ├── csharp-dev/
-│   ├── csp-security/
-│   ├── dal-dev/
-│   ├── delivery-execution/
-│   ├── dp-code-reviewer/
-│   ├── github-cli/
-│   ├── github-devops/
-│   ├── go-dev/
-│   ├── kilo-review-loop/
-│   ├── lm-studio-cli/
-│   ├── maui-dev/
-│   ├── pr-review-fix-comments/
-│   ├── product-owner/
-│   ├── python-dev/
-│   ├── resharper-clt/
-│   ├── rust-dev/
-│   ├── security-review/
-│   ├── setup-dev-environment/
-│   ├── task-gate/
-│   ├── test-dev/
-│   └── typescript-dev/
-└── migration/                          # 18 import and baseline verification logs
-    └── <agent-name>.md
+└── skills/                             # canonical skill directories and their resources
+    ├── app-docs-standard/
+    ├── architecture-decision-record/
+    ├── azure-cli/
+    ├── azure-naming/
+    ├── bug-crusher/
+    ├── code-review/
+    ├── code-review-loop/
+    ├── create-pull-request/
+    ├── csharp-dev/
+    ├── csp-security/
+    ├── dal-dev/
+    ├── delivery-execution/
+    ├── dp-code-reviewer/
+    ├── github-cli/
+    ├── github-devops/
+    ├── go-dev/
+    ├── kilo-review-loop/
+    ├── lm-studio-cli/
+    ├── maui-dev/
+    ├── pr-review-fix-comments/
+    ├── product-owner/
+    ├── python-dev/
+    ├── resharper-clt/
+    ├── rust-dev/
+    ├── security-review/
+    ├── setup-dev-environment/
+    ├── task-gate/
+    ├── test-dev/
+    └── typescript-dev/
 ```
 
 ---
@@ -121,7 +119,7 @@ aliases: []
 The normalized Markdown body following the second `---` delimiter is the authoritative instruction body.
 An agent body may link local Markdown resources beneath the agent's own directory (for example
 `conductor/references/*.md`); those links stay authored verbatim and resolve at the deployment
-target (see [Resource Closures](#6-resource-closures-and-progressive-disclosure)).
+target (see [Resource Closures](#5-resource-closures-and-progressive-disclosure)).
 
 ### 2. Skills (Canonical Skills)
 
@@ -198,17 +196,7 @@ lower it through the unoccupied-identity rule to a same-name role skill. `conduc
 orchestrator: it executes test-first by default with an explicit user opt-out to standard mode,
 and it routes plans, specifications, todos, and open requests through one intake.
 
-### 5. Migration Logs (`migration/`)
-
-The `migration/` directory contains 18 per-agent import reports recording baseline
-sources, SHA-256 hashes, retained additions, excluded harness mechanics, resolved permission
-policies, and final normalized instruction digests. `review-lens` and `review-triage` are
-canonical-only roles and therefore have no migration record. The retired test-first
-duplicates (`conductor-v3`, `architect-v3`) have no separate reports: each
-was folded into its canonical counterpart's report, which retains the retired source hash and a
-refreshed final-body digest for the consolidated instruction body.
-
-### 6. Resource Closures and Progressive Disclosure
+### 5. Resource Closures and Progressive Disclosure
 
 Every agent and skill owns an immutable, validated resource closure. Local links in the
 instruction body and in referenced Markdown are resolved recursively under the owning artifact's

@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: test
 owner: dpalfery
-last-reviewed: 2026-11-11
+last-reviewed: 2026-11-12
 decided-by:
   - adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint
 ---
@@ -110,6 +110,57 @@ test that pins one of those numbers is pinning a documented claim — if you cha
 change the document in the same commit. `RetrievalRegressionTests` in particular guards
 whether real questions find real answers; treat a failure there as a product regression,
 not a test to adjust.
+
+## Prose rules
+
+Agent and docs prose (`products/kyber-squad/**`, governed docs) is tested for what it says, not for
+its words ([ADR 0073](../../adr/0073-prose-rules-are-graded-by-meaning-not-pinned-by-phrase.md)):
+
+- **Structure and protocol tokens are deterministic checks.** File existence, frontmatter, rosters,
+  `delegates-to`, reference resolution, baseline injection, single-home markers, word budgets, and the
+  short tokens code parses or emits (`STATUS:` values, `PLAN_FILE:`, `TASK_GATE:`, rule ids, flags).
+  Assert a token against its C# constant where one exists.
+- **Meaning is graded by Jev.** Each rule is one entry in the rule catalog,
+  [`tests/KyberWeave.Tests/Fixtures/prose-rules/catalog.yml`](../../../tests/KyberWeave.Tests/Fixtures/prose-rules/catalog.yml):
+  a one-sentence `statement`, the `stated-in` files that must state it, at least one negative `control`
+  that must be judged not to, and, where an old rule must not come back, a `retired` statement with the
+  files it must stay `absent-from` and an `example` the grader must recognise. The worker rule map's ids
+  (A1 to G7) are catalog ids; [the map](../../kyber-squad/worker-rule-map.md) names its catalog rule in
+  each row.
+- **No phrase pins, forbidden-phrase pins or hash pins on prose.** A test that asserts a sentence, or a
+  word from one, breaks on every rewording and says nothing about whether the rule is still stated.
+
+`ProseRuleCatalogTests` runs offline on every build: every file, section heading, seed file and anchor
+the catalog names exists, and every rule has a home and a control. Deleting a file, a heading or a catalog
+entry fails there.
+
+`ProseRuleGradingTests` sends each document to Jev through `SystemOneClient`, one two-option `choice`
+question per rule and document. A home passes at the catalog's `confidence-floor` (0.8); a control or an
+absent-from file must be judged not to state the rule at the same floor. A home is sent whole; a file over
+the model's budget is sent as the section the catalog names, and the report says so. An absent-from file is
+judged one part (one or a few `##` sections) at a time. Outcomes: a confident wrong answer or an answer
+below the floor fails, a provider error or timeout skips the test with a warning, a refused key fails.
+
+**Adding a rule.** Write the statement as one narrow judgment, in the documents' own terms (split an "and"
+into two rules). Name the homes, and give the section heading for any file over about 60 KB. Pick a control
+that plainly does not state it (cutting the home's section with `without-section` works only when no other
+section repeats the rule). Run the grader on the rule. If a home stays below the floor after a rewording,
+give that home an `anchor` (a protocol token or heading it already carries, never a sentence of the rule)
+instead of a grade; if an absent-from file stays below the floor, drop it and say why in the commit.
+
+**Running it locally.** The key comes from `TYPESAFE_API_KEY` or the OS credential store entry for the
+endpoint's origin:
+
+```bash
+KW_PROSE_GRADE=1 scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj \
+  -c Release --filter "FullyQualifiedName~ProseRuleGradingTests"
+```
+
+`KW_PROSE_GRADE_ENDPOINT` and `KW_PROSE_GRADE_MODEL` default to `https://openrouter.ai/api/v1` and
+`typesafe/jev-1.14`. `KW_PROSE_GRADE_RULES=<id,id>` grades only those rules, `KW_PROSE_GRADE_OUT=<file>`
+writes every answer as JSON lines and the report beside it, and `KW_PROSE_GRADE_CATALOG=<file>` grades
+another catalog. A full run is about 1,100 questions, 3 million input tokens, $0.13 and 30 seconds; the
+test stops at 12 million tokens or $2.
 
 ## Fixtures
 
