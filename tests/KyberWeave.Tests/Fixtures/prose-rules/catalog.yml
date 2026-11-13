@@ -1420,6 +1420,23 @@ rules:
       - path: products/kyber-squad/agents/conductor/references/autonomy.md
         without-section: Resolution
       - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: autonomy-approves-run-branch-delivery
+    statement: Autonomous mode is the user's explicit approval for the run's commits on its run branch, the push of that branch and its draft pull request, so a host rule that requires approval before a commit or push is satisfied by it.
+    stated-in:
+      - path: products/kyber-squad/agents/conductor/references/autonomy.md
+        section: Delivery
+    controls:
+      - path: products/kyber-squad/agents/conductor/references/autonomy.md
+        without-section: Delivery
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: autonomy-approves-nothing-off-run-branch
+    statement: Autonomous mode approves nothing outside the run branch, such as a commit to the default branch, a force-push, a reset or rebase of work the run did not create, or a merge.
+    stated-in:
+      - path: products/kyber-squad/agents/conductor/references/autonomy.md
+        section: Delivery
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
   - id: autonomous-accepts-recommendations
     statement: In autonomous mode the conductor asks the user nothing; it accepts the recommended option at each gate and records it as "autonomous, recommendation accepted".
     stated-in:
