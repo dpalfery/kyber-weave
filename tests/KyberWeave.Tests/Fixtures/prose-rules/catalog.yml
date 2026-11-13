@@ -2212,3 +2212,15 @@ rules:
     controls:
       - products/kyber-squad/shared/worker-baseline.md
       - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: baseline-diagnostics-never-needs-one-tool
+    statement: When the harness offers no language-diagnostics tool, a developer worker takes its baseline from the project's own build or type-check and lint commands, never stops, refuses or asks for lack of that tool, and says which source it used.
+    stated-in:
+      - products/kyber-squad/agents/csharp-dev.md
+      - products/kyber-squad/agents/dal-dev.md
+      - products/kyber-squad/agents/maui-dev.md
+      - products/kyber-squad/agents/pulumi-dev.md
+      - products/kyber-squad/agents/react-dev.md
+      - products/kyber-squad/agents/test-dev.md
+    controls:
+      - products/kyber-squad/agents/go-dev.md
+      - products/kyber-squad/shared/worker-baseline.md
