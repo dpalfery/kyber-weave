@@ -305,6 +305,14 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
         CommandHelpers.TryWriteReport(settings.Out, ReviewJson.Write(written), ReportWriteFailed, report);
 
         CommandHelpers.Finish(report, settings, "review gates", "Gate");
+        if (cycle is not null && ReportRenderer.IsHuman(settings.ParsedFormat))
+        {
+            Console.WriteLine(
+                $"cycle: {cycle.Plan.Number} mode: {cycle.Mode} ran: {gates.Gates.Count} carried: {written.Gates.Count - gates.Gates.Count} " +
+                $"failed: {gates.Gates.Count(g => !g.Passed && g.NotApplicableReason is null && !(settings.Deadline && VerdictEngine.IsStoppedForTime(g)))}");
+            Console.Out.Flush();
+        }
+
         // Blocking failures are already Error diagnostics; a failed --out write is too.
         // Non-blocking gate failures stay Warning and do not fail the process. Gates that
         // did not apply are Info and never fail it either.
@@ -437,6 +445,8 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
             foreach (string line in ReviewCycleView.VerifierLines(cycle.Plan, cycle.Recheck))
                 Console.WriteLine(line);
         }
+
+        Console.Out.Flush();
     }
 
     /// <summary>

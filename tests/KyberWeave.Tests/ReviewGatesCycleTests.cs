@@ -156,6 +156,24 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
+    public void TheHeaderComesBeforeTheGateReportAndTheSummaryClosesTheOutput()
+    {
+        FinishCycle1();
+        Write("src/a.cs", "// fixed\n");
+        Commit("fix");
+
+        (_, string output) = Gates(2);
+
+        string[] lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        int header = Array.FindIndex(lines, line => line.StartsWith("cycle: 2 mode: verifier", StringComparison.Ordinal) && !line.Contains(" ran:", StringComparison.Ordinal));
+        int firstGate = Array.FindIndex(lines, line => line.Contains("KW-REVIEW-021", StringComparison.Ordinal));
+        Assert.Equal(0, header);
+        Assert.True(firstGate > header, "the gate lines follow the header");
+        Assert.StartsWith("cycle: 2 mode: verifier ran: 2 carried: 1 failed: 0", lines[^1], StringComparison.Ordinal);
+        Assert.Contains(lines, line => line.StartsWith("rerun: build", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void ACycleRecordedForAnotherBranchIsIgnoredAndTheRunIsFull()
     {
         FinishCycle1(branch: "someone-elses-change");
