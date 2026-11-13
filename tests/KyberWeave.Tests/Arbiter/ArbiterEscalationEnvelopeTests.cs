@@ -168,17 +168,21 @@ public sealed class ArbiterEscalationEnvelopeTests
             "dec-2",
             1);
         Assert.Equal(
-            "re-issue this planner dispatch with a recognised marker; do not send it to architect.",
+            "re-issue this planner dispatch as planning work with a recognised marker; do not send it to architect.",
             envelope.RenderNext());
         Assert.Contains(
-            "NEXT: re-issue this planner dispatch with a recognised marker; do not send it to architect.",
+            "NEXT: re-issue this planner dispatch as planning work with a recognised marker; do not send it to architect.",
             envelope.Render(),
             StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void Next_PlannerPlanFileInvalid_NamesTheRepositoryRelativeRule()
+    [Theory]
+    [InlineData("plan-file-invalid")]
+    [InlineData("plan-file-outside-planning-dirs")]
+    public void Next_RetiredPlannerPathAnswers_FallBackToTheGenericConductorNext(string retired)
     {
+        // ADR 0072 retired these answers: a PLAN_FILE's spelling is no longer a refusal, and where a planner
+        // writes is checked on its return. An old record carrying one renders the ordinary conductor NEXT.
         ArbiterEscalationEnvelope envelope = new(
             "delegate.planner",
             "conductor (harness)",
@@ -187,36 +191,13 @@ public sealed class ArbiterEscalationEnvelopeTests
             "T1",
             [new ArbiterEnvelopeEntry(
                 "KW-ARB-PLANNER-001",
-                "Does the dispatch name a valid PLAN_FILE?",
-                ArbiterAnswerText.Step0("plan-file-invalid"),
-                "PLAN_FILE is absolute")],
+                "Does the dispatch ask the planner for planning work?",
+                ArbiterAnswerText.Step0(retired),
+                "retired answer")],
             "dec-10",
             1);
         Assert.Equal(
-            "re-issue this planner dispatch with PLAN_FILE as one repository-relative path, '/'-separated, " +
-            "with no leading '/', '..', backslash, space or tab; do not send it to architect.",
-            envelope.RenderNext());
-    }
-
-    [Fact]
-    public void Next_PlannerPlanFileOutside_NamesThePlanningDirectories()
-    {
-        ArbiterEscalationEnvelope envelope = new(
-            "delegate.planner",
-            "conductor (harness)",
-            "product-owner",
-            "docs/plans/plan.md",
-            "T1",
-            [new ArbiterEnvelopeEntry(
-                "KW-ARB-PLANNER-001",
-                "Does the dispatch name a PLAN_FILE inside the planning directories?",
-                ArbiterAnswerText.Step0("plan-file-outside-planning-dirs"),
-                "PLAN_FILE is docs/adr/0001.md")],
-            "dec-11",
-            1);
-        Assert.Equal(
-            "re-issue this planner dispatch with a PLAN_FILE under the plan, spec or todo directory; " +
-            "do not send it to architect.",
+            "dispatch architect with this envelope; do not retry this delegation unchanged.",
             envelope.RenderNext());
     }
 

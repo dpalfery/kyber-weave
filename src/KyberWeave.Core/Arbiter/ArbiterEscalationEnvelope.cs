@@ -154,19 +154,7 @@ public sealed record ArbiterEscalationEnvelope(
 
             if (PlannerAnswered("malformed"))
             {
-                return "re-issue this planner dispatch with a recognised marker; do not send it to architect.";
-            }
-
-            if (PlannerAnswered("plan-file-invalid"))
-            {
-                return "re-issue this planner dispatch with PLAN_FILE as one repository-relative path, '/'-separated, "
-                    + "with no leading '/', '..', backslash, space or tab; do not send it to architect.";
-            }
-
-            if (PlannerAnswered("plan-file-outside-planning-dirs"))
-            {
-                return "re-issue this planner dispatch with a PLAN_FILE under the plan, spec or todo directory; "
-                    + "do not send it to architect.";
+                return "re-issue this planner dispatch as planning work with a recognised marker; do not send it to architect.";
             }
 
             return repeat >= 2
