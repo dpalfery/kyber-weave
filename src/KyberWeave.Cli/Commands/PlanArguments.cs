@@ -90,7 +90,7 @@ internal static class PlanArguments
     public static void Announce(DiagnosticReport report, AnalysisSettings settings, string relative)
     {
         report.AddMetric("plan", relative);
-        if (settings.ParsedFormat == OutputFormat.Table)
+        if (ReportRenderer.IsHuman(settings.ParsedFormat))
         {
             CommandHelpers.WriteUnfolded(() => AnsiConsole.MarkupLine($"Plan: {Markup.Escape(relative)}"));
         }

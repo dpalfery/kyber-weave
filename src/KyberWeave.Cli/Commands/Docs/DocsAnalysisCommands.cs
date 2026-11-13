@@ -90,7 +90,7 @@ public sealed class DocsReviewExportCommand : Command<DocsReviewExportSettings>
             report.AddMetric("reviewCandidates", result.Bundle.Candidates.Count);
             report.AddMetric("truncated", result.Truncated);
             CommandHelpers.Finish(report, settings, "docs review export", "Candidate");
-            if (settings.ParsedFormat == OutputFormat.Table)
+            if (ReportRenderer.IsHuman(settings.ParsedFormat))
             {
                 AnsiConsole.MarkupLine(
                     $"[green]Exported[/] {result.Bundle.Candidates.Count} review candidates to " +

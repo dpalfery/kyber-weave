@@ -34,7 +34,7 @@ public sealed class LintCommand : Command<LintSettings>
             report.AddRange(linter.LintSkill(skill));
         report.AddRange(linter.LintSet(set));
 
-        if (settings is { Explain: true, ParsedFormat: OutputFormat.Table })
+        if (settings.Explain && ReportRenderer.IsHuman(settings.ParsedFormat))
         {
             AnsiConsole.WriteLine();
             foreach (Skill skill in set.Skills)

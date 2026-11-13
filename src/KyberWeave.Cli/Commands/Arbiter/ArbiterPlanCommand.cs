@@ -102,7 +102,7 @@ public sealed class ArbiterPlanCommand : Command<ArbiterSettings>
 
         // The prose lines are for a person reading the table. Json, sarif and markdown must
         // carry only the rendered report, or a script reading stdout would parse a non-document.
-        if (settings.ParsedFormat == OutputFormat.Table)
+        if (ReportRenderer.IsHuman(settings.ParsedFormat))
         {
             CommandHelpers.WriteUnfolded(() => AnsiConsole.MarkupLine($"[bold]Plan:[/] {Markup.Escape(resolved)}"));
             AnsiConsole.MarkupLine($"[grey]Status: {Markup.Escape(document.Status ?? "—")}; mode: {Markup.Escape(document.DevelopmentMode)}.[/]");

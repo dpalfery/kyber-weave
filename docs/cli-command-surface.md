@@ -245,9 +245,16 @@ dropped.
 | `-v`, `--version` | Print the version (`kyber-weave <version>`). |
 
 Most branches and verbs share two settings bases: `AnalysisSettings` supplies `[path]`,
-`-f\|--format <FORMAT>` (`table` \| `json` \| `sarif` \| `markdown`; default `table`),
+`-f\|--format <FORMAT>` (`table` \| `lines` \| `json` \| `sarif` \| `markdown`; default `table` in an interactive terminal and `lines` when output is redirected),
 `--no-info`, and `-c\|--config <PATH>`; `DocsSettings` extends it with `--docs-root <DIR>`
 (repeatable). `--config` defaults to `<path>/.kyber-weave/kyber-weave.yml`.
+
+The `lines` format is what an agent or a script reads: one finding per line, never wrapped, as
+`<SEVERITY> <RULE-ID> <location>: <message> → <fix>`, then the summary line. The table wraps a rule id or a message
+across several lines when the output is not a terminal, so redirected output defaults to `lines`; an explicit
+`--format` (including `table`) is always honoured. Every command that reports findings through the shared renderer
+gets it, including `docs validate`, `docs drift`, `docs closeout`, `docs tasks`, `review gates`, `arbiter validate`
+and `arbiter doctor`.
 
 ### Naming a plan
 

@@ -117,9 +117,14 @@ public static class CommandHelpers
         }
 
         ReportRenderer.Render(report, settings.ParsedFormat, command, subjectLabel);
-        if (settings.ParsedFormat == OutputFormat.Table)
+        OutputFormat format = settings.ParsedFormat;
+        if (format == OutputFormat.Table)
         {
             AnsiConsole.WriteLine();
+            ReportRenderer.RenderSummary(report);
+        }
+        else if (format == OutputFormat.Lines)
+        {
             ReportRenderer.RenderSummary(report);
         }
     }

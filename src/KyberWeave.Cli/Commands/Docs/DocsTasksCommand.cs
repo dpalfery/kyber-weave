@@ -73,7 +73,7 @@ public sealed class DocsTasksCommand : Command<DocsTasksSettings>
 
         CommandHelpers.Finish(report, settings, "docs tasks", "Task file");
 
-        if (settings.ParsedFormat == OutputFormat.Table && !report.HasErrors && outcome.Json is not null)
+        if (ReportRenderer.IsHuman(settings.ParsedFormat) && !report.HasErrors && outcome.Json is not null)
         {
             if (mode == PlanTaskFileMode.Preview)
             {

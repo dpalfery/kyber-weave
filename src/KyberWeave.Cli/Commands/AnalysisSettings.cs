@@ -12,9 +12,8 @@ public class AnalysisSettings : CommandSettings
     public string Path { get; set; } = ".";
 
     [CommandOption("-f|--format <FORMAT>")]
-    [Description("Output format: table | json | sarif | markdown.")]
-    [DefaultValue("table")]
-    public string Format { get; set; } = "table";
+    [Description("Output format: table | lines | json | sarif | markdown. Defaults to table in an interactive terminal and to lines, one finding per line, when output is redirected.")]
+    public string? Format { get; set; }
 
     [CommandOption("--no-info")]
     [Description("Hide Info-level findings.")]
@@ -31,11 +30,13 @@ public class AnalysisSettings : CommandSettings
     internal string? WorkingDirectory { get; set; }
 
 #pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
-    public OutputFormat ParsedFormat => Format.ToLowerInvariant() switch
+    public OutputFormat ParsedFormat => Format?.ToLowerInvariant() switch
     {
+        null or "" => ReportRenderer.IsInteractive() ? OutputFormat.Table : OutputFormat.Lines,
         "json" => OutputFormat.Json,
         "sarif" => OutputFormat.Sarif,
         "markdown" or "md" => OutputFormat.Markdown,
+        "lines" or "plain" or "text" => OutputFormat.Lines,
         _ => OutputFormat.Table
     };
 #pragma warning restore CA1308
