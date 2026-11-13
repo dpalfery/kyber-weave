@@ -577,6 +577,13 @@ deployed target tree, and about a deployment receipt that still claims its
 files, in both cases printing the delete-then-`squad update` steps and pointing
 at the Kyber-Docs skills (`kyber-docs-*`, see `kyber-docs-onboarding-and-assessment`).
 
+It also warns (`KW-SQUAD-SHADOW-001`, exit code unchanged) when a skill folder the repository keeps
+for itself, in any location a renderer writes skills to (`.agents/skills`, `.github/skills`,
+`.claude/skills`, ...), has the same name as an installed squad skill but different content. Workers
+may load that project copy instead of the installed one. The warning names both paths; delete the
+project copy, or re-run `squad install` for the project. A copy that differs only in frontmatter or
+line endings is not reported.
+
 ### Renamed MCP servers and tools
 
 **This is a breaking change.** The three MCP servers are configured under new keys, and their
