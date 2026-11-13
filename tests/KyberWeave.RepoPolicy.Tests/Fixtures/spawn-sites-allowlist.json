@@ -1464,6 +1464,18 @@
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);",
       "count": 1,
       "bound": "ProcessRunner.Run with GitTimeout = 60 s; the process tree is killed on expiry. git add argv only, for the paths the closeout touched."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReviewGatesCycleTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp repository the fixture created."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReviewGatesCycleTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp repository the fixture created."
     }
   ]
 }
