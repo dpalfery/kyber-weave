@@ -209,9 +209,10 @@ without needing a separate `NEEDS_HUMAN` escape hatch.
 Autonomous delivery follows the current `autonomy.md` contract verbatim. This
 replaces the earlier rule that held an unapproved change back from the remote.
 
-- Push a **draft** pull request whatever the council verdict. The draft is
-  pushed before the council runs, so the council reviews a pull request that
-  already exists.
+- Push a **draft** pull request whatever the council verdict. The council
+  reviews the pushed branch, or the local branch when the push fails, and never
+  waits for a pull request. A pull request that cannot be opened stops nothing:
+  the run finishes locally and reports `NOT DELIVERED: pull request — <reason>`.
 - Mark it ready once required CI passes. Its wait is at most 60 minutes. If CI
   fails or is not done, it stays draft and the report says what it is waiting for.
 - The council verdict, every `autonomous: low-confidence` decision, the

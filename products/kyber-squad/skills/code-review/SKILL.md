@@ -306,9 +306,9 @@ Procedure above and the host's declared gates.
    actor advanced either, reconcile their changes into your branch and revalidate the
    affected work. Merge, never rebase, never force-push. Confirm the refreshed remote
    head and base branch are reachable from your local `HEAD` before the draft push.
-2. **Council over the whole change.** Push first: the change goes up as a draft pull
-   request before the council runs, so the council reviews a pull request that already
-   exists. Then run full Procedure steps 1–5 over the whole accumulated diff against its
+2. **Council over the whole change.** Push first, as a draft pull request where one can
+   be opened. The council reviews the pushed branch, or the local branch when the push
+   fails, and never waits for a pull request. Then run full Procedure steps 1–5 over the whole accumulated diff against its
    base, not just the last files touched. Fix major-or-worse findings where a bounded fix
    exists, re-review the fix as a verifier cycle (see **Review loop** above), and use that
    later verdict in the pull request description. A verdict computed before a fix is void. List any major-or-worse

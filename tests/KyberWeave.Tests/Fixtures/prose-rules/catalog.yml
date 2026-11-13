@@ -1568,10 +1568,12 @@ rules:
       - products/kyber-squad/skills/task-gate/references/rework.md
       - products/kyber-squad/shared/worker-baseline.md
   - id: draft-pr-before-council
-    statement: The draft pull request is pushed before the review council runs.
+    statement: The review council reviews the pushed branch, or the local branch when the push fails, and never waits for a pull request to exist.
     stated-in:
       - products/kyber-squad/agents/conductor/references/autonomy.md
       - products/kyber-squad/skills/delivery-execution/SKILL.md
+      - products/kyber-squad/skills/code-review/SKILL.md
+      - products/kyber-squad/agents/code-reviewer.md
     controls:
       - products/kyber-squad/skills/task-gate/references/rework.md
       - products/kyber-squad/shared/worker-baseline.md
@@ -2187,7 +2189,7 @@ rules:
       - products/kyber-squad/shared/worker-baseline.md
       - products/kyber-squad/skills/task-gate/references/rework.md
   - id: unopenable-pull-request-reports-not-delivered
-    statement: When the pull request cannot be opened, the conductor finishes everything local without asking and reports NOT DELIVERED with the reason.
+    statement: When the pull request cannot be opened, the run does not stop; it still finishes everything local, the final review council and closeout included, without asking, and reports NOT DELIVERED with the reason.
     stated-in:
       - path: products/kyber-squad/agents/conductor/references/autonomy.md
         section: Delivery
