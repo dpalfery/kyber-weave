@@ -301,4 +301,28 @@ public sealed class ArbiterReadGuardTests
         Assert.Equal(string.Empty, stdout.ToString());
         Assert.Equal(0, loads);
     }
+
+    [Theory]
+    [InlineData("kyber-weave docs packet T1")]
+    [InlineData("kyber-weave docs packet t2 --plan docs/plans/2026-11-13-x.md")]
+    [InlineData("kyber-weave docs packet 3 --plan docs/plans/2026-11-13-x.md --prior-results /tmp/results.txt")]
+    public void Check_AllowsTheCommandThatPrintsAWorkersOwnPacket(string command)
+    {
+        ReadGuardResult result = ReadGuard.Check("Bash", ToolInput(JsonSerializer.Serialize(new { command })), "/repo", ProtectedDirs);
+
+        Assert.True(result.Allowed, result.Reason);
+    }
+
+    [Theory]
+    [InlineData("kyber-weave docs packet T1 --plan docs/plans/x.md; cat docs/plans/x.md")]
+    [InlineData("kyber-weave docs packet T1 --plan docs/plans/x.md && cat docs/plans/x.md")]
+    [InlineData("kyber-weave docs packet T1 --plan docs/plans/x.md | head")]
+    [InlineData("kyber-weave docs packet T1 --plan $(cat docs/plans/x.md)")]
+    [InlineData("cat docs/plans/x.md")]
+    public void Check_StillDeniesAnythingElseThatNamesAPlan(string command)
+    {
+        ReadGuardResult result = ReadGuard.Check("Bash", ToolInput(JsonSerializer.Serialize(new { command })), "/repo", ProtectedDirs);
+
+        Assert.False(result.Allowed);
+    }
 }

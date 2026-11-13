@@ -2251,3 +2251,32 @@ rules:
     controls:
       - products/kyber-squad/agents/conductor/references/autonomy.md
       - products/kyber-squad/shared/worker-baseline.md
+  - id: conductor-dispatches-by-task-id-and-never-retypes-a-packet
+    statement: The conductor dispatches a task with the routing headers and the task id only; it never pastes, retypes or paraphrases the task's packet, and it does not open the task file to do so.
+    stated-in:
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Task file and dispatch
+    controls:
+      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+    retired:
+      statement: The conductor pastes each task's prompt from the task file into the dispatch unchanged, filling only the worktree and the prior results.
+      example: Paste the task's prompt from the task file into the dispatch unchanged, filling only {worktree} and {prior_results}.
+      seed-into: products/kyber-squad/agents/conductor/references/autonomy.md
+      absent-from:
+        - products/kyber-squad/agents/conductor/references/plan-path.md
+        - products/kyber-squad/agents/conductor/references/spec-path.md
+  - id: worker-first-action-is-the-packet-command
+    statement: A worker's first action is to run kyber-weave docs packet with the task id from its dispatch.
+    stated-in:
+      - products/kyber-squad/shared/worker-baseline.md
+    controls:
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: worker-reports-a-failed-packet-command-verbatim
+    statement: When kyber-weave docs packet fails or gives too little, the worker reports its output verbatim and stops instead of reading the plan.
+    stated-in:
+      - products/kyber-squad/shared/worker-baseline.md
+    controls:
+      - products/kyber-squad/agents/conductor/references/autonomy.md
+      - products/kyber-squad/skills/task-gate/references/rework.md

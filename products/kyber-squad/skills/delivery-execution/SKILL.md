@@ -26,9 +26,9 @@ A Ready plan or a Ready specification task artifact carries a task file beside i
 
 Before dispatching from it, the conductor validates the task file. A file whose tasks, file scopes or dependencies disagree with the artifact, or one whose execution digest is stale, is refused rather than dispatched from: a stale prompt describes work the artifact no longer asks for, and the run reports that finding instead of starting the task.
 
-Each dispatch pastes the task's prompt unchanged and fills only `{worktree}` and `{prior_results}`. Nothing else in it is substituted, reworded or summarized, because a prompt the conductor rewrote makes the plan stop describing what the worker was told. The two slots exist because no plan can know them: the worktree is chosen at dispatch, and `{prior_results}` carries earlier worker reports unchanged, so a later prompt can build on a cause an earlier worker found.
+Each dispatch carries the routing headers and the task id, and nothing else: the conductor never pastes, retypes or paraphrases a packet, and never reads the task file to do so. The worker's first action is `kyber-weave docs packet <task id>`, which prints that task's packet from the task file with `{worktree}` filled in. When a later task builds on what earlier workers reported, the conductor writes those reports unchanged to a file and the dispatch adds `--prior-results <file>` to that command, which fills `{prior_results}`. `kyber-weave docs tasks <plan> --list` prints one line per task (id, role, dependencies, session, file count) when the conductor needs them.
 
-The conductor dispatches from the task file. It does not reopen the plan to write a packet or decide what a worker should read; the plan stays the owner's approved record and the Arbiter's input.
+The conductor dispatches by task id. It does not open the plan or the task file to write a packet or decide what a worker should read; the plan stays the owner's approved record and the Arbiter's input.
 
 ## Task commits and resumption
 

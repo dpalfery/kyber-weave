@@ -1344,10 +1344,12 @@ derives one prompt per task from the plan, at finalization, into its tracked tas
 beside a plan, `<spec-folder>/tasks.json` beside a specification — committed with its artifact, so
 a push carries it to whichever machine resumes the run
 ([ADR 0063](../adr/0063-the-task-file-is-tracked-and-the-plan-stays-authoritative.md)). At dispatch
-the conductor validates that file, **pastes each prompt unchanged**, and fills exactly two slots:
-`{worktree}`, and `{prior_results}` with the earlier workers' reports as they were written. Nothing
-else is edited, added or re-derived, because a prompt the conductor rewrites is a prompt nobody
-validated.
+the conductor validates that file and dispatches each worker by **task id** alone. The worker's first
+action is `kyber-weave docs packet <task id>`, which finds the Ready plan, checks the task file
+against it, and prints that one packet with `{worktree}` filled in; `--prior-results <file>` adds the
+earlier workers' reports as they were written. The conductor never pastes or paraphrases a packet,
+because a packet the conductor retypes is a packet nobody validated. `kyber-weave docs tasks <plan>
+--list` prints one line per task.
 
 Rather than pointing workers to large plan or specification documents under `<plan-index>` or
 `<specification-index>` (which workers are forbidden from reading), each prompt carries five

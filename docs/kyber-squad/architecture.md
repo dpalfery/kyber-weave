@@ -1761,9 +1761,14 @@ what makes resuming a run somewhere else possible at all.
   because an earlier task on the same file moves them. The measured run's prompts carried none of
   this — the authoring contract asked for "exact files or symbols" and no commands — so a worker
   could not name the class that proved its change and reported a green suite it never ran.
-- **Two slots, and nothing else.** The conductor pastes each prompt **unchanged** and fills only
-  `{worktree}` and `{prior_results}`, pasting earlier worker reports as they were written. No plan
-  can know either: the second GREEN prompt in that run needed a cause an earlier worker had found.
+- **The machine delivers the packet.** The conductor dispatches by task id; the worker runs
+  `kyber-weave docs packet <task id>`, which resolves the one Ready plan, checks the task file against
+  its execution digest (a stale file is refused with the fix), and prints only that task's packet with
+  `{worktree}` filled in. `--prior-results <file>` fills `{prior_results}` with earlier worker reports as
+  they were written; without it that section says none were supplied. No plan can know either slot:
+  the second GREEN prompt in that run needed a cause an earlier worker had found. A conductor that
+  could not read a 33 KB file and retyped it through helpers left its worker blocked; the machine
+  prints the packet so no one retypes it.
 - **The plan stays authoritative.** The owner approves the plan, it holds the `## Decisions` table,
   and the Arbiter reads task ids, files, dependencies, skills, task text, test rows and out-of-scope
   items from it. Only the conductor stops reading it — 68 KB in the measured run.
@@ -1792,7 +1797,7 @@ what makes resuming a run somewhere else possible at all.
 flowchart TD
     Architect["architect at finalization\nwrites plan + tasks.json"]
     Validate["conductor validates the file\nthrough the docs tools"]
-    Paste["conductor pastes each prompt\nfills {worktree} and {prior_results}"]
+    Paste["conductor dispatches by task id\nworker runs docs packet"]
     Worker["worker dispatches, commits\nTask: id + report"]
     Resume["run start --resume\nreads the Task: lines"]
     Archive["docs-dev archives the plan\nand removes the file with git rm"]

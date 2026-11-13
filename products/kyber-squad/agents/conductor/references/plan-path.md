@@ -34,7 +34,7 @@ The conductor never edits a plan. Require `architect` to persist every decision 
 
 In autonomous mode the conductor never writes the row: it re-invokes `architect` with an explicit `AUTONOMOUS_APPROVAL: <gate id>` input (provenance `autonomous: recommendation accepted`), and `architect` records it in `## Decisions` exactly as it records a human approval. An approval that says only “approve” is sufficient when it clearly answers the presented **approve and execute** gate. Once `PLAN_FINALIZED` is returned, load the `delivery-execution` skill and enter the ready queue immediately: that skill, not this path, holds the dispatch, verification, digest, findings and closeout rules.
 
-`PLAN_FINALIZED` also returns `TASK_FILE:`, the path of the plan's `<plan>.tasks.json`. Accept it only when it sits beside the saved plan, validate it before the first dispatch, and dispatch each worker's prompt from that file unchanged: the plan is the approved record, not the dispatch source.
+`PLAN_FINALIZED` also returns `TASK_FILE:`, the path of the plan's `<plan>.tasks.json`. Accept it only when it sits beside the saved plan, validate it before the first dispatch, and dispatch each worker by task id: the worker prints its own packet from that file, and the plan is the approved record, not the dispatch source.
 
 ## Planner dispatches
 

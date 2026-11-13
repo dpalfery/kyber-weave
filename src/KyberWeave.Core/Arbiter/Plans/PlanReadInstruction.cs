@@ -52,7 +52,7 @@ public static partial class PlanReadInstruction
         ArgumentNullException.ThrowIfNull(planningDirectories);
 
         List<string> found = [];
-        foreach (string sentence in Sentences(text))
+        foreach (string sentence in Sentences(WithoutPacketCommands(text)))
         {
             if (NegationRegex().IsMatch(sentence) || !ReadVerbRegex().IsMatch(sentence))
             {
@@ -107,7 +107,7 @@ public static partial class PlanReadInstruction
             return named;
         }
 
-        foreach (string candidate in CandidatePaths(text))
+        foreach (string candidate in CandidatePaths(WithoutPacketCommands(text)))
         {
             string path = candidate.Trim().Replace('\\', '/').TrimEnd('.', ',', ';', ':', ')', ']', '"', '\'');
             string normalized = NormalizePath(path);
@@ -122,6 +122,12 @@ public static partial class PlanReadInstruction
 
         return named;
     }
+
+    /// <summary>
+    /// The text without any <c>kyber-weave docs packet …</c> command: the machine prints the packet, so naming the
+    /// plan to that command sends the worker nowhere.
+    /// </summary>
+    private static string WithoutPacketCommands(string text) => PacketCommandRegex().Replace(text, "docs packet");
 
     /// <summary>
     /// Lexically normalizes a path: collapses redundant separators, removes <c>.</c> segments,
@@ -222,6 +228,9 @@ public static partial class PlanReadInstruction
             }
         }
     }
+
+    [GeneratedRegex(@"kyber-weave\s+docs\s+packet\b(?:\s+(?!--)[\w.\-]+)?(?:\s+--(?:plan|prior-results)(?:\s+|=)[^\s`]+)*", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex PacketCommandRegex();
 
     [GeneratedRegex(@"(?<=[.!?])[ \t]+", RegexOptions.CultureInvariant)]
     private static partial Regex SentenceBoundaryRegex();

@@ -116,6 +116,13 @@ app.Configure(config =>
             .WithExample("docs", "tasks", "docs/plans/2026-11-12-my-plan.md", "--write")
             .WithExample("docs", "tasks", "docs/plans/2026-11-12-my-plan.md", "--check");
 
+        docs.AddCommand<DocsPacketCommand>("packet")
+            .WithDescription(
+                "Print one task's packet for the worker dispatched on it: the plan is found from the repository, " +
+                "the task file is checked against it, and {worktree} is filled in (KW-DOC-TASKS-CLI-*).")
+            .WithExample("docs", "packet", "T1")
+            .WithExample("docs", "packet", "T2", "--prior-results", "results.txt");
+
         docs.AddCommand<DocsCloseoutCommand>("closeout")
             .WithDescription(DocsCloseoutCommand.Description)
             .WithExample("docs", "closeout", "docs/plans/2026-11-12-my-plan.md")

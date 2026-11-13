@@ -18,4 +18,9 @@ public sealed class DocsTasksSettings : DocsSettings
     [CommandOption("--check")]
     [Description("Exit 1 and say what differs when the task file on disk is not exactly what --write would produce.")]
     public bool Check { get; set; }
+
+    /// <summary>Lists the plan's tasks, one line each, and changes nothing.</summary>
+    [CommandOption("--list")]
+    [Description("Print one line per task: id, role, depends-on, session and file count. Writes nothing.")]
+    public bool List { get; set; }
 }

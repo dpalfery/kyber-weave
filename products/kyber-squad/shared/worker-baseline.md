@@ -15,9 +15,7 @@ as not tried.
 
 When you work in a linked worktree, pass projectPath=<absolute path of your worktree> to every kw-docs tool and to codegraph_explore; the answer's provenance root= must equal your worktree.
 
-**Plans are the conductor's.** Do not open a file under `<plan-index>` or `<specification-index>`,
-or any plan folder. Your task packet is the whole brief; if it is insufficient, return a blocker
-rather than reading the plan.
+**Plans are the conductor's.** Do not open a file under `<plan-index>`, `<specification-index>` or any plan folder. Your first action is `kyber-weave docs packet <task id>`; its output is your whole brief. If it fails or falls short, report that output verbatim and stop.
 
 **Never run the full test suite.** Run the test classes your task names. The review council and
 CI run the full suite on the integrated head.

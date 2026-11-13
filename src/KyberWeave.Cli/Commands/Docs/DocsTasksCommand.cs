@@ -36,6 +36,18 @@ public sealed class DocsTasksCommand : Command<DocsTasksSettings>
     public override int Execute(CommandContext context, DocsTasksSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new();
+        if (settings.List && (settings.Write || settings.Check))
+        {
+            report.Add(new Diagnostic(
+                ConflictingModes,
+                Severity.Error,
+                "--list cannot be used with --write or --check.",
+                "docs tasks",
+                Hint: "Run --list alone to see the tasks, or --check or --write alone."));
+            CommandHelpers.Finish(report, settings, "docs tasks", "Task file");
+            return 1;
+        }
+
         if (settings.Write && settings.Check)
         {
             report.Add(new Diagnostic(
@@ -64,7 +76,11 @@ public sealed class DocsTasksCommand : Command<DocsTasksSettings>
             return 1;
         }
 
-        PlanArguments.Announce(report, settings, relative);
+        if (!settings.List)
+        {
+            PlanArguments.Announce(report, settings, relative);
+        }
+
         PlanTaskFileMode mode = settings.Write ? PlanTaskFileMode.Write
             : settings.Check ? PlanTaskFileMode.Check
             : PlanTaskFileMode.Preview;
@@ -83,6 +99,16 @@ public sealed class DocsTasksCommand : Command<DocsTasksSettings>
         if (mode == PlanTaskFileMode.Check && outcome.File is not null && !report.HasErrors)
         {
             CheckPacketsAsync(effective, outcome.File, relative, report, cancellationToken).GetAwaiter().GetResult();
+        }
+
+        if (settings.List && outcome.File is not null && !report.HasErrors)
+        {
+            foreach (PlanTaskFileEntry task in outcome.File.Tasks ?? [])
+            {
+                Console.Out.WriteLine(PlanTaskPacket.ListLine(task));
+            }
+
+            return 0;
         }
 
         CommandHelpers.Finish(report, settings, "docs tasks", "Task file");
