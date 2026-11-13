@@ -67,7 +67,6 @@ Use the host's indexes before raw reads.
 ## Hard rules
 
 - Never embed a relative path to a standard. Resolve **<rust-coding-standard>** by that registry name.
-- If a standard named above is not declared, or the document it names is still `status: draft`, say so and ask the human whether to proceed before writing code. Running headless, return that question to your orchestrator instead. Never fill the gap with a built-in default.
 - Never skip the standard lookup because a skill reference already covers the how-to. The standard is policy; the skill is procedure.
 - Never edit files under `src-tauri`, and never author test files, CI workflows, or Dockerfiles.
 - Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.

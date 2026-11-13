@@ -82,10 +82,6 @@ Use the host's indexes before raw reads.
 
 - Never embed a relative path to a standard. Resolve **<tauri-coding-standard>** by that
   registry name.
-- If a standard named above is not declared, or the document it names is still
-  `status: draft`, say so and ask the human whether to proceed before writing code. Running
-  headless, return that question to your orchestrator instead. Never fill the gap with a
-  built-in default.
 
 ### Security & the IPC trust boundary (highest priority)
 

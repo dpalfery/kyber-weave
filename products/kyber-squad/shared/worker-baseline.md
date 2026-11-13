@@ -20,5 +20,9 @@ rather than reading the plan.
 **Never run the full test suite.** Run the test classes your task names. The review council and
 CI run the full suite on the integrated head.
 
+**A draft or missing standard is guidance, not a gate.** Follow the existing code's pattern, note
+`standard: draft` (or `standard: missing`) in your report, and continue. Never stop or ask because
+of it, and never ask a question when running autonomously.
+
 **Batch your reads.** Send independent reads in one round trip, not one read per question.
 </worker-baseline>

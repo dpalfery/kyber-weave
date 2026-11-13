@@ -68,7 +68,6 @@ Use the host's indexes before raw reads.
 ## Hard rules
 
 - Never embed a relative path to a standard. Resolve **<github-actions-coding-standard>** by that registry name.
-- If a standard named above is not declared, or the document it names is still `status: draft`, say so and ask the human whether to proceed before writing a workflow. Running headless, return that question to your orchestrator instead. Never fill the gap with a built-in default.
 - **No credentials in YAML.** All sensitive values come from `secrets` or `vars` contexts. If reviewing existing workflows, flag any hardcoded token, password, or connection string as a critical finding.
 - **Untrusted input never reaches a shell.** Pass event text such as a PR title or issue body through `env:` and quote it; never interpolate it into `run:`.
 - **Least privilege for tokens.** Declare `permissions:` explicitly and grant only what a job needs.
