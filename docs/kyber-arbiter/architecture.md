@@ -216,7 +216,7 @@ A task counts as complete on its worker's own report: no separate reviewer confi
 
 ## The rules
 
-Thirty-three rules ship with permanent `KW-ARB-*` ids, tuned by id through `enabled`,
+Thirty-four rules ship with permanent `KW-ARB-*` ids, tuned by id through `enabled`,
 thresholds, `shadow` where the rule supports it, and per-answer `effects`. Host rules use the
 same shape under non-`KW-ARB-` ids and may not use an effect that only a shipped rule may use.
 
@@ -261,6 +261,7 @@ each, what stays at step 0 and which answer only the model can give.
 | `KW-ARB-FAILURE-001` | `delegate.failure` | 0, then 1 | Is the current rework failure the same failure as the previous attempt of its cluster? Shadow. |
 | `KW-ARB-TRIM-001` | `sections.select` | 1 | Does this section of a document bear on the task? Shadow. |
 | `KW-ARB-COMMENT-001` | `comment.triage` | 1 | Is this bot review comment a real defect, a nitpick, or already fixed? Shadow. |
+| `KW-ARB-CHECKOUT-001` | `delegate.returned`, `delegate.planner.returned` | 0 | Did the dispatch leave files in the repository's canonical checkout while its run works in its own worktree? Machine fact: `checkout.stray-paths`, git's diff of the canonical checkout against a snapshot `HookGitFacts` takes at dispatch, only for a target that writes files while a live run works in a separate worktree. No snapshot leaves the fact absent, which allows. The step-0 evidence lists the paths. See the [runbook](runbook.md#reading-a-canonical-checkout-refusal). |
 
 **The plan-read ban is enforced at dispatch (`KW-ARB-PLANREAD-001`).** Workers treat their dispatch
 packet as their whole context and do not open plan or specification files, and until this rule the

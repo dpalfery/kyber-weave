@@ -115,6 +115,51 @@ public static class RunBaseState
         return false;
     }
 
+    /// <summary>
+    /// Every run record that names its repository, branch and worktree. Records written before <c>run start</c>
+    /// recorded its place, and records that do not parse, are skipped.
+    /// </summary>
+    /// <param name="homeDirectory">The operator's home, which holds <c>.kyber-weave/runs</c>.</param>
+    /// <returns>The records, empty when there are none; null when the runs directory or a record could not be read.</returns>
+    public static IReadOnlyList<RunRecord>? ReadRecords(string homeDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
+
+        string directory = Path.Combine(homeDirectory, StateDirectoryName, RunsDirectoryName);
+        List<RunRecord> records = [];
+        try
+        {
+            if (!Directory.Exists(directory))
+            {
+                return records;
+            }
+
+            foreach (string file in Directory.GetFiles(directory, "*" + StateExtension))
+            {
+                StateDocument? document;
+                try
+                {
+                    document = JsonSerializer.Deserialize<StateDocument>(File.ReadAllText(file), JsonOptions);
+                }
+                catch (JsonException)
+                {
+                    continue;
+                }
+
+                if (document is { Repository: { Length: > 0 } repository, Branch: { Length: > 0 } branch, Worktree: { Length: > 0 } worktree })
+                {
+                    records.Add(new RunRecord(repository, branch, worktree));
+                }
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+
+        return records;
+    }
+
     private static StringComparison PathComparison =>
         OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
 

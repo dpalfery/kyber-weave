@@ -1,4 +1,4 @@
-# The 33 shipped Arbiter rules. Ids are permanent: suppressions, baselines and
+# The 34 shipped Arbiter rules. Ids are permanent: suppressions, baselines and
 # code-scanning alerts key on them, so a rule is never renumbered or reused.
 #
 #The step-0 predicate set is closed (all, any, not, exists, equals, in, matches,
@@ -681,6 +681,21 @@ rules:
       confidence-at-least: 0.85
       tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
     effects: { real: keep, nitpick: advise, already-fixed: advise }
+
+  # Machine facts only: checkout.stray-paths is git's diff of the repository's canonical checkout against
+  # a snapshot taken at dispatch, recorded only when the dispatch went to a specialist that writes files
+  # while a live run of the repository works in a worktree of its own. No snapshot leaves the fact absent,
+  # which allows. Subagents start in the canonical checkout, so a worker can edit there by mistake.
+  - id: KW-ARB-CHECKOUT-001
+    trigger: [delegate.returned, delegate.planner.returned]
+    question: Did this dispatch leave files in the repository's canonical checkout while its run works in its own worktree?
+    answers: [clean, stray]
+    decide:
+      - when: { fact: checkout.stray-paths, count: 0 }
+        answer: clean
+      - when: { fact: checkout.stray-paths, exists: true }
+        answer: stray
+    effects: { clean: allow, stray: escalate }
 
 # The OWNER-001 file-kind map, evaluated first match wins. The order is the
 # decision: specific owners precede the documentation and C# catch-alls.

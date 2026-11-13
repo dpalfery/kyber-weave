@@ -49,6 +49,7 @@ public sealed class ArbiterConfigTests
         "KW-ARB-FAILURE-001",
         "KW-ARB-TRIM-001",
         "KW-ARB-COMMENT-001",
+        "KW-ARB-CHECKOUT-001",
     ];
 
     [Fact]
@@ -61,9 +62,9 @@ public sealed class ArbiterConfigTests
         Assert.Equal("https://api.typesafe.ai/v1", config.Provider.Endpoint);
         Assert.Equal("jev-1.14.0", config.Provider.Model);
         Assert.Equal(3000, config.Provider.TimeoutMs);
-        // 33 shipped rule ids; ROSTER-001 runs on two triggers and RUN-001 on three, so they add three entries.
+        // 34 shipped rule ids; ROSTER-001 and CHECKOUT-001 run on two triggers and RUN-001 on three, so they add four entries.
         Assert.Equal(ExpectedRuleIds, config.Rules.Select(rule => rule.Id).Distinct());
-        Assert.Equal(ExpectedRuleIds.Length + 3, config.Rules.Count);
+        Assert.Equal(ExpectedRuleIds.Length + 4, config.Rules.Count);
         Assert.All(config.Rules, rule => Assert.True(rule.Enabled));
     }
 
@@ -188,7 +189,7 @@ public sealed class ArbiterConfigTests
                   effects: { touches: escalate, clear: allow }
             """);
 
-        Assert.Equal(ExpectedRuleIds.Length + 4, config.Arbiter.Rules.Count);
+        Assert.Equal(ExpectedRuleIds.Length + 5, config.Arbiter.Rules.Count);
         ArbiterRule host = config.Arbiter.Rules[^1];
         Assert.Equal("HOST-MIGRATIONS-001", host.Id);
         Assert.Equal("delegate", host.Trigger);

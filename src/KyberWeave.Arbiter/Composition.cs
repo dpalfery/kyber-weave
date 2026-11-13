@@ -117,8 +117,35 @@ public static class Composition
             return ConductorGuard.Run(stdinText, stdout, stderr, OptionValue(args, "--allow-mcp"));
         }
 
+        if (args.Length > 0 && string.Equals(args[0], "worker-guard", StringComparison.Ordinal))
+        {
+            string? harness = OptionValue(args, "--harness");
+            if (string.IsNullOrWhiteSpace(harness))
+            {
+                await stderr.WriteLineAsync(
+                    "Usage: kyber-weave-arbiter worker-guard --harness <copilot-cli|claude> [--home <path>]. " +
+                    "The tool-call event is read on stdin.").ConfigureAwait(false);
+                return 1;
+            }
+
+            string stdinText;
+            try
+            {
+                stdinText = await stdin.ReadToEndAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // An unread event allows: the guard only refuses on a fact it read (ADR 0072).
+                await stderr.WriteLineAsync($"{HookCommand.FailClosedCode}: worker guard could not read stdin: {OneLine(ex.Message)}").ConfigureAwait(false);
+                return 0;
+            }
+
+            return WorkerGuard.Run(harness, stdinText, stdout, stderr, OptionValue(args, "--home"));
+        }
+
         await stderr.WriteLineAsync(
-            "Usage: kyber-weave-arbiter hook --harness <token> [--caller <agent>] | kyber-weave-arbiter guard [--allow-mcp <server>] | kyber-weave-arbiter --version.")
+            "Usage: kyber-weave-arbiter hook --harness <token> [--caller <agent>] | kyber-weave-arbiter guard [--allow-mcp <server>] | " +
+            "kyber-weave-arbiter worker-guard --harness <token> | kyber-weave-arbiter --version.")
             .ConfigureAwait(false);
         return 1;
     }

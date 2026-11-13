@@ -122,6 +122,12 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
     private const string HandbackMatcher = "^SubagentHandback$";
 
     /// <summary>
+    /// The user-level worker guard's matcher: the tools that write a file by path. The guard acts only on a call
+    /// made inside a Squad subagent, which Claude marks with <c>agent_id</c> and <c>agent_type</c>.
+    /// </summary>
+    public const string WorkerGuardMatcher = "^(Edit|Write|MultiEdit|NotebookEdit)$";
+
+    /// <summary>
     /// The architect shell guard's matcher (<c>KW-ARB-SHELL-001</c>): the two shell tools a shell-guarded
     /// agent may call, anchored like the others.
     /// </summary>
@@ -233,6 +239,19 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
                             {
                                 ["type"] = "command",
                                 ["command"] = ArbiterHookWiring.HookCommandLine(SquadTarget.Claude, context.Scope),
+                                ["timeout"] = arbiter.HookTimeoutSeconds
+                            })
+                    }),
+                new SquadRenderedBlockEntry(
+                    "PreToolUse",
+                    new JsonObject
+                    {
+                        ["matcher"] = WorkerGuardMatcher,
+                        ["hooks"] = new JsonArray(
+                            new JsonObject
+                            {
+                                ["type"] = "command",
+                                ["command"] = ArbiterHookWiring.WorkerGuardCommandLine(SquadTargetCatalog.GetToken(SquadTarget.Claude)),
                                 ["timeout"] = arbiter.HookTimeoutSeconds
                             })
                     }),

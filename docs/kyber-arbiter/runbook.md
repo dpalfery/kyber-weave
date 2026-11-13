@@ -330,6 +330,26 @@ reads only those facts:
 On Copilot CLI the payload names no caller for the root agent, so the conductor guard below makes the same
 check on the conductor's own `task` calls, and logs instead of denying when it cannot read the evidence.
 
+## Reading a canonical-checkout refusal
+
+A subagent starts in the repository's canonical checkout (its main worktree) and is told the run's worktree
+in prose, so it can write to the wrong one. `KW-ARB-CHECKOUT-001` catches that on machine facts, in two
+places:
+
+- **Before the write, where the harness hooks it.** `kyber-weave-arbiter worker-guard` runs on Copilot CLI's
+  `edit` and `create` tools (the user-level hook file) and on Claude's `Edit`, `Write`, `MultiEdit` and
+  `NotebookEdit` (the user-level settings block). It denies a Squad subagent's write into the canonical
+  checkout while a live run of that repository works in a worktree of its own, and the reason names the same
+  path in the run worktree. A root agent (a person's own session) is never checked. The guard reads only the
+  run records and the checkout's git files, starts no process, and allows anything it cannot read.
+- **On the return, everywhere returns are observed.** Before a dispatch to a specialist that writes files,
+  the hook snapshots the canonical checkout; on the return it diffs it. Paths that changed are listed in the
+  escalation's evidence, and `NEXT` asks for the same specialist to move them into the run worktree and
+  restore them in the canonical checkout. A person editing the canonical checkout during the dispatch is
+  counted too, because git cannot tell who wrote a file.
+
+A run that branched in place works in the canonical checkout, so neither check applies to it.
+
 ## Reading a planner refusal
 
 A planner refusal is the Arbiter stopping a dispatch to a planner, such as `architect`,

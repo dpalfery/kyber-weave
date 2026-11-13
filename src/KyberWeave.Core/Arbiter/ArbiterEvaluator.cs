@@ -208,7 +208,8 @@ public sealed class ArbiterEvaluator
         bool ShortCircuits,
         List<Question> Questions,
         List<Question> Unanswerable,
-        List<Question> NoCandidates);
+        List<Question> NoCandidates,
+        IReadOnlyDictionary<string, string>? Step0Evidence = null);
 
     /// <summary>One finding's judgement input: the plan its own fact bag produced and the call that answered it.</summary>
     private sealed record FindingJudgement(string? FindingId, TriggerPlan Plan, Step1Call Call);
@@ -562,7 +563,9 @@ public sealed class ArbiterEvaluator
             }
         }
 
-        return new TriggerPlan(trigger, family, step0, step0Answers, shortCircuits, questions, unanswerable, noCandidates);
+        return new TriggerPlan(
+            trigger, family, step0, step0Answers, shortCircuits, questions, unanswerable, noCandidates,
+            Step0EvidenceOf(step0Answers, facts));
     }
 
     /// <summary>
@@ -1100,6 +1103,37 @@ public sealed class ArbiterEvaluator
         && string.Equals(answer.Answer, RuleEngine.Undecidable, StringComparison.Ordinal)
         && plan.Questions.Any(question => string.Equals(question.RuleId, answer.RuleId, StringComparison.Ordinal));
 
+    /// <summary>The most stray paths <c>KW-ARB-CHECKOUT-001</c>'s evidence names before it counts the rest.</summary>
+    private const int MaxStrayPathsNamed = 20;
+
+    /// <summary>
+    /// The evidence line of the step-0 answers whose fix needs the fact they read. A step-0 answer otherwise
+    /// carries no evidence: its rule and answer say enough. <c>KW-ARB-CHECKOUT-001</c> names the stray paths,
+    /// because whoever cleans up the canonical checkout needs the list.
+    /// </summary>
+    private static Dictionary<string, string>? Step0EvidenceOf(
+        IReadOnlyDictionary<string, string> step0Answers,
+        ArbiterFactSet facts)
+    {
+        if (!step0Answers.TryGetValue("KW-ARB-CHECKOUT-001", out string? answer)
+            || !string.Equals(answer, "stray", StringComparison.Ordinal)
+            || !facts.TryGet("checkout.stray-paths", out ArbiterFact? fact)
+            || fact.Value is not IEnumerable<string> paths)
+        {
+            return null;
+        }
+
+        List<string> all = [.. paths];
+        string named = string.Join(", ", all.Take(MaxStrayPathsNamed));
+        string more = all.Count > MaxStrayPathsNamed ? $" and {all.Count - MaxStrayPathsNamed} more" : string.Empty;
+        return new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["KW-ARB-CHECKOUT-001"] =
+                $"written in the canonical checkout instead of the run worktree: {named}{more}. Move each into the run " +
+                "worktree, then restore those paths in the canonical checkout.",
+        };
+    }
+
     /// <summary>The step-0 decision entries of a plan, without the undecidable entry a step-1 question superseded.</summary>
     private static List<ArbiterDecisionRule> Step0Rules(TriggerPlan plan)
     {
@@ -1111,8 +1145,10 @@ public sealed class ArbiterEvaluator
                 continue;
             }
 
+            string? evidence = plan.Step0Evidence is not null
+                && plan.Step0Evidence.TryGetValue(answer.RuleId, out string? found) ? found : null;
             rules.Add(new ArbiterDecisionRule(
-                answer.RuleId, 0, answer.Answer, null, null, null, answer.Effect, [], null,
+                answer.RuleId, 0, answer.Answer, null, null, null, answer.Effect, [], evidence,
                 shadow: answer.Shadow ? true : null,
                 wouldEffect: answer.WouldEffect));
         }

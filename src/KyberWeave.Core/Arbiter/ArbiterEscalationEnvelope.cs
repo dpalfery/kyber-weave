@@ -154,6 +154,13 @@ public sealed record ArbiterEscalationEnvelope(
             return RunStartEvidence.Remedy;
         }
 
+        // Stray files in the canonical checkout are a clean-up, not a design question for the architect.
+        if (entries.Any(entry => string.Equals(entry.RuleId, "KW-ARB-CHECKOUT-001", StringComparison.Ordinal)))
+        {
+            return "dispatch the same specialist to move the listed files into the run worktree and restore them in the " +
+                   "canonical checkout, then continue; do not dispatch architect for this.";
+        }
+
         if (family == ArbiterTriggerFamily.Conductor)
         {
             bool PlannerAnswered(string answer) => entries.Any(entry =>

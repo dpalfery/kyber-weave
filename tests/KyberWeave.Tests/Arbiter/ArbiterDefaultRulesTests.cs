@@ -57,6 +57,7 @@ public sealed class ArbiterDefaultRulesTests
         "KW-ARB-FAILURE-001",
         "KW-ARB-TRIM-001",
         "KW-ARB-COMMENT-001",
+        "KW-ARB-CHECKOUT-001",
     ];
 
     [Fact]

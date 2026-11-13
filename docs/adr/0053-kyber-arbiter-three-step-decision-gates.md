@@ -108,7 +108,7 @@ judgement about meaning is made without a confidence attached.
     failed. Older `review-gates/v1` reports still read.
 11. **Reserved paths keep the council (D13).** `always-human` paths still run code-reviewer
     to `NEEDS_HUMAN`; delegation rules still apply first.
-12. **Thirty-two shipped rules with permanent ids (D14).** Phase 1 shipped twenty-one. Phase 2 ships two more (`KW-ARB-DIFFICULTY-001`, `KW-ARB-LADDER-001`), and phase 3 ships nine. `KW-ARB-RUN-001` was added with [ADR 0072](0072-the-arbiter-blocks-only-on-machine-facts-and-confident-model-answers.md), so the count is now thirty-three. Hosts tune shipped rules by id
+12. **Thirty-two shipped rules with permanent ids (D14).** Phase 1 shipped twenty-one. Phase 2 ships two more (`KW-ARB-DIFFICULTY-001`, `KW-ARB-LADDER-001`), and phase 3 ships nine. `KW-ARB-RUN-001` and `KW-ARB-CHECKOUT-001` were added with [ADR 0072](0072-the-arbiter-blocks-only-on-machine-facts-and-confident-model-answers.md), so the count is now thirty-four. Hosts tune shipped rules by id
     (`enabled`, thresholds, `effects` only) and add their own under non-`KW-ARB-` ids. Ids
     are never reused or renumbered.
 13. **Every non-allow conductor outcome escalates to architect (D15).** The harness blocks
@@ -281,7 +281,7 @@ fact outside those declared states leaves the machine.
 
 ## Permanent identifiers
 
-Rule ids `KW-ARB-*` (33 shipped), `KW-REVIEW-026` (gate not applicable), the reason codes
+Rule ids `KW-ARB-*` (34 shipped), `KW-REVIEW-026` (gate not applicable), the reason codes
 `fallback-only`, `project-only`, `dispatch-unconfirmed`, and `hooks-disabled-by-harness`, the
 record schemas `kyber-arbiter.decision/v1` and `kyber-arbiter.ledger/v1`, and the routing
 headers `KYBER-ARBITER:`, `PLAN_FILE:`, `TASK:`, `LENS:`, `REFUTE:`, and `REVIEW_RUN:` are permanent.

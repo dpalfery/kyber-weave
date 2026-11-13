@@ -102,7 +102,7 @@ public sealed class ArbiterCopilotRenderingTests : IDisposable
 
         foreach (string eventName in new[] { "preToolUse", "postToolUse" })
         {
-            JsonElement entry = Assert.Single(hooks.GetProperty(eventName).EnumerateArray());
+            JsonElement entry = hooks.GetProperty(eventName).EnumerateArray().First();
             Assert.Equal(
                 new HashSet<string> { "type", "matcher", "bash", "powershell", "timeoutSec" },
                 entry.EnumerateObject().Select(property => property.Name).ToHashSet(StringComparer.Ordinal));
@@ -112,6 +112,13 @@ public sealed class ArbiterCopilotRenderingTests : IDisposable
             Assert.Equal("kyber-weave-arbiter hook --harness copilot-cli", entry.GetProperty("powershell").GetString());
             Assert.Equal(HookTimeoutSeconds, entry.GetProperty("timeoutSec").GetInt32());
         }
+
+        Assert.Single(hooks.GetProperty("postToolUse").EnumerateArray());
+        JsonElement guard = hooks.GetProperty("preToolUse").EnumerateArray().ElementAt(1);
+        Assert.Equal(2, hooks.GetProperty("preToolUse").GetArrayLength());
+        Assert.Equal("edit|create", guard.GetProperty("matcher").GetString());
+        Assert.Equal("kyber-weave-arbiter worker-guard --harness copilot-cli", guard.GetProperty("bash").GetString());
+        Assert.Equal("kyber-weave-arbiter worker-guard --harness copilot-cli", guard.GetProperty("powershell").GetString());
     }
 
     [Fact]
