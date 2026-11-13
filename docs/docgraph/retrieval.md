@@ -198,16 +198,24 @@ The qualification rule above applies at **document** level only. Inside a docume
 already cleared the floor, leaf selection adds partial document identity unguarded, which is
 safe: it can only reorder documents that have already qualified.
 
-The winning leaf comes back **whole**. **24,000 characters** is a ceiling, not a target —
-a shorter leaf returns a shorter answer with no padding. Past the ceiling the response is
-marked incomplete and a **stateless cursor** returns the next span of the **same** leaf. The
-same question without a cursor starts again at the first span.
+The winning leaf answers with a **window** of about **3,000 characters** (this refines the
+"returned whole" wording of [ADR 0046](../adr/0046-docs-explore-section-answer.md)). A leaf that
+fits comes back whole. A longer one is split into blocks at blank lines, never inside a code
+fence, with consecutive list items joined; the block that matches the question best is taken
+and neighbouring blocks are added, those matching the question first, while they fit. A table,
+list or code block larger than the window is not cut, so it comes back whole.
+
+A window that answers is a **complete** answer: it is not marked incomplete and its confidence
+is not halved because the section is longer. When the leaf has more, a line offers a
+**stateless cursor** for the rest, and following it costs the caller nothing in confidence.
+A continuation returns up to **24,000 characters**, the hard ceiling, and only a leaf that runs
+past it is marked incomplete. The same question without a cursor starts again at the window.
 
 The tool accepts **`query`** and an optional **`cursor`** only. `maxDocs` and `charBudget`
 are not parameters on it.
 
 **Confidence** is `tanh((winning topic score − best other topic score) / 2)`, formatted
-`0.00`–`1.00`, and halved when the reply is incomplete. The raw relevance score is not
+`0.00`–`1.00`, and halved only when a continuation runs past the ceiling. The raw relevance score is not
 returned. A caller should stop at **0.60 or higher** when the answer is not incomplete.
 
 The source line is `source: {path} — {## heading} › {### heading}`, or the path alone for

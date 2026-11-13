@@ -70,6 +70,26 @@ public sealed class RetrievalSourceDocumentTests(ITestOutputHelper output)
     }
 
     /// <summary>
+    /// The three questions whose whole-section answers ran from 8 to 26 thousand characters now
+    /// answer with a window: bounded, complete, and still from the right page.
+    /// </summary>
+    [Theory]
+    [InlineData("What is the arbiter, what rules does it enforce, and how do I enable or disable it?")]
+    [InlineData("Where is the rule reference for the KW rule ids?")]
+    [InlineData("What does the Kyber-Squad architecture look like?")]
+    public void ALongSectionAnswersWithABoundedCompleteWindow(string query)
+    {
+        DocumentIndex? index = IndexOverThisRepository();
+        if (index is null) return;
+
+        ExploreAnswer answer = index.Explore(query);
+        output.WriteLine($"{query}\n  prose {answer.Prose.Length} chars, more={answer.MoreAvailable}");
+
+        Assert.False(answer.Incomplete);
+        Assert.True(answer.Prose.Length <= 8000, $"the window was {answer.Prose.Length} characters.");
+    }
+
+    /// <summary>
     /// A reported miss that the ranking still gets wrong: the worker rule map answers, with a negative
     /// confidence, because its keywords share word prefixes with the query ("clean" with "cleanupcode")
     /// while the standard that states the answer mentions it once in a long page. Kept here, skipped,

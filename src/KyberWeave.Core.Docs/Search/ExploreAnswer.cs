@@ -22,10 +22,17 @@ public sealed record ExploreAnswer(
     double Confidence,
     bool Incomplete,
     string? CursorToken,
-    int DocumentsConsidered)
+    int DocumentsConsidered,
+    bool MoreAvailable = false)
 {
-    /// <summary>Characters of leaf prose returned in one call.</summary>
+    /// <summary>Hard ceiling on characters of leaf prose returned in one call: the limit of an explicit continuation.</summary>
     public const int AnswerCharCap = 24000;
+
+    /// <summary>
+    /// Characters a first answer aims for: the best-matching paragraphs with enough neighbouring
+    /// context to stand alone. A window that answers is a complete answer, however long its section.
+    /// </summary>
+    public const int WindowCharBudget = 3000;
 
     public static ExploreAnswer Miss(int documentsConsidered)
     {
@@ -114,14 +121,18 @@ public sealed partial class DocumentIndex
             return ContinueFromCursor(trimmed, rank.RunnerTopicScore, winner, parsed);
         }
 
-        return BuildFirstAnswer(rank.RunnerTopicScore, winner);
+        return BuildFirstAnswer(rank.RunnerTopicScore, winner, coverageTerms);
     }
 
-    private ExploreAnswer BuildFirstAnswer(double runnerTopicScore, ScoredLeaf winner)
+    /// <summary>
+    /// The first answer is a window of the winning leaf, not the leaf. A window that stands alone is
+    /// complete: the rest of the section is offered through the cursor and costs no confidence, so a
+    /// caller pages only when the window did not answer.
+    /// </summary>
+    private ExploreAnswer BuildFirstAnswer(double runnerTopicScore, ScoredLeaf winner, IReadOnlyList<string> coverageTerms)
     {
-        (string prose, bool incomplete, string? cursorToken) = SliceLeaf(winner, 0, ExploreAnswer.AnswerCharCap);
-
-        double confidence = ComputeTopicConfidence(winner.TopicScore, runnerTopicScore, incomplete);
+        (string prose, string? cursorToken) = SelectWindow(winner, coverageTerms);
+        double confidence = ComputeTopicConfidence(winner.TopicScore, runnerTopicScore, false);
 
         return new ExploreAnswer(
             false,
@@ -131,9 +142,154 @@ public sealed partial class DocumentIndex
             FormatSourceHeading(winner),
             prose,
             confidence,
-            incomplete,
+            false,
             cursorToken,
-            DocumentCount);
+            DocumentCount,
+            cursorToken is not null);
+    }
+
+    /// <summary>A run of lines up to a blank line outside a code fence, with its place in the leaf body.</summary>
+    private sealed record BodyBlock(int Start, int End, string Text);
+
+    private (string Prose, string? CursorToken) SelectWindow(ScoredLeaf winner, IReadOnlyList<string> coverageTerms)
+    {
+        string body = winner.Leaf.Body;
+        if (body.Length <= ExploreAnswer.WindowCharBudget)
+        {
+            return (body, null);
+        }
+
+        List<BodyBlock> blocks = SplitBlocks(body);
+        if (blocks.Count == 0)
+        {
+            return SliceFirstSpan(winner);
+        }
+
+        double[] scores = new double[blocks.Count];
+        for (int i = 0; i < blocks.Count; i++)
+        {
+            HashSet<string> terms = [.. TextVectorizer.Vectorize(blocks[i].Text).Keys];
+            foreach (string term in coverageTerms)
+            {
+                if (_corpus.IsInformative(term) && terms.Contains(term))
+                {
+                    scores[i] += _corpus.InverseDocumentFrequency(term);
+                }
+            }
+        }
+
+        int best = 0;
+        for (int i = 1; i < blocks.Count; i++)
+        {
+            if (scores[i] > scores[best]) best = i;
+        }
+
+        int first = best;
+        int last = best;
+        while (true)
+        {
+            bool canPrevious = first > 0 && Span(blocks, first - 1, last) <= ExploreAnswer.WindowCharBudget;
+            bool canNext = last < blocks.Count - 1 && Span(blocks, first, last + 1) <= ExploreAnswer.WindowCharBudget;
+            if (!canPrevious && !canNext) break;
+
+            // Context that matches the question earns its place before context that does not;
+            // on a tie the text after the match, which usually completes it, goes first.
+            if (canNext && (!canPrevious || scores[last + 1] >= scores[first - 1])) last++;
+            else first--;
+        }
+
+        if (Span(blocks, first, last) > ExploreAnswer.AnswerCharCap)
+        {
+            return SliceFirstSpan(winner);
+        }
+
+        string prose = body[blocks[first].Start..blocks[last].End];
+        string? cursor = last < blocks.Count - 1
+            ? ExploreCursor.Format(winner.Document.RelativePath, winner.Leaf.Id, blocks[last + 1].Start)
+            : null;
+        return (prose, cursor);
+    }
+
+    private static (string Prose, string? CursorToken) SliceFirstSpan(ScoredLeaf winner)
+    {
+        (string prose, bool _, string? cursor) = SliceLeaf(winner, 0, ExploreAnswer.AnswerCharCap);
+        return (prose, cursor);
+    }
+
+    private static int Span(List<BodyBlock> blocks, int first, int last) => blocks[last].End - blocks[first].Start;
+
+    /// <summary>
+    /// Splits a leaf body at blank lines, never inside a code fence, and joins consecutive list
+    /// items so a list is one block however loosely it is spaced. A table has no blank lines, so it
+    /// is one block already.
+    /// </summary>
+    private static List<BodyBlock> SplitBlocks(string body)
+    {
+        List<BodyBlock> blocks = [];
+        int position = 0;
+        int blockStart = -1;
+        int blockEnd = 0;
+        bool fenced = false;
+
+        while (position <= body.Length)
+        {
+            int lineEnd = body.IndexOf('\n', position);
+            int next = lineEnd < 0 ? body.Length : lineEnd;
+            string line = body[position..next];
+            string trimmed = line.Trim();
+
+            if (trimmed.StartsWith("```", StringComparison.Ordinal) || trimmed.StartsWith("~~~", StringComparison.Ordinal))
+            {
+                fenced = !fenced;
+            }
+
+            if (!fenced && trimmed.Length == 0)
+            {
+                if (blockStart >= 0)
+                {
+                    AddBlock(body, blocks, blockStart, blockEnd);
+                    blockStart = -1;
+                }
+            }
+            else
+            {
+                if (blockStart < 0) blockStart = position;
+                blockEnd = next;
+            }
+
+            if (lineEnd < 0) break;
+            position = lineEnd + 1;
+        }
+
+        if (blockStart >= 0) AddBlock(body, blocks, blockStart, blockEnd);
+        return blocks;
+    }
+
+    private static void AddBlock(string body, List<BodyBlock> blocks, int start, int end)
+    {
+        string text = body[start..end].TrimEnd('\r');
+        if (blocks.Count > 0 && StartsListItem(text) && StartsListItem(blocks[^1].Text))
+        {
+            BodyBlock previous = blocks[^1];
+            blocks[^1] = new BodyBlock(previous.Start, end, body[previous.Start..end]);
+            return;
+        }
+
+        blocks.Add(new BodyBlock(start, end, text));
+    }
+
+    private static bool StartsListItem(string text)
+    {
+        string t = text.TrimStart();
+        if (t.StartsWith("- ", StringComparison.Ordinal) || t.StartsWith("* ", StringComparison.Ordinal)
+            || t.StartsWith("+ ", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        int digits = 0;
+        while (digits < t.Length && char.IsAsciiDigit(t[digits])) digits++;
+        return digits > 0 && digits + 1 < t.Length && (t[digits] == '.' || t[digits] == ')') && t[digits + 1] == ' ';
     }
 
     private ExploreAnswer ContinueFromCursor(

@@ -1226,10 +1226,13 @@ figures above are a budget rather than a remark.
 
 One answer for a question, symbol, route, component, or document id — not a ranked list of
 documents. After the relevance floor, leaves inside qualifying documents compete; the
-winning **leaf** (preamble, lead-in before a `##` section's first `###`, or a `###`) is
-returned whole up to a **24,000-character** ceiling. Past that, the reply is marked
-incomplete and the optional **`cursor`** continues the **same** leaf on the next call with
-the same question.
+winning **leaf** (preamble, lead-in before a `##` section's first `###`, or a `###`) answers
+with a **window**: its best-matching paragraphs plus neighbouring context, about **3,000
+characters**. A window is a complete answer, so it is not marked incomplete and keeps its
+confidence; when the leaf has more, one line offers the optional **`cursor`** for the rest of
+the leaf (no confidence penalty). A continuation returns up to the **24,000-character** ceiling
+and is marked incomplete only if the leaf runs past it. Lists, tables and code blocks are
+never cut inside, so one larger than the window comes back whole.
 
 The response reads, in order:
 
@@ -1237,7 +1240,8 @@ The response reads, in order:
 2. `confidence: 0.00`–`1.00` — `tanh((winning topic − best other topic) / 2)`, halved when
    incomplete; stop at **0.60 or higher** when the answer is not incomplete
 3. a short reading rule (stop, continue with `cursor`, or ask a narrower question)
-4. when incomplete, one line naming the cursor token to pass on the next call
+4. when the window is not the whole leaf, one line naming the cursor token to pass on the next
+   call if the window did not answer (or, past the ceiling, the incomplete notice)
 5. `source: {path} — {## heading} › {### heading}`, or `source: {path}` for the preamble
 6. the leaf prose
 

@@ -129,7 +129,8 @@ public sealed partial class DocsTools
         DOCS FIRST — call before grepping or reading repository documentation under docs/ or other markdown.
         Searches this repository's guides, runbooks, decision records, and design
         notes and returns one answer with a confidence score and a single source line. Treat
-        the returned prose as already read; do NOT reopen that file. Retired and archived
+        the returned passage as already read; do NOT reopen that file. A long section returns its
+        best-matching passage and a cursor for the rest. Retired and archived
         pages are excluded.
 
         Use for: how X works, how to install/run/configure it, what a command, flag, or rule
@@ -194,6 +195,14 @@ public sealed partial class DocsTools
             sb.Append("This answer is incomplete. Call docs_answer_question_from_repo_documentation again with the same question and cursor \"")
               .Append(answer.CursorToken)
               .AppendLine("\".");
+            sb.AppendLine();
+        }
+
+        if (!answer.Incomplete && answer.MoreAvailable && answer.CursorToken is not null)
+        {
+            sb.Append("More of this section is available; ask again with the same question and cursor \"")
+              .Append(answer.CursorToken)
+              .AppendLine("\" only if the passage below does not answer it.");
             sb.AppendLine();
         }
 

@@ -69,25 +69,71 @@ public sealed class ExploreAnswerTests : IDisposable
     }
 
     [Fact]
-    public void MatchingTextPast3000CharactersYieldsTheIncompleteSentenceAndACursor()
+    public void ALongSectionReturnsItsBestWindowAsACompleteAnswerWithACursorForTheRest()
     {
-        const string early = "EARLY-SPAN-MARKER-continueline";
-        const string late = "LATE-SPAN-MARKER-continueline";
-        string body = LeafBodyWithContinuationMarkers("continueline ", early, late);
-        DocsTools tools = BuildTools(
-            ("continueline/fixture", "Continue fixture", "6-Docs/continueline/fixture.md", ["continueline"],
-                [("Detail", body)]));
+        const string needle = "NEEDLE-PARAGRAPH-windowneedle explains the answer.";
+        StringBuilder body = new();
+        for (int i = 0; i < 40; i++)
+        {
+            body.Append("Filler paragraph ").Append(i).Append(' ').Append(RepeatToLength("padding ", 400)).Append("\n\n");
+            if (i == 25) body.Append(needle).Append("\n\n");
+        }
 
-        string response = Explore(tools, "continueline");
+        DocsTools tools = BuildTools(
+            ("windowneedle/fixture", "Window needle", "6-Docs/windowneedle/fixture.md", ["windowneedle"],
+                [("Detail", body.ToString().TrimEnd())]));
+
+        string response = Explore(tools, "windowneedle");
         string prose = AnswerProse(response);
 
-        Assert.Contains(IncompletePrefix, response, StringComparison.Ordinal);
+        Assert.Contains(needle, prose, StringComparison.Ordinal);
+        Assert.True(prose.Length <= ExploreAnswer.WindowCharBudget,
+            $"the window must stay within {ExploreAnswer.WindowCharBudget} characters; it was {prose.Length}.");
+        Assert.DoesNotContain(IncompletePrefix, response, StringComparison.Ordinal);
+        Assert.Contains("More of this section is available", response, StringComparison.Ordinal);
         Assert.True(CursorToken.IsMatch(response), $"expected a cursor token; response was: {response}");
-        Assert.True(prose.Length <= SectionAnswerCeiling,
-            $"first span must respect the {SectionAnswerCeiling}-character ceiling; prose length was {prose.Length}.");
-        Assert.Contains(early, prose, StringComparison.Ordinal);
-        Assert.DoesNotContain(late, prose, StringComparison.Ordinal);
+        Assert.Contains("source:", response, StringComparison.Ordinal);
         AssertLegacyPileAbsent(response);
+    }
+
+    [Fact]
+    public void AWindowIsNotMarkedIncompleteAndKeepsTheConfidenceTheSectionEarned()
+    {
+        StringBuilder body = new();
+        for (int i = 0; i < 20; i++)
+        {
+            body.Append("Paragraph ").Append(i).Append(" windowconf ").Append(RepeatToLength("padding ", 500)).Append("\n\n");
+        }
+
+        DocsTools tools = BuildTools(
+            ("windowconf/fixture", "Window confidence", "6-Docs/windowconf/fixture.md", ["windowconf"],
+                [("Detail", body.ToString().TrimEnd())]));
+        DocumentIndex index = CreateHost(_fixture.Root).Current();
+
+        ExploreAnswer answer = index.Explore("windowconf");
+
+        Assert.False(answer.Incomplete);
+        Assert.True(answer.MoreAvailable);
+        (double winnerTopic, double runnerTopic) = RankTopicScores(index, "windowconf");
+        Assert.Equal(ContractConfidence(winnerTopic, runnerTopic, false), answer.Confidence, 2);
+        Assert.NotNull(tools);
+    }
+
+    [Fact]
+    public void AWindowNeverCutsACodeFenceOrAList()
+    {
+        string fence = "```text\n" + RepeatToLength("fencedline windowfence\n", 1500) + "\n\nafter a blank line inside\n```";
+        string list = "- item one windowfence\n\n- item two\n\n- item three";
+        string body = RepeatToLength("lead paragraph ", 2000) + "\n\n" + fence + "\n\n" + list + "\n\n" + RepeatToLength("tail ", 2500);
+        DocsTools tools = BuildTools(
+            ("windowfence/fixture", "Window fence", "6-Docs/windowfence/fixture.md", ["windowfence"],
+                [("Detail", body)]));
+
+        string prose = AnswerProse(Explore(tools, "windowfence"));
+
+        Assert.Equal(1, prose.Split("```").Length % 2);
+        Assert.True(!prose.Contains("item one", StringComparison.Ordinal) || prose.Contains("item three", StringComparison.Ordinal),
+            "a list must come back whole or not at all.");
     }
 
     [Fact]
@@ -354,6 +400,8 @@ public sealed class ExploreAnswerTests : IDisposable
         while (cursor is not null && guard++ < 20)
         {
             ExploreAnswer next = index.Explore("slackpara", cursor);
+            // The first answer ends at a paragraph break and the cursor resumes after it.
+            if (guard == 1) assembled.Append("\n\n");
             assembled.Append(next.Prose);
             cursor = next.CursorToken;
         }
