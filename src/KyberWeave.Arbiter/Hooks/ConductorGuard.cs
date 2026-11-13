@@ -50,6 +50,8 @@ public static partial class ConductorGuard
         "ask_user",
         "task_complete",
         "rename_chat",
+        // The conductor's own todo list: it writes no project file and runs nothing.
+        "update_todo",
     };
 
     private static readonly string[] DocsServerPrefixes = ["kyber-weave-docs_", "kw-docs-docs_"];
@@ -299,6 +301,10 @@ public static partial class ConductorGuard
         };
     }
 
+    /// <summary>
+    /// A file the conductor may read: its own references and skills, an <c>AGENTS.md</c>, and anything under
+    /// the planning directories, such as a plan's <c>.tasks.json</c>. Reading is all <c>view</c> does.
+    /// </summary>
     private static bool IsContractPath(string path, string? cwd, string copilotHome)
     {
         if (cwd is null && !Path.IsPathRooted(path))
@@ -307,13 +313,10 @@ public static partial class ConductorGuard
         }
 
         string fullPath = Normalize(cwd is null ? Path.GetFullPath(path) : Path.GetFullPath(path, cwd));
-        if (!fullPath.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
 
         if (Path.IsPathRooted(copilotHome)
-            && fullPath.StartsWith(DirectoryPrefix(Path.Combine(copilotHome, "agents", "conductor")), StringComparison.OrdinalIgnoreCase))
+            && (fullPath.StartsWith(DirectoryPrefix(Path.Combine(copilotHome, "agents", "conductor")), StringComparison.OrdinalIgnoreCase)
+                || fullPath.StartsWith(DirectoryPrefix(Path.Combine(copilotHome, "skills")), StringComparison.OrdinalIgnoreCase)))
         {
             return !HasLinkBelow(DirectoryPrefix(copilotHome), fullPath);
         }
@@ -332,9 +335,44 @@ public static partial class ConductorGuard
         string relative = fullPath[root.Length..];
         string[] segments = relative.Split('/');
         bool contract = relative.StartsWith(".github/agents/conductor/", StringComparison.OrdinalIgnoreCase)
+            || relative.StartsWith(".github/skills/", StringComparison.OrdinalIgnoreCase)
             || string.Equals(segments[^1], "AGENTS.md", StringComparison.OrdinalIgnoreCase)
-            || segments[..^1].Any(segment => ContractDirectories.Contains(segment, StringComparer.OrdinalIgnoreCase));
+            || segments[..^1].Any(segment => ContractDirectories.Contains(segment, StringComparer.OrdinalIgnoreCase))
+            || ConfiguredPlanningDirectories(cwd).Any(directory => relative.StartsWith(directory, StringComparison.OrdinalIgnoreCase));
         return contract && !HasLinkBelow(root, fullPath);
+    }
+
+    /// <summary>
+    /// The plan, specification and todo directories the repository's Config Reg names, as
+    /// repository-relative prefixes ending in <c>/</c>. A configuration that does not load names none.
+    /// </summary>
+    private static IEnumerable<string> ConfiguredPlanningDirectories(string cwd)
+    {
+        KyberWeaveConfigLoadResult loaded;
+        try
+        {
+            loaded = KyberWeaveConfigLoader.TryLoad(cwd);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            yield break;
+        }
+
+        if (!loaded.Success || loaded.Config is not { } config)
+        {
+            yield break;
+        }
+
+        foreach (ConfigRegEntry entry in config.ConfigReg.Resolve(config.Ontology))
+        {
+            if ((string.Equals(entry.Name, ConfigRegConfig.PlanIndexProperty, StringComparison.Ordinal)
+                    || string.Equals(entry.Name, ConfigRegConfig.SpecificationIndexProperty, StringComparison.Ordinal)
+                    || string.Equals(entry.Name, ConfigRegConfig.TodoIndexProperty, StringComparison.Ordinal))
+                && Path.GetDirectoryName(Normalize(entry.Path)) is { Length: > 0 } directory)
+            {
+                yield return $"{Normalize(directory).Trim('/')}/";
+            }
+        }
     }
 
     /// <summary>

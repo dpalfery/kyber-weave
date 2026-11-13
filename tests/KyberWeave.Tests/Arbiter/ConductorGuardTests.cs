@@ -29,6 +29,7 @@ public sealed class ConductorGuardTests
     [InlineData("ask_user")]
     [InlineData("task_complete")]
     [InlineData("rename_chat")]
+    [InlineData("update_todo")]
     [InlineData("tool_search_tool")]
     [InlineData("kyber-weave-docs_answer_question_from_repo_documentation")]
     [InlineData("kw-docs-docs_look_up_glossary_term_definition")]
@@ -75,6 +76,11 @@ public sealed class ConductorGuardTests
     [InlineData("/repo/6-Docs/plans/README.md")]
     [InlineData("docs/specs/feature/tasks.md")]
     [InlineData("docs/todo/item.md")]
+    [InlineData("docs/plans/2026-11-12-widget.tasks.json")]
+    [InlineData("docs/plans/code.cs")]
+    [InlineData("/home/me/.copilot/skills/delivery-execution/SKILL.md")]
+    [InlineData("/home/me/.copilot/skills/delivery-execution/references/gate.md")]
+    [InlineData(".github/skills/delivery-execution/SKILL.md")]
     public void ContractFiles_ArePermitted(string path)
     {
         Assert.Empty(Run(Event("view", new { path })));
@@ -84,13 +90,43 @@ public sealed class ConductorGuardTests
     [InlineData("src/App.cs")]
     [InlineData("README.md")]
     [InlineData("docs/plans/../../src/notes.md")]
-    [InlineData("docs/plans/code.cs")]
     [InlineData("/elsewhere/plans/x.md")]
+    [InlineData("/home/me/.copilot/config.json")]
+    [InlineData("src/skills/x.cs")]
     [InlineData("evil/agents/conductor/secret.md")]
     [InlineData("/tmp/agents/conductor/secret.md")]
     public void OtherFiles_AreDenied(string path)
     {
         Assert.NotEmpty(ReasonFor(Event("view", new { path })));
+    }
+
+    [Theory]
+    [InlineData("edit")]
+    [InlineData("create")]
+    [InlineData("apply_patch")]
+    public void WritingAPlanningFile_IsStillDenied(string tool)
+    {
+        Assert.Contains(tool, ReasonFor(Event(tool, new { path = "docs/plans/2026-11-12-widget.tasks.json" })), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AConfiguredPlanningDirectory_IsReadable()
+    {
+        string repo = Directory.CreateTempSubdirectory("guard-config-").FullName;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(repo, ".kyber-weave"));
+            File.WriteAllText(
+                Path.Combine(repo, ".kyber-weave", "kyber-weave.yml"),
+                "ontology:\n  docs-root: handbook\nconfig-reg:\n  plan-index: handbook/roadmap/README.md\n");
+
+            Assert.Empty(RunIn(repo, "handbook/roadmap/widget.tasks.json"));
+            Assert.Contains("deny", RunIn(repo, "handbook/guide.md"), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(repo, recursive: true);
+        }
     }
 
     [Fact]
