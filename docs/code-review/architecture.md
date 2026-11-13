@@ -579,14 +579,15 @@ on all of them.
 
 #### RED mode
 
-`review gates --agent test-dev --paths <test files> --task <slug> --red` runs the agent's gates and judges them as
-test-first RED evidence instead of as a pass or fail. The gates' output is classified by compiler diagnostic code, not
+`review gates --agent <agent> --paths <files> --task <slug> --red` runs the agent's gates and judges them as a test-first
+task's failing run instead of as a pass or fail; one worker writes the tests, runs this, implements, and runs the gates again
+([ADR 0076](../adr/0076-test-first-is-one-worker-per-task.md)). The gates' output is classified by compiler diagnostic code, not
 by anyone's prose: the run is RED when tests ran and at least one failed, or when every failing gate failed only on
 missing-symbol errors (C# `CS0103`, `CS0117`, `CS0234`, `CS0246`, `CS1061`; TypeScript `TS2304`, `TS2305`, `TS2307`,
 `TS2339`) in the files the task changed. A syntax or type error, a missing symbol in a file the task did not change, a
 restore error, or tests that all pass reject it (`KW-REVIEW-052`). The accepted gates are reported as passed with the
-reason, and `KW-REVIEW-051` carries the `RED_EVIDENCE:` line to paste. Without `--red`, the same classifier tells a GREEN
-worker its build fails only on sibling RED tests' missing symbols (`KW-REVIEW-053`). Languages and test runners are records in
+reason, and `KW-REVIEW-051` carries the `RED_EVIDENCE:` line to paste. Without `--red`, the same classifier tells a
+worker its build fails only on another task's tests' missing symbols (`KW-REVIEW-053`). Languages and test runners are records in
 `RedLanguages`, so a new one needs no change to the classifier.
 
 Once a build gate is accepted as RED on missing symbols, every later gate whose command runs tests is not run: the report records it as

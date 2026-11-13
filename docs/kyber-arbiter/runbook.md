@@ -258,8 +258,8 @@ Pre-dispatch denies block on every target. Post-dispatch limits differ by harnes
 targets deliver outcomes only as context, and Antigravity and Devin deliver none. The
 [harness notes](architecture.md#harness-facts) state each limit, and the
 [degradation taxonomy](../kyber-squad/requirements.md#degradation-taxonomy) lists the records.
-Antigravity cannot observe returns, so `READY-001`'s completion check and `MODE-001`'s RED
-check answer `returns-unobservable` there, which allows and is logged; the in-flight overlap
+Antigravity cannot observe returns, so `READY-001`'s completion check answers
+`returns-unobservable` there, which allows and is logged; the in-flight overlap
 check finds nothing there, since no dispatch ever closes.
 Devin's dispatch target and prompt are read from `tool_input.profile` and
 `tool_input.prompt`. The vendor documents only that the tool "takes a profile", so those

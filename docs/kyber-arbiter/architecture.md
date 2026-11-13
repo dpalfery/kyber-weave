@@ -164,7 +164,7 @@ request stays inside the provider budget instead of going unasked: `delegation.h
 prompt with its headers), `delegation.body-head` (the prompt the worker reads),
 `delegation.returned-tail` (the end of the worker's report, where its digest sits) and
 `gate.report.claim` (the raw `TASK_GATE:` line). `plan.task-list` lists every task of the plan
-as `id: title`, in plan order, and `plan.task.dependents` lists the tasks that name this one as a dependency. `ledger.task-returns` holds up to four stored report tails for this task and
+as `id: title`, in plan order. `ledger.task-returns` holds up to four stored report tails for this task and
 the tasks it depends on: on each `delegate.returned` the evaluator stores the last 2,000
 characters of the report in the run store beside the plan (`stores/returns-*/returns.jsonl`),
 never in the ledger, which holds no text.
@@ -205,12 +205,11 @@ below its floor is still recorded, beside the `undecidable` it produced. Entries
 the answer could not be read, and `probabilities` is null unless every option has a value.
 
 A worker's return reaches the rules through the ledger. The post event records the report's
-`RESULT:`, `RED_EVIDENCE:` and `STATUS:` lines, and only a planner return may record
+`RESULT:` and `STATUS:` lines, and only a planner return may record
 `ATTESTED:`. It pairs with its dispatch by call id, or by a digest of the target and the
 prompt with its headers removed, and a specialist's return takes its `TASK` from that dispatch
 because its headers were stripped before it ran. On each `delegate`, `ledger.completed-tasks`
-is the tasks of this plan whose report read `RESULT: PASS`, `ledger.red-evidence` is present
-when this task or one it depends on reported RED evidence, and `ledger.in-flight.paths` is the
+is the tasks of this plan whose report read `RESULT: PASS`, and `ledger.in-flight.paths` is the
 files of this session's dispatches that have not returned. A refused dispatch holds no files.
 A task counts as complete on its worker's own report: no separate reviewer confirms it.
 
@@ -234,7 +233,7 @@ each, what stays at step 0 and which answer only the model can give.
 | `KW-ARB-READY-001` | `delegate` | 0, then 1 (`choice`, ≥ 0.8) | Has every task this one depends on finished? Step 0: `no-task`, `overlaps-in-flight` (escalates), `ready`, `returns-unobservable`, `returns-unread` (no stored reports can be found for a loosely named plan, so it is not asked). Model only: `waiting` (escalates), reading `ledger.task-returns`. |
 | `KW-ARB-OWNER-001` | `delegate` | 0, then 1 (`choice`, ≥ 0.8) | Does the task name the target as its specialist? Step 0: `no-task`, `owner`, `no-mapping`. Model only: `not-owner` (escalates). |
 | `KW-ARB-OWNER-002` | `delegate` | 1 (`choice`, ≥ 0.8) | Which roster specialist owns this task? |
-| `KW-ARB-MODE-001` | `delegate` | 0, then 1 (`choice`, ≥ 0.8) | In test-first mode, does this dispatch build working logic a failing test should already exist for, with none on record? Step 0: `no-task`, `not-required`, `present`, `returns-unobservable`, `returns-unread`. Model only: `missing` (escalates) or `in-order` (allows: a failing run is reported, or the task adds only declarations or stubs that later tests need to compile), reading the task, `plan.task-list`, `plan.task.dependents`, `ledger.task-returns` and the dispatch. |
+| `KW-ARB-MODE-002` | `delegate.returned` | 0 | In test-first mode, did the worker's task gate fail on its new tests before it passed? Machine fact `gate.report.failing-run-first`: in the folder of the report the `TASK_GATE:` line claims as a pass, an accepted `--red` report (a gate summary starting `RED accepted`) written earlier. Step 0: `no-task`, `not-required` (standard mode, a `test-dev` or documentation target, or a `Not applicable` contract row), `failing-run-first`, `no-failing-run` (escalates). A claim or report that cannot be read leaves the fact absent: undecidable, allowed and logged. It replaced `KW-ARB-MODE-001`, retired with the RED/GREEN task split ([ADR 0076](../adr/0076-test-first-is-one-worker-per-task.md)). |
 | `KW-ARB-ROSTER-001` | `delegate`, `investigate` | 0 | Is the target in the caller's `delegates-to`? Machine fact: the embedded catalog. Only a caller the catalog names with a `delegates-to` list is judged: an unidentified caller, a helper agent outside the Squad, and an agent that delegates to no one answer `no-roster`, which allows. |
 | `KW-ARB-RUN-001` | `delegate`, `delegate.planner`, `investigate` | 0 | Has a run been started before an orchestrator hands a specialist that writes files any work? Machine facts: the catalog (the caller's `delegates-to` lists the target, whose profile is `worker`, `documentation`, `architect` or `product-planning`: a planner's plan belongs on the run branch), and `run.started`, a run record under `~/.kyber-weave/runs/` for this repository whose worktree still has its branch checked out. `not-started` escalates; unreadable evidence leaves the fact absent and allows. See the [runbook](runbook.md#reading-a-run-start-refusal). |
 | `KW-ARB-PLANREAD-001` | `delegate` | 0, then 1 (`choice`, ≥ 0.8) | Does the dispatch tell the worker to open a plan, specification or todo file? Step 0: `closeout`, `no-plan`. Model only: `names-plan` (escalates); `mentions-only` allows. |
@@ -307,8 +306,8 @@ non-empty **and** positively Markdown-only, so a tree the Arbiter cannot read is
 skipped (ADR 0053, decision 9). `KW-ARB-PLANNER-DIFF-001` evaluates `git.changed-paths.attributed` on `delegate.planner.returned` — the `git.changed-paths.since-dispatch` fact, computed by `HookGitFacts` against the pre-dispatch snapshot via `GitFacts.GetChangedPathsSinceSnapshot` and left absent when git cannot observe the repository, less the files of sibling writer dispatches in flight — so an empty planner diff allows and out-of-scope writes escalate. Unobservable git state leaves the fact absent, which is undecidable and allows (ADR 0072).
 
 Two answers are return-dependent: on a harness whose adapter declares returns unobservable
-(today only Antigravity), `READY-001`'s completion check and `MODE-001`'s RED check answer
-`returns-unobservable`, which allows and is logged. The in-flight overlap check finds nothing
+(today only Antigravity), `READY-001`'s completion check answers
+`returns-unobservable`, which allows and is logged, and `MODE-002` never runs. The in-flight overlap check finds nothing
 there, because a dispatch that never reports back would otherwise hold its files for the
 whole session.
 
@@ -772,18 +771,12 @@ compared.
   every lens scored between 0.12 and 0.45 on both models, so a ceiling of 0.6 would skip all
   of them.
 
-**`KW-ARB-MODE-001`, 2026-11-13.** A live run escalated two stub tasks that its test-first plan
-ordered before their failing tests, so that a shared test project compiles after every task, with
-`missing` at 1.0 and 0.98. Twelve cases were added (`mode-001` to `mode-012`): four stub tasks
-(`in-order`), four that build logic with no failing run on record (`missing`), and four whose
-failing run is reported in prose without the `RED_EVIDENCE:` marker (`in-order`), labelled by
-one Claude model and not reviewed by a person. With the old
-question, both models answered three of the four stub cases `missing` with confidence 1.0 in two
-runs each, so they would have escalated; the other nine were right. The question now reads the
-plan's task list and the tasks that depend on this one, and offers `in-order` for a stub. With the
-final wording, three runs on each model answered all 12 right, with no wrong answer above the
-floor; 10 or 11 of 12 cleared it. The criteria were reworded once against these same cases, so
-the result is partly selection, and 12 cases are few.
+**`KW-ARB-SCOPE-002`, 2026-11-13.** `KW-ARB-MODE-001` and its fifteen calibration cases are retired
+with the RED/GREEN split ([ADR 0076](../adr/0076-test-first-is-one-worker-per-task.md)); its
+replacement, `KW-ARB-MODE-002`, asks no model. A developer dispatch now includes writing the task's
+tests, so `KW-ARB-SCOPE-002`'s `within-task` criterion says so, and seven cases (`scope-031` to
+`scope-037`) check it: four in which a developer writes and runs its own tests (`within-task`) and
+three in which tests are the vehicle for work the task does not describe (`adds-work`).
 
 Confidence on one case can differ noticeably between the models (0.89 and 0.67 on the same
 case), so a floor set for one model is not assumed to hold for another.
@@ -1016,7 +1009,7 @@ Per-harness notes:
   escalates. It documents no input-rewrite field for `hooks.json`, so routing headers are
   not stripped — only documented fields are written. Because `PostToolUse` output is `{}`,
   the adapter declares returns unobservable (`harness.observes-returns` is false):
-  `READY-001`'s completion check and `MODE-001`'s RED check answer `returns-unobservable`,
+  `READY-001`'s completion check answers `returns-unobservable`,
   which allows and is logged, and the in-flight overlap check finds nothing because no
   dispatch ever closes — the other pre-dispatch gating (plan, scope, intent, ownership) is
   unaffected, and completion order is advisory there. The render records `arbiter-not-enforced` with
