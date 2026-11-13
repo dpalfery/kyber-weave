@@ -48,4 +48,21 @@ public sealed class RunStartSettings : CommandSettings
     [CommandOption("--json")]
     [Description("Print the run's facts as one JSON object instead of the human-readable report.")]
     public bool Json { get; set; }
+
+    /// <summary>Append the conductor's brief for the run just set up.</summary>
+    [CommandOption("--brief")]
+    [Description(
+        "After the run is set up, also print the conductor's brief: only the parts of its reference files " +
+        "that apply to --path and --autonomy. Adds a 'brief' field under --json.")]
+    public bool Brief { get; set; }
+
+    /// <summary>The route the brief is for.</summary>
+    [CommandOption("--path <PATH>")]
+    [Description("With --brief: the route the run is on, intake, plan or spec. Unknown keeps every route's sections.")]
+    public string? Path { get; set; }
+
+    /// <summary>The autonomy the brief is for.</summary>
+    [CommandOption("--autonomy <MODE>")]
+    [Description("With --brief: supervised or autonomous. Default: the repository's AGENTS.md Config Reg value, else supervised.")]
+    public string? Autonomy { get; set; }
 }

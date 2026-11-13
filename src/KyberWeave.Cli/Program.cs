@@ -7,6 +7,7 @@ using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Cli.Commands.Run;
 using KyberWeave.Cli.Commands.Skills;
 using KyberWeave.Cli.Commands.Squad;
+using KyberWeave.Cli.Commands.Squad.Brief;
 using KyberWeave.Cli.Commands.Update;
 using KyberWeave.Cli.Commands.Utilities;
 using KyberWeave.Cli.Rendering;
@@ -228,6 +229,11 @@ app.Configure(config =>
             .WithDescription("Launch an isolated harness instance configured with the active project preset.")
             .WithExample("squad", "run", "claude")
             .WithExample("squad", "run", "codex", "--", "--model", "custom-model");
+
+        squad.AddCommand<SquadBriefCommand>("brief")
+            .WithDescription("Print only the parts of an agent's installed reference files that apply to this run.")
+            .WithExample("squad", "brief", "conductor", "--path", "plan", "--autonomy", "supervised")
+            .WithExample("squad", "brief", "architect", "--plan", "my-plan", "--format", "json");
 
         squad.AddBranch("copilot-prompt", copilotPrompt =>
         {
