@@ -94,18 +94,16 @@ public sealed class SquadRustGoSpecialistTests
     }
 
     /// <summary>
-    /// Rust and Go test authorship stays with <c>test-dev</c>, so its trigger must name the
-    /// runners and the file shapes the two specialists decline.
+    /// <c>test-dev</c>'s test-only work includes Rust and Go suites, so its trigger names their runners.
+    /// The tests of a Rust or Go change are written by the specialist making it.
     /// </summary>
     [Fact]
-    public void TestDevTriggerCoversCargoAndGoTests()
+    public void TestDevTriggerNamesCargoAndGoRunners()
     {
         string testDev = LoadAgent("test-dev").Description;
 
         Assert.Contains("cargo test/nextest", testDev, StringComparison.Ordinal);
         Assert.Contains("go test", testDev, StringComparison.Ordinal);
-        Assert.Contains("#[cfg(test)]", testDev, StringComparison.Ordinal);
-        Assert.Contains("_test.go", testDev, StringComparison.Ordinal);
     }
 
     /// <summary>

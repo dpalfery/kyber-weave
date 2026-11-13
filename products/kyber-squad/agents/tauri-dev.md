@@ -54,7 +54,8 @@ Your packet is your whole scope.
 4. **Design the contract first.** For any new feature, specify the command/event/channel
    signatures and payload types before implementing, so the frontend agent can build in
    parallel.
-5. **Implement to the standard.** Use the layout and error types
+5. **Test first, then implement.** Write the tests for the change; in test-first mode, run
+   the `task-gate` skill's failing run before implementing. Use the layout and error types
    **<tauri-coding-standard>** names.
 6. **Wire permissions.** Every capability the command needs goes into `capabilities/` with
    the **least** permission and scope required.

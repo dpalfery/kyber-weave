@@ -8,7 +8,7 @@ capability-profile: root-fixer
 copilot-tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kw-docs/*", "context7/resolve-library-id", "context7/query-docs", search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, agent]
 # The skill dispatches bug-crusher-investigator as its first act on every defect and
 # docs-dev for the documentation-impact review. The escalated path adds architect, which
-# plans; test-dev, which establishes RED; code-reviewer, which judges the finished fix; and
+# plans; test-dev, which writes a failing test when no developer takes the fix; code-reviewer, which judges the finished fix; and
 # every developer agent a task can route to. `review-lens` and `review-triage` are for one
 # situation only: `code-reviewer` returns `STATUS: COUNCIL_SEATS_NEEDED` because its
 # harness gave it no way to start its own seats, and this session starts them and

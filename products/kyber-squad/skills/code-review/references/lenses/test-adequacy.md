@@ -16,6 +16,12 @@ are, and not what percentage of lines they touch.
 
 ## What to look for
 
+**Tests written by the implementer.** In test-first mode one worker writes a task's tests and
+its code, so this lens is the only independent read of those tests. Read each added test as an
+outsider: would it fail with the change reverted, does it assert behaviour rather than the
+implementation written beside it, and which negative and edge cases of the behaviour does no
+test exercise?
+
 **The test that proves the fix.** For a bug fix, there must be a test that fails without the
 change and passes with it. Read the test and ask whether it would genuinely have failed
 against the old code. A test written after the fix, asserting the new behaviour without ever

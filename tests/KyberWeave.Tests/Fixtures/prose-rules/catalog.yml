@@ -26,13 +26,21 @@ rules:
       - products/kyber-squad/shared/worker-baseline.md
       - products/kyber-squad/skills/task-gate/references/rework.md
   - id: A2
-    statement: The completion digest carries a RED_EVIDENCE line that names the runner filter, the failing tests and the reason, or says none when there was no RED run.
+    statement: The proof that a test-first task ran its tests failing first is the task gate's failing-run report written before its passing-run report, not a line the worker composes.
     stated-in:
       - path: products/kyber-squad/skills/task-gate/SKILL.md
-        section: Completion digest
+        section: Failing run (test-first)
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Test-first mode
     controls:
       - products/kyber-squad/shared/worker-baseline.md
       - products/kyber-squad/skills/task-gate/references/rework.md
+    retired:
+      statement: The completion digest carries a RED_EVIDENCE line that names the runner filter, the failing tests and the reason, or says none when there was no RED run.
+      example: "Add one more line after the six digest fields: RED_EVIDENCE: <runner filter> — <failing tests> — <reason>, or RED_EVIDENCE: none when no RED run was recorded."
+      seed-into: products/kyber-squad/skills/task-gate/references/rework.md
+      absent-from:
+        - products/kyber-squad/skills/task-gate/SKILL.md
   - id: A3
     statement: When the circuit breaker trips, the worker returns STATUS ESCALATION with one CIRCUIT_BREAKER_TRIGGER token instead of the completion digest.
     stated-in:
@@ -437,17 +445,6 @@ rules:
     controls:
       - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/shared/worker-baseline.md
-  - id: F4
-    statement: A RED proof never uses git stash; it is proved on a clean base checkout, a throwaway copy or an isolated worktree.
-    stated-in:
-      - products/kyber-squad/agents/conductor.md
-      - products/kyber-squad/agents/test-dev.md
-      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
-        section: Test-first mode
-      - products/kyber-squad/skills/test-dev/SKILL.md
-    controls:
-      - products/kyber-squad/agents/go-dev.md
-      - products/kyber-squad/shared/worker-baseline.md
   # ---------------------------------------------------------------- discovery, packets, and parallel work
   - id: D1
     statement: Before reading or searching files directly, the reader asks the code index (codegraph_explore) and the documentation tools.
@@ -555,31 +552,42 @@ rules:
         without-section: Ready queue
       - products/kyber-squad/skills/task-gate/references/rework.md
   - id: G3
-    statement: RED tests and the GREEN implementation are written by different workers, kept adversarially separate.
+    statement: In test-first mode one worker writes a task's tests and its code in one dispatch, running the tests failing before it implements.
     stated-in:
       - products/kyber-squad/agents/conductor.md
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Test-first mode
       - products/kyber-squad/agents/csharp-dev.md
-      - products/kyber-squad/agents/test-dev.md
-      - products/kyber-squad/skills/delivery-execution/SKILL.md
-      - products/kyber-squad/skills/test-dev/SKILL.md
     controls:
       - products/kyber-squad/skills/code-review/references/lenses/performance.md
       - products/kyber-squad/agents/conductor/references/autonomy.md
-  - id: G3-bundle-same-role
-    statement: Small tasks for the same role are bundled into one dispatch.
-    stated-in:
-      - products/kyber-squad/agents/conductor.md
-      - products/kyber-squad/skills/delivery-execution/SKILL.md
-    controls:
-      - products/kyber-squad/skills/task-gate/references/rework.md
-      - products/kyber-squad/skills/code-review/references/lenses/performance.md
+    retired:
+      statement: RED tests and the GREEN implementation are written by different workers, kept adversarially separate.
+      example: Keep RED and GREEN adversarially separate - test-dev writes the failing tests and a different implementation specialist makes them pass; never collapse the two into one dispatch.
+      seed-into: products/kyber-squad/agents/conductor/references/autonomy.md
+      absent-from:
+        - products/kyber-squad/agents/conductor.md
+        - products/kyber-squad/agents/csharp-dev.md
+        - products/kyber-squad/agents/test-dev.md
+        - products/kyber-squad/skills/test-dev/SKILL.md
   - id: green-against-red
-    statement: csharp-dev verifies its GREEN implementation against the RED tests that test-dev wrote independently.
+    statement: A developer worker writes the tests for its own change rather than leaving them to test-dev.
     stated-in:
       - products/kyber-squad/agents/csharp-dev.md
-    controls:
+      - products/kyber-squad/agents/typescript-dev.md
       - products/kyber-squad/agents/go-dev.md
+    controls:
+      - products/kyber-squad/agents/sql-database-architect.md
       - products/kyber-squad/shared/worker-baseline.md
+    retired:
+      statement: A developer worker leaves test authorship to test-dev and does not write test files.
+      example: Hand test authorship to test-dev. Report what needs covering; do not write the test files.
+      seed-into: products/kyber-squad/shared/worker-baseline.md
+      absent-from:
+        - products/kyber-squad/agents/csharp-dev.md
+        - products/kyber-squad/agents/dal-dev.md
+        - products/kyber-squad/agents/go-dev.md
+        - products/kyber-squad/agents/python-dev.md
   - id: G4
     statement: The Discovery line reporting codegraph, docs and direct-read counts comes before the completion digest.
     stated-in:
@@ -834,12 +842,18 @@ rules:
       - products/kyber-squad/skills/task-gate/references/rework.md
       - products/kyber-squad/agents/conductor/references/autonomy.md
   - id: review-fix-red-first
-    statement: In test-first mode the test for a review fix is a RED task for test-dev, dispatched before the owning worker's fix.
+    statement: In test-first mode the owning worker writes the test for a review fix and runs it failing before the fix, in the same rework dispatch.
     stated-in:
       - products/kyber-squad/skills/delivery-execution/SKILL.md
     controls:
       - products/kyber-squad/skills/task-gate/references/rework.md
       - products/kyber-squad/agents/conductor/references/autonomy.md
+    retired:
+      statement: In test-first mode the test for a review fix is a RED task for test-dev, dispatched before the owning worker's fix.
+      example: In test-first mode that test is a RED task for test-dev, dispatched before the owning worker's fix, as for any task.
+      seed-into: products/kyber-squad/agents/conductor/references/autonomy.md
+      absent-from:
+        - products/kyber-squad/skills/delivery-execution/SKILL.md
   - id: final-review-alone-last
     statement: The final review council runs last and alone, in the foreground, with no docs work or edits in the reviewed tree while it runs.
     stated-in:
@@ -1302,19 +1316,31 @@ rules:
       - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/agents/python-dev.md
   - id: go-tests-to-test-dev
-    statement: go-dev takes Go source and module files but not _test.go files, which go to test-dev.
+    statement: go-dev writes the _test.go tests of its own Go change; test-dev takes only work whose deliverable is tests.
     stated-in:
       - products/kyber-squad/agents/go-dev.md
     controls:
       - products/kyber-squad/agents/rust-dev.md
       - products/kyber-squad/agents/python-dev.md
+    retired:
+      statement: go-dev takes Go source and module files but not _test.go files, which go to test-dev.
+      example: Test files — *_test.go, fuzz targets, and benchmarks are test-dev's. Write testable code; do not author the tests.
+      seed-into: products/kyber-squad/agents/python-dev.md
+      absent-from:
+        - products/kyber-squad/agents/go-dev.md
   - id: typescript-routing-split
-    statement: typescript-dev takes non-test .ts files outside a React UI; test files go to test-dev and React UI code goes to react-dev.
+    statement: typescript-dev takes .ts files outside a React UI together with their tests, and React UI code goes to react-dev.
     stated-in:
       - products/kyber-squad/agents/typescript-dev.md
     controls:
       - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/agents/python-dev.md
+    retired:
+      statement: typescript-dev takes non-test .ts files outside a React UI; test files go to test-dev.
+      example: Test files — *.test.ts, *.spec.ts, fixtures, and test helpers are test-dev's. Write testable code; do not author the tests.
+      seed-into: products/kyber-squad/agents/python-dev.md
+      absent-from:
+        - products/kyber-squad/agents/typescript-dev.md
   - id: react-routing-split
     statement: react-dev takes .tsx and .jsx React UI code, and not .ts files outside a React UI.
     stated-in:
@@ -2182,15 +2208,21 @@ rules:
         - products/kyber-squad/agents/sql-database-architect.md
         - products/kyber-squad/agents/tauri-dev.md
   - id: plan-orders-red-green-per-compile-unit
-    statement: When tests of several layers share one compiled test project, the plan orders the tasks RED then GREEN per layer, so the project compiles after every GREEN, and runs RED in parallel only where each task has its own test project or the plan's Decisions table records a decision to add a stub task.
+    statement: A test-first plan never splits one behaviour into a task that writes its failing tests and another task that implements it.
     stated-in:
-      - path: products/kyber-squad/agents/architect/references/plan-authoring.md
-        section: Session groups
+      - products/kyber-squad/agents/architect/references/test-first-contract.md
+      - products/kyber-squad/skills/product-owner/references/tasks-phase.md
     controls:
       - products/kyber-squad/shared/worker-baseline.md
       - products/kyber-squad/agents/conductor/references/autonomy.md
+    retired:
+      statement: When tests of several layers share one compiled test project, the plan orders the tasks RED then GREEN per layer, so the project compiles after every GREEN.
+      example: Tests of several layers in one compiled test project must not all run RED first - order the tasks RED then GREEN per layer, so the project compiles after every GREEN.
+      seed-into: products/kyber-squad/agents/conductor/references/autonomy.md
+      absent-from:
+        - products/kyber-squad/agents/architect/references/plan-authoring.md
   - id: green-reports-not-verified-instead-of-private-runner
-    statement: A GREEN worker whose test project does not compile because of other tasks' tests builds the production projects it touched and reports NOT VERIFIED, and never builds a private runner project.
+    statement: A worker whose test project does not compile because of another task's tests reports the task gate's NOT VERIFIED line and never builds a private runner project.
     stated-in:
       - path: products/kyber-squad/skills/delivery-execution/SKILL.md
         section: Test-first mode
@@ -2226,7 +2258,7 @@ rules:
       - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/shared/worker-baseline.md
   - id: architect-runs-docs-tasks-check-before-finalize
-    statement: Before FINALIZE the architect runs docs tasks --check and fixes every packet warning it prints (a task whose packet cannot be understood without the plan, or a test task ordered before the code it names).
+    statement: Before FINALIZE the architect runs docs tasks --check and fixes every packet warning it prints, such as a task whose packet cannot be understood without the plan.
     stated-in:
       - path: products/kyber-squad/agents/architect/references/plan-authoring.md
         section: Task file
@@ -2234,20 +2266,39 @@ rules:
       - products/kyber-squad/agents/conductor/references/autonomy.md
       - products/kyber-squad/shared/worker-baseline.md
   - id: red-by-missing-symbol-is-valid-and-stubs-are-not-the-default
-    statement: In a compiled language a test-authoring task's RED may be a build that fails only because its tests name symbols the GREEN task creates, judged by running the task gate with --red; the worker does not add a production stub to make the tests compile.
+    statement: In a compiled language a task's failing run may be a build that fails only because its tests name symbols the task has not created yet, judged by running the task gate with --red, and the worker adds no stub to make the tests compile.
     stated-in:
       - path: products/kyber-squad/skills/task-gate/SKILL.md
-        section: Completion digest
-      - path: products/kyber-squad/agents/test-dev.md
-        anchor: "are valid RED"
+        section: Failing run (test-first)
     controls:
-      - products/kyber-squad/agents/csharp-dev.md
+      - products/kyber-squad/agents/sql-database-architect.md
       - products/kyber-squad/shared/worker-baseline.md
   - id: stub-task-needs-a-recorded-plan-decision
-    statement: A plan adds a production stub task for the test project only when its Decisions table records that decision, which also answers a host rule against stubs.
+    statement: A test-first plan never adds a stub task so that another task's tests compile.
     stated-in:
-      - path: products/kyber-squad/agents/architect/references/plan-authoring.md
-        section: Session groups
+      - products/kyber-squad/agents/architect/references/test-first-contract.md
+      - products/kyber-squad/skills/product-owner/references/tasks-phase.md
     controls:
       - products/kyber-squad/agents/conductor/references/autonomy.md
       - products/kyber-squad/shared/worker-baseline.md
+    retired:
+      statement: A plan adds a production stub task for the test project when its Decisions table records that decision.
+      example: A plan adds a stub task only when its Decisions table records the decision to, because the shared test project must keep compiling for parallel work.
+      seed-into: products/kyber-squad/agents/conductor/references/autonomy.md
+      absent-from:
+        - products/kyber-squad/agents/architect/references/plan-authoring.md
+  - id: test-dev-takes-test-only-tasks
+    statement: test-dev is assigned only tasks whose deliverable is tests, such as characterization tests, an end-to-end suite or test infrastructure.
+    stated-in:
+      - products/kyber-squad/agents/test-dev.md
+      - products/kyber-squad/agents/architect/references/test-first-contract.md
+    controls:
+      - products/kyber-squad/agents/go-dev.md
+      - products/kyber-squad/shared/worker-baseline.md
+  - id: test-adequacy-is-the-independent-test-check
+    statement: Because one worker writes both a task's tests and its code, the test-adequacy lens reads those tests as the independent check on them.
+    stated-in:
+      - products/kyber-squad/skills/code-review/references/lenses/test-adequacy.md
+    controls:
+      - products/kyber-squad/skills/code-review/references/lenses/performance.md
+      - products/kyber-squad/skills/code-review/references/lenses/correctness.md

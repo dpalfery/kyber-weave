@@ -27,12 +27,9 @@ Identify your sub-task and read ONLY the relevant reference before proceeding.
 
 ## Execution & Parallelization Invariants
 
-- **Adversarial RED/GREEN role boundary:** Maintain strict adversarial separation between RED phase test authoring (`test-dev`) and GREEN phase implementation (`csharp-dev`, etc.). Never collapse RED and GREEN into a single worker dispatch: test authors author tests and verify failures; implementers make them pass, while preserving independent verification at task completion.
-- **Same-role task bundling:** Tasks belonging to the same specialist role are bundled in same-role micro-task dispatches to minimize context thrash.
 - **Build once, test many with direct assembly runner:** Do not rebuild or recompile the entire solution on every iteration. The direct assembly runner is the language-specific form for a .NET solution — its exact assembly path and target framework come from the host's test standard, in its `## Completion` section — while other stacks use their own runners (such as `cargo test` or `go test`). Use `--no-build` for targeted test runs, or execute the pre-built test assembly directly:
   `dotnet <path-to-test-assembly>.dll -class "<Namespace>.<TestClass>"`
-- **Zero-stash RED proof rule:** Forbid `git stash` for RED proofs; never run `git stash` to fake clean working state. Run the RED proof against a clean base checkout, throwaway copy, or isolated worktree before any implementation edits exist.
-- **Per-task artifact isolation:** Isolate intermediate build and review artifacts using unique per-task paths, passing `dotnet build --artifacts-path .agent_scratchpad/<task-id>/artifacts` for build output isolation, and `kyber-weave review gates . --agent <agent> --out artifacts/task-gate-<task-id>.json` (or `.agent_scratchpad/<task-id>/task-gate.json`) so concurrent task-gate runs never overwrite one another.
+- **Per-task artifact isolation:** Isolate intermediate build and review artifacts using unique per-task paths, passing `dotnet build --artifacts-path .agent_scratchpad/<task-id>/artifacts` for build output isolation, and `kyber-weave review gates . --agent <agent> --out .agent_scratchpad/<task-id>/task-gate.json` so concurrent task-gate runs never overwrite one another.
 
 ## Completion Digest
 

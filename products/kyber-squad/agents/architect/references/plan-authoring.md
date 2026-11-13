@@ -50,19 +50,7 @@ Every task declares a `session` group, and the group is the unit of worker conti
 group run in one worker session, so the worker that made a change makes the follow-on fix to it
 rather than paying again to rebuild context it already had.
 
-The boundary is exact:
-
-- A session group may continue follow-on fixes and later same-role tasks on the same change.
-- It may merge RED tasks when a later one does not need an earlier GREEN.
-- It may never merge a RED task into its GREEN. Those stay two workers, because the implementation
-  specialist's passing run only proves the contract while someone else wrote it.
-- Tests of several layers in one compiled test project must not all run RED first: order the
-  tasks RED then GREEN per layer (dependency: next layer's RED on the previous GREEN), so the
-  project compiles after every GREEN. Parallel RED is allowed only where each task has its own
-  test project, or where the plan adds a stub task.
-- A plan adds a stub task only when its Decisions table records the decision to, because the
-  shared test project must keep compiling for parallel work. Without that row there is no stub
-  task: RED is by missing symbol. The row is also the answer to a host rule against stubs.
+A session group may continue follow-on fixes and later same-role tasks on the same change.
 
 ## Task file
 
@@ -82,7 +70,7 @@ is written.
 Finalization runs in this order:
 
 1. Make every plan edit first: the approval rows, the bold body status line, the frontmatter status (`current`) and the index row.
-2. Run `kyber-weave docs tasks <plan file> --write` in the checkout that holds the plan. It derives the whole file from the plan: file scopes, dependencies, skills, the execution digest, and each prompt from the task's own text plus its command and acceptance criteria. It writes nothing and names the task and the line to add when a task lacks a command (`Command: \`dotnet test --filter ...\``), acceptance criteria (`Acceptance criteria: ...`) or a skill (`Required skills: \`csharp-dev\``), or when a `Depends on` token names no task. Add the line to the plan task and run it again. Run `kyber-weave docs tasks <plan file> --check` before `FINALIZE` and fix every `KW-DOC-TASKS-008` to `-011` warning it prints: each names a task whose packet cannot be understood without the plan, a worker who cannot open the plan, or a test written before the code it names exists. A task may also carry `Session: <group>` (default: the task id) and `Role: <agent>` (default: its first required skill).
+2. Run `kyber-weave docs tasks <plan file> --write` in the checkout that holds the plan. It derives the whole file from the plan: file scopes, dependencies, skills, the execution digest, and each prompt from the task's own text plus its command and acceptance criteria. It writes nothing and names the task and the line to add when a task lacks a command (`Command: \`dotnet test --filter ...\``), acceptance criteria (`Acceptance criteria: ...`) or a skill (`Required skills: \`csharp-dev\``), or when a `Depends on` token names no task. Add the line to the plan task and run it again. Run `kyber-weave docs tasks <plan file> --check` before `FINALIZE` and fix every `KW-DOC-TASKS-008` to `-011` warning it prints: each names a task whose packet cannot be understood without the plan, or a worker who cannot open the plan. A task may also carry `Session: <group>` (default: the task id) and `Role: <agent>` (default: its first required skill).
 3. Run both documentation checks. Any `KW-DOC-TASKS-*` finding is fixed by changing the plan and repeating step 2, never by editing the file.
 
 Never write, edit or compute the task file or its digest by hand, with a script, or through a sibling such as a `.new` or `.tmp` copy. An edit to a task, a test contract row, an out-of-scope path or the development mode after step 2 means repeating step 2; a status or Decisions edit does not. `kyber-weave docs tasks <plan file> --check` exits 1 and says what differs without writing.

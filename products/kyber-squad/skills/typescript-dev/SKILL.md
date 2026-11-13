@@ -1,6 +1,6 @@
 ---
 name: typescript-dev
-description: Use when writing TypeScript for Node — CLIs, services, servers, data access, parsers, strict typing, absent values, async and error handling, or ESM modules. Do not use for .test.ts authorship, React UI, or CI/CD.
+description: Use when writing TypeScript for Node — CLIs, services, servers, data access, parsers, strict typing, absent values, async and error handling, or ESM modules. Do not use for React UI or CI/CD; test patterns are in the test-dev skill.
 license: MIT
 ---
 

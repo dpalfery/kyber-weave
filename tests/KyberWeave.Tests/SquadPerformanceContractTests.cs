@@ -224,7 +224,7 @@ public sealed class SquadPerformanceContractTests
     {
         string content = ReadRepoFile(relativePath);
         Assert.Contains("--artifacts-path .agent_scratchpad/<task-id>/artifacts", content, StringComparison.Ordinal);
-        Assert.Contains("--out artifacts/task-gate-<task-id>.json", content, StringComparison.Ordinal);
+        Assert.Contains("--out .agent_scratchpad/<task-id>/task-gate.json", content, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -365,14 +365,14 @@ public sealed class SquadPerformanceContractTests
     ///     rest are catalog rules. A failure names the sentence and the file it is missing from.
     /// </summary>
     [Theory]
-    [InlineData("S6", "Lines that are not one of the six digest fields are never counted or rejected as a seventh field. They are exactly these shapes: the Discovery: codegraph N, docs N, direct reads N header; COVERAGE_GAPS: followed by free text; RED_EVIDENCE: followed by the runner filter, the failing tests and the reason; Input sites: N traced, M files with none; Defect class: followed by one sentence and the inputs it covers; and Artifact: or Baseline: followed by one repository-relative or absolute path.", "agents/test-dev.md")]
+    [InlineData("S6", "Lines that are not one of the six digest fields are never counted or rejected as a seventh field. They are exactly these shapes: the Discovery: codegraph N, docs N, direct reads N header; COVERAGE_GAPS: followed by free text; RED_EVIDENCE: as `review gates --red` prints it; Input sites: N traced, M files with none; Defect class: followed by one sentence and the inputs it covers; and Artifact: or Baseline: followed by one repository-relative or absolute path.", "agents/test-dev.md")]
     [InlineData("S7", "If your change adds or alters a site where a value from outside the process is parsed, converted, or passed to a file or collection API, fill the input-site table before you report done, and make a fix for a reported defect cover its whole class; the Developer exit gate in the delivery-execution skill holds the rule, and the correctness lens of the code-review skill defines the table.", "agents/csharp-dev.md")]
     [InlineData("S7", "If your change adds or alters a site where a value from outside the process is parsed, converted, or passed to a file or collection API, fill the input-site table before you report done, and make a fix for a reported defect cover its whole class; the Developer exit gate in the delivery-execution skill holds the rule, and the correctness lens of the code-review skill defines the table.", "agents/typescript-dev.md")]
     [InlineData("S7", "If your change adds or alters a site where a value from outside the process is parsed, converted, or passed to a file or collection API, fill the input-site table before you report done, and make a fix for a reported defect cover its whole class; the Developer exit gate in the delivery-execution skill holds the rule, and the correctness lens of the code-review skill defines the table.", "agents/python-dev.md")]
     [InlineData("S7", "If your change adds or alters a site where a value from outside the process is parsed, converted, or passed to a file or collection API, fill the input-site table before you report done, and make a fix for a reported defect cover its whole class; the Developer exit gate in the delivery-execution skill holds the rule, and the correctness lens of the code-review skill defines the table.", "agents/go-dev.md")]
     [InlineData("S7", "If your change adds or alters a site where a value from outside the process is parsed, converted, or passed to a file or collection API, fill the input-site table before you report done, and make a fix for a reported defect cover its whole class; the Developer exit gate in the delivery-execution skill holds the rule, and the correctness lens of the code-review skill defines the table.", "agents/rust-dev.md")]
     [InlineData("S7", "If your change adds or alters a site where a value from outside the process is parsed, converted, or passed to a file or collection API, fill the input-site table before you report done, and make a fix for a reported defect cover its whole class; the Developer exit gate in the delivery-execution skill holds the rule, and the correctness lens of the code-review skill defines the table.", "agents/dal-dev.md")]
-    [InlineData("S8", "A RED test for code that parses or converts a value from outside the process has one case for every column after Source in the input-site table that the correctness lens of the code-review skill defines, and a RED test for a reported defect also covers at least three other inputs of its class, as the Developer exit gate in the delivery-execution skill requires.", "agents/test-dev.md")]
+    [InlineData("S8", "A test for code that parses or converts a value from outside the process has one case for every column after Source in the input-site table that the correctness lens of the code-review skill defines, and a test for a reported defect also covers at least three other inputs of its class, as the Developer exit gate in the delivery-execution skill requires.", "agents/test-dev.md")]
     public void DeveloperInputRuleSentenceIsStatedInItsProductFile(string sentenceId, string sentence, string file)
     {
         string text = Normalise(ReadRepoFile($"products/kyber-squad/{file}"));
@@ -568,7 +568,7 @@ public sealed class SquadPerformanceContractTests
         string content = ReadRepoFile(relativePath);
         Assert.Contains("dotnet build --artifacts-path .agent_scratchpad/<task-id>/artifacts", content,
             StringComparison.Ordinal);
-        Assert.Contains("--out artifacts/task-gate-<task-id>.json", content, StringComparison.Ordinal);
+        Assert.Contains("--out .agent_scratchpad/<task-id>/task-gate.json", content, StringComparison.Ordinal);
         Assert.Contains("kyber-weave review gates", content, StringComparison.OrdinalIgnoreCase);
     }
 
