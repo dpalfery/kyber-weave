@@ -15,6 +15,12 @@ public sealed class DocsCloseoutSettings : DocsSettings
                  "Without it nothing changes and the command reports whether the closeout evidence is complete.")]
     public bool Archive { get; set; }
 
+    /// <summary>Previews the archive: reports every missing condition and every change, and changes nothing.</summary>
+    [CommandOption("--dry-run")]
+    [Description("With --archive, report every missing closeout condition and every change that would be made " +
+                 "(including a missing archive inventory that would be created), and change nothing.")]
+    public bool DryRun { get; set; }
+
     /// <summary>The archive date, <c>yyyy-MM-dd</c>. Defaults to today (UTC).</summary>
     [CommandOption("--date <DATE>")]
     [Description("Archive date as yyyy-MM-dd. Defaults to today (UTC).")]

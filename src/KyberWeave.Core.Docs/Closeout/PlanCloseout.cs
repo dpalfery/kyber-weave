@@ -100,11 +100,12 @@ public sealed partial class PlanCloseout
             return new PlanCloseoutOutcome(report, false);
         }
 
-        foreach (string index in new[] { inventory, planIndex }.Where(index => !File.Exists(Absolute(index))))
+        // Every problem is collected before anything is reported: the caller is an agent that fixes what it is
+        // told, so a refusal that names one gap per run costs a run per gap.
+        if (!File.Exists(Absolute(planIndex)))
         {
-            report.Add(new Diagnostic(IndexNotEditable, Severity.Error, $"'{index}' does not exist.", plan, index,
-                Hint: "Restore the index, then run the closeout again."));
-            return new PlanCloseoutOutcome(report, false);
+            report.Add(new Diagnostic(IndexNotEditable, Severity.Error, $"'{planIndex}' does not exist.", plan, planIndex,
+                Hint: $"Restore it with 'git checkout -- {planIndex}', then run the closeout again."));
         }
 
         string archivedText = WithArchivedStatus(File.ReadAllText(Absolute(plan)), date);
@@ -116,28 +117,24 @@ public sealed partial class PlanCloseout
         string? newInventory = null;
         string? newPlanIndex = null;
         bool planRowRemoved = false;
+        string inventoryAction;
+        string row;
         try
         {
             File.WriteAllText(Absolute(target), archivedText);
             DocumentSet live = _loaderFactory().Load();
             report.AddRange(new ArchiveCloseoutValidator(_repoRoot, _config, _loaderFactory)
-                .Validate(live, [new ChangedPath(target, ChangeKind.Added)]).Items);
+                .Itemise(live, [new ChangedPath(target, ChangeKind.Added)]).Items);
             if (report.HasErrors)
             {
-                report.Add(new Diagnostic(Step, Severity.Info, "Nothing was moved or changed.", plan, plan));
+                report.Add(new Diagnostic(Step, Severity.Info,
+                    "Nothing was moved or changed. Fix every error above, then run the closeout again.", plan, plan));
                 return new PlanCloseoutOutcome(report, false);
             }
 
-            string row = InventoryRow(_loaderFactory().LoadArchivedDocument(target), name, archivedText, date);
-            newInventory = AddInventoryRow(File.ReadAllText(Absolute(inventory)), row);
+            row = InventoryRow(_loaderFactory().LoadArchivedDocument(target), name, archivedText, date);
+            (newInventory, inventoryAction) = WithInventoryRow(inventory, planIndex, row, date);
             (newPlanIndex, planRowRemoved) = RemovePlanRow(File.ReadAllText(Absolute(planIndex)), name);
-            if (newInventory is null)
-            {
-                report.Add(new Diagnostic(IndexNotEditable, Severity.Error,
-                    $"'{inventory}' has no archived plans table with the columns {InventoryColumns}.", plan, inventory,
-                    Hint: "Restore the table header and separator, then run the closeout again."));
-                return new PlanCloseoutOutcome(report, false);
-            }
         }
         finally
         {
@@ -150,10 +147,10 @@ public sealed partial class PlanCloseout
 
         if (!archive)
         {
-            Say(report, plan, $"Closeout evidence is complete. With --archive: move {plan} to {target}.");
-            Say(report, plan, hasTaskFile ? $"Remove {taskFile}." : "No task file to remove.");
-            Say(report, plan, planRowRemoved ? $"Take its row out of {planIndex}." : $"{planIndex} has no row for it.");
-            Say(report, plan, $"Add its row at the top of {inventory}.");
+            Say(report, plan, $"Closeout evidence is complete. With --archive (and without --dry-run) this would move {plan} to {target}.");
+            Say(report, plan, hasTaskFile ? $"Would remove {taskFile}." : "No task file to remove.");
+            Say(report, plan, planRowRemoved ? $"Would take its row out of {planIndex}." : $"{planIndex} has no row for it.");
+            Say(report, plan, $"Would {inventoryAction} {inventory} with this row: {row}");
             return new PlanCloseoutOutcome(report, false);
         }
 
@@ -169,7 +166,7 @@ public sealed partial class PlanCloseout
         File.WriteAllText(Absolute(planIndex), newPlanIndex!);
         Say(report, plan, planRowRemoved ? $"Took its row out of {planIndex}." : $"{planIndex} had no row for it.");
         File.WriteAllText(Absolute(inventory), newInventory);
-        Say(report, plan, $"Added its row at the top of {inventory}.");
+        Say(report, plan, $"Done: {inventoryAction} {inventory} with its row.");
 
         Stage(touched, report, plan);
         Say(report, plan, "Run 'docs validate . --merge-ready' and 'docs drift .' next.");
@@ -257,6 +254,34 @@ public sealed partial class PlanCloseout
         string goal = (archived.Frontmatter.Title ?? name).Replace("|", "\\|", StringComparison.Ordinal);
         return $"| [{name}]({name}) | Archived — complete {stamp} | {created} | {stamp} | " +
                $"{string.Join("; ", destinations).Replace("|", "\\|", StringComparison.Ordinal)} | {goal} |";
+    }
+
+    /// <summary>
+    /// The archived plan inventory with <paramref name="row"/> in it, and what was done to get there. A missing
+    /// inventory is created, and one without the table gets the table appended: both are mechanical and have one
+    /// right shape, so refusing would only cost the caller a run.
+    /// </summary>
+    private (string Text, string Action) WithInventoryRow(string inventory, string planIndex, string row, DateOnly date)
+    {
+        string table = $"{InventoryColumns}\n|---|---|---|---|---|---|\n{row}\n";
+        if (!File.Exists(Absolute(inventory)))
+        {
+            string owner = Owner().Match(File.ReadAllText(Absolute(planIndex))) is { Success: true } match
+                ? match.Groups[1].Value
+                : "Maintainers";
+            string stamp = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            return ($"---\nid: {OntologyConfig.ArchiveSegment}/{PlansSegment}/index\ntitle: Archived Plan Inventory\n" +
+                    $"doc-type: index\nstatus: current\nowner: {owner}\nlast-reviewed: {stamp}\n---\n\n" +
+                    $"# Archived Plan Inventory\n\nPlans that finished and were archived, newest first.\n\n" +
+                    $"## Archived Plans\n\n{table}", "create");
+        }
+
+        string text = File.ReadAllText(Absolute(inventory));
+        if (AddInventoryRow(text, row) is { } added)
+            return (added, "add its row at the top of");
+
+        string separator = text.EndsWith('\n') ? "\n" : "\n\n";
+        return ($"{text}{separator}## Archived Plans\n\n{table}", "append the archived plans table to");
     }
 
     /// <summary>The inventory with <paramref name="row"/> at the top of its table, or null when it has no such table.</summary>
@@ -347,6 +372,9 @@ public sealed partial class PlanCloseout
 
     [GeneratedRegex(@"^\*\*Status:[^*\r\n]*\*\*", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     private static partial Regex BodyStatusBold();
+
+    [GeneratedRegex(@"^owner:[ \t]*(\S[^\r\n]*?)[ \t]*$", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
+    private static partial Regex Owner();
 
     [GeneratedRegex(@"^created:\s*(\S+)", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     private static partial Regex Created();

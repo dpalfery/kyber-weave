@@ -215,6 +215,106 @@ public sealed class DocsCloseoutCommandTests
     }
 
     [Fact]
+    public void OneRunNamesEveryGapAsItsOwnFindingWithAnExampleAndMovesNothing()
+    {
+        // No mapping table, no impact components, the plan index gone: three problems that took three runs to see.
+        string sections = CloseoutCorpus.DecisionsSection("D1", "D2", "ADMIN-DASH") + CloseoutCorpus.DesignHarvestSection("H1");
+        using DocFixture fixture = Repository(
+            CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready", componentsLine: string.Empty, sections: sections));
+        File.Delete(Path.Combine(fixture.Root, PlanIndex.Replace('/', Path.DirectorySeparatorChar)));
+
+        (int exit, string output) = Run(fixture, archive: true);
+
+        Assert.Equal(1, exit);
+        using JsonDocument report = JsonDocument.Parse(output);
+        List<(string Code, string Message, string Hint)> findings = report.RootElement.GetProperty("findings").EnumerateArray()
+            .Select(item => (item.GetProperty("code").GetString()!, item.GetProperty("message").GetString()!,
+                item.TryGetProperty("hint", out JsonElement hint) ? hint.GetString() ?? string.Empty : string.Empty))
+            .ToList();
+        Assert.Contains(findings, f => f.Code == "KW-DOC-CLOSEOUT-003" && f.Message.Contains(PlanIndex, StringComparison.Ordinal));
+        (string _, string c4, string c4Hint) = Assert.Single(findings, f => f.Message.StartsWith("C4:", StringComparison.Ordinal));
+        Assert.Contains("D1, D2, ADMIN-DASH", c4Hint, StringComparison.Ordinal);
+        Assert.Contains("Documentation waiver", c4Hint, StringComparison.Ordinal);
+        (string _, string c5, string c5Hint) = Assert.Single(findings, f => f.Message.StartsWith("C5:", StringComparison.Ordinal));
+        Assert.Contains("impact-components", c5Hint, StringComparison.Ordinal);
+        Assert.NotEqual(c4, c5);
+        Assert.True(Exists(fixture, Plan));
+        Assert.False(Exists(fixture, Archived));
+    }
+
+    [Fact]
+    public void AMappingRowWhoseLinkResolvesNowhereIsNamedAlongsideEveryUnmappedId()
+    {
+        string sections = CloseoutCorpus.DecisionsSection("D1", "D2")
+                          + CloseoutCorpus.CloseoutMappingSection(("D1, D2, H1", "[Widget](../../reference/missing.md)"))
+                          + CloseoutCorpus.DesignHarvestSection("H1");
+        using DocFixture fixture = Repository(
+            CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready", sections: sections));
+
+        (int exit, string output) = Run(fixture, archive: true);
+
+        Assert.Equal(1, exit);
+        Assert.Contains("D1, D2, H1", output, StringComparison.Ordinal);
+        Assert.Contains("reference/missing.md", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AMissingArchiveInventoryIsCreatedWithTheTableHeaderAndTheRow()
+    {
+        using DocFixture fixture = Repository();
+        File.Delete(Path.Combine(fixture.Root, Inventory.Replace('/', Path.DirectorySeparatorChar)));
+
+        (int exit, string output) = Run(fixture, archive: true);
+
+        Assert.True(exit == 0, output);
+        string text = Read(fixture, Inventory);
+        Assert.Contains("| Plan | Status | Date | Archive Date | Canonical Docs / Harvested ADRs | Goal |", text, StringComparison.Ordinal);
+        Assert.Contains("| [2026-10-20-widget.md](2026-10-20-widget.md) | Archived — complete 2026-11-13 |", text, StringComparison.Ordinal);
+        Assert.Contains("doc-type: index", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnInventoryWithoutTheTableGetsTheTableAppended()
+    {
+        using DocFixture fixture = Repository();
+        fixture.Write(Inventory, "---\nid: archive/plans/index\ntitle: Archived Plan Inventory\ndoc-type: index\nstatus: current\nowner: Maintainers\nlast-reviewed: 2026-11-01\n---\n\n# Archived Plan Inventory\n\nNothing yet.\n");
+
+        (int exit, string output) = Run(fixture, archive: true);
+
+        Assert.True(exit == 0, output);
+        string text = Read(fixture, Inventory);
+        Assert.Contains("Nothing yet.", text, StringComparison.Ordinal);
+        Assert.Contains("| Plan | Status | Date | Archive Date | Canonical Docs / Harvested ADRs | Goal |", text, StringComparison.Ordinal);
+        Assert.Contains("[2026-10-20-widget.md]", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DryRunWithArchiveReportsEveryChangeIncludingTheInventoryItWouldCreateAndChangesNothing()
+    {
+        using DocFixture fixture = Repository();
+        File.Delete(Path.Combine(fixture.Root, Inventory.Replace('/', Path.DirectorySeparatorChar)));
+        DocsCloseoutSettings settings = new()
+        {
+            Path = Path.Combine(fixture.Root, Plan.Replace('/', Path.DirectorySeparatorChar)),
+            Format = "json",
+            Archive = true,
+            DryRun = true,
+            Date = Date
+        };
+
+        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(
+            () => new DocsCloseoutCommand().Execute(null!, settings, CancellationToken.None));
+
+        Assert.True(run.Result == 0, run.Output);
+        Assert.Contains("Would create", run.Output, StringComparison.Ordinal);
+        Assert.Contains("Would remove", run.Output, StringComparison.Ordinal);
+        Assert.True(Exists(fixture, Plan));
+        Assert.True(Exists(fixture, TaskFile));
+        Assert.False(Exists(fixture, Archived));
+        Assert.False(Exists(fixture, Inventory));
+    }
+
+    [Fact]
     public void ARunningPlanWithOtherRowsKeepsThemInThePlanIndex()
     {
         string index = PlanIndexWithRow.Replace(

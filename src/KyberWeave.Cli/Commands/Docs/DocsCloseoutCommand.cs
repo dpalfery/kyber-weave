@@ -58,7 +58,7 @@ public sealed class DocsCloseoutCommand : Command<DocsCloseoutSettings>
 
         PlanArguments.Announce(report, settings, relative);
         PlanCloseoutOutcome outcome = new PlanCloseout(root, effective, () => new DocumentLoader(root, ontology))
-            .Run(relative, date, settings.Archive);
+            .Run(relative, date, settings.Archive && !settings.DryRun);
         report.AddRange(outcome.Report.Items);
         report.AddMetric("archived", outcome.Archived);
 

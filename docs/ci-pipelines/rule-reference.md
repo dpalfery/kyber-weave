@@ -55,12 +55,12 @@ Reported only when the `plan-index` or `todo-index` registry property names a do
 |---|---|---|
 | `KW-DOC-CLOSEOUT-001` | Error | The path is not an active plan: it does not exist, is not a `.md` file directly under the plans folder, or is the plan index |
 | `KW-DOC-CLOSEOUT-002` | Error | The archive already holds a file with the plan's name |
-| `KW-DOC-CLOSEOUT-003` | Error | The plan index or the archived plan inventory is missing, or the inventory has no `Plan / Status / Date / Archive Date / Canonical Docs / Goal` table to add the row to |
+| `KW-DOC-CLOSEOUT-003` | Error | The plan index is missing. (A missing archived plan inventory, or one without the `Plan / Status / Date / Archive Date / Canonical Docs / Goal` table, is created or completed by `--archive` instead of refused.) |
 | `KW-DOC-CLOSEOUT-004` | Info / Warning | A step the command took or, without `--archive`, would take. Warning: `git add` could not stage the touched files |
 | `KW-DOC-CLOSEOUT-005` | Error | `--date` is not `yyyy-MM-dd` |
 | `KW-DOC-PLANREF-001` | Error | A plan or specification argument (to `docs closeout`, `docs tasks` or `arbiter plan`) matches more than one active file; the finding lists the candidates |
 
-A plan whose closeout evidence is incomplete is reported with `KW-DOC-LIFECYCLE-004` and nothing is moved.
+A plan whose closeout evidence is incomplete is reported with `KW-DOC-LIFECYCLE-004` and nothing is moved. One run reports every missing condition (`C1`–`C9`) as its own finding, with every unmapped id named and an example row or line as the hint, together with any index problem.
 
 ### Plan task files — `docs validate` and the docs MCP validate tool
 
