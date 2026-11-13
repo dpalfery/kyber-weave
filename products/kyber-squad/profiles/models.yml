@@ -19,7 +19,7 @@ profiles:
     antigravity: pro
     claude: opus
     codex: gpt-6.1-sol
-    copilot: GPT-5.6 Sol (copilot)
+    copilot: Claude Opus 5.5 (copilot)
     cursor: claude-sonnet-5-5[effort=high]
     devin: claude-opus-5-5-high
     factory: glm-5.3[reasoningEffort=high]
