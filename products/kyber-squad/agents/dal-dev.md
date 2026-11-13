@@ -22,8 +22,6 @@ Use the `task-gate` skill as the deterministic exit check on your own changed fi
 
 This routes to: schema-contract consumption, ADO.NET repositories, and FluentMigrator reference documentation.
 
-Use the `resharper-clt` skill before reporting `READY_FOR_REVIEW`. It owns the deterministic fix pass that erases mechanical findings before any reviewer sees them, and the remediation for the inspections that turn up most often. Run its fix pass, not its InspectCode pass: InspectCode is a review gate here, run once per review cycle, never a per-task one.
-
 ## Scope
 
 You own:

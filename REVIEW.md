@@ -315,7 +315,7 @@ Governing standards: [`docs/standards/csharp`](docs/standards/csharp/README.md) 
 
 ## What not to flag
 
-- Anything `dotnet format`, ReSharper, `tsc`, ESLint, `clippy`, or `docs validate` already
+- Anything `dotnet format`, the compiler and analyzers, `tsc`, ESLint, `clippy`, or `docs validate` already
   enforces.
 - Joke-grade or stylistic prose in comments, naming taste, or "I would have written this
   differently" with no failure scenario.

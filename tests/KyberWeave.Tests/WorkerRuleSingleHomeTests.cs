@@ -41,13 +41,24 @@ public sealed class WorkerRuleSingleHomeTests
             "body may mention it. Still mentioning it: " + string.Join(", ", repeating));
     }
 
-    /// <summary>The skill no longer carries a cleanupcode command, so no agent can be told to run one.</summary>
+    /// <summary>
+    ///     InspectCode is removed from the squad (ADR 0075): the tool never exits on the reference machine and a
+    ///     host repository has no wrapper to stop it. The skill is gone and no agent body names it or the tool.
+    /// </summary>
     [Fact]
-    public void TheCleanupCodeCommandIsAbsentFromTheSkill()
+    public void InspectCodeAndItsSkillAreAbsentFromTheSquad()
     {
-        string skill = ReadProductFile("skills/resharper-clt/SKILL.md");
+        Assert.False(
+            Directory.Exists(Path.Combine(ProductRoot, "skills", "resharper-clt")),
+            "The resharper-clt skill was removed with InspectCode (ADR 0075).");
 
-        Assert.DoesNotContain("jb cleanupcode", skill, StringComparison.OrdinalIgnoreCase);
+        string[] skillNamed = AgentsContaining("resharper-clt");
+        string[] toolNamed = AgentsContaining("inspectcode");
+
+        Assert.True(
+            skillNamed.Length == 0 && toolNamed.Length == 0,
+            "InspectCode was removed from the squad (ADR 0075); no agent body may name it or its skill. " +
+            "Still naming it: " + string.Join(", ", skillNamed.Concat(toolNamed).Distinct()));
     }
 
     /// <summary>

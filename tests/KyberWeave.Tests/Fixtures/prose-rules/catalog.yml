@@ -2158,13 +2158,6 @@ rules:
       - path: AGENTS.md
         without-section: Exploration order
       - products/kyber-squad/skills/task-gate/references/rework.md
-  - id: inspectcode-exit-zero
-    statement: InspectCode exits zero whether or not it finds anything, so its exit code is not a clean report.
-    stated-in:
-      - AGENTS.md
-    controls:
-      - products/kyber-squad/skills/task-gate/references/rework.md
-      - products/kyber-squad/shared/worker-baseline.md
   - id: kyberdash-display-layer
     statement: The KyberDash web and tray apps are display layers only, with no feature logic of their own.
     stated-in:

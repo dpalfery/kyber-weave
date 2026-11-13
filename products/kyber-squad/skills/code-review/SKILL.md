@@ -240,7 +240,7 @@ kyber-weave review verdict . --seats <cycle>/seats --gates <cycle>/gates.json --
 ```
 
 The command reads the findings from the seat files and writes the surviving findings to
-`findings.json`, so a later audit reads what the verdict read. Record every lens you do not seat with `--not-seated <lens>=<reason>`; the verdict refuses to compute while a lens has neither a seat file nor a reason (KW-REVIEW-041). A lens that needs gate input the run never produced is not seated, for example `--not-seated static-analysis-triage=no analyzer output: inspectcode not run`. A verifier cycle passes `--prior`, and a lens the prior cycle covered is carried from it, as is a blocking gate this cycle did not run whose inputs are unchanged; one whose inputs changed or that did not pass is refused (KW-REVIEW-049).
+`findings.json`, so a later audit reads what the verdict read. Record every lens you do not seat with `--not-seated <lens>=<reason>`; the verdict refuses to compute while a lens has neither a seat file nor a reason (KW-REVIEW-041). A lens that needs gate input the run never produced is not seated, for example `--not-seated static-analysis-triage=no analyzer output: build gate not run`. A verifier cycle passes `--prior`, and a lens the prior cycle covered is carried from it, as is a blocking gate this cycle did not run whose inputs are unchanged; one whose inputs changed or that did not pass is refused (KW-REVIEW-049).
 
 Rules, in evaluation order. The first that fires decides:
 
@@ -400,8 +400,8 @@ review:
     - id: test
       run: [dotnet, test, -c, Release]     # argv, never a command line
       blocking: true
-    - id: inspectcode                      # .NET static analysis; see the resharper-clt skill
-      run: [dotnet, jb, inspectcode, MySolution.sln, --output=.scratch/inspectcode.xml, --format=Xml]
+    - id: build                            # .NET compiler and analyzer warnings
+      run: [dotnet, build, MySolution.sln, -c, Release]
       blocking: true
   coverage:
     file-line-percent: 85

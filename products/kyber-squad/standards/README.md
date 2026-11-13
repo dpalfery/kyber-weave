@@ -51,8 +51,7 @@ follows `tauri` instead. `typescript` was written with the `typescript-dev` agen
 `python` were then rewritten from their agents so stack, packaging, environment, and
 quality-gate policy live in the template — those agents only name **<pulumi-coding-standard>**
 and **<python-coding-standard>**. `github-actions` and `sql` also carry the defaults the
-`github-devops` and `sql-database-architect` agents used to embed, and `csharp` carries the
-ReSharper redundancy-tier guidance the C# review reference used to hold. `test` was
+`github-devops` and `sql-database-architect` agents used to embed. `test` was
 rewritten from the `test-dev` agent so runners,
 isolation, naming, and assertion policy live in the template — the agent only names
 **<test-coding-standard>**. Kyber-Weave's own

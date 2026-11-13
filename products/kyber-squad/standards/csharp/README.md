@@ -48,19 +48,6 @@ in the file.
 
 Do not merge code that fails the build, and do not restate analyzer rules here.
 
-**ReSharper redundancy tier.** Where ReSharper InspectCode runs as a gate scoped to
-`--severity=WARNING`, the solution settings (`<Solution>.sln.DotSettings`) promote the
-redundancy tier from `SUGGESTION` to `WARNING`, or the gate drops the whole family before
-anyone sees it: `RedundantOverload.*`, `UnusedMember.Global`, `UnusedType.Global`,
-`UnusedMethodReturnValue.Global`, `VirtualMemberNeverOverridden.*`, and
-`ClassWithVirtualMembersNeverInherited.*`. Already at `WARNING` and needing no promotion:
-`EmptyConstructor`, `RedundantBaseConstructorCall`, `RedundantDefaultMemberInitializer`,
-`RedundantOverriddenMember`, `RedundantArgumentDefaultValue`, `DuplicatedStatements`.
-`ClassNeverInstantiated.Global` is noise wherever a container or CLI framework constructs
-types reflectively, and belongs in the suppression list. `UnusedMember.Global` is worth its
-false positives: mark reflectively constructed types `[UsedImplicitly]` rather than disabling
-the rule.
-
 ## Style the analyzers already enforce
 
 `.editorconfig` is the source of truth. The choices worth stating because other .NET

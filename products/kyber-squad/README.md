@@ -82,7 +82,6 @@ products/kyber-squad/
     ├── pr-review-fix-comments/
     ├── product-owner/
     ├── python-dev/
-    ├── resharper-clt/
     ├── rust-dev/
     ├── security-review/
     ├── setup-dev-environment/

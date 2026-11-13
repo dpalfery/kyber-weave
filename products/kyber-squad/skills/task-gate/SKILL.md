@@ -49,9 +49,7 @@ not a pass until a run without `--fix` reports every declared gate as passing.
 ## Fix pass for .NET work
 
 When the task changed C# files, the mechanical findings are erased by `dotnet format` and
-`dotnet format analyzers`, scoped with `--include` to this task's files. Never run `InspectCode`
-from this gate: inspection is a review gate, run once per review cycle, and a per-task run loads
-the whole solution.
+`dotnet format analyzers`, scoped with `--include` to this task's files.
 
 ## Loop and the 2-cycle cap
 
@@ -153,4 +151,3 @@ Lines that are not one of the six digest fields are never counted or rejected as
 - Never report a task done without this digest line.
 - Never edit the gate declarations to make a gate pass. A gate that fails on the task's own
   files is a finding to fix, not a configuration to change.
-- Never run `InspectCode` from this skill.

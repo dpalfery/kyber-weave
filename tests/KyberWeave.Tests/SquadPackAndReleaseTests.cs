@@ -78,7 +78,6 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         "pr-review-fix-comments",
         "product-owner",
         "python-dev",
-        "resharper-clt",
         "rust-dev",
         "security-review",
         "setup-dev-environment",
@@ -160,8 +159,8 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             Assert.Contains(entryNames, name => name == $"agents/{agent}.md");
         }
 
-        // Presence of all 29 canonical skills
-        Assert.Equal(29, CanonicalSkills.Length);
+        // Presence of all 28 canonical skills
+        Assert.Equal(28, CanonicalSkills.Length);
         foreach (string skill in CanonicalSkills)
         {
             Assert.Contains(entryNames, name => name == $"skills/{skill}/SKILL.md" || name.StartsWith($"skills/{skill}/", StringComparison.Ordinal));

@@ -13,7 +13,7 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadDoctorShadowedSkillTests : IDisposable
 {
-    private const string Installed = "---\nname: resharper-clt\n---\nRun the current command.\n";
+    private const string Installed = "---\nname: task-gate\n---\nRun the current command.\n";
 
     private readonly TempDirectory _temp = new();
 
@@ -22,14 +22,14 @@ public sealed class SquadDoctorShadowedSkillTests : IDisposable
     [Fact]
     public void AProjectCopyWithDifferentContentIsAWarningNamingBothPathsAndTheFix()
     {
-        string workingDir = Deploy(".agents/skills/resharper-clt/SKILL.md", "---\nname: resharper-clt\n---\nRun the removed command.\n");
+        string workingDir = Deploy(".agents/skills/task-gate/SKILL.md", "---\nname: task-gate\n---\nRun the removed command.\n");
 
         (int exitCode, string output) = RunDoctor(workingDir);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("KW-SQUAD-SHADOW-001", output, StringComparison.Ordinal);
-        Assert.Contains(Normalize(Path.Combine(workingDir, ".agents", "skills", "resharper-clt", "SKILL.md")), output, StringComparison.Ordinal);
-        Assert.Contains(Normalize(Path.Combine(workingDir, ".claude", "skills", "resharper-clt", "SKILL.md")), output, StringComparison.Ordinal);
+        Assert.Contains(Normalize(Path.Combine(workingDir, ".agents", "skills", "task-gate", "SKILL.md")), output, StringComparison.Ordinal);
+        Assert.Contains(Normalize(Path.Combine(workingDir, ".claude", "skills", "task-gate", "SKILL.md")), output, StringComparison.Ordinal);
         Assert.Contains("Delete the project copy", output, StringComparison.Ordinal);
         Assert.Contains("squad install", output, StringComparison.Ordinal);
     }
@@ -37,7 +37,7 @@ public sealed class SquadDoctorShadowedSkillTests : IDisposable
     [Fact]
     public void AProjectCopyWithTheSameBodyUnderAnotherHarnessFrontmatterIsNotReported()
     {
-        string workingDir = Deploy(".github/skills/resharper-clt/SKILL.md", "---\nname: resharper-clt\nextra: other-harness\n---\r\nRun the current command.\r\n");
+        string workingDir = Deploy(".github/skills/task-gate/SKILL.md", "---\nname: task-gate\nextra: other-harness\n---\r\nRun the current command.\r\n");
 
         (int exitCode, string output) = RunDoctor(workingDir);
 
@@ -60,11 +60,11 @@ public sealed class SquadDoctorShadowedSkillTests : IDisposable
     private string Deploy(string projectRelativePath, string projectContent)
     {
         string workingDir = Path.Combine(_temp.Path, "project");
-        string installedPath = Path.Combine(workingDir, ".claude", "skills", "resharper-clt", "SKILL.md");
+        string installedPath = Path.Combine(workingDir, ".claude", "skills", "task-gate", "SKILL.md");
         Directory.CreateDirectory(Path.GetDirectoryName(installedPath)!);
         byte[] installedBytes = Encoding.UTF8.GetBytes(Installed);
         File.WriteAllBytes(installedPath, installedBytes);
-        SeedReceipt(workingDir, ".claude/skills/resharper-clt/SKILL.md", installedBytes);
+        SeedReceipt(workingDir, ".claude/skills/task-gate/SKILL.md", installedBytes);
 
         string projectPath = Path.Combine(workingDir, projectRelativePath.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(projectPath)!);

@@ -1211,7 +1211,7 @@ and validates.
 - **Copilot emit today**: `CopilotRenderer` writes each agent's
   `.github/agents/<name>.agent.md` and each skill's `.github/skills/<name>/SKILL.md`, then
   `SquadResourceProjection.Append` places every file that owner's Markdown links reach beside
-  the principal. A fresh Copilot render is 150 files — 24 agents, 29 skills, plus projected
+  the principal. A fresh Copilot render is 149 files — 24 agents, 28 skills, plus projected
   closures — with authored relative links resolving in the output; every skill resource
   reaches this render except `skills/setup-dev-environment/agents/openai.yaml`, which stays
   packaged-only Codex skill-UI metadata. That count is the current
