@@ -11,9 +11,10 @@ namespace KyberWeave.Tests;
 /// <remarks>
 /// The digest template is a report format, and report formats belong to the one skill a worker
 /// loads when it finishes: slices of this programme moved them out of each agent body so the same
-/// template is not maintained once per agent (the rule map's "Report formats" row). The strings
-/// are pinned exactly as they were; only their home moved, and
-/// <c>WorkerRuleSingleHomeTests</c> keeps them from growing a second copy.
+/// template is not maintained once per agent (the rule map's "Report formats" row). This class
+/// pins the line's tokens and its place in the template; the prose around it (the ledger parses
+/// it, <c>none</c> means no RED run) is catalog rule A2 in
+/// <c>tests/KyberWeave.Tests/Fixtures/prose-rules/catalog.yml</c>.
 /// </remarks>
 public sealed class ArbiterTestDevContractTests
 {
@@ -32,7 +33,6 @@ public sealed class ArbiterTestDevContractTests
             "RED_EVIDENCE: <runner filter> — <failing tests> — <reason>",
             contract,
             StringComparison.Ordinal);
-        Assert.Contains("in-flight ledger", contract, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -41,7 +41,6 @@ public sealed class ArbiterTestDevContractTests
         string contract = TaskGateContract;
 
         Assert.Contains("RED_EVIDENCE: none", contract, StringComparison.Ordinal);
-        Assert.Contains("no RED run", contract, StringComparison.Ordinal);
     }
 
     [Fact]

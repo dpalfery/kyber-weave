@@ -67,6 +67,21 @@ public sealed class SquadStandardsToolContractTests
         "typescript-dev"
     ];
 
+    /// <summary>
+    /// The files where the prose rule catalog's <c>standards-via-tool</c> rule keeps the retired
+    /// "read the standard's file" route out (its <c>absent-from</c> list), so the read-route
+    /// heuristic below does not check them a second time. They still must name the tool.
+    /// </summary>
+    private static readonly HashSet<string> ReadRouteCheckedByTheCatalog = new(StringComparer.Ordinal)
+    {
+        "agents/csharp-dev.md",
+        "agents/go-dev.md",
+        "agents/python-dev.md",
+        "agents/test-dev.md",
+        "skills/go-dev/SKILL.md",
+        "skills/test-dev/SKILL.md"
+    };
+
     /// <summary>A verb that tells a reader to go and fetch a document.</summary>
     private static readonly Regex ReadImperative = new(
         @"\b(?:read|reads|reading|open|opens|consult|consults)\b",
@@ -194,7 +209,7 @@ public sealed class SquadStandardsToolContractTests
     /// <summary>
     /// The two facts a routing instruction owes: it names the tool, and no block of it tells the
     /// reader to get the standard by reading a path unless that same block says the tool may be
-    /// absent. The second is what the path form cost — 15,000 characters of a 21,354-character
+    /// absent. The second is skipped for the files the prose rule catalog already checks for it. The second is what the path form cost — 15,000 characters of a 21,354-character
     /// standard read whole, and nothing read at all where no read tool is granted.
     /// </summary>
     private static void AssertRoutesThroughTheTool(string relativePath)
@@ -206,6 +221,9 @@ public sealed class SquadStandardsToolContractTests
         Assert.True(
             text.Contains(ToolName, StringComparison.Ordinal),
             $"'{relativePath}' must reach its coding standard through {ToolName}; it does not name it.");
+
+        if (ReadRouteCheckedByTheCatalog.Contains(relativePath))
+            return;
 
         List<string> offenders = Blocks(text)
             .Where(block => ReadImperative.IsMatch(block))

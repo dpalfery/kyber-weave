@@ -3,14 +3,16 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Pins the operational facts the root <c>AGENTS.md</c> slim must keep: the .NET gate argv
-/// lives in the review catalogue, InspectCode's exit code is not the report, CodeGraph
-/// init is preceded by both staged and unstaged diffs, and every KyberDash row names the
-/// display layer.
+/// Pins the operational pointers and tokens the root <c>AGENTS.md</c> slim must keep: the .NET
+/// gate argv lives in the review catalogue, the InspectCode report path, the staged and unstaged
+/// diffs CodeGraph init records, the KyberDash rows' paths, and the area documents the Commands
+/// section points at.
 /// </summary>
 /// <remarks>
 /// Assertions match stable tokens in the hand-authored sections, not the generated Config Reg
-/// block, so a wording pass can move a sentence without hiding a dropped constraint.
+/// block. The rules those sections state in prose (InspectCode's exit code, the display layers,
+/// the full-suite ban, the quick-review threshold) are checked by the prose rule catalog,
+/// <c>tests/KyberWeave.Tests/Fixtures/prose-rules/catalog.yml</c>.
 /// </remarks>
 public sealed class RootAgentsOperationalPointerTests
 {
@@ -52,13 +54,10 @@ public sealed class RootAgentsOperationalPointerTests
     /// code as clean never hands <c>artifacts/inspectcode.xml</c> to the triage lens.
     /// </summary>
     [Fact]
-    public void InspectCodeExitZeroIsNotACleanReport()
+    public void InspectCodeReportPathIsNamed()
     {
         string commands = Section(ReadAgents(), "## Commands", "## Exploration order");
 
-        Assert.True(
-            commands.Contains("exits zero whether or not it finds anything", StringComparison.Ordinal),
-            "The Commands section must say InspectCode exits zero whether or not it finds anything.");
         Assert.True(
             commands.Contains("artifacts/inspectcode.xml", StringComparison.Ordinal),
             "The Commands section must name artifacts/inspectcode.xml as the InspectCode result.");
@@ -89,7 +88,7 @@ public sealed class RootAgentsOperationalPointerTests
     /// display-layer rule, so isolated feature logic can ship in the display layer.
     /// </summary>
     [Fact]
-    public void EveryKyberDashRowNamesTheDisplayLayer()
+    public void EveryKyberDashRowNamesTheDisplayLayerPaths()
     {
         string next = Section(ReadAgents(), "## Where to go next", "## House style");
         int rows = 0;
@@ -103,9 +102,8 @@ public sealed class RootAgentsOperationalPointerTests
             rows++;
             Assert.True(
                 line.Contains("`dash/web`", StringComparison.Ordinal)
-                    && line.Contains("`dash/tray`", StringComparison.Ordinal)
-                    && line.Contains("display layers", StringComparison.Ordinal),
-                "Each KyberDash row must say dash/web and dash/tray are display layers: " + line);
+                    && line.Contains("`dash/tray`", StringComparison.Ordinal),
+                "Each KyberDash row must name dash/web and dash/tray: " + line);
             Assert.True(
                 line.Contains("docs/rules/kyberdash-display-layer.md", StringComparison.Ordinal),
                 "Each KyberDash row must point at docs/rules/kyberdash-display-layer.md: " + line);
@@ -118,23 +116,17 @@ public sealed class RootAgentsOperationalPointerTests
     }
 
     /// <summary>
-    /// Only the review council and CI run the full suite. An exception for cross-cutting code
-    /// starts the very runs the rule exists to stop, and a bare <c>review gates .</c> is one of
-    /// them: its <c>test</c> gate has no filter, so any .NET change runs the whole product suite.
+    /// Only the review council and CI run the full suite. A bare <c>review gates .</c> is one of
+    /// those runs: its <c>test</c> gate has no filter, so any .NET change runs the whole product
+    /// suite. The ban itself is a prose rule in the catalog; this case keeps the commands out.
     /// </summary>
     [Fact]
-    public void NoDevAgentRunsTheFullSuiteAndCrossCuttingIsNoException()
+    public void TheCommandsSectionHandsDevAgentsNoFullRunCommand()
     {
         // Flattened so a re-wrap of the paragraph cannot break a phrase across two lines.
         string commands = System.Text.RegularExpressions.Regex.Replace(
             Section(ReadAgents(), "## Commands", "## Exploration order"), @"\s+", " ");
 
-        Assert.True(
-            commands.Contains("No dev agent runs the full test suite", StringComparison.Ordinal),
-            "The Commands section must state that no dev agent runs the full test suite.");
-        Assert.True(
-            commands.Contains("a cross-cutting change is no exception", StringComparison.Ordinal),
-            "The Commands section must say a cross-cutting change is no exception.");
         Assert.False(
             commands.Contains("Run `--full` locally", StringComparison.Ordinal),
             "The Commands section must not tell anyone to run --full locally.");
@@ -181,26 +173,6 @@ public sealed class RootAgentsOperationalPointerTests
         Assert.True(
             target.Contains(command, StringComparison.Ordinal),
             $"{relativePath} must hold the targeted command '{command}'.");
-    }
-
-    /// <summary>
-    /// A change of at most 300 changed lines gets the quick review before its pull request opens,
-    /// and a larger one gets the full pre-push council. An agent that reads only the root file
-    /// otherwise has no size threshold to choose the review by.
-    /// </summary>
-    [Fact]
-    public void QuickReviewThresholdIsStatedAtTheRoot()
-    {
-        string agents = System.Text.RegularExpressions.Regex.Replace(
-            ReadAgents().Replace("`", string.Empty, StringComparison.Ordinal).Replace("*", string.Empty, StringComparison.Ordinal),
-            @"\s+",
-            " ");
-
-        Assert.True(
-            agents.Contains(
-                "A change of at most 300 changed lines (added plus removed, from git diff --numstat <base>...HEAD) gets the quick review before its pull request is opened; a larger change gets the full pre-push council.",
-                StringComparison.Ordinal),
-            "AGENTS.md must state the 300-line quick-review threshold and the full pre-push council for larger changes.");
     }
 
     private static string ReadAgents()

@@ -7,20 +7,11 @@ namespace KyberWeave.Tests;
 /// a second file, because regrowth is what the text trim has to survive (task T50, decision D62).
 /// </summary>
 /// <remarks>
-/// <para>
-/// The rule map itself (<c>docs/kyber-squad/worker-rule-map.md</c>) is task T49's deliverable and
-/// carries one row per sentence removed. Until it exists, the rows this class can state without it
-/// are the two the plan's Design table fixes by name: the <c>cleanupcode</c> pass is off by default
-/// (D43) and stays in the skill that runs it, and the failure-loop rules live in the reference a
-/// worker loads after a failed fix, not in each developer agent's body. Every other row waits for
-/// the map, which is why <see cref="TheRuleMapRecordsAHomeForEveryRuleThatMoved"/> fails until T49
-/// lands as well.
-/// </para>
-/// <para>
-/// These cases are red by design until T52 applies the removals (D62). A red here is the ordering
-/// working, not a defect: T50 moves the pins before the text moves, and no pinned string is weakened
-/// to close the gap.
-/// </para>
+/// The rule map (<c>docs/kyber-squad/worker-rule-map.md</c>) carries one row per sentence removed.
+/// This class checks the homes by token: the <c>cleanupcode</c> pass is off by default (D43) and
+/// stays in the skill that runs it, the failure-loop rules live in the reference a worker loads
+/// after a failed fix, and the input-site table header is in no agent body. That the map and the
+/// prose rule catalog name the same rules is checked by <c>ProseRuleCatalogTests</c>.
 /// </remarks>
 public sealed class WorkerRuleSingleHomeTests
 {
@@ -119,26 +110,18 @@ public sealed class WorkerRuleSingleHomeTests
     }
 
     /// <summary>
-    ///     The rule map records where the input-site table rule lives, so the map and the developer exit gate
-    ///     cannot disagree about its home. The two names must share one row: the map already names the table
-    ///     in the review-lens row, and a bare word match there would pass without the developer home recorded.
+    ///     The rule map names the developer exit gate's skill, delivery-execution, as a home. Which rule
+    ///     lives there is a prose matter the catalog checks; this case keeps the home named at all.
     /// </summary>
     [Fact]
-    public void TheRuleMapRecordsTheInputSiteRuleHome()
+    public void TheRuleMapNamesTheDeliveryExecutionHome()
     {
         Assert.True(
             File.Exists(RuleMapPath),
             $"The rule map must live at '{RuleMapPath}'.");
 
         string map = File.ReadAllText(RuleMapPath);
-        string? row = map
-            .Split('\n')
-            .FirstOrDefault(line => line.Contains("input-site table", StringComparison.Ordinal)
-                                    && line.Contains("delivery-execution", StringComparison.Ordinal));
-
-        Assert.True(
-            row is not null,
-            "The rule map must carry one row that names the input-site table and its home, delivery-execution.");
+        Assert.Contains("delivery-execution", map, StringComparison.Ordinal);
     }
 
     /// <summary>Every agent body holding <paramref name="text"/>, by file name.</summary>
