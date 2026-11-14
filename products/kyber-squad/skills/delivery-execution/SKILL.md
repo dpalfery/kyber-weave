@@ -174,6 +174,12 @@ Before the final review, run the documentation-impact review step. For plan-back
 
 Only a successful closeout completes the objective. Record Q2 CLOSEOUT_COMPLETE in the execution artifact and carry the outcome in the PR description.
 
+## Delivery
+
+Once the archive and the merge-ready checks pass, and while no worker is dispatched, call `docs_push_run_branch_and_open_draft_pull_request` once. Pass the run's worktree as `projectPath`, a `summary` of one to three plain sentences for a human reviewer (the problem and the outcome), and docs-dev's documentation-impact outcome as `documentationImpact`. The tool commits the archived plan if it is still staged, pushes the run branch, creates or updates the draft pull request from the run's records, and reads it back. Report the link and the checks it returns, and dispatch nothing to re-check the pull request.
+
+On a refusal carrying `KW-DELIVER-005` (the host is not GitHub, or the GitHub CLI is missing or signed out), and only then, dispatch `github-devops` with the `create-pull-request` skill. Any other refusal names what to fix: send it to the role that owns it, then call the tool again.
+
 ## Arbiter routing headers
 
 Unless you hold `arbiter_evaluate_agent_dispatch_or_return` (see Arbiter fallback), every dispatch starts with `KYBER-ARBITER: true`. Dispatches that execute or audit a task — implementation specialist invocations, `review-triage` audits, and the `code-reviewer` end-of-run review dispatch — also carry `PLAN_FILE:` and `TASK:`; the `docs-dev` harvest carries `PLAN_FILE:` only.

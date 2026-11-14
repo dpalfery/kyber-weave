@@ -1535,6 +1535,40 @@ changes nothing, and ends with a `next:` line sending those findings to `docs-de
 ends with a `next:` line to run `docs_validate_governed_document_schema` with `mergeReady` true and
 `docs_detect_drift_between_documents_and_code`.
 
+### `docs_push_run_branch_and_open_draft_pull_request(projectPath, summary, notes?, title?, draft?, documentationImpact?, planFile?)`
+
+Delivers a finished run in one call, through the same `RunDelivery` step as `kyber-weave run deliver`.
+`projectPath` (the run's worktree) and `summary` (one to three plain sentences: the problem and the
+outcome) are required. `draft` defaults to true and applies only to a new pull request;
+`documentationImpact` carries docs-dev's outcome verbatim; `planFile` is needed only when the branch
+archived more than one plan. In order, it:
+
+1. checks the branch is a run branch with a run record naming its base, and not the base or default
+   branch;
+2. checks the origin remote is on github.com, and that nothing is uncommitted outside the plans and
+   archived-plans folders (the scratch folder is ignored);
+3. finds the plan the branch archived, and refuses a plan it added but did not archive;
+4. checks the title convention and that `gh` runs and is signed in;
+5. commits the archived plan when the archive left it staged, then pushes the branch to `origin`
+   (never forced, never another branch);
+6. creates the pull request into the run's base, as a draft and assigned to the signed-in user, or
+   updates the title and description of the open one for that branch; then reads it back once.
+
+The description is the create-pull-request skill's one format
+(`assets/pull-request-description.md`, shipped as a hash-checked copy), or the host's pull request
+template when it has one. It is filled from the archived plan (changes, `NOT VERIFIED` items,
+low-confidence autonomous decisions), the per-task `task-gate.json` reports written since the run
+started, and the last review cycle tied to this branch; a missing piece is reported as missing. The
+body goes to `gh` on standard input, so no file is written. It never marks the pull request ready,
+merges, requests reviewers or waits for CI.
+
+The response is the provenance line, `result: created | updated | refused`, one line per finding, and
+on success the pull request link, number, draft state, base, head and the CI checks GitHub reports.
+A refusal carrying `KW-DELIVER-005` ends with a `next:` line to dispatch the delivery agent with the
+`create-pull-request` skill. The rule ids are in the
+[rule reference](../ci-pipelines/rule-reference.md#run-delivery--run-deliver-and-docs_push_run_branch_and_open_draft_pull_request);
+the decision is [ADR 0081](../adr/0081-the-conductor-delivers-a-run-through-one-docs-tool.md).
+
 ## Reading a code join
 
 ```

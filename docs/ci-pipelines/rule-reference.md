@@ -74,6 +74,21 @@ Reported only when the `plan-index` or `todo-index` registry property names a do
 | `KW-DOC-FINALIZE-007` | Error | `--date` is not `yyyy-MM-dd`, or `--approval-mode` is not `autonomous` or `supervised` |
 | `KW-DOC-FINALIZE-008` | Error | Files other than the plan, its task file and the plan index are staged, so they cannot be committed alone |
 
+### Run delivery — `run deliver` and `docs_push_run_branch_and_open_draft_pull_request`
+
+Every Error refuses before anything leaves the machine and changes nothing, except `-006` and `-007`, which come after the push or the commit of a staged plan archive; calling again is safe after either. See [ADR 0081](../adr/0081-the-conductor-delivers-a-run-through-one-docs-tool.md).
+
+| Id | Severity | Meaning |
+|---|---|---|
+| `KW-DELIVER-001` | Error | No summary, a summary over 1,000 characters, or a title that is not `<type>(<scope>): <summary> [<harness>]` with the run's harness once, at the end |
+| `KW-DELIVER-002` | Error | Not a run branch: detached `HEAD`, a branch not named `[<owner>.<agent>.]<harness>/<type>/<slug>`, no run record naming its base, the base or default branch itself, or no history shared with the base |
+| `KW-DELIVER-003` | Error | Uncommitted changes outside the plans and archived-plans folders (the scratch folder is ignored), or the commit of a staged plan archive failed |
+| `KW-DELIVER-004` | Error | A plan this branch added is not archived yet, the branch archived several plans and none was named, or the named plan is not one it archived |
+| `KW-DELIVER-005` | Error | The origin remote is not on github.com (Azure DevOps included), or the GitHub CLI is missing or not signed in. The conductor's fallback keys on this id: dispatch the delivery agent with the `create-pull-request` skill |
+| `KW-DELIVER-006` | Error | The push was refused; it is never forced |
+| `KW-DELIVER-007` | Error | `gh` could not list, create, update or read back the pull request, or an open pull request from the branch targets a different base (left for a person) |
+| `KW-DELIVER-008` | Info / Warning | A step taken. Warning: the pull request read back with a different title or description than was sent |
+
 A plan whose closeout evidence is incomplete is reported with `KW-DOC-LIFECYCLE-004` and nothing is moved. One run reports every missing condition (`C1`–`C9`) as its own finding, with every unmapped id named and an example row or line as the hint, together with any index problem.
 
 ### Plan task files — `docs validate` and the docs MCP validate tool

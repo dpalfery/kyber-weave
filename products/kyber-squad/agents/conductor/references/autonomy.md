@@ -41,7 +41,7 @@ Do not relay `GAPS` or `OPEN_QUESTIONS` that carry a recommended option: accept 
 
 ## Delivery
 
-Both modes deliver the same way. When the work is ready to leave the machine (with the applicable closeout done), the conductor commits to a feature branch (never the default branch), pushes it, and opens a **draft** pull request. The review council reviews the pushed branch, or the local branch when the push fails; it never waits for a pull request, and its verdict is posted on the pull request when one exists. Delivery never waits for the council.
+Both modes deliver the same way. When the work is ready to leave the machine (with the applicable closeout done), the conductor commits to a feature branch (never the default branch), pushes it, and opens a **draft** pull request, all in one call to the deliver tool (the `delivery-execution` skill's Delivery section). The review council reviews the pushed branch, or the local branch when the push fails; it never waits for a pull request, and its verdict is posted on the pull request when one exists. Delivery never waits for the council.
 
 ### Autonomous approval of the run's delivery
 
@@ -49,7 +49,7 @@ Both modes deliver the same way. When the work is ready to leave the machine (wi
 
 The plan, its task file and the plan index are committed together before the first dispatch, in both modes, without asking: the finalize tool does it. Delivery never asks, and a pull request that cannot be opened (no supported remote host, no credentials) is not a broken step that stops the run: finish everything local (commits, the push if a remote accepts it, the final council review, closeout) and report `NOT DELIVERED: pull request — <reason>`.
 
-The draft is marked ready once required CI passes. The `create-pull-request` skill, run by `github-devops`, waits at most 60 minutes for CI. If CI fails or is not done in that time, the pull request stays draft and the report says what it is waiting for. No review or human approval is needed before ready.
+The draft is marked ready once required CI passes. The deliver tool does not wait for CI and never marks a pull request ready: it returns the checks GitHub reports when it reads the pull request back. The pull request stays draft and the report says what CI is waiting for. Only on the delivery agent fallback does the `create-pull-request` skill, run by `github-devops`, wait at most 60 minutes for CI. No review or human approval is needed before ready.
 
 The council verdict goes in the PR description when there is one. It does not gate ready: required CI does. The council re-reviews after every fix round until it returns APPROVE. The loop runs on the pushed branch: delivery never waits for it, and required CI alone decides ready. The loop stops after 5 review cycles, or after 3 cycles in a row in which the count of surviving critical and major findings does not fall; the findings still open are then listed in the pull request as pending human review, and delivery continues. The `delivery-execution` skill owns the loop itself.
 

@@ -160,21 +160,24 @@ are provider facts.
 
 ## Description
 
-If the host has a pull request template, fill in every section of the host's pull request
-template; the provider file lists where each provider looks for one. Leave no placeholder text.
-Otherwise use these sections:
+One format serves every pull request: [assets/pull-request-description.md](assets/pull-request-description.md).
+Its comment says what each section holds; fill each `{{token}}` and drop a section whose token has no
+value. The docs server's deliver tool fills the same file from a run's records, so a description written
+here and one the tool writes read the same. The sections are Summary, Type of change, Linked work,
+Changes, Validation, Not verified, Decisions made for you to check, Pending human review,
+Documentation impact (the docs-dev outcome verbatim plus recommendations; what documentation changed,
+or why none was needed), and Notes.
 
-- **Summary**: the problem and the outcome, in one to three sentences; why more than how.
-- **Type of change**: bug fix, feature, breaking change, refactor, or documentation.
-- **Linked work**: as decided under Linked work; omit when there is none.
-- **Changes**: a short list of what changed, summarized from the commits and the diff.
-- **Validation**: which suites ran, which tests were added, and any manual verification and its
-  environment. Never write "tests pass" without naming them.
-- **Documentation impact**: the docs-dev outcome verbatim plus recommendations; what documentation changed, or why none was needed. When the host supplies no template, use the heading fallback `## Documentation impact`.
-- **Notes**: extra notes, follow-ups, and anything reviewers should know.
+If the host has a pull request template, fill in every section of the host's pull request template
+instead, each with the section of the format it asks for; the provider file lists where each provider
+looks for one. Leave no placeholder text. Not verified, Decisions made for you to check and Pending
+human review follow the host's sections when it has none of its own for them.
 
-Do not paste raw commit lists or file lists; the provider shows both. Write the description to a
-UTF-8 file and pass the file wherever the provider's CLI allows; the provider file says how.
+Write for a human reviewer: plain words, short, why more than how, and no internal rule ids, tool or
+agent names, decision ids or scratch paths unless the reviewer needs one to act. Do not paste raw
+commit lists or file lists; the provider shows both. Write the description to a UTF-8 file in the
+run's scratch folder or the system temporary folder, never in the repository's canonical checkout, and
+pass the file wherever the provider's CLI allows; the provider file says how.
 
 ## Create or update
 
@@ -235,6 +238,8 @@ When a check fails:
 
 ## Resources
 
+- [assets/pull-request-description.md](assets/pull-request-description.md): the one pull request
+  description format, shared with the deliver tool.
 - [providers/github.md](providers/github.md): GitHub tools, CLI commands, templates, and closing
   keywords.
 - [providers/azure-devops.md](providers/azure-devops.md): Azure DevOps tools, CLI commands,

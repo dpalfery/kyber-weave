@@ -34,9 +34,30 @@
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\tauri\README.md" LogicalName="Standards.tauri.md" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\test\README.md" LogicalName="Standards.test.md" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\typescript\README.md" LogicalName="Standards.typescript.md" />
-    <!-- The one pull request description format: the create-pull-request skill and the deliver tool both fill it. -->
-    <EmbeddedResource Include="..\..\products\kyber-squad\skills\create-pull-request\assets\pull-request-description.md" LogicalName="Delivery.pull-request-description.md" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      The one pull request description format, which the create-pull-request skill and the deliver tool both
+      fill. The binaries embed no Squad corpus, so this is a copy of the skill's file, and the build fails when
+      the two differ: editing either alone cannot ship two formats.
+    -->
+    <EmbeddedResource Include="Delivery\Resources\pull-request-description.md" LogicalName="Delivery.pull-request-description.md" />
+    <CanonicalPullRequestDescription Include="$(MSBuildThisFileDirectory)..\..\products\kyber-squad\skills\create-pull-request\assets\pull-request-description.md" />
+    <ShippedPullRequestDescription Include="$(MSBuildThisFileDirectory)Delivery\Resources\pull-request-description.md" />
+  </ItemGroup>
+
+  <Target Name="VerifyPullRequestDescription" BeforeTargets="PrepareForBuild">
+    <GetFileHash Files="@(CanonicalPullRequestDescription)" Algorithm="SHA256">
+      <Output TaskParameter="Hash" PropertyName="_CanonicalPullRequestDescriptionHash" />
+    </GetFileHash>
+    <GetFileHash Files="@(ShippedPullRequestDescription)" Algorithm="SHA256">
+      <Output TaskParameter="Hash" PropertyName="_ShippedPullRequestDescriptionHash" />
+    </GetFileHash>
+    <Error
+      Condition="'$(_CanonicalPullRequestDescriptionHash)' != '$(_ShippedPullRequestDescriptionHash)'"
+      Text="The pull request description template shipped in KyberWeave.Core.Docs (src/KyberWeave.Core.Docs/Delivery/Resources/pull-request-description.md) has drifted from its canonical source (products/kyber-squad/skills/create-pull-request/assets/pull-request-description.md). Copy the canonical file over it." />
+  </Target>
 
   <ItemGroup>
     <!-- Compile-time only, as in KyberWeave.Core: see the note there. -->

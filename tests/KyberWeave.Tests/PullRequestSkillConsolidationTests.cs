@@ -37,6 +37,7 @@ public sealed class PullRequestSkillConsolidationTests
 
     private static readonly string[] CombinedSkillResources =
     [
+        "assets/pull-request-description.md",
         "providers/azure-devops.md",
         "providers/github.md",
         "scripts/github-create-pr.ps1",
