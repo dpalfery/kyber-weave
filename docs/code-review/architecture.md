@@ -15,6 +15,7 @@ decided-by:
   - adr/0064-project-knowledge-lives-in-gates-and-standards-reached-through-tools
   - adr/0069-the-review-council-loops-until-approve-and-computes-its-verdict-from-seat-output
   - adr/0077-the-dispatching-session-seats-the-council-from-the-gate-runs-evidence
+  - adr/0079-the-reviewer-starts-its-own-seats-where-sub-agents-can-dispatch
 code-refs:
   - VerdictEngine
   - GateRunner
@@ -83,7 +84,7 @@ flowchart TD
 
     Scope --> GR
     Scope --> DG
-    Gates -->|"evidence.md · diff · gate results<br/>seats started by the dispatching session"| Council
+    Gates -->|"evidence.md · diff · gate results<br/>seats started by code-reviewer"| Council
 
     subgraph Gates["LAYER 1 — Deterministic gates (no model)"]
         direction LR
@@ -134,13 +135,16 @@ no duplicate cluster names a changed file; the reviewer records each with `--not
 report cites the gate instead. `test-adequacy` is always seated for a change with code or tests:
 whether the tests would catch the change breaking is a judgement no gate makes.
 
-**The dispatching session seats the council.** A `code-reviewer` started by another agent (the
-conductor, or `bug-crusher`) starts no seat and applies no lens itself: after its gates it
-returns `STATUS: COUNCIL_SEATS_NEEDED` with one `SEAT:` block per seat (the routing headers and a
-packet path), the dispatching session starts every seat in one parallel batch, and the reviewer
-is re-invoked to adjudicate and compute the verdict. A refutation spawn comes back the same way.
-Only a reviewer a human started seats its own lenses. The reasons are in
-[ADR 0077](../adr/0077-the-dispatching-session-seats-the-council-from-the-gate-runs-evidence.md).
+**The reviewer starts its own seats.** The conductor (or `bug-crusher`) makes one review dispatch.
+`code-reviewer` runs the gates, then starts every seat itself in one parallel batch, each with its
+packet and the evidence path, and adjudicates and computes the verdict. A reviewer that holds a
+tool to start agents never applies a lens itself; only one with none applies them itself and says
+so. On a harness where a sub-agent cannot start sub-agents, the main session loads the
+`review-council` skill instead: the reviewer runs in hand-back mode and returns
+`STATUS: COUNCIL_SEATS_NEEDED` with one `SEAT:` block per seat, the main session starts them, each
+seat writes its output to its own seat file, and the reviewer is re-invoked to adjudicate. The
+render tells each harness which path it is on. The reasons are in
+[ADR 0079](../adr/0079-the-reviewer-starts-its-own-seats-where-sub-agents-can-dispatch.md).
 
 `review duplicates` is a second command rather than a declared gate entry because its input is
 not a host command at all: it reads the repository's CodeGraph index and clusters symbols whose
@@ -212,7 +216,7 @@ flowchart LR
 ```
 
 Every council path receives this selection. Step 2 gives each seat its rows. The refuter (step 3)
-gets the same sections as the seat it challenges. When a top-level `code-reviewer` has no tool to start agents, it
+gets the same sections as the seat it challenges. When a `code-reviewer` has no tool to start agents, it
 applies each lens itself and uses the same selection, and the report says the council ran
 in-process. The developer's pre-push self-review gate walks the recurring defect
 classes for the technologies present. If a host has no `REVIEW.md`, the reviewer reports that
@@ -470,13 +474,15 @@ one artifact — its findings — and on harnesses that cannot express `ask` the
 narrows it to `deny` and the findings come back in the response instead. `network.publish`
 stays `deny`. **The role that judges a change never ships it.**
 
-`delegate` on the reviewer is what lets a reviewer a human started fan out the council; a
-dispatched reviewer hands its seats to the session above it instead
-([ADR 0077](../adr/0077-the-dispatching-session-seats-the-council-from-the-gate-runs-evidence.md)).
+`delegate` on the reviewer is what lets it fan out the council; where a sub-agent cannot
+dispatch, the `review-council` skill starts its seats from the main session instead
+([ADR 0079](../adr/0079-the-reviewer-starts-its-own-seats-where-sub-agents-can-dispatch.md)).
 The grant is also what gives
 `delegate: deny` on the other subagent profiles a meaning it previously lacked: delegation is a
 per-role grant, not a property of being a subagent. The lens seats hold `deny`, so a council
-seat cannot re-enter the council.
+seat cannot re-enter the council. They hold the `review-seat` profile: read-only plus one
+write, their own seat file, which the `review-council` path needs so their findings never pass
+through the main session.
 
 ### Review evidence contract
 
@@ -846,11 +852,12 @@ flowchart TD
 Two facts about how the review is run complete the picture, and neither is enforced by the gate
 command:
 
-- **A dispatched reviewer runs its gates and hands its seats back.** A `code-reviewer` that
-  another agent dispatched reports `COUNCIL_SEATS_NEEDED` after its gates finish, with the
-  `evidence:` line, its `--not-seated` reasons and one `SEAT:` block per seat. The session above
-  it starts those seats in parallel and re-invokes the reviewer, which still adjudicates and
-  still owns the verdict. Gates are not re-run to seat a lens.
+- **The reviewer starts its seats after its gates.** One `code-reviewer` dispatch runs the gates
+  and then every seat in parallel. Only on the `review-council` path does it report
+  `COUNCIL_SEATS_NEEDED` after its gates, for the main session to start the seats and re-invoke
+  it. Either way it adjudicates and owns the verdict, and gates are not re-run to seat a lens.
+  Nor does the reviewer run tests, deploy scripts or end-to-end suites the gates ran: it reads
+  `evidence.md`.
 - **The review runs alone, last, and in the foreground.** No documentation work and no edits
   land in the reviewed tree while it runs, and the documentation-impact review and any edit it
   causes finish before the council starts. A review racing an edit reviews a tree that no longer
@@ -1153,7 +1160,7 @@ Every other lens is never skipped by this rule. In particular it never skips:
 
 The rule is enforced, not shadowed. Its skips appear in the decision log like any other enforced
 answer. The rule only applies where the hook runs, and the `LENS:` headers are what let it judge each
-spawn, whether code-reviewer or the session that seats the council for it dispatches it.
+spawn, whether code-reviewer or, on the `review-council` path, the main session dispatches it.
 
 ### Nitpick filter, duplicates and the review run (phase 3)
 

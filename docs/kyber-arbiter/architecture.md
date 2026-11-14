@@ -134,8 +134,9 @@ harness payload above the rendered `--caller`, then header inference. Plan and t
 come from the headers only — never inferred from the plan index. A `review-lens` or `review-triage`
 dispatch carrying `LENS:` classifies as `lens.spawn`, and a `review-lens` dispatch carrying `REFUTE:`
 as `refute.spawn`, whether `code-reviewer`, the conductor or `bug-crusher` sends it: the last two seat
-the council for a dispatched reviewer. Any notes those rules return reach the dispatcher, which relays
-them to the reviewer as the seat's outcome.
+the council through the `review-council` skill where a sub-agent cannot dispatch. On a harness whose
+hook names no caller, the `LENS:` or `REFUTE:` header itself infers `code-reviewer`. Any notes those
+rules return reach the dispatcher, which relays them to the reviewer as the seat's outcome.
 
 `PLAN_FILE:` is a repository-relative path. A value that starts with `/`, contains a
 backslash, a space or a tab, has an empty or `..` segment, or appears twice is rejected

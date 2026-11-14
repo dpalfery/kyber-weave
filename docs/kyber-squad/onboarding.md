@@ -133,6 +133,25 @@ Rendering canonical source into a harness's native files is Kyber-Weave's own co
 - **Update**: An explicit `--target` list is the complete desired deployment target set and takes precedence over the existing receipt. When `--target` is omitted, update reuses the receipt roster. Update never auto-detects filesystem markers.
 - **Uninstall**: Uses the recorded target roster from the existing deployment receipt and never performs marker detection.
 
+### Review council and nested sub-agents
+
+The final review is one `code-reviewer` dispatch where a dispatched agent can start agents of its
+own: the reviewer starts every lens itself. Elsewhere the conductor loads the `review-council`
+skill, which starts the lenses from the main session
+([ADR 0079](../adr/0079-the-reviewer-starts-its-own-seats-where-sub-agents-can-dispatch.md)). The
+render decides which, per harness:
+
+| Harness | Path | What nesting needs |
+|---|---|---|
+| Claude | one dispatch | `Agent(...)` in the reviewer's `tools`, which Squad renders; nesting is on by default (three layers) |
+| Copilot | one dispatch | Nothing on Copilot CLI. VS Code needs the user setting `chat.subagents.allowInvocationsFromSubagents: true`, which Squad does not write; without it the reviewer applies the lenses itself and says so |
+| Cursor | one dispatch | Task tool access in the current mode; Cursor allows one nested layer |
+| Pi | one dispatch | `allowed_subagents` on the reviewer, which Squad renders from its roster; depth 2 by default |
+| OpenCode, Kilo | `review-council` | The reviewer's `task` permission, which Squad renders, and `subagent_depth` of 2 or more in the harness config, which Squad does not write (default 1) |
+| Factory | `review-council` | Not possible: a droid gets no `Task` tool |
+| Devin | `review-council` | Not enabled: nested delegation cannot be limited to a roster |
+| Codex, Antigravity, Warp, ZCode, Command Code | `review-council` | Unverified |
+
 ### Codex notes
 
 Codex keeps each agent as a native TOML file at `.codex/agents/<name>.toml`. For a primary
@@ -425,8 +444,8 @@ two root wrappers `product-owner` and `bug-crusher` through their own canonical 
 session, which dispatches the specialists as subagents. Its orchestrator boundary — no searching, editing, running commands,
 or reading the web — is instruction-only on Devin, as on Pi. Subagents cannot delegate further
 on Devin: Devin cannot limit nested delegation to a roster, so Squad
-does not enable it. `code-reviewer` therefore hands its review lenses back to the conductor, which seats them,
-as it does on every harness; `architect` does its own sweeps and hands a live Azure
+does not enable it. The conductor therefore loads the `review-council` skill, which starts `code-reviewer`'s lenses
+from the main session; `architect` does its own sweeps and hands a live Azure
 question back for the conductor to put to `azure-reader`; `product-owner` does its own external
 research. The receipt records a `permission-not-expressible` degradation for each.
 

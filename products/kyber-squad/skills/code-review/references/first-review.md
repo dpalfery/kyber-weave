@@ -13,10 +13,11 @@ ends its output with one attestation line, `REVIEW.md sections checked: [<ids>]`
 findings form and its `NO FINDINGS` form (a `review-triage` seat lists `Ground rules`). A
 findings or `NO FINDINGS` seat without that line has not shown it applied the guidance; the
 report records that as a coverage gap under Council coverage. `SKIPPED` seats return no
-attestation, and a missing attestation is never a verdict input. A `code-reviewer` that another agent
-dispatched starts no seat and applies no lens itself: it returns `STATUS: COUNCIL_SEATS_NEEDED` and
-the conductor starts the seats. Only a top-level reviewer with no tool to start agents applies each
-lens in turn, with the same guidance sections and the same attestation line.
+attestation, and a missing attestation is never a verdict input. The reviewer dispatches every seat
+itself, all in one parallel batch, whoever dispatched it; where sub-agents cannot dispatch, the
+`review-council` skill starts the seats from the main session instead. A reviewer that holds a tool to
+start agents never applies a lens itself. Only one with no such tool applies the lenses itself, one at
+a time, with the same guidance sections and the same attestation line, and says so in its report.
 
 ## The lens catalogue
 

@@ -17,7 +17,10 @@ code-refs:
 
 ## Status
 
-Accepted, 2026-11-13. Decided by the owner.
+Accepted, 2026-11-13. Decided by the owner. Amended 2026-11-13: decision 1 rested on a wrong fact,
+that a sub-agent cannot start sub-agents, and is replaced by
+[ADR 0079](0079-the-reviewer-starts-its-own-seats-where-sub-agents-can-dispatch.md). Decisions 2 to 4
+stand.
 
 ## Context
 

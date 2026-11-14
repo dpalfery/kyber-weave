@@ -148,6 +148,7 @@ public sealed class SquadCanonicalContentTests
         "pr-review-fix-comments",
         "product-owner",
         "python-dev",
+        "review-council",
         "rust-dev",
         "security-review",
         "setup-dev-environment",

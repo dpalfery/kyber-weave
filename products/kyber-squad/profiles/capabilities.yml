@@ -179,6 +179,22 @@ profiles:
       network.publish: deny
       delegate: deny
       decision.query: deny
+  # A review council seat (review-lens, review-triage) reads like read-only and writes one file: its
+  # own seat file in the review cycle's seats folder, when its packet names one. That write exists
+  # for the review-council skill (ADR 0079): on a harness where a sub-agent cannot dispatch, the main
+  # session starts the seats, and a seat that replied with its findings would fill that session's
+  # context. ACCEPTED WIDENING: the lattice has no path scoping, so the one-file boundary is the
+  # agent body's instruction; seats still run no shell and never edit source.
+  review-seat:
+    permissions:
+      filesystem.read: allow
+      filesystem.search: allow
+      filesystem.write: allow
+      process.execute: deny
+      network.read: allow
+      network.publish: deny
+      delegate: deny
+      decision.query: deny
   reviewer:
     permissions:
       filesystem.read: allow

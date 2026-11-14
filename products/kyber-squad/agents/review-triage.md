@@ -4,7 +4,7 @@ name: review-triage
 description: "Attributes machine-produced output (analyzer diagnostics, manifest and lock diffs) to the change under review and reports it by rule or package identifier. Use when code-reviewer runs a lens whose input is a tool artifact rather than source code."
 invocation: subagent
 model-profile: reviewer
-capability-profile: read-only
+capability-profile: review-seat
 copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kw-docs/*", "context7/resolve-library-id", "context7/query-docs", search, web]
 delegates-to: []
 fallback: role-skill
@@ -24,7 +24,7 @@ is attribution and reporting, which is bounded and checkable, and it is run on a
 precisely because it is those things. Straying outside it produces exactly the low-confidence
 guesswork that the council's evidence rules will drop anyway.
 
-Your invocation names the **lens file** to load and the **review scope**: the cycle's `evidence.md`, which the council's gate run wrote, with the diff path, the changed files and each gate's result. Read it and the diff it names via `view_file` (`filesystem.read: allow`) to attribute static analysis and duplicate diagnostics to diff-touched lines; never re-run a gate. You have a read-only profile: never execute git commands and never mutate files. The lens file is your instruction set. Load it first.
+Your invocation names the **lens file** to load and the **review scope**: the cycle's `evidence.md`, which the council's gate run wrote, with the diff path, the changed files and each gate's result. Read it and the diff it names via `view_file` (`filesystem.read: allow`) to attribute static analysis and duplicate diagnostics to diff-touched lines; never re-run a gate. Never execute git commands and never change a file in the tree. The one file you may write is the `Seat file:` your packet or invocation names: write your whole output there unchanged and reply only `written: <path>`, so the session that started you never carries your findings. With no `Seat file:` line, reply with your output. The lens file is your instruction set. Load it first.
 
 ## Discovery order
 
