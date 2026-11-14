@@ -84,7 +84,7 @@ Every finding is one block in this exact shape:
 
 - **critical** — data loss, a security hole, corruption, or a break in behaviour that ships silently.
 - **major** — the change is wrong or will fail under conditions a reasonable user reaches.
-- **minor** — real but bounded: clarity, a missed convention, a narrow edge case.
+- **minor** — real but bounded: clarity, a missed naming or style convention, a narrow edge case. A file or type placed against the repository's documented structure (wrong project, layer or folder) is `major`.
 
 Severity describes **impact if it ships**, never how confident you are or how much effort the fix takes. Confidence is a separate field; use it. A finding you are 5/10 sure of but which would be critical is `severity: critical, confidence: 5` — say both, and let the reviewer decide.
 

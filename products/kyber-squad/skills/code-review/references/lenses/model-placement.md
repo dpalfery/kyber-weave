@@ -42,6 +42,12 @@ standard separates them.
 **Boundary types that are not translated.** A boundary that passes the same object straight
 through in both directions is not a boundary; it is a rename.
 
+**A file in the wrong project, layer or folder.** A class or file placed somewhere other than
+where the repository's documented structure puts its kind — in C#, a shared transfer object in
+the Domain project when the standard puts shared DTOs in a contracts project — is `major`, not
+`minor`. Wrong placement against a documented structure rule is a maintainability defect that
+compounds: every later contributor copies where the last one put it.
+
 ## What this lens must not report
 
 - Placement in a repository with no declared standard. Absent a standard, this is preference,

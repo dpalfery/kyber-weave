@@ -790,7 +790,7 @@ rules:
       type: choice
       state: { severity: finding.severity, claim: finding.claim, failure-scenario: finding.failure-scenario }
       criteria:
-        too-high: "The stated impact is lower than the severity says. critical means data loss, a security hole, corruption or a silent break in behaviour; major means the change is wrong or fails under conditions a reasonable user reaches; minor means real but bounded: clarity, a missed convention, a narrow edge case."
+        too-high: "The stated impact is lower than the severity says. critical means data loss, a security hole, corruption or a silent break in behaviour; major means the change is wrong or fails under conditions a reasonable user reaches; minor means real but bounded: clarity, a missed naming or style convention, a narrow edge case. A file placed against the repository's documented structure is major."
         about-right: "The stated impact matches the severity, as critical, major and minor are defined above."
         too-low: "The stated impact is higher than the severity says, as critical, major and minor are defined above."
       confidence-at-least: 0.8
