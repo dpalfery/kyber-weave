@@ -32,6 +32,7 @@ public sealed class CliHelpRenderingTests
 
         Assert.Equal(160, tail.Length);
         Assert.EndsWith("the end", tail, StringComparison.Ordinal);
+        Assert.DoesNotContain('\r', tail);
         Assert.DoesNotContain('\n', tail);
     }
 
