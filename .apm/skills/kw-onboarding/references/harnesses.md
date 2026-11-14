@@ -21,9 +21,21 @@ removes an existing Copilot install. So:
   user chose now.
 - Say so to the user in one line before running it: "Copilot is already installed, so I am
   passing `copilot,claude` to keep it."
-- Verb: `squad update --target <union>` when the squad already exists at that scope (global or
-  this project); `squad install --target <union>` when it does not.
-- Only refreshing what is installed: `kyber-weave squad update [--global]` with no `--target`.
+- Scope comes first: the answer to question 2. Before running, say which scope you chose and
+  why ("global, because you want it in every repository"). Without `--global`, both verbs act
+  on the current directory, which is the project scope and writes harness files into this
+  repository, so every command below names its scope. Verb: `update` when the squad already
+  exists at that scope, `install` when it does not.
+
+  | Scope | Squad exists there | Command |
+  |---|---|---|
+  | Global | yes | `kyber-weave squad update --global --target <union>` |
+  | Global | no | `kyber-weave squad install --global --target <union>` |
+  | This project | yes | `kyber-weave squad update . --target <union>` |
+  | This project | no | `kyber-weave squad install . --target <union>` |
+
+- Only refreshing what is installed: `kyber-weave squad update --global` or
+  `kyber-weave squad update .`, with no `--target`.
 - Removing a harness is a separate question, asked only when the user brings it up, with its own
   context (below). Never remove one as a side effect.
 
@@ -38,7 +50,7 @@ Context to give (the worked example below shows the full wording):
   on the machine but not in use; and "show me the other supported tools". Name each tool with a
   few words so the user recognises it. Choosing nothing installs nothing.
 - *Cost and undo*: about a minute; writes the harness's home folder (global) or this repository
-  (project); undo by re-running this skill, or `kyber-weave squad uninstall [--global]` for all.
+  (project); undo by re-running this skill, or `kyber-weave squad uninstall --global` (or `squad uninstall .` for a project install) for all.
 - *Found*: which tools are on the machine and which already have the squad, with its version.
 - *Recommend*: the tools in use (first-look: the squad is there, or its command is on `PATH`).
   Tools with only a home folder are named once as "also found", not recommended.
@@ -72,9 +84,8 @@ Context to give (the worked example below shows the full wording):
   this machine gets it; a project install puts it inside this repository only.
 - *Why*: global means one install to keep up to date; project means the repository carries its
   own copy, which teammates get when they pull.
-- *Options*: global (`kyber-weave squad install --global --target <union>`, or `squad update
-  --global --target <union>` when a global install exists), or project (`kyber-weave squad
-  install . --target <union>`, or `squad update . --target <union>` when the project has one).
+- *Options*: global or project, each with the command from the table above for the verb that
+  fits what question 1's detection found.
 - *Cost and undo*: global writes under the home directory; project writes repository files that
   show in `git status`. `--dry-run` previews either. In an agent's shell the CLI does not prompt
   for confirmation, so the user's yes here is the only one. A global install with OpenCode also
@@ -89,11 +100,12 @@ Context to give (the worked example below shows the full wording):
 - *What*: the **Arbiter** is Kyber-Weave's decision gate. A small hook in the harness asks it,
   before each agent is started, whether that step matches the approved plan, and blocks it if not.
 - *Why*: without it, an agent can start work the plan never approved; with it, runs stay on plan.
-- *Options*: turn it on for each chosen harness (`kyber-weave arbiter install --target <one>`,
-  one harness per run; `--project` for this repository only), or leave it off.
+- *Options*: turn it on for each chosen harness, one harness per run, at the scope question 2
+  chose: `kyber-weave arbiter install --global --target <one>` or
+  `kyber-weave arbiter install --project --target <one>`; or leave it off.
 - *Cost and undo*: adds a hook entry to the harness's settings in its home folder (or this
   repository with `--project`), seconds per harness; it keeps the decision model already set up
-  (pass `--provider` only to change it). Undo with `kyber-weave arbiter uninstall --target <one>`.
+  (pass `--provider` only to change it). Undo with `kyber-weave arbiter uninstall --global --target <one>` (or `--project`).
 - *Found*: the per-harness lines of `kyber-weave arbiter status` (on, off, or on for a harness
   with no squad).
 - *Recommend*: on for every harness that gets the squad.
@@ -101,9 +113,11 @@ Context to give (the worked example below shows the full wording):
 ## Removing a harness (only when the user asks)
 
 - *What it does*: deletes the squad's files from that harness; its other agents and settings stay.
-- *How*: `kyber-weave squad update [--global] --target <the harnesses to keep>`, after
-  `--dry-run`; and `kyber-weave arbiter uninstall --target <removed>` for its hook. With nothing
-  left to keep, `kyber-weave squad uninstall [--global]`.
+- *How*, at the scope that harness is installed at: `kyber-weave squad update --global --target
+  <the harnesses to keep>` or `kyber-weave squad update . --target <the harnesses to keep>`,
+  after `--dry-run`; and `kyber-weave arbiter uninstall --global --target <removed>` (or
+  `--project`) for its hook. With nothing left to keep, `kyber-weave squad uninstall --global`
+  or `kyber-weave squad uninstall .`.
 - *Undo*: install it again; local edits to the squad's files in that harness are lost.
 
 ## Per harness
