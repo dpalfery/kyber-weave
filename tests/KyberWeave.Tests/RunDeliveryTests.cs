@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Reflection;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Delivery;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review;
@@ -490,9 +491,61 @@ public sealed class RunDeliveryTests : IDisposable
         Assert.Contains($"unreadable-follow-up (`{Unreadable}`)", gh.Bodies.Single(), StringComparison.Ordinal);
     }
 
-    /// <summary>A host template that cannot be read falls back to the standard description rather than throwing.</summary>
+    /// <summary>
+    /// A host template that cannot be read is skipped and named, and a later readable location is used. The read is
+    /// scripted, so the test runs the same on every platform and for every user.
+    /// </summary>
     [Fact]
-    public void AHostTemplateThatCannotBeReadIsNotUsedAndDoesNotThrow()
+    public void AnUnreadableHostTemplateIsSkippedAndNamedAndALaterOneIsUsed()
+    {
+        string repo = Path.Combine(_root, "template-repo");
+        Directory.CreateDirectory(Path.Combine(repo, ".github"));
+        File.WriteAllText(Path.Combine(repo, "pull_request_template.md"), "## Summary\n");
+        File.WriteAllText(Path.Combine(repo, ".github", "pull_request_template.md"), "## Why\n");
+
+        PullRequestDescription.HostTemplate read = PullRequestDescription.ReadHostTemplate(repo, path =>
+            Path.GetFileName(Path.GetDirectoryName(path)) == "template-repo" ? throw new IOException("denied") : File.ReadAllText(path));
+
+        Assert.Equal("## Why\n", read.Text);
+        Assert.Equal(["pull_request_template.md"], read.Unreadable);
+    }
+
+    [Fact]
+    public void WhenNoHostTemplateCanBeReadTheStandardFormatIsUsedAndEachUnreadableOneIsNamed()
+    {
+        string repo = Path.Combine(_root, "template-repo");
+        Directory.CreateDirectory(Path.Combine(repo, "docs"));
+        File.WriteAllText(Path.Combine(repo, "pull_request_template.md"), "## Summary\n");
+        File.WriteAllText(Path.Combine(repo, "docs", "pull_request_template.md"), "## Summary\n");
+
+        PullRequestDescription.HostTemplate read = PullRequestDescription.ReadHostTemplate(repo, _ => throw new UnauthorizedAccessException());
+
+        Assert.Null(read.Text);
+        Assert.Equal(["pull_request_template.md", "docs/pull_request_template.md"], read.Unreadable);
+    }
+
+    /// <summary>The delivery warns, naming the template, instead of silently using the standard format.</summary>
+    [Fact]
+    public void AnUnreadableHostTemplateGivesTheDeliveryAWarningThatNamesIt()
+    {
+        GitRunRepository(archivePending: false);
+        Write(".github/pull_request_template.md", "## Summary\n");
+        Git(_work, "add", "-A");
+        Git(_work, "commit", "-q", "-m", "docs: template");
+        ScriptedGh gh = new();
+
+        DeliveryOutcome outcome = Deliver(gh, new DeliveryRequest("S."), readTemplateFile: _ => throw new IOException("denied"));
+
+        Assert.True(outcome.Delivered, Findings(outcome));
+        Diagnostic warning = Assert.Single(outcome.Report.Items, item => item.Severity == Severity.Warning);
+        Assert.Contains(".github/pull_request_template.md", warning.Message, StringComparison.Ordinal);
+        Assert.Contains("standard description format", warning.Message, StringComparison.Ordinal);
+        Assert.Contains("## Summary", gh.Bodies.Single(), StringComparison.Ordinal);
+    }
+
+    /// <summary>The same failure with a real unreadable file, where the platform and the user allow one.</summary>
+    [Fact]
+    public void AHostTemplateWithNoReadPermissionIsNotUsedAndDoesNotThrow()
     {
         if (OperatingSystem.IsWindows() || Environment.UserName == "root")
             return;
@@ -642,8 +695,8 @@ public sealed class RunDeliveryTests : IDisposable
 
     private const string Config = "ontology:\n  docs-root: docs\n";
 
-    private DeliveryOutcome Deliver(ScriptedGh gh, DeliveryRequest request, Action<string>? afterPlanFound = null) =>
-        new RunDelivery(_work, KyberWeaveConfigLoader.LoadFromYaml(Config), gh, _home) { AfterPlanFound = afterPlanFound }.Run(request);
+    private DeliveryOutcome Deliver(ScriptedGh gh, DeliveryRequest request, Action<string>? afterPlanFound = null, Func<string, string>? readTemplateFile = null) =>
+        new RunDelivery(_work, KyberWeaveConfigLoader.LoadFromYaml(Config), gh, _home) { AfterPlanFound = afterPlanFound, ReadTemplateFile = readTemplateFile }.Run(request);
 
     private void AssertRefusedBeforeAnythingLeaves(DeliveryOutcome outcome, ScriptedGh gh, string code)
     {

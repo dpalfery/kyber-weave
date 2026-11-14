@@ -69,10 +69,18 @@ public static partial class PullRequestDescription
     public static IReadOnlyList<string> HostTemplateLocations { get; } =
         ["pull_request_template.md", "docs/pull_request_template.md", ".github/pull_request_template.md"];
 
-    /// <summary>Reads the host's default pull request template, matching the file name case-insensitively, or null when it has none.</summary>
-    public static string? ReadHostTemplate(string repoRoot)
+    /// <summary>Reads the host's default pull request template, matching the file name case-insensitively, or null when it has none or none can be read.</summary>
+    public static string? ReadHostTemplate(string repoRoot) => ReadHostTemplate(repoRoot, File.ReadAllText).Text;
+
+    /// <summary>
+    /// Reads the host's default pull request template through <paramref name="read"/>. A candidate that cannot be read is
+    /// skipped and named in <see cref="HostTemplate.Unreadable"/>, and the next location is tried.
+    /// </summary>
+    internal static HostTemplate ReadHostTemplate(string repoRoot, Func<string, string> read)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
+        ArgumentNullException.ThrowIfNull(read);
+        List<string> unreadable = [];
         foreach (string location in HostTemplateLocations)
         {
             string folder = Path.Combine(repoRoot, Path.GetDirectoryName(location) ?? string.Empty);
@@ -86,17 +94,20 @@ public static partial class PullRequestDescription
 
             try
             {
-                return File.ReadAllText(match);
+                return new HostTemplate(read(match), unreadable);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
-                // A template that cannot be read is not worth failing the delivery for: the standard format is used instead.
-                return null;
+                // A template that cannot be read is not worth failing the delivery for: the next location, or the standard format, is used.
+                unreadable.Add(location);
             }
         }
 
-        return null;
+        return new HostTemplate(null, unreadable);
     }
+
+    /// <summary>The host template that was read, if any, and the locations that held one that could not be read.</summary>
+    internal sealed record HostTemplate(string? Text, IReadOnlyList<string> Unreadable);
 
     /// <summary>The description for <paramref name="content"/>, in the host's template when one is given, otherwise in the standard format.</summary>
     public static string Render(PullRequestContent content, string? hostTemplate = null)

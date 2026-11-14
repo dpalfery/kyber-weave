@@ -130,6 +130,9 @@ public sealed partial class RunDelivery
     /// </summary>
     internal Action<string>? AfterPlanFound { get; init; }
 
+    /// <summary>Test seam: reads a host pull request template file; null reads from disk.</summary>
+    internal Func<string, string>? ReadTemplateFile { get; init; }
+
     /// <summary>Creates the deliver step for one checkout.</summary>
     /// <param name="repoRoot">The run's worktree.</param>
     /// <param name="config">The repository's effective configuration.</param>
@@ -264,7 +267,14 @@ public sealed partial class RunDelivery
         {
             FollowUps = FiledTodos(mergeBase, todoFolder)
         };
-        string body = PullRequestDescription.Render(content, PullRequestDescription.ReadHostTemplate(_repoRoot));
+        PullRequestDescription.HostTemplate hostTemplate = PullRequestDescription.ReadHostTemplate(_repoRoot, ReadTemplateFile ?? File.ReadAllText);
+        foreach (string unreadable in hostTemplate.Unreadable)
+        {
+            report.Add(new Diagnostic(Step, Severity.Warning,
+                $"The pull request template '{unreadable}' could not be read, so it was not used{(hostTemplate.Text is null ? "; the standard description format was used instead" : "; the next template found was used instead")}.", "deliver"));
+        }
+
+        string body = PullRequestDescription.Render(content, hostTemplate.Text);
 
         ProcessResult push = Git("push", "--porcelain", Remote, $"refs/heads/{branch}:refs/heads/{branch}");
         if (push.ExitCode != 0)
