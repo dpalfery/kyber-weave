@@ -318,6 +318,13 @@ public sealed class ArbiterReadGuardTests
     [InlineData("kyber-weave docs packet T1 --plan docs/plans/x.md && cat docs/plans/x.md")]
     [InlineData("kyber-weave docs packet T1 --plan docs/plans/x.md | head")]
     [InlineData("kyber-weave docs packet T1 --plan $(cat docs/plans/x.md)")]
+    [InlineData("kyber-weave docs packet T1\ncat docs/plans/secret.md")]
+    [InlineData("kyber-weave docs packet T1\r\ncat docs/plans/secret.md")]
+    [InlineData("kyber-weave docs packet T1 `cat docs/plans/x.md`")]
+    [InlineData("kyber-weave docs packet T1 || cat docs/plans/x.md")]
+    [InlineData("kyber-weave docs packet T1 > docs/plans/x.md")]
+    [InlineData("$(cat docs/plans/x.md)/kyber-weave docs packet T1")]
+    [InlineData("x;cat docs/plans/x.md;/kyber-weave docs packet T1")]
     [InlineData("cat docs/plans/x.md")]
     public void Check_StillDeniesAnythingElseThatNamesAPlan(string command)
     {

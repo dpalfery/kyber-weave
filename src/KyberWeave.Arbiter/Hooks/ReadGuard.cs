@@ -191,9 +191,11 @@ public static partial class ReadGuard
         return ReadGuardResult.Allow;
     }
 
-    // `kyber-weave docs packet <task> [--agent <name>] [--plan <plan>] [--prior-results <file>]` and nothing else on the line: no
-    // separator, redirect, substitution or second command, so the exemption cannot carry a read of a plan.
-    [GeneratedRegex(@"^\s*(?:\S*/)?kyber-weave\s+docs\s+packet(?:\s+[^\s;&|<>`$()\\]+)*\s*$", RegexOptions.CultureInvariant)]
+    // `kyber-weave docs packet <task> [--agent <name>] [--plan <plan>] [--prior-results <file>]` and nothing else: one
+    // line (horizontal whitespace only, anchored at both ends of the whole text), no separator, newline, redirect,
+    // substitution or second command, and no such character in the path before the program name, so the exemption
+    // cannot carry a read of a plan.
+    [GeneratedRegex(@"\A[ \t]*(?:[^\s;&|<>`$()\\]*/)?kyber-weave[ \t]+docs[ \t]+packet(?:[ \t]+[^\s;&|<>`$()\\]+)*[ \t]*\z", RegexOptions.CultureInvariant)]
     private static partial Regex PacketCommandRegex();
 
     private static ReadGuardResult Deny(string toolName, string value, string dir) =>
