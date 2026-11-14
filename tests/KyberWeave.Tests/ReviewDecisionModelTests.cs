@@ -185,6 +185,20 @@ public sealed class ReviewDecisionModelTests : IDisposable
         Assert.Equal(0, provider.Calls);
     }
 
+    [Fact]
+    public async Task DuplicateQuestionsAreCappedAndTheSkippedComparisonsAreReported()
+    {
+        FakeProvider provider = new() { Choice = "different-defect", Confidence = 0.99 };
+        ReviewDecisionModel model = Model(provider);
+        ReviewFinding[] many = [.. Enumerable.Range(1, 30).Select(index => Finding($"x/f{index}", ReviewSeverity.Major, line: index))];
+
+        (List<ReviewFinding> kept, _) = await ReviewVerdictDecisions.MergeDuplicatesAsync(model, many);
+
+        Assert.Equal(30, kept.Count);
+        Assert.Equal(ReviewVerdictDecisions.MaxQuestionsPerStep, provider.Calls);
+        Assert.Contains("90 comparison(s) skipped", model.SummaryLine([]), StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("same-defect", 0.5)]
     [InlineData("different-defect", 0.99)]

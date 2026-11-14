@@ -40,6 +40,12 @@ public static partial class ReviewVerdictDecisions
     /// <summary>Does the finding belong to the class a host severity override describes.</summary>
     public const string OverrideRule = "KW-ARB-OVERRIDE-001";
 
+    /// <summary>
+    /// The most decision-model questions one step asks in one command run. Pairs multiply with the findings on one
+    /// file, and each question is a paid call; past this the remaining comparisons go unasked and are reported.
+    /// </summary>
+    public const int MaxQuestionsPerStep = 300;
+
     private const int DuplicateWindowLines = 20;
     private const int SurroundingLines = 6;
     private const int MaxSurroundingsFileBytes = 1 << 20;
@@ -61,28 +67,32 @@ public static partial class ReviewVerdictDecisions
         if (!model.Configured || rule is null || findings.Count < 2)
             return ([.. findings], []);
 
-        List<(int A, int B)> pairs = [];
-        List<ReviewQuestion> questions = [];
+        List<(int A, int B)> candidates = [];
         for (int a = 0; a < findings.Count; a++)
         {
             for (int b = a + 1; b < findings.Count; b++)
             {
-                if (!string.Equals(Normalize(findings[a].File), Normalize(findings[b].File), StringComparison.Ordinal)
-                    || Math.Abs(findings[a].Line - findings[b].Line) > DuplicateWindowLines)
+                if (string.Equals(Normalize(findings[a].File), Normalize(findings[b].File), StringComparison.Ordinal)
+                    && Math.Abs(findings[a].Line - findings[b].Line) <= DuplicateWindowLines)
                 {
-                    continue;
+                    candidates.Add((a, b));
                 }
-
-                pairs.Add((a, b));
-                questions.Add(new ReviewQuestion(
-                    PairSubject(findings[a], findings[b]),
-                    new Dictionary<string, object?>(StringComparer.Ordinal)
-                    {
-                        ["finding.excerpt"] = ReviewDecisionModel.FindingText(findings[a]),
-                        ["candidate.text"] = ReviewDecisionModel.FindingText(findings[b]),
-                    }));
             }
         }
+
+        // The pairs most likely to be one defect, and the ones that matter most, are asked first.
+        List<(int A, int B)> pairs = [.. candidates
+            .OrderBy(pair => Math.Abs(findings[pair.A].Line - findings[pair.B].Line))
+            .ThenByDescending(pair => (ReviewSeverity)Math.Max((int)findings[pair.A].Severity, (int)findings[pair.B].Severity))
+            .Take(MaxQuestionsPerStep)];
+        model.NoteSkipped(candidates.Count - pairs.Count);
+        List<ReviewQuestion> questions = [.. pairs.Select(pair => new ReviewQuestion(
+            PairSubject(findings[pair.A], findings[pair.B]),
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["finding.excerpt"] = ReviewDecisionModel.FindingText(findings[pair.A]),
+                ["candidate.text"] = ReviewDecisionModel.FindingText(findings[pair.B]),
+            }))];
 
         IReadOnlyDictionary<string, ReviewAnswer> answers = await model.AskAsync(
             rule,
@@ -297,8 +307,7 @@ public static partial class ReviewVerdictDecisions
         if (!model.Configured || rule is null || overrides.Rows.Count == 0)
             return ([.. findings], []);
 
-        List<(int Index, SeverityOverrideRow Row, string Subject)> pairs = [];
-        List<ReviewQuestion> questions = [];
+        List<(int Index, SeverityOverrideRow Row, string Subject)> candidates = [];
         for (int index = 0; index < findings.Count; index++)
         {
             ReviewFinding finding = findings[index];
@@ -306,18 +315,21 @@ public static partial class ReviewVerdictDecisions
                 continue;
 
             foreach (SeverityOverrideRow row in overrides.RowsForFinding(finding.Lens, finding.File))
-            {
-                string subject = $"{finding.Id} ~ {row.Id}";
-                pairs.Add((index, row, subject));
-                questions.Add(new ReviewQuestion(
-                    subject,
-                    new Dictionary<string, object?>(StringComparer.Ordinal)
-                    {
-                        ["finding.claim"] = ReviewDecisionModel.FindingText(finding),
-                        ["override.class"] = row.FindingClass,
-                    }));
-            }
+                candidates.Add((index, row, $"{finding.Id} ~ {row.Id}"));
         }
+
+        // The findings with the most at stake are asked first; the sort is stable, so seat order breaks ties.
+        List<(int Index, SeverityOverrideRow Row, string Subject)> pairs = [.. candidates
+            .OrderByDescending(pair => findings[pair.Index].Severity)
+            .Take(MaxQuestionsPerStep)];
+        model.NoteSkipped(candidates.Count - pairs.Count);
+        List<ReviewQuestion> questions = [.. pairs.Select(pair => new ReviewQuestion(
+            pair.Subject,
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["finding.claim"] = ReviewDecisionModel.FindingText(findings[pair.Index]),
+                ["override.class"] = pair.Row.FindingClass,
+            }))];
 
         IReadOnlyDictionary<string, ReviewAnswer> answers = await model.AskAsync(
             rule,

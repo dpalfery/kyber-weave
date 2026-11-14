@@ -295,6 +295,19 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     }
 
     [Fact]
+    public async Task OverrideQuestionsAreCappedAndTheSkippedComparisonsAreReported()
+    {
+        FakeProvider provider = new(_ => ("no", 0.99));
+        ReviewDecisionModel model = Model(provider);
+        ReviewFinding[] many = [.. Enumerable.Range(1, 160).Select(index => Finding($"model-placement/x{index}", ReviewSeverity.Minor))];
+
+        await ReviewVerdictDecisions.MatchOverridesAsync(model, SeverityOverrides.Parse(Table), many);
+
+        Assert.Equal(ReviewVerdictDecisions.MaxQuestionsPerStep, provider.Calls);
+        Assert.Contains("20 comparison(s) skipped", model.SummaryLine([]), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AFaultChangesNothingAndStopsFurtherCalls()
     {
         FakeProvider provider = new(_ => ("belongs", 1.0)) { Fault = true };

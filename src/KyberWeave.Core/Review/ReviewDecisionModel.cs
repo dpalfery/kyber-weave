@@ -56,6 +56,7 @@ public sealed class ReviewDecisionModel
     private readonly TimeProvider _clock;
     private readonly List<ReviewDecision> _decisions = [];
     private bool _faulted;
+    private int _skipped;
 
     /// <summary>Creates the model over a provider; a null provider is the model switched off.</summary>
     /// <param name="provider">The provider that answers; null when no decision model is configured.</param>
@@ -95,6 +96,9 @@ public sealed class ReviewDecisionModel
 
     /// <summary>Whether a fault stopped further calls in this command run.</summary>
     public bool Faulted => _faulted;
+
+    /// <summary>Records comparisons a step left unasked because it reached its cap, for the summary line.</summary>
+    internal void NoteSkipped(int count) => _skipped += Math.Max(0, count);
 
     /// <summary>Every question asked so far, in order, with its answer and effect.</summary>
     public IReadOnlyList<ReviewDecision> Decisions => _decisions;
@@ -168,10 +172,13 @@ public sealed class ReviewDecisionModel
         if (_provider is null)
             return null;
 
+        string skipped = _skipped > 0
+            ? $"; {_skipped} comparison(s) skipped: a step asks at most {ReviewVerdictDecisions.MaxQuestionsPerStep} questions, the rest stayed as the seats gave them"
+            : string.Empty;
         string fault = _faulted ? "; stopped after a provider fault, the rest went unasked" : string.Empty;
         return counts.Count == 0
-            ? $"decision model: {_decisions.Count} question(s), no effect{fault}"
-            : $"decision model: {string.Join(", ", counts)}{fault}";
+            ? $"decision model: {_decisions.Count} question(s), no effect{skipped}{fault}"
+            : $"decision model: {string.Join(", ", counts)}{skipped}{fault}";
     }
 
     private sealed record Sent(ReviewQuestion Question, string Id, ArbiterStep1BatchResult? Batch, int LatencyMs);
