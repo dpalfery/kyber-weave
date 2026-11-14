@@ -21,6 +21,8 @@ code-refs:
   - ReviewVerdictDecisions
   - ReviewLensApplicability
   - NotSeatedRecord
+  - ReviewVerdictCommand
+  - ReviewPolicy
 ---
 
 # ADR 0079: The reviewer starts its own seats where sub-agents can dispatch
@@ -33,7 +35,9 @@ decisions 2 to 4 (the evidence the gate run writes, no seat for what a gate prov
 classifying a seat the conductor starts) stand. Amended 2026-11-13: decisions 6 to 9 make the seats
 start while the gates run, after a replay showed the fanned-out review taking 16.7 minutes.
 Amended 2026-11-14: decision 10 moves the review's decision-model questions from the Arbiter hooks
-into the review commands.
+into the review commands. Amended 2026-11-14 again, by the owner after a live run: decisions 11 to
+13 make every fix round narrow and mechanical, fix the majors an approval leaves, and grade wrong
+placement as major.
 
 ## Context
 
@@ -158,6 +162,34 @@ apply, which the changed-file list already showed.
     unsure answer leaves the review exactly as it was, the first fault stops further calls, and nothing
     depends on the Arbiter's hooks or `arbiter.enabled`. The hook side of the four rules answers from
     step 0, so no question is asked twice.
+
+11. **A fix round is checked narrowly, never by the whole council.** In a live Copilot CLI run the
+    conductor asked, in its own words, to "re-run the full council over the whole accumulated change"
+    after a one-finding fix, and the reviewer complied: 11.1 minutes against the first review's 7.4.
+    `review seats` printed every seat and only hinted to send fewer. Now, in any cycle after the
+    first, it seats only the lenses that raised the findings the fix round took, plus `correctness`
+    and `test-adequacy` when the fix changed anything but Markdown, on the fix-only diff; the gate run
+    re-runs only the gates whose inputs the fix touched, and its `after-gates:` line names only seated
+    lenses. Only a fix delta of more than 300 changed lines (the quick-review threshold) seats every
+    lens the delta's files call for; the first review is not scaled to change size. The conductor
+    sends fixed verifier text, and the reviewer answers a widening request with the verifier cycle and
+    says so. The loop caps (5 cycles, or 3 in a row with no drop in critical plus major) are unchanged.
+12. **The verdict names the fix round; an approval still fixes its majors.** `review verdict` prints
+    `fix:` lines (failed blocking gates, critical and major findings), `follow-up:` lines (minor
+    findings left open, and findings the reviewer dropped as `pre-existing debt`) and a closing
+    `fix round:` line (`KW-REVIEW-056`), and the conductor dispatches from them. APPROVE means not
+    blocked, not nothing to do: majors below `major-count-blocks` get one fix round, and when the cycle
+    after it approves too, what is still open is printed as `open:` for human review.
+    `review.policy.minor-findings` decides the minors: `follow-up` (default) lists them in the pull
+    request and files them as todos; `fix` sends them to the same round. A later cycle carries each
+    prior finding the fix round did not take, so the last cycle, which the pull request reads, still
+    lists it. The owner has not yet chosen between the two values; the default is the reversible one.
+13. **Wrong placement is major.** A class or file placed against the repository's documented
+    structure (in C#, the wrong project, layer or folder) is graded `major` by the model-placement
+    lens, and `minor` now reads "a missed naming or style convention". In the run, a new DTO in the
+    Domain layer was graded minor although the documented rule puts shared DTOs in a contracts
+    project; wrong placement compounds, because every later contributor copies it. How existing code
+    that breaks such a rule is handled is [ADR 0083](0083-a-documented-rule-outranks-the-code-around-it-and-out-of-scope-work-becomes-todos.md).
 
 The Arbiter classification ADR 0077 added stays: on the `review-council` path the conductor or
 `bug-crusher` starts the seats, and on Factory, whose hook names no caller, the `LENS:` or `REFUTE:`
