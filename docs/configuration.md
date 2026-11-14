@@ -383,40 +383,37 @@ rather than a confident answer from somewhere else (see
 
 ### Run controls
 
-Three settings govern how a run starts, once the onboarding question above is answered.
-`stop-on-tool-failure` sits at the top level, beside `autonomy`; the other two sit under a `run:`
+Two settings govern how a run starts, once the onboarding question above is answered.
+`stop-on-tool-failure` sits at the top level, beside `autonomy`; the other sits under a `run:`
 key:
 
 ```yaml
 stop-on-tool-failure: false
 run:
   base-branch: develop
-  harness-names: true
 ```
 
 | Setting | Default | Effect |
 |---|---|---|
 | `stop-on-tool-failure` | `true` | Whether a tool that fails during the run stops it. An absent key means **stop**. |
 | `run.base-branch` | `origin/HEAD` | The branch a run branches from and is compared against. `main` is never assumed: a repository whose default branch is `develop`, or whose operator named a release branch, is compared against the branch that was actually named. A value already carrying the `origin/` prefix is used as written. |
-| `run.harness-names` | `true` | Whether a rendered artifact publishes the harness name. An absent key publishes it. |
 
-`stop-on-tool-failure` and `run.harness-names` take `true` or `false`; any other value is a
+`stop-on-tool-failure` takes `true` or `false`; any other value is a
 configuration error, because a free-form read would let `sometimes` arrive as a later `false`.
 `run.base-branch` is a branch name, and a blank value is treated as absent so that a property
 publishing an empty branch cannot look configured while resolving to nothing a run can compare
 against.
 
 **A chosen value publishes a mode property; an absent one publishes nothing.** `docs init`
-renders `<run-base-branch>` and `<run-harness-names>` into the generated block of the repository
+renders `<run-base-branch>` into the generated block of the repository
 root `AGENTS.md` only when the key was actually written:
 
 ```markdown
 - **<run-base-branch>**: `develop`
-- **<run-harness-names>**: `true`
 ```
 
 An absent key publishes no line, because an agent already applies the documented default and
-only a value somebody chose can differ from it. Declaring either name (or `stop-on-tool-failure`)
+only a value somebody chose can differ from it. Declaring that name (or `stop-on-tool-failure`)
 under `config-reg:` is rejected with the setting that owns it named in the refusal. They
 are values, not paths, so `docs validate` never resolves them as paths (`KW-CONFIG-REG-001`),
 but a missing or wrong line is a stale block (`KW-CONFIG-REG-002`). As noted above, `stop-on-tool-failure`

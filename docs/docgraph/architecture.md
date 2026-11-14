@@ -186,9 +186,9 @@ Because the kind travels on the entry, a mode property is also reserved: a host 
 declare one under `config-reg:`, because that would replace a setting with a path and break
 the promise the registry makes.
 
-**The run settings are the next three.** `stop-on-tool-failure` at the top level, and
-`run.base-branch` and `run.harness-names`, publish `<stop-on-tool-failure>`,
-`<run-base-branch>` and `<run-harness-names>` as mode properties. A key the operator never
+**The run settings are the next two.** `stop-on-tool-failure` at the top level, and
+`run.base-branch`, publish `<stop-on-tool-failure>` and
+`<run-base-branch>` as mode properties. A key the operator never
 wrote publishes nothing at all: an agent already applies the documented default, only a value
 somebody chose can differ from it, and a published default would claim a choice the repository
 never made. `run.base-branch` carries a branch name rather than a mode word, and the kind still
