@@ -57,7 +57,7 @@ public static partial class PullRequestDescription
     private const string HostSectionNotCovered = "Not covered by this run; the reviewer completes it.";
 
     /// <summary>The sections that follow a host template when it does not ask for them, because a reviewer must see them.</summary>
-    private static readonly string[] AlwaysShown = ["not-verified", "decisions", "pending-review"];
+    private static readonly string[] AlwaysShown = ["not-verified", "decisions", "pending-review", "notes"];
 
     /// <summary>The embedded description template, comment included.</summary>
     public static string Template { get; } = ReadTemplate();

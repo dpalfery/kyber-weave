@@ -170,8 +170,8 @@ or why none was needed), and Notes.
 
 If the host has a pull request template, fill in every section of the host's pull request template
 instead, each with the section of the format it asks for; the provider file lists where each provider
-looks for one. Leave no placeholder text. Not verified, Decisions made for you to check and Pending
-human review follow the host's sections when it has none of its own for them.
+looks for one. Leave no placeholder text. Not verified, Decisions made for you to check, Pending
+human review and Notes follow the host's sections when it has none of its own for them.
 
 Write for a human reviewer: plain words, short, why more than how, and no internal rule ids, tool or
 agent names, decision ids or scratch paths unless the reviewer needs one to act. Do not paste raw

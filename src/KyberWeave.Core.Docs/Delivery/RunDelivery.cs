@@ -162,7 +162,7 @@ public sealed partial class RunDelivery
         if (!RunBaseState.TryReadBaseRef(_homeDirectory, branch, out string? baseRef) || baseRef is null)
         {
             return Refused(NotARunBranch, $"No run record names the base '{branch}' was started from. Nothing was changed.",
-                "Start the run with kyber-weave run start, or " + char.ToLowerInvariant(DeliveryAgentHint[0]) + DeliveryAgentHint[1..]);
+                "Deliver only a branch kyber-weave run start created or resumed (--resume <branch>), which records its base.");
         }
 
         string? originHead = Git("symbolic-ref", "--quiet", "--short", $"refs/remotes/{Remote}/HEAD") is { ExitCode: 0 } head
@@ -505,7 +505,11 @@ public sealed partial class RunDelivery
         return true;
     }
 
-    /// <summary>The latest task gate report of each task, from this run only: written after the run started, or measured against this change's base.</summary>
+    /// <summary>
+    /// The passing-run gate report of each task, from this run only: written after the run started, or measured against
+    /// this change's base. A test-first failing run is written to <c>task-gate-red.json</c> (or, in older runs, a
+    /// <c>-red</c> folder) and is never read as a failed check.
+    /// </summary>
     private List<GateReport> TaskGateReports(string mergeBase)
     {
         string scratch = Path.Combine(_repoRoot, ScratchFolder);
@@ -517,7 +521,7 @@ public sealed partial class RunDelivery
         foreach (string folder in Directory.EnumerateDirectories(scratch))
         {
             string file = Path.Combine(folder, TaskGateFile);
-            if (!File.Exists(file))
+            if (!File.Exists(file) || Path.GetFileName(folder).EndsWith("-red", StringComparison.OrdinalIgnoreCase))
                 continue;
             try
             {

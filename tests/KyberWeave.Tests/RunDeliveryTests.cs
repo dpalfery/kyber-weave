@@ -161,10 +161,11 @@ public sealed class RunDeliveryTests : IDisposable
             NotVerified = ["the export in a real browser"],
             Decisions = ["Cap the export size: Yes."],
             DocumentationImpact = "DOCS_REVIEW: update — the list page guide gained an Export section.",
+            Notes = "Follow-up: add XLSX.",
         }, host);
 
         Assert.Equal(
-            ["Summary", "Documentation impact", "Test plan", "Checklist", "Not verified", "Decisions made for you to check"],
+            ["Summary", "Documentation impact", "Test plan", "Checklist", "Not verified", "Decisions made for you to check", "Notes"],
             Headings(body));
         Assert.Contains("## Test plan\n\n- Review: approved", body, StringComparison.Ordinal);
         Assert.Contains("## Checklist\n\n- [ ] No secrets or credentials in the diff", body, StringComparison.Ordinal);
@@ -346,6 +347,34 @@ public sealed class RunDeliveryTests : IDisposable
         Assert.NotEqual(string.Empty, Git(_work, "status", "--porcelain").Trim());
     }
 
+    [Fact]
+    public void AMissingGitHubCliSendsTheConductorToTheDeliveryAgent()
+    {
+        GitRunRepository(archivePending: false);
+        ScriptedGh gh = new() { Installed = false };
+
+        DeliveryOutcome outcome = Deliver(gh, new DeliveryRequest("S."));
+
+        Assert.False(outcome.Delivered);
+        Assert.True(outcome.NeedsDeliveryAgent);
+        Assert.Equal(string.Empty, Git(_remote, "branch", "--list", Branch).Trim());
+    }
+
+    [Fact]
+    public void AFailingTestFirstRunIsNotReadAsAFailedCheck()
+    {
+        GitRunRepository(archivePending: false);
+        Write(".agent_scratchpad/T3-red/task-gate.json", ReviewJson.Write(new GateReport(GateReport.CurrentSchema,
+            [new GateResult("test", true, 1, "failed")])));
+        Write(".agent_scratchpad/T3/task-gate-red.json", ReviewJson.Write(new GateReport(GateReport.CurrentSchema,
+            [new GateResult("test", true, 1, "failed")])));
+        ScriptedGh gh = new();
+
+        Assert.True(Deliver(gh, new DeliveryRequest("S.")).Delivered);
+
+        Assert.Contains("- Checks per task: 1 task, all passed (build, format, test).", gh.Bodies.Single(), StringComparison.Ordinal);
+    }
+
     // ---------------------------------------------------------------- the MCP tool
 
     [Fact]
@@ -511,6 +540,8 @@ public sealed class RunDeliveryTests : IDisposable
     {
         public bool SignedIn { get; init; } = true;
 
+        public bool Installed { get; init; } = true;
+
         public string OpenPullRequest { get; init; } = "[]";
 
         public List<string[]> Calls { get; } = [];
@@ -527,6 +558,8 @@ public sealed class RunDeliveryTests : IDisposable
                 return RealGit(startInfo.WorkingDirectory, arguments, standardInput);
 
             Calls.Add(arguments);
+            if (!Installed)
+                throw new System.ComponentModel.Win32Exception(2, "No such file or directory");
             if (arguments.Contains("--body-file"))
                 Bodies.Add(standardInput);
             return arguments switch

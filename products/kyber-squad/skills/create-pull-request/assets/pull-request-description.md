@@ -13,7 +13,7 @@ heading and all. When the host repository has its own pull request template, fil
 sections instead: each host section takes the section below whose subject it asks for (summary,
 type, linked work, changes, testing, documentation, notes); a host section none of these answers
 keeps its checklist for the reviewer; and the sections below the host template does not ask for
-(Not verified, Decisions made for you to check, Pending human review) follow it.
+(Not verified, Decisions made for you to check, Pending human review, Notes) follow it.
 
 - summary: the problem and the outcome, in one to three sentences.
 - type: bug fix, feature, breaking change, refactor, documentation, and so on.
