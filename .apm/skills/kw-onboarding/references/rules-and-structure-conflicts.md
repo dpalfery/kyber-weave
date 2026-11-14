@@ -86,9 +86,10 @@ Record for each source:
 - **Loaded:** *always* (root `AGENTS.md`, harness instruction files, and any file the root
   `AGENTS.md` tells every agent to read, such as the rules folder), *scoped* (a subtree's
   `AGENTS.md`), or *on demand* (standards, review guidance, other docs). Squad workers also get
-  the first root `AGENTS.md` section whose heading names rules, constraints, prohibitions or
-  non-negotiables copied into every task packet (`kyber-weave docs packet`), so that section counts
-  twice toward weight.
+  every root `AGENTS.md` rules section (headings naming rules, constraints, prohibitions,
+  non-negotiables and the like; empty ones are skipped) copied into every task packet
+  (`kyber-weave docs packet`), up to about 6,000 characters, so those sections count twice toward
+  weight.
 - **Generated blocks:** find marker pairs (`grep -n '<!-- [A-Z_]*_START -->' <file>`) and read
   the block's own text for who writes it. The Config Reg block is written by `kyber-weave docs init`
   (and `kyber-weave docs onboarding`) from `.kyber-weave/kyber-weave.yml`: it is changed through
@@ -142,10 +143,10 @@ Run these before reading anything for meaning. Each produces candidate findings 
 6. **Empty lead-ins and headings (category 4).** A line ending in `:` whose next non-blank line is
    a heading or another lead-in; a heading with no text before the next heading of the same or higher
    level; a bold label such as `**CRITICAL**:` with nothing after it on the line or below it.
-   Then find the first root `AGENTS.md` heading containing *rules*, *constraints*, *prohibitions* or
-   *non-negotiable*: that section is what Squad task packets copy. If it is not the section holding
-   the real rules (an empty or misspelled section that happens to match), workers never see the
-   rules.
+   Then list the root `AGENTS.md` headings that name rules (*rules*, *constraints*, *prohibitions*,
+   *non-negotiable*, *mandatory*, *policies*, *guardrails*): Squad task packets copy those sections
+   in order, skip empty ones, and stop at about 6,000 characters. Report an empty or misspelled
+   rules heading, and any rules section that falls past the limit, because workers will not see it.
 7. **Buried exceptions (category 1).** Bullets or paragraphs holding both a prohibition and an
    exception:
    `grep -nEi "(do not|don't|never|must not|forbidden|prohibited|not permitted)" <file> | grep -Ei "(except|unless|exception|only when|carries|however|but )"`.
