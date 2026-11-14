@@ -1,4 +1,4 @@
-# The 35 shipped Arbiter rules. Ids are permanent: suppressions, baselines and
+# The 36 shipped Arbiter rules. Ids are permanent: suppressions, baselines and
 # code-scanning alerts key on them, so a rule is never renumbered or reused.
 #
 #The step-0 predicate set is closed (all, any, not, exists, equals, in, matches,

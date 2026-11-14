@@ -84,11 +84,12 @@ public sealed class ArbiterSectionAndCommentRuleTests
     {
         string[] ids = ArbiterConfig.ProductDefaults.Rules.Select(rule => rule.Id).Distinct().ToArray();
 
-        Assert.Equal("KW-ARB-FAILURE-001", ids[^6]);
-        Assert.Equal(TrimRule, ids[^5]);
-        Assert.Equal(CommentRule, ids[^4]);
-        Assert.Equal("KW-ARB-CHECKOUT-001", ids[^3]);
-        Assert.Equal("KW-ARB-MODE-002", ids[^2]);
-        Assert.Equal("KW-ARB-SEVERITY-001", ids[^1]);
+        Assert.Equal("KW-ARB-FAILURE-001", ids[^7]);
+        Assert.Equal(TrimRule, ids[^6]);
+        Assert.Equal(CommentRule, ids[^5]);
+        Assert.Equal("KW-ARB-CHECKOUT-001", ids[^4]);
+        Assert.Equal("KW-ARB-MODE-002", ids[^3]);
+        Assert.Equal("KW-ARB-SEVERITY-001", ids[^2]);
+        Assert.Equal("KW-ARB-OVERRIDE-001", ids[^1]);
     }
 }
