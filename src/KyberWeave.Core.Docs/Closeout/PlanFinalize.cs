@@ -130,9 +130,21 @@ public sealed partial class PlanFinalize
         }
 
         string? planIndex = _files.PlanIndexPath();
+        string? indexText;
+        try
+        {
+            indexText = planIndex is null ? null : PresentFile.ReadIfPresent(_files.Absolute(planIndex));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            report.Add(new Diagnostic(PlanNeedsArchitect, Severity.Error,
+                $"The plan index could not be read, so nothing was changed: {exception.Message}", plan, plan, Hint: ArchitectHint));
+            return Refused();
+        }
+
         List<string> touched = [plan, taskFile];
-        if (planIndex is not null && File.Exists(_files.Absolute(planIndex)))
-            touched.Add(planIndex);
+        if (indexText is not null)
+            touched.Add(planIndex!);
         if (HasOtherStaged(touched, plan, report))
             return Refused();
 
@@ -154,9 +166,6 @@ public sealed partial class PlanFinalize
             return Refused();
         }
 
-        string? indexText = planIndex is not null && File.Exists(_files.Absolute(planIndex))
-            ? File.ReadAllText(_files.Absolute(planIndex))
-            : null;
         string? newIndex = indexText is null ? null : WithReadyIndexRow(indexText, Path.GetFileName(plan));
         string newPlan = WithReadyStatus(withApproval, date);
         if (!ReadyStatus().IsMatch(newPlan))
@@ -170,7 +179,9 @@ public sealed partial class PlanFinalize
         string? taskFileBefore;
         try
         {
-            taskFileBefore = File.Exists(_files.Absolute(taskFile)) ? File.ReadAllText(_files.Absolute(taskFile)) : null;
+            // One read answers both "is it there" and "what does it hold": null means absent at this read, and only then
+            // may a restore delete it.
+            taskFileBefore = PresentFile.ReadIfPresent(_files.Absolute(taskFile));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -245,7 +256,7 @@ public sealed partial class PlanFinalize
         Say(report, plan, $"{plan} is already Ready and {taskFile} is current; nothing changed.");
         List<string> own = [plan, taskFile];
         string? index = _files.PlanIndexPath();
-        if (index is not null && File.Exists(_files.Absolute(index)))
+        if (index is not null && PresentFile.ReadIfPresent(_files.Absolute(index)) is not null)
             own.Add(index);
         if (!HasOtherStaged(own, plan, report))
             _files.CommitOnly(own, CommitMessage(plan), report, plan, Step);
@@ -275,7 +286,7 @@ public sealed partial class PlanFinalize
     {
         try
         {
-            return ReadyQueueOf(File.ReadAllText(_files.Absolute(taskFile)));
+            return PresentFile.ReadIfPresent(_files.Absolute(taskFile)) is { } text ? ReadyQueueOf(text) : null;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -283,15 +294,19 @@ public sealed partial class PlanFinalize
         }
     }
 
-    /// <summary>The queue for a task file's text; "(no tasks)" for a valid file with none; null when it cannot be read as a task file.</summary>
+    /// <summary>
+    /// The queue for a task file's text. "(no tasks)" only for a file that is valid and lists an empty set of tasks;
+    /// null for anything the task-file validator would refuse: not JSON, no or another schema version, no task list,
+    /// or a null entry in it. A corrupt file must not read as a valid empty one.
+    /// </summary>
     internal static string? ReadyQueueOf(string taskFileText)
     {
         try
         {
             PlanTaskFile? file = JsonSerializer.Deserialize<PlanTaskFile>(taskFileText, PlanTaskFileJson.ReadOptions);
-            if (file is null)
+            if (file is not { Tasks: { } tasks } || file.SchemaVersion != PlanTaskFileValidator.SchemaVersion || tasks.Any(task => task is null))
                 return null;
-            return file.Tasks is { Count: > 0 } tasks ? PlanTaskPacket.ReadyQueue(tasks) : "(no tasks)";
+            return tasks.Count > 0 ? PlanTaskPacket.ReadyQueue(tasks) : "(no tasks)";
         }
         catch (JsonException)
         {
@@ -477,8 +492,20 @@ public sealed partial class PlanFinalize
             File.WriteAllText(_files.Absolute(planIndex), indexText);
         if (taskFileBefore is not null)
             File.WriteAllText(_files.Absolute(taskFile), taskFileBefore);
-        else if (File.Exists(_files.Absolute(taskFile)))
-            File.Delete(_files.Absolute(taskFile));
+        else
+            DeleteIfPresent(_files.Absolute(taskFile));
+    }
+
+    private static void DeleteIfPresent(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (DirectoryNotFoundException)
+        {
+            // The folder is gone, so the file is too.
+        }
     }
 
     private static void Say(DiagnosticReport report, string plan, string message) =>

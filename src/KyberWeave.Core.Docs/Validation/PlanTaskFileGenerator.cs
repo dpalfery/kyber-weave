@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Docs.Closeout;
 
 namespace KyberWeave.Core.Docs.Validation;
 
@@ -592,9 +593,9 @@ public sealed partial class PlanTaskFileGenerator
         string full = Path.Combine(_repoRoot, taskFile.Replace('/', Path.DirectorySeparatorChar));
         try
         {
-            if (!File.Exists(full))
+            if (PresentFile.ReadIfPresent(full) is not { } text)
                 return found;
-            PlanTaskFile? existing = JsonSerializer.Deserialize<PlanTaskFile>(File.ReadAllText(full), PlanTaskFileJson.ReadOptions);
+            PlanTaskFile? existing = JsonSerializer.Deserialize<PlanTaskFile>(text, PlanTaskFileJson.ReadOptions);
             foreach (PlanTaskFileEntry? entry in existing?.Tasks ?? [])
             {
                 if (entry?.Id is { } id)
@@ -627,7 +628,7 @@ public sealed partial class PlanTaskFileGenerator
                 return false;
             }
 
-            if (File.Exists(full) && string.Equals(File.ReadAllText(full), json, StringComparison.Ordinal))
+            if (string.Equals(PresentFile.ReadIfPresent(full), json, StringComparison.Ordinal))
             {
                 return false;
             }
@@ -651,7 +652,24 @@ public sealed partial class PlanTaskFileGenerator
     {
         string full = Path.Combine(_repoRoot, taskFile.Replace('/', Path.DirectorySeparatorChar));
         string fix = TaskFileCommand.Write(artifact);
-        if (!File.Exists(full))
+        string? diskText;
+        try
+        {
+            diskText = PresentFile.ReadIfPresent(full);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            report.Add(new Diagnostic(
+                PlanTaskFileValidator.Malformed,
+                Severity.Error,
+                $"The task file '{taskFile}' cannot be read: {exception.Message}",
+                taskFile,
+                taskFile,
+                Hint: $"Run {fix}."));
+            return;
+        }
+
+        if (diskText is null)
         {
             report.Add(new Diagnostic(
                 PlanTaskFileValidator.MissingTaskFile,
@@ -667,7 +685,7 @@ public sealed partial class PlanTaskFileGenerator
         PlanTaskFile? actual;
         try
         {
-            actualText = File.ReadAllText(full);
+            actualText = diskText;
             actual = JsonSerializer.Deserialize<PlanTaskFile>(actualText, PlanTaskFileJson.ReadOptions);
         }
         catch (Exception exception) when (exception is JsonException or IOException or UnauthorizedAccessException)

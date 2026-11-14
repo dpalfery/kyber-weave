@@ -99,7 +99,8 @@ public sealed partial class PlanCloseout
 
         // Every problem is collected before anything is reported: the caller is an agent that fixes what it is
         // told, so a refusal that names one gap per run costs a run per gap.
-        if (!File.Exists(_files.Absolute(planIndex)))
+        string? planIndexText = PresentFile.ReadIfPresent(_files.Absolute(planIndex));
+        if (planIndexText is null)
         {
             report.Add(new Diagnostic(IndexNotEditable, Severity.Error, $"'{planIndex}' does not exist.", plan, planIndex,
                 Hint: $"Restore it with 'git checkout -- {planIndex}', then run the closeout again."));
@@ -119,9 +120,18 @@ public sealed partial class PlanCloseout
         string archiveDirectory = Path.GetDirectoryName(_files.Absolute(target))!;
         string? createdDirectory = FirstMissingDirectory(archiveDirectory);
         Directory.CreateDirectory(archiveDirectory);
+        bool wroteTarget = false;
         try
         {
-            File.WriteAllText(_files.Absolute(target), archivedText);
+            if (!TryWriteNew(_files.Absolute(target), archivedText))
+            {
+                report.Add(new Diagnostic(ArchiveTargetExists, Severity.Error,
+                    $"The archive already holds '{target}'.", plan, target,
+                    Hint: "Rename the plan, or remove the earlier archive entry if it is a stale copy."));
+                return new PlanCloseoutOutcome(report, false);
+            }
+
+            wroteTarget = true;
             DocumentSet live = _loaderFactory().Load();
             report.AddRange(new ArchiveCloseoutValidator(_repoRoot, _config, _loaderFactory)
                 .Itemise(live, [new ChangedPath(target, ChangeKind.Added)]).Items);
@@ -133,12 +143,14 @@ public sealed partial class PlanCloseout
             }
 
             row = InventoryRow(_loaderFactory().LoadArchivedDocument(target), name, archivedText, date);
-            (newInventory, inventoryAction) = WithInventoryRow(inventory, planIndex, row, date);
-            (newPlanIndex, planRowRemoved) = RemovePlanRow(File.ReadAllText(_files.Absolute(planIndex)), name);
+            (newInventory, inventoryAction) = WithInventoryRow(inventory, planIndexText ?? string.Empty, row, date);
+            (newPlanIndex, planRowRemoved) = RemovePlanRow(planIndexText ?? string.Empty, name);
         }
         finally
         {
-            File.Delete(_files.Absolute(target));
+            // Only a file this run created is removed: one that appeared before the exclusive create is someone else's.
+            if (wroteTarget)
+                File.Delete(_files.Absolute(target));
             if (createdDirectory is not null)
                 Directory.Delete(createdDirectory, recursive: true);
         }
@@ -157,7 +169,14 @@ public sealed partial class PlanCloseout
         }
 
         Directory.CreateDirectory(archiveDirectory);
-        File.WriteAllText(_files.Absolute(target), archivedText);
+        if (!TryWriteNew(_files.Absolute(target), archivedText))
+        {
+            report.Add(new Diagnostic(ArchiveTargetExists, Severity.Error,
+                $"The archive already holds '{target}'. Nothing was moved.", plan, target,
+                Hint: "Rename the plan, or remove the earlier archive entry if it is a stale copy."));
+            return new PlanCloseoutOutcome(report, false);
+        }
+
         File.Delete(_files.Absolute(plan));
         Say(report, plan, $"Moved {plan} to {target} with status archived.");
         if (hasTaskFile)
@@ -174,6 +193,25 @@ public sealed partial class PlanCloseout
         _files.Stage(touched, report, plan, Step);
         Say(report, plan, "Run 'docs validate . --merge-ready' and 'docs drift .' next.");
         return new PlanCloseoutOutcome(report, true);
+    }
+
+    /// <summary>
+    /// Writes <paramref name="text"/> to a file that must not exist yet, in one step, so a file that appeared since the
+    /// last look is never overwritten. False when the file is already there.
+    /// </summary>
+    private static bool TryWriteNew(string path, string text)
+    {
+        try
+        {
+            using FileStream stream = new(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            using StreamWriter writer = new(stream, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            writer.Write(text);
+            return true;
+        }
+        catch (IOException) when (File.Exists(path))
+        {
+            return false;
+        }
     }
 
     /// <summary>The outermost directory on the way to <paramref name="directory"/> that does not exist yet, or null.</summary>
@@ -230,12 +268,12 @@ public sealed partial class PlanCloseout
     /// inventory is created, and one without the table gets the table appended: both are mechanical and have one
     /// right shape, so refusing would only cost the caller a run.
     /// </summary>
-    private (string Text, string Action) WithInventoryRow(string inventory, string planIndex, string row, DateOnly date)
+    private (string Text, string Action) WithInventoryRow(string inventory, string planIndexText, string row, DateOnly date)
     {
         string table = $"{InventoryColumns}\n|---|---|---|---|---|---|\n{row}\n";
-        if (!File.Exists(_files.Absolute(inventory)))
+        if (PresentFile.ReadIfPresent(_files.Absolute(inventory)) is not { } text)
         {
-            string owner = Owner().Match(File.ReadAllText(_files.Absolute(planIndex))) is { Success: true } match
+            string owner = Owner().Match(planIndexText) is { Success: true } match
                 ? match.Groups[1].Value
                 : "Maintainers";
             string stamp = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
@@ -245,7 +283,6 @@ public sealed partial class PlanCloseout
                     $"## Archived Plans\n\n{table}", "create");
         }
 
-        string text = File.ReadAllText(_files.Absolute(inventory));
         if (AddInventoryRow(text, row) is { } added)
             return (added, "add its row at the top of");
 

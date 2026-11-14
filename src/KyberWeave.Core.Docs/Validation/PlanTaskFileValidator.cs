@@ -78,7 +78,7 @@ public sealed partial class PlanTaskFileValidator
     public const string PacketNotSelfContained = "KW-DOC-TASKS-011";
 
     /// <summary>The schema version this build reads.</summary>
-    private const int SchemaVersion = 1;
+    internal const int SchemaVersion = 1;
 
     private const string PlanExtension = ".md";
     private const string TaskFileSuffix = ".tasks.json";
