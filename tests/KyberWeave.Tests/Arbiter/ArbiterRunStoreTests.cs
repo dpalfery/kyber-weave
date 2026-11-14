@@ -142,6 +142,38 @@ public sealed class ArbiterRunStoreTests : IDisposable
 
     /// <summary>Reading a run returns exactly what was stored for that run, and nothing from another run.</summary>
     [Fact]
+    public async Task ReadingReturnsLooksOnlyAtTheTailOfAFileLargerThanTheCap()
+    {
+        ArbiterRunStore store = Store(Now, new ArbiterStoreOptions(MaxItemBytes: 16384, RetainDays: 14));
+        string body = new('x', 8000);
+        int count = (int)(ArbiterRunStore.MaxReturnsReadBytes / 8000) + 40;
+        for (int i = 0; i < count; i++)
+        {
+            Assert.Equal(ArbiterStoreStatus.Stored, await store.AppendReturnAsync("plan.md", $"task: T{i}\n{body}"));
+        }
+
+        IReadOnlyList<string> returns = store.ReadReturns("plan.md");
+
+        Assert.True(returns.Count < count);
+        Assert.True(returns.Count > 40);
+        Assert.StartsWith($"task: T{count - 1}\n", returns[^1], StringComparison.Ordinal);
+        Assert.DoesNotContain(returns, item => item.StartsWith("task: T0\n", StringComparison.Ordinal));
+        Assert.All(returns, item => Assert.StartsWith("task: T", item, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ReadingReturnsOfAFileUnderTheCapKeepsEveryItem()
+    {
+        ArbiterRunStore store = Store(Now);
+        for (int i = 0; i < 5; i++)
+        {
+            await store.AppendReturnAsync("plan.md", $"task: T{i}\nreport");
+        }
+
+        Assert.Equal(5, store.ReadReturns("plan.md").Count);
+    }
+
+    [Fact]
     public async Task ReadingAReviewRunReturnsOnlyItsOwnFindings()
     {
         ArbiterRunStore store = Store(Now);

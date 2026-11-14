@@ -48,6 +48,13 @@ public sealed class ArbiterRunStore
     private const string ReturnsFileName = "returns.jsonl";
 
     /// <summary>
+    /// The most bytes of a plan's returns file one read looks at, taken from the end. An active plan's file is never
+    /// swept, so reading all of it would make every evaluation cost more as the plan ages; the newest returns are
+    /// the only ones a caller wants.
+    /// </summary>
+    internal const long MaxReturnsReadBytes = 1024 * 1024;
+
+    /// <summary>
     /// The longest retention the sweep honours: ten years. A larger configured value is clamped to this, because a
     /// span past the largest representable time span cannot be formed, and the append must still store its item.
     /// </summary>
@@ -164,7 +171,7 @@ public sealed class ArbiterRunStore
     public IReadOnlyList<string> ReadReturns(string planFile)
     {
         ArgumentNullException.ThrowIfNull(planFile);
-        return ReadItems(Path.Combine(ReturnsDirectory(planFile), ReturnsFileName));
+        return ReadItems(Path.Combine(ReturnsDirectory(planFile), ReturnsFileName), MaxReturnsReadBytes);
     }
 
     /// <summary>Keyed by the plan file alone, so an amended plan still sees the returns made before the amendment.</summary>
@@ -298,7 +305,7 @@ public sealed class ArbiterRunStore
         return newest ?? directory.LastWriteTimeUtc;
     }
 
-    private static IReadOnlyList<string> ReadItems(string path)
+    private static IReadOnlyList<string> ReadItems(string path, long tailBytes = long.MaxValue)
     {
         if (!File.Exists(path))
         {
@@ -308,7 +315,21 @@ public sealed class ArbiterRunStore
         try
         {
             List<string> items = [];
-            foreach (string line in File.ReadLines(path))
+            using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            bool partialFirstLine = stream.Length > tailBytes;
+            if (partialFirstLine)
+            {
+                stream.Seek(-tailBytes, SeekOrigin.End);
+            }
+
+            using StreamReader reader = new(stream);
+            if (partialFirstLine)
+            {
+                // The seek landed mid-line (and possibly mid-character); the fragment is not an item.
+                reader.ReadLine();
+            }
+
+            while (reader.ReadLine() is { } line)
             {
                 StoredItem? item = TryDeserialize(line);
                 if (item is not null)
