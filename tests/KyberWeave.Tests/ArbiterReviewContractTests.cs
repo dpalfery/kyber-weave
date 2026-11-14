@@ -95,7 +95,7 @@ public sealed class ArbiterReviewContractTests
     {
         string skill = SkillContract;
 
-        Assert.Matches(@"kyber-weave review verdict \. --seats[^\n]*--out", skill);
+        Assert.Contains("kyber-weave review verdict . [--drop", skill, StringComparison.Ordinal);
         Assert.Contains(".agent_scratchpad/<task-id>/review/cycle-<n>/", skill, StringComparison.Ordinal);
         Assert.DoesNotContain("kyber-weave review verdict . --findings", skill, StringComparison.Ordinal);
     }

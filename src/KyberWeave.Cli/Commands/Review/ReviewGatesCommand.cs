@@ -334,6 +334,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
                     Console.WriteLine($"not-seated: --not-seated \"{lens}={reason}\"");
                 string[] send = [.. CouncilSeating.AfterGates.Where(lens => !gateProven.ContainsKey(lens))];
                 Console.WriteLine($"after-gates: send {(send.Length == 0 ? "none" : string.Join(", ", send))}");
+                Console.WriteLine($"next: {ReviewSeatsCommand.VerdictCommand(null)}");
             }
 
             Console.WriteLine(
@@ -491,7 +492,17 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
         CommandHelpers.TryWriteReport(
             Path.Combine(cycle.Folder!, "duplicates.json"), ReviewJson.Write(duplicates), ReportWriteFailed, report);
         (IReadOnlyList<string>? changed, _) = ResolveCouncilChangedSet(root, settings);
-        return CouncilSeating.GateProvenSkips(written, duplicates, changed);
+        IReadOnlyDictionary<string, string> skips = CouncilSeating.GateProvenSkips(written, duplicates, changed);
+        try
+        {
+            NotSeatedRecord.Add(cycle.Folder!, skips);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The printed not-seated lines still carry the decisions; the verdict asks for any it cannot read.
+        }
+
+        return skips;
     }
 
     /// <summary>Records the branch, base and head this cycle reviews, so a later cycle can tell the cycle belongs to its change.</summary>

@@ -104,7 +104,9 @@ public sealed class ReviewDuplicatesSettings : AnalysisSettings
 public sealed class ReviewVerdictSettings : AnalysisSettings
 {
     [CommandOption("--findings <PATH>")]
-    [Description("Path to the council's findings JSON document.")]
+    [Description("Path to the council's findings JSON document. With neither --findings nor --seats, the newest " +
+                 "cycle folder of the review is used: its seats, gates.json and recorded not-seated lenses, its " +
+                 "findings.json as --out, and the cycle before it as --prior.")]
     public string? Findings { get; set; }
 
     [CommandOption("--gates <PATH>")]
@@ -152,6 +154,11 @@ public sealed class ReviewVerdictSettings : AnalysisSettings
                  "cited code it confidently found to support the claim is not listed, and its answers are kept beside " +
                  "the seat folder for the verdict run.")]
     public bool Candidates { get; set; }
+
+    [CommandOption("--task <ID>")]
+    [Description("With no --seats or --findings: the task id whose review folder holds the cycle. Omitted: the only " +
+                 "review folder, or the one named for the current branch.")]
+    public string? Task { get; set; }
 
     [CommandOption("--no-decision-model")]
     [Description("Do not ask the decision model (arbiter.provider) to merge duplicates, drop minor nitpicks, check " +

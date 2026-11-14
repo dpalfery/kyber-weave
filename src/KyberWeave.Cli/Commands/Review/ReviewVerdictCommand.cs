@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Review;
@@ -67,6 +68,9 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
         if (!CommandHelpers.TryLoadConfig(root, settings.Config, report, out KyberWeaveConfig config))
             return Fail(report, settings);
 
+        if (settings.Seats is null && settings.Findings is null && !UseCurrentCycle(root, settings, report))
+            return Fail(report, settings);
+
         if (settings.Prior is not null && !PriorBelongsToThisChange(root, settings, report))
             return Fail(report, settings);
 
@@ -119,6 +123,8 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
             // A partial read lists candidates only: a verdict, findings.json or a recorded cycle now would let a later
             // reader take it for the cycle's verdict.
             CommandHelpers.Finish(report, settings, "review verdict", "Review");
+            if (ReportRenderer.IsHuman(settings.ParsedFormat))
+                Console.WriteLine($"next: refute each candidate listed above, then {ReviewSeatsCommand.VerdictCommand(settings.Task)}");
             return 0;
         }
 
@@ -380,7 +386,12 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
         if (!TryReadSeats(settings.Seats, report, out List<SeatOutput> seats))
             return false;
 
-        Dictionary<string, string> notSeated = ParseNotSeated(settings.NotSeated, report);
+        // The cycle's recorded decisions first; a reason typed on the command line wins over the recorded one.
+        Dictionary<string, string> notSeated = new(
+            NotSeatedRecord.Read(Path.GetDirectoryName(Path.GetFullPath(settings.Seats).TrimEnd(Path.DirectorySeparatorChar))!),
+            StringComparer.Ordinal);
+        foreach ((string lens, string reason) in ParseNotSeated(settings.NotSeated, report))
+            notSeated[lens] = reason;
         List<LensCoverage> coverage = AccountForLenses(seats, notSeated, prior, report, settings.Candidates);
         if (report.HasErrors)
             return false;
@@ -793,6 +804,51 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
         }
 
         return kept;
+    }
+
+    /// <summary>
+    /// Points the verdict at the review's newest cycle folder, so the reviewer types no path: its seats, its gate report
+    /// when the gate run wrote one, its <c>findings.json</c> as <c>--out</c> for a verdict run, and the cycle before it
+    /// as <c>--prior</c> when that one wrote its findings. An option given explicitly is kept.
+    /// </summary>
+    private static bool UseCurrentCycle(string root, ReviewVerdictSettings settings, DiagnosticReport report)
+    {
+        string tree = ReviewWorkTree.Of(root);
+        string scratchpad = ReviewWorkTree.Scratchpad(tree);
+        string? cycle = null;
+        string? problem = null;
+        if (ReviewCycleView.TryChooseTask(tree, scratchpad, settings.Task, out string task, out _, out problem))
+        {
+            cycle = NotSeatedRecord.LatestCycle(Path.Combine(scratchpad, task, "review"));
+            problem = cycle is null ? $"no cycle folder with seats under {Path.Combine(scratchpad, task, "review")}" : null;
+        }
+
+        if (cycle is null)
+        {
+            report.Add(new Diagnostic(
+                UnreadableInput,
+                Severity.Error,
+                $"No findings were given and no review cycle was found: {problem}.",
+                Subject,
+                Hint: "Run kyber-weave review seats first, or pass --seats <DIR>."));
+            return false;
+        }
+
+        settings.Seats = Path.Combine(cycle, "seats");
+        string gates = Path.Combine(cycle, "gates.json");
+        if (settings.Gates is null && File.Exists(gates))
+            settings.Gates = gates;
+        if (!settings.Candidates)
+            settings.Out ??= Path.Combine(cycle, PriorFindingsFile);
+        if (settings.Prior is null
+            && ReviewCycleView.TryFromOutPath(Path.Combine(cycle, PriorFindingsFile), out string reviewFolder, out int number)
+            && number > 1
+            && File.Exists(Path.Combine(reviewFolder, $"cycle-{number - 1}", PriorFindingsFile)))
+        {
+            settings.Prior = Path.Combine(reviewFolder, $"cycle-{number - 1}");
+        }
+
+        return true;
     }
 
     /// <summary>The cycle's decision-model answer file, beside the seat folder; none for a hand-built findings file.</summary>

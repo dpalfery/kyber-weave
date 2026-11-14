@@ -186,11 +186,16 @@ The reviewer applies the checks no individual lens can, because no lens sees the
 Each cycle writes to the absolute `folder:` that `kyber-weave review cycle .` and the gate run print, `<tree>/.agent_scratchpad/<task-id>/review/cycle-<n>/` in the worktree under review, never a relative path: the `seats` folder, `gates.json`, the `findings.json` the verdict command writes, and `cycle.json`; keep it until the run ends. `cycle.json` is written by the tools and records the branch, base and head the cycle reviewed; a recorded cycle counts as prior only when its branch and base are this change's and its head is an ancestor of `HEAD`, and the gate run lists any other as `ignored:`. The council's gate run reads the folders and prints the cycle, its mode (`full` or `verifier`), the `recheck:` findings and the `rerun:`/`carry:` gates, and a verifier cycle re-seats and re-runs only what it lists; `review cycle` asks the same question without running anything. This is the only place the verdict command is written down:
 
 ```bash
-kyber-weave review verdict . --seats <cycle>/seats --gates <cycle>/gates.json --out <cycle>/findings.json [--drop <id>=<reason>]... [--not-seated <lens>=<reason>]... [--prior <prior cycle>]
+kyber-weave review verdict . [--drop <id>=<reason>]... [--not-seated <lens>=<reason>]...
 ```
 
+With no `--seats` or `--findings` it uses the review's newest cycle folder: its `seats`, its
+`gates.json`, the not-seated lenses `review seats` and the gate run recorded there, `findings.json`
+as `--out`, and the cycle before it as `--prior`. `--task <id>` names the review folder when there are
+several. Anyone running the procedure without `review seats` passes `--seats`, `--gates` and `--out`.
+
 The command reads the findings from the seat files and writes the surviving findings to
-`findings.json`, so a later audit reads what the verdict read. Record every lens you do not seat with `--not-seated <lens>=<reason>`; the verdict refuses to compute while a lens has neither a seat file nor a reason (KW-REVIEW-041). A lens that needs gate input the run never produced is not seated, for example `--not-seated static-analysis-triage=no analyzer output: build gate not run`, and neither is a lens whose whole input is a gate that passed, for example `--not-seated static-analysis-triage=gates build, ts-lint passed`. A verifier cycle passes `--prior`, and a lens the prior cycle covered is carried from it, as is a blocking gate this cycle did not run whose inputs are unchanged; one whose inputs changed or that did not pass is refused (KW-REVIEW-049).
+`findings.json`, so a later audit reads what the verdict read. Every lens a command did not seat is already recorded; record any other lens you do not seat with `--not-seated <lens>=<reason>`. The verdict refuses to compute while a lens has neither a seat file nor a reason (KW-REVIEW-041). A lens that needs gate input the run never produced is not seated, for example `--not-seated static-analysis-triage=no analyzer output: build gate not run`, and neither is a lens whose whole input is a gate that passed, for example `--not-seated static-analysis-triage=gates build, ts-lint passed`. A verifier cycle passes `--prior`, and a lens the prior cycle covered is carried from it, as is a blocking gate this cycle did not run whose inputs are unchanged; one whose inputs changed or that did not pass is refused (KW-REVIEW-049).
 
 Rules, in evaluation order. The first that fires decides:
 

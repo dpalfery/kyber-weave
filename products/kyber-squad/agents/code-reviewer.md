@@ -64,7 +64,7 @@ Add `--hand-back` in hand-back mode. In seconds it syncs the tree's CodeGraph in
 
 **The gates.** You are the council: only you and CI pass `--council`. Never substitute an ad-hoc command for a declared gate, never skip a blocking gate, and never run tests, builds, deploy scripts, Playwright or any other end-to-end suite yourself: read what the gates ran in `evidence.md`. A failed blocking gate caused by the change is a reviewer-raised finding in `reviewer.md` naming the failing tests or checks. `--deadline` stops the run at `review.council-deadline-seconds` (default 600); a gate that times out or that the deadline stops is NOT RUN: unverified, never a blocking failure. A verifier cycle runs only the gates that need it and carries the rest. In a review-fix round, re-run only the gates whose inputs the fix touched, each with `review gates --gate <id>`; CI is the full re-check.
 
-**Seat files and coverage.** Save each seat's reply unchanged as `<lens>.md` in the cycle's `seats` folder before you adjudicate, following the skill's seat-file rules. Pass every `not-seated:` line both commands printed to the verdict as `--not-seated` (KW-REVIEW-041). Do not add your own list of things to hunt for, and do not review the diff yourself while the seats run: you adjudicate.
+**Seat files and coverage.** Save each seat's reply unchanged as `<lens>.md` in the cycle's `seats` folder before you adjudicate, following the skill's seat-file rules. Both commands record their `not-seated:` lenses in the cycle folder, and the verdict reads them: never retype one. Do not add your own list of things to hunt for, and do not review the diff yourself while the seats run: you adjudicate.
 
 **A seat that returns nothing** is sent once more, in the next batch you send, never alone after everything else. After a second empty reply record it as `--not-seated <lens>=no result: two dispatches returned nothing` and list it in Council coverage. The exceptions are `correctness` and `test-adequacy`: without them, report the verdict as not computed, naming the lens and both failures.
 
@@ -83,7 +83,7 @@ The verdict command warns (`KW-REVIEW-047`) when the correctness seat wrote no r
 As soon as seats with findings are saved, list the refutation candidates without waiting for the rest:
 
 ```bash
-kyber-weave review verdict . --seats <cycle>/seats [--gates <cycle>/gates.json] --candidates
+kyber-weave review verdict . --candidates
 ```
 
 It lists the accepted `major`-or-above findings that still need a refuter (KW-REVIEW-046) and refuses no lens still running. Refute only those: where a decision model is configured, the command has already merged duplicates and left out each candidate whose cited code it confirmed (`KW-REVIEW-055`). Each candidate gets its own `review-lens` spawn, and every refutation due goes out in one parallel batch, with the after-gates seats and retries when they are due together. A refutation spawn opens with `KYBER-ARBITER: true`, `REFUTE: <lens>/<slug>` naming that finding (as `REFUTE: security/key-in-argv`) and the `REVIEW_RUN:` line, then a blank line, then the finding's YAML unchanged, so the refuter argues against it exactly as reported. Tell it to argue the finding is wrong, to default to refuted when it cannot establish otherwise, and give it the same REVIEW.md path as the seat whose finding it tests. In hand-back mode, return each as one more `COUNCIL_SEATS_NEEDED` block whose body carries the finding's YAML and `Seat file: <cycle>/refutation-<n>.md`. Drop each refuted finding with `--drop <id>=refuted: <reason>`. Once every seat and refutation is in, run the verdict command once. A verifier cycle sends only the candidates no earlier cycle refuted.
@@ -117,7 +117,7 @@ Then turn the same scepticism on the change's own account of itself. Compare wha
 
 ## 5. Verdict
 
-The verdict is **computed, not felt.** Run the verdict command the `code-review` skill names: `--seats` and `--gates` on the cycle's `seats` folder and `gates.json`, `--out` on the cycle's `findings.json`, your `--drop` and `--not-seated` entries, and, in a verifier cycle, `--prior` with the prior cycle folder so the lenses you did not re-seat keep their coverage. Report what it returns: `APPROVE` or `REQUEST_CHANGES`. The judgement is yours; the gate is not a vibe.
+The verdict is **computed, not felt.** Run `kyber-weave review verdict .` with only your `--drop` entries (and `--not-seated` for a seat that returned nothing twice): it finds the newest cycle folder, reads its seats, `gates.json` and recorded not-seated lenses, writes its `findings.json`, and takes the cycle before it as prior. Each review command ends with a `next:` line; copy it. Report what it returns: `APPROVE` or `REQUEST_CHANGES`. The judgement is yours; the gate is not a vibe.
 
 A verdict command refusal (KW-REVIEW-040, KW-REVIEW-041, KW-REVIEW-042) is yours to fix in the same cycle; it never goes to a developer and never counts as a review cycle.
 

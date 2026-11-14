@@ -20,6 +20,7 @@ code-refs:
   - ReviewDecisionModel
   - ReviewVerdictDecisions
   - ReviewLensApplicability
+  - NotSeatedRecord
 ---
 
 # ADR 0079: The reviewer starts its own seats where sub-agents can dispatch
@@ -135,7 +136,10 @@ apply, which the changed-file list already showed.
    result", except `correctness` and `test-adequacy`, without which the verdict is not computed.
    `review verdict --candidates` lists refutation candidates from the seats saved so far, and each
    candidate is refuted in its own spawn, all in one parallel batch with the after-gates seats and
-   retries. The verdict command then runs once.
+   retries. The verdict command then runs once, as `kyber-weave review verdict .` with no other argument: it
+   finds the newest cycle folder and reads the lenses `review seats` and the gate run recorded as not
+   seated in its `not-seated.json`, so the reviewer never retypes a reason. Each review command ends
+   with the `next:` command line to copy.
 
 10. **The review commands ask the decision model, when one is configured.** The Arbiter's review
     questions hung off dispatch hooks that saw a seat-file path or no finding at all: in a replay the

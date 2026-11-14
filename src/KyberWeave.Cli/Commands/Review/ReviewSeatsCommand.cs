@@ -104,6 +104,7 @@ public sealed class ReviewSeatsCommand : Command<ReviewSeatsSettings>
                 config.Review.Policy.MinConfidence,
                 GuidancePath(root, config),
                 Path.Combine(folder, "duplicates.json")));
+            NotSeatedRecord.Add(folder, seats.NotSeated);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -149,9 +150,14 @@ public sealed class ReviewSeatsCommand : Command<ReviewSeatsSettings>
         foreach (string lens in seats.AfterGates)
             Console.Write(Block(folder, lens, reviewRun, settings.HandBack));
 
+        Say($"next: {VerdictCommand(settings.Task)} --candidates");
         Console.Out.Flush();
         return 0;
     }
+
+    /// <summary>The verdict command line the reviewer copies; it needs no other argument, since the cycle folder records the rest.</summary>
+    internal static string VerdictCommand(string? task) =>
+        task is null ? "kyber-weave review verdict ." : $"kyber-weave review verdict . --task {task}";
 
     private static void Say(string line) => Console.WriteLine(line);
 

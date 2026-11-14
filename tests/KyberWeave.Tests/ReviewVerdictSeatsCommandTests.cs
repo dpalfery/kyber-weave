@@ -425,6 +425,28 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
         Assert.False(File.Exists(Path.Combine(_temp.Path, "decision-model.json")));
     }
 
+    /// <summary>
+    /// The bare command finds the review's newest cycle folder, reads its seats and the not-seated decisions
+    /// <c>review seats</c> and the gate run recorded there, and writes the cycle's <c>findings.json</c>: the reviewer
+    /// types no path and no reason.
+    /// </summary>
+    [Fact]
+    public void TheBareCommandReadsTheNewestCycleAndItsRecordedNotSeatedLenses()
+    {
+        string cycle = Path.Combine(_repo, ".agent_scratchpad", "bare-task", "review", "cycle-1");
+        Directory.CreateDirectory(Path.Combine(cycle, "seats"));
+        File.WriteAllText(Path.Combine(cycle, "seats", "correctness.md"), NoFindingsSeat("correctness"));
+        NotSeatedRecord.Add(cycle, ReviewLensCatalogue.Names
+            .Where(lens => lens != "correctness")
+            .ToDictionary(lens => lens, _ => "recorded by review seats in this test", StringComparer.Ordinal));
+
+        CapturedConsoleExecution<int> run = Verdict("--task", "bare-task");
+
+        Assert.Equal(0, run.Result);
+        Assert.Contains("recorded by review seats in this test", run.Output, StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Combine(cycle, "findings.json")));
+    }
+
     [Fact]
     public void TheAcceptedListIsAbsentWhenABlockingGateFailed()
     {
