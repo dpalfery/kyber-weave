@@ -159,24 +159,34 @@ Step 6 asks one question with this context.
   allows. Checks based on machine facts still run. Nothing breaks; the gate is weaker.
 - *Options*: set up a key now (the user runs the command), or keep the gate without a model
   (`none`).
-- *Cost and undo*: an API key from TypeSafe or OpenRouter (their pricing applies); stored in the OS credential store,
-  never in a file. Undo with `kyber-weave arbiter uninstall --target <name> --remove-key`, or by
-  deleting the credential.
+- *Cost and undo*: an API key from TypeSafe or OpenRouter (their pricing applies); stored in the OS credential store
+  by the product's own command, never in a file by this skill. Undo with `kyber-weave arbiter
+  uninstall --global --target <name> --remove-key` (or `--project`), or by deleting the credential.
 - *Found*: `kyber-weave arbiter status` says whether a key is found, never its value, and which
   provider and endpoint are set.
 - *Recommend*: keep what is set if a key is found; otherwise skip on a first setup and add one
   when runs are routine.
 
-**Where the key comes from.** The `TYPESAFE_API_KEY` environment variable first, then the OS
-credential store entry for the endpoint. It is never written to a configuration, hook or MCP file.
+**Where the key comes from.** The `TYPESAFE_API_KEY` environment variable of the process
+first, then the OS credential store entry for the endpoint. It is never written to a
+configuration, hook or MCP file.
 
-**How to set it.** The user runs one of these themselves:
+**How to set it (recommended: the OS credential store).** The user runs one of these
+themselves, in their own terminal, and never pastes the key into the chat; this skill never
+writes the key anywhere:
 
 - `kyber-weave arbiter setup`: choose the provider; the key is entered at a masked prompt and
   stored in the OS credential store.
-- `kyber-weave arbiter install --target <name> --provider systemone --key-stdin`, with the key
-  piped in from a password manager.
-- `export TYPESAFE_API_KEY=...` in their own shell profile.
+- `kyber-weave arbiter setup --provider systemone --key-stdin`, with the key piped in from a
+  password manager's command line.
+- With the hook install in one step: `kyber-weave arbiter install --global --target <name>
+  --provider systemone --key-stdin` (or `--project`), the key piped the same way.
+
+**Environment variable (only if already in place).** A user may already have `TYPESAFE_API_KEY`
+set for the current process, or inject it from a secret manager or a CI secret; that works and
+needs no step from this skill. Tell the user plainly that putting the key in a shell profile
+stores it unencrypted on disk, where backups and dotfiles repositories can read it, and is not
+recommended. Do not give an `export` line to copy into a profile.
 
 Avoid `--arbiter-key <key>`: the key lands in shell history. Check the result with
 `kyber-weave arbiter status`.

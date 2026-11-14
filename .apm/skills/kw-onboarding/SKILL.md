@@ -48,8 +48,8 @@ when the user needs it to look something up.
 - **ALWAYS ask before every change outside this repository**: a global install, a harness hook, a shell
   profile, the OS credential store, anything under the home directory. Inside the repository,
   say what you will write before you write it.
-- **NEVER print, store, or echo a secret.** Keys go to the CLI's own prompt, `--key-stdin`, or an
-  environment variable the user sets themselves.
+- **NEVER print, store, or echo a secret.** Keys go to the CLI's own masked prompt or `--key-stdin`, run by the
+  user, into the OS credential store. Never ask for a key in the chat or put one in a shell profile.
 - **Indexing is the user's decision**; a "no" stands for the rest of the run.
 - **The CLI is the authority.** Use only verbs and flags that `kyber-weave <verb> --help` shows.
 - **NEVER drop a harness by accident.** Every `--target` list you pass is the union of what is
