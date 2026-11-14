@@ -175,13 +175,9 @@ public static partial class PlanTaskPacket
     {
         try
         {
-            return ActiveStatusRegex().IsMatch(File.ReadAllText(file));
+            return ActiveStatusRegex().IsMatch(BoundedFile.ReadAllText(file));
         }
-        catch (IOException)
-        {
-            return false;
-        }
-        catch (UnauthorizedAccessException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
         {
             return false;
         }

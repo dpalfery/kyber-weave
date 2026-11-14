@@ -525,9 +525,21 @@ public sealed partial class PlanTaskFileGenerator
 
         try
         {
-            return File.ReadAllText(full);
+            if (new FileInfo(full).LinkTarget is not null)
+            {
+                report.Add(new Diagnostic(
+                    PlanNotReadable,
+                    Severity.Error,
+                    $"'{artifact}' is a symbolic link, so it is not read.",
+                    artifact,
+                    artifact,
+                    Hint: "Pass the plan file itself, not a link to it."));
+                return null;
+            }
+
+            return BoundedFile.ReadAllText(full);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
         {
             report.Add(new Diagnostic(
                 PlanNotReadable,

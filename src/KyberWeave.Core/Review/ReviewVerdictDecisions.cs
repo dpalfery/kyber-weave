@@ -1,6 +1,7 @@
 using System.Text;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Review;
 
@@ -566,9 +567,9 @@ public static partial class ReviewVerdictDecisions
             {
                 try
                 {
-                    lines = File.ReadAllLines(path);
+                    lines = BoundedFileReader.ReadAllLines(path, ReviewSeatInput.MaxFileBytes);
                 }
-                catch (Exception ex) when (ReviewSeatInput.IsFileFailure(ex))
+                catch (Exception ex) when (ReviewSeatInput.IsFileFailure(ex) || ex is InvalidDataException)
                 {
                     failure = ex.GetType().Name;
                 }

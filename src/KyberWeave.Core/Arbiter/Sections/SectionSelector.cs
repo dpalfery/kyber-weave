@@ -1,6 +1,6 @@
-using System.Text;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Arbiter.Sections;
 
@@ -28,32 +28,6 @@ public sealed class SectionSelector(IArbiterProvider provider)
     private const string TaskFact = "task.text";
     private const string CandidatesFact = "section.candidates";
 
-    /// <summary>
-    /// Reads the file as text, or returns null when it holds more than <paramref name="limitBytes"/>. The bound applies to
-    /// the bytes actually read, not to a length looked up beforehand, so a file that grows after a check is still refused.
-    /// The byte-order mark is detected as <c>File.ReadAllTextAsync</c> detects it.
-    /// </summary>
-    internal static async Task<string?> ReadBoundedAsync(string path, long limitBytes, CancellationToken ct)
-    {
-        await using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 81920, useAsync: true);
-        using MemoryStream bytes = new();
-        byte[] chunk = new byte[81920];
-        int read;
-        while ((read = await stream.ReadAsync(chunk.AsMemory(), ct).ConfigureAwait(false)) > 0)
-        {
-            if (bytes.Length + read > limitBytes)
-            {
-                return null;
-            }
-
-            await bytes.WriteAsync(chunk.AsMemory(0, read), ct).ConfigureAwait(false);
-        }
-
-        using StreamReader reader = new(
-            new MemoryStream(bytes.GetBuffer(), 0, (int)bytes.Length), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-        return await reader.ReadToEndAsync(ct).ConfigureAwait(false);
-    }
-
     /// <summary>Selects the sections of the document at <paramref name="documentPath"/> that the task needs.</summary>
     /// <param name="documentPath">The path of the markdown document; it must exist.</param>
     /// <param name="task">The task the worker is about to do, in plain words.</param>
@@ -69,9 +43,10 @@ public sealed class SectionSelector(IArbiterProvider provider)
         string? text;
         try
         {
-            text = await ReadBoundedAsync(documentPath, MaxDocumentBytes, ct).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            text = BoundedFileReader.ReadAllText(documentPath, MaxDocumentBytes);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
         {
             return new SectionSelection([], FailedSafe: true);
         }

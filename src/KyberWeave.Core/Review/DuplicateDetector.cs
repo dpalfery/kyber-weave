@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Review;
 
@@ -283,10 +284,10 @@ public static class DuplicateDetector
             // The same cap every other read of a path a seat or an index names applies: an oversized file is unreadable.
             // A symbolic link on the path can lead out of the tree, so a file reached through one is unreadable here, as
             // it is for every other read of a path an index or a seat names.
-            if (DocsRootPath.IsContainedFile(repoRoot, relativePath, []) && new FileInfo(full).Length <= ReviewSeatInput.MaxFileBytes)
-                lines = File.ReadAllLines(full);
+            if (DocsRootPath.IsContainedFile(repoRoot, relativePath, []))
+                lines = BoundedFileReader.ReadAllLines(full, ReviewSeatInput.MaxFileBytes);
         }
-        catch (Exception ex) when (ReviewSeatInput.IsFileFailure(ex))
+        catch (Exception ex) when (ReviewSeatInput.IsFileFailure(ex) || ex is InvalidDataException)
         {
             lines = null;
         }

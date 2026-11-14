@@ -23,9 +23,9 @@ internal static class PresentFile
         {
             throw new IOException($"'{Path.GetFileName(path)}' was not read: {exception.Message}", exception);
         }
-        catch (FileNotFoundException) when (Directory.Exists(path))
+        catch (Exception exception) when (exception is FileNotFoundException or UnauthorizedAccessException && Directory.Exists(path))
         {
-            // The size check reports a folder as a missing file; a folder in the file's place is a failure, not an absence.
+            // Opening a folder reports it as a missing or an inaccessible file; a folder in the file's place is a failure, not an absence.
             throw new IOException($"'{Path.GetFileName(path)}' is a folder, not a file.");
         }
         catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)

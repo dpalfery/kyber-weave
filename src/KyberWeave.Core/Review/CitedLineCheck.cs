@@ -1,4 +1,5 @@
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Review;
 
@@ -68,10 +69,11 @@ public static class CitedLineCheck
                 return new FileLines(null, $"{path} is not a file in the repository, or is reached through a link");
 
             string full = Path.Combine(repositoryRoot, path);
-            if (new FileInfo(full).Length > ReviewSeatInput.MaxFileBytes)
-                return new FileLines(null, $"{path} is larger than {ReviewSeatInput.MaxFileBytes} bytes, so it was not read");
-
-            return new FileLines(File.ReadAllLines(full), null);
+            return new FileLines(BoundedFileReader.ReadAllLines(full, ReviewSeatInput.MaxFileBytes), null);
+        }
+        catch (InvalidDataException)
+        {
+            return new FileLines(null, $"{path} is larger than {ReviewSeatInput.MaxFileBytes} bytes, so it was not read");
         }
         // A seat can write a path holding a character no file system accepts, such as a NUL from a quoted "\0", or
         // name a root the process may not look in; the one shared filter says which failures are answers.

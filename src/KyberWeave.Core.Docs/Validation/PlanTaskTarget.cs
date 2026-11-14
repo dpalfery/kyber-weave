@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Docs.Closeout;
 using KyberWeave.Core.Review;
 
 namespace KyberWeave.Core.Docs.Validation;
@@ -61,11 +62,11 @@ public static partial class PlanTaskTarget
         ArgumentException.ThrowIfNullOrWhiteSpace(plan);
         try
         {
-            string markdown = File.ReadAllText(Path.Combine(root, plan.Replace('/', Path.DirectorySeparatorChar)));
+            string markdown = BoundedFile.ReadAllText(Path.Combine(root, plan.Replace('/', Path.DirectorySeparatorChar)));
             return PlanDocumentParser.Parse(markdown).ContractRows
                 .FirstOrDefault(row => string.Equals(row.TaskId, taskId, StringComparison.Ordinal));
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
         {
             return null;
         }
