@@ -145,7 +145,7 @@ public sealed class ReviewGatesCycleTests : IDisposable
         (int exit, string output) = Gates(1, "--base", baseCommit);
 
         Assert.Equal(0, exit);
-        Assert.Contains("not-seated: --not-seated \"static-analysis-triage=gates build, always passed\"", output, StringComparison.Ordinal);
+        Assert.Contains("not-seated: --not-seated \"static-analysis-triage=gates build, docs, always passed\"", output, StringComparison.Ordinal);
         Assert.Contains("after-gates: send ", output, StringComparison.Ordinal);
         Assert.Contains("test-adequacy", output[output.IndexOf("after-gates: send ", StringComparison.Ordinal)..], StringComparison.Ordinal);
         Assert.True(File.Exists(Path.Combine(CycleFolder(1), "duplicates.json")));

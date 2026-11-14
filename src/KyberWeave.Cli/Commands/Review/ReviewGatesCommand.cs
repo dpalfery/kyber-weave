@@ -327,9 +327,6 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
         {
             if (evidence is not null)
                 Console.WriteLine($"evidence: {evidence}");
-            Console.WriteLine(
-                $"cycle: {cycle.Plan.Number} mode: {cycle.Mode} ran: {gates.Gates.Count} carried: {written.Gates.Count - gates.Gates.Count} " +
-                $"failed: {gates.Gates.Count(g => !g.Passed && g.NotApplicableReason is null && !(settings.Deadline && VerdictEngine.IsStoppedForTime(g)))}");
             if (gateProven is not null)
             {
                 foreach ((string lens, string reason) in gateProven.OrderBy(pair => pair.Key, StringComparer.Ordinal))
@@ -338,6 +335,9 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
                 Console.WriteLine($"after-gates: send {(send.Length == 0 ? "none" : string.Join(", ", send))}");
             }
 
+            Console.WriteLine(
+                $"cycle: {cycle.Plan.Number} mode: {cycle.Mode} ran: {gates.Gates.Count} carried: {written.Gates.Count - gates.Gates.Count} " +
+                $"failed: {gates.Gates.Count(g => !g.Passed && g.NotApplicableReason is null && !(settings.Deadline && VerdictEngine.IsStoppedForTime(g)))}");
             Console.Out.Flush();
         }
 

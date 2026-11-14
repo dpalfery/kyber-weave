@@ -198,7 +198,7 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
         ArbiterDispatchBudgetConfig seatBudget = new(Minutes: 3, ToolCalls: 1, CallMinutes: 2);
 
         Assert.Empty(SeatGuard(Copilot("review-lens", "seat-2"), Start, seatBudget));
-        Assert.NotEmpty(SeatGuard(Copilot("review-lens", "seat-2"), Start.AddMinutes(4), seatBudget));
+        Assert.NotEmpty(SeatGuard(Copilot("review-lens", "seat-2"), Start.AddSeconds(10), seatBudget));
 
         string write = JsonSerializer.Serialize(new
         {
@@ -209,18 +209,18 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
             toolName = "create",
             toolArgs = JsonSerializer.Serialize(new { path = Path.Combine(_home.Path, "seats", "correctness.md") }),
         });
-        Assert.Empty(SeatGuard(write, Start.AddMinutes(4), seatBudget));
+        Assert.Empty(SeatGuard(write, Start.AddSeconds(20), seatBudget));
     }
 
     [Fact]
     public void SeatBudget_UsesTheSeatLimitNotTheDeveloperLimit()
     {
-        ArbiterDispatchBudgetConfig seatBudget = new(Minutes: 3, ToolCalls: 30, CallMinutes: 2);
+        ArbiterDispatchBudgetConfig seatBudget = new(Minutes: 3, ToolCalls: 1, CallMinutes: 2);
 
         Assert.Empty(SeatGuard(Copilot("review-triage", "seat-3"), Start, seatBudget));
-        Assert.NotEmpty(SeatGuard(Copilot("review-triage", "seat-3"), Start.AddMinutes(4), seatBudget));
+        Assert.NotEmpty(SeatGuard(Copilot("review-triage", "seat-3"), Start.AddSeconds(10), seatBudget));
         Assert.Empty(SeatGuard(Copilot("dal-dev", "dev-3"), Start, seatBudget));
-        Assert.Empty(SeatGuard(Copilot("dal-dev", "dev-3"), Start.AddMinutes(4), seatBudget));
+        Assert.Empty(SeatGuard(Copilot("dal-dev", "dev-3"), Start.AddSeconds(10), seatBudget));
     }
 
     [Fact]
