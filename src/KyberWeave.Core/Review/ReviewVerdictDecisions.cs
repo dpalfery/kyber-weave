@@ -359,11 +359,10 @@ public static partial class ReviewVerdictDecisions
     internal static string? Surroundings(string repositoryRoot, ReviewFinding finding)
     {
         ArgumentNullException.ThrowIfNull(finding);
-        string path = Path.GetFullPath(Path.Combine(repositoryRoot, finding.File));
-        string root = Path.GetFullPath(repositoryRoot).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         try
         {
-            if (!path.StartsWith(root, StringComparison.Ordinal) || !File.Exists(path) || new FileInfo(path).Length > MaxSurroundingsFileBytes)
+            string? path = Resolve(repositoryRoot, finding.File);
+            if (path is null)
                 return null;
 
             int excerptLines = (finding.Excerpt ?? string.Empty).Split('\n').Length;
@@ -442,13 +441,25 @@ public static partial class ReviewVerdictDecisions
         int.TryParse(text, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out number)
         && number is >= 1 and <= MaxCitedLine;
 
+    /// <summary>
+    /// The full path of a file inside the repository, as long as it exists and is small enough to read; null for a
+    /// name that is malformed, over-long, outside the repository or absent. The name is seat-written, so every way
+    /// it can fail to resolve is an answer, not an error.
+    /// </summary>
     private static string? Resolve(string repositoryRoot, string file)
     {
-        string root = Path.GetFullPath(repositoryRoot).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        string path = Path.GetFullPath(Path.Combine(repositoryRoot, file));
-        return path.StartsWith(root, StringComparison.Ordinal) && File.Exists(path) && new FileInfo(path).Length <= MaxSurroundingsFileBytes
-            ? path
-            : null;
+        try
+        {
+            string root = Path.GetFullPath(repositoryRoot).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            string path = Path.GetFullPath(Path.Combine(repositoryRoot, file));
+            return path.StartsWith(root, StringComparison.Ordinal) && File.Exists(path) && new FileInfo(path).Length <= MaxSurroundingsFileBytes
+                ? path
+                : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return null;
+        }
     }
 
     [System.Text.RegularExpressions.GeneratedRegex(

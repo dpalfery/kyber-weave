@@ -260,6 +260,25 @@ public sealed class ReviewDecisionModelTests : IDisposable
         Assert.Contains("other.md:2: status: archived", provider.LastStateText, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task AnOverLongOrEscapingFileNameIsAQuoteProblemNotACrash()
+    {
+        string root = Repository();
+        await File.WriteAllTextAsync(Path.Combine(_temp.Path, "outside.cs"), "    return total / count;");
+        FakeProvider provider = new() { Choice = "supports", Confidence = 1.0 };
+
+        foreach (string file in new[] { new string('d', 5000) + "/x.cs", "../outside.cs", "bad\0name.cs" })
+        {
+            ClaimCheck check = Assert.Single(await ReviewVerdictDecisions.CheckClaimsAsync(
+                Model(provider), root, [Finding("a", ReviewSeverity.Major, file: file)]));
+
+            Assert.True(check.NeedsRefuter);
+            Assert.Contains("the cited file could not be read", check.Note, StringComparison.Ordinal);
+        }
+
+        Assert.Equal(0, provider.Calls);
+    }
+
     [Theory]
     [InlineData("see a.cs:9999999999")]
     [InlineData("see a.cs:1-99999999999")]
