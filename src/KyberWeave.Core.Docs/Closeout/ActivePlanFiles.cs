@@ -69,12 +69,60 @@ internal sealed class ActivePlanFiles
     internal string Absolute(string relative) =>
         Path.Combine(_repoRoot, relative.Replace('/', Path.DirectorySeparatorChar));
 
+    /// <summary>Whether the root is a git checkout, so there is something to stage and commit.</summary>
+    internal bool IsGitCheckout() =>
+        Directory.Exists(Path.Combine(_repoRoot, ".git")) || File.Exists(Path.Combine(_repoRoot, ".git"));
+
+    /// <summary>The staged paths that are not one of <paramref name="paths"/>; null when git could not say.</summary>
+    internal IReadOnlyList<string>? StagedOutside(IEnumerable<string> paths)
+    {
+        HashSet<string> own = new(paths.Select(path => path.Replace('\\', '/')), StringComparer.Ordinal);
+        ProcessResult result = Git(["diff", "--cached", "--name-only", "-z"]);
+        return result.ExitCode == 0
+            ? [.. result.StandardOutput.Split('\0', StringSplitOptions.RemoveEmptyEntries).Where(path => !own.Contains(path))]
+            : null;
+    }
+
     /// <summary>Stages the paths a command touched, so a commit that only takes tracked files cannot leave a new one behind.</summary>
     internal void Stage(IEnumerable<string> paths, DiagnosticReport report, string plan, string stepCode)
     {
-        if (!Directory.Exists(Path.Combine(_repoRoot, ".git")) && !File.Exists(Path.Combine(_repoRoot, ".git")))
+        if (!IsGitCheckout())
             return;
 
+        ProcessResult result = Git([.. StageArguments, .. paths]);
+        report.Add(result.ExitCode == 0
+            ? new Diagnostic(stepCode, Severity.Info, "Staged the moved and edited files.", plan, plan)
+            : new Diagnostic(stepCode, Severity.Warning, $"git add failed ({result.StandardError.Trim()}); stage the files before committing.", plan, plan));
+    }
+
+    /// <summary>
+    /// Commits exactly <paramref name="paths"/> on the current branch, never pushing. Does nothing when they hold no
+    /// change; reports a warning and leaves them staged when git refuses.
+    /// </summary>
+    internal void CommitOnly(IReadOnlyList<string> paths, string message, DiagnosticReport report, string plan, string stepCode)
+    {
+        if (!IsGitCheckout())
+            return;
+
+        ProcessResult pending = Git(["status", "--porcelain", "--", .. paths]);
+        if (pending.ExitCode != 0)
+        {
+            report.Add(new Diagnostic(stepCode, Severity.Warning, $"git status failed ({pending.StandardError.Trim()}); nothing was committed.", plan, plan));
+            return;
+        }
+
+        if (pending.StandardOutput.Trim().Length == 0)
+            return;
+
+        ProcessResult commit = Git(["commit", "-m", message, "--", .. paths]);
+        report.Add(commit.ExitCode == 0
+            ? new Diagnostic(stepCode, Severity.Info, $"Committed {string.Join(", ", paths)} on the current branch: {message}", plan, plan)
+            : new Diagnostic(stepCode, Severity.Warning,
+                $"git commit failed ({(commit.StandardError + commit.StandardOutput).Trim()}); the files are staged but not committed.", plan, plan));
+    }
+
+    private ProcessResult Git(IEnumerable<string> arguments)
+    {
         ProcessStartInfo startInfo = new("git")
         {
             WorkingDirectory = _repoRoot,
@@ -84,23 +132,16 @@ internal sealed class ActivePlanFiles
             RedirectStandardError = true,
             CreateNoWindow = true
         };
-        foreach (string argument in StageArguments.Concat(paths))
+        foreach (string argument in arguments)
             startInfo.ArgumentList.Add(argument);
 
         try
         {
-            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);
-            if (result.ExitCode == 0)
-            {
-                report.Add(new Diagnostic(stepCode, Severity.Info, "Staged the moved and edited files.", plan, plan));
-                return;
-            }
-
-            report.Add(new Diagnostic(stepCode, Severity.Warning, $"git add failed ({result.StandardError.Trim()}); stage the files before committing.", plan, plan));
+            return ProcessRunner.Run(startInfo, string.Empty, GitTimeout);
         }
         catch (Exception ex) when (ex is Win32Exception or TimeoutException or InvalidOperationException)
         {
-            report.Add(new Diagnostic(stepCode, Severity.Warning, $"git could not be run ({ex.Message}); stage the files before committing.", plan, plan));
+            return new ProcessResult(-1, string.Empty, $"git could not be run: {ex.Message}");
         }
     }
 }

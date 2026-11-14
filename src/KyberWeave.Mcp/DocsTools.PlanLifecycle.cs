@@ -28,18 +28,21 @@ public sealed partial class DocsTools
 
     /// <summary>
     /// Finalizes an approved Draft plan: records the approval in its Decisions table, sets the plan and its index row
-    /// to Ready, and writes its task file. Refuses, changing nothing, without an approval, on a plan that is not Draft,
-    /// with open decisions, or when the task file cannot be written or the result fails validation.
+    /// to Ready, writes its task file and commits those files on the current branch (never pushing). Refuses, changing
+    /// nothing, without an approval, on a plan that is not Draft, with open decisions, with other files staged, or when
+    /// the task file cannot be written or the result fails validation.
     /// </summary>
     [McpServerTool(Name = FinalizeToolName, ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("""
         Use when a Draft plan has been approved for execution and needs finalizing: it records
-        the approval in the plan's Decisions table, sets the plan and its plan-index row to
-        Ready, and writes the plan's task file. Call it once approval exists — right after the
-        Draft returns in autonomous mode, only after the owner approves in supervised mode.
-        Changes only the plan, its task file and the plan index, and refuses with findings,
-        changing nothing, when the plan is not Draft, a decision is open, or the task file
-        cannot be written; a plan already Ready with a current task file reports done.
+        the approval in the plan's Decisions table (in autonomous mode it also accepts decisions
+        still marked RECOMMENDED), sets the plan and its plan-index row to Ready, writes the
+        plan's task file, and commits those three files. Call it once approval exists — right
+        after the Draft returns in autonomous mode, only after the owner approves in supervised
+        mode. Changes only those files, never pushes, and refuses with findings, changing
+        nothing, when the plan is not Draft, a decision is open, other files are staged, or the
+        task file cannot be written. On success it lists the ready queue to dispatch from; a
+        plan already Ready with a current task file reports done.
         """)]
     public string FinalizePlan(
         [Description("Absolute path of the run's worktree that holds the plan. Required.")] string projectPath,
@@ -71,12 +74,15 @@ public sealed partial class DocsTools
             .Run(plan, mode, approval, DateOnly.FromDateTime(DateTime.UtcNow));
         report.AddRange(outcome.Report.Items);
         if (outcome.Finalized)
-            return LifecycleResponse(provenance, "finalized", report,
-                $"next: TASK_FILE: {outcome.TaskFilePath}. Commit the plan, its task file and the plan index together before the first dispatch.");
+            return LifecycleResponse(provenance, "finalized", report, ReadyNext(outcome));
         if (outcome.AlreadyReady)
-            return LifecycleResponse(provenance, "already-ready", report, $"next: TASK_FILE: {outcome.TaskFilePath}.");
+            return LifecycleResponse(provenance, "already-ready", report, ReadyNext(outcome));
         return LifecycleResponse(provenance, "refused", report, null);
     }
+
+    private static string ReadyNext(PlanFinalizeOutcome outcome) =>
+        $"next: TASK_FILE: {outcome.TaskFilePath}\nready queue (dispatch each worker by task id; it fetches its own packet):\n" +
+        $"{outcome.ReadyQueue ?? "(unreadable: validate the task file)"}\ndispatch the first ready tasks now.";
 
     /// <summary>
     /// Archives a plan whose closeout evidence is complete, through the same step as

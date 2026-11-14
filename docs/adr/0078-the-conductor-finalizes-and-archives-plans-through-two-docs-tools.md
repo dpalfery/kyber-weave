@@ -52,8 +52,13 @@ server's tools.
    changing nothing, when a precondition fails: finalize on a missing or multi-line approval, an
    autonomous approval of a plan whose frontmatter says `autonomy: supervised`, a plan that is not
    Draft, an open decision, a plan the task file cannot be written from, or a result that fails
-   validation (it writes, validates, and restores the original bytes on failure). A plan already
-   Ready with a current task file reports done. Archive keeps every check `docs closeout` makes.
+   validation (it writes, validates, and restores the original bytes on failure), or other files
+   being staged. A plan already Ready with a current task file reports done. Amended: in autonomous
+   mode finalize accepts any decision still `RECOMMENDED` and answers the approve-and-execute row
+   whatever its id, so the conductor never dispatches `architect` just to record the approval; on
+   success finalize commits exactly the plan, its task file and the plan index on the current branch
+   (never a push), and replies with the ready queue, so no `github-devops` commit dispatch and no
+   `architect` briefing dispatch follow it. Archive keeps every check `docs closeout` makes.
 3. **Judgement goes back to its owner.** A finalize refusal for plan content goes to `architect` as a
    Draft revision. An archive refusal carries closeout's findings and one line sending them to
    `docs-dev`, and to no other role.

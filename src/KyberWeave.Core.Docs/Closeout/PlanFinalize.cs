@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -22,17 +23,20 @@ public enum PlanApprovalMode
 /// <param name="Finalized">True when this run moved the plan from Draft to Ready.</param>
 /// <param name="AlreadyReady">True when the plan was already Ready with a current task file, so nothing changed.</param>
 /// <param name="TaskFilePath">The task file beside the plan, repository-relative.</param>
-public sealed record PlanFinalizeOutcome(DiagnosticReport Report, bool Finalized, bool AlreadyReady, string TaskFilePath);
+/// <param name="ReadyQueue">One line per task, from the task file, then the tasks that may start now; null when refused.</param>
+public sealed record PlanFinalizeOutcome(
+    DiagnosticReport Report, bool Finalized, bool AlreadyReady, string TaskFilePath, string? ReadyQueue = null);
 
 /// <summary>
 /// Does the mechanical half of finalizing an approved Draft plan: records the approval in its Decisions table, sets
-/// the frontmatter, body and index status to Ready, and writes its task file.
+/// the frontmatter, body and index status to Ready, writes its task file, and commits those three files.
 /// </summary>
 /// <remarks>
-/// The judgement half stays with the architect: a plan with open decisions, one the task file cannot be derived from,
-/// or one that then fails validation is refused, naming what is wrong, and nothing is changed. The class edits only the
-/// plan, the plan index and the task file, and refuses any path that is not a plan file directly under the plans
-/// folder.
+/// The judgement half stays with the architect: a plan with an open decision, one the task file cannot be derived from,
+/// or one that then fails validation is refused, naming what is wrong, and nothing is changed. Under autonomy a
+/// decision still marked <c>RECOMMENDED</c> is accepted as recommended. The class edits only the plan, the plan index
+/// and the task file, commits only those, never pushes, and refuses any path that is not a plan file directly under
+/// the plans folder, or a checkout with other files staged.
 /// </remarks>
 public sealed partial class PlanFinalize
 {
@@ -50,6 +54,9 @@ public sealed partial class PlanFinalize
 
     /// <summary>The task file could not be written from the plan, or the finalized plan failed validation.</summary>
     public const string PlanNeedsArchitect = "KW-DOC-FINALIZE-005";
+
+    /// <summary>Other files are staged, so the plan files cannot be committed alone.</summary>
+    public const string OtherFilesStaged = "KW-DOC-FINALIZE-008";
 
     /// <summary>A step done.</summary>
     public const string Step = "KW-DOC-FINALIZE-006";
@@ -110,6 +117,13 @@ public sealed partial class PlanFinalize
             return Refused();
         }
 
+        string? planIndex = _files.PlanIndexPath();
+        List<string> touched = [plan, taskFile];
+        if (planIndex is not null && File.Exists(_files.Absolute(planIndex)))
+            touched.Add(planIndex);
+        if (HasOtherStaged(touched, plan, report))
+            return Refused();
+
         string? line = ApprovalLine(approval, mode, planText, plan, report);
         if (line is null)
             return Refused();
@@ -128,7 +142,6 @@ public sealed partial class PlanFinalize
             return Refused();
         }
 
-        string? planIndex = _files.PlanIndexPath();
         string? indexText = planIndex is not null && File.Exists(_files.Absolute(planIndex))
             ? File.ReadAllText(_files.Absolute(planIndex))
             : null;
@@ -175,11 +188,9 @@ public sealed partial class PlanFinalize
             ? $"Set its row in {planIndex} to Ready."
             : $"{planIndex} has no Draft row for it to change.");
         Say(report, plan, $"Wrote {taskFile}.");
-        List<string> touched = [plan, taskFile];
-        if (newIndex is not null)
-            touched.Add(planIndex!);
         _files.Stage(touched, report, plan, Step);
-        return new PlanFinalizeOutcome(report, true, false, taskFile);
+        _files.CommitOnly(touched, CommitMessage(plan), report, plan, Step);
+        return new PlanFinalizeOutcome(report, true, false, taskFile, ReadyQueue(taskFile));
     }
 
     /// <summary>Reads an approval mode, <c>autonomous</c> or <c>supervised</c>, case-insensitively.</summary>
@@ -208,7 +219,45 @@ public sealed partial class PlanFinalize
         }
 
         Say(report, plan, $"{plan} is already Ready and {taskFile} is current; nothing changed.");
-        return new PlanFinalizeOutcome(report, false, true, taskFile);
+        List<string> own = [plan, taskFile];
+        string? index = _files.PlanIndexPath();
+        if (index is not null && File.Exists(_files.Absolute(index)))
+            own.Add(index);
+        if (!HasOtherStaged(own, plan, report))
+            _files.CommitOnly(own, CommitMessage(plan), report, plan, Step);
+        return new PlanFinalizeOutcome(report, false, true, taskFile, ReadyQueue(taskFile));
+    }
+
+    private bool HasOtherStaged(IReadOnlyList<string> own, string plan, DiagnosticReport report)
+    {
+        if (_files.StagedOutside(own) is not { Count: > 0 } others)
+            return false;
+
+        report.Add(new Diagnostic(OtherFilesStaged, Severity.Error,
+            $"Other files are staged ({string.Join(", ", others.Take(5))}), so the plan files cannot be committed alone. Nothing was changed.",
+            plan, plan, Hint: "Unstage or commit them first, then call finalize again."));
+        return true;
+    }
+
+    private static string CommitMessage(string plan)
+    {
+        string name = Path.GetFileNameWithoutExtension(plan);
+        string slug = DatePrefix().Replace(name, string.Empty);
+        return $"docs(plan): finalize {(slug.Length > 0 ? slug : name)} plan";
+    }
+
+    /// <summary>One line per task in the task file, then the tasks with no unmet dependency.</summary>
+    private string? ReadyQueue(string taskFile)
+    {
+        try
+        {
+            PlanTaskFile? file = JsonSerializer.Deserialize<PlanTaskFile>(File.ReadAllText(_files.Absolute(taskFile)), PlanTaskFileJson.ReadOptions);
+            return file?.Tasks is { Count: > 0 } tasks ? PlanTaskPacket.ReadyQueue(tasks) : null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return null;
+        }
     }
 
     private static string? ApprovalLine(string? approval, PlanApprovalMode mode, string planText, string plan, DiagnosticReport report)
@@ -229,9 +278,10 @@ public sealed partial class PlanFinalize
     }
 
     /// <summary>
-    /// The plan text with the approval recorded: an open approval row (id starting <c>AP</c>) is answered in place,
-    /// otherwise a new <c>AP</c> row is added. Null, with the reason reported, when the plan has no Decisions table or
-    /// a decision is still open.
+    /// The plan text with the approval recorded: an open approval row (id starting <c>AP</c>, or a question asking to
+    /// approve and execute) is answered in place, otherwise a new <c>AP</c> row is added. Under autonomy, other rows
+    /// still marked <c>RECOMMENDED</c> are accepted as recommended. Null, with the reason reported, when the plan has
+    /// no Decisions table or another decision is still open.
     /// </summary>
     private static string? WithApproval(string planText, PlanApprovalMode mode, string approval, DateOnly date, string plan, DiagnosticReport report)
     {
@@ -256,6 +306,7 @@ public sealed partial class PlanFinalize
             : $"ANSWERED: owner approval, {approval}, {stamp}";
 
         List<string> open = [];
+        List<int> accepted = [];
         int approvalRow = -1;
         int highest = 0;
         for (int index = header + 2; index <= last; index++)
@@ -272,8 +323,10 @@ public sealed partial class PlanFinalize
             if (!OpenStatus().IsMatch(cells[^1]))
                 continue;
 
-            if (isApproval && approvalRow < 0)
+            if ((isApproval || ApproveAndExecute().IsMatch(cells[1])) && approvalRow < 0)
                 approvalRow = index;
+            else if (mode == PlanApprovalMode.Autonomous && RecommendedStatus().IsMatch(cells[^1]))
+                accepted.Add(index);
             else
                 open.Add(id);
         }
@@ -283,6 +336,13 @@ public sealed partial class PlanFinalize
             report.Add(new Diagnostic(OpenDecisions, Severity.Error,
                 $"Decisions still open: {string.Join(", ", open)}. Nothing was changed.", plan, plan, Hint: ArchitectHint));
             return null;
+        }
+
+        foreach (int index in accepted)
+        {
+            string[] cells = Cells(lines[index]);
+            cells[^1] = $"autonomous: recommendation accepted, {stamp}";
+            lines[index] = "| " + string.Join(" | ", cells) + " |";
         }
 
         if (approvalRow >= 0)
@@ -408,6 +468,15 @@ public sealed partial class PlanFinalize
 
     [GeneratedRegex(@"^\W*(OPEN|RECOMMENDED)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex OpenStatus();
+
+    [GeneratedRegex(@"^\d{4}-\d{2}-\d{2}-", RegexOptions.CultureInvariant)]
+    private static partial Regex DatePrefix();
+
+    [GeneratedRegex(@"^\W*RECOMMENDED\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex RecommendedStatus();
+
+    [GeneratedRegex(@"\bapprove\s+(?:and|&)\s+execute\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex ApproveAndExecute();
 
     [GeneratedRegex(@"(?<!\\)\|", RegexOptions.CultureInvariant)]
     private static partial Regex CellSeparator();

@@ -67,10 +67,11 @@ Reported only when the `plan-index` or `todo-index` registry property names a do
 | `KW-DOC-FINALIZE-001` | Error | The path is not an active plan file directly under the plans folder |
 | `KW-DOC-FINALIZE-002` | Error | The plan's body status is neither Draft nor Ready |
 | `KW-DOC-FINALIZE-003` | Error | No usable approval: missing, more than one line, over 300 characters, or an autonomous approval of a plan whose frontmatter says `autonomy: supervised` |
-| `KW-DOC-FINALIZE-004` | Error | The plan has no `## Decisions` table, or a decision is still `OPEN` or `RECOMMENDED` |
+| `KW-DOC-FINALIZE-004` | Error | The plan has no `## Decisions` table, or a decision is still `OPEN`, or (supervised) `RECOMMENDED`; under autonomy a `RECOMMENDED` decision is accepted |
 | `KW-DOC-FINALIZE-005` | Error | The task file cannot be written from the plan, or the finalized plan, index or task file fails validation (every change is undone); also a Ready plan whose task file is not current |
-| `KW-DOC-FINALIZE-006` | Info / Warning | A step taken. Warning: `git add` could not stage the touched files |
+| `KW-DOC-FINALIZE-006` | Info / Warning | A step taken. Warning: `git add` or the commit of the plan, its task file and the plan index failed |
 | `KW-DOC-FINALIZE-007` | Error | `--date` is not `yyyy-MM-dd`, or `--approval-mode` is not `autonomous` or `supervised` |
+| `KW-DOC-FINALIZE-008` | Error | Files other than the plan, its task file and the plan index are staged, so they cannot be committed alone |
 
 A plan whose closeout evidence is incomplete is reported with `KW-DOC-LIFECYCLE-004` and nothing is moved. One run reports every missing condition (`C1`–`C9`) as its own finding, with every unmapped id named and an example row or line as the hint, together with any index problem.
 

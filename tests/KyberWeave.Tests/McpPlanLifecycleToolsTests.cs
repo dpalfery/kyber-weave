@@ -67,6 +67,51 @@ public sealed class McpPlanLifecycleToolsTests
         Assert.Contains("**Status: Ready,", Read(fixture, PlanTaskFileProbe.PlanPath), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void FinalizeCommitsOnlyThePlanFilesAndListsTheReadyQueue()
+    {
+        using DocFixture fixture = GitRepository(PlanFinalizeTests.Repository());
+        Git(fixture.Root, "config", "user.name", "t");
+        Git(fixture.Root, "config", "user.email", "t@example.com");
+        Git(fixture.Root, "add", "-A");
+        Git(fixture.Root, "commit", "-q", "-m", "init");
+        File.WriteAllText(Path.Combine(fixture.Root, "stray.txt"), "not part of the plan");
+
+        string response = Tools(fixture.Root).FinalizePlan(fixture.Root, PlanTaskFileProbe.PlanPath, "autonomous",
+            "AUTONOMOUS_APPROVAL: approve-and-execute");
+
+        Assert.Contains("result: finalized", response, StringComparison.Ordinal);
+        Assert.DoesNotContain("Commit the plan", response, StringComparison.Ordinal);
+        Assert.Contains("ready queue", response, StringComparison.Ordinal);
+        Assert.Contains("T1: ", response, StringComparison.Ordinal);
+        Assert.Contains("| role=", response, StringComparison.Ordinal);
+        Assert.Contains("dispatch the first ready tasks now", response, StringComparison.Ordinal);
+        string committed = Git(fixture.Root, "show", "--name-only", "--format=%s", "HEAD");
+        Assert.StartsWith("docs(plan): finalize ", committed, StringComparison.Ordinal);
+        Assert.Contains(PlanTaskFileProbe.PlanPath, committed, StringComparison.Ordinal);
+        Assert.Contains(PlanTaskFileProbe.TaskFilePath, committed, StringComparison.Ordinal);
+        Assert.Contains(PlanTaskFileProbe.PlanIndexPath, committed, StringComparison.Ordinal);
+        Assert.DoesNotContain("stray.txt", committed, StringComparison.Ordinal);
+        Assert.Contains("?? stray.txt", Git(fixture.Root, "status", "--porcelain"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FinalizeRefusesAndChangesNothingWhenOtherFilesAreStaged()
+    {
+        using DocFixture fixture = GitRepository(PlanFinalizeTests.Repository());
+        File.WriteAllText(Path.Combine(fixture.Root, "stray.txt"), "staged by someone else");
+        Git(fixture.Root, "add", "stray.txt");
+        string before = Read(fixture, PlanTaskFileProbe.PlanPath);
+
+        string response = Tools(fixture.Root).FinalizePlan(fixture.Root, PlanTaskFileProbe.PlanPath, "autonomous",
+            "AUTONOMOUS_APPROVAL: approve-and-execute");
+
+        Assert.Contains("result: refused", response, StringComparison.Ordinal);
+        Assert.Contains("KW-DOC-FINALIZE-008", response, StringComparison.Ordinal);
+        Assert.Equal(before, Read(fixture, PlanTaskFileProbe.PlanPath));
+        Assert.False(Exists(fixture, PlanTaskFileProbe.TaskFilePath));
+    }
+
     /// <summary>A linked worktree named by projectPath is finalized and archived in that worktree, not refused.</summary>
     [Fact]
     public void BothToolsWorkInALinkedWorktree()
@@ -167,7 +212,7 @@ public sealed class McpPlanLifecycleToolsTests
         Assert.True(Exists(fixture, "src/Placeholder.cs"));
     }
 
-    private static void Git(string directory, params string[] arguments)
+    private static string Git(string directory, params string[] arguments)
     {
         ProcessStartInfo startInfo = new("git")
         {
@@ -184,5 +229,6 @@ public sealed class McpPlanLifecycleToolsTests
 
         ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
         Assert.True(result.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {result.StandardError}");
+        return result.StandardOutput;
     }
 }

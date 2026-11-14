@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Closeout;
@@ -122,6 +123,39 @@ public static partial class PlanTaskPacket
         return string.Create(
             CultureInfo.InvariantCulture,
             $"{entry.Id}  role={entry.Role}  depends-on={depends}  session={entry.Session ?? "-"}  files={entry.Files?.Count ?? 0}");
+    }
+
+    /// <summary>
+    /// The queue a conductor dispatches from: one line per task (id, title, role, what it waits on, session), then the
+    /// tasks with no dependency, which may run in parallel.
+    /// </summary>
+    /// <param name="tasks">The task file's tasks.</param>
+    public static string ReadyQueue(IReadOnlyList<PlanTaskFileEntry> tasks)
+    {
+        ArgumentNullException.ThrowIfNull(tasks);
+
+        StringBuilder queue = new();
+        foreach (PlanTaskFileEntry task in tasks)
+        {
+            string depends = task.DependsOn is { Count: > 0 } ? string.Join(',', task.DependsOn) : "none";
+            queue.Append(CultureInfo.InvariantCulture, $"{task.Id}: {TitleOf(task)} | role={task.Role} | after={depends}");
+            if (task.Session is not null)
+                queue.Append(CultureInfo.InvariantCulture, $" | session={task.Session}");
+            queue.Append('\n');
+        }
+
+        string[] ready = [.. tasks.Where(task => task.DependsOn is not { Count: > 0 }).Select(task => task.Id ?? string.Empty)];
+        queue.Append(ready.Length > 1
+            ? $"ready now, may run in parallel: {string.Join(", ", ready)}"
+            : $"ready now: {string.Join(", ", ready)}");
+        return queue.ToString();
+    }
+
+    private static string TitleOf(PlanTaskFileEntry task)
+    {
+        string first = (task.Prompt ?? string.Empty).Split('\n', 2)[0].Trim();
+        string prefix = $"Task {task.Id}";
+        return first.StartsWith(prefix, StringComparison.Ordinal) ? first[prefix.Length..].TrimStart(':', ' ') : first;
     }
 
     private static bool IsActive(string file)

@@ -184,7 +184,7 @@ public sealed class PlanFinalizeTests
     [Fact]
     public void AnOpenDecisionIsRefusedAndNamed()
     {
-        using DocFixture fixture = Repository(DraftPlan().Replace("| user: explicit decision 2026-11-07 |", "| RECOMMENDED |", StringComparison.Ordinal));
+        using DocFixture fixture = Repository(DraftPlan().Replace("| user: explicit decision 2026-11-07 |", "| OPEN |", StringComparison.Ordinal));
         string plan = Read(fixture, PlanTaskFileProbe.PlanPath);
         string index = Read(fixture, PlanTaskFileProbe.PlanIndexPath);
 
@@ -192,6 +192,43 @@ public sealed class PlanFinalizeTests
 
         AssertRefusedUnchanged(fixture, run, "KW-DOC-FINALIZE-004", plan, index);
         Assert.Contains("D1", run.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>Under autonomy a decision the architect left RECOMMENDED is accepted as recommended, not sent back.</summary>
+    [Fact]
+    public void AutonomyAcceptsARecommendedDecisionAndRecordsIt()
+    {
+        using DocFixture fixture = Repository(DraftPlan().Replace("| user: explicit decision 2026-11-07 |", "| RECOMMENDED |", StringComparison.Ordinal));
+
+        (int exit, string output) = Run(fixture);
+
+        Assert.True(exit == 0, output);
+        Assert.Contains($"| autonomous: recommendation accepted, {Date} |", Read(fixture, PlanTaskFileProbe.PlanPath), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ASupervisedRunDoesNotAcceptARecommendedDecision()
+    {
+        using DocFixture fixture = Repository(DraftPlan(autonomous: false).Replace("| user: explicit decision 2026-11-07 |", "| RECOMMENDED |", StringComparison.Ordinal));
+        string plan = Read(fixture, PlanTaskFileProbe.PlanPath);
+        string index = Read(fixture, PlanTaskFileProbe.PlanIndexPath);
+
+        AssertRefusedUnchanged(fixture, Run(fixture, mode: "supervised", approval: "owner approved"), "KW-DOC-FINALIZE-004", plan, index);
+    }
+
+    /// <summary>The architect numbers its own approve-and-execute row, so the gate is found by its question, not only an AP id.</summary>
+    [Fact]
+    public void AnOpenApproveAndExecuteRowWithAnyIdIsAnsweredInPlace()
+    {
+        string gate = "| D9 | Approve and execute this plan as written? | Approved as written. | The gate. | OPEN |";
+        using DocFixture fixture = Repository(DraftPlan().Replace("| user: explicit decision 2026-11-07 |", "| user: explicit decision 2026-11-07 |\n" + gate, StringComparison.Ordinal));
+
+        (int exit, string output) = Run(fixture);
+
+        Assert.True(exit == 0, output);
+        string plan = Read(fixture, PlanTaskFileProbe.PlanPath);
+        Assert.Contains($"| ANSWERED: autonomous: recommendation accepted, {Approval}, {Date} |", plan, StringComparison.Ordinal);
+        Assert.DoesNotContain("| AP1 |", plan, StringComparison.Ordinal);
     }
 
     [Fact]

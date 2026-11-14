@@ -129,8 +129,7 @@ DOCS_DRIFT: pass
 ### Task file
 
 At finalization the architect saves the task file beside the plan, `<plan>.tasks.json` in the
-directory named by **<plan-index>**, returns its path, and the file is committed with the plan at
-once.
+directory named by **<plan-index>**, returns its path, and the finalize tool commits it with the plan.
 
 It carries a schema version, the plan's path, the execution digest, and one entry per task: id,
 role, dependencies, file scope, `session` group and the full prompt. The command writes all of it. The execution digest covers the

@@ -1473,9 +1473,9 @@
     },
     {
       "file": "src/KyberWeave.Core.Docs/Closeout/ActivePlanFiles.cs",
-      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);",
+      "text": "return ProcessRunner.Run(startInfo, string.Empty, GitTimeout);",
       "count": 1,
-      "bound": "ProcessRunner.Run with GitTimeout = 60 s; the process tree is killed on expiry. git add argv only, for the paths the closeout or finalize touched."
+      "bound": "ProcessRunner.Run with GitTimeout = 60 s; the process tree is killed on expiry. git argv only (add, diff --cached, status, commit) for the paths the closeout or finalize touched; never push."
     },
     {
       "file": "tests/KyberWeave.Tests/ReviewGatesCycleTests.cs",

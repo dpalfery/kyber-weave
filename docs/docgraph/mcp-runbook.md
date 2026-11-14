@@ -1502,20 +1502,25 @@ return `STATUS: TOOL_FAILURE`, and this one cannot, so a failure can be diagnose
 ### `docs_finalize_approved_plan_and_write_task_file(projectPath, planFile, approvalMode, approval)`
 
 Finalizes an approved Draft plan: records the approval in its `## Decisions` table (an open `AP` row
-is answered in place, otherwise a new `AP<n>` row is added), sets the frontmatter `status` to
+or an open "approve and execute" row is answered in place, otherwise a new `AP<n>` row is added; in
+autonomous mode any other row still `RECOMMENDED` is accepted as `autonomous: recommendation
+accepted`), sets the frontmatter `status` to
 `current` and the body status line and the plan index row to Ready, and writes the task file with
 the same code as `kyber-weave docs tasks <plan> --write`. `kyber-weave docs finalize` is its CLI
 twin. `projectPath` is required (the run's worktree); `approvalMode` is `autonomous` or
 `supervised`; `approval` is one line, at most 300 characters, recorded as the provenance.
 
-It edits only the plan, its task file and the plan index, and refuses, changing nothing, with
+It edits only the plan, its task file and the plan index, then commits exactly those three files on
+the current branch of `projectPath` (conventional message, never a push), and refuses, changing
+nothing, with `KW-DOC-FINALIZE-008` when other files are staged, and with
 `KW-DOC-FINALIZE-001` (not a plan file under the plans folder), `-002` (not Draft), `-003` (no usable
 approval, or an autonomous approval of a plan whose frontmatter says `autonomy: supervised`), `-004`
-(no Decisions table, or a decision still `OPEN` or `RECOMMENDED`) or `-005` (the task file cannot be
+(no Decisions table, or a decision still `OPEN`, or `RECOMMENDED` in supervised mode) or `-005` (the task file cannot be
 written from the plan, or the finalized files fail validation; it writes, validates, and restores
 the original bytes). A plan already Ready with a current task file reports `result: already-ready`.
 The response is the provenance line, `result: finalized | already-ready | refused`, one line per
-finding, and on success `TASK_FILE: <path>`. The packet self-containment check
+finding, and on success `TASK_FILE: <path>`, the ready queue (one line per task: id, title, role,
+dependencies, session; then the tasks that may run now) and `dispatch the first ready tasks now`. The packet self-containment check
 (`KW-DOC-TASKS-008` to `-011`) needs a model, so it is not run here; the architect runs
 `docs tasks --check` before `PLAN_READY`. See
 [ADR 0078](../adr/0078-the-conductor-finalizes-and-archives-plans-through-two-docs-tools.md).
