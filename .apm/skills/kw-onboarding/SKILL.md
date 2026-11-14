@@ -73,14 +73,20 @@ Load [references/harnesses.md](references/harnesses.md) now.
 
 1. Get the supported list from the product: the `--target` line of
    `kyber-weave squad install --help`, or the renderer line of `kyber-weave squad doctor --global`.
-2. Detect what is in place: `kyber-weave squad status --global`, `kyber-weave squad status .`,
-   and `kyber-weave arbiter status`.
+2. Detect what is in place: `kyber-weave squad status --global` and `kyber-weave squad status .`
+   (each deployed file names its harness in parentheses) and `kyber-weave arbiter status`.
 3. Ask which harnesses the user wants (multi-select), marking the ones already deployed.
-4. For each chosen harness: ask global (recommended, every repository) or this project only; run
-   `kyber-weave squad install` or `squad update` with `--target <token>` (`--global` if chosen);
-   then `kyber-weave arbiter install --target <token>` (add `--project` for project scope). Show
-   the harness's row from the reference: its trust step and any setting it needs. Offer to apply
-   a setting only where the reference says how, and never edit a shell profile or harness
+4. Ask global (recommended: every repository) or this project only, then deploy. An explicit
+   `--target` list on `squad update` replaces the deployed set, so never update one harness alone:
+   - Only refreshing what is deployed: `kyber-weave squad update` (`--global` for global), no `--target`.
+   - Adding a harness globally: `kyber-weave squad install --global --target <new>`; the others stay.
+   - Adding a harness to a project that has others: `kyber-weave squad update . --target <every deployed token>,<new>`.
+   - Nothing deployed in the project yet: `kyber-weave squad install . --target <tokens>`.
+5. For each chosen harness, `kyber-weave arbiter install --target <token> --provider <current>`
+   (add `--project` for project scope). `<current>` is the provider `arbiter status` reports
+   (`none` or `systemone`): an omitted `--provider` resets it to `none`.
+6. Show the harness's row from the reference: its trust step and any setting it needs. Offer to
+   apply a setting only where the reference says how, and never edit a shell profile or harness
    settings file without a yes.
 
 ## Step 4 — Settings
@@ -105,7 +111,11 @@ Load [references/settings.md](references/settings.md) now.
 1. Explain tiers in one line: each agent names a tier (a model profile) such as `fast` or
    `reviewer`, and each harness maps a tier to a concrete model.
 2. Run `kyber-weave squad preset list`. For each chosen harness show which preset it uses; with a
-   preset, `kyber-weave squad preset show <name> --target <token>` prints tier to model.
+   preset, `kyber-weave squad preset show <name> --target <token>` prints tier to model. Without
+   one the harness uses the bundled models: read that harness's column from
+   `~/.kyber-weave/squad/profiles/<version>.yml`, where `<version>` is the one
+   `kyber-weave --version` prints (without any `+build` suffix). If the file is missing,
+   `kyber-weave squad update` writes it.
 3. Ask which harnesses' models the user wants to change (multi-select). For those, hand over to
    the `kyber-weave-model-profile` skill, which builds and applies a preset.
 

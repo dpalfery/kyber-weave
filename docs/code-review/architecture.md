@@ -865,7 +865,7 @@ command:
 
 ### Repository gate scoping in this repository
 
-This repository configures `include:` globs on all 29 council gates in `.kyber-weave/kyber-weave.yml`,
+This repository configures `include:` globs on all 36 council gates in `.kyber-weave/kyber-weave.yml`,
 partitioned by ecosystem:
 
 - **Pure C# formatting and duplicate detection** (`format-whitespace`, `format-style`, `duplicates`): scoped to `&net-source-paths` (`["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets", "**/*.sln*", "**/NuGet.config", "**/.editorconfig"]`).

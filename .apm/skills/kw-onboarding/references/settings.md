@@ -30,6 +30,7 @@ exists; if selected, explain it, read its section in the product's configuration
 | `review.parallelism` | `2` | How many review gates run at once. Raise it only on a machine with spare cores. | a positive whole number |
 | `review.council-deadline-seconds` | `600` | Time budget for the review council's gate run; gates still running at the deadline are reported as not run. | a positive whole number of seconds |
 | `review.policy.strictness` | `balanced` | How many major findings block a change and how confident a finding must be: `lenient` (5 majors, confidence 8), `balanced` (3, 7), `strict` (1, 5). | `balanced`, `strict`, `lenient` |
+| `review.policy.major-count-blocks`, `min-confidence`, `suppressions` *advanced* | from strictness; none | Override the two strictness numbers directly, or suppress a named finding until an expiry date with a reason. | — |
 | `review.coverage.file-line-percent`, `class-line-percent` | `0` (off) | Minimum line coverage the review verdict requires. | a percentage |
 | `review.duplicates.minimum-lines` | `4` | Shortest duplicated block the duplicate-code check reports. | a whole number |
 | `review.gates`, `review.task-gates`, `review.test-map` *advanced* | from onboarding | The build, test and lint commands each change must pass. Owned by the `kyber-docs-onboarding-and-assessment` skill; `kyber-weave review catalogue` prints the shipped set for the declared technologies. | — |
@@ -40,6 +41,7 @@ exists; if selected, explain it, read its section in the product's configuration
 |---|---|---|
 | `mcp.required-servers` | `kw-docs` | Which MCP servers the repository's agents rely on. Handled in step 2; `kw-dash` (KyberDash analytics) is optional. |
 | `ontology.docs-root`, `ontology.technologies` *advanced* | `docs` as `docs init` scaffolds it, none | Where governed docs live and which stacks have coding standards. Owned by the docs-onboarding skill. |
+| Other `ontology.*` keys *advanced* | product vocabulary | The document types, statuses, required frontmatter keys, excluded paths and catalog layout the docs checks enforce. |
 | `docs-analysis.*` *advanced* | presets | Tuning for duplicate and conflict detection, and optional local embeddings (`docs-analysis.embeddings.mode`, default `off`). |
 | `config-reg` *advanced* | none | Extra named paths published to agents, for skills that look up repository documents by name. |
 | `harness.profiles` *advanced* | none | Declares a harness's legitimate capability differences so the agent parity check does not report them. |

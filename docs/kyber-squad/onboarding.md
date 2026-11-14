@@ -39,7 +39,9 @@ the canonical skills, plus the Kyber-Weave skills it ships beside them, with tra
 recovery and state governance. Thirteen harness targets are declared; all thirteen are currently
 implemented and registered.
 
-**New here? Use the guided setup.** Ask your agent to run the `kw-onboarding` skill. It checks the
+**New here? Use the guided setup.** The skill arrives with the squad, so first deploy the squad
+for the harness you use (`kyber-weave squad install --global --target <harness>`), then ask your
+agent in that harness to run the `kw-onboarding` skill. It checks the
 machine with `kyber-weave doctor`, makes sure the code index and the `kw-docs` and `codegraph` MCP
 servers answer, installs the squad and the Arbiter hooks for the harnesses you pick, lists every
 setting with its default so you choose which to change, and checks the Arbiter's decision-model
