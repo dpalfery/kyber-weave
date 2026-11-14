@@ -354,7 +354,7 @@ public sealed partial class RunDelivery
     {
         DeliveryOutcome Failed(string message)
         {
-            report.Add(new Diagnostic(PullRequestFailed, Severity.Error, message, "deliver",
+            report.Add(new Diagnostic(PullRequestFailed, Severity.Error, $"{message} Branch '{branch}' is already pushed.", "deliver",
                 Hint: "The branch is pushed; calling this again creates or updates the pull request without pushing anything new."));
             return new DeliveryOutcome(report, false, Head: branch, Base: baseBranch, Title: title, Body: body);
         }
@@ -379,8 +379,16 @@ public sealed partial class RunDelivery
         string target;
         if (existing is { } open)
         {
-            string number = open.GetProperty("number").GetInt32().ToString(CultureInfo.InvariantCulture);
-            string openBase = open.TryGetProperty("baseRefName", out JsonElement b) ? b.GetString() ?? string.Empty : string.Empty;
+            if (open.ValueKind != JsonValueKind.Object
+                || !open.TryGetProperty("number", out JsonElement numberElement)
+                || numberElement.ValueKind != JsonValueKind.Number
+                || !numberElement.TryGetInt32(out int openNumber))
+            {
+                return Failed("gh pr list answered an open pull request with no usable number.");
+            }
+
+            string number = openNumber.ToString(CultureInfo.InvariantCulture);
+            string openBase = Text(open, "baseRefName") ?? string.Empty;
             if (!string.Equals(openBase, baseBranch, StringComparison.Ordinal))
                 return Failed($"Pull request #{number} from '{branch}' is open into '{openBase}', not the run's base '{baseBranch}'. A person decides which base is right; it was not changed.");
 
@@ -412,8 +420,21 @@ public sealed partial class RunDelivery
         {
             using JsonDocument read = JsonDocument.Parse(view.StandardOutput);
             JsonElement pr = read.RootElement;
-            string readTitle = pr.GetProperty("title").GetString() ?? string.Empty;
-            string readBody = pr.GetProperty("body").GetString() ?? string.Empty;
+            if (pr.ValueKind != JsonValueKind.Object
+                || !pr.TryGetProperty("number", out JsonElement numberElement)
+                || numberElement.ValueKind != JsonValueKind.Number
+                || !numberElement.TryGetInt32(out int prNumber)
+                || !pr.TryGetProperty("isDraft", out JsonElement draftElement)
+                || draftElement.ValueKind is not (JsonValueKind.True or JsonValueKind.False)
+                || Text(pr, "url") is not { } url
+                || Text(pr, "baseRefName") is not { } readBase
+                || Text(pr, "headRefName") is not { } readHead)
+            {
+                return Failed("gh pr view answered without a usable number, url, draft flag, base or head.");
+            }
+
+            string readTitle = Text(pr, "title") ?? string.Empty;
+            string readBody = Text(pr, "body") ?? string.Empty;
             if (!string.Equals(readTitle, title, StringComparison.Ordinal) || !string.Equals(Normalized(readBody), Normalized(body), StringComparison.Ordinal))
             {
                 report.Add(new Diagnostic(Step, Severity.Warning,
@@ -421,16 +442,16 @@ public sealed partial class RunDelivery
             }
 
             return new DeliveryOutcome(report, true, created,
-                pr.GetProperty("url").GetString(),
-                pr.GetProperty("number").GetInt32(),
-                pr.GetProperty("isDraft").GetBoolean(),
-                pr.GetProperty("baseRefName").GetString(),
-                pr.GetProperty("headRefName").GetString(),
+                url,
+                prNumber,
+                draftElement.GetBoolean(),
+                readBase,
+                readHead,
                 Checks(pr.TryGetProperty("statusCheckRollup", out JsonElement rollup) ? rollup : default),
                 title,
                 body);
         }
-        catch (Exception exception) when (exception is JsonException or KeyNotFoundException or InvalidOperationException)
+        catch (JsonException exception)
         {
             return Failed($"gh pr view answered in an unexpected shape: {exception.Message}");
         }
@@ -456,10 +477,13 @@ public sealed partial class RunDelivery
         }
 
         return $"{rollup.GetArrayLength().ToString(CultureInfo.InvariantCulture)} CI checks reported: {passed} passed, {failed} failed, {pending} pending";
-
-        static string? Text(JsonElement element, string name) =>
-            element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
     }
+
+    /// <summary>A string property of a JSON object; null when the element is not an object or the property is absent or not a string.</summary>
+    private static string? Text(JsonElement element, string name) =>
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
 
     private bool TryFindPlan(string? named, string mergeBase, string plansFolder, string archiveFolder, string porcelain, DiagnosticReport report, out string? plan)
     {

@@ -291,6 +291,41 @@ public sealed class RunDeliveryTests : IDisposable
         Assert.DoesNotContain(gh.Calls, call => call.Contains("edit") || call.Contains("create"));
     }
 
+    [Theory]
+    [InlineData("""[{"url":"x","baseRefName":"main"}]""")]
+    [InlineData("""[{"number":"1","baseRefName":"main"}]""")]
+    [InlineData("""[{"number":99999999999,"baseRefName":"main"}]""")]
+    [InlineData("""["not an object"]""")]
+    public void AMalformedPullRequestListIsARefusalThatNamesThePushedBranch(string list)
+    {
+        GitRunRepository(archivePending: false);
+        ScriptedGh gh = new() { OpenPullRequest = list };
+
+        DeliveryOutcome outcome = Deliver(gh, new DeliveryRequest("S."));
+
+        Assert.False(outcome.Delivered);
+        var refusal = Assert.Single(outcome.Report.Items, item => item.Code == RunDelivery.PullRequestFailed);
+        Assert.Contains($"Branch '{Branch}' is already pushed", refusal.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("""{"url":"u","isDraft":true,"baseRefName":"main","headRefName":"h"}""")]
+    [InlineData("""{"number":"7","url":"u","isDraft":true,"baseRefName":"main","headRefName":"h"}""")]
+    [InlineData("""{"number":7,"url":"u","isDraft":"yes","baseRefName":"main","headRefName":"h"}""")]
+    [InlineData("""{"number":7,"url":5,"isDraft":true,"baseRefName":"main","headRefName":"h"}""")]
+    [InlineData("[]")]
+    public void AMalformedPullRequestViewIsARefusalThatNamesThePushedBranch(string view)
+    {
+        GitRunRepository(archivePending: false);
+        ScriptedGh gh = new() { ViewResponse = view };
+
+        DeliveryOutcome outcome = Deliver(gh, new DeliveryRequest("S."));
+
+        Assert.False(outcome.Delivered);
+        var refusal = Assert.Single(outcome.Report.Items, item => item.Code == RunDelivery.PullRequestFailed);
+        Assert.Contains($"Branch '{Branch}' is already pushed", refusal.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void RefusesWithoutASummary()
     {
@@ -591,6 +626,8 @@ public sealed class RunDeliveryTests : IDisposable
 
         public string OpenPullRequest { get; init; } = "[]";
 
+        public string? ViewResponse { get; init; }
+
         public List<string[]> Calls { get; } = [];
 
         public List<string> Bodies { get; } = [];
@@ -616,7 +653,7 @@ public sealed class RunDeliveryTests : IDisposable
                 ["pr", "list", ..] => new ProcessResult(0, OpenPullRequest, string.Empty),
                 ["pr", "create", ..] => new ProcessResult(0, PrUrl + "\n", string.Empty),
                 ["pr", "edit", ..] => new ProcessResult(0, PrUrl + "\n", string.Empty),
-                ["pr", "view", ..] => new ProcessResult(0, View(), string.Empty),
+                ["pr", "view", ..] => new ProcessResult(0, ViewResponse ?? View(), string.Empty),
                 _ => new ProcessResult(1, string.Empty, "unexpected gh call"),
             };
         }
