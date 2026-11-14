@@ -1729,6 +1729,15 @@ compiled test projects and stopped headless runs on stub and evidence rules. Wha
 independent test author, is covered by the council's `test-adequacy` lens, which reads every added
 test as an outsider; its findings per run are how the decision is monitored.
 
+Both runs are one command, `kyber-weave review gates . --agent <name> --task <id>` (with `--red`
+for the failing run), which the packet prints filled in: it takes the task's files and declared
+test classes from the plan, writes each report where the Arbiter reads it, and prints failures in
+a few lines with the full log beside the report. How to write the tests — the test-first sequence,
+what to assert, unit or integration, test data and parallel safety — is one shared skill,
+`testing`, that every developer agent names instead of carrying its own copy; how tests work in a
+given repository is that repository's test standard, which the skill reads first through
+`docs_get_coding_standard_for_technology`.
+
 Operational contracts remain in
 `products/kyber-squad/agents/conductor.md`,
 `products/kyber-squad/agents/conductor/references/{plan-path,spec-path,intake-path,autonomy}.md`,

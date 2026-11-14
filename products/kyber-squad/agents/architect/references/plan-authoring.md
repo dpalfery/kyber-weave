@@ -25,7 +25,7 @@ Every plan contains:
 - a permanent Decisions section recording all material choices, alternatives, questions, and approvals;
 - the declared scale (`documentation-impact` plus `impact-components`) and a `Design harvest` table keyed by Target component and Target doc type (one row per durable design, contract, interface, behaviour, or operations section; a `no-design-change` scale carries `Documentation waiver: <reason>` instead of rows);
 - investigation findings;
-- the mode-specific Test contract or verification contract;
+- the mode-specific Test contract or verification contract; where an existing test class or fixture already tests the same area, its row names it (one line, "extend `<class>`" or "copy `<class>`") so the worker starts from that example instead of searching for one;
 - dispatchable tasks with objective, acceptance criteria, dependencies, capabilities, and its `session` group, naming every file it touches by path plus symbol, the full test class names its runner must match, and exact commands (the rules are below);
 - a dependency graph;
 - risks, out-of-scope boundaries, verification gates, review, and `docs-dev` closeout.
