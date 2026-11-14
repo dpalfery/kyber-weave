@@ -208,6 +208,21 @@ public class ReviewDuplicatesTests : IDisposable
     }
 
     [Fact]
+    public void ASymbolInAFileReachedThroughASymbolicLinkIsUnreadableAndNeverCompared()
+    {
+        Write("A.cs", Body);
+        string outside = Path.Combine(_temp.Path, "outside", "B.cs");
+        Directory.CreateDirectory(Path.GetDirectoryName(outside)!);
+        File.WriteAllText(outside, Body);
+        File.CreateSymbolicLink(Path.Combine(_temp.Path, "B.cs"), outside);
+
+        DuplicateReport report = Detect([Method("Total", "A.cs", 1, 7), Method("Total", "B.cs", 1, 7)]);
+
+        Assert.Equal(1, report.SymbolsUnreadable);
+        Assert.Empty(report.Clusters);
+    }
+
+    [Fact]
     public void ASpanRunningPastTheEndOfTheFileIsUnreadableRatherThanTruncated()
     {
         // Index staleness in its most common form: the file shrank after it was indexed.

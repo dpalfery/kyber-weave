@@ -504,6 +504,23 @@ public sealed class ReviewDecisionModelTests : IDisposable
         }
     }
 
+    [Fact]
+    public void ACitedFileThatCannotBeReadSaysSoInsteadOfLeavingNoTrace()
+    {
+        string path = Path.Combine(_temp.Path, "locked.txt");
+        File.WriteAllText(path, "first\nsecond\nthird");
+        // Held open without sharing, so the read fails on every platform without relying on file modes or the user.
+        using FileStream held = new(path, FileMode.Open, FileAccess.Read, FileShare.None);
+        List<string> failures = [];
+
+        string? surroundings = ReviewVerdictDecisions.Surroundings(_temp.Path, Finding("f", ReviewSeverity.Minor, line: 2, file: "locked.txt"), failures.Add);
+        string evidence = ReviewVerdictDecisions.EvidenceLines(_temp.Path, WithEvidence("see locked.txt:2"));
+
+        Assert.Null(surroundings);
+        Assert.Equal(["IOException"], failures);
+        Assert.Contains("locked.txt: could not be read (IOException)", evidence, StringComparison.Ordinal);
+    }
+
     private static bool TryLink(Action create)
     {
         try

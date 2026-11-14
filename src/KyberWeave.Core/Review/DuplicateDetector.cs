@@ -281,7 +281,9 @@ public static class DuplicateDetector
         try
         {
             // The same cap every other read of a path a seat or an index names applies: an oversized file is unreadable.
-            if (File.Exists(full) && new FileInfo(full).Length <= ReviewSeatInput.MaxFileBytes)
+            // A symbolic link on the path can lead out of the tree, so a file reached through one is unreadable here, as
+            // it is for every other read of a path an index or a seat names.
+            if (DocsRootPath.IsContainedFile(repoRoot, relativePath, []) && new FileInfo(full).Length <= ReviewSeatInput.MaxFileBytes)
                 lines = File.ReadAllLines(full);
         }
         catch (Exception ex) when (ReviewSeatInput.IsFileFailure(ex))

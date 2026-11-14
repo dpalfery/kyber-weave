@@ -326,8 +326,9 @@ public static partial class ReviewVerdictDecisions
             }
 
             looked++;
-            string? surroundings = Surroundings(repositoryRoot, finding);
-            string? problem = surroundings is null ? "the cited file could not be read"
+            string? readFailure = null;
+            string? surroundings = Surroundings(repositoryRoot, finding, type => readFailure = type);
+            string? problem = surroundings is null ? $"the cited file could not be read{(readFailure is null ? string.Empty : $" ({readFailure})")}"
                 : string.IsNullOrWhiteSpace(finding.Excerpt) ? "the finding quotes no code"
                 : !ReviewSeatInput.ExcerptWithinLimits(finding.Excerpt)
                     ? $"its excerpt is over {ReviewSeatInput.MaxExcerptCharacters} characters or {ReviewSeatInput.MaxExcerptLines} lines, so the quote was not verified"
@@ -506,12 +507,15 @@ public static partial class ReviewVerdictDecisions
     }
 
     /// <summary>The lines around a finding's cited line, wide enough to hold a multi-line excerpt; null when unreadable.</summary>
-    internal static string? Surroundings(string repositoryRoot, ReviewFinding finding)
+    /// <param name="repositoryRoot">The repository root the cited file is resolved against.</param>
+    /// <param name="finding">The finding whose cited lines are read.</param>
+    /// <param name="onFailure">Told the exception type when a read failed, so the cause is not lost with the null.</param>
+    internal static string? Surroundings(string repositoryRoot, ReviewFinding finding, Action<string>? onFailure = null)
     {
         ArgumentNullException.ThrowIfNull(finding);
         try
         {
-            string? path = Resolve(repositoryRoot, finding.File);
+            string? path = Resolve(repositoryRoot, finding.File, onFailure);
             if (path is null)
                 return null;
 
@@ -528,6 +532,7 @@ public static partial class ReviewVerdictDecisions
         }
         catch (Exception ex) when (ReviewSeatInput.IsFileFailure(ex))
         {
+            onFailure?.Invoke(ex.GetType().Name);
             return null;
         }
     }
@@ -547,20 +552,33 @@ public static partial class ReviewVerdictDecisions
         // The evidence is seat-written: only its first characters are scanned, and only the first few citations are read.
         StringBuilder text = new();
         int added = 0;
+        int notes = 0;
         foreach (System.Text.RegularExpressions.Match match in EvidenceCitation().Matches(ReviewSeatInput.Clip(finding.Evidence)!).Take(MaxEvidenceCitations))
         {
             string file = match.Groups["file"].Value;
-            string? path = Resolve(repositoryRoot, file);
-            if (path is null)
+            string? failure = null;
+            string? path = Resolve(repositoryRoot, file, type => failure = type);
+            if (path is null && failure is null)
                 continue;
 
-            string[] lines;
-            try
+            string[] lines = [];
+            if (path is not null)
             {
-                lines = File.ReadAllLines(path);
+                try
+                {
+                    lines = File.ReadAllLines(path);
+                }
+                catch (Exception ex) when (ReviewSeatInput.IsFileFailure(ex))
+                {
+                    failure = ex.GetType().Name;
+                }
             }
-            catch (Exception ex) when (ReviewSeatInput.IsFileFailure(ex))
+
+            if (failure is not null)
             {
+                // Said in the question, so the model does not read a missing citation as one that has nothing to show.
+                text.Append('\n').Append(file).Append(": could not be read (").Append(failure).Append(')');
+                notes++;
                 continue;
             }
 
@@ -574,7 +592,7 @@ public static partial class ReviewVerdictDecisions
             }
         }
 
-        return added == 0 ? string.Empty : "\n\nLines the finding's evidence cites, as they are in the tree now:" + text;
+        return added + notes == 0 ? string.Empty : "\n\nLines the finding's evidence cites, as they are in the tree now:" + text;
     }
 
     private static IEnumerable<int> CitedNumbers(System.Text.RegularExpressions.Match match)
@@ -604,7 +622,7 @@ public static partial class ReviewVerdictDecisions
     /// The name is seat-written, so every way it can fail to resolve is an answer, not an error. A link is refused
     /// because it can lead out of the repository, and what is read here goes into the decision-model question.
     /// </summary>
-    private static string? Resolve(string repositoryRoot, string file)
+    private static string? Resolve(string repositoryRoot, string file, Action<string>? onFailure = null)
     {
         try
         {
@@ -618,6 +636,7 @@ public static partial class ReviewVerdictDecisions
         }
         catch (Exception ex) when (ReviewSeatInput.IsFileFailure(ex))
         {
+            onFailure?.Invoke(ex.GetType().Name);
             return null;
         }
     }
