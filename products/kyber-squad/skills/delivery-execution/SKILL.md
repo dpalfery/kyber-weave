@@ -182,7 +182,7 @@ On a refusal carrying `KW-DELIVER-005` (the host is not GitHub, or the GitHub CL
 
 ## Arbiter routing headers
 
-Unless you hold `arbiter_evaluate_agent_dispatch_or_return` (see Arbiter fallback), every dispatch starts with `KYBER-ARBITER: true`. Dispatches that execute or audit a task — implementation specialist invocations, `review-triage` audits, and the `code-reviewer` end-of-run review dispatch — also carry `PLAN_FILE:` and `TASK:`; the `docs-dev` harvest carries `PLAN_FILE:` only.
+Unless you hold `arbiter_evaluate_agent_dispatch_or_return` (see Arbiter fallback), every dispatch starts with `KYBER-ARBITER: true`. Dispatches that execute or audit a task — implementation specialist invocations, `review-triage` audits, and the `code-reviewer` end-of-run review dispatch — also carry `PLAN_FILE:` and `TASK:`; the `docs-dev` harvest carries `PLAN_FILE:` only. Headers are welcome but not required: without them the Arbiter finds the plan from the run's worktree and the task from its id, so name the worktree and the task id (`Task T3`) in every task dispatch.
 
 `PLAN_FILE:` is always the repository-relative path with `/` separators, never the absolute path of a checkout or worktree, even when the run works in a worktree. Sent any other way, the Arbiter cannot read it as a header and falls back to the file on disk or its decision model, which is slower and less certain.
 

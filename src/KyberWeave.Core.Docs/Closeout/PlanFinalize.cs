@@ -71,9 +71,20 @@ public sealed partial class PlanFinalize
     private readonly KyberWeaveConfig _config;
     private readonly Func<DocumentLoader> _loaderFactory;
     private readonly ActivePlanFiles _files;
+    private readonly IPlanTaskAgentPicker? _picker;
 
     /// <summary>Creates the finalize step over a repository, its effective configuration and the loader validation reads with.</summary>
     public PlanFinalize(string repoRoot, KyberWeaveConfig config, Func<DocumentLoader> loaderFactory)
+        : this(repoRoot, config, loaderFactory, null)
+    {
+    }
+
+    /// <summary>Creates the finalize step with a picker that chooses each unassigned task's agent as the task file is written.</summary>
+    /// <param name="repoRoot">The repository root.</param>
+    /// <param name="config">The effective configuration.</param>
+    /// <param name="loaderFactory">The loader validation reads with.</param>
+    /// <param name="picker">The agent picker, or null when no decision model is configured.</param>
+    public PlanFinalize(string repoRoot, KyberWeaveConfig config, Func<DocumentLoader> loaderFactory, IPlanTaskAgentPicker? picker)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
@@ -82,6 +93,7 @@ public sealed partial class PlanFinalize
         _config = config;
         _loaderFactory = loaderFactory;
         _files = new ActivePlanFiles(_repoRoot, config);
+        _picker = picker;
     }
 
     /// <summary>Finalizes the approved Draft plan at <paramref name="planPath"/>, or refuses and changes nothing.</summary>
@@ -132,7 +144,7 @@ public sealed partial class PlanFinalize
         if (withApproval is null)
             return Refused();
 
-        PlanTaskFileGenerator generator = new(_repoRoot, _config);
+        PlanTaskFileGenerator generator = new(_repoRoot, _config, _picker);
         PlanTaskFileOutcome preview = generator.Run(plan, PlanTaskFileMode.Preview);
         if (preview.Report.HasErrors)
         {

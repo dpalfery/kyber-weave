@@ -73,17 +73,28 @@ public sealed partial class PlanTaskFileGenerator
 
     private readonly string _repoRoot;
     private readonly KyberWeaveConfig _config;
+    private readonly IPlanTaskAgentPicker? _picker;
 
     /// <summary>Creates the generator over a repository root and its effective configuration.</summary>
     /// <param name="repoRoot">The absolute repository root the artifact path is relative to.</param>
     /// <param name="config">The effective host configuration, with its ontology applied.</param>
     public PlanTaskFileGenerator(string repoRoot, KyberWeaveConfig config)
+        : this(repoRoot, config, null)
+    {
+    }
+
+    /// <summary>Creates the generator with a picker that chooses each unassigned task's agent when the file is written.</summary>
+    /// <param name="repoRoot">The absolute repository root the artifact path is relative to.</param>
+    /// <param name="config">The effective host configuration, with its ontology applied.</param>
+    /// <param name="picker">The agent picker, or null when no decision model is configured.</param>
+    public PlanTaskFileGenerator(string repoRoot, KyberWeaveConfig config, IPlanTaskAgentPicker? picker)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
 
         _repoRoot = repoRoot;
         _config = config;
+        _picker = picker;
     }
 
     /// <summary>The task file's repository-relative path for the plan or specification task list at <paramref name="artifactPath"/>.</summary>
@@ -120,6 +131,7 @@ public sealed partial class PlanTaskFileGenerator
             return new PlanTaskFileOutcome(report, taskFile, null, null, 0, false);
         }
 
+        file = WithAgents(file, taskFile, mode);
         string json = PlanTaskFileJson.Serialize(file);
         int count = file.Tasks?.Count ?? 0;
         bool wrote = false;
@@ -524,6 +536,77 @@ public sealed partial class PlanTaskFileGenerator
                 artifact));
             return null;
         }
+    }
+
+    /// <summary>
+    /// Adds each task's agent pick. A pick on disk for a task whose role, capabilities and prompt are unchanged is kept,
+    /// so checking the file never asks the model and a rewrite does not move a pick. Only a write asks the picker, and
+    /// only for the tasks still without one; a task the plan assigned a role never gets a pick.
+    /// </summary>
+    private PlanTaskFile WithAgents(PlanTaskFile file, string taskFile, PlanTaskFileMode mode)
+    {
+        if (file.Tasks is not { Count: > 0 } tasks)
+            return file;
+
+        Dictionary<string, PlanTaskFileEntry> onDisk = ReadExistingEntries(taskFile);
+        List<PlanTaskFileEntry> entries = new(tasks.Count);
+        foreach (PlanTaskFileEntry task in tasks)
+        {
+            PlanTaskFileEntry kept = task;
+            if (task.Role is null && task.Id is not null
+                && onDisk.TryGetValue(task.Id, out PlanTaskFileEntry? old)
+                && old.Agent is not null && old.Role is null
+                && string.Equals(old.Capabilities, task.Capabilities, StringComparison.Ordinal)
+                && string.Equals(old.Prompt, task.Prompt, StringComparison.Ordinal))
+            {
+                kept = task with { Agent = old.Agent, AgentConfidence = old.AgentConfidence };
+            }
+
+            entries.Add(kept);
+        }
+
+        if (mode == PlanTaskFileMode.Write && _picker is not null)
+        {
+            List<PlanTaskFileEntry> open = [.. entries.Where(entry => entry.Role is null && entry.Agent is null)];
+            if (open.Count > 0)
+            {
+                IReadOnlyDictionary<string, PlanTaskAgentChoice> picks = _picker.Pick(open);
+                for (int index = 0; index < entries.Count; index++)
+                {
+                    PlanTaskFileEntry entry = entries[index];
+                    if (entry.Role is null && entry.Agent is null && entry.Id is not null
+                        && picks.TryGetValue(entry.Id, out PlanTaskAgentChoice? choice))
+                    {
+                        entries[index] = entry with { Agent = choice.Agent, AgentConfidence = choice.Confidence };
+                    }
+                }
+            }
+        }
+
+        return file with { Tasks = entries };
+    }
+
+    private Dictionary<string, PlanTaskFileEntry> ReadExistingEntries(string taskFile)
+    {
+        Dictionary<string, PlanTaskFileEntry> found = new(StringComparer.Ordinal);
+        string full = Path.Combine(_repoRoot, taskFile.Replace('/', Path.DirectorySeparatorChar));
+        try
+        {
+            if (!File.Exists(full))
+                return found;
+            PlanTaskFile? existing = JsonSerializer.Deserialize<PlanTaskFile>(File.ReadAllText(full), PlanTaskFileJson.ReadOptions);
+            foreach (PlanTaskFileEntry? entry in existing?.Tasks ?? [])
+            {
+                if (entry?.Id is { } id)
+                    found[id] = entry;
+            }
+        }
+        catch (Exception exception) when (exception is JsonException or IOException or UnauthorizedAccessException)
+        {
+            // An unreadable file keeps no picks; the check reports the file itself.
+        }
+
+        return found;
     }
 
     private bool WriteIfChanged(string artifact, string taskFile, string json, DiagnosticReport report)

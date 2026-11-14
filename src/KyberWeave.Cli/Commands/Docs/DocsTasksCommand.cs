@@ -85,7 +85,9 @@ public sealed class DocsTasksCommand : Command<DocsTasksSettings>
             : settings.Check ? PlanTaskFileMode.Check
             : PlanTaskFileMode.Preview;
 
-        PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(root, effective).Run(relative, mode);
+        // Only a write may ask the decision model to pick each task's agent; check and preview keep the picks on disk.
+        using PlanTaskAgentPick? picker = mode == PlanTaskFileMode.Write ? PlanTaskAgentPick.ForConfig(effective) : null;
+        PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(root, effective, picker).Run(relative, mode);
         report.AddRange(outcome.Report.Items);
 
         if (outcome.ExecutionDigest is not null)

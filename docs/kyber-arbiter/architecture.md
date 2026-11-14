@@ -952,6 +952,17 @@ writing headers. With no headers, plan and task identity are unknown, so only th
 apply, and each allows a caller it cannot name: `KW-ARB-ROSTER-001` answers `no-roster` and
 `KW-ARB-RUN-001` does not apply. Copilot CLI is the exception for callers: inside a subagent its payload
 carries the calling agent's `agentType` at the top level, and the hook reads that as the harness caller.
+So on Copilot CLI a dispatch with no caller is the root session's, and its dispatch to an implementation or
+documentation agent is a `delegate` (its return `delegate.returned`) with or without headers
+([ADR 0082](../adr/0082-the-decision-model-picks-task-agents-and-headerless-dispatches-are-delegations.md)).
+Headers still win when present. Otherwise the plan is the one Ready or In-progress plan in the worktree
+the dispatch names, and the task is a task id that plan holds, from a `TASK_ID:`, `TASK:` or `Task` label
+at a line start or the one id named after `task` or `packet`. `delegation.identity` records `headers` or
+`machine`. When no plan or no task resolves, the delegation rules answer at step 0 and allow
+(`KW-ARB-PLAN-001` `unresolved`, `KW-ARB-SCOPE-001` `task-unknown`, `KW-ARB-PLANREAD-001` `not-a-task`,
+`KW-ARB-GATE-REPORT-001` `not-a-task`, `KW-ARB-DIFF-001` `no-task`): a closeout, a delivery or a check is
+rightly not a plan task. `arbiter audit` counts the decision-model evaluations and reports
+`KW-ARB-AUDIT-006` when a configured model was never asked about dispatches to implementation agents.
 
 Caller inference from a planner target is one of those gates, and it applies only to a
 marked dispatch or on a trusted harness (`claude`, `copilot-vscode`). So an unmarked

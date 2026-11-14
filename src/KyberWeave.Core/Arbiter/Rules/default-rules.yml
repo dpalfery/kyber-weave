@@ -25,10 +25,15 @@ rules:
   - id: KW-ARB-PLAN-001
     trigger: delegate
     question: Does this dispatch name the plan or specification file its work comes from?
-    answers: [has-tasks, names-plan, no-plan]
+    answers: [has-tasks, unresolved, names-plan, no-plan]
+    # A dispatch that wrote no PLAN_FILE or TASK header had its plan resolved from the run's worktree (ADR 0082).
+    # When none resolved (no active plan, or several) the dispatch is not judged on its prose: a task packet rightly
+    # says "do not open the plan", so asking whether it names one would refuse correct work.
     decide:
       - when: { all: [{ fact: plan.tasks.count, exists: true }, { not: { fact: plan.tasks.count, equals: 0 } }] }
         answer: has-tasks
+      - when: { fact: delegation.identity, equals: machine }
+        answer: unresolved
     ask:
       type: choice
       state: { dispatch: delegation.head, plan-file: delegation.plan-file-raw, plan-file-found-on-disk: plan.exists }
@@ -37,16 +42,20 @@ rules:
         no-plan: The dispatch names no plan or specification file anywhere; it gives the worker the work with no plan behind it.
       confidence-at-least: 0.8
       tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
-    effects: { has-tasks: allow, names-plan: allow, no-plan: escalate }
+    effects: { has-tasks: allow, unresolved: allow, names-plan: allow, no-plan: escalate }
 
   - id: KW-ARB-SCOPE-001
     trigger: delegate
     question: Is the work this dispatch asks for one of the plan's tasks?
-    answers: [in-task-files, beyond-files, no-task-files, in-plan, not-in-plan]
+    answers: [task-unknown, in-task-files, beyond-files, no-task-files, in-plan, not-in-plan]
     # A TASK that names a task the plan holds is a lookup; whether the dispatch's work is one of
     # the plan's tasks when the lookup missed is a reading of prose. Asked only once a plan with
-    # tasks was read, so a dispatch with no plan is judged by KW-ARB-PLAN-001 alone.
+    # tasks was read, so a dispatch with no plan is judged by KW-ARB-PLAN-001 alone. A dispatch whose identity came
+    # from machine facts and names no task the plan holds (a closeout harvest, a delivery, a check) is not asked:
+    # most such dispatches are rightly not plan tasks, and the question would judge an absence it cannot see.
     decide:
+      - when: { all: [{ fact: delegation.identity, equals: machine }, { fact: plan.task, exists: false }] }
+        answer: task-unknown
       - when: { all: [{ fact: plan.task, exists: true }, { fact: plan.task.files, count: 0 }] }
         answer: no-task-files
       - when: { all: [{ fact: plan.task, exists: true }, { fact: delegation.paths, subset-of: plan.task.files }] }
@@ -69,7 +78,7 @@ rules:
       confidence-at-least: 0.8
       tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
       when: KW-ARB-PLAN-001=has-tasks
-    effects: { in-task-files: allow, beyond-files: allow, no-task-files: allow, in-plan: allow, not-in-plan: escalate }
+    effects: { task-unknown: allow, in-task-files: allow, beyond-files: allow, no-task-files: allow, in-plan: allow, not-in-plan: escalate }
 
   - id: KW-ARB-SCOPE-002
     trigger: delegate
@@ -86,6 +95,8 @@ rules:
         within-task: >-
           Every piece of work the delegation asks for is described by the task. Writing and running the tests for
           the task's own behaviour, failing first and then passing, is part of every task that changes behaviour.
+          Fixing review findings, failing tests or gate failures in the task's own work, and committing that work,
+          are part of the task.
         adds-work: The delegation asks for work the task does not describe.
         unrelated: The delegation does not concern this task.
       confidence-at-least: 0.8
@@ -218,9 +229,16 @@ rules:
     # tree during this one (parallel workers share a run worktree). When a sibling declared no files, what is
     # left cannot be attributed and the answer is unattributed. The task's file list is plan prose. A changed
     # path the list does not cover is asked about, because a task's file list is rarely exhaustive.
+    # A dispatch that is no plan task (a closeout, a delivery, a check) is not held to the plan's out-of-scope list:
+    # that list is read from prose and names files such as the todo a closeout is meant to reconcile. Only a task's
+    # own work is held to it; the closeout's harvest of the plan sent to a documentation agent is never a task.
     decide:
       - when: { fact: git.changed-paths.attributed, exists: false }
         answer: unattributed
+      - when: { all: [{ fact: plan.task, exists: false }, { fact: delegation.identity, equals: machine }] }
+        answer: no-task
+      - when: { all: [{ fact: plan.task, exists: false }, { fact: delegation.target-profile, equals: documentation }] }
+        answer: no-task
       - when: { fact: git.changed-paths.attributed, intersects: plan.out-of-scope }
         answer: out-of-scope
       - when: { fact: plan.task, exists: false }
@@ -394,12 +412,16 @@ rules:
   - id: KW-ARB-PLANREAD-001
     trigger: delegate
     question: Does the dispatch tell the worker to open or read a plan, specification or todo file?
-    answers: [names-plan, mentions-only, no-plan, closeout]
+    answers: [names-plan, mentions-only, no-plan, closeout, not-a-task]
     # The path detector reads prose, so a named planning path is asked about: a dispatch may
-    # mention its plan to say which task it serves without sending the worker into it.
+    # mention its plan to say which task it serves without sending the worker into it. A dispatch identified
+    # from machine facts that names no plan task (a delivery, a check) hands the worker no task packet, so
+    # the rule that keeps a packet worker out of the plan has nothing to hold it to.
     decide:
       - when: { fact: delegation.target-profile, equals: documentation }
         answer: closeout
+      - when: { all: [{ fact: delegation.identity, equals: machine }, { fact: plan.task, exists: false }] }
+        answer: not-a-task
       - when: { any: [{ fact: delegation.planning-paths, exists: false }, { fact: delegation.planning-paths, count: 0 }] }
         answer: no-plan
     ask:
@@ -410,7 +432,7 @@ rules:
         mentions-only: The dispatch mentions a planning-paths file only to say which plan or task the work serves.
       confidence-at-least: 0.8
       tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
-    effects: { names-plan: escalate, mentions-only: allow, no-plan: allow, closeout: allow }
+    effects: { names-plan: escalate, mentions-only: allow, no-plan: allow, closeout: allow, not-a-task: allow }
 
   # A dispatch claims what the worker will do; the digest that comes back carries a
   # `TASK_GATE:` line claiming a gate run happened. That line is the worker's own word,
@@ -427,7 +449,7 @@ rules:
   - id: KW-ARB-GATE-REPORT-001
     trigger: delegate.returned
     question: Does the worker's report say it ran the task gate on its changes?
-    answers: [verified, disagrees, no-report, no-gates-declared, ran-gate, missing]
+    answers: [verified, disagrees, no-report, no-gates-declared, not-a-task, ran-gate, missing]
     decide:
       - when: { fact: gate.report.agrees, equals: true }
         answer: verified
@@ -439,6 +461,10 @@ rules:
       # report with no TASK_GATE claim is expected, not a skipped gate.
       - when: { fact: config.task-gates-declared, equals: false }
         answer: no-gates-declared
+      # A dispatch identified from machine facts that names no plan task (a delivery, a check, a closeout) owes no
+      # task gate, so a report that never mentions one is expected.
+      - when: { all: [{ fact: delegation.identity, equals: machine }, { fact: plan.task, exists: false }] }
+        answer: not-a-task
     ask:
       type: choice
       state: { report: delegation.returned-tail, task-gate-line: gate.report.claim }
@@ -447,7 +473,7 @@ rules:
         missing: The report never mentions running the task gate.
       confidence-at-least: 0.8
       tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
-    effects: { verified: allow, disagrees: escalate, no-report: allow, no-gates-declared: allow, ran-gate: allow, missing: escalate }
+    effects: { verified: allow, disagrees: escalate, no-report: allow, no-gates-declared: allow, not-a-task: allow, ran-gate: allow, missing: escalate }
 
   # A change with no code in it has nothing for these six lenses to judge. The skip needs
   # positive evidence: every changed path must be one the git read marked no-code, and the
@@ -689,8 +715,8 @@ rules:
   # a snapshot taken at dispatch, recorded only when the dispatch went to a specialist that writes files
   # while a live run of the repository works in a worktree of its own. No snapshot leaves the fact absent,
   # which allows. Subagents start in the canonical checkout, so a worker can edit there by mistake.
-  # investigate.returned is listed because a Copilot CLI root conductor names no caller, so its dispatch to
-  # a developer is classified as investigate.
+  # investigate.returned is listed because a dispatch from a caller nobody names to a writer is still classified
+  # as investigate on every harness but Copilot CLI, where the root session's dispatch is a delegate (ADR 0082).
   - id: KW-ARB-CHECKOUT-001
     trigger: [delegate.returned, delegate.planner.returned, investigate.returned]
     question: Did this dispatch leave files in the repository's canonical checkout while its run works in its own worktree?

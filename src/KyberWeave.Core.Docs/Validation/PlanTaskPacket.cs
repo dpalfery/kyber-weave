@@ -114,7 +114,7 @@ public static partial class PlanTaskPacket
     }
 
     /// <summary>
-    /// One line for a task: id, the abilities it needs, the agent the plan assigned when it assigned one, what it
+    /// One line for a task: id, the abilities it needs, the agent the plan assigned or the model picked, what it
     /// depends on, its session and how many files it scopes.
     /// </summary>
     /// <param name="entry">The task.</param>
@@ -125,13 +125,13 @@ public static partial class PlanTaskPacket
         string depends = entry.DependsOn is { Count: > 0 } ? string.Join(',', entry.DependsOn) : "none";
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"{entry.Id}  needs={NeedsOf(entry)}{RoleOf(entry, "  ")}  depends-on={depends}  session={entry.Session ?? "-"}  files={entry.Files?.Count ?? 0}");
+            $"{entry.Id}  needs={NeedsOf(entry)}{RoleOf(entry, "  ")}{AgentOf(entry, "  ")}  depends-on={depends}  session={entry.Session ?? "-"}  files={entry.Files?.Count ?? 0}");
     }
 
     /// <summary>
     /// The queue a conductor dispatches from: one line per task (id, title, the abilities it needs, the agent the plan
-    /// assigned when it assigned one, what it waits on, session), then the tasks with no dependency, which may run in
-    /// parallel. The conductor chooses each task's agent from the abilities, since it never opens the plan.
+    /// assigned or the decision model picked, what it waits on, session), then the tasks with no dependency, which may run
+    /// in parallel. Where the line names no agent the conductor chooses one from the abilities, since it never opens the plan.
     /// </summary>
     /// <param name="tasks">The task file's tasks.</param>
     public static string ReadyQueue(IReadOnlyList<PlanTaskFileEntry> tasks)
@@ -142,7 +142,7 @@ public static partial class PlanTaskPacket
         foreach (PlanTaskFileEntry task in tasks)
         {
             string depends = task.DependsOn is { Count: > 0 } ? string.Join(',', task.DependsOn) : "none";
-            queue.Append(CultureInfo.InvariantCulture, $"{task.Id}: {TitleOf(task)} | needs: {NeedsOf(task)}{RoleOf(task, " | ")} | after={depends}");
+            queue.Append(CultureInfo.InvariantCulture, $"{task.Id}: {TitleOf(task)} | needs: {NeedsOf(task)}{RoleOf(task, " | ")}{AgentOf(task, " | ")} | after={depends}");
             if (task.Session is not null)
                 queue.Append(CultureInfo.InvariantCulture, $" | session={task.Session}");
             queue.Append('\n');
@@ -160,6 +160,9 @@ public static partial class PlanTaskPacket
 
     private static string RoleOf(PlanTaskFileEntry task, string separator) =>
         task.Role is null ? string.Empty : $"{separator}role={task.Role}";
+
+    private static string AgentOf(PlanTaskFileEntry task, string separator) =>
+        task.Role is null && task.Agent is not null ? $"{separator}agent={task.Agent}" : string.Empty;
 
     private static string TitleOf(PlanTaskFileEntry task)
     {

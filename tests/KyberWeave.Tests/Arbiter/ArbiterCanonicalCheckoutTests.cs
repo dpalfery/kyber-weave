@@ -232,7 +232,7 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
 
         ArbiterEvent ev = Event("post", "copilot-cli", caller: null);
         TriggerClassification classification = TriggerClassifier.ClassifySingle(ev, ev.Target, ev.Prompt);
-        Assert.Equal("investigate.returned", classification.Trigger);
+        Assert.Equal("delegate.returned", classification.Trigger);
         ArbiterFactSet returned = facts.Enrich(
             TriggerFactBuilder.Build(classification, ev.Prompt, KyberWeaveConfig.ProductDefaults), classification, ev);
 

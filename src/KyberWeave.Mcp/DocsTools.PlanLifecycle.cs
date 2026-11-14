@@ -5,6 +5,7 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Closeout;
 using KyberWeave.Core.Docs.Parsing;
+using KyberWeave.Core.Docs.Validation;
 using ModelContextProtocol.Server;
 
 namespace KyberWeave.Mcp;
@@ -70,7 +71,9 @@ public sealed partial class DocsTools
                 $"approvalMode '{approvalMode}' is not 'autonomous' or 'supervised'. Nothing was changed.");
         }
 
-        PlanFinalizeOutcome outcome = new PlanFinalize(_host.RepositoryRoot, config, () => new DocumentLoader(_host.RepositoryRoot, config.Ontology))
+        // The decision model, when one is configured, picks each unassigned task's agent as the task file is written.
+        using PlanTaskAgentPick? picker = PlanTaskAgentPick.ForConfig(config);
+        PlanFinalizeOutcome outcome = new PlanFinalize(_host.RepositoryRoot, config, () => new DocumentLoader(_host.RepositoryRoot, config.Ontology), picker)
             .Run(plan, mode, approval, DateOnly.FromDateTime(DateTime.UtcNow));
         report.AddRange(outcome.Report.Items);
         if (outcome.Finalized)
@@ -81,7 +84,7 @@ public sealed partial class DocsTools
     }
 
     private static string ReadyNext(PlanFinalizeOutcome outcome) =>
-        $"next: TASK_FILE: {outcome.TaskFilePath}\nready queue (dispatch each worker by task id; it fetches its own packet):\n" +
+        $"next: TASK_FILE: {outcome.TaskFilePath}\nready queue (dispatch each worker by task id, to the agent its line names when it names one; it fetches its own packet):\n" +
         $"{outcome.ReadyQueue ?? "(unreadable: validate the task file)"}\ndispatch the first ready tasks now.";
 
     /// <summary>

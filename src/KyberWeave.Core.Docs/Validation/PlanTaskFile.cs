@@ -60,6 +60,11 @@ public sealed record PlanTaskFile(
 /// allows it.
 /// </param>
 /// <param name="Prompt">The worker's whole brief, pasted unchanged at dispatch.</param>
+/// <param name="Agent">
+/// The agent the decision model picked for the task from its capabilities when the file was written; null when the
+/// plan assigned a <paramref name="Role"/>, when no model is configured, or when the pick fell below the confidence floor.
+/// </param>
+/// <param name="AgentConfidence">The model's confidence in <paramref name="Agent"/>; null when there is no pick.</param>
 public sealed record PlanTaskFileEntry(
     [property: JsonPropertyName("id")] string? Id = null,
     [property: JsonPropertyName("role")] string? Role = null,
@@ -67,4 +72,6 @@ public sealed record PlanTaskFileEntry(
     [property: JsonPropertyName("depends-on")] IReadOnlyList<string>? DependsOn = null,
     [property: JsonPropertyName("files")] IReadOnlyList<string>? Files = null,
     [property: JsonPropertyName("session")] string? Session = null,
-    [property: JsonPropertyName("prompt")] string? Prompt = null);
+    [property: JsonPropertyName("prompt")] string? Prompt = null,
+    [property: JsonPropertyName("agent")] string? Agent = null,
+    [property: JsonPropertyName("agent-confidence")] double? AgentConfidence = null);

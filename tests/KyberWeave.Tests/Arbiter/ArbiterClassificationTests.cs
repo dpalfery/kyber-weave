@@ -488,16 +488,17 @@ public sealed class ArbiterClassificationTests
     }
 
     [Theory]
-    [InlineData("antigravity")]
-    [InlineData("copilot-cli")]
-    [InlineData("claude")]
-    public void Classification_UnmarkedUnidentifiedDispatchToASquadAgent_IsEvaluated(string harness)
+    [InlineData("antigravity", "investigate")]
+    [InlineData("copilot-cli", "delegate")]
+    [InlineData("claude", "investigate")]
+    public void Classification_UnmarkedUnidentifiedDispatchToASquadAgent_IsEvaluated(string harness, string expected)
     {
         var ev = Dispatch("Do anything with `src/a.cs`.", target: "csharp-dev", harness: harness);
 
         TriggerClassification single = Assert.Single(TriggerClassifier.Classify(ev));
 
-        Assert.Equal("investigate", single.Trigger);
+        // On Copilot CLI no caller is the root session's, so its writer dispatch is a delegation (ADR 0082).
+        Assert.Equal(expected, single.Trigger);
         Assert.Null(single.Caller);
     }
 

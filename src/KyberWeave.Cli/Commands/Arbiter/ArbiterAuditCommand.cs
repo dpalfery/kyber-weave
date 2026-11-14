@@ -1,5 +1,6 @@
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -26,6 +27,12 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
 
     /// <summary>An attestation listed for information; never a finding.</summary>
     public const string AttestationListed = "KW-ARB-AUDIT-005";
+
+    /// <summary>
+    /// The decision model is configured and dispatches went to implementation agents, yet no rule asked it anything:
+    /// the judgement rules did not run (ADR 0082). Silent when no model is configured.
+    /// </summary>
+    public const string NoModelEvaluations = "KW-ARB-AUDIT-006";
 
     /// <summary>
     /// Reads the ledger and the decision log under <c>artifacts/arbiter/</c> and
@@ -157,10 +164,70 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
                 "attested"));
         }
 
+        CheckModelEvaluations(config, events, records, settings, since, planFilter, report, ref reported);
+
         AnsiConsole.MarkupLine($"[grey]{reported} finding(s) over {events.Count} ledger event(s).[/]");
 
         CommandHelpers.Finish(report, settings, "arbiter audit", "Event");
         return report.HasErrors ? 1 : 0;
+    }
+
+    /// <summary>
+    /// Counts the decision-model (step 1) evaluations behind the events in scope and reports
+    /// <see cref="NoModelEvaluations"/> when a model is configured, implementation agents were dispatched, and the model
+    /// was asked nothing. The count is always reported as a metric; with provider <c>none</c> the finding stays silent.
+    /// </summary>
+    private static void CheckModelEvaluations(
+        KyberWeaveConfig config,
+        IReadOnlyList<ArbiterLedgerEvent> events,
+        IReadOnlyList<ArbiterDecisionRecord> records,
+        ArbiterSettings settings,
+        DateTimeOffset? since,
+        PlanFilter? planFilter,
+        DiagnosticReport report,
+        ref int reported)
+    {
+        HashSet<string> scoped = [.. events.Where(e => InScope(e, settings, since, planFilter)).Select(e => e.Id)];
+        List<ArbiterDecisionRecord> inScope = [.. records.Where(record => scoped.Contains(record.LedgerId))];
+        int evaluations = inScope.Sum(record => record.Rules.Count(rule =>
+            rule.Step == 1 && !string.Equals(rule.Answer, ArbiterStep1BatchResult.NotEvaluated, StringComparison.Ordinal)));
+        int implementationDispatches = inScope
+            .Where(record => !record.Trigger.EndsWith(".returned", StringComparison.Ordinal)
+                             && string.Equals(TriggerClassifier.TargetClassFor(record.Target), "implementation", StringComparison.Ordinal))
+            .Select(record => record.LedgerId)
+            .Distinct(StringComparer.Ordinal)
+            .Count();
+        report.AddMetric("model-evaluations", evaluations);
+        report.AddMetric("implementation-dispatches", implementationDispatches);
+        AnsiConsole.MarkupLine(
+            $"[grey]{evaluations} decision-model evaluation(s) over {implementationDispatches} dispatch(es) to implementation agents.[/]");
+
+        if (evaluations > 0 || implementationDispatches == 0 || !ModelConfigured(config))
+            return;
+
+        reported++;
+        report.Add(new Diagnostic(
+            NoModelEvaluations,
+            Severity.Warning,
+            $"A decision model is configured and {implementationDispatches} dispatch(es) went to implementation agents, " +
+            "but no rule asked the model anything: the Arbiter's judgement rules did not run.",
+            "arbiter",
+            Hint: "Check how those dispatches were classified in the decision log: a writer dispatch classified as " +
+                  "investigate runs only the machine-fact rules. See ADR 0082."));
+    }
+
+    private static bool ModelConfigured(KyberWeaveConfig config)
+    {
+        try
+        {
+            return ArbiterUserSettings.ApplyTo(config.Arbiter.Provider, ArbiterCommandComposition.HomeDirectory()).Kind
+                   != ArbiterProviderKind.None;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                                              or YamlDotNet.Core.YamlException)
+        {
+            return config.Arbiter.Provider.Kind != ArbiterProviderKind.None;
+        }
     }
 
     /// <summary>Runs the command without cancellation; the entry point tests use.</summary>

@@ -67,6 +67,9 @@ public static partial class TriggerClassifier
     /// </summary>
     private const string RunStartMarker = "RUN-START";
 
+    /// <summary>The harness whose hook payload names the calling agent for every sub-agent, so no name means the root.</summary>
+    private const string RootNamesNoCallerHarness = "copilot-cli";
+
     /// <summary>
     /// The marker a conductor writes first on a rework dispatch, naming the failure cluster the worker is
     /// reworking. Its <c>FAILURE:</c> section carries the failing output the same-failure rule compares.
@@ -224,7 +227,7 @@ public static partial class TriggerClassifier
             && string.Equals(targetClass, "not-squad", StringComparison.Ordinal))
             return new TriggerClassification(null, null, ArbiterCallerSources.None, target, targetClass, headers, marker, true);
 
-        string? trigger = ClassifyTrigger(resolved, target, targetClass, headers, marker);
+        string? trigger = ClassifyTrigger(resolved, target, targetClass, headers, marker, IsRootSession(ev, resolved));
         if (trigger is not null && IsReturnPhase(ev.Phase))
             trigger = ToReturned(trigger);
 
@@ -294,12 +297,23 @@ public static partial class TriggerClassifier
         return null;
     }
 
+    /// <summary>
+    /// Whether the dispatch came from the session a human started. On Copilot CLI a sub-agent's hook payload carries
+    /// the calling agent's type, so a dispatch that names no caller there is the root session's: a machine fact, not a
+    /// guess. On every other project-wide harness an unnamed caller is unknown, never the root.
+    /// </summary>
+    private static bool IsRootSession(ArbiterEvent ev, string? resolvedCaller) =>
+        resolvedCaller is null
+        && ev.AssertedCaller is null
+        && string.Equals(ev.Harness, RootNamesNoCallerHarness, StringComparison.OrdinalIgnoreCase);
+
     private static string? ClassifyTrigger(
         string? caller,
         string? target,
         string targetClass,
         IReadOnlyDictionary<string, string> headers,
-        string? marker)
+        string? marker,
+        bool rootSession)
     {
         // RUN-START: true is the conductor handing the run-start step to a worker because it has no shell
         // of its own, so the dispatch carries no PLAN_FILE. KW-ARB-PLAN-001 asks whether a delegate names a
@@ -352,8 +366,14 @@ public static partial class TriggerClassifier
         if (headers.ContainsKey("KYBER-ARBITER"))
             return "investigate";
 
-        // A Squad target with no caller and no headers: plan and task identity are unknown, so only the
-        // machine-fact rules have anything to judge, and each of them allows a caller it cannot name.
+        // The root session handing a Squad writer work is a delegation whether or not it wrote headers: the
+        // conductor's headers are optional (ADR 0082), so plan and task identity are resolved from machine facts
+        // (the run's worktree, its active plan, a task id the plan holds) and every judgement allows what it cannot name.
+        if (rootSession && string.Equals(targetClass, "implementation", StringComparison.Ordinal))
+            return "delegate";
+
+        // Any other Squad target with no caller and no headers: only the machine-fact rules have anything to judge,
+        // and each of them allows a caller it cannot name.
         if (!string.Equals(targetClass, "not-squad", StringComparison.Ordinal))
             return "investigate";
 

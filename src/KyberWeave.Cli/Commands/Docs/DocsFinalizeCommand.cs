@@ -3,6 +3,7 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Closeout;
 using KyberWeave.Core.Docs.Parsing;
+using KyberWeave.Core.Docs.Validation;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Docs;
@@ -58,7 +59,8 @@ public sealed class DocsFinalizeCommand : Command<DocsFinalizeSettings>
         }
 
         PlanArguments.Announce(report, settings, relative);
-        PlanFinalizeOutcome outcome = new PlanFinalize(root, effective, () => new DocumentLoader(root, ontology))
+        using PlanTaskAgentPick? picker = PlanTaskAgentPick.ForConfig(effective);
+        PlanFinalizeOutcome outcome = new PlanFinalize(root, effective, () => new DocumentLoader(root, ontology), picker)
             .Run(relative, mode, settings.Approval, date);
         report.AddRange(outcome.Report.Items);
         report.AddMetric("finalized", outcome.Finalized);

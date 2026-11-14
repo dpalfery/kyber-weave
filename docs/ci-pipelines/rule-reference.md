@@ -417,6 +417,7 @@ Hook guards are not rules: hosts cannot tune a guard by id, but `arbiter.enabled
 | `KW-ARB-AUDIT-002` | Warning | Unmarked dispatch to a Squad agent with an unidentified caller |
 | `KW-ARB-AUDIT-003` | Warning | Unpaired event: a `pre` with no `post`, or a `post` with no `pre` |
 | `KW-ARB-AUDIT-004` | Warning | Dispatch to an implementation specialist whose packet body names a planning path |
+| `KW-ARB-AUDIT-006` | Warning | A decision model is configured and dispatches went to implementation agents, but no rule asked the model anything; silent with provider `none` (ADR 0082) |
 | `KW-ARB-HOOK-001` | Error | Internal hook or evaluator error; the dispatch is allowed and the error is logged (ADR 0072) |
 
 ## Shared

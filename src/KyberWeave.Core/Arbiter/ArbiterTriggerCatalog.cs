@@ -27,6 +27,8 @@ public static class ArbiterTriggerCatalog
         "delegation.plan-file-raw",
         "delegation.task",
         "delegation.task-raw",
+        "delegation.identity",
+        "config.planning-dirs",
         "plan.exists",
         "plan.status",
         "plan.development-mode",

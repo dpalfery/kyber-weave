@@ -53,6 +53,7 @@ public sealed class ArbiterExistsFalseRuleTests
         Assert.Equal(
             new HashSet<string>(StringComparer.Ordinal)
             {
+                "KW-ARB-SCOPE-001",
                 "KW-ARB-SCOPE-002",
                 "KW-ARB-READY-001",
                 "KW-ARB-OWNER-001",

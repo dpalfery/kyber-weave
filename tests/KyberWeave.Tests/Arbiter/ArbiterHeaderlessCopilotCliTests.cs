@@ -40,11 +40,21 @@ public sealed class ArbiterHeaderlessCopilotCliTests : IDisposable
         string stdout = Run(Payload("csharp-dev", "Add the status cards to the dashboard."));
 
         Assert.DoesNotContain("\"deny\"", stdout, StringComparison.Ordinal);
-        ArbiterDecisionRecord record = Assert.Single(Decisions());
-        Assert.Equal("investigate", record.Trigger);
+        ArbiterDecisionRecord record = Assert.Single(Decisions(), decision => decision.Trigger != "delegate.model");
+        Assert.Equal("delegate", record.Trigger);
         Assert.Equal("csharp-dev", record.Target);
         Assert.Contains(record.Rules, rule => rule.Id == "KW-ARB-ROSTER-001" && rule.Answer == "no-roster");
+        Assert.Contains(record.Rules, rule => rule.Id == "KW-ARB-PLAN-001" && rule.Answer == "unresolved");
         Assert.DoesNotContain(record.Rules, rule => rule.Effect == "escalate");
+    }
+
+    [Fact]
+    public void ARootDispatchWithNoHeaders_IsAllowedWhenTheModelFaults()
+    {
+        string stdout = Run(Payload("csharp-dev", "Add the status cards to the dashboard."), new FaultingProvider());
+
+        Assert.DoesNotContain("\"deny\"", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain(Decisions().SelectMany(decision => decision.Rules), rule => rule.Effect == "escalate");
     }
 
     [Fact]
@@ -129,15 +139,25 @@ public sealed class ArbiterHeaderlessCopilotCliTests : IDisposable
         return JsonSerializer.Serialize(payload);
     }
 
-    private string Run(string stdin)
+    private string Run(string stdin, IArbiterProvider? provider = null)
     {
-        ArbiterHookDecisionEngine engine = new(providerFactory: _ => new NoneProvider(), homeDirectory: () => _home.Path);
+        ArbiterHookDecisionEngine engine = new(providerFactory: _ => provider ?? new NoneProvider(), homeDirectory: () => _home.Path);
         HookCommand command = new(HarnessAdapterRegistry.CreateDefault(engine), Composition.LoadHostConfig, () => "cli-1");
         using StringWriter stdout = new();
         using StringWriter log = new();
 
         Assert.Equal(0, command.Run("copilot-cli", null, stdin, stdout, log, homeDirectory: _home.Path));
         return stdout.ToString();
+    }
+
+    private sealed class FaultingProvider : IArbiterProvider
+    {
+        public Task<ArbiterStep1BatchResult> AskStep1Async(
+            IReadOnlyList<ArbiterRule> rules,
+            ArbiterFactSet facts,
+            IReadOnlyDictionary<string, string>? step0Answers = null,
+            CancellationToken cancellationToken = default) =>
+            throw new HttpRequestException("model unreachable");
     }
 
     private IReadOnlyList<ArbiterDecisionRecord> Decisions() =>
