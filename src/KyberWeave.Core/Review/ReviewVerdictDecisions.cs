@@ -1,5 +1,6 @@
 using System.Text;
 using KyberWeave.Core.Arbiter.Rules;
+using KyberWeave.Core.Configuration;
 
 namespace KyberWeave.Core.Review;
 
@@ -598,9 +599,10 @@ public static partial class ReviewVerdictDecisions
         && number is >= 1 and <= MaxCitedLine;
 
     /// <summary>
-    /// The full path of a file inside the repository, as long as it exists and is small enough to read; null for a
-    /// name that is malformed, over-long, outside the repository or absent. The name is seat-written, so every way
-    /// it can fail to resolve is an answer, not an error.
+    /// The full path of a file inside the repository, as long as it exists, is small enough to read and is reached
+    /// without a symbolic link; null for a name that is malformed, over-long, outside the repository, absent or a link.
+    /// The name is seat-written, so every way it can fail to resolve is an answer, not an error. A link is refused
+    /// because it can lead out of the repository, and what is read here goes into the decision-model question.
     /// </summary>
     private static string? Resolve(string repositoryRoot, string file)
     {
@@ -608,9 +610,11 @@ public static partial class ReviewVerdictDecisions
         {
             string root = Path.GetFullPath(repositoryRoot).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
             string path = Path.GetFullPath(Path.Combine(repositoryRoot, file));
-            return path.StartsWith(root, StringComparison.Ordinal) && File.Exists(path) && new FileInfo(path).Length <= ReviewSeatInput.MaxFileBytes
-                ? path
-                : null;
+            return path.StartsWith(root, StringComparison.Ordinal)
+                && DocsRootPath.IsContainedFile(repositoryRoot, path[root.Length..], [])
+                && new FileInfo(path).Length <= ReviewSeatInput.MaxFileBytes
+                    ? path
+                    : null;
         }
         catch (Exception ex) when (ReviewSeatInput.IsFileFailure(ex))
         {

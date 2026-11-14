@@ -61,4 +61,44 @@ public sealed class RedEvidenceSaturationTests
 
         Assert.Equal(new TestRunSummary(2, 1), summary);
     }
+
+    [Theory]
+    [InlineData(139)]
+    [InlineData(138)]
+    [InlineData(140)]
+    public void ACompilerMessageCutForTheReasonNeverSplitsASurrogatePair(int lettersBeforeThePair)
+    {
+        // Compiler output is untrusted text: the cut at 140 characters must not leave half of an emoji behind.
+        string message = new string('a', lettersBeforeThePair) + "\U0001F600\U0001F600 tail";
+        RedGateObservation gate = new("build", "dotnet build", 1, $"Broken.cs(3,5): error CS1002: {message}");
+
+        RedOutcome outcome = RedClassifier.Evaluate([gate], ["src/Own.cs"]);
+
+        Assert.False(outcome.Passed);
+        Assert.Contains("CS1002", outcome.Reason, StringComparison.Ordinal);
+        Assert.Contains(new string('a', lettersBeforeThePair), outcome.Reason, StringComparison.Ordinal);
+        Assert.True(HasOnlyWholePairs(outcome.Reason), "the reason holds a surrogate that is not half of a pair");
+    }
+
+    private static bool HasOnlyWholePairs(string text)
+    {
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (char.IsHighSurrogate(text[i]))
+            {
+                if (i + 1 >= text.Length || !char.IsLowSurrogate(text[i + 1]))
+                {
+                    return false;
+                }
+
+                i++;
+            }
+            else if (char.IsLowSurrogate(text[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 }

@@ -72,6 +72,32 @@ public sealed class ReviewDecisionModelTests : IDisposable
     }
 
     [Fact]
+    public async Task ADecisionThatCannotBeLoggedIsReportedInTheSummaryLineAndDoesNotFailTheReview()
+    {
+        // A file where the log folder belongs: the log cannot be created, as on a read-only or full disk.
+        Directory.CreateDirectory(Path.GetDirectoryName(LogDirectory)!);
+        await File.WriteAllTextAsync(LogDirectory, "not a folder");
+        ReviewDecisionModel model = Model(new FakeProvider { Noul = 0.02 });
+
+        IReadOnlyDictionary<string, string> notSeated = await ReviewLensApplicability.NotApplicableAsync(model, ["security", "performance"], "x");
+
+        Assert.Equal(2, notSeated.Count);
+        string? summary = model.SummaryLine([]);
+        Assert.Contains("2 decision record(s) could not be written to the decision log", summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ADecisionThatIsLoggedLeavesNoUnloggedNoteInTheSummaryLine()
+    {
+        ReviewDecisionModel model = Model(new FakeProvider { Noul = 0.02 });
+
+        await ReviewLensApplicability.NotApplicableAsync(model, ["security"], "x");
+
+        Assert.DoesNotContain("could not be written", model.SummaryLine([]), StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Combine(LogDirectory, "decisions.jsonl")));
+    }
+
+    [Fact]
     public async Task ProviderNoneAsksNothingAndPrintsNothing()
     {
         ReviewDecisionModel model = new(new NoneProvider(), ArbiterConfig.ProductDefaults.Rules, LogDirectory, TimeProvider.System);
@@ -438,6 +464,61 @@ public sealed class ReviewDecisionModelTests : IDisposable
         Assert.Equal(32767, text.Length);
         Assert.False(char.IsHighSurrogate(text[^1]));
     }
+
+    [Fact]
+    public void ACitedFileInsideTheRepositoryIsReadForItsSurroundingsAndItsEvidenceLines()
+    {
+        File.WriteAllText(Path.Combine(_temp.Path, "real.txt"), "first\nsecond secret\nthird");
+
+        string? surroundings = ReviewVerdictDecisions.Surroundings(_temp.Path, Finding("f", ReviewSeverity.Minor, line: 2, file: "real.txt"));
+        string evidence = ReviewVerdictDecisions.EvidenceLines(_temp.Path, WithEvidence("see real.txt:2"));
+
+        Assert.Contains("second secret", surroundings, StringComparison.Ordinal);
+        Assert.Contains("real.txt:2: second secret", evidence, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ACitedFileThatIsASymbolicLinkOutOfTheRepositoryIsNeverReadIntoTheQuestion()
+    {
+        string repository = Path.Combine(_temp.Path, "repo");
+        string outside = Path.Combine(_temp.Path, "outside");
+        Directory.CreateDirectory(repository);
+        Directory.CreateDirectory(outside);
+        File.WriteAllText(Path.Combine(outside, "secret.txt"), "line one\nthe outside secret\nline three");
+        string fileLink = Path.Combine(repository, "notes.md");
+        string folderLink = Path.Combine(repository, "linked");
+        if (!TryLink(() => File.CreateSymbolicLink(fileLink, Path.Combine(outside, "secret.txt")))
+            || !TryLink(() => Directory.CreateSymbolicLink(folderLink, outside)))
+        {
+            Assert.Skip("This host cannot create symbolic links, so a link out of the repository cannot be simulated.");
+            return;
+        }
+
+        foreach (string cited in new[] { "notes.md", "linked/secret.txt" })
+        {
+            string? surroundings = ReviewVerdictDecisions.Surroundings(repository, Finding("f", ReviewSeverity.Minor, line: 2, file: cited));
+            string evidence = ReviewVerdictDecisions.EvidenceLines(repository, WithEvidence($"see {cited}:2"));
+
+            Assert.Null(surroundings);
+            Assert.Equal(string.Empty, evidence);
+        }
+    }
+
+    private static bool TryLink(Action create)
+    {
+        try
+        {
+            create();
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private static ReviewFinding WithEvidence(string evidence) =>
+        Finding("e", ReviewSeverity.Minor) with { Evidence = evidence };
 
     [Theory]
     [InlineData("ab\U0001F600cd", 3, 2)]

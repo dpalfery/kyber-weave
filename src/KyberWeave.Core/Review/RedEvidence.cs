@@ -656,7 +656,8 @@ public static partial class RedClassifier
             ? $"{error.Code} for '{error.Symbol}' in {error.File}, which this task did not change"
             : $"{error.Code} in {error.File}: {Shorten(error.Message)}".Replace(" in :", ":", StringComparison.Ordinal).Trim();
 
-    private static string Shorten(string message) => message.Length <= 140 ? message : message[..140] + "...";
+    /// <summary>The message cut to 140 characters without splitting a surrogate pair; it is tool output, so untrusted text.</summary>
+    private static string Shorten(string message) => ReviewSeatInput.Clip(message, 140);
 
     private static string FirstOtherError(string output) =>
         OtherErrorLine().Match(output) is { Success: true } match

@@ -58,6 +58,8 @@ public sealed class ReviewDecisionModel
     private bool _faulted;
     private int _skipped;
     private int _leftOut;
+    private int _logFailures;
+    private string? _logFailure;
 
     /// <summary>Creates the model over a provider; a null provider is the model switched off.</summary>
     /// <param name="provider">The provider that answers; null when no decision model is configured.</param>
@@ -191,9 +193,12 @@ public sealed class ReviewDecisionModel
             ? $"; {_leftOut} finding(s) left out of the comparison: a step compares at most {ReviewVerdictDecisions.MaxFindingsPerFile} findings per file and {ReviewVerdictDecisions.MaxFindingsPerStep} in all, the rest stayed as the seats gave them"
             : string.Empty;
         string fault = _faulted ? "; stopped after a provider fault, the rest went unasked" : string.Empty;
+        string unlogged = _logFailures > 0
+            ? $"; {_logFailures} decision record(s) could not be written to the decision log ({_logFailure})"
+            : string.Empty;
         return counts.Count == 0
-            ? $"decision model: {_decisions.Count} question(s), no effect{skipped}{leftOut}{fault}"
-            : $"decision model: {string.Join(", ", counts)}{skipped}{leftOut}{fault}";
+            ? $"decision model: {_decisions.Count} question(s), no effect{skipped}{leftOut}{fault}{unlogged}"
+            : $"decision model: {string.Join(", ", counts)}{skipped}{leftOut}{fault}{unlogged}";
     }
 
     private sealed record Sent(ReviewQuestion Question, string Id, ArbiterStep1BatchResult? Batch, int LatencyMs);
@@ -344,7 +349,10 @@ public sealed class ReviewDecisionModel
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // The log is an audit trail; a review is never failed because it could not be written.
+            // The log is an audit trail; a review is never failed because it could not be written. The loss is counted
+            // and named in the summary line, so a missing entry is not mistaken for a decision that was never made.
+            _logFailures++;
+            _logFailure ??= ex.GetType().Name;
         }
     }
 
