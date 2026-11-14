@@ -60,6 +60,7 @@ public sealed class ReviewDecisionModel
     private int _leftOut;
     private int _logFailures;
     private string? _logFailure;
+    private string? _faultCause;
 
     /// <summary>Creates the model over a provider; a null provider is the model switched off.</summary>
     /// <param name="provider">The provider that answers; null when no decision model is configured.</param>
@@ -192,7 +193,9 @@ public sealed class ReviewDecisionModel
         string leftOut = _leftOut > 0
             ? $"; {_leftOut} finding(s) left out of the comparison: a step compares at most {ReviewVerdictDecisions.MaxFindingsPerFile} findings per file and {ReviewVerdictDecisions.MaxFindingsPerStep} in all, the rest stayed as the seats gave them"
             : string.Empty;
-        string fault = _faulted ? "; stopped after a provider fault, the rest went unasked" : string.Empty;
+        string fault = _faulted
+            ? $"; stopped after a provider fault{(_faultCause is null ? string.Empty : $" ({_faultCause})")}, the rest went unasked"
+            : string.Empty;
         string unlogged = _logFailures > 0
             ? $"; {_logFailures} decision record(s) could not be written to the decision log ({_logFailure})"
             : string.Empty;
@@ -201,7 +204,7 @@ public sealed class ReviewDecisionModel
             : $"decision model: {string.Join(", ", counts)}{skipped}{leftOut}{fault}{unlogged}";
     }
 
-    private sealed record Sent(ReviewQuestion Question, string Id, ArbiterStep1BatchResult? Batch, int LatencyMs);
+    private sealed record Sent(ReviewQuestion Question, string Id, ArbiterStep1BatchResult? Batch, int LatencyMs, string? FaultType);
 
     private async Task<Sent> SendAsync(ArbiterRule rule, ReviewQuestion question, CancellationToken cancellationToken)
     {
@@ -209,16 +212,18 @@ public sealed class ReviewDecisionModel
         ArbiterRule expanded = Expand(rule, question, 0, facts);
         Stopwatch watch = Stopwatch.StartNew();
         ArbiterStep1BatchResult? batch = null;
+        string? faultType = null;
         try
         {
             batch = await _provider!.AskStep1Async([expanded], new ArbiterFactSet(facts), null, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested && ProviderFailures.IsAbsorbable(ex))
         {
-            // Recorded as a fault below, like the client's own error paths.
+            // Recorded as a fault below, like the client's own error paths; the type is kept so the summary can name it.
+            faultType = ex.GetType().Name;
         }
 
-        return new Sent(question, expanded.Id, batch, (int)watch.ElapsedMilliseconds);
+        return new Sent(question, expanded.Id, batch, (int)watch.ElapsedMilliseconds, faultType);
     }
 
     private async Task RecordAsync(
@@ -232,6 +237,8 @@ public sealed class ReviewDecisionModel
         // The client's error paths answer every question undecidable with no scores; a reply below a floor keeps them.
         bool fault = batch is null || (batch.RequestSent && batch.ScoresByRule is null);
         _faulted |= fault;
+        if (fault)
+            _faultCause ??= sent.FaultType;
         string status = fault ? ArbiterProviderStatuses.Error
             : batch!.RequestSent ? ArbiterProviderStatuses.Answered
             : ArbiterProviderStatuses.OverBudget;

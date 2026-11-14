@@ -72,6 +72,29 @@ public sealed class ReviewDecisionModelTests : IDisposable
     }
 
     [Fact]
+    public async Task AnAbsorbedProviderExceptionKeepsItsTypeInTheSummaryLine()
+    {
+        FakeProvider provider = new() { Throws = new TimeoutException("the endpoint did not answer") };
+        ReviewDecisionModel model = Model(provider);
+
+        await ReviewLensApplicability.NotApplicableAsync(model, ["security", "performance"], "x");
+
+        Assert.True(model.Faulted);
+        Assert.Contains("stopped after a provider fault (TimeoutException)", model.SummaryLine([]), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AFaultWithNoExceptionStillSaysItStoppedWithoutAType()
+    {
+        ReviewDecisionModel model = Model(new FakeProvider { Fault = true });
+
+        await ReviewLensApplicability.NotApplicableAsync(model, ["security"], "x");
+
+        string summary = model.SummaryLine([])!;
+        Assert.Contains("stopped after a provider fault, the rest went unasked", summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ADecisionThatCannotBeLoggedIsReportedInTheSummaryLineAndDoesNotFailTheReview()
     {
         // A file where the log folder belongs: the log cannot be created, as on a read-only or full disk.
@@ -521,6 +544,23 @@ public sealed class ReviewDecisionModelTests : IDisposable
         Assert.Contains("locked.txt: could not be read (IOException)", evidence, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task ACitedFileThatCannotBeReadNamesTheCauseInTheClaimCheckProblemText()
+    {
+        string root = Repository();
+        string path = Path.Combine(root, "a.cs");
+        // Held open without sharing, so the read fails on every platform without relying on file modes or the user.
+        using FileStream held = new(path, FileMode.Open, FileAccess.Read, FileShare.None);
+        FakeProvider provider = new() { Choice = "supports", Confidence = 0.95 };
+
+        ClaimCheck check = Assert.Single(await ReviewVerdictDecisions.CheckClaimsAsync(
+            Model(provider), root, [Finding("locked", ReviewSeverity.Major)]));
+
+        Assert.True(check.NeedsRefuter);
+        Assert.Equal(0, provider.Calls);
+        Assert.Contains("the cited file could not be read (IOException)", check.Note, StringComparison.Ordinal);
+    }
+
     private static bool TryLink(Action create)
     {
         try
@@ -748,6 +788,9 @@ public sealed class ReviewDecisionModelTests : IDisposable
 
         public bool Fault { get; init; }
 
+        /// <summary>When set, the provider call raises it, as a transport failure does.</summary>
+        public Exception? Throws { get; init; }
+
         private readonly Lock _gate = new();
 
         public int Calls { get; private set; }
@@ -766,6 +809,9 @@ public sealed class ReviewDecisionModelTests : IDisposable
                 LastStateText = string.Join('\n', rules.SelectMany(rule => rule.Ask!.State.Values)
                     .Select(name => facts.TryGet(name, out ArbiterFact? fact) ? fact.Value?.ToString() : null));
             }
+
+            if (Throws is not null)
+                throw Throws;
 
             Dictionary<string, string> answers = new(StringComparer.Ordinal);
             Dictionary<string, ArbiterStep1Score> scores = new(StringComparer.Ordinal);
