@@ -107,7 +107,7 @@ public sealed class DocsPacketCommand : Command<DocsPacketSettings>
         string? agent = string.IsNullOrWhiteSpace(settings.Agent) ? entry.Role : settings.Agent.Trim();
         Console.Out.WriteLine(PlanTaskPacket.Fill(entry, root, prior));
         Console.Out.WriteLine();
-        if (PacketTestCommand.Render(root, config, agent, entry, ContractRow(root, plan, entry.Id), OperatingSystem.IsWindows()) is { } tests)
+        if (PacketTestCommand.Render(root, config, agent, entry, PlanTaskTarget.ContractRow(root, plan, entry.Id), OperatingSystem.IsWindows()) is { } tests)
         {
             Console.Out.WriteLine(tests);
             Console.Out.WriteLine();
@@ -115,20 +115,6 @@ public sealed class DocsPacketCommand : Command<DocsPacketSettings>
 
         Console.Out.WriteLine(PacketHostFacts.Render(root, config, agent, entry.Id));
         return 0;
-    }
-
-    private static PlanContractRow? ContractRow(string root, string plan, string? taskId)
-    {
-        try
-        {
-            string markdown = File.ReadAllText(Path.Combine(root, plan.Replace('/', Path.DirectorySeparatorChar)));
-            return PlanDocumentParser.Parse(markdown).ContractRows
-                .FirstOrDefault(row => string.Equals(row.TaskId, taskId, StringComparison.Ordinal));
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return null;
-        }
     }
 
     private static string? ChoosePlan(string root, KyberWeaveConfig config, DocsPacketSettings settings, string current, DiagnosticReport report)

@@ -132,6 +132,10 @@ public static class TaskGateSelection
     /// The host's <c>review.test-map</c>, as source glob to fully qualified class names, or
     /// <see langword="null"/> when the host declares none.
     /// </param>
+    /// <param name="declaredClasses">
+    /// Test classes the task's plan names in its Test contract. When given, they fill <c>{tests}</c> instead of the
+    /// classes looked up from the changed files.
+    /// </param>
     /// <exception cref="ArgumentException">
     /// <paramref name="currentOs"/> is neither <c>windows</c> nor <c>unix</c>. Any other host value would
     /// be read as unix, so it is refused rather than guessed at.
@@ -142,7 +146,8 @@ public static class TaskGateSelection
         string? task,
         string currentOs,
         string? root = null,
-        IReadOnlyDictionary<string, IReadOnlyList<string>>? testMap = null)
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? testMap = null,
+        IReadOnlyList<string>? declaredClasses = null)
     {
         ArgumentNullException.ThrowIfNull(gates);
         ArgumentNullException.ThrowIfNull(changed);
@@ -239,7 +244,9 @@ public static class TaskGateSelection
                 IReadOnlyList<string> classes;
                 try
                 {
-                    classes = TestClassMapping.Resolve(root, matches, testMap);
+                    // Classes a plan declares win: in test-first work they may not exist yet, so a lookup from the
+                    // changed files would find none.
+                    classes = declaredClasses is { Count: > 0 } ? declaredClasses : TestClassMapping.Resolve(root, matches, testMap);
                 }
                 catch (Exception ex) when (ex is InvalidOperationException)
                 {
@@ -333,24 +340,6 @@ public static class TaskGateSelection
         }
 
         return expanded;
-    }
-
-    /// <summary>
-    /// One gate's verify command with <c>{tests}</c> built from test classes the caller already knows, such as those a
-    /// plan's Test contract names, and <c>{task}</c> from the task slug, by the same expansion <see cref="Plan"/> uses.
-    /// </summary>
-    /// <returns>The expanded argv, or <see langword="null"/> when the gate names <c>{changed}</c>, which no task id can fill.</returns>
-    public static IReadOnlyList<string>? ExpandForClasses(ReviewTaskGate gate, IReadOnlyList<string> classes, string task)
-    {
-        ArgumentNullException.ThrowIfNull(gate);
-        ArgumentNullException.ThrowIfNull(classes);
-        ArgumentException.ThrowIfNullOrWhiteSpace(task);
-
-        if (classes.Count == 0 || classes.Count > MaxTestClassesInFilter || gate.Run.Contains(ChangedToken)
-            || NamesTestsInProgram(gate) || ValidateTask(task) is not null)
-            return null;
-
-        return Expand(gate.Id, gate.Run, [], task, TestsFilter(classes), []);
     }
 
     /// <summary>

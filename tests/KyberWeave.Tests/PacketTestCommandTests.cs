@@ -32,9 +32,23 @@ public sealed class PacketTestCommandTests
 
         string? text = PacketTestCommand.Render(KyberWeaveTestPaths.ToolRoot, Config(), "csharp-dev", Task, row, windows: false);
 
-        Assert.Equal(
-            "## Test command\n\nThis task's Test contract runner command, ready to paste:\n\n    dotnet test --filter FullyQualifiedName~XTests",
-            text);
+        Assert.NotNull(text);
+        Assert.StartsWith("## Test command\n", text, StringComparison.Ordinal);
+        Assert.EndsWith(
+            "This task's Test contract runner command, ready to paste:\n\n    dotnet test --filter FullyQualifiedName~XTests",
+            text,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheSectionNamesTheOneGateCommandForTheFailingAndThePassingRunWithNothingLeftToFillIn()
+    {
+        string? text = PacketTestCommand.Render(KyberWeaveTestPaths.ToolRoot, Config(), "csharp-dev", Task, null, windows: false);
+
+        Assert.NotNull(text);
+        Assert.Contains("    kyber-weave review gates . --agent csharp-dev --task t1 --red ", text, StringComparison.Ordinal);
+        Assert.Contains("    kyber-weave review gates . --agent csharp-dev --task t1          #", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("<", text, StringComparison.Ordinal);
     }
 
     [Fact]

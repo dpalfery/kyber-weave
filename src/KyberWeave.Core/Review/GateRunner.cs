@@ -455,6 +455,8 @@ public static class GateRunner
         }
     }
 
+    private const int MaxSummaryLineLength = 200;
+
     private static string SummarizeOutput(string output)
     {
         string[] lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -475,9 +477,10 @@ public static class GateRunner
         string[] lines = output
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
+        // Each line is capped too: one runner line can be tens of kilobytes, and the summary is printed.
         return lines.Length == 0
             ? $"exit code {process.ExitCode}"
-            : string.Join(" | ", lines.TakeLast(3));
+            : string.Join(" | ", lines.TakeLast(3).Select(line => line.Length <= MaxSummaryLineLength ? line : line[..MaxSummaryLineLength] + "…"));
     }
 }
 

@@ -5,6 +5,7 @@ using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Core.Doctor;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review;
@@ -630,8 +631,21 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
         if (settings.BaseRef is not null && ChangedFiles.ValidateBase(settings.BaseRef) is { } baseProblem)
             refusals.Add(baseProblem);
 
+        // With --task and no --paths, the task's own files and declared test classes come from the active plan, the
+        // lookup docs packet prints its test command from, so the worker passes nothing it could get wrong.
+        PlanTaskTargetMatch? target = settings.TaskSlug is not null && settings.Paths.Length == 0
+            ? PlanTaskTarget.Find(EnclosingRepositoryRoot(root), config, settings.TaskSlug, out _)
+            : null;
+
         if (settings.TaskSlug is not null && TaskSlug.Normalise(settings.TaskSlug) is { Length: > 0 } normalised)
             settings.TaskSlug = normalised;
+
+        if (target is not null)
+            settings.Paths = [.. PlanTaskTarget.Files(root, target.Entry)];
+
+        // The report goes where the Arbiter reads the evidence; a --fix run never counts, so it writes none by default.
+        if (settings.Out is null && settings.TaskSlug is not null && !settings.Fix)
+            settings.Out = Path.Combine(root, settings.Red ? TaskGateNextStep.FailingReportPath(settings.TaskSlug) : TaskGateNextStep.PassingReportPath(settings.TaskSlug));
 
         if (TaskGateSelection.ValidateTask(settings.TaskSlug) is { } taskProblem)
             refusals.Add(taskProblem);
@@ -692,7 +706,8 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
 
         string repoRoot = EnclosingRepositoryRoot(root);
         TaskGatePlan plan = TaskGateSelection.Plan(
-            agentGates, changed, settings.TaskSlug, CurrentOs(), repoRoot, config.Review.TestMap);
+            agentGates, changed, settings.TaskSlug, CurrentOs(), repoRoot, config.Review.TestMap,
+            target is null ? null : PlanTaskTarget.DeclaredClasses(target.Row));
         if (plan.Refusals.Count > 0)
             return RefuseInput(report, settings, plan.Refusals);
 
@@ -751,13 +766,16 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
 
         CommandHelpers.TryWriteReport(settings.Out, ReviewJson.Write(finalReport), ReportWriteFailed, report);
 
+        // The run as it happened, not as --red re-judged it: an accepted compile failure is still a failed build to read.
+        IReadOnlyList<string> digest = TestDigest(root, settings, plan.Gates, run.Report, outputs);
         CommandHelpers.Finish(report, settings, "review gates", "Gate");
         if (ReportRenderer.IsHuman(settings.ParsedFormat))
         {
+            WriteLines(digest);
             if (redOutcome is not null)
             {
                 WriteRedLines(redOutcome, agent, finalReport, settings.Out);
-                WriteLines(TaskGateNextStep.AfterFailingRun(redOutcome.Passed, agent, changed, settings.TaskSlug));
+                WriteLines(TaskGateNextStep.AfterFailingRun(redOutcome.Passed, agent, changed, settings.TaskSlug, fromPlan: target is not null));
             }
             else
             {
@@ -771,6 +789,42 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
         }
 
         return report.HasErrors ? 1 : 0;
+    }
+
+    /// <summary>
+    ///     The short form of each test gate and each failed gate (<see cref="TaskTestDigest" />), after writing every
+    ///     gate's full output to a log beside the report, so a worker reads a few lines instead of the raw output.
+    /// </summary>
+    private static List<string> TestDigest(
+        string root, ReviewGatesSettings settings, IReadOnlyList<PlannedTaskGate> planned, GateReport report, Dictionary<string, string> outputs)
+    {
+        List<string> lines = [];
+        foreach (GateResult gate in report.Gates.Where(result => !result.NotApplicable))
+        {
+            PlannedTaskGate? plannedGate = planned.FirstOrDefault(candidate => string.Equals(candidate.Id, gate.Id, StringComparison.Ordinal));
+            if (plannedGate is null || !outputs.TryGetValue(gate.Id, out string? output)
+                || (gate.Passed && !RedClassifier.IsTestCommand(string.Join(' ', plannedGate.Run))))
+                continue;
+
+            string? log = settings.TaskSlug is null ? null : $".agent_scratchpad/{settings.TaskSlug}/logs/{gate.Id}{(settings.Red ? "-red" : string.Empty)}.log";
+            if (log is not null)
+            {
+                try
+                {
+                    string full = Path.Combine(root, log);
+                    Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+                    File.WriteAllText(full, output);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    log = null;
+                }
+            }
+
+            lines.AddRange(TaskTestDigest.Lines(gate.Id, gate.Passed, output, log));
+        }
+
+        return lines;
     }
 
     private static void WriteLines(IReadOnlyList<string> lines)

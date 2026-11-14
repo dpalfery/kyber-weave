@@ -28,12 +28,15 @@ internal static class TaskGateNextStep
     /// <param name="agent">The agent the gates belong to.</param>
     /// <param name="paths">The files the task changed, as given with <c>--paths</c>.</param>
     /// <param name="task">The task id, or null when none was given.</param>
-    public static IReadOnlyList<string> AfterFailingRun(bool accepted, string agent, IReadOnlyList<string> paths, string? task) =>
+    /// <param name="fromPlan">Whether the files came from the plan's task, so the short command finds them again.</param>
+    public static IReadOnlyList<string> AfterFailingRun(bool accepted, string agent, IReadOnlyList<string> paths, string? task, bool fromPlan = false) =>
         accepted
             ? [
                 NextPrefix + "the failing run is recorded; do not paste its lines into the digest. Implement the task, " +
                 "then run the passing run:",
-                "  " + Command(agent, paths, task, PassingReportPath(task ?? "<task-id>")),
+                "  " + (fromPlan && task is not null
+                    ? $"kyber-weave review gates . --agent {agent} --task {task}"
+                    : Command(agent, paths, task, PassingReportPath(task ?? "<task-id>"))),
             ]
             : [
                 NextPrefix + "fix what RED_REJECTED names, without adding a stub to make the tests compile, and run " +
