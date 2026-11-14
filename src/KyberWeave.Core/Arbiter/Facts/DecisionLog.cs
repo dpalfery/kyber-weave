@@ -50,15 +50,17 @@ public sealed class DecisionLog
     public IReadOnlyList<ArbiterDecisionRecord> ReadAll() => ReadAllWithDiagnostics().Records;
 
     /// <summary>
-    /// Reads every complete decision and reports how many lines were malformed. The
-    /// hook uses <see cref="ReadAll"/> and skips them; <c>audit</c> uses this overload
-    /// to report the corruption instead of silently hiding it.
+    /// Reads every complete decision in the newest <see cref="ArbiterLogFiles.MaxReadBytes"/> bytes and reports what
+    /// the read could not show: how many lines were malformed, whether older decisions fell outside the window, and
+    /// why a log that exists could not be read. The hook uses <see cref="ReadAll"/> and stays quiet about all three;
+    /// <c>audit</c> and <c>tune</c> use this overload to report them instead of presenting a partial log as whole.
     /// </summary>
-    public (IReadOnlyList<ArbiterDecisionRecord> Records, int MalformedLines) ReadAllWithDiagnostics()
+    public ArbiterLogRead<ArbiterDecisionRecord> ReadAllWithDiagnostics()
     {
         List<ArbiterDecisionRecord> records = [];
         int malformed = 0;
-        foreach (string line in ArbiterLogFiles.ReadCompleteLines(FilePath))
+        LogTail tail = ArbiterLogFiles.ReadComplete(FilePath);
+        foreach (string line in tail.Lines)
         {
             ArbiterDecisionRecord? record = TryDeserialize(line);
             if (record is null)
@@ -70,7 +72,7 @@ public sealed class DecisionLog
             records.Add(record);
         }
 
-        return (records, malformed);
+        return new ArbiterLogRead<ArbiterDecisionRecord>(records, malformed, tail.Truncated, tail.Unreadable);
     }
 
     /// <summary>

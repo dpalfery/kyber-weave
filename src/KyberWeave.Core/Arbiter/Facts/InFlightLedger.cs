@@ -108,10 +108,16 @@ internal static class ArbiterLogFiles
     /// <summary>
     /// Reads the complete lines of <paramref name="path"/>, looking only at its last <see cref="MaxReadBytes"/> bytes,
     /// without taking any lock, and ignoring a final line that has no newline (a writer mid-line). A log that is
-    /// absent or cannot be read reads as empty.
+    /// absent or cannot be read reads as empty; <see cref="ReadComplete"/> says which, and whether the window cut.
     /// </summary>
-    internal static IReadOnlyList<string> ReadCompleteLines(string path) =>
-        ReadTailLines(path, MaxReadBytes, keepUnterminatedFinalLine: false);
+    internal static IReadOnlyList<string> ReadCompleteLines(string path) => ReadComplete(path).Lines;
+
+    /// <summary>
+    /// <see cref="ReadCompleteLines"/> with what it left out: whether the window cut older lines off, and why a
+    /// log that exists could not be read.
+    /// </summary>
+    internal static LogTail ReadComplete(string path) =>
+        ReadTail(path, MaxReadBytes, keepUnterminatedFinalLine: false);
 
     /// <summary>
     /// Reads the lines inside the last <paramref name="tailBytes"/> bytes of <paramref name="path"/>. A line the
@@ -122,26 +128,45 @@ internal static class ArbiterLogFiles
     /// <param name="path">The file to read.</param>
     /// <param name="tailBytes">The window, at least 1.</param>
     /// <param name="keepUnterminatedFinalLine">Whether a final line with no newline is returned.</param>
-    internal static IReadOnlyList<string> ReadTailLines(string path, long tailBytes, bool keepUnterminatedFinalLine)
+    internal static IReadOnlyList<string> ReadTailLines(string path, long tailBytes, bool keepUnterminatedFinalLine) =>
+        ReadTail(path, tailBytes, keepUnterminatedFinalLine).Lines;
+
+    /// <summary>
+    /// <see cref="ReadTailLines(string, long, bool)"/> with what it left out. An absent file is an empty log with no
+    /// problem; any other open or read failure is an empty log with <see cref="LogTail.Unreadable"/> set, so a
+    /// caller that can report it does not mistake an unreadable log for an empty one.
+    /// </summary>
+    internal static LogTail ReadTail(string path, long tailBytes, bool keepUnterminatedFinalLine)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(tailBytes, 1);
         try
         {
             using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            return ReadTailLines(stream, tailBytes, keepUnterminatedFinalLine);
+            return ReadTail(stream, tailBytes, keepUnterminatedFinalLine);
         }
-        catch (IOException)
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
-            return [];
+            return new LogTail([], Truncated: false, Unreadable: null);
         }
-        catch (UnauthorizedAccessException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            return [];
+            return new LogTail([], Truncated: false, Unreadable: $"{exception.GetType().Name}: {exception.Message}");
         }
     }
 
-    /// <summary>The stream form of <see cref="ReadTailLines(string, long, bool)"/>; it lets no exception escape unhandled.</summary>
-    internal static IReadOnlyList<string> ReadTailLines(Stream stream, long tailBytes, bool keepUnterminatedFinalLine)
+    /// <summary>
+    /// The stream form of <see cref="ReadTailLines(string, long, bool)"/>. It catches nothing: an
+    /// <see cref="IOException"/> from the stream propagates, and only the path overloads turn it into an empty read.
+    /// </summary>
+    internal static IReadOnlyList<string> ReadTailLines(Stream stream, long tailBytes, bool keepUnterminatedFinalLine) =>
+        ReadTail(stream, tailBytes, keepUnterminatedFinalLine).Lines;
+
+    /// <summary>The stream form of <see cref="ReadTail(string, long, bool)"/>; it catches nothing.</summary>
+    /// <remarks>
+    /// The window is read in fixed chunks and cut into lines as it goes, so the memory held is one chunk, the line
+    /// being assembled and the lines kept, not a buffer, a string and a split of the whole window.
+    /// </remarks>
+    internal static LogTail ReadTail(Stream stream, long tailBytes, bool keepUnterminatedFinalLine)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentOutOfRangeException.ThrowIfLessThan(tailBytes, 1);
@@ -150,35 +175,87 @@ internal static class ArbiterLogFiles
         // the first and yield a negative seek or a window of the wrong size.
         long length = stream.Length;
         long window = Math.Min(length, tailBytes);
+        bool truncated = length > tailBytes;
         bool startsMidLine = false;
-        if (length > tailBytes)
+        if (truncated)
         {
             stream.Seek(length - tailBytes - 1, SeekOrigin.Begin);
             startsMidLine = stream.ReadByte() != '\n';
         }
 
-        byte[] buffer = new byte[window];
-        int read = stream.ReadAtLeast(buffer, buffer.Length, throwOnEndOfStream: false);
-        if (read == 0)
+        List<string> lines = [];
+        byte[] chunk = new byte[Math.Min(window, ChunkBytes)];
+        using MemoryStream pending = new();
+        long remaining = window;
+        int segment = 0;
+        while (remaining > 0)
         {
-            return [];
+            int read = stream.Read(chunk, 0, (int)Math.Min(chunk.Length, remaining));
+            if (read == 0)
+            {
+                break;
+            }
+
+            remaining -= read;
+            int start = 0;
+            while (start < read)
+            {
+                int newline = Array.IndexOf(chunk, (byte)'\n', start, read - start);
+                if (newline < 0)
+                {
+                    pending.Write(chunk, start, read - start);
+                    break;
+                }
+
+                pending.Write(chunk, start, newline - start);
+                AddSegment(lines, pending, segment++, startsMidLine);
+                start = newline + 1;
+            }
         }
 
-        string[] segments = Encoding.UTF8.GetString(buffer, 0, read).Split('\n');
-        // The first segment is a fragment when the window opened mid-line (and possibly mid-character). A file that
-        // ends with '\n' yields a trailing empty segment and a torn final write a trailing partial one; unless the
-        // caller wants it, that last segment is not a complete record.
-        int first = startsMidLine ? 1 : 0;
-        int end = keepUnterminatedFinalLine ? segments.Length : segments.Length - 1;
-        List<string> lines = new(Math.Max(0, end - first));
-        for (int i = first; i < end; i++)
+        // What is left has no newline after it: a writer mid-line or a torn write. The first segment is a fragment
+        // when the window opened mid-line (and possibly mid-character), and is never kept.
+        if (pending.Length > 0 && keepUnterminatedFinalLine)
         {
-            lines.Add(segments[i].TrimEnd('\r'));
+            AddSegment(lines, pending, segment, startsMidLine);
         }
 
-        return lines;
+        return new LogTail(lines, truncated, Unreadable: null);
+    }
+
+    private const int ChunkBytes = 64 * 1024;
+
+    private static void AddSegment(List<string> lines, MemoryStream segmentBytes, int index, bool startsMidLine)
+    {
+        if (index > 0 || !startsMidLine)
+        {
+            lines.Add(Encoding.UTF8.GetString(segmentBytes.GetBuffer(), 0, (int)segmentBytes.Length).TrimEnd('\r'));
+        }
+
+        segmentBytes.SetLength(0);
     }
 }
+
+/// <summary>What one windowed read of an append-only log found, and what it could not show.</summary>
+/// <param name="Lines">The whole lines in the window, in file order.</param>
+/// <param name="Truncated">Whether the log was longer than the window, so older lines were not read.</param>
+/// <param name="Unreadable">Why a log that exists could not be read; null when it was read or is absent.</param>
+internal readonly record struct LogTail(IReadOnlyList<string> Lines, bool Truncated, string? Unreadable);
+
+/// <summary>
+/// The records of an append-only Arbiter log with what the read could not show: lines that were not a record, a window
+/// that cut older records off, and a log that exists but could not be read.
+/// </summary>
+/// <typeparam name="T">The record type.</typeparam>
+/// <param name="Records">The records in the window, in append order.</param>
+/// <param name="MalformedLines">How many whole lines were not a record.</param>
+/// <param name="Truncated">Whether the log was longer than the read window, so older records were not read.</param>
+/// <param name="Unreadable">Why a log that exists could not be read; null otherwise.</param>
+public sealed record ArbiterLogRead<T>(
+    IReadOnlyList<T> Records,
+    int MalformedLines,
+    bool Truncated,
+    string? Unreadable);
 
 /// <summary>
 /// The ledger (<c>artifacts/arbiter/ledger.jsonl</c>, schema
@@ -242,15 +319,17 @@ public sealed class InFlightLedger
     public IReadOnlyList<ArbiterLedgerEvent> ReadAll() => ReadAllWithDiagnostics().Records;
 
     /// <summary>
-    /// Reads every complete event and reports how many lines were malformed. The hook
-    /// uses <see cref="ReadAll"/> and skips them; <c>audit</c> uses this overload to
-    /// report the corruption instead of silently hiding it.
+    /// Reads every complete event in the newest <see cref="ArbiterLogFiles.MaxReadBytes"/> bytes and reports what
+    /// the read could not show: how many lines were malformed, whether older events fell outside the window, and
+    /// why a log that exists could not be read. The hook uses <see cref="ReadAll"/> and stays quiet about all three;
+    /// <c>audit</c> and <c>tune</c> use this overload to report them instead of presenting a partial log as whole.
     /// </summary>
-    public (IReadOnlyList<ArbiterLedgerEvent> Records, int MalformedLines) ReadAllWithDiagnostics()
+    public ArbiterLogRead<ArbiterLedgerEvent> ReadAllWithDiagnostics()
     {
         List<ArbiterLedgerEvent> records = [];
         int malformed = 0;
-        foreach (string line in ArbiterLogFiles.ReadCompleteLines(FilePath))
+        LogTail tail = ArbiterLogFiles.ReadComplete(FilePath);
+        foreach (string line in tail.Lines)
         {
             ArbiterLedgerEvent? record = TryDeserialize(line);
             if (record is null)
@@ -262,7 +341,7 @@ public sealed class InFlightLedger
             records.Add(record);
         }
 
-        return (records, malformed);
+        return new ArbiterLogRead<ArbiterLedgerEvent>(records, malformed, tail.Truncated, tail.Unreadable);
     }
 
     /// <summary>

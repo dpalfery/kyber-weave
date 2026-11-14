@@ -963,6 +963,7 @@ at a line start or the one id named after `task` or `packet`. `delegation.identi
 `KW-ARB-GATE-REPORT-001` `not-a-task`, `KW-ARB-DIFF-001` `no-task`): a closeout, a delivery or a check is
 rightly not a plan task. `arbiter audit` counts the decision-model evaluations and reports
 `KW-ARB-AUDIT-006` when a configured model was never asked about dispatches to implementation agents.
+A read looks only at the newest 8 MiB of the ledger and of the decision log; the hook stays quiet about older records, but `arbiter audit` reports `KW-ARB-AUDIT-007` and `arbiter tune` prints the same warning (a `truncated` key in `--json`) so a partial history is not read as a whole one. A log that exists but cannot be read fails both commands closed instead of reading as empty.
 
 Caller inference from a planner target is one of those gates, and it applies only to a
 marked dispatch or on a trusted harness (`claude`, `copilot-vscode`). So an unmarked

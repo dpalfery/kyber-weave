@@ -111,6 +111,55 @@ public sealed class ArbiterLogFilesReadTests : IDisposable
         Assert.Equal(1, stream.LengthReads);
     }
 
+    [Fact]
+    public void AWindowIsReadInBoundedChunksNotInOneAllocationTheSizeOfTheWindow()
+    {
+        // Lines that straddle the 64 KiB chunk boundary must still come back whole and in order.
+        string[] expected = [.. Enumerable.Range(0, 40).Select(i => i.ToString("D2", CultureInfo.InvariantCulture).PadRight(50_000, 'y'))];
+        byte[] bytes = Encoding.UTF8.GetBytes(string.Join('\n', expected) + "\n");
+        using RecordingStream stream = new(bytes);
+
+        IReadOnlyList<string> read = ArbiterLogFiles.ReadTailLines(stream, bytes.Length, keepUnterminatedFinalLine: false);
+
+        Assert.Equal(expected, read);
+        Assert.InRange(stream.LargestRequest, 1, 64 * 1024);
+    }
+
+    [Fact]
+    public void AnUnterminatedFinalLineIsKeptOnlyWhenAskedFor()
+    {
+        byte[] bytes = Encoding.UTF8.GetBytes("one\ntwo\nthr");
+
+        Assert.Equal(["one", "two"], ArbiterLogFiles.ReadTailLines(new MemoryStream(bytes), 100, keepUnterminatedFinalLine: false));
+        Assert.Equal(["one", "two", "thr"], ArbiterLogFiles.ReadTailLines(new MemoryStream(bytes), 100, keepUnterminatedFinalLine: true));
+    }
+
+    [Fact]
+    public void AWindowThatOpensMidLineNeverKeepsTheFragmentEvenWhenItIsTheOnlyLine()
+    {
+        byte[] bytes = Encoding.UTF8.GetBytes("abcdefghij\n");
+
+        Assert.Empty(ArbiterLogFiles.ReadTailLines(new MemoryStream(bytes), 5, keepUnterminatedFinalLine: true));
+    }
+
+    /// <summary>A stream that records the largest buffer any read was offered.</summary>
+    private sealed class RecordingStream(byte[] bytes) : MemoryStream(bytes)
+    {
+        public int LargestRequest { get; private set; }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            LargestRequest = Math.Max(LargestRequest, count);
+            return base.Read(buffer, offset, count);
+        }
+
+        public override int Read(Span<byte> buffer)
+        {
+            LargestRequest = Math.Max(LargestRequest, buffer.Length);
+            return base.Read(buffer);
+        }
+    }
+
     /// <summary>A stream whose length reads as 0 after the first read, as a file truncated between two reads would.</summary>
     private sealed class ShrinkingLengthStream(byte[] bytes) : MemoryStream(bytes)
     {

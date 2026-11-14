@@ -35,6 +35,12 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
     public const string NoModelEvaluations = "KW-ARB-AUDIT-006";
 
     /// <summary>
+    /// The ledger or the decision log is longer than the window one read looks at, so its older records were not
+    /// read and what follows describes only the newest part. Also reported by <c>arbiter tune</c>.
+    /// </summary>
+    public const string LogWindowTruncated = "KW-ARB-AUDIT-007";
+
+    /// <summary>
     /// Reads the ledger and the decision log under <c>artifacts/arbiter/</c> and
     /// reports <c>KW-ARB-AUDIT-001</c> to <c>-004</c> as warnings, filtered by
     /// <c>--plan</c>, <c>--session</c> and <c>--since</c>. Attestations are
@@ -96,19 +102,43 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
         IReadOnlyList<ArbiterDecisionRecord> records;
         try
         {
-            (events, int malformedEvents) = ledger.ReadAllWithDiagnostics();
-            (records, int malformedRecords) = decisions.ReadAllWithDiagnostics();
-            if (malformedEvents + malformedRecords > 0)
+            ArbiterLogRead<ArbiterLedgerEvent> ledgerRead = ledger.ReadAllWithDiagnostics();
+            ArbiterLogRead<ArbiterDecisionRecord> decisionRead = decisions.ReadAllWithDiagnostics();
+            events = ledgerRead.Records;
+            records = decisionRead.Records;
+            if (ArbiterLogProblems.Unreadable(ledgerRead, decisionRead) is { } unreadable)
+            {
+                report.Add(new Diagnostic(
+                    ArbiterEvaluator.HookErrorCode,
+                    Severity.Error,
+                    $"The arbiter log under '{arbiterDirectory}' exists but could not be read: {unreadable}",
+                    arbiterDirectory,
+                    "The audit fails closed rather than reporting an unreadable log as an empty one."));
+                CommandHelpers.Finish(report, settings, "arbiter audit", "Event");
+                return 1;
+            }
+
+            if (ledgerRead.MalformedLines + decisionRead.MalformedLines > 0)
             {
                 report.Add(new Diagnostic(
                     ArbiterEvaluator.HookErrorCode,
                     Severity.Error,
                     $"The arbiter log under '{arbiterDirectory}' holds " +
-                    $"{malformedEvents + malformedRecords} line(s) that are not a complete record.",
+                    $"{ledgerRead.MalformedLines + decisionRead.MalformedLines} line(s) that are not a complete record.",
                     arbiterDirectory,
                     "The ledger or the decision log holds a line that is not a complete record; the audit fails closed rather than reporting a partial log."));
                 CommandHelpers.Finish(report, settings, "arbiter audit", "Event");
                 return 1;
+            }
+
+            if (ArbiterLogProblems.TruncationNote(ledgerRead, decisionRead) is { } truncated)
+            {
+                report.Add(new Diagnostic(
+                    LogWindowTruncated,
+                    Severity.Warning,
+                    $"The arbiter log under '{arbiterDirectory}': {truncated}",
+                    arbiterDirectory,
+                    "Findings below describe only the newest records; older dispatches and decisions are not counted."));
             }
         }
         // A truncated, hand-edited or foreign line is malformed JSON, which throws
