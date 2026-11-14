@@ -386,7 +386,7 @@ public sealed class SquadDocsHarvestContractTests
     /// closeout command, a specification's archival <c>git mv</c>, its task file's <c>git rm</c>, the two documentation checks, rewriting a task file it made stale,
     /// targeted doc-pinning tests, and committing its own documentation edits, so a later edit cannot widen the instruction-scoped boundary
     /// silently. The never-push and only-archiver rules are graded from the prose rule
-    /// catalog (<c>docs-dev-shell-commands</c>, <c>docs-dev-only-archiver</c>).
+    /// catalog (<c>docs-dev-shell-commands</c>, <c>docs-dev-only-spec-archiver</c>).
     /// </summary>
     [Fact]
     public void DocsDevBodyNamesItsOnlyShellCommands()

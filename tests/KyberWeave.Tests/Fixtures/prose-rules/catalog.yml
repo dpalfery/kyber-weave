@@ -33,7 +33,7 @@ rules:
       - path: products/kyber-squad/skills/delivery-execution/SKILL.md
         section: Test-first mode
     controls:
-      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/agents/conductor/references/autonomy.md
       - products/kyber-squad/skills/task-gate/references/rework.md
     retired:
       statement: The completion digest carries a RED_EVIDENCE line that names the runner filter, the failing tests and the reason, or says none when there was no RED run.
@@ -254,13 +254,13 @@ rules:
     controls:
       - products/kyber-squad/shared/worker-baseline.md
       - products/kyber-squad/skills/code-review/references/lenses/performance.md
-  - id: task-gate-two-cycle-cap
-    statement: The task gate allows at most two fix-and-rerun cycles and then stops even if a gate still fails.
+  - id: task-gate-three-cycle-cap
+    statement: The task gate allows at most three fix-and-rerun cycles and then stops even if a gate still fails.
     stated-in:
       - products/kyber-squad/skills/task-gate/SKILL.md
     controls:
       - products/kyber-squad/shared/worker-baseline.md
-      - products/kyber-squad/agents/conductor/references/autonomy.md
+      - products/kyber-squad/agents/go-dev.md
   # ---------------------------------------------------------------- the full-suite ban and test runs
   - id: C1
     statement: A developer agent, or worker, never runs the full test suite.
@@ -319,8 +319,6 @@ rules:
       - products/kyber-squad/agents/conductor.md
       - path: products/kyber-squad/skills/delivery-execution/SKILL.md
         section: Test-first mode
-      - products/kyber-squad/agents/csharp-dev.md
-      - products/kyber-squad/agents/test-dev.md
       - docs/standards/test/README.md
       - path: docs/kyber-squad/onboarding.md
         section: Fast assembly runner invocation
@@ -362,8 +360,6 @@ rules:
   - id: shared-infra-targeted-set
     statement: A worker whose change reaches shared test infrastructure still runs a targeted set of tests, not the full suite.
     stated-in:
-      - products/kyber-squad/agents/csharp-dev.md
-      - products/kyber-squad/agents/test-dev.md
       - docs/standards/test/README.md
     controls:
       - products/kyber-squad/agents/go-dev.md
@@ -392,7 +388,8 @@ rules:
       - products/kyber-squad/agents/test-dev.md
       - path: products/kyber-squad/skills/delivery-execution/SKILL.md
         anchor: "--artifacts-path"
-      - products/kyber-squad/skills/testing/SKILL.md
+      - path: products/kyber-squad/skills/task-gate/SKILL.md
+        anchor: "--artifacts-path"
       - path: docs/kyber-squad/architecture.md
         anchor: "--artifacts-path"
         section: Concurrency and scheduling model (worktree and artifact isolation)
@@ -411,10 +408,7 @@ rules:
     statement: Build once and test many times, reusing the build with --no-build or running the compiled test assembly directly.
     stated-in:
       - products/kyber-squad/agents/conductor.md
-      - products/kyber-squad/agents/csharp-dev.md
-      - products/kyber-squad/agents/test-dev.md
       - products/kyber-squad/skills/delivery-execution/SKILL.md
-      - products/kyber-squad/skills/testing/SKILL.md
       - docs/standards/test/README.md
     controls:
       - products/kyber-squad/agents/go-dev.md
@@ -431,21 +425,10 @@ rules:
     statement: The exact command for running tests directly lives in the host test standard's Completion section.
     stated-in:
       - products/kyber-squad/agents/conductor.md
-      - products/kyber-squad/agents/csharp-dev.md
-      - products/kyber-squad/agents/test-dev.md
       - products/kyber-squad/skills/delivery-execution/SKILL.md
-      - products/kyber-squad/skills/testing/SKILL.md
     controls:
       - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/agents/conductor/references/autonomy.md
-  - id: runner-dotnet-only
-    statement: The direct test-assembly runner applies to .NET; other languages use their own way of targeting tests.
-    stated-in:
-      - products/kyber-squad/skills/testing/SKILL.md
-    controls:
-      - products/kyber-squad/agents/go-dev.md
-      - products/kyber-squad/shared/worker-baseline.md
-  # ---------------------------------------------------------------- discovery, packets, and parallel work
   - id: D1
     statement: Before reading or searching files directly, the reader asks the code index (codegraph_explore) and the documentation tools.
     stated-in:
@@ -591,7 +574,6 @@ rules:
     stated-in:
       - products/kyber-squad/agents/conductor.md
       - products/kyber-squad/skills/delivery-execution/SKILL.md
-      - products/kyber-squad/skills/testing/SKILL.md
     controls:
       - products/kyber-squad/skills/task-gate/references/rework.md
       - products/kyber-squad/agents/conductor/references/autonomy.md
@@ -706,8 +688,8 @@ rules:
     controls:
       - products/kyber-squad/shared/worker-baseline.md
       - products/kyber-squad/agents/conductor/references/autonomy.md
-  - id: fix-round-one-finding
-    statement: Each review fix-round dispatch carries one finding, or one tightly related group, with its file and line.
+  - id: fix-round-one-dispatch-per-session
+    statement: A review fix round sends each owning worker session one dispatch carrying all of that session's fix lines, never one dispatch per finding.
     stated-in:
       - path: products/kyber-squad/skills/delivery-execution/SKILL.md
         section: "Review loop (the verdict's `fix:` lines)"
@@ -799,7 +781,6 @@ rules:
   - id: review-cycle-belongs-to-this-change
     statement: A recorded review cycle counts as a prior cycle only when it belongs to the current change, meaning it reviewed the same branch and base and its head is an ancestor of HEAD; the gate run ignores and lists any other recorded cycle.
     stated-in:
-      - products/kyber-squad/agents/code-reviewer.md
       - products/kyber-squad/skills/code-review/SKILL.md
     controls:
       - products/kyber-squad/skills/task-gate/references/rework.md
@@ -894,10 +875,9 @@ rules:
       - products/kyber-squad/skills/code-review/references/lenses/performance.md
       - products/kyber-squad/agents/conductor/references/autonomy.md
   - id: materialized-diff
-    statement: The code reviewer writes the diff to a file under the scratchpad before the council fans out, and passes that path to the seats.
+    statement: The review tooling writes the diff to a file in the review cycle's folder before the seats start.
     stated-in:
       - products/kyber-squad/agents/code-reviewer.md
-      - products/kyber-squad/skills/code-review/references/first-review.md
       - path: docs/code-review/architecture.md
         section: Review evidence contract
     controls:
@@ -911,14 +891,6 @@ rules:
     controls:
       - products/kyber-squad/skills/task-gate/references/rework.md
       - products/kyber-squad/agents/conductor/references/autonomy.md
-  - id: materialized-diff-cleanup
-    statement: The code reviewer removes the materialized diff file once the council is done.
-    stated-in:
-      - products/kyber-squad/agents/code-reviewer.md
-      - products/kyber-squad/skills/code-review/references/first-review.md
-    controls:
-      - products/kyber-squad/skills/task-gate/references/rework.md
-      - products/kyber-squad/agents/go-dev.md
   - id: seat-min-confidence
     statement: A review seat reports only findings at or above the effective minimum confidence.
     stated-in:
@@ -958,7 +930,7 @@ rules:
       - products/kyber-squad/skills/task-gate/references/rework.md
       - docs/kyber-arbiter/jev-decision-model.md
   - id: not-seated-recorded
-    statement: Every lens that is not seated is recorded with its reason, and the verdict refuses to run otherwise.
+    statement: Every lens that is not seated is recorded with its reason in the cycle folder, and the verdict reads those records.
     stated-in:
       - products/kyber-squad/agents/code-reviewer.md
       - products/kyber-squad/skills/code-review/SKILL.md
@@ -1095,7 +1067,6 @@ rules:
   - id: single-gate-recheck
     statement: To re-check one gate, the reviewer runs review gates with --gate and that gate's id instead of re-running every gate.
     stated-in:
-      - products/kyber-squad/agents/code-reviewer.md
       - products/kyber-squad/skills/code-review/SKILL.md
     controls:
       - products/kyber-squad/skills/task-gate/references/rework.md
@@ -1108,7 +1079,7 @@ rules:
       - products/kyber-squad/skills/task-gate/references/rework.md
       - products/kyber-squad/agents/review-triage.md
   - id: council-handback-reuses-gates
-    statement: A reviewer re-invoked with the seats' output after a COUNCIL_SEATS_NEEDED handback finds gates.json already in the cycle folder and does not run the gates again.
+    statement: A reviewer re-invoked with each seat's outcome after a COUNCIL_SEATS_NEEDED handback finds the seat files already in the cycle folder and goes straight to adjudication.
     stated-in:
       - products/kyber-squad/agents/code-reviewer.md
     controls:
@@ -1651,7 +1622,7 @@ rules:
         - products/kyber-squad/agents/conductor/references/autonomy.md
         - products/kyber-squad/skills/delivery-execution/SKILL.md
   - id: ci-wait-bound
-    statement: Required CI is waited for at most 60 minutes; when it is not done by then, the pull request stays a draft.
+    statement: Only the delivery agent fallback waits for required CI, for at most 60 minutes; the deliver tool never waits for it.
     stated-in:
       - products/kyber-squad/agents/conductor/references/autonomy.md
     controls:
@@ -1703,10 +1674,9 @@ rules:
       - products/kyber-squad/skills/task-gate/references/rework.md
       - products/kyber-squad/skills/code-review/references/lenses/performance.md
   - id: autonomous-approval-by-specialist
-    statement: The conductor never writes an approval itself; it re-invokes the owning specialist with AUTONOMOUS_APPROVAL, and the specialist records it.
+    statement: Outside the plan's final approve-and-execute gate, which the finalize tool records, the conductor never writes an approval itself; it re-invokes the owning specialist with AUTONOMOUS_APPROVAL, and the specialist records it.
     stated-in:
       - products/kyber-squad/agents/conductor/references/autonomy.md
-      - products/kyber-squad/agents/conductor/references/plan-path.md
       - path: products/kyber-squad/agents/conductor/references/spec-path.md
         anchor: "AUTONOMOUS_APPROVAL"
       - path: products/kyber-squad/agents/architect.md
@@ -1721,7 +1691,7 @@ rules:
       example: In autonomous mode the conductor supplies the approval and records it in the plan itself.
       seed-into: products/kyber-squad/shared/worker-baseline.md
       absent-from:
-        - products/kyber-squad/agents/conductor/references/plan-path.md
+        - products/kyber-squad/agents/conductor/references/spec-path.md
   - id: needs-human-retired-recorded
     statement: The NEEDS_HUMAN verdict and the always-human reserved-path stop are retired.
     stated-in:
@@ -1831,10 +1801,19 @@ rules:
     controls:
       - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/skills/task-gate/references/rework.md
-  - id: docs-dev-only-archiver
-    statement: docs-dev is the only role that archives a plan or a specification.
+  - id: docs-dev-only-spec-archiver
+    statement: docs-dev is the only role that archives a specification.
     stated-in:
       - products/kyber-squad/agents/docs-dev.md
+    controls:
+      - products/kyber-squad/agents/go-dev.md
+      - products/kyber-squad/skills/task-gate/references/rework.md
+  - id: plan-archived-by-conductor-tool
+    statement: A completed plan is archived by the conductor's archive tool; docs-dev archives one only on an archive dispatch.
+    stated-in:
+      - products/kyber-squad/agents/docs-dev.md
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        anchor: "docs_archive_plan_after_closeout_is_complete"
     controls:
       - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/skills/task-gate/references/rework.md
@@ -2316,7 +2295,6 @@ rules:
     statement: test-dev is assigned only tasks whose deliverable is tests, such as characterization tests, an end-to-end suite or test infrastructure.
     stated-in:
       - products/kyber-squad/agents/test-dev.md
-      - products/kyber-squad/agents/architect/references/test-first-contract.md
     controls:
       - products/kyber-squad/agents/sql-database-architect.md
       - products/kyber-squad/shared/worker-baseline.md
