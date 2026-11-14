@@ -9,7 +9,8 @@ namespace KyberWeave.Tests;
 /// The gate step reads its skill list from the folder, so validate, lint and scan cover a new skill
 /// without an edit. Code scanning needs one upload step per skill, because each upload carries its own
 /// category; this suite fails when a skill folder has no such step, or when the loop goes back to a
-/// hand-kept list. It reads files only.
+/// hand-kept list. The review gates in <c>.kyber-weave/kyber-weave.yml</c> are listed per skill, so it also
+/// fails when a skill folder lacks its validate, lint or scan gate. It reads files only.
 /// </remarks>
 public sealed class CiSkillGateCoverageTests
 {
@@ -39,6 +40,31 @@ public sealed class CiSkillGateCoverageTests
         Assert.True(
             missing.Count == 0,
             $"ci.yml has no SARIF upload step for: {string.Join(", ", missing)}. Add one per skill to the skill-docs-gate job.");
+    }
+
+    /// <summary>Every skill folder has its validate, lint and scan review gates in the repository configuration.</summary>
+    [Fact]
+    public void EverySkillFolderHasAValidateLintAndScanGate()
+    {
+        string config = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, ".kyber-weave", "kyber-weave.yml"));
+        string skillsRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, ".apm", "skills");
+        string[] skills = Directory.GetDirectories(skillsRoot).Select(d => Path.GetFileName(d)!).Order().ToArray();
+        Assert.NotEmpty(skills);
+
+        List<string> missing = [];
+        foreach (string skill in skills)
+        {
+            foreach (string verb in new[] { "validate", "lint", "scan" })
+            {
+                string argv = $"skill, {verb}, .apm/skills/{skill}";
+                if (!config.Contains(argv + "]", StringComparison.Ordinal) && !config.Contains(argv + ",", StringComparison.Ordinal))
+                    missing.Add($"{verb} {skill}");
+            }
+        }
+
+        Assert.True(
+            missing.Count == 0,
+            $"kyber-weave.yml has no review gate for: {string.Join("; ", missing)}. Add the validate, lint and scan triplet under review.gates.");
     }
 
     private static string ReadCi() =>

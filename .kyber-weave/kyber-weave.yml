@@ -199,6 +199,20 @@ review:
       include: *skill-kw-onboarding-paths
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/kw-onboarding, --fail-on, critical]
       blocking: true
+    # The spec-conductor skill orchestrates delivery of an existing specification bundle, so
+    # its trigger wording and command examples are gated like the other skills' surfaces.
+    - id: skill-validate-spec-conductor
+      include: &skill-spec-conductor-paths [".apm/skills/spec-conductor/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Core/Skills/**"]
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/spec-conductor]
+      blocking: true
+    - id: skill-lint-spec-conductor
+      include: *skill-spec-conductor-paths
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, lint, .apm/skills/spec-conductor, --min-desc-score, "70"]
+      blocking: true
+    - id: skill-scan-spec-conductor
+      include: *skill-spec-conductor-paths
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/spec-conductor, --fail-on, critical]
+      blocking: true
     - id: docs-validate
       include: ["docs/**", "**/*.md", ".kyber-weave/kyber-weave.yml", "src/**"]
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, docs, validate, .]
