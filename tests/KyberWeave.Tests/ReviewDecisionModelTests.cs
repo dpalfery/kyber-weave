@@ -274,6 +274,20 @@ public sealed class ReviewDecisionModelTests : IDisposable
         Assert.Contains("other.md:2: status: archived", provider.LastStateText, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("}", false)]
+    [InlineData("});\n}", false)]
+    [InlineData("x;", false)]
+    [InlineData("    return total / count;", true)]
+    [InlineData("if (count == 0)\n{\n    return total / count;", true)]
+    [InlineData("return total / count;\nif (count == 0)", false)]
+    public void AnExcerptNeedsEnoughSignalAndItsLinesInOrder(string excerpt, bool verified)
+    {
+        const string window = "if (count == 0)\n{\n    return total / count;\n}\n";
+
+        Assert.Equal(verified, ReviewVerdictDecisions.ExcerptIsIn(excerpt, window));
+    }
+
     [Fact]
     public async Task AnOverLongOrEscapingFileNameIsAQuoteProblemNotACrash()
     {

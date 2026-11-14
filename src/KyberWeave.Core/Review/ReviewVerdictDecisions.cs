@@ -51,6 +51,9 @@ public static partial class ReviewVerdictDecisions
     private const int MaxSurroundingsFileBytes = 1 << 20;
     private const int MaxEvidenceLines = 12;
 
+    /// <summary>The fewest non-blank characters the strongest line of a quoted excerpt must have to verify it.</summary>
+    private const int MinSignalCharacters = 8;
+
     /// <summary>The largest line number a citation may name; a source file is capped at one megabyte.</summary>
     private const int MaxCitedLine = 1 << 20;
 
@@ -479,11 +482,29 @@ public static partial class ReviewVerdictDecisions
         System.Text.RegularExpressions.RegexOptions.CultureInvariant)]
     private static partial System.Text.RegularExpressions.Regex EvidenceCitation();
 
-    /// <summary>Whether every non-blank excerpt line, trimmed, appears in the window: the quote is really there.</summary>
+    /// <summary>
+    /// Whether the quote is really in the window. Lines that are only punctuation (a brace, a bracket) carry no
+    /// signal and are not judged; at least one other line must have <see cref="MinSignalCharacters"/> non-blank
+    /// characters, and the judged lines must appear in the order given. A weaker excerpt is "not verified".
+    /// </summary>
     internal static bool ExcerptIsIn(string excerpt, string window)
     {
-        string[] lines = [.. excerpt.Split('\n').Select(line => line.Trim()).Where(line => line.Length > 0)];
-        return lines.Length > 0 && lines.All(line => window.Contains(line, StringComparison.Ordinal));
+        string[] lines = [.. excerpt.Split('\n')
+            .Select(line => line.Trim())
+            .Where(line => line.Any(char.IsLetterOrDigit))];
+        if (!lines.Any(line => line.Count(character => !char.IsWhiteSpace(character)) >= MinSignalCharacters))
+            return false;
+
+        int from = 0;
+        foreach (string line in lines)
+        {
+            int at = window.IndexOf(line, from, StringComparison.Ordinal);
+            if (at < 0)
+                return false;
+            from = at + line.Length;
+        }
+
+        return true;
     }
 
     /// <summary>A severity as seat files write it.</summary>
