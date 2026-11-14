@@ -154,11 +154,32 @@ public sealed class ArbiterRunStoreTests : IDisposable
 
         IReadOnlyList<string> returns = store.ReadReturns("plan.md");
 
-        Assert.True(returns.Count < count);
-        Assert.True(returns.Count > 40);
+        int expected = ItemsStartingInsideTheLastBytes("returns.jsonl", ArbiterRunStore.MaxReturnsReadBytes);
+        Assert.InRange(expected, 41, count - 1);
+        Assert.Equal(expected, returns.Count);
+        Assert.StartsWith($"task: T{count - expected}\n", returns[0], StringComparison.Ordinal);
         Assert.StartsWith($"task: T{count - 1}\n", returns[^1], StringComparison.Ordinal);
-        Assert.DoesNotContain(returns, item => item.StartsWith("task: T0\n", StringComparison.Ordinal));
         Assert.All(returns, item => Assert.StartsWith("task: T", item, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// How many whole lines of the one stored file named <paramref name="fileName"/> start inside its last
+    /// <paramref name="window"/> bytes: exactly the items a read of that window is to return.
+    /// </summary>
+    private int ItemsStartingInsideTheLastBytes(string fileName, long window)
+    {
+        string file = Directory.GetFiles(ArbiterDirectory, fileName, SearchOption.AllDirectories).Single();
+        byte[] bytes = File.ReadAllBytes(file);
+        int count = bytes.Length > 0 && bytes.Length - window <= 0 ? 1 : 0;
+        for (int i = 0; i < bytes.Length - 1; i++)
+        {
+            if (bytes[i] == (byte)'\n' && i + 1 >= bytes.Length - window)
+            {
+                count++;
+            }
+        }
+
+        return count;
     }
 
     private async Task<(string Path, long[] LineStarts, long Length)> WriteFindingLinesAsync(string run, params string[] texts)
@@ -251,9 +272,15 @@ public sealed class ArbiterRunStoreTests : IDisposable
         IReadOnlyList<string> readFindings = store.ReadFindings("RUN-GROW");
         IReadOnlyList<string> readFailures = store.ReadFailures("plan.md", "d", null);
 
-        Assert.InRange(readFindings.Count, 41, findings - 1);
+        int expectedFindings = ItemsStartingInsideTheLastBytes("findings.jsonl", ArbiterRunStore.MaxFindingsReadBytes);
+        int expectedFailures = ItemsStartingInsideTheLastBytes("failures.jsonl", ArbiterRunStore.MaxFailuresReadBytes);
+        Assert.InRange(expectedFindings, 41, findings - 1);
+        Assert.InRange(expectedFailures, 41, failures - 1);
+        Assert.Equal(expectedFindings, readFindings.Count);
+        Assert.StartsWith($"n{findings - expectedFindings}\n", readFindings[0], StringComparison.Ordinal);
         Assert.StartsWith($"n{findings - 1}\n", readFindings[^1], StringComparison.Ordinal);
-        Assert.InRange(readFailures.Count, 41, failures - 1);
+        Assert.Equal(expectedFailures, readFailures.Count);
+        Assert.StartsWith($"n{failures - expectedFailures}\n", readFailures[0], StringComparison.Ordinal);
         Assert.StartsWith($"n{failures - 1}\n", readFailures[^1], StringComparison.Ordinal);
     }
 

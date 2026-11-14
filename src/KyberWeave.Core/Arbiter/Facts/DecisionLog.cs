@@ -46,7 +46,7 @@ public sealed class DecisionLog
         await ArbiterLogFiles.AppendLineAsync(_directory, FileName, ArbiterJson.Serialize(record), cancellationToken);
     }
 
-    /// <summary>Reads every complete decision, in append order. Takes no lock.</summary>
+    /// <summary>Reads every complete decision in the newest <see cref="ArbiterLogFiles.MaxReadBytes"/> bytes, in append order. Takes no lock.</summary>
     public IReadOnlyList<ArbiterDecisionRecord> ReadAll() => ReadAllWithDiagnostics().Records;
 
     /// <summary>

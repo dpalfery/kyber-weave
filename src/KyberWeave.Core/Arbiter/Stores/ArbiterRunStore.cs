@@ -333,45 +333,17 @@ public sealed class ArbiterRunStore
     /// </remarks>
     internal static IReadOnlyList<string> ReadItems(string path, long tailBytes)
     {
-        ArgumentOutOfRangeException.ThrowIfLessThan(tailBytes, 1);
-        try
+        List<string> items = [];
+        foreach (string line in ArbiterLogFiles.ReadTailLines(path, tailBytes, keepUnterminatedFinalLine: true))
         {
-            List<string> items = [];
-            using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            bool partialFirstLine = false;
-            if (stream.Length > tailBytes)
+            StoredItem? item = TryDeserialize(line);
+            if (item is not null)
             {
-                stream.Seek(stream.Length - tailBytes - 1, SeekOrigin.Begin);
-                partialFirstLine = stream.ReadByte() != '\n';
+                items.Add(item.Text);
             }
-
-            using StreamReader reader = new(stream);
-            if (partialFirstLine)
-            {
-                // The seek landed mid-line (and possibly mid-character); the fragment is not an item.
-                reader.ReadLine();
-            }
-
-            while (reader.ReadLine() is { } line)
-            {
-                StoredItem? item = TryDeserialize(line);
-                if (item is not null)
-                {
-                    items.Add(item.Text);
-                }
-            }
-
-            return items;
         }
-        catch (IOException)
-        {
-            // Includes a file that is absent when opened; a store that cannot be read has no items to offer.
-            return [];
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return [];
-        }
+
+        return items;
     }
 
     private static StoredItem? TryDeserialize(string line)

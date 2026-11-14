@@ -99,35 +99,84 @@ internal static class ArbiterLogFiles
     }
 
     /// <summary>
-    /// Reads the complete lines of <paramref name="path"/> without taking any
-    /// lock, ignoring a final line that has no newline (a writer mid-line).
+    /// The most bytes one read of an append-only Arbiter log looks at, taken from the end. A log is never swept, so
+    /// reading all of it would make every hook call cost more as the log ages; the newest records are the ones the
+    /// in-flight and decision queries need.
     /// </summary>
-    internal static IReadOnlyList<string> ReadCompleteLines(string path)
+    internal const long MaxReadBytes = 8L * 1024 * 1024;
+
+    /// <summary>
+    /// Reads the complete lines of <paramref name="path"/>, looking only at its last <see cref="MaxReadBytes"/> bytes,
+    /// without taking any lock, and ignoring a final line that has no newline (a writer mid-line). A log that is
+    /// absent or cannot be read reads as empty.
+    /// </summary>
+    internal static IReadOnlyList<string> ReadCompleteLines(string path) =>
+        ReadTailLines(path, MaxReadBytes, keepUnterminatedFinalLine: false);
+
+    /// <summary>
+    /// Reads the lines inside the last <paramref name="tailBytes"/> bytes of <paramref name="path"/>. A line the
+    /// window cuts the start of is dropped, so a whole line is never read as a fragment. A file that is absent or
+    /// cannot be opened or read (<see cref="IOException"/>, <see cref="UnauthorizedAccessException"/>) reads as
+    /// empty: a log that cannot be read has no records to offer, and must not crash the caller.
+    /// </summary>
+    /// <param name="path">The file to read.</param>
+    /// <param name="tailBytes">The window, at least 1.</param>
+    /// <param name="keepUnterminatedFinalLine">Whether a final line with no newline is returned.</param>
+    internal static IReadOnlyList<string> ReadTailLines(string path, long tailBytes, bool keepUnterminatedFinalLine)
     {
-        string text;
+        ArgumentOutOfRangeException.ThrowIfLessThan(tailBytes, 1);
         try
         {
-            text = File.ReadAllText(path);
+            using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            return ReadTailLines(stream, tailBytes, keepUnterminatedFinalLine);
         }
-        catch (FileNotFoundException)
+        catch (IOException)
         {
             return [];
         }
-        catch (DirectoryNotFoundException)
+        catch (UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
+
+    /// <summary>The stream form of <see cref="ReadTailLines(string, long, bool)"/>; it lets no exception escape unhandled.</summary>
+    internal static IReadOnlyList<string> ReadTailLines(Stream stream, long tailBytes, bool keepUnterminatedFinalLine)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentOutOfRangeException.ThrowIfLessThan(tailBytes, 1);
+
+        // Length is read once: a second read of a file that is being appended to, or truncated, could disagree with
+        // the first and yield a negative seek or a window of the wrong size.
+        long length = stream.Length;
+        long window = Math.Min(length, tailBytes);
+        bool startsMidLine = false;
+        if (length > tailBytes)
+        {
+            stream.Seek(length - tailBytes - 1, SeekOrigin.Begin);
+            startsMidLine = stream.ReadByte() != '\n';
+        }
+
+        byte[] buffer = new byte[window];
+        int read = stream.ReadAtLeast(buffer, buffer.Length, throwOnEndOfStream: false);
+        if (read == 0)
         {
             return [];
         }
 
-        if (text.Length == 0)
+        string[] segments = Encoding.UTF8.GetString(buffer, 0, read).Split('\n');
+        // The first segment is a fragment when the window opened mid-line (and possibly mid-character). A file that
+        // ends with '\n' yields a trailing empty segment and a torn final write a trailing partial one; unless the
+        // caller wants it, that last segment is not a complete record.
+        int first = startsMidLine ? 1 : 0;
+        int end = keepUnterminatedFinalLine ? segments.Length : segments.Length - 1;
+        List<string> lines = new(Math.Max(0, end - first));
+        for (int i = first; i < end; i++)
         {
-            return [];
+            lines.Add(segments[i].TrimEnd('\r'));
         }
 
-        string[] segments = text.Split('\n');
-        // A file that ends with '\n' yields a trailing empty segment; a torn
-        // final write yields a trailing partial line. Either way the last
-        // segment is not a complete record, so readers drop it.
-        return [.. segments.Take(segments.Length - 1)];
+        return lines;
     }
 }
 
@@ -189,7 +238,7 @@ public sealed class InFlightLedger
             cancellationToken);
     }
 
-    /// <summary>Reads every complete event, in append order. Takes no lock.</summary>
+    /// <summary>Reads every complete event in the newest <see cref="ArbiterLogFiles.MaxReadBytes"/> bytes, in append order. Takes no lock.</summary>
     public IReadOnlyList<ArbiterLedgerEvent> ReadAll() => ReadAllWithDiagnostics().Records;
 
     /// <summary>
