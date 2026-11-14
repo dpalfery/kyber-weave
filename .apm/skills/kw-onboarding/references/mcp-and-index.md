@@ -28,7 +28,7 @@ Ask each only where first-look found a gap.
   `.codegraph/`. Nothing leaves the machine.
 - *Recommend*: build it. A "no" stands for the rest of the run.
 
-**Add the worktree index hook?** Only after a yes to the index. The context is the
+**Add the worktree index hook?** Only after a yes to the index; after a no, skip it, say the hook has nothing to build, and run no `--ensure`. The context is the
 `githook.post-checkout` row of [doctor-checks.md](doctor-checks.md).
 
 **Declare the `codegraph` server for this repository?**
@@ -57,7 +57,7 @@ directory: show `codegraph install --help` and say exactly which files it names 
 |---|---|---|
 | `kyber-weave doctor --check .` | Reports only. Never indexes. | No |
 | `kyber-weave doctor --provision .` | Builds the index when absent, refreshes it otherwise. | Yes |
-| `kyber-weave doctor --ensure .` | Refreshes the index, proves it and the docs server answer, repairs once, and installs the worktree-index git hook. | Yes |
+| `kyber-weave doctor --ensure .` | Refreshes the index, proves it and the docs server answer, repairs once, and installs the worktree-index git hook. | Yes, and never after a "no" to indexing |
 
 Never run `codegraph init`, `sync`, or `index` directly from this skill; doctor wraps them with a
 lock, a timeout, and a restore of any tracked file the index rewrites.

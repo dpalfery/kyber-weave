@@ -34,7 +34,7 @@ removes an existing Copilot install. So:
   | This project | yes | `kyber-weave squad update . --target <union>` |
   | This project | no | `kyber-weave squad install . --target <union>` |
 
-- Only refreshing what is installed: `kyber-weave squad update --global` or
+- Only refreshing what is installed (this rewrites the squad's files in every harness already installed at that scope to the CLI's version, so say so and `--dry-run` first): `kyber-weave squad update --global` or
   `kyber-weave squad update .`, with no `--target`.
 - Removing a harness is a separate question, asked only when the user brings it up, with its own
   context (below). Never remove one as a side effect.
