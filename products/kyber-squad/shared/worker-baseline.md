@@ -24,7 +24,7 @@ The host's rules (Host facts, root `AGENTS.md`) apply to every task; fetch the s
 **Your task's files are your scope.** Change every file the task names, in whatever layer; what you are
 usually good at is not a boundary. Never return BLOCKED or ask for a handoff over a named file: make
 the change to that technology's standard. Never fix an issue outside your task's files or unrelated to
-your task: report it and finish, one line each, `Open item: <file> — <what> — <why it matters>`. They
+your task; report it and finish, one line each, `Open item: <file> — <what> — <why it matters>`. They
 are filed as todos when the run ends. Stop only for a missing packet, a contradiction in the task, or a
 safety limit (migrations on a shared database, CI or deploy secrets, a push).
 
