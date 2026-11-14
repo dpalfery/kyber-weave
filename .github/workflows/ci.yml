@@ -739,10 +739,13 @@ jobs:
           set -euo pipefail
           EXIT_CODE=0
           mkdir -p kyber-weave-sarif
-          # Every skill directory is gated under the same three verbs. Add a path here
-          # AND a matching upload step below when a new skill lands, or the suite covers it
-          # zero times / its SARIF never reaches code scanning.
-          skills_dirs=(.apm/skills/kyber-docs-authoring .apm/skills/kyber-docs-integrity-review .apm/skills/kyber-docs-onboarding-and-assessment .apm/skills/kyber-weave-cli)
+          # Every directory under .apm/skills is gated under the same three verbs; the list
+          # is read from the folder, so a new skill is covered without an edit here. Add a
+          # matching upload step below when a new skill lands, or its SARIF never reaches
+          # code scanning (a repository policy test fails until it exists).
+          skills_dirs=()
+          for dir in .apm/skills/*/; do skills_dirs+=("${dir%/}"); done
+          if [ "${#skills_dirs[@]}" -eq 0 ]; then echo "no skills found under .apm/skills" >&2; exit 1; fi
           CLI="dotnet run --project src/KyberWeave.Cli --no-build -c ${{ env.CONFIGURATION }} --"
           for skills_dir in "${skills_dirs[@]}"; do
             # Path-derived, not basename: two skills whose leaf directories share a name
@@ -804,6 +807,38 @@ jobs:
         with:
           sarif_file: kyber-weave-sarif/skills-_apm_skills_kyber-weave-cli.sarif
           category: kyber-weave-skills-_apm_skills_kyber-weave-cli
+
+      # Intentional github/codeql-action v4 pin
+      - name: Upload skill scan SARIF (codegraph)
+        if: always()
+        uses: github/codeql-action/upload-sarif@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
+        with:
+          sarif_file: kyber-weave-sarif/skills-_apm_skills_codegraph.sarif
+          category: kyber-weave-skills-_apm_skills_codegraph
+
+      # Intentional github/codeql-action v4 pin
+      - name: Upload skill scan SARIF (kw-onboarding)
+        if: always()
+        uses: github/codeql-action/upload-sarif@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
+        with:
+          sarif_file: kyber-weave-sarif/skills-_apm_skills_kw-onboarding.sarif
+          category: kyber-weave-skills-_apm_skills_kw-onboarding
+
+      # Intentional github/codeql-action v4 pin
+      - name: Upload skill scan SARIF (kyber-weave-model-profile)
+        if: always()
+        uses: github/codeql-action/upload-sarif@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
+        with:
+          sarif_file: kyber-weave-sarif/skills-_apm_skills_kyber-weave-model-profile.sarif
+          category: kyber-weave-skills-_apm_skills_kyber-weave-model-profile
+
+      # Intentional github/codeql-action v4 pin
+      - name: Upload skill scan SARIF (spec-conductor)
+        if: always()
+        uses: github/codeql-action/upload-sarif@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
+        with:
+          sarif_file: kyber-weave-sarif/skills-_apm_skills_spec-conductor.sarif
+          category: kyber-weave-skills-_apm_skills_spec-conductor
 
       # --merge-ready adds KW-DOC-LIFECYCLE-003 (a plan or specification still open
       # fails the build) and KW-DOC-LIFECYCLE-004 (an archived entry the change
