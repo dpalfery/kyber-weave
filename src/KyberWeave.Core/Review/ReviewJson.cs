@@ -300,6 +300,19 @@ public static class ReviewJson
             if (!inRange)
                 throw new JsonException($"'{path}.{key}' is {Describe(value)}; it must be a whole number from 1 to 10.");
         }
+
+        foreach ((string key, JsonNode? value) in Members(finding, nameof(ReviewFinding.Line)))
+        {
+            bool inRange = value is JsonValue number
+                           && number.GetValueKind() == JsonValueKind.Number
+                           && number.TryGetValue(out long line)
+                           && ReviewSeatInput.IsLineNumber(line);
+            if (!inRange)
+            {
+                throw new JsonException(
+                    $"'{path}.{key}' is {Describe(value)}; it must be a whole number from 0 to {ReviewSeatInput.MaxLine}.");
+            }
+        }
     }
 
     /// <summary>

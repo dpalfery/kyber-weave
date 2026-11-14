@@ -57,6 +57,7 @@ public sealed class ReviewDecisionModel
     private readonly List<ReviewDecision> _decisions = [];
     private bool _faulted;
     private int _skipped;
+    private int _leftOut;
 
     /// <summary>Creates the model over a provider; a null provider is the model switched off.</summary>
     /// <param name="provider">The provider that answers; null when no decision model is configured.</param>
@@ -100,6 +101,9 @@ public sealed class ReviewDecisionModel
     /// <summary>Records comparisons a step left unasked because it reached its cap, for the summary line.</summary>
     internal void NoteSkipped(int count) => _skipped += Math.Max(0, count);
 
+    /// <summary>Records findings a step did not compare at all because it reached its per-file or per-step limit.</summary>
+    internal void NoteFindingsLeftOut(int count) => _leftOut += Math.Max(0, count);
+
     /// <summary>Every question asked so far, in order, with its answer and effect.</summary>
     public IReadOnlyList<ReviewDecision> Decisions => _decisions;
 
@@ -127,6 +131,14 @@ public sealed class ReviewDecisionModel
 
         if (_provider is null || rule?.Ask is null || questions.Count == 0)
             return answers;
+
+        // Every step is capped here, so a caller that forgets its own cap cannot ask one paid question per finding.
+        // A step that already chose its questions by priority passes at most the cap and is not cut again.
+        if (questions.Count > ReviewVerdictDecisions.MaxQuestionsPerStep)
+        {
+            NoteSkipped(questions.Count - ReviewVerdictDecisions.MaxQuestionsPerStep);
+            questions = [.. questions.Take(ReviewVerdictDecisions.MaxQuestionsPerStep)];
+        }
 
         // An answer an earlier run of this cycle got (--candidates, then the verdict) is reused, so the two runs agree
         // and the question costs one call.
@@ -175,10 +187,13 @@ public sealed class ReviewDecisionModel
         string skipped = _skipped > 0
             ? $"; {_skipped} comparison(s) skipped: a step asks at most {ReviewVerdictDecisions.MaxQuestionsPerStep} questions, the rest stayed as the seats gave them"
             : string.Empty;
+        string leftOut = _leftOut > 0
+            ? $"; {_leftOut} finding(s) left out of the comparison: a step compares at most {ReviewVerdictDecisions.MaxFindingsPerFile} findings per file and {ReviewVerdictDecisions.MaxFindingsPerStep} in all, the rest stayed as the seats gave them"
+            : string.Empty;
         string fault = _faulted ? "; stopped after a provider fault, the rest went unasked" : string.Empty;
         return counts.Count == 0
-            ? $"decision model: {_decisions.Count} question(s), no effect{skipped}{fault}"
-            : $"decision model: {string.Join(", ", counts)}{skipped}{fault}";
+            ? $"decision model: {_decisions.Count} question(s), no effect{skipped}{leftOut}{fault}"
+            : $"decision model: {string.Join(", ", counts)}{skipped}{leftOut}{fault}";
     }
 
     private sealed record Sent(ReviewQuestion Question, string Id, ArbiterStep1BatchResult? Batch, int LatencyMs);
@@ -342,9 +357,9 @@ public sealed class ReviewDecisionModel
     {
         ArgumentNullException.ThrowIfNull(finding);
         StringBuilder text = new();
-        text.Append(finding.File).Append(':').Append(finding.Line).Append(" — ").Append(finding.Claim ?? string.Empty);
+        text.Append(finding.File).Append(':').Append(finding.Line).Append(" — ").Append(ReviewSeatInput.Clip(finding.Claim) ?? string.Empty);
         if (!string.IsNullOrWhiteSpace(finding.FailureScenario))
-            text.Append("\nFailure scenario: ").Append(finding.FailureScenario);
+            text.Append("\nFailure scenario: ").Append(ReviewSeatInput.Clip(finding.FailureScenario));
         return text.ToString();
     }
 }

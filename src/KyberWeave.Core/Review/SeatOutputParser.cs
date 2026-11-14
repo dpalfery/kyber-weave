@@ -456,7 +456,7 @@ public static partial class SeatOutputParser
             severity,
             confidence,
             Required(item, "file", where),
-            RequiredNumber(item, "line", where),
+            RequiredLine(item, where),
             Optional(item, "excerpt", where),
             Optional(item, "claim", where),
             Optional(item, "evidence", where),
@@ -475,6 +475,15 @@ public static partial class SeatOutputParser
         Optional(item, key, where) is { Length: > 0 } value
             ? value
             : throw new SeatOutputException($"{where} has no '{key}'.");
+
+    private static int RequiredLine(SeatItem item, string where)
+    {
+        int line = RequiredNumber(item, "line", where);
+        return ReviewSeatInput.IsLineNumber(line)
+            ? line
+            : throw new SeatOutputException(
+                $"{where} has line {line}; it must be a whole number from 0 to {ReviewSeatInput.MaxLine}.");
+    }
 
     private static int RequiredNumber(SeatItem item, string key, string where)
     {

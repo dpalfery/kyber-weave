@@ -266,8 +266,8 @@ public static partial class RedLanguages
         foreach (Match match in VsTestSummary().Matches(output))
         {
             ran = true;
-            total += Number(match.Groups["total"]);
-            failed += Number(match.Groups["failed"]);
+            total = SaturatingSum(total, Number(match.Groups["total"]));
+            failed = SaturatingSum(failed, Number(match.Groups["failed"]));
         }
 
         if (!ran && RunnerTotal().Match(output) is { Success: true } runnerTotal)
@@ -314,8 +314,8 @@ public static partial class RedLanguages
             return null;
         }
 
-        int failedCount = failed.Sum(match => Number(match.Groups["n"]));
-        return new TestRunSummary(failedCount + other.Sum(match => Number(match.Groups["n"])), failedCount);
+        int failedCount = SaturatingSum([.. failed.Select(match => Number(match.Groups["n"]))]);
+        return new TestRunSummary(SaturatingSum(failedCount, SaturatingSum([.. other.Select(match => Number(match.Groups["n"]))])), failedCount);
     }
 
     private static List<string> PlaywrightFailedTests(string output) =>
@@ -334,11 +334,11 @@ public static partial class RedLanguages
         string text = summary.Groups["summary"].Value;
         int failed = Count(text, "failed");
         int passed = Count(text, "passed");
-        return new TestRunSummary(failed + passed + Count(text, "error"), failed);
+        return new TestRunSummary(SaturatingSum(failed, passed, Count(text, "error")), failed);
 
         static int Count(string line, string word) =>
             Regex.Match(line, @"(?<n>\d+) " + word, RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)) is { Success: true } match
-                ? int.Parse(match.Groups["n"].Value, CultureInfo.InvariantCulture)
+                ? Number(match.Groups["n"])
                 : 0;
     }
 
@@ -356,8 +356,8 @@ public static partial class RedLanguages
             return null;
         }
 
-        int failed = results.Sum(match => Number(match.Groups["failed"]));
-        return new TestRunSummary(failed + results.Sum(match => Number(match.Groups["passed"])), failed);
+        int failed = SaturatingSum([.. results.Select(match => Number(match.Groups["failed"]))]);
+        return new TestRunSummary(SaturatingSum(failed, SaturatingSum([.. results.Select(match => Number(match.Groups["passed"]))])), failed);
     }
 
     private static List<string> CargoFailedTests(string output) =>
@@ -380,7 +380,12 @@ public static partial class RedLanguages
     private static string? GoAssertion(string output) =>
         GoAssertionLine().Match(output) is { Success: true } match ? match.Groups["line"].Value.Trim() : null;
 
-    private static int Number(Group group) => int.Parse(group.Value, CultureInfo.InvariantCulture);
+    /// <summary>A count read from a test runner's output; one too large for an int reads as the largest int, not as an error.</summary>
+    private static int Number(Group group) =>
+        int.TryParse(group.Value, NumberStyles.None, CultureInfo.InvariantCulture, out int number) ? number : int.MaxValue;
+
+    private static int SaturatingSum(params int[] counts) =>
+        (int)Math.Min(counts.Sum(count => (long)count), int.MaxValue);
 }
 
 /// <summary>What the RED classifier decided about a set of task gate runs.</summary>

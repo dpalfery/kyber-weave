@@ -282,11 +282,7 @@ public static class DuplicateDetector
         {
             if (File.Exists(full)) lines = File.ReadAllLines(full);
         }
-        catch (IOException)
-        {
-            lines = null;
-        }
-        catch (UnauthorizedAccessException)
+        catch (Exception ex) when (ReviewSeatInput.IsFileFailure(ex))
         {
             lines = null;
         }

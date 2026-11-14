@@ -46,16 +46,114 @@ public static partial class ReviewVerdictDecisions
     /// </summary>
     public const int MaxQuestionsPerStep = 300;
 
+    /// <summary>
+    /// The most findings on one file the duplicate step compares, taken in seat order. Candidate pairs grow with the
+    /// square of this, so it is the bound on the work, not only on the questions asked.
+    /// </summary>
+    public const int MaxFindingsPerFile = 500;
+
+    /// <summary>The most findings in all that one step compares, taken in the order the step prefers.</summary>
+    public const int MaxFindingsPerStep = 5000;
+
     private const int DuplicateWindowLines = 20;
     private const int SurroundingLines = 6;
-    private const int MaxSurroundingsFileBytes = 1 << 20;
     private const int MaxEvidenceLines = 12;
+    private const int MaxEvidenceCitations = 20;
+
+    /// <summary>The most characters of a file's surroundings sent to the model with one claim question.</summary>
+    private const int MaxSurroundingsCharacters = 32768;
 
     /// <summary>The fewest non-blank characters the strongest line of a quoted excerpt must have to verify it.</summary>
     private const int MinSignalCharacters = 8;
 
     /// <summary>The largest line number a citation may name; a source file is capped at one megabyte.</summary>
     private const int MaxCitedLine = 1 << 20;
+
+    /// <summary>
+    /// The candidate pairs for the duplicate step: findings on the same file within the line window, the nearest and the
+    /// most severe first, at most <see cref="MaxQuestionsPerStep"/>. The work is bounded, not only the result: findings
+    /// are grouped by file and sorted by line so only neighbours inside the window are paired, a file contributes at
+    /// most <see cref="MaxFindingsPerFile"/> findings and a step <see cref="MaxFindingsPerStep"/>, and the chosen pairs
+    /// are held in a heap of the cap's size, so memory does not grow with the number of candidates.
+    /// </summary>
+    /// <returns>The chosen pairs, best first; how many candidates there were; how many findings were left out of the comparison.</returns>
+    internal static (List<(int A, int B)> Pairs, int CandidateCount, int LeftOut) NearbyPairs(IReadOnlyList<ReviewFinding> findings)
+    {
+        Dictionary<string, List<int>> byFile = new(StringComparer.Ordinal);
+        int considered = 0;
+        int leftOut = 0;
+        for (int index = 0; index < findings.Count; index++)
+        {
+            List<int> group = byFile.TryGetValue(Normalize(findings[index].File), out List<int>? existing)
+                ? existing
+                : byFile[Normalize(findings[index].File)] = [];
+            if (group.Count >= MaxFindingsPerFile || considered >= MaxFindingsPerStep)
+            {
+                leftOut++;
+                continue;
+            }
+
+            group.Add(index);
+            considered++;
+        }
+
+        // A max-heap on the sort key, so the worst chosen pair is the one replaced when a better one turns up.
+        PriorityQueue<(int A, int B), (long Distance, int Severity, int A, int B)> chosen = new(
+            Comparer<(long Distance, int Severity, int A, int B)>.Create((left, right) => PairOrder(right, left)));
+        int candidates = 0;
+        foreach (List<int> group in byFile.Values)
+        {
+            int[] sorted = [.. group.OrderBy(index => findings[index].Line).ThenBy(index => index)];
+            for (int first = 0; first < sorted.Length; first++)
+            {
+                for (int second = first + 1;
+                     second < sorted.Length
+                     && ReviewSeatInput.LineDistance(findings[sorted[first]].Line, findings[sorted[second]].Line) <= DuplicateWindowLines;
+                     second++)
+                {
+                    int a = Math.Min(sorted[first], sorted[second]);
+                    int b = Math.Max(sorted[first], sorted[second]);
+                    candidates++;
+                    (long Distance, int Severity, int A, int B) key = (
+                        ReviewSeatInput.LineDistance(findings[a].Line, findings[b].Line),
+                        -Math.Max((int)findings[a].Severity, (int)findings[b].Severity),
+                        a,
+                        b);
+                    if (chosen.Count < MaxQuestionsPerStep)
+                    {
+                        chosen.Enqueue((a, b), key);
+                    }
+                    else if (chosen.TryPeek(out _, out (long Distance, int Severity, int A, int B) worst) && PairOrder(key, worst) < 0)
+                    {
+                        chosen.DequeueEnqueue((a, b), key);
+                    }
+                }
+            }
+        }
+
+        List<((int A, int B) Pair, (long Distance, int Severity, int A, int B) Key)> best = [];
+        while (chosen.TryDequeue(out (int A, int B) pair, out (long Distance, int Severity, int A, int B) key))
+            best.Add((pair, key));
+
+        best.Reverse();
+        return ([.. best.Select(entry => entry.Pair)], candidates, leftOut);
+    }
+
+    private static int PairOrder(
+        (long Distance, int Severity, int A, int B) left,
+        (long Distance, int Severity, int A, int B) right)
+    {
+        int byDistance = left.Distance.CompareTo(right.Distance);
+        if (byDistance != 0)
+            return byDistance;
+
+        int bySeverity = left.Severity.CompareTo(right.Severity);
+        if (bySeverity != 0)
+            return bySeverity;
+
+        int byFirst = left.A.CompareTo(right.A);
+        return byFirst != 0 ? byFirst : left.B.CompareTo(right.B);
+    }
 
     /// <summary>
     /// Asks, for each pair of findings on the same file within 20 lines, whether they name the same defect, and folds
@@ -70,25 +168,9 @@ public static partial class ReviewVerdictDecisions
         if (!model.Configured || rule is null || findings.Count < 2)
             return ([.. findings], []);
 
-        List<(int A, int B)> candidates = [];
-        for (int a = 0; a < findings.Count; a++)
-        {
-            for (int b = a + 1; b < findings.Count; b++)
-            {
-                if (string.Equals(Normalize(findings[a].File), Normalize(findings[b].File), StringComparison.Ordinal)
-                    && Math.Abs(findings[a].Line - findings[b].Line) <= DuplicateWindowLines)
-                {
-                    candidates.Add((a, b));
-                }
-            }
-        }
-
-        // The pairs most likely to be one defect, and the ones that matter most, are asked first.
-        List<(int A, int B)> pairs = [.. candidates
-            .OrderBy(pair => Math.Abs(findings[pair.A].Line - findings[pair.B].Line))
-            .ThenByDescending(pair => (ReviewSeverity)Math.Max((int)findings[pair.A].Severity, (int)findings[pair.B].Severity))
-            .Take(MaxQuestionsPerStep)];
-        model.NoteSkipped(candidates.Count - pairs.Count);
+        (List<(int A, int B)> pairs, int candidateCount, int leftOut) = NearbyPairs(findings);
+        model.NoteSkipped(candidateCount - pairs.Count);
+        model.NoteFindingsLeftOut(leftOut);
         List<ReviewQuestion> questions = [.. pairs.Select(pair => new ReviewQuestion(
             PairSubject(findings[pair.A], findings[pair.B]),
             new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -116,7 +198,7 @@ public static partial class ReviewVerdictDecisions
             joinedAt.TryAdd(a, answer.Score);
         }
 
-        List<ReviewFinding> kept = [];
+        List<(int Index, ReviewFinding Finding)> keptAt = [];
         List<MergedFindings> merged = [];
         foreach (IGrouping<int, int> group in Enumerable.Range(0, findings.Count).GroupBy(index => Find(parent, index)))
         {
@@ -127,7 +209,7 @@ public static partial class ReviewVerdictDecisions
                 .ThenByDescending(index => (findings[index].Evidence ?? string.Empty).Length)
                 .ThenBy(index => index)
                 .First();
-            kept.Add(findings[winner]);
+            keptAt.Add((winner, findings[winner]));
             if (members.Length > 1)
             {
                 merged.Add(new MergedFindings(
@@ -137,8 +219,8 @@ public static partial class ReviewVerdictDecisions
         }
 
         // The verdict keeps seat order, so the kept list is put back in the order the seats gave.
-        kept.Sort((left, right) => IndexOf(findings, left).CompareTo(IndexOf(findings, right)));
-        return (kept, merged);
+        keptAt.Sort((left, right) => left.Index.CompareTo(right.Index));
+        return ([.. keptAt.Select(entry => entry.Finding)], merged);
     }
 
     /// <summary>
@@ -208,6 +290,8 @@ public static partial class ReviewVerdictDecisions
             string? surroundings = Surroundings(repositoryRoot, finding);
             string? problem = surroundings is null ? "the cited file could not be read"
                 : string.IsNullOrWhiteSpace(finding.Excerpt) ? "the finding quotes no code"
+                : !ReviewSeatInput.ExcerptWithinLimits(finding.Excerpt)
+                    ? $"its excerpt is over {ReviewSeatInput.MaxExcerptCharacters} characters or {ReviewSeatInput.MaxExcerptLines} lines, so the quote was not verified"
                 : string.IsNullOrWhiteSpace(finding.Claim) ? "the finding states no claim"
                 : !ExcerptIsIn(finding.Excerpt, surroundings) ? "its excerpt is not at the cited lines"
                 : null;
@@ -221,7 +305,7 @@ public static partial class ReviewVerdictDecisions
                 finding.Id,
                 new Dictionary<string, object?>(StringComparer.Ordinal)
                 {
-                    ["finding.claim"] = finding.Claim,
+                    ["finding.claim"] = ReviewSeatInput.Clip(finding.Claim),
                     ["finding.excerpt"] = finding.Excerpt,
                     ["file.surroundings"] = surroundings + EvidenceLines(repositoryRoot, finding),
                 }));
@@ -277,8 +361,8 @@ public static partial class ReviewVerdictDecisions
             new Dictionary<string, object?>(StringComparer.Ordinal)
             {
                 ["finding.severity"] = SeverityName(finding.Severity),
-                ["finding.claim"] = finding.Claim,
-                ["finding.failure-scenario"] = finding.FailureScenario,
+                ["finding.claim"] = ReviewSeatInput.Clip(finding.Claim),
+                ["finding.failure-scenario"] = ReviewSeatInput.Clip(finding.FailureScenario),
             }))];
         IReadOnlyDictionary<string, ReviewAnswer> answers = await model.AskAsync(
             rule,
@@ -310,22 +394,34 @@ public static partial class ReviewVerdictDecisions
         if (!model.Configured || rule is null || overrides.Rows.Count == 0)
             return ([.. findings], []);
 
-        List<(int Index, SeverityOverrideRow Row, string Subject)> candidates = [];
-        for (int index = 0; index < findings.Count; index++)
+        // The findings with the most at stake are asked first; the sort is stable, so seat order breaks ties. Candidates
+        // are built in that order; once the step's questions are full the rows of later findings are only counted, and
+        // at most MaxFindingsPerStep findings are looked at, so the work is bounded by that and the host's row count.
+        int[] order = [.. Enumerable.Range(0, findings.Count)
+            .Where(index => findings[index].Override is null && findings[index].OverrideSource is null)
+            .OrderByDescending(index => findings[index].Severity)];
+        List<(int Index, SeverityOverrideRow Row, string Subject)> pairs = [];
+        int looked = 0;
+        foreach (int index in order)
         {
-            ReviewFinding finding = findings[index];
-            if (finding.Override is not null || finding.OverrideSource is not null)
-                continue;
+            if (looked >= MaxFindingsPerStep)
+                break;
 
+            looked++;
+            ReviewFinding finding = findings[index];
             foreach (SeverityOverrideRow row in overrides.RowsForFinding(finding.Lens, finding.File))
-                candidates.Add((index, row, $"{finding.Id} ~ {row.Id}"));
+            {
+                if (pairs.Count >= MaxQuestionsPerStep)
+                {
+                    model.NoteSkipped(1);
+                    continue;
+                }
+
+                pairs.Add((index, row, $"{finding.Id} ~ {row.Id}"));
+            }
         }
 
-        // The findings with the most at stake are asked first; the sort is stable, so seat order breaks ties.
-        List<(int Index, SeverityOverrideRow Row, string Subject)> pairs = [.. candidates
-            .OrderByDescending(pair => findings[pair.Index].Severity)
-            .Take(MaxQuestionsPerStep)];
-        model.NoteSkipped(candidates.Count - pairs.Count);
+        model.NoteFindingsLeftOut(order.Length - looked);
         List<ReviewQuestion> questions = [.. pairs.Select(pair => new ReviewQuestion(
             pair.Subject,
             new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -380,12 +476,18 @@ public static partial class ReviewVerdictDecisions
             if (path is null)
                 return null;
 
-            int excerptLines = (finding.Excerpt ?? string.Empty).Split('\n').Length;
-            int first = Math.Max(1, finding.Line - SurroundingLines);
-            string[] window = [.. File.ReadLines(path).Skip(first - 1).Take(finding.Line - first + excerptLines + SurroundingLines)];
-            return window.Length == 0 ? null : string.Join('\n', window);
+            // The excerpt is counted, never split, and capped, so the window stays a few dozen lines whatever the seat wrote.
+            int excerptLines = Math.Min(
+                (finding.Excerpt ?? string.Empty).AsSpan().Count('\n') + 1, ReviewSeatInput.MaxExcerptLines);
+            long first = Math.Max(1L, (long)finding.Line - SurroundingLines);
+            long count = Math.Max(0L, finding.Line - first + excerptLines + SurroundingLines);
+            string[] window = [.. File.ReadLines(path).Skip((int)(first - 1)).Take((int)Math.Min(count, int.MaxValue))];
+            string text = string.Join('\n', window);
+            return window.Length == 0
+                ? null
+                : text.Length <= MaxSurroundingsCharacters ? text : text[..MaxSurroundingsCharacters];
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ReviewSeatInput.IsFileFailure(ex))
         {
             return null;
         }
@@ -403,9 +505,10 @@ public static partial class ReviewVerdictDecisions
         if (string.IsNullOrWhiteSpace(finding.Evidence))
             return string.Empty;
 
+        // The evidence is seat-written: only its first characters are scanned, and only the first few citations are read.
         StringBuilder text = new();
         int added = 0;
-        foreach (System.Text.RegularExpressions.Match match in EvidenceCitation().Matches(finding.Evidence))
+        foreach (System.Text.RegularExpressions.Match match in EvidenceCitation().Matches(ReviewSeatInput.Clip(finding.Evidence)!).Take(MaxEvidenceCitations))
         {
             string file = match.Groups["file"].Value;
             string? path = Resolve(repositoryRoot, file);
@@ -417,7 +520,7 @@ public static partial class ReviewVerdictDecisions
             {
                 lines = File.ReadAllLines(path);
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            catch (Exception ex) when (ReviewSeatInput.IsFileFailure(ex))
             {
                 continue;
             }
@@ -427,7 +530,7 @@ public static partial class ReviewVerdictDecisions
                 if (number < 1 || number > lines.Length || added >= MaxEvidenceLines)
                     continue;
 
-                text.Append('\n').Append(file).Append(':').Append(number).Append(": ").Append(lines[number - 1].Trim());
+                text.Append('\n').Append(file).Append(':').Append(number).Append(": ").Append(ReviewSeatInput.Clip(lines[number - 1].Trim()));
                 added++;
             }
         }
@@ -467,11 +570,11 @@ public static partial class ReviewVerdictDecisions
         {
             string root = Path.GetFullPath(repositoryRoot).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
             string path = Path.GetFullPath(Path.Combine(repositoryRoot, file));
-            return path.StartsWith(root, StringComparison.Ordinal) && File.Exists(path) && new FileInfo(path).Length <= MaxSurroundingsFileBytes
+            return path.StartsWith(root, StringComparison.Ordinal) && File.Exists(path) && new FileInfo(path).Length <= ReviewSeatInput.MaxFileBytes
                 ? path
                 : null;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        catch (Exception ex) when (ReviewSeatInput.IsFileFailure(ex))
         {
             return null;
         }
@@ -489,6 +592,9 @@ public static partial class ReviewVerdictDecisions
     /// </summary>
     internal static bool ExcerptIsIn(string excerpt, string window)
     {
+        if (!ReviewSeatInput.ExcerptWithinLimits(excerpt))
+            return false;
+
         string[] lines = [.. excerpt.Split('\n')
             .Select(line => line.Trim())
             .Where(line => line.Any(char.IsLetterOrDigit))];
@@ -523,17 +629,6 @@ public static partial class ReviewVerdictDecisions
         while (parent[index] != index)
             index = parent[index] = parent[parent[index]];
         return index;
-    }
-
-    private static int IndexOf(IReadOnlyList<ReviewFinding> findings, ReviewFinding finding)
-    {
-        for (int index = 0; index < findings.Count; index++)
-        {
-            if (ReferenceEquals(findings[index], finding))
-                return index;
-        }
-
-        return -1;
     }
 
     private static string Normalize(string path)

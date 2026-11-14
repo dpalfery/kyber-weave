@@ -356,6 +356,174 @@ public sealed class ReviewDecisionModelTests : IDisposable
         Assert.Equal(0, second.Calls);
     }
 
+    // ---------------------------------------------------------------- bounds on seat-written numbers, text and paths
+
+    [Fact]
+    public async Task LinesAtTheTwoEndsOfTheIntRangeAreComparedWithoutOverflowing()
+    {
+        FakeProvider provider = new() { Choice = "same-defect", Confidence = 0.99 };
+        ReviewFinding[] findings =
+        [
+            Finding("a", ReviewSeverity.Major, line: int.MinValue),
+            Finding("b", ReviewSeverity.Major, line: 0),
+            Finding("c", ReviewSeverity.Major, line: int.MaxValue),
+        ];
+
+        (List<ReviewFinding> kept, List<MergedFindings> merged) = await ReviewVerdictDecisions.MergeDuplicatesAsync(Model(provider), findings);
+
+        Assert.Equal(3, kept.Count);
+        Assert.Empty(merged);
+        Assert.Equal(0, provider.Calls);
+    }
+
+    [Fact]
+    public void ThePairsAreTheNearestFirstThenTheMostSevereThenSeatOrder()
+    {
+        ReviewFinding[] findings =
+        [
+            Finding("a", ReviewSeverity.Minor, line: 10),
+            Finding("b", ReviewSeverity.Minor, line: 12),
+            Finding("c", ReviewSeverity.Critical, line: 12),
+            Finding("far", ReviewSeverity.Minor, line: 500),
+            Finding("other-file", ReviewSeverity.Minor, line: 10, file: "b.cs"),
+        ];
+
+        (List<(int A, int B)> pairs, int candidates, int leftOut) = ReviewVerdictDecisions.NearbyPairs(findings);
+
+        Assert.Equal([(1, 2), (0, 2), (0, 1)], pairs);
+        Assert.Equal(3, candidates);
+        Assert.Equal(0, leftOut);
+    }
+
+    [Fact]
+    public void TwentyThousandFindingsOnOneFileAreBoundedInWorkAndReported()
+    {
+        ReviewFinding[] findings = [.. Enumerable.Range(0, 20_000).Select(index => Finding($"f{index}", ReviewSeverity.Minor, line: index % 40))];
+
+        System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
+        (List<(int A, int B)> pairs, _, int leftOut) = ReviewVerdictDecisions.NearbyPairs(findings);
+        watch.Stop();
+
+        Assert.Equal(ReviewVerdictDecisions.MaxQuestionsPerStep, pairs.Count);
+        Assert.Equal(20_000 - ReviewVerdictDecisions.MaxFindingsPerFile, leftOut);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"took {watch.Elapsed}");
+    }
+
+    [Fact]
+    public async Task AFindingsOverTheLimitAreReportedInTheSummaryAndNeverLost()
+    {
+        FakeProvider provider = new() { Choice = "different", Confidence = 0.99 };
+        ReviewDecisionModel model = Model(provider);
+        ReviewFinding[] findings = [.. Enumerable.Range(0, ReviewVerdictDecisions.MaxFindingsPerFile + 25).Select(index => Finding($"f{index}", ReviewSeverity.Minor, line: 1))];
+
+        (List<ReviewFinding> kept, _) = await ReviewVerdictDecisions.MergeDuplicatesAsync(model, findings);
+
+        Assert.Equal(findings.Length, kept.Count);
+        Assert.Equal(ReviewVerdictDecisions.MaxQuestionsPerStep, provider.Calls);
+        Assert.Contains("25 finding(s) left out of the comparison", model.SummaryLine([]), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EveryStepAsksAtMostTheQuestionCapEvenWhenItDidNotCapItself()
+    {
+        FakeProvider provider = new() { Choice = "about-right", Confidence = 0.99 };
+        ReviewDecisionModel model = Model(provider);
+        ReviewFinding[] findings = [.. Enumerable.Range(0, 450).Select(index => Finding($"f{index}", ReviewSeverity.Major, line: index))];
+
+        await ReviewVerdictDecisions.CheckSeveritiesAsync(model, findings);
+
+        Assert.Equal(ReviewVerdictDecisions.MaxQuestionsPerStep, provider.Calls);
+        Assert.Contains("150 comparison(s) skipped", model.SummaryLine([]), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(int.MinValue)]
+    [InlineData(-1)]
+    [InlineData(0)]
+    [InlineData(int.MaxValue)]
+    public async Task AnImpossibleCitedLineIsAFileProblemNotACrash(int line)
+    {
+        string root = Repository();
+        FakeProvider provider = new() { Choice = "supports", Confidence = 1.0 };
+
+        ClaimCheck check = Assert.Single(await ReviewVerdictDecisions.CheckClaimsAsync(
+            Model(provider), root, [Finding("a", ReviewSeverity.Major, line: line)]));
+
+        Assert.True(check.NeedsRefuter);
+        Assert.Equal(0, provider.Calls);
+    }
+
+    [Fact]
+    public async Task AnExcerptOverTheLimitsIsNotVerifiedAndGoesToTheRefuter()
+    {
+        string root = Repository();
+        FakeProvider provider = new() { Choice = "supports", Confidence = 1.0 };
+        string[] excerpts =
+        [
+            string.Join('\n', Enumerable.Repeat("    return total / count;", 500_000)),
+            new string('x', ReviewSeatInput.MaxExcerptCharacters + 1),
+            string.Join('\n', Enumerable.Repeat("    return total / count;", ReviewSeatInput.MaxExcerptLines + 1)),
+        ];
+
+        foreach (string excerpt in excerpts)
+        {
+            ClaimCheck check = Assert.Single(await ReviewVerdictDecisions.CheckClaimsAsync(
+                Model(provider), root, [Finding("a", ReviewSeverity.Major) with { Excerpt = excerpt }]));
+
+            Assert.True(check.NeedsRefuter);
+            Assert.Contains("so the quote was not verified", check.Note, StringComparison.Ordinal);
+        }
+
+        Assert.Equal(0, provider.Calls);
+    }
+
+    [Fact]
+    public async Task AnExcerptExactlyAtTheLimitsIsStillChecked()
+    {
+        string root = Repository();
+        FakeProvider provider = new() { Choice = "supports", Confidence = 0.95 };
+        string atLines = "    return total / count;" + string.Concat(Enumerable.Repeat("\n", ReviewSeatInput.MaxExcerptLines - 1));
+
+        ClaimCheck check = Assert.Single(await ReviewVerdictDecisions.CheckClaimsAsync(
+            Model(provider), root, [Finding("a", ReviewSeverity.Major) with { Excerpt = atLines }]));
+
+        Assert.False(check.NeedsRefuter);
+    }
+
+    [Fact]
+    public async Task OverLongClaimAndEvidenceAreCutBeforeTheyAreSentOrScanned()
+    {
+        string root = Repository();
+        FakeProvider provider = new() { Choice = "supports", Confidence = 0.95 };
+        string huge = new('a', 600_000);
+
+        await ReviewVerdictDecisions.CheckClaimsAsync(
+            Model(provider), root, [Finding("a", ReviewSeverity.Major) with { Claim = huge, Evidence = huge }]);
+
+        Assert.True(provider.LastStateText.Length < 50_000, $"{provider.LastStateText.Length} characters reached the model");
+    }
+
+    [Fact]
+    public void EveryWayAFileReadCanFailIsOneAnswer()
+    {
+        Exception[] failures =
+        [
+            new IOException(), new UnauthorizedAccessException(), new System.Security.SecurityException(),
+            new ArgumentException(), new NotSupportedException(), new PathTooLongException(),
+        ];
+
+        Assert.All(failures, failure => Assert.True(ReviewSeatInput.IsFileFailure(failure), failure.GetType().Name));
+        Assert.False(ReviewSeatInput.IsFileFailure(new InvalidOperationException()));
+    }
+
+    [Fact]
+    public void ALineDistanceBetweenTheEndsOfTheIntRangeDoesNotOverflow()
+    {
+        Assert.Equal(4_294_967_295L, ReviewSeatInput.LineDistance(int.MinValue, int.MaxValue));
+        Assert.Equal(2_147_483_648L, ReviewSeatInput.LineDistance(int.MinValue, 0));
+        Assert.Equal(0L, ReviewSeatInput.LineDistance(7, 7));
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private string LogDirectory => Path.Combine(_temp.Path, "artifacts", "arbiter");
