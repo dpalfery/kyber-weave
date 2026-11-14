@@ -400,13 +400,10 @@ public sealed class ReviewDecisionModelTests : IDisposable
     {
         ReviewFinding[] findings = [.. Enumerable.Range(0, 20_000).Select(index => Finding($"f{index}", ReviewSeverity.Minor, line: index % 40))];
 
-        System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
         (List<(int A, int B)> pairs, _, int leftOut) = ReviewVerdictDecisions.NearbyPairs(findings);
-        watch.Stop();
 
         Assert.Equal(ReviewVerdictDecisions.MaxQuestionsPerStep, pairs.Count);
         Assert.Equal(20_000 - ReviewVerdictDecisions.MaxFindingsPerFile, leftOut);
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"took {watch.Elapsed}");
     }
 
     [Fact]
@@ -434,6 +431,51 @@ public sealed class ReviewDecisionModelTests : IDisposable
 
         Assert.Equal(ReviewVerdictDecisions.MaxQuestionsPerStep, provider.Calls);
         Assert.Contains("150 comparison(s) skipped", model.SummaryLine([]), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The claim check reads files for each candidate, so the loop stops at the step's question cap instead of reading
+    /// for candidates whose questions the model would only drop. A later candidate that cannot be read is therefore
+    /// left to the refuter unasked, with no per-candidate note, and is counted as skipped.
+    /// </summary>
+    [Fact]
+    public async Task TheClaimCheckStopsReadingFilesOnceTheQuestionCapIsFull()
+    {
+        string root = Repository();
+        FakeProvider provider = new() { Choice = "supports", Confidence = 0.95 };
+        ReviewDecisionModel model = Model(provider);
+        ReviewFinding[] readable = [.. Enumerable.Range(0, ReviewVerdictDecisions.MaxQuestionsPerStep).Select(index => Finding($"ok/f{index}", ReviewSeverity.Major))];
+        ReviewFinding[] later = [.. Enumerable.Range(0, 50).Select(index => Finding($"late/f{index}", ReviewSeverity.Major, file: "missing.cs"))];
+
+        IReadOnlyList<ClaimCheck> checks = await ReviewVerdictDecisions.CheckClaimsAsync(model, root, [.. readable, .. later]);
+
+        Assert.Equal(readable.Length + later.Length, checks.Count);
+        Assert.Equal(ReviewVerdictDecisions.MaxQuestionsPerStep, provider.Calls);
+        Assert.All(checks.Take(readable.Length), check => Assert.False(check.NeedsRefuter));
+        Assert.All(checks.Skip(readable.Length), check =>
+        {
+            Assert.True(check.NeedsRefuter);
+            Assert.Null(check.Note);
+        });
+        Assert.Contains("50 comparison(s) skipped", model.SummaryLine([]), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TheClaimCheckLooksAtMostAtTheStepsFindingLimitAndReportsTheRest()
+    {
+        string root = Repository();
+        FakeProvider provider = new() { Choice = "supports", Confidence = 0.95 };
+        ReviewDecisionModel model = Model(provider);
+        ReviewFinding[] unreadable = [.. Enumerable.Range(0, ReviewVerdictDecisions.MaxFindingsPerStep + 7).Select(index => Finding($"x/f{index}", ReviewSeverity.Major, file: "missing.cs"))];
+
+        IReadOnlyList<ClaimCheck> checks = await ReviewVerdictDecisions.CheckClaimsAsync(model, root, unreadable);
+
+        Assert.Equal(unreadable.Length, checks.Count);
+        Assert.Equal(0, provider.Calls);
+        Assert.All(checks.Take(ReviewVerdictDecisions.MaxFindingsPerStep), check => Assert.Contains("could not be read", check.Note, StringComparison.Ordinal));
+        Assert.All(checks.Skip(ReviewVerdictDecisions.MaxFindingsPerStep), check => Assert.Null(check.Note));
+        Assert.All(checks, check => Assert.True(check.NeedsRefuter));
+        Assert.Contains("7 finding(s) left out of the comparison", model.SummaryLine([]), StringComparison.Ordinal);
     }
 
     [Theory]

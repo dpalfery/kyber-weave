@@ -285,8 +285,26 @@ public static partial class ReviewVerdictDecisions
 
         Dictionary<string, string> quoteProblems = new(StringComparer.Ordinal);
         List<ReviewQuestion> questions = [];
+
+        // Each candidate costs file reads, so the work is bounded where it is done, not after the model has dropped the
+        // questions past the cap: the loop stops once a step's questions are full or MaxFindingsPerStep candidates
+        // were looked at, and the rest are counted and left to the refuter as if unasked.
+        int looked = 0;
         foreach (ReviewFinding finding in candidates)
         {
+            if (questions.Count >= MaxQuestionsPerStep)
+            {
+                model.NoteSkipped(candidates.Count - looked);
+                break;
+            }
+
+            if (looked >= MaxFindingsPerStep)
+            {
+                model.NoteFindingsLeftOut(candidates.Count - looked);
+                break;
+            }
+
+            looked++;
             string? surroundings = Surroundings(repositoryRoot, finding);
             string? problem = surroundings is null ? "the cited file could not be read"
                 : string.IsNullOrWhiteSpace(finding.Excerpt) ? "the finding quotes no code"

@@ -308,6 +308,41 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenTheQuestionCapIsReachedTheMostSevereFindingsAreAskedFirst()
+    {
+        FakeProvider provider = new(_ => ("belongs", 0.95));
+        // 150 minor findings, then 10 critical ones the seats listed last; two rows apply to each, so 300 questions
+        // cover 150 findings and the ten critical ones must be among them.
+        ReviewFinding[] findings =
+        [
+            .. Enumerable.Range(0, 150).Select(index => Finding($"model-placement/m{index}", ReviewSeverity.Minor)),
+            .. Enumerable.Range(0, 10).Select(index => Finding($"model-placement/c{index}", ReviewSeverity.Critical)),
+        ];
+
+        (List<ReviewFinding> graded, _) = await ReviewVerdictDecisions.MatchOverridesAsync(Model(provider), SeverityOverrides.Parse(Table), findings);
+
+        Assert.Equal(ReviewVerdictDecisions.MaxQuestionsPerStep, provider.Calls);
+        Assert.All(graded.Skip(150), finding => Assert.Equal(SeverityOverrides.ModelSource, finding.OverrideSource));
+        Assert.Equal(SeverityOverrides.ModelSource, graded[0].OverrideSource);
+        Assert.Equal(SeverityOverrides.ModelSource, graded[139].OverrideSource);
+        Assert.Null(graded[140].OverrideSource);
+        Assert.Null(graded[149].OverrideSource);
+    }
+
+    [Fact]
+    public async Task OnlyTheStepsFindingLimitIsLookedAtAndTheRestAreReportedAsLeftOut()
+    {
+        FakeProvider provider = new(_ => ("no", 0.99));
+        ReviewDecisionModel model = Model(provider);
+        ReviewFinding[] many = [.. Enumerable.Range(0, ReviewVerdictDecisions.MaxFindingsPerStep + 100).Select(index => Finding($"model-placement/x{index}", ReviewSeverity.Minor))];
+
+        await ReviewVerdictDecisions.MatchOverridesAsync(model, SeverityOverrides.Parse(Table), many);
+
+        Assert.Equal(ReviewVerdictDecisions.MaxQuestionsPerStep, provider.Calls);
+        Assert.Contains("100 finding(s) left out of the comparison", model.SummaryLine([]), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AFaultChangesNothingAndStopsFurtherCalls()
     {
         FakeProvider provider = new(_ => ("belongs", 1.0)) { Fault = true };
