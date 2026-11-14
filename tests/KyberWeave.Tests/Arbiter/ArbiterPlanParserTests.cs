@@ -404,4 +404,31 @@ public sealed class ArbiterPlanParserTests
           - **Depends on:** 1.1
           - _Requirements: 1.1, 1.2_
         """;
+
+    /// <summary>Labels agents write besides the canonical ones: a file list under File, Paths or Files to change.</summary>
+    [Theory]
+    [InlineData("File")]
+    [InlineData("Paths")]
+    [InlineData("Files to change")]
+    [InlineData("Files")]
+    public void AFilesLabelVariant_StillReadsTheFiles(string label)
+    {
+        PlanDocument plan = PlanDocumentParser.Parse(
+            $"# Plan\n\n## Tasks\n\n### T1 — One\n{label}: `src/a.cs`\n\n### T2 — Two\nDepends: T1\n{label}: `src/b.cs`\n");
+
+        Assert.Equal(["src/a.cs"], plan.Tasks[0].Files);
+        Assert.Equal(["src/b.cs"], plan.Tasks[1].Files);
+    }
+
+    [Theory]
+    [InlineData("Depends")]
+    [InlineData("Depends on")]
+    [InlineData("Dependencies")]
+    public void ADependsLabelVariant_StillReadsTheDependencies(string label)
+    {
+        PlanDocument plan = PlanDocumentParser.Parse(
+            $"# Plan\n\n## Tasks\n\n### T1 — One\nFiles: `src/a.cs`\n\n### T2 — Two\n{label}: T1\nFiles: `src/b.cs`\n");
+
+        Assert.Equal(["T1"], plan.Tasks[1].DependsOn);
+    }
 }

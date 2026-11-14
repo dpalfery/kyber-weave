@@ -8,7 +8,7 @@ namespace KyberWeave.Core.Docs.Validation;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The file duplicates the plan on purpose: each task's id, role, dependencies and file scope
+/// The file duplicates the plan on purpose: each task's id, capabilities, dependencies and file scope
 /// are restated so the conductor can dispatch without reading the plan, and the plan stays the
 /// authority the file is checked against. The duplication is what
 /// <see cref="PlanTaskFileValidator" /> checks, because a file that has drifted hands a worker
@@ -45,18 +45,33 @@ public sealed record PlanTaskFile(
 /// prompt it pastes unchanged.
 /// </summary>
 /// <param name="Id">The task id, matching the plan's.</param>
-/// <param name="Role">The agent the task dispatches to.</param>
+/// <param name="Role">
+/// The agent the plan explicitly assigned the task to with a <c>Role</c>, <c>Agent</c> or <c>Specialist</c> label;
+/// null when it named none, which is the normal case: the conductor then picks the agent from <paramref name="Capabilities"/>.
+/// </param>
+/// <param name="Capabilities">
+/// The abilities the task needs, in plain words, from the plan task's <c>Capabilities</c> line (or, for an older plan,
+/// its <c>Skills</c> names); null when the plan gave neither.
+/// </param>
 /// <param name="DependsOn">The task ids that must finish first, matching the plan's; null when none.</param>
 /// <param name="Files">The task's file scope, matching the plan's; null when none.</param>
 /// <param name="Session">
 /// The worker session group: tasks sharing it continue one worker session where the harness
-/// allows it, which is why a plan's RED and GREEN tasks do not share one.
+/// allows it.
 /// </param>
 /// <param name="Prompt">The worker's whole brief, pasted unchanged at dispatch.</param>
+/// <param name="Agent">
+/// The agent the decision model picked for the task from its capabilities when the file was written; null when the
+/// plan assigned a <paramref name="Role"/>, when no model is configured, or when the pick fell below the confidence floor.
+/// </param>
+/// <param name="AgentConfidence">The model's confidence in <paramref name="Agent"/>; null when there is no pick.</param>
 public sealed record PlanTaskFileEntry(
     [property: JsonPropertyName("id")] string? Id = null,
     [property: JsonPropertyName("role")] string? Role = null,
+    [property: JsonPropertyName("capabilities")] string? Capabilities = null,
     [property: JsonPropertyName("depends-on")] IReadOnlyList<string>? DependsOn = null,
     [property: JsonPropertyName("files")] IReadOnlyList<string>? Files = null,
     [property: JsonPropertyName("session")] string? Session = null,
-    [property: JsonPropertyName("prompt")] string? Prompt = null);
+    [property: JsonPropertyName("prompt")] string? Prompt = null,
+    [property: JsonPropertyName("agent")] string? Agent = null,
+    [property: JsonPropertyName("agent-confidence")] double? AgentConfidence = null);

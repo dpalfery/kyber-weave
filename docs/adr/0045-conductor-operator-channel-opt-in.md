@@ -4,7 +4,7 @@ title: Conductor Operator Channel as an Opt-In Render-Time Overlay, and Non-Bloc
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-02
+last-reviewed: 2026-11-13
 component: KyberSquad
 code-refs:
   - SquadOperatorChannel
@@ -18,7 +18,7 @@ supersedes: []
 
 ## Status
 
-Accepted, 2026-10-27; amended 2026-11-02 to record the retirement of `NEEDS_HUMAN`, `always-human` (`KW-REVIEW-008` / `KW-REVIEW-011`), and `max-reviewable-lines` (`KW-REVIEW-009`) in favor of a binary `APPROVE` / `REQUEST_CHANGES` verdict. Records two decisions and one subsequent amendment. Decision 1 gives the Copilot CLI conductor an opt-in channel to the operator, added at install time only when the user turns it on, through an MCP server whose name the user chooses. Decision 2 changes autonomous delivery so that review findings are reported in the pull request rather than holding the change back. Amendment 3 records the retirement of `NEEDS_HUMAN` and associated escalate-to-human review rules.
+Accepted, 2026-10-27; amended 2026-11-02 to record the retirement of `NEEDS_HUMAN`, `always-human` (`KW-REVIEW-008` / `KW-REVIEW-011`), and `max-reviewable-lines` (`KW-REVIEW-009`) in favor of a binary `APPROVE` / `REQUEST_CHANGES` verdict. Records two decisions and one subsequent amendment. Decision 1 gives the Copilot CLI conductor an opt-in channel to the operator, added at install time only when the user turns it on, through an MCP server whose name the user chooses. Decision 2 changes autonomous delivery so that review findings are reported in the pull request rather than holding the change back. Amendment 3 records the retirement of `NEEDS_HUMAN` and associated escalate-to-human review rules. Amended 2026-11-13: the council reviews the pushed branch and never waits for a pull request.
 
 ## Context
 
@@ -112,13 +112,14 @@ These delivery rules replace the earlier push rule. They amend the autonomy cont
 autonomous-gates inventory, and they reverse owner decision Q5 of the archived
 [issue 386 plan](../archive/plans/2026-10-24-issue-386-reduce-autonomous-gates.md).
 
-- The draft pull request is pushed before the review council runs, so the council reviews a
-  pull request that already exists.
+- The review council reviews the pushed branch (the local branch when the push fails) and never
+  waits for a pull request. It posts its verdict on the pull request when one exists; a pull
+  request that cannot be opened does not stop the council or closeout.
 - The draft is marked ready once required CI passes. `github-devops`, using the `create-pull-request`
   skill, waits for CI for at most 60 minutes. If a required check fails or CI is not finished in that
   time, the pull request stays draft and the report says "draft: CI failed" or "draft: CI pending".
-- Review runs after the pull request is ready. The council verdict goes in the pull request
-  description; it does not gate readiness.
+- Review does not wait for the pull request to be ready. The council verdict goes in the pull request
+  description when there is one; it does not gate readiness.
 - In autonomous mode, unresolved circuit-breakers are reported findings. They are listed in the
   pull request description and the final report as pending human review. None of them stops delivery.
 - The self-review step keeps the name `pre-push` as the name of its gate. It is a gate that runs

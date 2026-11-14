@@ -22,6 +22,10 @@ and exit-code contract; this skill is the entry point, not a second copy of that
 If you are here to author or validate governed documents rather than run the products,
 stop — that is the `kyber-docs-authoring` skill. This skill does not write documentation.
 
+For a first-time setup, use the `kw-onboarding` skill instead: it walks the user through the
+doctor, the MCP servers, harness installs, every setting, models, and the Arbiter key, asking
+before each change.
+
 ## Install
 
 Both binaries install from the same one-liner on macOS and Linux:
@@ -114,6 +118,20 @@ The Kyber-Weave key surface is in `docs/configuration.md`; the initialization wa
 is in `docs/docgraph/onboarding.md`. KyberDash install, update, and configure are in
 `docs/dash/onboarding.md`. The configure flow for both products is at
 `docs/cli-command-surface.md#configure`.
+
+## Check the machine
+
+`kyber-weave doctor` checks a repository's CodeGraph index and docs server, and recommends
+machine settings. If the user runs GitHub Copilot CLI it warns, without failing, when
+`COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES` is unset or below 32000: Copilot CLI then saves large tool
+results to a file instead of showing them to the agent, and agents stop using the code index.
+Tell the user to set it themselves in the shell Copilot CLI starts from; never edit their profile.
+
+```bash
+export COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES=32000   # PowerShell: $env:COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES = "32000"
+```
+
+Details: `docs/docgraph/mcp-runbook.md#the-copilot-cli-large-output-limit`.
 
 ## Where the full surface lives
 

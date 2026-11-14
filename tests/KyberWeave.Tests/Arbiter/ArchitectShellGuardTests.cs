@@ -55,6 +55,7 @@ public sealed class ArchitectShellGuardTests
     [InlineData("kyber-weave docs drift .")]
     [InlineData("codegraph explore \"ArbiterHookWiring BuildHooks\"")]
     [InlineData("codegraph explore 'a && b'")]
+    [InlineData("kyber-weave squad brief architect --path finalize --plan docs/plans/x.md --autonomy autonomous")]
     [InlineData("kyber-weave doctor --ensure")]
     [InlineData("git status")]
     [InlineData("git -C /w log --oneline -5")]

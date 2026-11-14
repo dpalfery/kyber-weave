@@ -135,7 +135,9 @@ public static class ConfigRegMarkdown
 
         Instructions for agents working here. Everything outside the generated block below is
         yours to write: what this repository is, the commands that must pass before a change
-        lands, and the conventions worth stating.
+        lands, and its rules. Every agent reads this file on every task, so keep it to rules
+        that apply to every task and pointers; how one technology is written belongs in its
+        coding standard (see "Rules and standards" in the documentation ontology).
 
         Documentation lives in [`{docsRoot}/`]({docsRoot}/README.md).
 

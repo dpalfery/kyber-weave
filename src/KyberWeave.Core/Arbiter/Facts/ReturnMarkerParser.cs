@@ -29,12 +29,11 @@ internal static partial class ReturnMarkerParser
 
         string text = Flatten(output);
         string? review = LastGroup(ResultRegex(), text);
-        string? red = LastGroup(RedEvidenceRegex(), text) is { Length: > 0 } evidence ? evidence : null;
         string? status = LastGroup(StatusRegex(), text);
         IReadOnlyList<string>? attested = readAttestations ? ReadAttested(text) : null;
-        return review is null && red is null && status is null && attested is null
+        return review is null && status is null && attested is null
             ? null
-            : new ArbiterReturnMarkers(review, red, status, attested);
+            : new ArbiterReturnMarkers(review, status, attested);
     }
 
     private static IReadOnlyList<string>? ReadAttested(string text)
@@ -60,7 +59,7 @@ internal static partial class ReturnMarkerParser
     /// A foreground harness hands back its tool response as JSON, where a report's line
     /// breaks are escaped. Every string in it is joined so a marker starts a line again.
     /// </summary>
-    private static string Flatten(string output)
+    internal static string Flatten(string output)
     {
         string trimmed = output.TrimStart();
         if (trimmed.Length == 0 || (trimmed[0] != '{' && trimmed[0] != '['))
@@ -107,9 +106,6 @@ internal static partial class ReturnMarkerParser
 
     [GeneratedRegex(@"^RESULT:\s+(PASS|FAIL)\b", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     private static partial Regex ResultRegex();
-
-    [GeneratedRegex(@"^RED_EVIDENCE:[ \t]*(.*?)[ \t]*\r?$", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
-    private static partial Regex RedEvidenceRegex();
 
     [GeneratedRegex(@"^STATUS:[ \t]*(\S+)", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     private static partial Regex StatusRegex();

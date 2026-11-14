@@ -132,6 +132,10 @@ public static class TaskGateSelection
     /// The host's <c>review.test-map</c>, as source glob to fully qualified class names, or
     /// <see langword="null"/> when the host declares none.
     /// </param>
+    /// <param name="declaredClasses">
+    /// Test classes the task's plan names in its Test contract. They fill <c>{tests}</c> ahead of the classes looked up
+    /// from the changed files.
+    /// </param>
     /// <exception cref="ArgumentException">
     /// <paramref name="currentOs"/> is neither <c>windows</c> nor <c>unix</c>. Any other host value would
     /// be read as unix, so it is refused rather than guessed at.
@@ -142,7 +146,8 @@ public static class TaskGateSelection
         string? task,
         string currentOs,
         string? root = null,
-        IReadOnlyDictionary<string, IReadOnlyList<string>>? testMap = null)
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? testMap = null,
+        IReadOnlyList<string>? declaredClasses = null)
     {
         ArgumentNullException.ThrowIfNull(gates);
         ArgumentNullException.ThrowIfNull(changed);
@@ -239,7 +244,9 @@ public static class TaskGateSelection
                 IReadOnlyList<string> classes;
                 try
                 {
-                    classes = TestClassMapping.Resolve(root, matches, testMap);
+                    // Classes a plan declares come first: in test-first work they may not exist yet, so a lookup from
+                    // the changed files would miss them. The mapped classes still run, so existing coverage is kept.
+                    classes = [.. (declaredClasses ?? []).Concat(TestClassMapping.Resolve(root, matches, testMap)).Distinct(StringComparer.Ordinal)];
                 }
                 catch (Exception ex) when (ex is InvalidOperationException)
                 {

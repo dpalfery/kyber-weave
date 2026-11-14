@@ -68,6 +68,15 @@ public sealed class ArbiterPlanReadRuleTests
             });
     }
 
+    private static object Fact(ArbiterFactSet facts, string name)
+    {
+        Assert.True(facts.TryGet(name, out ArbiterFact? fact));
+        return fact!.Value!;
+    }
+
+    /// <summary>The shipped rule's step-0 answer for those facts.</summary>
+    private static string Answer(string prompt, string target = "csharp-dev") => RuleEngine.Decide(Rule(), Facts(prompt, target));
+
     /// <summary>The effect the shipped rule produces for those facts.</summary>
     private static string Effect(string prompt, string target = "csharp-dev")
     {
@@ -80,30 +89,70 @@ public sealed class ArbiterPlanReadRuleTests
     /// that cannot stop the read is replaced by a dispatch that does not happen.
     /// </summary>
     [Fact]
-    public void APromptThatNamesAPlanningPathEscalatesTheDispatch()
+    public void APromptThatNamesAPlanningPathGoesToTheModel()
     {
+        // The detector reads prose, so a named planning path is undecidable at step 0 and the model is asked
+        // whether the worker is told to read it (ADR 0072). Only a confident names-plan escalates.
         string prompt = Prompt(
             "Read `docs/plans/2026-11-07-ready-tasks.md` and implement the task it describes in " +
             "`src/KyberWeave.Core/RunStart/RunStartPlanner.cs`.");
 
-        Assert.Equal(RuleEffects.Escalate, Effect(prompt));
+        Assert.Equal(RuleEngine.Undecidable, Answer(prompt));
+        Assert.Equal(RuleEffects.Allow, Effect(prompt));
+        Assert.Equal(RuleEffects.Escalate, Rule().Effects["names-plan"]);
+        Assert.Contains("names-plan", Rule().Ask!.Criteria!.Keys);
+    }
+
+    /// <summary>
+    /// Routing metadata is not evidence of a plan read: the header lines, the run-mode lines beside them and the
+    /// product's own packet commands name the plan so the machine can identify the dispatch, and never reach the question.
+    /// </summary>
+    [Theory]
+    [InlineData("Fetch your packet with `kyber-weave docs packet T1 --agent dal-dev`.")]
+    [InlineData("Fetch your packet with `kyber-weave docs tasks docs/plans/2026-11-07-ready-tasks.md --task T1` (from the worktree).")]
+    [InlineData("Your first action is `kyber-weave docs packet T1 --plan docs/plans/2026-11-07-ready-tasks.md`.")]
+    public void RoutingMetadataAndPacketCommandsNameNoPlanToTheQuestion(string body)
+    {
+        string prompt = "PLAN_FILE: docs/plans/2026-11-07-ready-tasks.md\nTASK: T1\ndevelopment-mode: test-first\nautonomy: autonomous\n\n" + body;
+        ArbiterFactSet facts = Facts(prompt);
+
+        Assert.Empty(Assert.IsAssignableFrom<IReadOnlyList<string>>(Fact(facts, "delegation.planning-paths")));
+        string head = Assert.IsType<string>(Fact(facts, "delegation.body-head"));
+        Assert.DoesNotContain("PLAN_FILE", head, StringComparison.Ordinal);
+        Assert.DoesNotContain("development-mode", head, StringComparison.Ordinal);
+        Assert.DoesNotContain("docs/plans", head, StringComparison.Ordinal);
+        Assert.Equal("no-plan", Answer(prompt));
+    }
+
+    /// <summary>A read instruction that is not a packet command still names the plan, with its header lines removed.</summary>
+    [Fact]
+    public void AnInstructionToReadThePlanStillReachesTheQuestionWithoutItsHeaders()
+    {
+        string prompt = "PLAN_FILE: docs/plans/2026-11-07-ready-tasks.md\nTASK: T1\ndevelopment-mode: test-first\n\n" +
+            "Open docs/plans/2026-11-07-ready-tasks.md and implement task 2 from it.";
+        ArbiterFactSet facts = Facts(prompt);
+
+        Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<string>>(Fact(facts, "delegation.planning-paths")));
+        string head = Assert.IsType<string>(Fact(facts, "delegation.body-head"));
+        Assert.StartsWith("Open docs/plans/", head, StringComparison.Ordinal);
+        Assert.Equal(RuleEngine.Undecidable, Answer(prompt));
     }
 
     /// <summary>
     /// Lexical variations (leading ./, duplicate slashes, /./, /../) must still be identified as
-    /// planning paths and escalate rather than bypassing the rule.
+    /// planning paths and reach the model question rather than bypassing the rule.
     /// </summary>
     [Theory]
     [InlineData("./docs/plans/2026-11-07-ready-tasks.md")]
     [InlineData("docs//plans/2026-11-07-ready-tasks.md")]
     [InlineData("docs/./plans/2026-11-07-ready-tasks.md")]
     [InlineData("docs/sub/../plans/2026-11-07-ready-tasks.md")]
-    public void APromptThatNamesALexicallyVariantPlanningPathEscalatesTheDispatch(string path)
+    public void APromptThatNamesALexicallyVariantPlanningPathGoesToTheModel(string path)
     {
         string prompt = Prompt(
             $"Read `{path}` and implement the task it describes in `src/KyberWeave.Core/RunStart/RunStartPlanner.cs`.");
 
-        Assert.Equal(RuleEffects.Escalate, Effect(prompt));
+        Assert.Equal(RuleEngine.Undecidable, Answer(prompt));
     }
 
     /// <summary>
@@ -117,6 +166,7 @@ public sealed class ArbiterPlanReadRuleTests
         string prompt = Prompt(
             "Implement the reader in `src/KyberWeave.Core/RunStart/RunStartPlanner.cs` and report the total.");
 
+        Assert.Equal("no-plan", Answer(prompt));
         Assert.Equal(RuleEffects.Allow, Effect(prompt));
     }
 
@@ -148,7 +198,7 @@ public sealed class ArbiterPlanReadRuleTests
             $"the shipped rules file must live at '{ShippedRulesPath}'.");
         string[] lines = File.ReadAllLines(ShippedRulesPath);
 
-        Assert.Contains("32 shipped Arbiter rules", lines[0], StringComparison.Ordinal);
+        Assert.Contains("36 shipped Arbiter rules", lines[0], StringComparison.Ordinal);
 
         string[] ids =
         [
@@ -158,9 +208,9 @@ public sealed class ArbiterPlanReadRuleTests
                 .Select(line => line["- id: ".Length..].Trim())
         ];
 
-        Assert.Equal(32, ids.Length);
+        Assert.Equal(36, ids.Length);
         Assert.Contains(PlanReadRule, ids);
-        Assert.Equal("KW-ARB-COMMENT-001", ids[^1]);
+        Assert.Equal("KW-ARB-MODE-002", ids[^3]);
         Assert.Equal("delegate", Rule().Trigger);
     }
 }

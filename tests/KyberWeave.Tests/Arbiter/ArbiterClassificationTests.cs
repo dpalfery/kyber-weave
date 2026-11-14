@@ -224,15 +224,17 @@ public sealed class ArbiterClassificationTests
     [Theory]
     [InlineData("factory")]
     [InlineData("antigravity")]
-    public void Classification_UnmarkedPlannerTargetOnProjectWideHarnessPasses(string harness)
+    public void Classification_UnmarkedPlannerTargetOnProjectWideHarness_IsEvaluatedWithNoCallerInvented(string harness)
     {
+        // The catalog names the target, so the dispatch is evaluated; nothing names the caller, so it is
+        // not taken for the conductor and only rules that allow an unnamed caller apply.
         const string Prompt = "Plan the upgrade.";
         TriggerClassification plan = TriggerClassifier.ClassifySingle(
             Dispatch(Prompt, target: "architect", harness: harness),
             "architect",
             Prompt);
 
-        Assert.Null(plan.Trigger);
+        Assert.Equal("investigate", plan.Trigger);
         Assert.Null(plan.Caller);
     }
 
@@ -353,6 +355,43 @@ public sealed class ArbiterClassificationTests
         Assert.Equal("lens.returned", post.Trigger);
     }
 
+    [Theory]
+    [InlineData("conductor", "review-lens", "LENS: security", "lens.spawn")]
+    [InlineData("conductor", "review-triage", "LENS: static-analysis-triage", "lens.spawn")]
+    [InlineData("conductor", "review-lens", "REFUTE: security/key-in-argv", "refute.spawn")]
+    [InlineData("bug-crusher", "review-lens", "LENS: correctness", "lens.spawn")]
+    public void Classification_SeatingTheCouncilForTheReviewerIsTheSameSpawnAsTheReviewers(
+        string caller, string target, string header, string trigger)
+    {
+        string prompt = Marked("Apply lens.", header);
+        TriggerClassification seat = TriggerClassifier.ClassifySingle(
+            Dispatch(prompt, target: target, harness: "copilot-cli", harnessCaller: caller),
+            target,
+            prompt);
+
+        Assert.Equal(trigger, seat.Trigger);
+    }
+
+    /// <summary>
+    /// On Factory the review-council skill seats the council from the main session, whose hook names no
+    /// caller: a marked seat dispatch is still the reviewer's lens or refutation spawn.
+    /// </summary>
+    [Theory]
+    [InlineData("review-lens", "LENS: security", "lens.spawn")]
+    [InlineData("review-triage", "LENS: dependency-supply-chain", "lens.spawn")]
+    [InlineData("review-lens", "REFUTE: security/key-in-argv", "refute.spawn")]
+    public void Classification_ASeatTheMainSessionStartsOnFactoryIsTheReviewersSpawn(
+        string target, string header, string trigger)
+    {
+        string prompt = Marked("Packet: /tmp/cycle-1/packets/seat.md", header);
+        TriggerClassification seat = TriggerClassifier.ClassifySingle(
+            Dispatch(prompt, target: target, harness: "factory"),
+            target,
+            prompt);
+
+        Assert.Equal(trigger, seat.Trigger);
+    }
+
     [Fact]
     public void Classification_CodeReviewerRefuteIsRefuteSpawn()
     {
@@ -440,12 +479,27 @@ public sealed class ArbiterClassificationTests
         static KyberWeave.Core.Configuration.KyberWeaveConfig Fail() =>
             throw new InvalidOperationException("must not load .kyber-weave/kyber-weave.yml");
 
-        var ev = Dispatch("Do anything with `src/a.cs`.", target: "csharp-dev", harness: "antigravity");
+        var ev = Dispatch("Do anything with `src/a.cs`.", target: "explore", harness: "antigravity");
         IReadOnlyList<TriggerClassification> rows = TriggerClassifier.Classify(ev, Fail);
 
         TriggerClassification single = Assert.Single(rows);
         Assert.Null(single.Trigger);
         Assert.True(single.PassedWithoutConfig);
+    }
+
+    [Theory]
+    [InlineData("antigravity", "investigate")]
+    [InlineData("copilot-cli", "delegate")]
+    [InlineData("claude", "investigate")]
+    public void Classification_UnmarkedUnidentifiedDispatchToASquadAgent_IsEvaluated(string harness, string expected)
+    {
+        var ev = Dispatch("Do anything with `src/a.cs`.", target: "csharp-dev", harness: harness);
+
+        TriggerClassification single = Assert.Single(TriggerClassifier.Classify(ev));
+
+        // On Copilot CLI no caller is the root session's, so its writer dispatch is a delegation (ADR 0082).
+        Assert.Equal(expected, single.Trigger);
+        Assert.Null(single.Caller);
     }
 
     [Fact]

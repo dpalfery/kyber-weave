@@ -20,7 +20,15 @@ public sealed record TriggerClassification(
     string TargetClass,
     IReadOnlyDictionary<string, string> Headers,
     string? Marker,
-    bool PassedWithoutConfig);
+    bool PassedWithoutConfig)
+{
+    /// <summary>
+    /// The raw header values the prompt writes, including the ones <see cref="Headers"/> rejected
+    /// (see <see cref="HeaderBlock.RawValues"/>). Read by the plan lookup and the model questions only.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> RawHeaders { get; init; } =
+        new Dictionary<string, string>(StringComparer.Ordinal);
+}
 
 /// <summary>
 /// Classifies harness-neutral events into triggers (design section 4): target
@@ -58,6 +66,9 @@ public static partial class TriggerClassifier
     /// shell of its own to run the tool with.
     /// </summary>
     private const string RunStartMarker = "RUN-START";
+
+    /// <summary>The harness whose hook payload names the calling agent for every sub-agent, so no name means the root.</summary>
+    private const string RootNamesNoCallerHarness = "copilot-cli";
 
     /// <summary>
     /// The marker a conductor writes first on a rework dispatch, naming the failure cluster the worker is
@@ -185,7 +196,10 @@ public static partial class TriggerClassifier
         return ClassifyOne(ev, target, prompt);
     }
 
-    private static TriggerClassification ClassifyOne(ArbiterEvent ev, string? target, string prompt)
+    private static TriggerClassification ClassifyOne(ArbiterEvent ev, string? target, string prompt) =>
+        ClassifyCore(ev, target, prompt) with { RawHeaders = HeaderBlock.Parse(prompt).RawValues };
+
+    private static TriggerClassification ClassifyCore(ArbiterEvent ev, string? target, string prompt)
     {
         HeaderBlock block = HeaderBlock.Parse(prompt);
         IReadOnlyDictionary<string, string> headers = block.Headers;
@@ -206,10 +220,14 @@ public static partial class TriggerClassifier
         bool marked = headers.ContainsKey("KYBER-ARBITER");
         bool unidentified = resolved is null;
 
-        if (!marked && unidentified && IsProjectWideHarness(ev.Harness))
+        // A project-wide hook fires for every agent, so an unmarked dispatch from a caller nobody names passes,
+        // unless its target is a Squad agent: the catalog is a machine fact, and routing must not depend on the
+        // orchestrator volunteering headers.
+        if (!marked && unidentified && IsProjectWideHarness(ev.Harness)
+            && string.Equals(targetClass, "not-squad", StringComparison.Ordinal))
             return new TriggerClassification(null, null, ArbiterCallerSources.None, target, targetClass, headers, marker, true);
 
-        string? trigger = ClassifyTrigger(resolved, target, targetClass, headers, marker);
+        string? trigger = ClassifyTrigger(resolved, target, targetClass, headers, marker, IsRootSession(ev, resolved));
         if (trigger is not null && IsReturnPhase(ev.Phase))
             trigger = ToReturned(trigger);
 
@@ -267,19 +285,51 @@ public static partial class TriggerClassifier
         return (null, ArbiterCallerSources.None);
     }
 
+    /// <summary>A lens seat or a refutation seat of the review council, or null when the dispatch is neither.</summary>
+    private static string? CouncilSeat(string? target, IReadOnlyDictionary<string, string> headers)
+    {
+        bool lensTarget = string.Equals(target, "review-lens", StringComparison.Ordinal)
+            || string.Equals(target, "review-triage", StringComparison.Ordinal);
+        if (lensTarget && headers.ContainsKey("LENS"))
+            return "lens.spawn";
+        if (string.Equals(target, "review-lens", StringComparison.Ordinal) && headers.ContainsKey("REFUTE"))
+            return "refute.spawn";
+        return null;
+    }
+
+    /// <summary>
+    /// Whether the dispatch came from the session a human started. On Copilot CLI a sub-agent's hook payload carries
+    /// the calling agent's type, so a dispatch that names no caller there is the root session's: a machine fact, not a
+    /// guess. On every other project-wide harness an unnamed caller is unknown, never the root.
+    /// </summary>
+    private static bool IsRootSession(ArbiterEvent ev, string? resolvedCaller) =>
+        resolvedCaller is null
+        && ev.AssertedCaller is null
+        && string.Equals(ev.Harness, RootNamesNoCallerHarness, StringComparison.OrdinalIgnoreCase);
+
     private static string? ClassifyTrigger(
         string? caller,
         string? target,
         string targetClass,
         IReadOnlyDictionary<string, string> headers,
-        string? marker)
+        string? marker,
+        bool rootSession)
     {
         // RUN-START: true is the conductor handing the run-start step to a worker because it has no shell
-        // of its own, so the dispatch carries no PLAN_FILE. KW-ARB-PLAN-001 escalates a delegate with no
-        // plan, which would refuse the very route the marker exists for; investigate keeps the roster check
+        // of its own, so the dispatch carries no PLAN_FILE. KW-ARB-PLAN-001 asks whether a delegate names a
+        // plan, and a confident no would refuse the very route the marker exists for; investigate keeps the roster check
         // and KW-ARB-READONLY-001 doing their work over the dispatch instead.
         if (string.Equals(marker, RunStartMarker, StringComparison.Ordinal))
             return "investigate";
+
+        // Where a sub-agent cannot dispatch, the review-council skill has the session a human started (the
+        // conductor, or bug-crusher) seat the council for code-reviewer (ADR 0079); a council seat is the same
+        // lens or refutation spawn whichever of them dispatches it.
+        bool reviewer = string.Equals(caller, "code-reviewer", StringComparison.Ordinal);
+        if ((reviewer || string.Equals(caller, "conductor", StringComparison.Ordinal)
+                      || string.Equals(caller, "bug-crusher", StringComparison.Ordinal))
+            && CouncilSeat(target, headers) is { } seat)
+            return seat;
 
         // A rework dispatch (FAILURE-CLUSTER marker) is classified as the ordinary delegation: its failure rule
         // rides as a secondary trigger, derived by SecondaryTriggers.For.
@@ -294,16 +344,8 @@ public static partial class TriggerClassifier
             return "investigate";
         }
 
-        if (string.Equals(caller, "code-reviewer", StringComparison.Ordinal))
-        {
-            bool lensTarget = string.Equals(target, "review-lens", StringComparison.Ordinal)
-                || string.Equals(target, "review-triage", StringComparison.Ordinal);
-            if (lensTarget && headers.ContainsKey("LENS"))
-                return "lens.spawn";
-            if (string.Equals(target, "review-lens", StringComparison.Ordinal) && headers.ContainsKey("REFUTE"))
-                return "refute.spawn";
+        if (reviewer)
             return "investigate";
-        }
 
         if (string.Equals(caller, "architect", StringComparison.Ordinal)
             || string.Equals(caller, "product-owner", StringComparison.Ordinal))
@@ -322,6 +364,17 @@ public static partial class TriggerClassifier
             return "investigate";
 
         if (headers.ContainsKey("KYBER-ARBITER"))
+            return "investigate";
+
+        // The root session handing a Squad writer work is a delegation whether or not it wrote headers: the
+        // conductor's headers are optional (ADR 0082), so plan and task identity are resolved from machine facts
+        // (the run's worktree, its active plan, a task id the plan holds) and every judgement allows what it cannot name.
+        if (rootSession && string.Equals(targetClass, "implementation", StringComparison.Ordinal))
+            return "delegate";
+
+        // Any other Squad target with no caller and no headers: only the machine-fact rules have anything to judge,
+        // and each of them allows a caller it cannot name.
+        if (!string.Equals(targetClass, "not-squad", StringComparison.Ordinal))
             return "investigate";
 
         return null;

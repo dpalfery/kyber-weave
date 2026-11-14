@@ -3,9 +3,11 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Pins the <c>autonomy</c> contract across the portable Squad text. The value is a
-/// repository default (Config Reg <c>&lt;autonomy&gt;</c>) overridable per run, and
-/// <c>supervised</c> must keep every human gate it has today.
+/// Checks the protocol tokens, markers and file references of the <c>autonomy</c> contract across
+/// the portable Squad text. The value is a repository default (Config Reg <c>&lt;autonomy&gt;</c>)
+/// overridable per run. The prose rules themselves (resolution order, hard stops, supervised gates,
+/// hard-block repair, autonomous approval) are graded from the prose rule catalog
+/// (<c>Fixtures/prose-rules/catalog.yml</c>).
 /// </summary>
 public sealed class SquadAutonomyContractTests
 {
@@ -45,18 +47,12 @@ public sealed class SquadAutonomyContractTests
 
         AssertAll(autonomy,
             "autonomy: supervised|autonomous",
-            "the value declared as **<autonomy>** in the repository root `AGENTS.md` Config Reg",
-            "`supervised` when absent",
-            "does not reopen approval",
-            "next gate",
             "`development-mode`");
         Assert.Contains("conductor/references/autonomy.md", conductor, StringComparison.Ordinal);
         Assert.True(
             autonomy.IndexOf("autonomy: supervised|autonomous", StringComparison.Ordinal) <
-            autonomy.IndexOf("**<autonomy>**", StringComparison.Ordinal) &&
-            autonomy.IndexOf("**<autonomy>**", StringComparison.Ordinal) <
-            autonomy.IndexOf("`supervised` when absent", StringComparison.Ordinal),
-            "Resolution order must read prompt, then Config Reg, then the supervised default.");
+            autonomy.IndexOf("**<autonomy>**", StringComparison.Ordinal),
+            "Resolution order must read the prompt directive, then the Config Reg property.");
     }
 
     [Fact]
@@ -71,10 +67,7 @@ public sealed class SquadAutonomyContractTests
             "ESCALATION: hard_block",
             "SOURCES_SEARCHED",
             "COST_OF_WRONG",
-            "RECOMMENDED",
-            "approve and execute",
-            "rejects a hard-block escalation",
-            "same question-group shape");
+            "RECOMMENDED");
     }
 
     [Fact]
@@ -85,90 +78,40 @@ public sealed class SquadAutonomyContractTests
         AssertAll(autonomy,
             "Hard stops",
             "RECOMMENDED: none",
-            "merge, publish, delete, or spend",
-            "STATUS: BLOCKED",
-            "write error",
-            "draft** pull request",
-            "Never merge");
+            "STATUS: BLOCKED");
     }
 
     [Fact]
-    public void AutonomousCircuitBreakerIsAReportedFindingAndDeliveryContinues()
+    public void AutonomyAndExecutionNeverEmitTheRetiredNeedsHumanVerdict()
     {
         string autonomy = Read("agents", "conductor", "references", "autonomy.md");
         string execution = Read("skills", "delivery-execution", "SKILL.md");
 
-        AssertAll(
-            autonomy,
-            "pending human review",
-            "reported as a finding",
-            "the draft pull request is the human review",
-            "listed in the PR",
-            "delivery continues");
         Assert.DoesNotContain("NEEDS_HUMAN", autonomy, StringComparison.Ordinal);
         Assert.DoesNotContain("NEEDS_HUMAN", execution, StringComparison.Ordinal);
     }
 
-    /// <summary>
-    /// The conductor pushes the draft pull request before the review council runs, so the council
-    /// reviews a PR that already exists. It marks the PR ready only once required CI passes. The
-    /// retired wording held the push back until the council returned and parked changes unpushed.
-    /// </summary>
     [Fact]
-    public void ConductorPushesDraftBeforeCouncilAndMarksReadyOnRequiredCi()
-    {
-        string contract = ConductorContract();
-
-        AssertAll(
-            contract,
-            "draft pull request is pushed before the review council runs",
-            "marked ready once required CI passes",
-            "required CI",
-            "60 minutes",
-            "review happens after",
-            "not a conductor gate");
-        Assert.DoesNotContain(
-            "Do not commit, push, publish, or open a pull request until the council returns",
-            contract,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain("leave it unpushed", contract, StringComparison.Ordinal);
-        Assert.DoesNotContain("Do not mark the pull request ready", contract, StringComparison.Ordinal);
-        Assert.DoesNotContain("Park that change or task", contract, StringComparison.Ordinal);
-        Assert.DoesNotContain("parked NEEDS_HUMAN", contract, StringComparison.Ordinal);
-        Assert.DoesNotContain("at least one review", contract, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void FinalReportListsLowConfidenceDecisionsAndAutoApprovedGates()
+    public void AutonomyCarriesTheLowConfidenceMarker()
     {
         string autonomy = Read("agents", "conductor", "references", "autonomy.md");
 
-        AssertAll(autonomy,
-            "autonomous: low-confidence",
-            "why no source",
-            "auto-approved gates");
+        Assert.Contains("autonomous: low-confidence", autonomy, StringComparison.Ordinal);
     }
 
     [Theory]
     [InlineData("agents/architect/references/autonomy-decisions.md", "agents/architect.md")]
     [InlineData("skills/product-owner/references/autonomy-decisions.md", "skills/product-owner/SKILL.md")]
-    public void SpecialistsApplyTheThreeCheckDecisionRuleAndTheEscalationMarker(string reference, string owner)
+    public void SpecialistsCarryTheLowConfidenceAndEscalationMarkers(string reference, string owner)
     {
         string text = Read(reference.Split('/'));
 
         AssertAll(text,
-            "Covered?",
-            "Microsoft Learn",
-            "research-agent",
             "autonomous: low-confidence, no authoritative source",
-            "cheap to reverse",
-            "expensive to reverse",
-            "already-accepted decision",
             "ESCALATION: hard_block",
             "SOURCES_SEARCHED",
             "COST_OF_WRONG",
-            "RECOMMENDED",
-            "never ask a question just to ask");
+            "RECOMMENDED");
         Assert.Contains(
             Path.GetFileName(reference),
             Read(owner.Split('/')),
@@ -181,48 +124,24 @@ public sealed class SquadAutonomyContractTests
         string skill = Read("skills", "bug-crusher", "SKILL.md");
 
         AssertAll(skill,
-            "autonomy",
             "**<autonomy>**",
             "ESCALATION: hard_block",
-            "autonomous: recommendation accepted",
-            "approve and execute");
+            "autonomous: recommendation accepted");
     }
 
     [Fact]
-    public void SupervisedGatesRemainInTheContracts()
+    public void ConductorContractNeverEmitsTheRetiredNeedsHumanVerdict()
     {
-        string contract = ConductorContract();
-
-        AssertAll(contract,
-            "relay all independent questions",
-            "require the user to choose plan or spec",
-            "Ask for approval or concrete revision feedback",
-            "ask the final blocking question as **approve and execute**",
-            "explicitly chooses **approve and execute**",
-            "reopens approval of the affected Test contract",
-            "Supervised behaviour is unchanged");
-        Assert.DoesNotContain("NEEDS_HUMAN", contract, StringComparison.Ordinal);
-        AssertAll(Read("skills", "bug-crusher", "SKILL.md"),
-            "Relay its decision digests and final **approve and execute** gate",
-            "surface every grouped question");
-        AssertAll(Read("agents", "architect.md"), "never prompt the user directly", "**approve and execute**");
-        AssertAll(Read("skills", "product-owner", "SKILL.md"), "never prompts the user", "**approve and execute**");
+        Assert.DoesNotContain("NEEDS_HUMAN", ConductorContract(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void MalformedHardBlockEscalationIsRepairedOnceNeverDecidedOrAskedOfTheUser()
+    public void MalformedHardBlockFallbackCarriesTheLowConfidenceMarker()
     {
-        string autonomy = Read("agents", "conductor", "references", "autonomy.md");
-        string bug = Read("skills", "bug-crusher", "SKILL.md");
+        const string Marker = "autonomous: low-confidence, no authoritative source";
 
-        AssertAll(autonomy,
-            "ONCE to be REPAIRED",
-            "same question, same ids",
-            "autonomous: low-confidence, no authoritative source",
-            "Never ask the user for a malformed block");
-        Assert.DoesNotContain("sends it back to the specialist to decide", autonomy, StringComparison.Ordinal);
-        AssertAll(bug, "ONCE to be REPAIRED", "autonomous: low-confidence, no authoritative source");
-        Assert.DoesNotContain("sending it back to `architect` to decide", bug, StringComparison.Ordinal);
+        Assert.Contains(Marker, Read("agents", "conductor", "references", "autonomy.md"), StringComparison.Ordinal);
+        Assert.Contains(Marker, Read("skills", "bug-crusher", "SKILL.md"), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -234,16 +153,11 @@ public sealed class SquadAutonomyContractTests
         string architect = Read("agents", "architect.md");
         string owner = Read("skills", "product-owner", "SKILL.md");
 
-        AssertAll(autonomy, "AUTONOMOUS_APPROVAL: <gate id>", "never writes the row");
-        AssertAll(plan, "AUTONOMOUS_APPROVAL: <gate id>", "`architect` records");
-        AssertAll(spec, "AUTONOMOUS_APPROVAL: <gate id>", "`product-owner` records");
-        Assert.DoesNotContain("conductor supplies the approval and records it", plan, StringComparison.Ordinal);
-        Assert.DoesNotContain("record the approval yourself", spec, StringComparison.Ordinal);
-        AssertAll(architect, "Never infer approval", "AUTONOMOUS_APPROVAL", "autonomous: recommendation accepted",
-            "from silence or from the mode alone");
-        AssertAll(owner, "AUTONOMOUS_APPROVAL", "autonomous: recommendation accepted",
-            "from silence or from the mode alone");
-        Assert.DoesNotContain("conductor supplies those approvals itself", owner, StringComparison.Ordinal);
+        Assert.Contains("AUTONOMOUS_APPROVAL: <gate id>", autonomy, StringComparison.Ordinal);
+        Assert.Contains("AUTONOMOUS_APPROVAL: <gate id>", plan, StringComparison.Ordinal);
+        Assert.Contains("AUTONOMOUS_APPROVAL: <gate id>", spec, StringComparison.Ordinal);
+        AssertAll(architect, "AUTONOMOUS_APPROVAL", "autonomous: recommendation accepted");
+        AssertAll(owner, "AUTONOMOUS_APPROVAL", "autonomous: recommendation accepted");
     }
 
     [Fact]

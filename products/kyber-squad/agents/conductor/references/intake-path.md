@@ -2,16 +2,6 @@
 
 Use this path for todo/open-request intake and for defect diagnosis before resuming an existing artifact.
 
-## Run start
-
-Get the run onto its own branch before anything on this path happens: no diagnosis, assessment or promotion starts on an unnamed branch or a stale base.
-
-Run `kyber-weave run start --harness {{harness}} --type <type> --slug <slug> [--failing-version <version>]` from the repository root, adding `--failing-version <version>` for a defect so the failing build, `HEAD` and base are compared rather than assumed. Where the harness gives you no shell, dispatch `github-devops` with that exact command and `RUN-START: true`, which the Arbiter classifies as an `investigate` dispatch. Pass the `--type` the work will be committed as (`fix` for a defect, `feat` for a feature, and so on) and a `--slug` of lowercase hyphen-separated words: the branch is `[<owner>.<agent>.]<harness>/<type>/<slug>`, the same shape the pull request's naming check holds it to.
-
-The command fetches `origin` with `--prune` and starts from the branch `run.base-branch` declares, or from `origin/HEAD` when the repository declares none — never an assumed `main`. Keep its printed facts in the run record: `base`, `branch`, `where`, `revision`, and the failing, `HEAD` and base versions. Everyone you dispatch next works in `where`, and on the defect path the investigator is given those versions rather than sent to hunt for them.
-
-A refused harness token, type or slug exits `2`: correct the argument and re-run once. Exit `3` is the missing `codegraph` binary, handled as the run-start lifecycle invariant describes. Exit `1` is a tool failure, which stops the run when `stop-on-tool-failure` is on (a failed fetch alone only warns when it is off) and is otherwise relayed as a blocker, because a run with no branch has nothing to commit to.
-
 ## Intent first
 
 Before any assessment, read the user's intent from the request. The assessment exists only to collect a choice the user has not made.

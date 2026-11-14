@@ -33,6 +33,7 @@ public static partial class SeatOutputParser
     private const string IndexFallbackPrefix = "Index fallback:";
     private const string DiscoveryPrefix = "Discovery:";
     private const string InputSitesPrefix = "Input sites:";
+    private const string BudgetPrefix = "Budget reached, not examined:";
     private const string AttestationPrefix = "REVIEW.md sections checked:";
     private const char FenceCharacter = '`';
     private const int MinimumFenceLength = 3;
@@ -43,7 +44,7 @@ public static partial class SeatOutputParser
     private static readonly HashSet<string> TextFields = new(StringComparer.Ordinal)
     {
         "id", "lens", "severity", "confidence", "file", "line", "excerpt", "claim", "evidence",
-        "failure_scenario", "failureScenario", "suggestion"
+        "failure_scenario", "failureScenario", "suggestion", "override"
     };
 
     /// <summary>
@@ -77,6 +78,7 @@ public static partial class SeatOutputParser
         List<string> indexFallbacks = [];
         List<SeatDiscovery?> discoveries = [];
         List<SeatInputSites?> inputSiteLines = [];
+        string? budgetNote = null;
         SeatOutputKind? declared = null;
         int declaredLine = 0;
         List<SeatLine> body = [];
@@ -95,6 +97,13 @@ public static partial class SeatOutputParser
                 discoveries.Add(ReadDiscovery(trimmed));
             else if (line.StartsWith(InputSitesPrefix, StringComparison.Ordinal))
                 inputSiteLines.Add(ReadInputSites(trimmed));
+            else if (line.StartsWith(BudgetPrefix, StringComparison.Ordinal))
+            {
+                // An empty note still records that the budget was reached; it must not hide a later one that names files.
+                string note = trimmed[BudgetPrefix.Length..].Trim();
+                if (string.IsNullOrEmpty(budgetNote))
+                    budgetNote = note;
+            }
             else if (line.StartsWith(NoFindingsPrefix, StringComparison.Ordinal)
                      || line.StartsWith(SkippedPrefix, StringComparison.Ordinal))
             {
@@ -138,7 +147,10 @@ public static partial class SeatOutputParser
                     "line, not both.");
             }
 
-            return new SeatOutput(lens, kind, [], attestation, indexFallback, discovery, inputSites, indexFallbacks);
+            return new SeatOutput(lens, kind, [], attestation, indexFallback, discovery, inputSites, indexFallbacks)
+            {
+                BudgetNote = budgetNote
+            };
         }
 
         IReadOnlyList<ReviewFinding> findings = ReadFindings(lens, yaml);
@@ -150,7 +162,10 @@ public static partial class SeatOutputParser
         }
 
         return new SeatOutput(
-            lens, SeatOutputKind.Findings, findings, attestation, indexFallback, discovery, inputSites, indexFallbacks);
+            lens, SeatOutputKind.Findings, findings, attestation, indexFallback, discovery, inputSites, indexFallbacks)
+        {
+            BudgetNote = budgetNote
+        };
     }
 
     /// <summary>
@@ -425,7 +440,7 @@ public static partial class SeatOutputParser
                 string.Equals(name, severityText, StringComparison.OrdinalIgnoreCase)) is not { } severityName
             || !Enum.TryParse(severityName, out ReviewSeverity severity))
         {
-            throw new SeatOutputException($"{where} has severity '{Clip(severityText)}'; use critical, major or minor.");
+            throw new SeatOutputException($"{where} has severity '{Clip(severityText)}'; use critical, major, minor or nitpick.");
         }
 
         int confidence = RequiredNumber(item, "confidence", where);
@@ -441,12 +456,13 @@ public static partial class SeatOutputParser
             severity,
             confidence,
             Required(item, "file", where),
-            RequiredNumber(item, "line", where),
+            RequiredLine(item, where),
             Optional(item, "excerpt", where),
             Optional(item, "claim", where),
             Optional(item, "evidence", where),
             Optional(item, "failure_scenario", where) ?? Optional(item, "failureScenario", where),
-            Optional(item, "suggestion", where));
+            Optional(item, "suggestion", where),
+            Optional(item, "override", where));
     }
 
     private static string LensFromId(string id, string seatLens)
@@ -460,6 +476,15 @@ public static partial class SeatOutputParser
             ? value
             : throw new SeatOutputException($"{where} has no '{key}'.");
 
+    private static int RequiredLine(SeatItem item, string where)
+    {
+        int line = RequiredNumber(item, "line", where);
+        return ReviewSeatInput.IsLineNumber(line)
+            ? line
+            : throw new SeatOutputException(
+                $"{where} has line {line}; it must be a whole number from 0 to {ReviewSeatInput.MaxLine}.");
+    }
+
     private static int RequiredNumber(SeatItem item, string key, string where)
     {
         string value = Required(item, key, where);
@@ -469,16 +494,7 @@ public static partial class SeatOutputParser
     }
 
     /// <summary>A value from the seat's text, cut short so a runaway value cannot flood a diagnostic.</summary>
-    /// <remarks>The cut backs off one character rather than split a surrogate pair.</remarks>
-    private static string Clip(string value)
-    {
-        const int limit = 200;
-        if (value.Length <= limit)
-            return value;
-
-        int cut = char.IsHighSurrogate(value[limit - 1]) ? limit - 1 : limit;
-        return value[..cut] + "…";
-    }
+    private static string Clip(string value) => ReviewSeatInput.Clip(value, 200);
 
     /// <summary>The trimmed text of a scalar field, or null when the field is absent or empty.</summary>
     private static string? Optional(SeatItem item, string key, string where)
@@ -562,7 +578,11 @@ public sealed record SeatOutput(
     string? IndexFallback,
     SeatDiscovery? Discovery,
     SeatInputSites? InputSites = null,
-    IReadOnlyList<string>? IndexFallbacks = null);
+    IReadOnlyList<string>? IndexFallbacks = null)
+{
+    /// <summary>What the seat did not examine because its budget ran out, from its <c>Budget reached, not examined:</c> line.</summary>
+    public string? BudgetNote { get; init; }
+}
 
 /// <summary>The correctness seat's <c>Input sites: N traced, M files with none</c> closing line.</summary>
 /// <param name="Traced">Input sites the seat traced through the hostile-input classes.</param>

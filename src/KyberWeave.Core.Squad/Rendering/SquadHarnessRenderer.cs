@@ -34,6 +34,15 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
     /// </summary>
     private const string HarnessPlaceholder = "{{harness}}";
 
+    /// <summary>
+    /// Where canonical text needs to know whether a dispatched agent on this harness can dispatch agents
+    /// of its own, answered <c>yes</c> or <c>no</c> from <see cref="SquadTargetCatalog.GetSubagentDispatch"/>.
+    /// </summary>
+    private const string SubagentDispatchPlaceholder = "{{subagents-dispatch}}";
+
+    /// <summary>Where canonical text names the tool that starts a sub-agent on this harness, as the model sees it.</summary>
+    private const string DispatchToolPlaceholder = "{{dispatch-tool}}";
+
     private protected SquadHarnessRenderer(SquadHarnessSpec spec)
     {
         ArgumentNullException.ThrowIfNull(spec);
@@ -92,9 +101,21 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
             // The shared worker baseline is applied here for the same reason: it is one paragraph, it
             // reaches every worker on every round trip, and this pipeline is the only step all
             // thirteen harnesses share, so a rule written once cannot reach twelve of them.
+            // The root resolver answers once per target for this render: the worker baseline's skills
+            // path and a harness's own links and probes must read the same root.
+            request = request.GlobalRoots is null
+                ? request
+                : request with { GlobalRoots = new MemoizedGlobalRoots(request.GlobalRoots) };
+
             SquadSource renderSource = SquadWorkerBaselineInjector.Apply(
-                SubstituteHarnessToken(source, Spec.Token),
-                SquadWorkerBaselineInjector.ReadBlock(request.SourceDirectory));
+                SubstituteHarnessToken(
+                    source,
+                    Spec.Token,
+                    SubagentDispatchAnswer(Spec.Target),
+                    SquadTargetCatalog.GetSubagentDispatchTool(Spec.Target)),
+                SquadWorkerBaselineInjector.BindSkillsRoot(
+                    SquadWorkerBaselineInjector.ReadBlock(request.SourceDirectory),
+                    ResolveSkillsRoot(Spec, request)));
             return Task.FromResult(Render(new SquadHarnessRenderContext(Spec, request, renderSource)));
         }
         catch (OperationCanceledException canceled) when (canceled.CancellationToken.IsCancellationRequested)
@@ -105,6 +126,61 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
         {
             return Task.FromException<SquadRenderResult>(exception);
         }
+    }
+
+    /// <summary>Asks the wrapped resolver once per target, so every consumer in one render sees one answer.</summary>
+    private sealed class MemoizedGlobalRoots(ISquadGlobalRootResolver inner) : ISquadGlobalRootResolver
+    {
+        private readonly Dictionary<SquadTarget, string> _answers = [];
+
+        public string? HomeDirectory => inner.HomeDirectory;
+
+        public string ResolveGlobalRoot(SquadTarget target)
+        {
+            if (!_answers.TryGetValue(target, out string? root))
+            {
+                root = inner.ResolveGlobalRoot(target);
+                _answers[target] = root;
+            }
+
+            return root;
+        }
+    }
+
+    /// <summary>
+    /// The directory this render's skills install to, as a worker can open it: repository-relative at
+    /// project scope, <c>~/…</c> (or absolute outside the home directory) at global scope. It is
+    /// null when a global render has no resolver or the resolver refuses the target; the install step
+    /// reports that failure, and the worker baseline then omits the path rather than guess one.
+    /// </summary>
+    private static string? ResolveSkillsRoot(SquadHarnessSpec spec, SquadRenderRequest request)
+    {
+        string skills = spec.ResolveDirectory("skills", request.Scope);
+        if (request.Scope == SquadDeploymentScope.Project)
+        {
+            return skills;
+        }
+
+        if (request.GlobalRoots is null)
+        {
+            return null;
+        }
+
+        string root;
+        try
+        {
+            root = request.GlobalRoots.ResolveGlobalRoot(spec.Target);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+
+        string path = $"{root.Replace('\\', '/').TrimEnd('/')}/{skills}";
+        string? home = request.GlobalRoots.HomeDirectory?.Replace('\\', '/').TrimEnd('/');
+        return home is { Length: > 0 } && path.StartsWith(home + "/", StringComparison.Ordinal)
+            ? $"~{path[home.Length..]}"
+            : path;
     }
 
     /// <summary>
@@ -156,8 +232,9 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
     }
 
     /// <summary>
-    /// Replaces the canonical <see cref="HarnessPlaceholder"/> with <paramref name="token"/>, over
-    /// every piece of canonical text a render can emit.
+    /// Replaces the canonical <see cref="HarnessPlaceholder"/> with <paramref name="token"/>, and
+    /// <see cref="SubagentDispatchPlaceholder"/> with <paramref name="subagentDispatch"/>, over every piece
+    /// of canonical text a render can emit.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -178,30 +255,36 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
     /// adopted the placeholder renders byte for byte as it did before.
     /// </para>
     /// </remarks>
-    private static SquadSource SubstituteHarnessToken(SquadSource source, string token)
+    private static SquadSource SubstituteHarnessToken(SquadSource source, string token, string subagentDispatch, string dispatchTool)
     {
-        static string ReplaceText(string text, string replacement) =>
-            text.Replace(HarnessPlaceholder, replacement, StringComparison.Ordinal);
+        string ReplaceText(string text) =>
+            text.Replace(HarnessPlaceholder, token, StringComparison.Ordinal)
+                .Replace(SubagentDispatchPlaceholder, subagentDispatch, StringComparison.Ordinal)
+                .Replace(DispatchToolPlaceholder, dispatchTool, StringComparison.Ordinal);
 
-        static IReadOnlyList<SquadResource> ReplaceResources(IReadOnlyList<SquadResource> resources, string replacement) =>
-            [.. resources.Select(resource => resource with { Content = ReplaceText(resource.Content, replacement) })];
+        IReadOnlyList<SquadResource> ReplaceResources(IReadOnlyList<SquadResource> resources) =>
+            [.. resources.Select(resource => resource with { Content = ReplaceText(resource.Content) })];
 
         return source with
         {
             Agents = [.. source.Agents.Select(agent => agent with
             {
-                Description = ReplaceText(agent.Description, token),
-                InstructionBody = ReplaceText(agent.InstructionBody, token),
-                Resources = ReplaceResources(agent.Resources, token)
+                Description = ReplaceText(agent.Description),
+                InstructionBody = ReplaceText(agent.InstructionBody),
+                Resources = ReplaceResources(agent.Resources)
             })],
             Skills = [.. source.Skills.Select(skill => skill with
             {
-                Description = ReplaceText(skill.Description, token),
-                InstructionBody = ReplaceText(skill.InstructionBody, token),
-                Resources = ReplaceResources(skill.Resources, token)
+                Description = ReplaceText(skill.Description),
+                InstructionBody = ReplaceText(skill.InstructionBody),
+                Resources = ReplaceResources(skill.Resources)
             })]
         };
     }
+
+    /// <summary>The <see cref="SubagentDispatchPlaceholder"/> answer for <paramref name="target"/>.</summary>
+    private static string SubagentDispatchAnswer(SquadTarget target) =>
+        SquadTargetCatalog.GetSubagentDispatch(target) == SquadSubagentDispatch.Nested ? "yes" : "no";
 
     /// <summary>Renders the loaded source; the default is the native agent-then-skill shape.</summary>
     private protected virtual SquadRenderResult Render(SquadHarnessRenderContext context)

@@ -41,7 +41,7 @@ first, and the second is shipped policy.
 | `architect` | Deep architectural and product reasoning | `architect`, `product-owner` |
 | `deep-planning` | Investigative planning and diagnosis | `bug-crusher-investigator`, `sql-database-architect` |
 | `fast` | Bounded, checkable work | Most `*-dev` agents, `docs-dev`, `test-dev`, triage roles |
-| `general` | Standard implementation and support | `dal-dev`, `github-devops`, `pulumi-dev`, `rust-dev`, `tauri-dev`, `typescript-dev` |
+| `general` | Standard implementation and support | `github-devops`, `pulumi-dev`, `rust-dev`, `tauri-dev`, `typescript-dev` |
 | `orchestration` | Coordination and dispatch | `conductor` |
 | `reviewer` | Adversarial code reading | `code-reviewer`, `review-lens`, `review-triage` |
 

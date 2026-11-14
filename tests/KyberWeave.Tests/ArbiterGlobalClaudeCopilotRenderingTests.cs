@@ -73,7 +73,12 @@ public sealed class ArbiterGlobalClaudeCopilotRenderingTests : IDisposable
         Assert.Equal(1, root.GetProperty("version").GetInt32());
         JsonElement hooks = root.GetProperty("hooks");
         Assert.True(hooks.TryGetProperty("preToolUse", out JsonElement preToolUse));
-        JsonElement entry = Assert.Single(preToolUse.EnumerateArray());
+        Assert.Equal(2, preToolUse.GetArrayLength());
+        JsonElement entry = preToolUse[0];
+        Assert.Equal(".*", preToolUse[1].GetProperty("matcher").GetString());
+        Assert.Equal(
+            "kyber-weave-arbiter worker-guard --harness copilot-cli",
+            preToolUse[1].GetProperty("bash").GetString());
         Assert.Equal("command", entry.GetProperty("type").GetString());
         Assert.Equal(
             "kyber-weave-arbiter hook --harness copilot-cli --scope global",

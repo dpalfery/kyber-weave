@@ -18,8 +18,8 @@ namespace KyberWeave.Arbiter.Hooks;
 /// <para>
 /// Outside a repository or without <c>git</c> on <c>PATH</c>, <see cref="GitFacts.GetHead"/>
 /// returns <c>null</c> and every git-derived fact stays absent (<c>null</c>) so rules that
-/// require git evidence fail closed (<c>undecidable</c>) rather than mistaking an
-/// unobservable repository for an empty diff.
+/// require git evidence answer <c>undecidable</c>, which allows and is logged, rather than
+/// mistaking an unobservable repository for an empty diff.
 /// </para>
 /// <para>
 /// On a pre-dispatch trigger whose return trigger declares
@@ -60,8 +60,11 @@ internal sealed class HookGitFacts(
     private const string CommentOnlyFact = "review.comment-only-paths";
     private const string NoCodeChangeFact = "review.no-code-change-paths";
     private const string FindingChangedLinesFact = "finding.changed-lines";
+    private const string RunStartedFact = "run.started";
 
+    private const string StrayPathsFact = "checkout.stray-paths";
     private const string SnapshotFileName = "snapshots.json";
+    private const string CanonicalSnapshotFileName = "canonical-snapshots.json";
     private const string SnapshotLockFileName = ".snapshots.lock";
     private const int MaxStoredSnapshots = 256;
     private const int SurroundingLines = 20;
@@ -84,6 +87,7 @@ internal sealed class HookGitFacts(
         bool needsChangeSet = NeedsChangeSet(facts);
         string cwd = !string.IsNullOrWhiteSpace(ev.Cwd) ? ev.Cwd : workingDirectory;
         facts = WithSurroundings(facts, cwd);
+        facts = WithRunStarted(facts, ev, cwd);
 
         if (!isPreWithReturn && !needsSinceDispatch && !needsReviewChangedPaths && !needsChangeSet)
         {
@@ -95,9 +99,13 @@ internal sealed class HookGitFacts(
             GitSnapshot? preSnapshot = GitFacts.CaptureSnapshot(cwd);
             if (preSnapshot is not null)
             {
-                RecordPreSnapshot(ResolveArbiterDirectory(cwd), classification.Target, ev, preSnapshot);
+                RecordPreSnapshot(ResolveArbiterDirectory(cwd), SnapshotFileName, classification.Target, ev, preSnapshot);
             }
+
+            RecordCanonicalSnapshot(facts, classification, ev, cwd);
         }
+
+        facts = WithStrayPaths(facts, classification, ev, cwd);
 
         if (!needsSinceDispatch && !needsReviewChangedPaths && !needsChangeSet)
         {
@@ -112,7 +120,7 @@ internal sealed class HookGitFacts(
 
         if (needsSinceDispatch)
         {
-            GitSnapshot? baseline = FindPreSnapshot(ResolveArbiterDirectory(cwd), classification.Target, ev);
+            GitSnapshot? baseline = FindPreSnapshot(ResolveArbiterDirectory(cwd), SnapshotFileName, classification.Target, ev);
             if (baseline is not null)
             {
                 IReadOnlyList<string> sinceDispatch = [.. GitFacts.GetChangedPathsSinceSnapshot(cwd, baseline)];
@@ -142,6 +150,99 @@ internal sealed class HookGitFacts(
         }
 
         return facts;
+    }
+
+    /// <summary>
+    /// Fills <c>run.started</c> for a dispatch to a specialist that writes project files: whether a run
+    /// recorded by <c>run start</c> is live for this repository. Left absent (undecidable, so the dispatch
+    /// proceeds) when git cannot name the repository or the run records cannot be read.
+    /// </summary>
+    private ArbiterFactSet WithRunStarted(ArbiterFactSet facts, ArbiterEvent ev, string cwd)
+    {
+        if (!facts.Contains(RunStartedFact)
+            || !string.Equals(ev.Phase, "pre", StringComparison.OrdinalIgnoreCase)
+            || !facts.TryGet("delegation.target-profile", out ArbiterFact? profile)
+            || profile.Value is not string name
+            || !RunStartEvidence.IsWriterProfile(name))
+        {
+            return facts;
+        }
+
+        bool? started = RunStartEvidence.Started(
+            cwd, homeDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        return started is null ? facts : facts.With(RunStartedFact, started.Value, ArbiterFactLabel.Derived);
+    }
+
+    /// <summary>
+    /// Before a dispatch to a specialist that writes files, while a live run of this repository works in a
+    /// worktree of its own, records a snapshot of the repository's canonical checkout, so the return can say
+    /// which paths the dispatch left there (<c>KW-ARB-CHECKOUT-001</c>).
+    /// </summary>
+    private void RecordCanonicalSnapshot(ArbiterFactSet facts, TriggerClassification classification, ArbiterEvent ev, string cwd)
+    {
+        if (!IsRunBranchWriter(facts) || CanonicalCheckoutWithSeparateRun(cwd) is not { } canonical)
+        {
+            return;
+        }
+
+        GitSnapshot? snapshot = GitFacts.CaptureSnapshot(canonical);
+        if (snapshot is not null)
+        {
+            RecordPreSnapshot(ResolveArbiterDirectory(cwd), CanonicalSnapshotFileName, classification.Target, ev, snapshot);
+        }
+    }
+
+    /// <summary>
+    /// On a writer's return, fills <c>checkout.stray-paths</c>: the canonical checkout's paths that changed since
+    /// the dispatch's snapshot of it. Absent when no snapshot was recorded (no live run in a separate worktree at
+    /// dispatch, or git could not be read), which allows.
+    /// </summary>
+    private ArbiterFactSet WithStrayPaths(ArbiterFactSet facts, TriggerClassification classification, ArbiterEvent ev, string cwd)
+    {
+        if (!facts.Contains(StrayPathsFact)
+            || !string.Equals(ev.Phase, "post", StringComparison.OrdinalIgnoreCase)
+            || !IsRunBranchWriter(facts)
+            || GitFacts.GetCommonDirectory(cwd) is not { } repository
+            || RunCheckout.CanonicalCheckoutOf(repository) is not { } canonical)
+        {
+            return facts;
+        }
+
+        GitSnapshot? baseline = FindPreSnapshot(ResolveArbiterDirectory(cwd), CanonicalSnapshotFileName, classification.Target, ev);
+        if (baseline is null)
+        {
+            return facts;
+        }
+
+        // Only what the dispatch left behind counts: a path it changed and then restored, or a stray file a
+        // clean-up dispatch put back, is no longer dirty. A commit on the canonical branch keeps every path it
+        // moved. The agent scratchpad is working state, not a change to the checkout.
+        IReadOnlySet<string> changed = GitFacts.GetChangedPathsSinceSnapshot(canonical, baseline);
+        bool headMoved = !string.Equals(GitFacts.GetHead(canonical), baseline.Head, StringComparison.Ordinal);
+        IReadOnlyDictionary<string, string> dirty = GitFacts.GetDirtyStatuses(canonical);
+        List<string> stray = [.. changed
+            .Where(path => (headMoved || dirty.ContainsKey(path)) && !IsScratchpad(path))
+            .Order(StringComparer.Ordinal)];
+        return facts.With(StrayPathsFact, stray, ArbiterFactLabel.Derived);
+    }
+
+    private static bool IsScratchpad(string path) =>
+        path.StartsWith(".agent_scratchpad/", StringComparison.Ordinal);
+
+    private static bool IsRunBranchWriter(ArbiterFactSet facts) =>
+        facts.TryGet("delegation.target-profile", out ArbiterFact? profile)
+        && profile.Value is string name
+        && RunStartEvidence.IsWriterProfile(name);
+
+    /// <summary>The canonical checkout of <paramref name="cwd" />'s repository when a live run of it works in another worktree.</summary>
+    private string? CanonicalCheckoutWithSeparateRun(string cwd)
+    {
+        string home = homeDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return GitFacts.GetCommonDirectory(cwd) is { } repository
+               && RunCheckout.CanonicalCheckoutOf(repository) is { } canonical
+               && RunCheckout.LiveSeparateRuns(home, canonical) is { Count: > 0 }
+            ? canonical
+            : null;
     }
 
     private static bool NeedsChangeSet(ArbiterFactSet facts) =>
@@ -303,6 +404,7 @@ internal sealed class HookGitFacts(
 
     private static void RecordPreSnapshot(
         string directory,
+        string fileName,
         string? target,
         ArbiterEvent ev,
         GitSnapshot snapshot)
@@ -314,7 +416,7 @@ internal sealed class HookGitFacts(
             return;
         }
 
-        WithSnapshotStore(directory, entries =>
+        WithSnapshotStore(directory, fileName, entries =>
         {
             entries.RemoveAll(entry => DateTimeOffset.UtcNow - entry.RecordedAt > SnapshotRetention);
             entries.Add(new StoredSnapshot(
@@ -336,6 +438,7 @@ internal sealed class HookGitFacts(
 
     private static GitSnapshot? FindPreSnapshot(
         string directory,
+        string fileName,
         string? target,
         ArbiterEvent ev)
     {
@@ -352,7 +455,7 @@ internal sealed class HookGitFacts(
             return null;
         }
 
-        string filePath = Path.Combine(directory, SnapshotFileName);
+        string filePath = Path.Combine(directory, fileName);
         if (!File.Exists(filePath))
         {
             return null;
@@ -471,6 +574,7 @@ internal sealed class HookGitFacts(
 
     private static void WithSnapshotStore(
         string directory,
+        string fileName,
         Func<List<StoredSnapshot>, bool> mutate)
     {
         try
@@ -495,7 +599,7 @@ internal sealed class HookGitFacts(
 
                 using (lockFile)
                 {
-                    string filePath = Path.Combine(directory, SnapshotFileName);
+                    string filePath = Path.Combine(directory, fileName);
                     SweepTempFiles(directory);
                     List<StoredSnapshot> entries = ReadSnapshots(filePath);
                     if (mutate(entries))

@@ -1,4 +1,6 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
+using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Review;
@@ -16,9 +18,11 @@ namespace KyberWeave.Cli.Commands.Review;
 /// output is parsed instead, and the command, not the reviewer, accounts for every catalogue lens.
 /// </para>
 /// <para>
-/// Nothing here changes what a seat said about a finding. A finding can be dropped only with a stated reason,
-/// or moved only when its cited line cannot exist, and both are reported; severity and confidence pass
-/// through untouched to <see cref="VerdictEngine"/>, which stays the only judge.
+/// Nothing here changes what a seat said about a finding but the host's own grading. A finding can be dropped only
+/// with a stated reason, or moved only when its cited line cannot exist, and both are reported. Its severity changes
+/// only to the severity of a host severity override (the review guidance's <c>Severity overrides</c> rows) that the
+/// seat cited or the decision model confidently matched, also reported; confidence passes through untouched to
+/// <see cref="VerdictEngine"/>, which stays the only judge.
 /// </para>
 /// </remarks>
 public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings>
@@ -37,6 +41,11 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
     private const string HandBuiltFindings = "KW-REVIEW-045";
     private const string RefutationCandidates = "KW-REVIEW-046";
     private const string InputSitesMissing = "KW-REVIEW-047";
+    private const string SeatBudgetReached = "KW-REVIEW-054";
+    private const string GateCarried = "KW-REVIEW-048";
+    private const string GateNotRerun = "KW-REVIEW-049";
+    private const string PriorNotThisChange = "KW-REVIEW-050";
+    private const string FixRoundCode = "KW-REVIEW-056";
     private const string CorrectnessLens = "correctness";
     private const string ReviewerSeat = "reviewer";
     private const string PriorFindingsFile = "findings.json";
@@ -63,7 +72,13 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
         if (!CommandHelpers.TryLoadConfig(root, settings.Config, report, out KyberWeaveConfig config))
             return Fail(report, settings);
 
-        if (!TryReadInput(settings, report, out FindingsReport? input) || input is null)
+        if (settings.Seats is null && settings.Findings is null && !UseCurrentCycle(root, settings, report))
+            return Fail(report, settings);
+
+        if (settings.Prior is not null && !PriorBelongsToThisChange(root, settings, report))
+            return Fail(report, settings);
+
+        if (!TryReadInput(settings, config.Review.Policy, report, out FindingsReport? input) || input is null)
             return Fail(report, settings);
 
         // A missing gate report is not an error: a change may legitimately be reviewed
@@ -76,6 +91,10 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
             return Fail(report, settings);
         }
 
+        IReadOnlyList<GateResult> gateResults = WithCarriedGates(root, config, settings, gates, report);
+        if (report.HasErrors)
+            return Fail(report, settings);
+
         List<DroppedFinding> dropped = [];
         List<ReviewFinding> findings = ApplyDrops(input.Findings, settings.Drop, report, dropped);
         if (report.HasErrors)
@@ -83,7 +102,22 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
 
         findings = CheckCitedLines(root, findings, report, dropped);
 
-        IReadOnlyList<GateResult> gateResults = gates?.Gates ?? [];
+        // A host severity override sets the severity everything after this reads: the nitpick drop, the verdict rules,
+        // the fix-level routing and the fix counts the loop compares.
+        SeverityOverrides overrides = SeverityOverrides.Load(root, config);
+        List<Diagnostic> overrideNotes = [];
+        findings = [.. overrides.ApplyCited(findings, overrideNotes)];
+        report.AddRange(overrideNotes);
+
+        ReviewDecisionModel model = ReviewDecisionModelFactory.Create(
+            root, config, settings.NoDecisionModel, DecisionCachePath(settings));
+        List<string> modelEffects = [];
+        findings = MatchOverrides(model, overrides, findings, report, modelEffects, cancellationToken);
+        findings = DropNitpicksBelowTheFixLevel(findings, config.Review.Policy, report, dropped);
+
+        findings = ApplyDecisionModel(
+            model, findings, settings.Candidates, config.Review.Policy.FixLevel == ReviewFixLevel.Nitpick, report, dropped, modelEffects, cancellationToken);
+
         ReviewOutcome outcome = VerdictEngine.Evaluate(
             findings,
             gateResults,
@@ -93,13 +127,30 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
         outcome = outcome with { Dropped = [.. dropped, .. outcome.Dropped] };
 
         report.AddRange(outcome.Diagnostics);
-        ReportRefutationCandidates(outcome, gateResults, report);
+        ReportRefutationCandidates(root, model, outcome, gateResults, report, modelEffects, cancellationToken);
+        if (!settings.Candidates)
+            ReportSeverityNotes(model, outcome.Accepted, report, modelEffects, cancellationToken);
+        if (model.SummaryLine(modelEffects) is { } summaryLine)
+            report.Add(new Diagnostic(ReviewVerdictDecisions.Code, Severity.Info, summaryLine, Subject));
+
+        if (settings.Candidates)
+        {
+            // A partial read lists candidates only: a verdict, findings.json or a recorded cycle now would let a later
+            // reader take it for the cycle's verdict.
+            CommandHelpers.Finish(report, settings, "review verdict", "Review");
+            if (ReportRenderer.IsHuman(settings.ParsedFormat))
+                Console.WriteLine($"next: refute each candidate listed above, then {ReviewSeatsCommand.VerdictCommand(settings.Task)}");
+            return 0;
+        }
+
         report.Add(new Diagnostic(
             Verdict,
             outcome.Verdict == ReviewVerdict.Approve ? Severity.Info : Severity.Error,
             $"{DescribeForSummary(outcome.Verdict)} — risk {outcome.Risk.ToString().ToUpperInvariant()}, " +
             $"{outcome.Accepted.Count} finding(s) accepted, {outcome.Dropped.Count} dropped.",
             Subject));
+
+        ReportFixRound(outcome, gateResults, config.Review.Policy, PriorFixCounts(root, settings, config), report);
 
         report.AddMetric("verdict", outcome.Verdict.ToString());
         report.AddMetric("risk", outcome.Risk.ToString());
@@ -111,9 +162,243 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
             ReviewJson.Write(input with { Findings = findings }),
             ReportWriteFailed,
             report);
+        RecordCycleIdentity(root, settings);
 
         CommandHelpers.Finish(report, settings, "review verdict", "Review");
         return report.HasErrors && outcome.Verdict == ReviewVerdict.Approve ? 1 : outcome.ExitCode;
+    }
+
+    /// <summary>The drop reason that marks a finding about pre-existing code the change did not touch.</summary>
+    internal const string PreExistingDebt = "pre-existing debt";
+
+    /// <summary>
+    /// Says what the fix round takes and what becomes follow-up work, one line each, so the conductor dispatches from
+    /// the lines and never decides the scope itself. <c>fix:</c> lines are every failed blocking gate and every
+    /// finding at or above <c>review.policy.fix-level</c>. Any <c>fix:</c> line gets a fix round and then a
+    /// verifier cycle, an APPROVE included, until a cycle prints none or a cap in <see cref="ReviewLoop"/> stops the
+    /// loop; the findings still to fix are then <c>open:</c> lines for human review. <c>follow-up:</c> lines are the
+    /// findings below the level and each finding dropped as pre-existing debt.
+    /// </summary>
+    private static void ReportFixRound(
+        ReviewOutcome outcome, IReadOnlyList<GateResult> gates, ReviewPolicy policy, List<int> priorCounts, DiagnosticReport report)
+    {
+        List<string> fix = [.. FailedGates(gates).Select(gate => $"gate {gate.Id}")];
+        fix.AddRange(outcome.Accepted.Where(policy.FixRoundTakes).Select(Line));
+        List<string> followUp = [.. outcome.Accepted.Where(finding => !policy.FixRoundTakes(finding)).Select(Line)];
+        followUp.AddRange(outcome.Dropped
+            .Where(drop => drop.Reason.StartsWith(PreExistingDebt, StringComparison.OrdinalIgnoreCase))
+            .Select(drop => $"{Line(drop.Finding)} ({PreExistingDebt})"));
+
+        string level = policy.FixLevelName;
+        ReviewLoopState state = ReviewLoop.Decide([.. priorCounts, fix.Count]);
+        bool stopped = state is ReviewLoopState.CycleCap or ReviewLoopState.NoProgress;
+        foreach (string line in fix)
+            report.Add(new Diagnostic(FixRoundCode, Severity.Info, $"{(stopped ? "open" : "fix")}: {line}", Subject));
+        foreach (string line in followUp)
+            report.Add(new Diagnostic(FixRoundCode, Severity.Info, $"follow-up: {line}", Subject));
+        report.Add(new Diagnostic(
+            FixRoundCode,
+            Severity.Info,
+            state switch
+            {
+                ReviewLoopState.Clean when outcome.Verdict == ReviewVerdict.Approve => $"fix round: none (fix level {level}); review clean: proceed to archive.",
+                ReviewLoopState.Clean => $"fix round: none (fix level {level}); nothing is at or above that level, so each follow-up: line goes to human review.",
+                ReviewLoopState.CycleCap =>
+                    $"fix round: none (fix level {level}); the loop stopped at its {ReviewLoop.MaxCycles.ToString(System.Globalization.CultureInfo.InvariantCulture)}-cycle cap, so each open: line goes to human review.",
+                ReviewLoopState.NoProgress =>
+                    $"fix round: none (fix level {level}); the loop stopped because {ReviewLoop.NoProgressCycles.ToString(System.Globalization.CultureInfo.InvariantCulture)} cycles in a row did not lower the findings to fix, so each open: line goes to human review.",
+                _ => $"fix round: {fix.Count} item(s) at fix level {level}; fix these, then run a verifier cycle."
+            },
+            Subject));
+
+        static string SeverityWord(ReviewSeverity severity) => severity switch
+        {
+            ReviewSeverity.Critical => "critical",
+            ReviewSeverity.Major => "major",
+            ReviewSeverity.Nitpick => "nitpick",
+            _ => "minor"
+        };
+
+        static string Line(ReviewFinding finding) =>
+            $"{finding.Id} ({SeverityWord(finding.Severity)}) {finding.File}:{finding.Line.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+    }
+
+    /// <summary>The blocking gates that failed and are not just stopped for time or not applicable.</summary>
+    private static IEnumerable<GateResult> FailedGates(IReadOnlyList<GateResult> gates) => gates
+        .Where(gate => gate.Blocking && !gate.Passed && gate.NotApplicableReason is null && !VerdictEngine.IsStoppedForTime(gate));
+
+    /// <summary>
+    /// The count of findings to fix after each earlier cycle of this change, oldest first, each recomputed from the
+    /// cycle's own findings and gates; empty without <c>--prior</c>. A cycle that cannot be read is left out.
+    /// </summary>
+    private static List<int> PriorFixCounts(string root, ReviewVerdictSettings settings, KyberWeaveConfig config)
+    {
+        List<int> counts = [];
+        if (settings.Prior is null)
+            return counts;
+
+        IReadOnlyList<ReviewCycleRecord> history;
+        try
+        {
+            history = ReviewWorkTree.Prior(
+                ReviewWorkTree.Of(root), settings.BaseRef, ReviewCycles.ReadThrough(settings.Prior), CurrentCycleFolder(settings)).Valid;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+        {
+            return counts;
+        }
+
+        foreach (ReviewCycleRecord cycle in history)
+        {
+            try
+            {
+                FindingsReport prior = ReviewJson.ReadFindings(File.ReadAllText(cycle.FindingsPath));
+                IReadOnlyList<GateResult> gates = cycle.Gates?.Gates ?? [];
+                ReviewOutcome outcome = VerdictEngine.Evaluate(prior.Findings, gates, config.Review, DateOnly.FromDateTime(DateTime.UtcNow));
+                counts.Add(FailedGates(gates).Count() + outcome.Accepted.Count(config.Review.Policy.FixRoundTakes));
+            }
+            catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException or ArgumentException
+                                           or NotSupportedException or InvalidOperationException)
+            {
+                // A cycle that cannot be read adds no count: the loop then counts fewer cycles, never more.
+            }
+        }
+
+        return counts;
+    }
+
+    /// <summary>
+    /// The gate results the verdict is computed from. With <c>--prior</c>, a declared blocking gate this cycle did not
+    /// run keeps the result of the cycle that last ran it, unless a file changed since that cycle matches the gate's
+    /// inputs or the gate had not passed: then the cycle is refused, because dropping the gate would read as a pass.
+    /// </summary>
+    private static IReadOnlyList<GateResult> WithCarriedGates(
+        string root,
+        KyberWeaveConfig config,
+        ReviewVerdictSettings settings,
+        GateReport? gates,
+        DiagnosticReport report)
+    {
+        IReadOnlyList<GateResult> given = gates?.Gates ?? [];
+        if (settings.Prior is null || gates is null)
+            return given;
+
+        ReviewGate[] absent =
+        [
+            .. config.Review.Gates.Where(gate => gate.Blocking
+                                                 && !given.Any(result => string.Equals(result.Id, gate.Id, StringComparison.Ordinal)))
+        ];
+        IReadOnlyList<ReviewCycleRecord> history =
+            ReviewWorkTree.Prior(ReviewWorkTree.Of(root), settings.BaseRef, ReviewCycles.ReadThrough(settings.Prior), CurrentCycleFolder(settings)).Valid;
+        if (absent.Length == 0 || history.Count == 0)
+            return given;
+
+        List<GateResult> effective = [.. given];
+        List<GateCycleDecision> decisions = [.. ReviewCycles.DecideGates(
+            history,
+            absent,
+            OperatingSystem.IsWindows() ? "windows" : "unix",
+            commit => TryChangedSince(ReviewWorkTree.Of(root), commit))];
+        string[] outstanding =
+            [.. decisions.Where(decision => decision is { Action: GateCycleAction.Rerun, FromCycle: not null }).Select(decision => decision.GateId)];
+        string command = ReviewCycleView.GatesCommand(root, Path.GetFullPath(settings.Gates!), settings.BaseRef);
+        foreach (GateCycleDecision decision in decisions)
+        {
+            if (decision is { Action: GateCycleAction.Carry, Carried: { } carried })
+            {
+                effective.Add(carried with { Summary = $"carried from cycle {decision.FromCycle}: {carried.Summary}" });
+                report.Add(new Diagnostic(
+                    GateCarried,
+                    Severity.Info,
+                    $"{decision.GateId}: carried from cycle {decision.FromCycle} ({decision.Reason}).",
+                    decision.GateId));
+            }
+            else if (decision is { Action: GateCycleAction.Rerun, FromCycle: not null })
+            {
+                report.Add(new Diagnostic(
+                    GateNotRerun,
+                    Severity.Error,
+                    $"{decision.GateId}: this cycle's gate report has no result for it, and cycle {decision.FromCycle}'s " +
+                    $"result cannot be carried ({decision.Reason}). Gates still outstanding: {string.Join(", ", outstanding)}. " +
+                    $"One command runs them all: {command}",
+                    decision.GateId,
+                    Hint: $"Run this once, then compute the verdict again: {command}"));
+            }
+        }
+
+        return effective;
+    }
+
+    /// <summary>
+    /// Refuses a <c>--prior</c> folder that belongs to another change: carrying its gate results and lens coverage
+    /// would let a stale folder from an earlier run stand in for this change's review.
+    /// </summary>
+    private static bool PriorBelongsToThisChange(string root, ReviewVerdictSettings settings, DiagnosticReport report)
+    {
+        IReadOnlyList<ReviewCycleRecord> history = ReviewCycles.ReadThrough(settings.Prior!);
+        if (history.Count == 0)
+            return true;
+
+        IgnoredCycle? named = ReviewWorkTree.Prior(ReviewWorkTree.Of(root), settings.BaseRef, history, CurrentCycleFolder(settings)).Ignored
+            .FirstOrDefault(cycle => cycle.Record.Number == history[^1].Number && cycle.Record.Folder == history[^1].Folder);
+        if (named is null)
+            return true;
+
+        report.Add(new Diagnostic(
+            PriorNotThisChange,
+            Severity.Error,
+            $"--prior {named.Record.Folder} does not belong to this change: {named.Reason}.",
+            Subject,
+            Hint: "Pass the folder of the cycle this review's own gate run wrote, or leave --prior out for a first cycle."));
+        return false;
+    }
+
+    /// <summary>The folder of the cycle this verdict belongs to: the one <c>--out</c> or <c>--gates</c> sits in, when it records its change.</summary>
+    private static string? CurrentCycleFolder(ReviewVerdictSettings settings)
+    {
+        foreach (string? path in new[] { settings.Out, settings.Gates })
+        {
+            if (path is not null && Path.GetDirectoryName(Path.GetFullPath(path)) is { } folder && ReviewCycles.HasIdentity(folder))
+                return folder;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// When the findings document is written into a cycle folder that records no change yet, records the branch, base
+    /// and head the verdict was computed on, so the next cycle can tell the folder belongs to this change.
+    /// </summary>
+    private static void RecordCycleIdentity(string root, ReviewVerdictSettings settings)
+    {
+        if (settings.Out is null || !ReviewCycleView.TryFromOutPath(settings.Out, out _, out _))
+            return;
+
+        string folder = Path.GetDirectoryName(Path.GetFullPath(settings.Out))!;
+        if (ReviewCycles.HasIdentity(folder) || ReviewWorkTree.IdentityOf(ReviewWorkTree.Of(root), settings.BaseRef) is not { } identity)
+            return;
+
+        try
+        {
+            ReviewCycles.WriteIdentity(folder, identity);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The findings were written; without the record the next cycle runs in full, which is the safe answer.
+        }
+    }
+
+    private static IReadOnlyList<string>? TryChangedSince(string root, string commit)
+    {
+        try
+        {
+            return ChangedFiles.ResolveSince(root, commit);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception
+                                       or TimeoutException)
+        {
+            return null;
+        }
     }
 
     /// <summary>The verdict as printed in the console summary.</summary>
@@ -175,7 +460,8 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
     /// The findings the verdict is computed from: the seat folder, or the deprecated findings document. A seat
     /// folder's report has no changed-path facts, because the seats do not measure the change.
     /// </summary>
-    private static bool TryReadInput(ReviewVerdictSettings settings, DiagnosticReport report, out FindingsReport? input)
+    private static bool TryReadInput(
+        ReviewVerdictSettings settings, ReviewPolicy policy, DiagnosticReport report, out FindingsReport? input)
     {
         input = null;
         if (settings.Seats is not null && settings.Findings is not null)
@@ -217,14 +503,24 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
         if (!TryReadSeats(settings.Seats, report, out List<SeatOutput> seats))
             return false;
 
-        Dictionary<string, string> notSeated = ParseNotSeated(settings.NotSeated, report);
-        List<LensCoverage> coverage = AccountForLenses(seats, notSeated, prior, report);
+        // The cycle's recorded decisions first; a reason typed on the command line wins over the recorded one.
+        Dictionary<string, string> notSeated = new(
+            NotSeatedRecord.Read(Path.GetDirectoryName(Path.GetFullPath(settings.Seats).TrimEnd(Path.DirectorySeparatorChar))!),
+            StringComparer.Ordinal);
+        foreach ((string lens, string reason) in ParseNotSeated(settings.NotSeated, report))
+            notSeated[lens] = reason;
+        List<LensCoverage> coverage = AccountForLenses(seats, notSeated, prior, report, settings.Candidates);
         if (report.HasErrors)
             return false;
 
+        // A finding the fix round did not take (a minor one, by default) is carried, so the last cycle still lists it.
+        List<ReviewFinding> seated = [.. seats.SelectMany(seat => seat.Findings)];
+        IEnumerable<ReviewFinding> carried = (prior?.Findings ?? [])
+            .Where(finding => !policy.FixRoundTakes(finding)
+                              && !seated.Any(other => string.Equals(other.Id, finding.Id, StringComparison.Ordinal)));
         input = new FindingsReport(
             FindingsReport.CurrentSchema,
-            [.. seats.SelectMany(seat => seat.Findings)],
+            [.. seated, .. carried],
             [],
             0,
             Coverage: coverage);
@@ -326,6 +622,15 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
         {
             ReportDiscoveryGap(seat, report);
             ReportInputSitesGap(seat, report);
+            if (seat.BudgetNote is { } note)
+            {
+                report.Add(new Diagnostic(
+                    SeatBudgetReached,
+                    Severity.Warning,
+                    $"{seat.Lens} stopped at its budget; not examined: {note}",
+                    seat.Lens,
+                    Hint: "A coverage gap for the report's Council coverage, never a verdict input."));
+            }
         }
 
         return !report.HasErrors;
@@ -439,7 +744,8 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
         List<SeatOutput> seats,
         Dictionary<string, string> notSeated,
         FindingsReport? prior,
-        DiagnosticReport report)
+        DiagnosticReport report,
+        bool partial = false)
     {
         List<LensCoverage> coverage = [];
         List<string> unaccounted = [];
@@ -480,7 +786,15 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
             unaccounted.Add(lens);
         }
 
-        if (unaccounted.Count > 0)
+        if (unaccounted.Count > 0 && partial)
+        {
+            report.Add(new Diagnostic(
+                LensCoverageCode,
+                Severity.Info,
+                $"No seat file yet for: {string.Join(", ", unaccounted)}. Candidates are listed from the seats saved so far.",
+                Subject));
+        }
+        else if (unaccounted.Count > 0)
         {
             report.Add(new Diagnostic(
                 LensCoverageCode,
@@ -615,22 +929,279 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
     }
 
     /// <summary>
+    /// Points the verdict at the review's newest cycle folder, so the reviewer types no path: its seats, its gate report
+    /// when the gate run wrote one, its <c>findings.json</c> as <c>--out</c> for a verdict run, and the cycle before it
+    /// as <c>--prior</c> when that one wrote its findings. An option given explicitly is kept.
+    /// </summary>
+    private static bool UseCurrentCycle(string root, ReviewVerdictSettings settings, DiagnosticReport report)
+    {
+        string tree = ReviewWorkTree.Of(root);
+        string scratchpad = ReviewWorkTree.Scratchpad(tree);
+        string? cycle = null;
+        string? problem = null;
+        if (ReviewCycleView.TryChooseTask(tree, scratchpad, settings.Task, out string task, out _, out problem))
+        {
+            cycle = NotSeatedRecord.LatestCycle(Path.Combine(scratchpad, task, "review"));
+            problem = cycle is null ? $"no cycle folder with seats under {Path.Combine(scratchpad, task, "review")}" : null;
+        }
+
+        if (cycle is null)
+        {
+            report.Add(new Diagnostic(
+                UnreadableInput,
+                Severity.Error,
+                $"No findings were given and no review cycle was found: {problem}.",
+                Subject,
+                Hint: "Run kyber-weave review seats first, or pass --seats <DIR>."));
+            return false;
+        }
+
+        settings.Seats = Path.Combine(cycle, "seats");
+        string gates = Path.Combine(cycle, "gates.json");
+        if (settings.Gates is null && File.Exists(gates))
+            settings.Gates = gates;
+        if (!settings.Candidates)
+            settings.Out ??= Path.Combine(cycle, PriorFindingsFile);
+        // The prior is the newest earlier cycle that belongs to this change, by the same test review seats applies, so a
+        // folder left by another change is never taken.
+        if (settings.Prior is null
+            && ReviewCycleView.TryFromOutPath(Path.Combine(cycle, PriorFindingsFile), out string reviewFolder, out int number)
+            && ReviewWorkTree.Prior(tree, settings.BaseRef, ReviewCycles.ReadFinished(reviewFolder)).Valid
+                .Where(record => record.Number < number && File.Exists(record.FindingsPath))
+                .MaxBy(record => record.Number) is { } prior)
+        {
+            settings.Prior = prior.Folder;
+        }
+
+        return true;
+    }
+
+    /// <summary>The cycle's decision-model answer file, beside the seat folder; none for a hand-built findings file.</summary>
+    private static string? DecisionCachePath(ReviewVerdictSettings settings) =>
+        settings.Seats is null ? null : Path.Combine(Path.GetDirectoryName(Path.GetFullPath(settings.Seats).TrimEnd(Path.DirectorySeparatorChar))!, "decision-model.json");
+
+    /// <summary>
+    /// Drops each finding a lens raised as a nitpick when the fix level is below <c>nitpick</c>, with a reported
+    /// reason: a nitpick is never fixed unless the level asks for it, and the report is the only place it is listed.
+    /// </summary>
+    private static List<ReviewFinding> DropNitpicksBelowTheFixLevel(
+        List<ReviewFinding> findings, ReviewPolicy policy, DiagnosticReport report, List<DroppedFinding> dropped)
+    {
+        if (policy.FixLevel == ReviewFixLevel.Nitpick)
+            return findings;
+
+        List<ReviewFinding> kept = [];
+        foreach (ReviewFinding finding in findings)
+        {
+            if (finding.Severity != ReviewSeverity.Nitpick)
+            {
+                kept.Add(finding);
+                continue;
+            }
+
+            dropped.Add(new DroppedFinding(
+                finding, ReviewVerdictDecisions.Code, $"nitpick: below the fix level ({policy.FixLevelName})"));
+            report.Add(new Diagnostic(
+                ReviewVerdictDecisions.Code,
+                Severity.Info,
+                $"Dropped as nitpick (fix level {policy.FixLevelName}): '{finding.Id}'",
+                finding.Lens,
+                finding.File,
+                StartLine: finding.Line));
+        }
+
+        return kept;
+    }
+
+    /// <summary>
+    /// Grades each finding that cites no host severity override at the row the decision model confidently finds it
+    /// belongs to, with a report line per match. With no model configured, or no rows, nothing is asked or changed.
+    /// </summary>
+    private static List<ReviewFinding> MatchOverrides(
+        ReviewDecisionModel model,
+        SeverityOverrides overrides,
+        List<ReviewFinding> findings,
+        DiagnosticReport report,
+        List<string> effects,
+        CancellationToken cancellationToken)
+    {
+        if (!model.Configured || overrides.Rows.Count == 0)
+            return findings;
+
+        (List<ReviewFinding> graded, List<(ReviewFinding Finding, SeverityOverrideRow Row, double? Confidence)> matched) =
+            ReviewVerdictDecisions.MatchOverridesAsync(model, overrides, findings, cancellationToken).GetAwaiter().GetResult();
+        foreach ((ReviewFinding finding, SeverityOverrideRow row, double? confidence) in matched)
+            report.Add(SeverityOverrides.Note(finding, row, $"matched by decision model, confidence {ReviewDecisionModel.Format(confidence)}"));
+
+        if (matched.Count > 0)
+            effects.Add($"{matched.Count} severity override(s) matched");
+        return graded;
+    }
+
+    /// <summary>
+    /// Merges the findings the decision model confidently calls one defect, then, for a verdict run, drops the minor
+    /// findings it confidently calls nitpicks. Each change is reported and kept in the dropped list with its reason, so
+    /// nothing leaves the verdict silently. With no model configured nothing is asked and nothing changes.
+    /// </summary>
+    private static List<ReviewFinding> ApplyDecisionModel(
+        ReviewDecisionModel model,
+        List<ReviewFinding> findings,
+        bool candidatesOnly,
+        bool keepNitpicks,
+        DiagnosticReport report,
+        List<DroppedFinding> dropped,
+        List<string> effects,
+        CancellationToken cancellationToken)
+    {
+        if (!model.Configured)
+            return findings;
+
+        // The reviewer's drops take part in the merge, so a copy of a finding the reviewer dropped (refuted, say) goes
+        // with it instead of coming back on its own.
+        ReviewFinding[] reviewerDropped = [.. dropped.Where(entry => entry.Code == FindingDropped).Select(entry => entry.Finding)];
+        (List<ReviewFinding> kept, List<MergedFindings> merged) = ReviewVerdictDecisions
+            .MergeDuplicatesAsync(model, [.. findings, .. reviewerDropped], cancellationToken).GetAwaiter().GetResult();
+        kept.RemoveAll(finding => reviewerDropped.Contains(finding));
+        foreach (MergedFindings group in merged)
+        {
+            ReviewFinding? droppedMember = reviewerDropped.Contains(group.Kept)
+                ? group.Kept
+                : group.Merged.Select(item => item.Finding).FirstOrDefault(reviewerDropped.Contains);
+            foreach ((ReviewFinding finding, double? confidence) in group.Merged.Prepend((group.Kept, null)))
+            {
+                if (reviewerDropped.Contains(finding))
+                    continue;
+                if (droppedMember is not null)
+                {
+                    kept.Remove(finding);
+                    dropped.Add(new DroppedFinding(
+                        finding, ReviewVerdictDecisions.Code, $"decision model: duplicate of '{droppedMember.Id}', which was dropped"));
+                }
+                else if (!ReferenceEquals(finding, group.Kept))
+                {
+                    dropped.Add(new DroppedFinding(
+                        finding, ReviewVerdictDecisions.Code, $"decision model: duplicate of {group.Kept.Id} (confidence {ReviewDecisionModel.Format(confidence)})"));
+                }
+            }
+
+            report.Add(new Diagnostic(
+                ReviewVerdictDecisions.Code,
+                Severity.Info,
+                droppedMember is not null
+                    ? $"Merged as duplicates (decision model): {string.Join(", ", group.Merged.Select(item => item.Finding).Prepend(group.Kept).Where(finding => !ReferenceEquals(finding, droppedMember)).Select(finding => $"'{finding.Id}'"))} " +
+                      $"dropped with '{droppedMember.Id}', which the reviewer dropped"
+                    : $"Merged as duplicates (decision model): kept '{group.Kept.Id}'; merged " +
+                string.Join(", ", group.Merged.Select(item => $"'{item.Finding.Id}' (confidence {ReviewDecisionModel.Format(item.Confidence)})")),
+                group.Kept.Lens,
+                group.Kept.File,
+                StartLine: group.Kept.Line));
+        }
+
+        int mergedCount = merged.Sum(group => group.Merged.Count);
+        if (mergedCount > 0)
+            effects.Add($"{mergedCount} duplicate(s) merged");
+        if (candidatesOnly || keepNitpicks)
+            return kept;
+
+        (List<ReviewFinding> substantive, List<(ReviewFinding Finding, double? Confidence)> nitpicks) =
+            ReviewVerdictDecisions.DropNitpicksAsync(model, kept, cancellationToken).GetAwaiter().GetResult();
+        foreach ((ReviewFinding finding, double? confidence) in nitpicks)
+        {
+            string reason = $"decision model: nitpick (confidence {ReviewDecisionModel.Format(confidence)})";
+            dropped.Add(new DroppedFinding(finding, ReviewVerdictDecisions.Code, reason));
+            report.Add(new Diagnostic(
+                ReviewVerdictDecisions.Code,
+                Severity.Info,
+                $"Dropped as nitpick (decision model): '{finding.Id}' (confidence {ReviewDecisionModel.Format(confidence)})",
+                finding.Lens,
+                finding.File,
+                StartLine: finding.Line));
+        }
+
+        if (nitpicks.Count > 0)
+            effects.Add($"{nitpicks.Count} nitpick(s) dropped");
+        return substantive;
+    }
+
+    /// <summary>
+    /// Notes each accepted finding whose stated severity the decision model confidently finds out of line with its
+    /// stated impact. Advisory: the verdict was already computed on the seat's severity and does not change.
+    /// </summary>
+    private static void ReportSeverityNotes(
+        ReviewDecisionModel model,
+        IReadOnlyList<ReviewFinding> accepted,
+        DiagnosticReport report,
+        List<string> effects,
+        CancellationToken cancellationToken)
+    {
+        if (!model.Configured)
+            return;
+
+        IReadOnlyList<(ReviewFinding Finding, string Direction, double? Confidence)> notes =
+            ReviewVerdictDecisions.CheckSeveritiesAsync(model, accepted, cancellationToken).GetAwaiter().GetResult();
+        foreach ((ReviewFinding finding, string direction, double? confidence) in notes)
+        {
+            report.Add(new Diagnostic(
+                ReviewVerdictDecisions.Code,
+                Severity.Info,
+                $"'{finding.Id}': decision model: severity looks {direction} for the stated impact (confidence " +
+                $"{ReviewDecisionModel.Format(confidence)}). Advisory; the verdict keeps '{ReviewVerdictDecisions.SeverityName(finding.Severity)}'.",
+                finding.Lens,
+                finding.File,
+                StartLine: finding.Line,
+                Hint: "Re-grade with a one-line reason in the report if you agree; otherwise ignore."));
+        }
+
+        if (notes.Count > 0)
+            effects.Add($"{notes.Count} severity note(s)");
+    }
+
+    /// <summary>
     /// Lists the accepted critical and major findings, the ones worth a refutation run before the verdict is
     /// acted on. Omitted when a blocking gate that ran already failed, because the change goes back either way.
+    /// With a decision model configured, a finding whose cited code it confidently found to support the claim is
+    /// reported as confirmed and left out of the list, so no refuter is sent for it.
     /// </summary>
     private static void ReportRefutationCandidates(
+        string root,
+        ReviewDecisionModel model,
         ReviewOutcome outcome,
         IReadOnlyList<GateResult> gates,
-        DiagnosticReport report)
+        DiagnosticReport report,
+        List<string> effects,
+        CancellationToken cancellationToken)
     {
         bool blockingGateFailed = gates.Any(gate =>
             gate is { Blocking: true, Passed: false, NotApplicableReason: null, Outcome: GateOutcome.Completed });
         if (blockingGateFailed)
             return;
 
-        string[] ids = [.. outcome.Accepted
-            .Where(finding => finding.Severity is ReviewSeverity.Critical or ReviewSeverity.Major)
-            .Select(finding => finding.Id)];
+        ReviewFinding[] candidates = [.. outcome.Accepted
+            .Where(finding => finding.Severity is ReviewSeverity.Critical or ReviewSeverity.Major)];
+        string[] ids = [.. candidates.Select(finding => finding.Id)];
+        if (model.Configured && candidates.Length > 0)
+        {
+            IReadOnlyList<ClaimCheck> checks =
+                ReviewVerdictDecisions.CheckClaimsAsync(model, root, candidates, cancellationToken).GetAwaiter().GetResult();
+            foreach (ClaimCheck check in checks.Where(check => check.Note is not null))
+            {
+                report.Add(new Diagnostic(
+                    ReviewVerdictDecisions.Code,
+                    Severity.Info,
+                    check.NeedsRefuter
+                        ? $"'{check.Finding.Id}': claim check (decision model): {check.Note}."
+                        : $"Claim confirmed without refutation (decision model): '{check.Finding.Id}': {check.Note}.",
+                    check.Finding.Lens,
+                    check.Finding.File,
+                    StartLine: check.Finding.Line));
+            }
+
+            int confirmed = checks.Count(check => !check.NeedsRefuter);
+            if (confirmed > 0)
+                effects.Add($"{confirmed} claim(s) confirmed without refutation");
+            ids = [.. checks.Where(check => check.NeedsRefuter).Select(check => check.Finding.Id)];
+        }
+
         if (ids.Length == 0)
             return;
 

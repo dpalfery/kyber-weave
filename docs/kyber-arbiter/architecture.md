@@ -11,6 +11,7 @@ decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
   - adr/0054-squad-owned-blocks-in-shared-hook-files
   - adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude
+  - adr/0072-the-arbiter-blocks-only-on-machine-facts-and-confident-model-answers
 code-refs:
   - ArbiterEvaluator
   - RuleEngine
@@ -37,6 +38,10 @@ code-refs:
   - ArbiterModelTargets
   - CommentSyntax
   - RuleEffects
+  - PlanFacts
+  - PlanRootResolver
+  - TextExcerpts
+  - ArbiterHookTimeout
 ---
 
 # Kyber Arbiter architecture
@@ -44,7 +49,27 @@ code-refs:
 The Arbiter is a rule engine that gates Squad delegations and review fan-out. It evaluates
 each decision in up to three steps inside the hook process, then gets out of the way: step 2
 — the reasoning agent — always runs after the block, outside the Arbiter. Decided by
-[ADR 0053](../adr/0053-kyber-arbiter-three-step-decision-gates.md).
+[ADR 0053](../adr/0053-kyber-arbiter-three-step-decision-gates.md), with the blocking contract
+below set by [ADR 0072](../adr/0072-the-arbiter-blocks-only-on-machine-facts-and-confident-model-answers.md).
+
+## The blocking contract
+
+**The Arbiter blocks only on a machine fact or a confident model answer that names a violation.**
+
+- **Step 0 decides only what the machine produces itself:** git diffs, files on disk, the harness
+  payload and the embedded Squad catalog, plus the answers that let a dispatch proceed.
+- **Any judgment that rests on reading agent-written prose is a step-1 question** to the decision
+  model (Jev, see [the Jev decision model](jev-decision-model.md)), with a confidence floor. Routing
+  headers, plan markdown, task labels, return markers and `TASK_GATE:` lines are all agent-written prose.
+- **When the Arbiter cannot decide, it allows and logs.** A parse miss, provider `none`, a provider
+  error or timeout, a request over budget, an answer below its floor, and an exception inside the
+  evaluator or the hook host are all "cannot decide". `undecidable` maps to the proceeding effect in
+  every trigger family, and the decision record keeps the `undecidable` answer with its provider
+  status, so the audit trail shows what happened.
+
+An agent that writes `plan_file:` instead of `PLAN_FILE:`, or a path with a space, no longer
+stops a run: the header tier keeps the raw value, the plan lookup tries it against the file on
+disk, and anything still unread goes to the model.
 
 ## Terminology
 
@@ -67,6 +92,9 @@ shipped. Whoever implements the provider client or writes model rules installs i
 time:
 
 - [TypeSafe's skill](https://github.com/typesafe-ai/skills/blob/main/skills/typesafe-ai/SKILL.md)
+- [The Jev decision model](jev-decision-model.md) — this repository's summary of the question
+  types, the returned fields, and the one-question-per-judgment and threshold guidance the
+  step-1 rules follow
 
 ## The engine
 
@@ -85,10 +113,13 @@ the answers, and appends one decision record.
   once step 0 has produced the trigger family's strongest effect (`escalate`, `skip`, or
   `verify`): step 1 can add a red flag but never overturns plain code. Over budget, on
   provider error, or on timeout, answers are `undecidable` — and with provider `none`,
-  step-1 rules report not evaluated, which is not `undecidable`.
+  step-1 rules report not evaluated, which is not `undecidable`. Both allow. A rule with
+  both `decide` and `ask` asks only when step 0 is `undecidable`, and its decision record
+  then keeps the step-1 row alone.
 - **Combination.** Any escalating rule escalates the trigger; signals are never averaged.
-  `undecidable` escalates on conductor and investigate triggers and allows on review
-  triggers. Non-allow conductor outcomes render an `ArbiterEscalationEnvelope` in the style
+  `undecidable` allows on every trigger. An evaluator exception returns an error result
+  that allows; the hook logs `KW-ARB-HOOK-001` with the message, as it does for every
+  decision whose provider call failed. Non-allow conductor outcomes render an `ArbiterEscalationEnvelope` in the style
   of the Squad's status handoffs; review outcomes render skip/verify/annotation notes for
   code-reviewer.
 
@@ -100,16 +131,48 @@ Facts come from `TriggerFactBuilder`: the plan parser over `PLAN_FILE` at evalua
 embedded Squad catalog. `HeaderBlock` parses the closed routing-header set
 (`KYBER-ARBITER:`, `PLAN_FILE:`, `TASK:`, `LENS:`, `REFUTE:`); `CallerResolver` ranks the
 harness payload above the rendered `--caller`, then header inference. Plan and task identity
-come from the headers only — never inferred from the plan index.
+come from the headers only — never inferred from the plan index. A `review-lens` or `review-triage`
+dispatch carrying `LENS:` classifies as `lens.spawn`, and a `review-lens` dispatch carrying `REFUTE:`
+as `refute.spawn`, whether `code-reviewer`, the conductor or `bug-crusher` sends it: the last two seat
+the council through the `review-council` skill where a sub-agent cannot dispatch. On a harness whose
+hook names no caller, the `LENS:` or `REFUTE:` header itself infers `code-reviewer`. Any notes those
+rules return reach the dispatcher, which relays them to the reviewer as the seat's outcome.
 
 `PLAN_FILE:` is a repository-relative path. A value that starts with `/`, contains a
-backslash, a space or a tab, has an empty or `..` segment, or appears twice is rejected.
-A rejected name goes to `HeaderBlock.RejectedNames` with its value discarded, so a header
-that was sent and rejected is distinct from one that was never sent: the planner rule
-reads it as `delegation.plan-file-rejected`. A second sighting of a name leaves it absent
-whichever sighting was valid. On a planner dispatch, a rejected
-`PLAN_FILE:` answers `plan-file-invalid` before any body marker is read, so a marker in
-the body cannot rescue it.
+backslash, a space or a tab, has an empty or `..` segment, or appears twice is rejected
+from `HeaderBlock.Headers`, and the name goes to `HeaderBlock.RejectedNames`, so a header
+that was sent and rejected is distinct from one that was never sent. A second sighting of
+a name leaves the validated value absent whichever sighting was valid.
+
+Nothing is thrown away. `HeaderBlock.RawValues` keeps, for each closed name, the value the
+prompt wrote in its first 40 lines: a rejected value, the first of a repeated name, a name in
+another case or with `-` for `_`, and a header line that sits after the line that ended the
+block. The raw values are evidence, never a gate:
+
+- **`PlanFacts`**, the plan reader both the hook and the CLI share, tries the validated
+  `PLAN_FILE` and else the raw one through `PlanPathResolver`. A file that resolves inside the
+  repository and exists is a machine fact, so a path with a space or an absolute path inside
+  the repository reads its plan. A `TASK` that is not an exact id matches the task whose id is
+  its first word (`T3 — add the parser` names `T3`).
+- **`PlanRootResolver`** finds the working tree the plan lives in. A conductor run writes its plan in
+  a git worktree, untracked, while some harnesses run the hook in the main checkout. When the plan is
+  not under the hook's directory, the resolver lists the repository's worktrees
+  (`git worktree list --porcelain`) and uses the one that holds the plan for the plan, the task file
+  and the git facts of that decision; several holding it prefer the one the dispatch names, then the
+  newest plan. A return whose headers were stripped follows the worktree its body names. The ledger
+  stays in the hook's directory, so a dispatch and its return still pair.
+- **`delegation.plan-file-raw`** and **`delegation.task-raw`** carry the raw values to the model
+  questions.
+
+Model questions read bounded excerpts, cut by `TextExcerpts` to 3,000 characters so a batched
+request stays inside the provider budget instead of going unasked: `delegation.head` (the raw
+prompt with its headers), `delegation.body-head` (the prompt the worker reads),
+`delegation.returned-tail` (the end of the worker's report, where its digest sits) and
+`gate.report.claim` (the raw `TASK_GATE:` line). `plan.task-list` lists every task of the plan
+as `id: title`, in plan order. `ledger.task-returns` holds up to four stored report tails for this task and
+the tasks it depends on: on each `delegate.returned` the evaluator stores the last 2,000
+characters of the report in the run store beside the plan (`stores/returns-*/returns.jsonl`),
+never in the ledger, which holds no text.
 
 The hook route fills the facts step 1 reads. All of it runs in `HookGitFacts`, except the
 finding, which `TriggerFactBuilder` reads from the prompt:
@@ -147,41 +210,47 @@ below its floor is still recorded, beside the `undecidable` it produced. Entries
 the answer could not be read, and `probabilities` is null unless every option has a value.
 
 A worker's return reaches the rules through the ledger. The post event records the report's
-`RESULT:`, `RED_EVIDENCE:` and `STATUS:` lines, and only a planner return may record
+`RESULT:` and `STATUS:` lines, and only a planner return may record
 `ATTESTED:`. It pairs with its dispatch by call id, or by a digest of the target and the
 prompt with its headers removed, and a specialist's return takes its `TASK` from that dispatch
 because its headers were stripped before it ran. On each `delegate`, `ledger.completed-tasks`
-is the tasks of this plan whose report read `RESULT: PASS`, `ledger.red-evidence` is present
-when this task or one it depends on reported RED evidence, and `ledger.in-flight.paths` is the
+is the tasks of this plan whose report read `RESULT: PASS`, and `ledger.in-flight.paths` is the
 files of this session's dispatches that have not returned. A refused dispatch holds no files.
 A task counts as complete on its worker's own report: no separate reviewer confirms it.
 
 ## The rules
 
-Thirty-two rules ship with permanent `KW-ARB-*` ids, tuned by id through `enabled`,
+Thirty-four rules ship with permanent `KW-ARB-*` ids, tuned by id through `enabled`,
 thresholds, `shadow` where the rule supports it, and per-answer `effects`. Host rules use the
 same shape under non-`KW-ARB-` ids and may not use an effect that only a shipped rule may use.
 
 | Rule | Trigger | Step | Question |
 |---|---|---|---|
-| `KW-ARB-PLAN-001` | `delegate` | 0 | Does `PLAN_FILE` name an artifact with parseable tasks? |
-| `KW-ARB-SCOPE-001` | `delegate` | 0 | Does `TASK` name a plan task, and do named paths stay inside its files? |
-| `KW-ARB-SCOPE-002` | `delegate` | 1 (`choice`, ≥ 0.8) | Does the delegation ask for work the task does not describe? |
-| `KW-ARB-READY-001` | `delegate` | 0 | Are dependencies complete and files clear of work in flight? |
-| `KW-ARB-OWNER-001` | `delegate` | 0 | Is the target the named specialist or the file-kind-map owner? |
-| `KW-ARB-OWNER-002` | `delegate` | 1 (`choice`, ≥ 0.8) | Which roster specialist owns this task? |
-| `KW-ARB-MODE-001` | `delegate` | 0 | In test-first mode, does RED evidence exist first? |
-| `KW-ARB-ROSTER-001` | `delegate`, `investigate` | 0 | Is the target in the caller's `delegates-to`? |
-| `KW-ARB-PLANREAD-001` | `delegate` | 0 | Does the dispatch send the worker into a plan, specification or todo path? |
-| `KW-ARB-DIFF-001` | `delegate.returned` | 0 | Did the delegation change only its task's files? |
-| `KW-ARB-GATE-REPORT-001` | `delegate.returned` | 0 | Does the returned digest's `TASK_GATE` line agree with the gate report it names? |
-| `KW-ARB-PLANNER-001` | `delegate.planner` | 0 | Is this a recognised planner invocation? |
-| `KW-ARB-PLANNER-DIFF-001` | `delegate.planner.returned` | 0 | Did the planner write only plan, spec, and todo directories? |
-| `KW-ARB-READONLY-001` | `investigate.returned` | 0 | Did the read-only dispatch leave the tree unchanged? |
-| `KW-ARB-LENS-001` | `lens.spawn` | 0, then 1 (`noul`, skip below P 0.1) | Does the lens apply to this change? |
+Each conductor rule below that reads prose has a step 0 that answers only proceeding answers and
+machine facts, then one step-1 `choice` question at a confidence floor of 0.8. The table names, for
+each, what stays at step 0 and which answer only the model can give.
+
+| Rule | Trigger | Step | Question |
+|---|---|---|---|
+| `KW-ARB-PLAN-001` | `delegate` | 0, then 1 (`choice`, ≥ 0.8) | Does this dispatch name the plan or specification file its work comes from? Step 0: `has-tasks` when the named plan was read with tasks. Model only: `no-plan` (escalates). |
+| `KW-ARB-SCOPE-001` | `delegate` | 0, then 1 (`choice`, ≥ 0.8), asked only when PLAN-001 is `has-tasks` | Is the work one of the plan's tasks? Step 0: the file-scope answers, all allow. Model only: `not-in-plan` (escalates). The model is told the target's capability profile and counts a documentation closeout or impact review sent to a documentation-profile target as `in-plan`. |
+| `KW-ARB-SCOPE-002` | `delegate` | 0, then 1 (`choice`, ≥ 0.8) | Does the delegation ask for work the task does not describe? Step 0: `no-task` when no plan task was found (not asked). |
+| `KW-ARB-READY-001` | `delegate` | 0, then 1 (`choice`, ≥ 0.8) | Has every task this one depends on finished? Step 0: `no-task`, `overlaps-in-flight` (escalates), `ready`, `returns-unobservable`, `returns-unread` (no stored reports can be found for a loosely named plan, so it is not asked). Model only: `waiting` (escalates), reading `ledger.task-returns`. |
+| `KW-ARB-OWNER-001` | `delegate` | 0, then 1 (`choice`, ≥ 0.8) | Does the task name the target as its specialist? Step 0: `no-task`, `owner`, `no-mapping`. Model only: `not-owner` (escalates). |
+| `KW-ARB-OWNER-002` | `delegate` | 1 (`choice`, ≥ 0.8) | Which roster specialist owns this task? Shipped disabled (a host sets `enabled: true` to log the pick); every answer allows: a plan task names capabilities, and the conductor chooses the agent ([ADR 0080](../adr/0080-plan-tasks-name-capabilities-and-the-conductor-chooses-the-agent.md)). |
+| `KW-ARB-MODE-002` | `delegate.returned` | 0 | In test-first mode, did the worker's task gate fail on its new tests before it passed? Machine fact `gate.report.failing-run-first`: in the folder of the report the `TASK_GATE:` line claims as a pass, an accepted `--red` report (a gate summary starting `RED accepted`) written earlier. Step 0: `no-task`, `not-required` (standard mode, a `test-dev` or documentation target, or a `Not applicable` contract row), `failing-run-first`, `no-failing-run`. Every answer allows and is logged, `no-failing-run` included: a worker cannot make a failing run after implementing, so the answer is monitored rather than a stop (a host may override it to `escalate`). A claim or report that cannot be read leaves the fact absent: undecidable. A return whose harness stripped its routing headers names no plan task and answers `no-task`, as every return-side plan rule does there. It replaced `KW-ARB-MODE-001`, retired with the RED/GREEN task split ([ADR 0076](../adr/0076-test-first-is-one-worker-per-task.md)). |
+| `KW-ARB-ROSTER-001` | `delegate`, `investigate` | 0 | Is the target in the caller's `delegates-to`? Machine fact: the embedded catalog. Only a caller the catalog names with a `delegates-to` list is judged: an unidentified caller, a helper agent outside the Squad, and an agent that delegates to no one answer `no-roster`, which allows. |
+| `KW-ARB-RUN-001` | `delegate`, `delegate.planner`, `investigate` | 0 | Has a run been started before an orchestrator hands a specialist that writes files any work? Machine facts: the catalog (the caller's `delegates-to` lists the target, whose profile is `worker`, `documentation`, `architect` or `product-planning`: a planner's plan belongs on the run branch), and `run.started`, a run record under `~/.kyber-weave/runs/` for this repository whose worktree still has its branch checked out. `not-started` escalates; unreadable evidence leaves the fact absent and allows. See the [runbook](runbook.md#reading-a-run-start-refusal). |
+| `KW-ARB-PLANREAD-001` | `delegate` | 0, then 1 (`choice`, ≥ 0.8) | Does the dispatch tell the worker to open a plan, specification or todo file? Step 0: `closeout`, `no-plan`. Model only: `names-plan` (escalates); `mentions-only` allows. |
+| `KW-ARB-DIFF-001` | `delegate.returned` | 0, then 1 (`choice`, ≥ 0.8) | Are all changed files part of the task's work? It reads `git.changed-paths.attributed`: the paths changed since dispatch, less the task files of writer dispatches in flight in the same working tree during this one (`ledger.concurrent.paths`), because parallel workers share a run worktree. Step 0: `unattributed` (allows: a sibling declared no files and a path outside this task remains, or the return is not in the ledger), `out-of-scope` (escalates), `no-task`, `no-task-files`, `inside-task`. Model only: `outside-task` (escalates). |
+| `KW-ARB-GATE-REPORT-001` | `delegate.returned` | 0, then 1 (`choice`, ≥ 0.8) | Does the report say the worker ran the task gate? Step 0: `verified`, `disagrees` (escalates, machine), `no-report`, `no-gates-declared` (the host's `review.task-gates` lists no gate for the returning agent; allows). Model only: `missing` (escalates). |
+| `KW-ARB-PLANNER-001` | `delegate.planner` | 0, then 1 (`choice`, ≥ 0.8) | Does the dispatch ask the planner for planning work? Step 0: `recognised` for an exact marker and an in-directory or absent `PLAN_FILE`. Model only: `malformed` (escalates). Where the planner writes is checked by PLANNER-DIFF-001. |
+| `KW-ARB-PLANNER-DIFF-001` | `delegate.planner.returned` | 0 | Did the planner write only plan, spec, and todo directories? Machine fact: git, read as `git.changed-paths.attributed`, the paths changed since dispatch less the task files of writer dispatches in flight in the same working tree during this one. When such a sibling declared no files and a remaining path lies outside the planning directories, the fact stays absent and the answer is `unattributed`, which allows. |
+| `KW-ARB-READONLY-001` | `investigate.returned` | 0 | Did the read-only dispatch leave the tree unchanged? It reads `git.changed-paths.attributed`, as `KW-ARB-DIFF-001` does: files that belong to writer dispatches in flight in the same working tree are set aside, and a remaining change that cannot be attributed (a sibling declared no files) answers `unattributed`, which allows. A target the catalog classes as `implementation` or `planner` answers `not-read-only` and is allowed, except the `RUN-START: true` dispatch. |
+| `KW-ARB-LENS-001` | `lens.spawn` | 0, then 1 (`noul`, skip below P 0.1) | Does the lens apply to this change? Asked by `review seats`. |
 | `KW-ARB-QUOTE-001` | `lens.returned` | 0 | Is each finding's excerpt present at its `file:line`? |
 | `KW-ARB-PREEX-001` | `lens.returned` | 0 | Is the excerpt inside a changed hunk? It reads `finding.changed-lines`. |
-| `KW-ARB-CLAIM-001` | `refute.spawn` | 1 (`choice`, ≥ 0.9) | Do the quoted code and surroundings support the claim? |
+| `KW-ARB-CLAIM-001` | `refute.spawn` | 1 (`choice`, ≥ 0.9) | Do the quoted code and surroundings support the claim? Asked by `review verdict`. |
 | `KW-ARB-GATE-CORROBORATED-001` | `refute.spawn` | 0 | Does a failed gate already corroborate the finding? |
 | `KW-ARB-GATE-001` | `gate.select` | 0 | Does any changed path match the gate's `applies-when.paths`? |
 | `KW-ARB-LENS-002` | `lens.spawn` | 0 | Is this lens one that has nothing to judge in a change with no code in it? See [hunk-level lens skipping](../code-review/architecture.md#hunk-level-lens-skipping-kw-arb-lens-002). |
@@ -196,12 +265,15 @@ same shape under non-`KW-ARB-` ids and may not use an effect that only a shipped
 | `KW-ARB-FAILURE-001` | `delegate.failure` | 0, then 1 | Is the current rework failure the same failure as the previous attempt of its cluster? Shadow. |
 | `KW-ARB-TRIM-001` | `sections.select` | 1 | Does this section of a document bear on the task? Shadow. |
 | `KW-ARB-COMMENT-001` | `comment.triage` | 1 | Is this bot review comment a real defect, a nitpick, or already fixed? Shadow. |
+| `KW-ARB-CHECKOUT-001` | `delegate.returned`, `delegate.planner.returned`, `investigate.returned` | 0 | Did the dispatch leave files in the repository's canonical checkout while its run works in its own worktree? Machine fact: `checkout.stray-paths`, git's diff of the canonical checkout against a snapshot `HookGitFacts` takes at dispatch, only for a target that writes files while a live run works in a separate worktree. No snapshot leaves the fact absent, which allows. The step-0 evidence lists the paths. See the [runbook](runbook.md#reading-a-canonical-checkout-refusal). |
 
 **The plan-read ban is enforced at dispatch (`KW-ARB-PLANREAD-001`).** Workers treat their dispatch
 packet as their whole context and do not open plan or specification files, and until this rule the
 only enforcement was a Read guard — advisory wherever a harness's hooks are. On a `delegate` trigger
-the rule removes the routing header block, then asks whether what remains names a path under
-`config.planning-dirs`; if it does, the dispatch escalates. The header is removed first because that
+the rule removes the routing header block, the run-mode lines beside it (`development-mode:`, `autonomy:`) and the product's own packet commands (`kyber-weave docs packet …`, `kyber-weave docs tasks <plan> --task <id>`), then asks whether what remains names a path under
+`config.planning-dirs`. The detector reads prose, so a named path goes to the model, which escalates
+only when it is confident the worker is told to open the file; a dispatch that mentions its plan to say
+which task it serves allows. The header is removed first because that
 block names the plan by design, so a rule reading the raw prompt would fire on every dispatch. A
 documentation-profile target answers `closeout` and is allowed, because a `docs-dev` dispatch that
 names the plan while archiving it is the correct behaviour. The rule shares one detector with the
@@ -219,8 +291,11 @@ means the claim was `PASS` and the report corroborates it: at least one gate pas
 `disagrees` means the report contradicts the claim, and it includes a claim no report can back — any
 status other than `PASS`, and a `PASS` over a run whose every gate was not applicable, because a
 skipped gate is evidence neither way (`KW-REVIEW-026`). `missing` means the claim names no readable
-report, or the return carries no claim at all. Only `verified` allows; the other two escalate, because
-a claim whose evidence cannot be found is exactly the case the rule exists for. The comparison spans
+report, or the return carries no claim at all. `verified` allows and `disagrees` escalates: the report
+contradicting the claim is a machine fact. `missing` is the parser failing to read a line, so step 0
+leaves it undecidable and the model reads the report tail and the raw `TASK_GATE:` line; only a
+confident "the report never mentions the gate" escalates, and a return with no text allows
+(`no-report`). A report path with a space is tried whole as well as split. The comparison spans
 two facts — the claim and the report — which the closed step-0 predicate set cannot express, so
 `GateReportFacts` makes it and the rule reads a single boolean. Where a harness cannot observe returns
 the post-dispatch hook never fires and the rule cannot run; the end-of-run gates catch that case
@@ -233,11 +308,11 @@ in a Squad run, and a dirty-only basis made a committed change invisible, so `KW
 empty set, treated it as "no code to judge", and skipped `correctness` and `test-adequacy` exactly
 when the run started committing each task. The rule now skips those two lenses only when the set is
 non-empty **and** positively Markdown-only, so a tree the Arbiter cannot read is judged rather than
-skipped (ADR 0053, decision 9). `KW-ARB-PLANNER-DIFF-001` evaluates `git.changed-paths.since-dispatch` on `delegate.planner.returned` — computed by `HookGitFacts` against the pre-dispatch snapshot via `GitFacts.GetChangedPathsSinceSnapshot` and left absent when git cannot observe the repository — so an empty planner diff allows while out-of-scope writes or unobservable git state escalate.
+skipped (ADR 0053, decision 9). `KW-ARB-PLANNER-DIFF-001` evaluates `git.changed-paths.attributed` on `delegate.planner.returned` — the `git.changed-paths.since-dispatch` fact, computed by `HookGitFacts` against the pre-dispatch snapshot via `GitFacts.GetChangedPathsSinceSnapshot` and left absent when git cannot observe the repository, less the files of sibling writer dispatches in flight — so an empty planner diff allows and out-of-scope writes escalate. Unobservable git state leaves the fact absent, which is undecidable and allows (ADR 0072).
 
 Two answers are return-dependent: on a harness whose adapter declares returns unobservable
-(today only Antigravity), `READY-001`'s completion check and `MODE-001`'s RED check answer
-`returns-unobservable`, which allows and is logged. The in-flight overlap check finds nothing
+(today only Antigravity), `READY-001`'s completion check answers
+`returns-unobservable`, which allows and is logged, and `MODE-002` never runs. The in-flight overlap check finds nothing
 there, because a dispatch that never reports back would otherwise hold its files for the
 whole session.
 
@@ -248,7 +323,8 @@ model targets file, `KW-ARB-KEY-001` for a missing key,
 `KW-ARB-LOG-001` for an un-ignored log directory,
 `KW-ARB-BIN-001` for a missing binary, `KW-ARB-GUARD-001` for undeclared planning indexes,
 `KW-ARB-PARSE-001`/`-002` for plan parsing, `KW-ARB-AUDIT-001`…`-004` for the ledger audit,
-and `KW-ARB-HOOK-001` for a fail-closed hook error. See the
+and `KW-ARB-HOOK-001` for a hook or evaluator error, which allows and is logged.
+`KW-ARB-CONFIG-016` warns when the provider timeout in force cannot fit the rendered hook timeout. See the
 [rule reference](../ci-pipelines/rule-reference.md).
 
 **Hook guards sit beside the read guard, outside the rules.** `ReadGuard` (the worker plan-read guard) and
@@ -260,6 +336,17 @@ claim key, so a global and a project hook could both record one call. Hosts cann
 Arbiter off, and with it the guard. Each `ArchitectShellGuard` decision writes a hook-log line rather than a ledger event. The rule-engine count above is unchanged. See the [runbook](runbook.md#the-architect-shell-guard) and
 [ADR 0071](../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md).
 
+`WorkerGuard` (`kyber-weave-arbiter worker-guard`) is the hook guard on a Squad subagent's own tool calls. It
+runs on every Copilot CLI and Claude tool call from the user-level hook file or settings block, the only
+places those harnesses report a subagent's calls with its id and type, and it acts only on a call from inside
+a Squad subagent. It denies a write into the canonical checkout while a live run works in its own worktree
+(`KW-ARB-CHECKOUT-001`, the same id as the return rule) and every call of a developer or `docs-dev` dispatch
+past `arbiter.dispatch-budget` (`KW-ARB-BUDGET-001`), and denies once the call after one that ran past
+`dispatch-budget.call-minutes`, measured as the gap between the dispatch's consecutive calls. It reads the run records, the checkout's git files and
+one append-only counter file per subagent under `~/.kyber-weave/arbiter/budgets/`, starts no process, calls no
+model, and allows anything it cannot read. A shell command that writes a file is not seen by it; the return
+rule catches that. See the [runbook](runbook.md#reading-a-canonical-checkout-refusal).
+
 ## Secondary triggers, families and effects
 
 Every trigger belongs to one family. `ArbiterTriggerFamilies` fixes the effects the family's
@@ -268,8 +355,8 @@ cannot change any of it.
 
 | Family | Triggers | Effects its rules may use | `undecidable` maps to | Combines to |
 |---|---|---|---|---|
-| Conductor | `delegate`, `delegate.returned`, `delegate.planner`, `delegate.planner.returned` | `allow`, `escalate` | `escalate` | `escalate` when any rule escalates |
-| Investigate | `investigate`, `investigate.returned` | `allow`, `escalate` | `escalate` | `escalate` when any rule escalates |
+| Conductor | `delegate`, `delegate.returned`, `delegate.planner`, `delegate.planner.returned` | `allow`, `escalate` | `allow` | `escalate` when any rule escalates |
+| Investigate | `investigate`, `investigate.returned` | `allow`, `escalate` | `allow` | `escalate` when any rule escalates |
 | LensSpawn | `lens.spawn` | `allow`, `skip` | `allow` | `skip` when any rule skips |
 | RefuteSpawn | `refute.spawn` | `allow`, `verify`, `drop`, `duplicate` | `allow` | `verify`, else `drop`, else `duplicate`, else `allow` |
 | LensReturned | `lens.returned` | `allow`, `annotate`, `drop` | `allow` | `annotate` when any rule annotates (a `drop` on the same finding is then suppressed and logged), else `drop`, else `allow` |
@@ -358,22 +445,22 @@ comment-only.
 
 ## Phase 3 facts: review, shortcuts, stores, and comments
 
-Phase 3 adds nine rules. All nine ship with `shadow: true`: each is evaluated and logged with the
+Phase 3 adds nine rules. Seven ship with `shadow: true`: each is evaluated and logged with the
 effect it would have had (`would-effect`), and the host sees no effect until the rule is enforced
-by setting `shadow: false` under `arbiter.rules`. The rules are `KW-ARB-NITPICK-001`,
-`KW-ARB-NITPICK-002`, `KW-ARB-DUP-001`, `KW-ARB-TRIAGE-001`, `KW-ARB-INTAKE-001`,
-`KW-ARB-DOCIMPACT-001`, `KW-ARB-FAILURE-001`, `KW-ARB-TRIM-001` and `KW-ARB-COMMENT-001`.
+by setting `shadow: false` under `arbiter.rules`. They are `KW-ARB-NITPICK-002`,
+`KW-ARB-TRIAGE-001`, `KW-ARB-INTAKE-001`, `KW-ARB-DOCIMPACT-001`, `KW-ARB-FAILURE-001`,
+`KW-ARB-TRIM-001` and `KW-ARB-COMMENT-001`. `KW-ARB-NITPICK-001` and `KW-ARB-DUP-001` are asked by
+`review verdict`, not by a hook, and are enforced there (below); `shadow: true` on either returns it
+to logging only.
 
-- **Nitpick filter (`KW-ARB-NITPICK-001`, `-002`).** A `Critical` lens finding, or one a failed gate
-  corroborates, is substantive without a question. Any other finding is asked once, and only a
-  confident `nitpick` (≥ 0.85) drops it. A drop never blocks: after the lens returns, the hook adds
-  `ARBITER_DROPPED: <id> rule=KW-ARB-NITPICK-001 decision=<id>`. A refutation of a dropped finding is
-  skipped (`-002`, effect `verify`).
-- **Duplicate findings (`KW-ARB-DUP-001`).** The candidates are the earlier findings of the same review
-  in the same file within 20 lines, at most three, oldest first. The first candidate answered
-  `same-defect` at ≥ 0.9 makes the refutation a duplicate: it is denied with
-  `ARBITER_DUPLICATE: <id> of <earlier id> decision=<id>`. Lens and refute dispatches identify their
-  review with a `REVIEW_RUN: <id>` header, so the findings of one review share a store.
+- **Asked by the review commands, not the hooks.** `KW-ARB-LENS-001`, `KW-ARB-NITPICK-001`,
+  `KW-ARB-DUP-001` and `KW-ARB-CLAIM-001` are asked by `review seats` and `review verdict`, which hold
+  the changed files and the seat files' text; the hook received a seat-file path or no finding at all,
+  and answered almost nothing. Each rule's hook side now answers from step 0 (`asked-by-review-seats`
+  or `asked-by-review-verdict`, effect `allow`), so a question is never asked twice. The command path
+  is described in [the code-review architecture](../code-review/architecture.md#the-decision-model-in-the-review-commands).
+  `KW-ARB-NITPICK-002` stays on `refute.spawn` and has nothing to read while the hook drops nothing.
+  Lens and refute dispatches still identify their review with a `REVIEW_RUN: <id>` header.
 - **Run stores (`<arbiter-dir>/stores/`).** Finding text and worker failure text are held in stores
   under `<arbiter-dir>/stores/`, outside the decision log and the ledger. A review store is keyed by a
   digest of its `REVIEW_RUN` id. A failure store is keyed by the plan file and its content digest, or by the
@@ -450,7 +537,7 @@ dispatch. The mode also controls the `KW-ARB-MODEL-001` doctor check.
 | Primary outcome not `allow` | Secondary not delivered | `would-effect` and the evidence `suppressed: primary <outcome>` |
 | No hook and no `serve` call | Nothing runs, nothing logged | None |
 | `serve` call | Outcome labelled advisory | `source: serve` |
-| Invalid new configuration | **Known gap.** The config loader throws on an invalid `arbiter:` key, so the hook fails closed for the whole hook with `KW-ARB-HOOK-001`. The design intended to skip only the affected rule. | `validate` and `doctor` name `KW-ARB-CONFIG-012` to `-015` |
+| Invalid new configuration | **Known gap.** The config loader throws on an invalid `arbiter:` key, so the whole hook allows without evaluating and logs `KW-ARB-HOOK-001`. The design intended to skip only the affected rule. | `validate` and `doctor` name `KW-ARB-CONFIG-012` to `-015` |
 | Model targets table missing or unreadable | The dispatch is kept on its model | `model.reason: model-targets-unreadable`; `KW-ARB-MODEL-001` at doctor time |
 | Claude model write throws | The dispatch runs with its routing header stripped and no model field | `delivered: false`, `model.reason: model-write-failed`; hook log line `model-write-failed` |
 | Run store write fails | The store reports `unavailable` and never throws; the append is best-effort | The store status; see [phase 3 facts](#phase-3-facts-review-shortcuts-stores-and-comments) |
@@ -689,6 +776,17 @@ compared.
   every lens scored between 0.12 and 0.45 on both models, so a ceiling of 0.6 would skip all
   of them.
 
+**`KW-ARB-SCOPE-002`, 2026-11-13.** `KW-ARB-MODE-001` and its fifteen calibration cases are retired
+with the RED/GREEN split ([ADR 0076](../adr/0076-test-first-is-one-worker-per-task.md)); its
+replacement, `KW-ARB-MODE-002`, asks no model. A developer dispatch now includes writing the task's
+tests, so `KW-ARB-SCOPE-002`'s `within-task` criterion says so, and seven cases (`scope-031` to
+`scope-037`) check it: four in which a developer writes and runs its own tests (`within-task`) and
+three in which tests are the vehicle for work the task does not describe (`adds-work`), labelled by
+one Claude model and not reviewed by a person. One run per model over all 37 SCOPE-002 cases with the
+new criterion: `typesafe/jev-1.14` 36 right, its one miss (`scope-014`) at 0.25, below the floor;
+`typesafe/jev-1.13` 37 right. No answer was wrong above the floor, and all seven new cases were right
+on both, five of them above 0.8 on `jev-1.13` and all seven on `jev-1.14`.
+
 Confidence on one case can differ noticeably between the models (0.89 and 0.67 on the same
 case), so a floor set for one model is not assumed to hold for another.
 
@@ -727,8 +825,8 @@ The degradation records these outcomes produce are listed once, in the
 |---|---|---|---|---|---|---|
 | Claude | 1 | `hooks` in each dispatching agent's `.claude/agents/<agent>.md` frontmatter and the `/conductor` entry-point skill | `Agent`, matched exactly so task-list tools do not match | `agent_type` inside sub-agents, rendered `--caller` otherwise | `subagent_type`, `prompt` | Supported: `model` on the `Agent` input; aliases `sonnet`, `opus`, `haiku`, `fable` [CC-SUB], [CC-HOOK] |
 | Copilot in VS Code | 1 | `hooks` in each `.github/agents/<agent>.agent.md` (Preview, Local harness) | `runSubagent` | Rendered `--caller`; the payload carries no caller field | `agentName` (absent means the calling agent), `prompt` | Unsupported (unverified): the custom-agent `model` is agent-level only [GH-HOOK], [GH-AGENT] |
-| Copilot CLI | 1 | `.github/hooks/kyber-arbiter.json`, its own file | `task` | Header inference from the marker | `agent_type`, `prompt` | Unsupported (unverified): the custom-agent `model` is agent-level only [GH-HOOK], [GH-AGENT] |
-| OpenCode | 1 | `.opencode/plugins/kyber-arbiter.ts` shim speaking the plugin envelope | `task` | Header inference from the marker | `args.subagent_type`, `args.prompt` | Unsupported: the task tool documents no per-call model; model is agent config [OC-AGENT] |
+| Copilot CLI | 1 | `.github/hooks/kyber-arbiter.json`, its own file | `task` | The top-level `agentType` inside a subagent; a root agent's payload names no caller, so header inference (the conductor's agent-scoped guard makes the run-start check there) | `agent_type`, `prompt` | Unsupported (unverified): the custom-agent `model` is agent-level only [GH-HOOK], [GH-AGENT] |
+| OpenCode | 1 | `.opencode/plugins/kyber-arbiter.ts` shim speaking the plugin envelope | `task` (before 2.2) or `subagent` (2.2.5) | Header inference from the marker | `args.subagent_type` or `args.agent`, `args.prompt` | Unsupported: the task tool documents no per-call model; model is agent config [OC-AGENT] |
 | Pi | 2 | Owned extension file `.pi/extensions/kyber-arbiter.ts` speaking the plugin envelope (`before`/`after`, tool `Agent`) | `Agent` | Header inference from the marker | `args.subagent_type`, `args.prompt` | Unsupported (unverified): no core subagent tool or model field is documented [PI-EXT] |
 | Codex | 2 | Owned block in the shared `.codex/hooks.json` (`PreToolUse`/`PostToolUse` matcher groups) | `spawn_agent` (also matched as `Agent`, under any namespace prefix) | Header inference from the marker | `tool_input.agent_type`, `tool_input.message`; returns pair by `tool_use_id` | Unsupported (unverified): no `spawn_agent` model parameter is documented [CX-HOOK], [CX-SUB] |
 | Cursor | 2 | Owned entries in the shared `.cursor/hooks.json` (`preToolUse`/`postToolUse`, `failClosed: true`) | `Task` | Header inference from the marker | `tool_input.prompt`; `tool_input.subagent_type` is undocumented, so when absent the rules answer `undecidable`. Returns pair by `tool_use_id` | Unsupported (unverified): whether `updated_input` applies to `Task` is undocumented [CU-SUB], [CU-HOOK] |
@@ -846,14 +944,30 @@ re-read live for this revision, so a changed vendor page is a defect to record, 
 
 ### Delivery and caller notes
 
-Phase 2 and Phase 3 targets are project-wide hooks with no caller identity. They gate only
-dispatches carrying the `KYBER-ARBITER: true` marker, infer the caller from the headers, and
-pass anything else through, logged with `caller: unidentified`.
+Phase 2 and Phase 3 targets are project-wide hooks with no caller identity. They infer the caller from
+the headers. An unmarked dispatch whose caller nothing names passes through, logged with
+`caller: unidentified`, unless its target is a Squad agent: the embedded catalog is a machine fact, so the
+dispatch is classified as `investigate` with no caller, and gating does not depend on the orchestrator
+writing headers. With no headers, plan and task identity are unknown, so only the machine-fact rules
+apply, and each allows a caller it cannot name: `KW-ARB-ROSTER-001` answers `no-roster` and
+`KW-ARB-RUN-001` does not apply. Copilot CLI is the exception for callers: inside a subagent its payload
+carries the calling agent's `agentType` at the top level, and the hook reads that as the harness caller.
+So on Copilot CLI a dispatch with no caller is the root session's, and its dispatch to an implementation or
+documentation agent is a `delegate` (its return `delegate.returned`) with or without headers
+([ADR 0082](../adr/0082-the-decision-model-picks-task-agents-and-headerless-dispatches-are-delegations.md)).
+Headers still win when present. Otherwise the plan is the one Ready or In-progress plan in the worktree
+the dispatch names, and the task is a task id that plan holds, from a `TASK_ID:`, `TASK:` or `Task` label
+at a line start or the one id named after `task` or `packet`. `delegation.identity` records `headers` or
+`machine`. When no plan or no task resolves, the delegation rules answer at step 0 and allow
+(`KW-ARB-PLAN-001` `unresolved`, `KW-ARB-SCOPE-001` `task-unknown`, `KW-ARB-PLANREAD-001` `not-a-task`,
+`KW-ARB-GATE-REPORT-001` `not-a-task`, `KW-ARB-DIFF-001` `no-task`): a closeout, a delivery or a check is
+rightly not a plan task. `arbiter audit` counts the decision-model evaluations and reports
+`KW-ARB-AUDIT-006` when a configured model was never asked about dispatches to implementation agents.
 
 Caller inference from a planner target is one of those gates, and it applies only to a
 marked dispatch or on a trusted harness (`claude`, `copilot-vscode`). So an unmarked
-dispatch to a planner passes on `factory` and `antigravity`, and `KW-ARB-AUDIT-002`
-reports it. An unmarked dispatch that carries `PLAN_FILE:` or `TASK:`, or any header that
+dispatch to a planner is evaluated on `factory` and `antigravity` with no caller, never as the
+conductor's, and `KW-ARB-AUDIT-002` reports it. An unmarked dispatch that carries `PLAN_FILE:` or `TASK:`, or any header that
 was rejected, still infers the conductor and stays gated. The cost is that a conductor which drops its marker goes
 ungated on those harnesses. That is the accepted risk the Arbiter design records, and the
 audit rule is how it is seen.
@@ -915,7 +1029,7 @@ Per-harness notes:
   escalates. It documents no input-rewrite field for `hooks.json`, so routing headers are
   not stripped — only documented fields are written. Because `PostToolUse` output is `{}`,
   the adapter declares returns unobservable (`harness.observes-returns` is false):
-  `READY-001`'s completion check and `MODE-001`'s RED check answer `returns-unobservable`,
+  `READY-001`'s completion check answers `returns-unobservable`,
   which allows and is logged, and the in-flight overlap check finds nothing because no
   dispatch ever closes — the other pre-dispatch gating (plan, scope, intent, ownership) is
   unaffected, and completion order is advisory there. The render records `arbiter-not-enforced` with
@@ -989,8 +1103,8 @@ grant is built from; the executable and its argv are unchanged. Five tools:
   envelope or review note. The caller asserts the routing facts (`target`, `plan-file`, `task`,
   `prompt`, `lens`, `finding`, `phase`, `call-id`, `output`); the server derives the rest
   and records `caller-source: asserted`. The asserted `plan-file` is rendered as a
-  `PLAN_FILE:` header, so the repository-relative rule and the `plan-file-invalid` answer
-  apply to it as they do to a hook dispatch. Because the gated agent makes the call, this path
+  `PLAN_FILE:` header, so the header rules and the raw-value fallback apply to it as they do
+  to a hook dispatch. Because the gated agent makes the call, this path
   is advisory.
 - **`arbiter_list_effective_rules_by_trigger(trigger?)`** — lists the rule catalogue; read-only
   and closed-world.

@@ -47,10 +47,11 @@ public static class TriggerFactBuilder
             && !string.Equals(fact, "delegation.target-profile", StringComparison.Ordinal))
             return ArbiterFactLabel.Asserted;
 
-        // The one gate fact the Arbiter computes rather than receives: it joins a returned
-        // digest to the report it names, so it is derived even though gate.* is usually
+        // The gate facts the Arbiter computes rather than receives: they join a returned
+        // digest to the reports on disk, so they are derived even though gate.* is usually
         // dispatch or lens output.
-        if (string.Equals(fact, GateReportFacts.AgreesFact, StringComparison.Ordinal))
+        if (string.Equals(fact, GateReportFacts.AgreesFact, StringComparison.Ordinal)
+            || string.Equals(fact, GateReportFacts.FailingRunFirstFact, StringComparison.Ordinal))
             return ArbiterFactLabel.Derived;
 
         // Measured by the hook from the changed hunks, not supplied by the lens that returned the finding.
@@ -192,6 +193,12 @@ public static class TriggerFactBuilder
                 "delegation.target-class" => targetClass,
                 "delegation.target-profile" => profile,
                 "delegation.prompt" => stripped,
+                // Bounded excerpts for model questions: the raw head keeps the header block as written, the body
+                // head is the dispatch the worker reads. Raw header values keep what validation rejected.
+                "delegation.head" => TextExcerpts.Head(prompt),
+                "delegation.body-head" => TextExcerpts.Head(PlanReadInstruction.WithoutRoutingMetadata(stripped)),
+                "delegation.plan-file-raw" => block.RawValues.TryGetValue("PLAN_FILE", out string? rawPlan) ? rawPlan : null,
+                "delegation.task-raw" => block.RawValues.TryGetValue("TASK", out string? rawTask) ? rawTask : null,
                 // The shortcut rules' questions read the dispatch body: the defect the investigator was sent to
                 // find, and the intake request the planner was asked to assess.
                 "defect.report" => stripped,
@@ -200,13 +207,17 @@ public static class TriggerFactBuilder
                 // The plan-read rule's question, asked by the one detector the docs
                 // validator also uses, so a spelling the rule accepts is a spelling
                 // KW-DOC-TASKS-005 accepts.
-                "delegation.planning-paths" => PlanReadInstruction.NamesPathUnder(stripped, planningDirs),
+                "delegation.planning-paths" => PlanReadInstruction.NamesPathUnder(PlanReadInstruction.WithoutRoutingMetadata(stripped), planningDirs),
                 "delegation.plan-file" => planFile,
                 // Absent (null) unless PLAN_FILE was present but failed validation or repeated.
                 "delegation.plan-file-rejected" => block.RejectedNames.Contains("PLAN_FILE") ? true : null,
                 "delegation.task" => task,
                 "delegation.markers" => marker,
                 "config.planning-dirs" => planningDirs,
+                // A machine fact: whether the host's review.task-gates lists any gate for the agent that returned.
+                "config.task-gates-declared" => target is not null
+                                                && config.Review.TaskGates.TryGetValue(target, out IReadOnlyList<ReviewTaskGate>? gates)
+                                                && gates.Count > 0,
                 "lens.name" => lens,
                 "lens.applicability" => applicability,
                 "finding.id" => finding is null ? null : refute,

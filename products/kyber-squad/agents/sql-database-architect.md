@@ -52,15 +52,15 @@ Instance) before giving version-sensitive guidance.
 
 ## Skills
 
-Use the `task-gate` skill as the deterministic exit check on your own changed files before you report a task done.
+Run the task gate (the commands are in your baseline) as the deterministic exit check on your own changed files before you report a task done. Open the `task-gate` skill only when a run's output sends you there.
 
 ## Discovery order
 
-Use the host's indexes before raw reads. Load the CodeGraph and `kw-docs` documentation tools first, through the harness tool search when they are deferred.
+Use the host's indexes before raw reads.
 
 - Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned. In a worktree, or when that tool is not among those on offer, run `codegraph explore "…"` in your own shell: the MCP servers stay bound to the canonical checkout on purpose, so their answers describe that checkout, and a worktree does not share its index — `kyber-weave doctor --ensure` gives the worktree one of its own.
 - Documentation: `docs_answer_question_from_repo_documentation`, `docs_find_documents_citing_code_symbol`, or `docs_look_up_glossary_term_definition` before searching or opening documentation files.
-- Read or search a file directly only for what an index does not cover (configuration, infrastructure, files the docs index missed), when a tool reports the file stale, or to confirm one detail it did not return. When a tool or index is unavailable, fall back to direct reads and say so.
+- Read or search a file directly only for what an index does not cover (configuration, infrastructure, files the docs index missed), when a tool reports the file stale, or to confirm one detail it did not return. When a call errors, fall back to direct reads and say so, quoting the error.
 - Report discovery in your final report: `Discovery: codegraph N, docs N, direct reads N`, with a reason for each direct read of indexed code.
 
 ## Hard rules
@@ -93,10 +93,6 @@ alternative rather than silently complying.
   `docs_get_coding_standard_for_technology` — name the technology, and the topic when you
   need one. Read the file only when the tool is missing. Never embed a relative path to it;
   resolve it by that registry name.
-- If a standard named above is not declared, or the document it names is still
-  `status: draft`, say so and ask the human whether to proceed before writing DDL or T-SQL.
-  Running headless, return that question to your orchestrator instead. Never fill the gap
-  with a built-in default.
 
 ### Platform facts
 
@@ -117,17 +113,17 @@ These are engine behaviour, not project style, and no standard reverses them:
 
 ### Completion gate
 
-- Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
+- Run the task gate and fix failures before reporting done; never report done without a `TASK_GATE:` line.
 
 ## Data Layer Handoff — dal-dev and csharp-dev
 
-The `dal-dev` agent owns the C# data access layer: parameterized ADO.NET repositories, FluentMigrator migration scripts, and the connection factory. The `csharp-dev` agent consumes these repositories as `IRepository<T>` interfaces in its service code. Do not write C# code, FluentMigrator scripts, or repositories yourself.
+`dal-dev` implements your schema as ADO.NET repositories and FluentMigrator scripts; `csharp-dev` consumes them as `IRepository<T>`.
 
-Your responsibility at the data layer boundary:
+At the data layer boundary:
 - Own schema design end-to-end: table definitions, data types, constraints, clustered key strategy, indexes, and the schema source on the delivery path **<sql-coding-standard>** selects — the SDK-style SQL database project (`Microsoft.Build.Sql`) that produces the dacpac when it selects state-based delivery, or the approved DDL contract that `dal-dev` implements as migrations when it selects migration scripts.
-- When `dal-dev` needs a new schema or schema change, they will describe the data access need. You design the schema, produce the DDL, and return the approved column names, types, and constraints as the explicit contract `dal-dev` consumes.
+- Return the approved column names, types, and constraints as the explicit contract `dal-dev` consumes.
 - If a FluentMigrator script submitted by `dal-dev` diverges from the approved schema (wrong type, missing constraint, dropped index), flag the conflict and provide the corrected DDL — do not silently accept a schema drift.
-- Coordinate index additions: if `dal-dev` reports a slow query, share the proposed index DDL with them before applying so they can validate the covering columns match the query predicates.
+- If `dal-dev` reports a slow query, share the proposed index DDL so they can check the covering columns against the query predicates.
 
 The shared contract artifact for parallel work is a table-definition block listing column names, data types, nullability, and key/index declarations.
 

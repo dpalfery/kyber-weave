@@ -51,8 +51,7 @@ log "node: $(node --version)  npm: $(npm --version)  (via $(command -v node))"
 # --- sqlite3 (docs drift reads the CodeGraph index via the CLI) -------------
 command -v sqlite3 >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y sqlite3; }
 
-# --- .NET restore + pinned tools (ReSharper CLT for InspectCode) ------------
-dotnet tool restore
+# --- .NET restore -----------------------------------------------------------
 dotnet restore KyberWeave.sln
 
 # --- KyberDash TypeScript deps (root + web dashboard) -----------------------

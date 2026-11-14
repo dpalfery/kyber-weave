@@ -320,6 +320,31 @@ public sealed class SeatOutputParserTests
         Assert.Contains("confidence", error.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("-2147483648")]
+    [InlineData("-1")]
+    [InlineData("10000001")]
+    [InlineData("2147483647")]
+    public void ALineOutsideTheCitableRangeIsRefusedNamingTheField(string line)
+    {
+        SeatOutputException error = Assert.Throws<SeatOutputException>(
+            () => SeatOutputParser.Parse("correctness", Fenced(FindingLines(line: line))));
+
+        Assert.Contains("line", error.Message, StringComparison.Ordinal);
+        Assert.Contains("0 to 10000000", error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("1")]
+    [InlineData("10000000")]
+    public void ALineAtTheEdgesOfTheCitableRangeIsKept(string line)
+    {
+        SeatOutput seat = SeatOutputParser.Parse("correctness", Fenced(FindingLines(line: line)));
+
+        Assert.Equal(int.Parse(line, System.Globalization.CultureInfo.InvariantCulture), Assert.Single(seat.Findings).Line);
+    }
+
     [Fact]
     public void ANonNumericConfidenceIsRefusedNamingTheField()
     {
@@ -1066,7 +1091,8 @@ public sealed class SeatOutputParserTests
         string? id = "correctness/off-by-one",
         string? severity = "minor",
         string? confidence = "7",
-        string claim = "The loop bound excludes the final element.")
+        string claim = "The loop bound excludes the final element.",
+        string line = "12")
     {
         List<string> lines = [];
         lines.Add(id is null ? "- lens: correctness" : $"- id: {id}");
@@ -1077,7 +1103,7 @@ public sealed class SeatOutputParserTests
         if (confidence is not null)
             lines.Add($"  confidence: {confidence}");
         lines.Add("  file: src/Foo.cs");
-        lines.Add("  line: 12");
+        lines.Add($"  line: {line}");
         lines.Add("  excerpt: \"if (i < count)\"");
         lines.Add($"  claim: {claim}");
         lines.Add("  evidence: src/Foo.cs:12");
@@ -1103,5 +1129,58 @@ public sealed class SeatOutputParserTests
         lines.AddRange(body);
         lines.Add(fence);
         return string.Join('\n', lines) + "\n";
+    }
+    [Fact]
+    public void ABudgetLineIsAClosingLineNotPartOfTheFindings()
+    {
+        const string text = """
+            - id: correctness/off-by-one
+              lens: correctness
+              severity: major
+              confidence: 8
+              file: src/A.cs
+              line: 12
+              excerpt: |
+                for (int i = 0; i <= n; i++)
+              claim: The loop reads one past the end.
+              evidence: src/A.cs:12
+              failure_scenario: n = 3 reads items[3] and throws.
+              suggestion: Use i < n.
+            Budget reached, not examined: src/B.cs, src/C.cs
+            Discovery: codegraph 2, docs 0, direct reads 1
+            REVIEW.md sections checked: [R2]
+            """;
+
+        SeatOutput seat = SeatOutputParser.Parse("correctness", text);
+
+        Assert.Equal(SeatOutputKind.Findings, seat.Kind);
+        Assert.Single(seat.Findings);
+        Assert.Equal("src/B.cs, src/C.cs", seat.BudgetNote);
+    }
+
+    [Fact]
+    public void ABudgetLineIsAllowedAfterNoFindings()
+    {
+        SeatOutput seat = SeatOutputParser.Parse(
+            "performance",
+            "NO FINDINGS: the two loops it reached are bounded.\nBudget reached, not examined: src/Hot.cs\n" +
+            "Discovery: codegraph 1, docs 0, direct reads 0\nREVIEW.md sections checked: [§4]\n");
+
+        Assert.Equal(SeatOutputKind.NoFindings, seat.Kind);
+        Assert.Equal("src/Hot.cs", seat.BudgetNote);
+    }
+
+    [Theory]
+    [InlineData("Budget reached, not examined:\nBudget reached, not examined: src/B.cs\n", "src/B.cs")]
+    [InlineData("Budget reached, not examined: src/A.cs\nBudget reached, not examined: src/B.cs\n", "src/A.cs")]
+    [InlineData("Budget reached, not examined:\n", "")]
+    public void TheFirstNonEmptyBudgetNoteWins(string budgetLines, string expected)
+    {
+        SeatOutput seat = SeatOutputParser.Parse(
+            "performance",
+            "NO FINDINGS: the loops it reached are bounded.\n" + budgetLines +
+            "Discovery: codegraph 1, docs 0, direct reads 0\nREVIEW.md sections checked: [§4]\n");
+
+        Assert.Equal(expected, seat.BudgetNote);
     }
 }

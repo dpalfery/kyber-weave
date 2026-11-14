@@ -311,7 +311,25 @@ public sealed class ArbiterCalibrationTests
     }
 
     private static ArbiterRule FindRule(string id) =>
-        Assert.Single(ArbiterConfig.ProductDefaults.Rules, rule => string.Equals(rule.Id, id, StringComparison.Ordinal));
+        string.Equals(id, KyberWeave.Core.Docs.Validation.PacketSelfContainment.Rule.Id, StringComparison.Ordinal)
+            ? KyberWeave.Core.Docs.Validation.PacketSelfContainment.Rule
+            : Assert.Single(ArbiterConfig.ProductDefaults.Rules, rule => string.Equals(rule.Id, id, StringComparison.Ordinal));
+
+    /// <summary>The packet fixtures name the packet question, one of its answers and every fact it reads; run them live with the cases variable.</summary>
+    [Fact]
+    public void PacketCases_MatchThePacketQuestion()
+    {
+        string path = Path.Combine(Path.GetDirectoryName(CasesPath())!, "..", "task-packets", "cases.jsonl");
+        List<CalibrationCase> cases = LoadCases(path);
+
+        Assert.Equal(3, cases.Count);
+        foreach (CalibrationCase item in cases)
+        {
+            ArbiterRule rule = FindRule(item.Rule);
+            Assert.Contains(item.Label, rule.Answers);
+            Assert.All(rule.Ask!.State.Values, fact => Assert.True(item.Facts.Contains(fact), $"{item.Id} lacks {fact}"));
+        }
+    }
 
     private static List<CalibrationCase> LoadCases(string path) =>
         File.ReadLines(path)

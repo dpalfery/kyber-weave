@@ -275,10 +275,10 @@ public static class VerdictEngine
             diagnostics.Add(new Diagnostic(
                 CriticalFinding,
                 Severity.Error,
-                $"{finding.Id}: {finding.Claim}",
+                $"{finding.Id}: {ReviewSeatInput.Clip(finding.Claim)}",
                 finding.Lens,
                 finding.File,
-                finding.Suggestion,
+                ReviewSeatInput.Clip(finding.Suggestion),
                 finding.Line));
         }
 

@@ -1,12 +1,16 @@
 using System.Globalization;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Doctor;
+using System.Text.Json.Nodes;
+using KyberWeave.Cli.Commands.Squad.Brief;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Doctor;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.RunStart;
+using KyberWeave.Core.Squad.Briefs;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -90,6 +94,16 @@ public sealed class RunStartCommand : Command<RunStartSettings>
                 out string refusal))
         {
             return Refuse(refusal);
+        }
+
+        if (!settings.Brief && (settings.Path is not null || settings.Autonomy is not null))
+        {
+            return Refuse("--path and --autonomy only apply with --brief.");
+        }
+
+        if (settings.Brief && !SquadBriefBuilder.AcceptsFacts(settings.Path, settings.Autonomy, out string briefRefusal))
+        {
+            return Refuse(briefRefusal);
         }
 
         IProcessExecutor executor = _executor ?? ProcessExecutor.WithTimeout(ToolTimeout);
@@ -332,7 +346,13 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         // hook can read it. The record is auxiliary — the run's own report below still names
         // the base — so a missing home degrades to the hook's default base rather than
         // failing a run that is otherwise ready.
-        RecordBase(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), target, startRef);
+        // Where the run works is recorded with it, so the dispatch guard can tell a started run from none.
+        string? repository = GitFacts.GetCommonDirectory(repositoryRoot);
+        RecordBase(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            target,
+            startRef,
+            repository is null ? null : new RunStartPlace(repository, worktreePath ?? repositoryRoot, DateTimeOffset.UtcNow));
 
         // A new worktree has no index of its own, so the index goes where the run works. A failure here does not
         // undo the branch: the operator repairs the index and the run continues in that tree.
@@ -358,41 +378,51 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         if (index.Status is WorktreeIndexStatus.Failed or WorktreeIndexStatus.BinaryMissing)
             ReportIndexWarning(settings.Json, indexTree, index);
 
+        BriefResult? brief = settings.Brief
+            ? BuildBrief(settings, config, indexTree, repositoryRoot, worktreePath is not null, runHarness: settings.Harness)
+            : null;
+
         if (settings.Json)
         {
-            Console.Out.WriteLine(JsonSerializer.Serialize(
-                new
+            object facts = new
+            {
+                @base = baseBranch,
+                baseRef = startRef,
+                branch = target,
+                worktree = worktreePath,
+                location = location == RunStartLocation.InPlace ? "in-place" : "worktree",
+                revision = baseRevision,
+                resumed = resume is not null,
+                index = indexLabel,
+                completed = completed.Select(task => new { id = task.Id, report = task.Report }),
+                completedWarning,
+                versions = new
                 {
-                    @base = baseBranch,
-                    baseRef = startRef,
-                    branch = target,
-                    worktree = worktreePath,
-                    location = location == RunStartLocation.InPlace ? "in-place" : "worktree",
-                    revision = baseRevision,
-                    resumed = resume is not null,
-                    index = indexLabel,
-                    completed = completed.Select(task => new { id = task.Id, report = task.Report }),
-                    completedWarning,
-                    versions = new
-                    {
-                        failing = settings.FailingVersion,
-                        head = headVersion,
-                        @base = baseVersion
-                    },
-                    serverAlignment = new
-                    {
-                        remote = RunStartPlanner.Remote,
-                        host = HostOf(originUrl),
-                        remoteUrl = originUrl,
-                        head = alignmentRevision,
-                        ahead,
-                        behind,
-                        aligned = ahead is not null && behind is not null
+                    failing = settings.FailingVersion,
+                    head = headVersion,
+                    @base = baseVersion
+                },
+                serverAlignment = new
+                {
+                    remote = RunStartPlanner.Remote,
+                    host = HostOf(originUrl),
+                    remoteUrl = originUrl,
+                    head = alignmentRevision,
+                    ahead,
+                    behind,
+                    aligned = ahead is not null && behind is not null
                             ? ahead == 0 && behind == 0
                             : (bool?)null
-                    }
-                },
-                JsonOptions));
+                }
+            };
+
+            JsonNode document = JsonSerializer.SerializeToNode(facts, JsonOptions)!;
+            if (brief is not null)
+            {
+                document["brief"] = JsonNode.Parse(BriefFormatter.ToJson(brief));
+            }
+
+            Console.Out.WriteLine(document.ToJsonString(JsonOptions));
             return Ready;
         }
 
@@ -414,7 +444,56 @@ public sealed class RunStartCommand : Command<RunStartSettings>
             completedWarning,
             indexLabel);
 
+        if (brief is not null)
+        {
+            Console.Out.Write("\n" + BriefFormatter.ToText(brief));
+        }
+
         return Ready;
+    }
+
+    /// <summary>
+    ///     Builds the conductor's brief for the run just set up. The branch already exists, so a brief that
+    ///     cannot be built is a warning and the run is still ready: the conductor falls back to reading the
+    ///     reference files whole.
+    /// </summary>
+    private BriefResult? BuildBrief(
+        RunStartSettings settings,
+        KyberWeaveConfig config,
+        string runTree,
+        string repositoryRoot,
+        bool inWorktree,
+        string? runHarness)
+    {
+        string[] roots = inWorktree ? [runTree, repositoryRoot] : [repositoryRoot];
+        SquadBriefRequest request = new(
+            "conductor",
+            settings.Path,
+            settings.Autonomy,
+            null,
+            null,
+            runHarness,
+            null,
+            runTree,
+            roots,
+            config);
+
+        if (SquadBriefBuilder.TryBuild(request, out BriefResult? result, out string error))
+        {
+            return result;
+        }
+
+        string warning = $"the conductor's brief could not be built ({error}); read its reference files whole.";
+        if (settings.Json)
+        {
+            Console.Error.WriteLine($"{CommandName}: warn: {warning}");
+        }
+        else
+        {
+            AnsiConsole.MarkupLine($"[yellow]warn[/] {Markup.Escape(warning)}");
+        }
+
+        return null;
     }
 
     /// <summary>The index state as the <c>index</c> JSON field and the report line name it.</summary>
@@ -474,7 +553,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
     /// hook can read it. Best effort: false when there is nowhere to record (or the record
     /// cannot be written), in which case the hook falls back to its default base.
     /// </summary>
-    internal static bool RecordBase(string homeDirectory, string branch, string baseRef)
+    internal static bool RecordBase(string homeDirectory, string branch, string baseRef, RunStartPlace? place = null)
     {
         if (string.IsNullOrWhiteSpace(homeDirectory))
         {
@@ -483,7 +562,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
 
         try
         {
-            RunBaseState.Write(homeDirectory, branch, baseRef);
+            RunBaseState.Write(homeDirectory, branch, baseRef, place);
             return true;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)

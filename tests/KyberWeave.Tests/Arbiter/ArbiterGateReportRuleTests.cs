@@ -32,7 +32,7 @@ public sealed class ArbiterGateReportRuleTests
         KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Core", "Arbiter", "Rules", "default-rules.yml");
 
     /// <summary>
-    /// The eighteen rules the file ships today, pinned so the new one joins without renumbering any.
+    /// The seventeen rules the file shipped before it that it still ships, pinned so the new one joins without renumbering any.
     /// Rule ids are permanent: suppressions, baselines and code-scanning alerts key on them.
     /// </summary>
     private static readonly string[] ShippedBeforeThisSlice =
@@ -43,7 +43,6 @@ public sealed class ArbiterGateReportRuleTests
         "KW-ARB-READY-001",
         "KW-ARB-OWNER-001",
         "KW-ARB-OWNER-002",
-        "KW-ARB-MODE-001",
         "KW-ARB-ROSTER-001",
         "KW-ARB-DIFF-001",
         "KW-ARB-PLANNER-001",
@@ -89,14 +88,69 @@ public sealed class ArbiterGateReportRuleTests
     }
 
     /// <summary>
-    /// Nothing is known about a report — no facts at all — so the digest's claim is unverified. D29
-    /// makes that escalation, not a pass: the case the rule exists for is the report a worker cannot
-    /// produce.
+    /// Nothing is known about a report — no facts at all — so the claim cannot be read. ADR 0072 makes that
+    /// undecidable at step 0: with no report text it allows, and with a report the model is asked whether the
+    /// worker ran the gate. Only a confident "it did not" escalates.
     /// </summary>
     [Fact]
-    public void AReturnWithNoVerifiableReportEscalatesTheDispatch()
+    public void AReturnWithNoVerifiableReportIsLeftToTheModel()
     {
-        Assert.Equal(RuleEffects.Escalate, EffectFor(new ArbiterFactSet()));
+        Assert.Equal("no-report", RuleEngine.Decide(Rule(), new ArbiterFactSet()));
+        Assert.Equal(RuleEffects.Allow, EffectFor(new ArbiterFactSet()));
+
+        ArbiterFactSet withReport = new ArbiterFactSet()
+            .With(GateReportFacts.ReturnedTailFact, "Done. Tests pass.", ArbiterFactLabel.Asserted);
+        Assert.Equal(RuleEngine.Undecidable, RuleEngine.Decide(Rule(), withReport));
+        Assert.Equal(RuleEffects.Escalate, Rule().Effects["missing"]);
+        Assert.Equal(RuleEffects.Allow, Rule().Effects["ran-gate"]);
+    }
+
+    /// <summary>
+    /// The documentation developer has no task gate, so its return carries no TASK_GATE claim by design. When the host
+    /// declares no task gate for the returning agent, step 0 allows before any model question is asked.
+    /// </summary>
+    [Fact]
+    public void AReturnFromAnAgentWithNoDeclaredTaskGateIsAllowedAtStepZero()
+    {
+        ArbiterFactSet facts = new ArbiterFactSet()
+            .With(GateReportFacts.ReturnedTailFact, "Closeout done. No gate run.", ArbiterFactLabel.Asserted)
+            .With("config.task-gates-declared", false, ArbiterFactLabel.Derived);
+
+        Assert.Equal("no-gates-declared", RuleEngine.Decide(Rule(), facts));
+        Assert.Equal(RuleEffects.Allow, EffectFor(facts));
+    }
+
+    [Fact]
+    public void AReturnFromAnAgentWithADeclaredTaskGateStillReachesTheModelQuestion()
+    {
+        ArbiterFactSet facts = new ArbiterFactSet()
+            .With(GateReportFacts.ReturnedTailFact, "Done. Tests pass.", ArbiterFactLabel.Asserted)
+            .With("config.task-gates-declared", true, ArbiterFactLabel.Derived);
+
+        Assert.Equal(RuleEngine.Undecidable, RuleEngine.Decide(Rule(), facts));
+    }
+
+    /// <summary>The fact is read from the host's <c>review.task-gates</c> for the agent that returned, not guessed.</summary>
+    [Theory]
+    [InlineData("dev", true)]
+    [InlineData("docs-dev", false)]
+    public void TheDeclaredTaskGateFactComesFromTheHostConfiguration(string returningAgent, bool declared)
+    {
+        ReviewTaskGate gate = new("unit", ["**"], null, ["dotnet", "test"], []);
+        KyberWeaveConfig config = new()
+        {
+            Review = new ReviewConfig
+            {
+                TaskGates = new Dictionary<string, IReadOnlyList<ReviewTaskGate>>(StringComparer.Ordinal) { ["dev"] = [gate] }
+            }
+        };
+
+        ArbiterFactSet facts = TriggerFactBuilder.Build(
+            "delegate.returned", returningAgent, "KYBER-ARBITER: true\n\nDo the work.", "conductor",
+            ArbiterCallerSources.Harness, config);
+
+        Assert.True(facts.TryGet("config.task-gates-declared", out ArbiterFact? fact));
+        Assert.Equal(declared, fact.Value);
     }
 
     [Fact]
@@ -292,26 +346,19 @@ public sealed class ArbiterGateReportRuleTests
     }
 
     /// <summary>
-    /// Exactly one answer may allow the dispatch, because a rule that allows on more than one answer
-    /// lets a disagreement through with it. The disagreeing answers must escalate.
+    /// The machine contradiction always escalates, and the model's "no gate run" answer escalates; step 0 itself
+    /// can answer only verified, disagrees or no-report, so it never escalates on a line it could not read.
     /// </summary>
     [Fact]
-    public void OnlyTheAgreeingReportAllowsAndDisagreementEscalates()
+    public void DisagreementAndAConfidentNoGateAnswerEscalate()
     {
         ArbiterRule rule = Rule();
 
-        KeyValuePair<string, string> allow =
-            Assert.Single(rule.Effects, entry => string.Equals(entry.Value, RuleEffects.Allow, StringComparison.Ordinal));
-        Assert.Contains(allow.Key, rule.Answers);
-
-        string[] escalating =
-        [
-            .. rule.Answers.Where(answer => string.Equals(rule.Effects[answer], RuleEffects.Escalate, StringComparison.Ordinal))
-        ];
-        Assert.True(
-            escalating.Length >= 2,
-            $"'{GateReportRule}' declares {escalating.Length} escalating answer(s). D29 names two: a missing " +
-            "report and a report that disagrees with the claim.");
+        Assert.Equal(RuleEffects.Escalate, rule.Effects["disagrees"]);
+        Assert.Equal(RuleEffects.Escalate, rule.Effects["missing"]);
+        Assert.DoesNotContain(rule.Decide!, clause => string.Equals(clause.Answer, "missing", StringComparison.Ordinal));
+        Assert.NotNull(rule.Ask);
+        Assert.Contains("missing", rule.Ask.Criteria!.Keys);
     }
 
     /// <summary>

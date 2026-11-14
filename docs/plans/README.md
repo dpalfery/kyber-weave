@@ -18,7 +18,7 @@ A plan is open only while it is built. The pull request that finishes it archive
 **One plan never spans several pull requests.** Work that needs more than one is authored as several plans, one per slice: each is carved from the design, approved on the branch that delivers it, and archived in that slice's own pull request. The alternative — one approved design merged in stages — is how a specification once shipped with no closeout, which is the failure `KW-DOC-LIFECYCLE-003` exists to prevent.
 
 **A slice whose base is unmerged is stacked on it, not on `main`.** When a slice edits files the slice before it rewrote, branching from `main` conflicts on the first push, and GitHub runs no `pull_request` workflow at all on a conflicted pull request — so CI never reports and the slice has no verdict. Cut the branch from the unmerged slice's branch, target the pull request at that branch, and retarget it to `main` as the base merges. Do not merge the base into the slice to unblock CI and do not rebase the slice onto `main`: both rewrite a branch whose own review is still open.
-**Maintaining this inventory.** Register a new plan by adding a row to **Active Plans** when execution starts. On closeout, `git mv` the plan file to `docs/archive/plans/`, remove its row from **Active Plans** and add one line for it at the top of the table in the [archived plan inventory](../archive/plans/README.md) with its harvest destinations, putting evidence in the plan's own completion summary. Leave **Active Plans** in the empty state when nothing remains open. Reconcile the plan file, frontmatter, body status, and index row in the same change.
+**Maintaining this inventory.** Register a new plan by adding a row to **Active Plans** when execution starts. On closeout, `docs-dev` harvests the plan and fills its Closeout mapping (`kyber-weave docs closeout <plan>` names what is still missing), then the archive runs — the conductor's `docs_archive_plan_after_closeout_is_complete` tool, or `kyber-weave docs closeout <plan> --archive`: once the closeout evidence is complete it moves the plan file to `docs/archive/plans/`, removes its task file and its row from **Active Plans**, and adds one line for it at the top of the table in the [archived plan inventory](../archive/plans/README.md) with its harvest destinations; evidence goes in the plan's own completion summary. Leave **Active Plans** in the empty state when nothing remains open. Reconcile the plan file, frontmatter, body status, and index row in the same change.
 
 A note or excuse for why the process was not followed is not a resolution. The process exists to ensure quality; trying to work around it signals bad quality. Do not put such a note in **Active Plans**. A pull request that does will not be approved.
 
@@ -35,10 +35,16 @@ Closeout explicitly distinguishes between two waiver categories:
 - **Documentation Waiver**: Permitted ONLY when an item is purely transient, historical, or test-fixture scoped with zero surviving architectural, operational, or behavioral invariants that future engineers or agents need to consult. "No ADR" is NOT a documentation waiver. "No existing doc describes it" is explicitly rejected as an invalid documentation waiver: canonical documentation must be created or updated.
 
 A plan delivered by a conductor may carry a tracked task file, `docs/plans/<plan>.tasks.json`,
-written by `architect` at finalization and committed with the plan at once. Each task carries its
-id, role, dependencies, file scope, a `session` group and the full prompt, and each prompt carries
+written at finalization (by the conductor's `docs_finalize_approved_plan_and_write_task_file` tool, or
+`kyber-weave docs finalize`) and committed with the plan at once. Each task carries its
+id, the capabilities it needs, dependencies, file scope, a `session` group and the full prompt (plus a
+`role` only when the plan assigns an agent explicitly), and each prompt carries
 files as path plus symbol, full test class names, exact commands, acceptance criteria and the
-standards to fetch. The conductor validates the file, pastes each prompt unchanged and fills only
+standards to fetch. A plan task names capabilities in plain words, never an agent or skill; the
+conductor picks the agent whose description fits them
+([ADR 0080](../adr/0080-plan-tasks-name-capabilities-and-the-conductor-chooses-the-agent.md)). The
+conductor validates the file and dispatches by task id; each worker
+fetches its prompt unchanged with `kyber-weave docs packet <task id> --agent <its name>`, which fills only
 `{worktree}` and `{prior_results}`. **The plan stays authoritative**: it is what the owner
 approves, it holds the `## Decisions` table, and the Arbiter reads task ids, files, dependencies,
 skills, task text, test rows and out-of-scope items from it. The file's execution digest covers
@@ -46,8 +52,8 @@ the parsed tasks, files, dependencies, skills, test rows, out-of-scope paths and
 flip or a Decisions edit does not mark it stale while any task edit does. A file that disagrees
 with its plan, a stale digest, a prompt without a command or acceptance criteria, and a prompt
 that tells a worker to open a plan each fail validation (`KW-DOC-TASKS-002` to `-005`). A malformed
-or wrong-schema file fails `-001`, and a Ready plan with no file warns `-006`. The architect reads the
-digest from `kyber-weave arbiter plan <plan> -f json` after its last plan edit, and writes the file in place; a copy left beside it under another name, such as `<plan>.tasks.json.new`, fails `-007`.
+or wrong-schema file fails `-001`, and a Ready plan with no file warns `-006`. The architect runs
+`kyber-weave docs tasks <plan> --write` after its last plan edit, which derives the file and its digest from the plan, in place, and never writes either by hand (`--check` reports what differs); a copy left beside it under another name, such as `<plan>.tasks.json.new`, fails `-007`.
 
 The task file is transient. Closeout removes it with `git rm` in the same commit that archives the
 plan, so it never reaches `main` — this repository squash merges, and nothing durable is lost

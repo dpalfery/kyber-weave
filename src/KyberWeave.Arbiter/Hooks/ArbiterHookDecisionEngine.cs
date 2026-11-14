@@ -1,9 +1,11 @@
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Deployment;
 using YamlDotNet.Core;
@@ -22,10 +24,10 @@ namespace KyberWeave.Arbiter.Hooks;
 /// (<c>~/.config/kyber-weave/arbiter.yml</c>) applies field by field to the provider,
 /// as in every other host. A non-allow outcome renders the escalation envelope on
 /// conductor and investigate triggers, the post-return block, or the review note;
-/// an error result — the evaluator throws rather than allows — writes
-/// <c>KW-ARB-HOOK-001</c> to the log and the chat-visible note and lets the dispatch
-/// continue. A malformed user override still fails closed like a malformed host
-/// config. Nothing but the returned outcome ever reaches stdout:
+/// an error result, an evaluator fault and a malformed user override all write
+/// <c>KW-ARB-HOOK-001</c> to the log and the chat-visible note and let the dispatch
+/// continue: the Arbiter blocks only on a finding, never on a failure to decide.
+/// Nothing but the returned outcome ever reaches stdout:
 /// diagnostics go to <see cref="HookContext.Log"/> (stderr in production).
 /// Evaluation is synchronous at this boundary because the adapters are; the wait
 /// stays inside the harness's per-hook timeout.
@@ -178,24 +180,38 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         }
         catch (InvalidOperationException ex)
         {
-            // A malformed user override fails closed like a malformed host config.
-            return BlockWithError(harness, resolved, ex.Message, context.NewDecisionId(), isPost);
+            // A malformed user override leaves no provider to decide with: the dispatch continues loudly.
+            return AllowLoudly(harness, ex.Message, context.NewDecisionId(), context);
+        }
+
+        foreach (Diagnostic warning in RuleValidator.CheckProviderTimeout(config.Arbiter.Provider, effective.Arbiter.Provider))
+        {
+            context.Log.WriteLine($"{warning.Code}: {warning.Message} {warning.Hint}");
         }
 
         IArbiterProvider provider = _providerFactory(effective);
         IDisposable? owned = provider as IDisposable;
         try
         {
+            // The plan, its task file and the git facts are read in the worktree that holds the plan, which in a
+            // conductor run is often not the checkout the hook runs in. The ledger stays with the hook's directory
+            // so a dispatch and its return still pair.
+            string evaluationRoot = PlanRootResolver.Resolve(repoRoot, prompt);
+            if (!string.Equals(evaluationRoot, repoRoot, StringComparison.Ordinal))
+            {
+                context.Log.WriteLine($"Arbiter: evaluating against worktree '{evaluationRoot}', which holds the dispatch's plan.");
+            }
+
             IArbiterGitFacts gitFacts = _gitFactsFactory is not null
-                ? _gitFactsFactory(repoRoot)
-                : new HookGitFacts(repoRoot, _homeDirectory(), arbiterDirectory);
+                ? _gitFactsFactory(evaluationRoot)
+                : new HookGitFacts(evaluationRoot, _homeDirectory(), arbiterDirectory);
             ArbiterEvaluator evaluator = new(
                 provider,
                 KeyResolverFor(effective),
                 new InFlightLedger(arbiterDirectory),
                 new DecisionLog(arbiterDirectory),
                 gitFacts,
-                _planReaderFactory(repoRoot),
+                _planReaderFactory(evaluationRoot),
                 _clock);
             ArbiterEvent ev = new()
             {
@@ -212,7 +228,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
                 Prompt = prompt,
                 ToolCallId = toolCallId,
                 Session = sessionId,
-                Cwd = repoRoot,
+                Cwd = evaluationRoot,
                 ObservesReturns = context.ObservesReturns,
                 ModelOverrideField = context.ModelOverride is { Supported: true } capability ? capability.Field : null,
                 ModelOverrideAliases = context.ModelOverride is { Supported: true } aliases ? aliases.AcceptedAliases : null,
@@ -265,6 +281,9 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
             || string.Equals(result.Outcome, RuleEffects.Applies, StringComparison.Ordinal)
             || string.Equals(result.Outcome, RuleEffects.NotApplicable, StringComparison.Ordinal))
         {
+            // A model that failed or timed out leaves its questions undecidable, and undecidable allows. The
+            // dispatch proceeds, and the failure is logged so an allow nothing judged is never silent.
+            LogProviderFailures(decisions, result.LedgerId, harness, context);
             ArbiterModelBlock? block = ModelBlockFor(decisions, result.LedgerId);
             bool targeting = !string.Equals(config.Arbiter.ModelTargeting.Mode, ModelTargetingOff, StringComparison.Ordinal);
             return new HookOutcome(
@@ -310,8 +329,10 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
                 : new HookOutcome(HookOutcomeKind.Deny, digest);
         }
 
-        ArbiterDecisionRecord? record = decisions
-            .LastOrDefault(decision => string.Equals(decision.LedgerId, result.LedgerId, StringComparison.Ordinal));
+        // A secondary (delegate.model) shares the primary's ledger id and is written after it, so the last record on
+        // the ledger is not the dispatch's decision. The record that carries the event's outcome is.
+        ArbiterDecisionRecord? record = DecisionWithOutcome(decisions, result.LedgerId, result.Outcome)
+            ?? decisions.LastOrDefault(decision => string.Equals(decision.LedgerId, result.LedgerId, StringComparison.Ordinal));
         if (record is null)
         {
             return AllowLoudly(
@@ -376,6 +397,20 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         return isPost
             ? new HookOutcome(HookOutcomeKind.PostBlock, reason)
             : new HookOutcome(HookOutcomeKind.Deny, reason);
+    }
+
+    /// <summary>Logs <c>KW-ARB-HOOK-001</c> for each decision on the event whose provider call failed.</summary>
+    private static void LogProviderFailures(
+        IReadOnlyList<ArbiterDecisionRecord> decisions, string ledgerId, string harness, HookContext context)
+    {
+        foreach (ArbiterDecisionRecord decision in decisions.Where(decision =>
+            string.Equals(decision.LedgerId, ledgerId, StringComparison.Ordinal)
+            && string.Equals(decision.Provider.Status, ArbiterProviderStatuses.Error, StringComparison.Ordinal)))
+        {
+            context.Log.WriteLine(
+                $"{HookCommand.FailClosedCode}: the decision model failed (provider {decision.Provider.Kind}) on " +
+                $"'{decision.Trigger}' for '{harness}' (decision {decision.Id}); its questions are undecidable and the dispatch proceeds.");
+        }
     }
 
     /// <summary>
@@ -595,34 +630,6 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         return new HookOutcome(
             HookOutcomeKind.AllowWithNote,
             $"{HookCommand.FailClosedCode}: {flat}. The dispatch continues without an Arbiter decision.");
-    }
-
-    private static HookOutcome BlockWithError(
-        string harness, string? caller, string? message, string decisionId, bool isPost)
-    {
-        string flat = OneLine(message);
-        if (flat.StartsWith(HookCommand.FailClosedCode + ": ", StringComparison.Ordinal))
-        {
-            flat = flat.Substring((HookCommand.FailClosedCode + ": ").Length);
-        }
-
-        string trigger = string.Equals(caller, "conductor", StringComparison.Ordinal) ? "delegate" : "investigate";
-        string rendered = new ArbiterEscalationEnvelope(
-            trigger,
-            $"{caller ?? "unidentified"} ({harness})",
-            null,
-            null,
-            null,
-            [new ArbiterEnvelopeEntry(
-                HookCommand.FailClosedCode,
-                "Did the hook host fail before evaluation completed?",
-                ArbiterAnswerText.Error(HookCommand.FailClosedCode, flat),
-                $"{HookCommand.FailClosedCode}: {flat}")],
-            string.IsNullOrWhiteSpace(decisionId) ? "unknown" : decisionId,
-            1).Render();
-        return isPost
-            ? new HookOutcome(HookOutcomeKind.PostBlock, rendered)
-            : new HookOutcome(HookOutcomeKind.Deny, rendered);
     }
 
     private Func<Uri, string?> KeyResolverFor(KyberWeaveConfig config)

@@ -1,4 +1,5 @@
 using System.Globalization;
+using KyberWeave.Core.RunStart;
 
 namespace KyberWeave.Core.Arbiter;
 
@@ -146,6 +147,20 @@ public sealed record ArbiterEscalationEnvelope(
         ArgumentNullException.ThrowIfNull(trigger);
         ArgumentNullException.ThrowIfNull(entries);
         ArbiterTriggerFamily family = ArbiterTriggerFamilies.ForTrigger(trigger);
+
+        // A dispatch refused for want of a run has one fix, and the architect cannot supply it.
+        if (entries.Any(entry => string.Equals(entry.RuleId, "KW-ARB-RUN-001", StringComparison.Ordinal)))
+        {
+            return RunStartEvidence.Remedy;
+        }
+
+        // Stray files in the canonical checkout are a clean-up, not a design question for the architect.
+        if (entries.Any(entry => string.Equals(entry.RuleId, "KW-ARB-CHECKOUT-001", StringComparison.Ordinal)))
+        {
+            return "dispatch the same specialist to move the listed files into the run worktree and restore them in the " +
+                   "canonical checkout, then continue; do not dispatch architect for this.";
+        }
+
         if (family == ArbiterTriggerFamily.Conductor)
         {
             bool PlannerAnswered(string answer) => entries.Any(entry =>
@@ -154,19 +169,7 @@ public sealed record ArbiterEscalationEnvelope(
 
             if (PlannerAnswered("malformed"))
             {
-                return "re-issue this planner dispatch with a recognised marker; do not send it to architect.";
-            }
-
-            if (PlannerAnswered("plan-file-invalid"))
-            {
-                return "re-issue this planner dispatch with PLAN_FILE as one repository-relative path, '/'-separated, "
-                    + "with no leading '/', '..', backslash, space or tab; do not send it to architect.";
-            }
-
-            if (PlannerAnswered("plan-file-outside-planning-dirs"))
-            {
-                return "re-issue this planner dispatch with a PLAN_FILE under the plan, spec or todo directory; "
-                    + "do not send it to architect.";
+                return "re-issue this planner dispatch as planning work with a recognised marker; do not send it to architect.";
             }
 
             return repeat >= 2

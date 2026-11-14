@@ -13,8 +13,8 @@ namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
 /// Contract for task 16.9 (unobservable returns, option (a) of Q17): where a harness
-/// cannot observe sub-agent returns, <c>READY-001</c>'s completion check and
-/// <c>MODE-001</c>'s RED check answer <c>returns-unobservable</c>, which allows. The
+/// cannot observe sub-agent returns, <c>READY-001</c>'s completion check answers
+/// <c>returns-unobservable</c>, which allows. The
 /// in-flight overlap check still escalates. RED: the <c>harness.observes-returns</c>
 /// fact, <c>IHarnessHookAdapter.ObservesReturns</c> and the answer do not exist yet.
 /// </summary>
@@ -70,6 +70,7 @@ public sealed class ArbiterUnobservableReturnsTests
     {
         ArbiterRule ready = Shipped("KW-ARB-READY-001");
         ArbiterFactSet facts = Facts(
+            ("plan.task", "T2"),
             ("plan.task.files", SrcA),
             ("plan.task.depends-on", TaskT1),
             ("ledger.completed-tasks", NoPaths),
@@ -87,6 +88,7 @@ public sealed class ArbiterUnobservableReturnsTests
     {
         ArbiterRule ready = Shipped("KW-ARB-READY-001");
         ArbiterFactSet facts = Facts(
+            ("plan.task", "T2"),
             ("plan.task.files", SrcA),
             ("plan.task.depends-on", TaskT1),
             ("ledger.completed-tasks", NoPaths),
@@ -97,46 +99,20 @@ public sealed class ArbiterUnobservableReturnsTests
     }
 
     [Fact]
-    public void Ready001_WhenReturnsObserved_DependencyNotComplete_StillWaits()
+    public void Ready001_WhenReturnsObserved_DependencyNotComplete_AsksTheModel()
     {
         ArbiterRule ready = Shipped("KW-ARB-READY-001");
         ArbiterFactSet facts = Facts(
+            ("plan.task", "T2"),
             ("plan.task.files", SrcA),
             ("plan.task.depends-on", TaskT1),
             ("ledger.completed-tasks", NoPaths),
             ("ledger.in-flight.paths", NoPaths),
+            ("ledger.task-returns", NoPaths),
             ("harness.observes-returns", true));
 
-        Assert.Equal("waiting", RuleEngine.Decide(ready, facts));
-    }
-
-    [Fact]
-    public void Mode001_WhenReturnsUnobservable_RedMissing_Allows()
-    {
-        ArbiterRule mode = Shipped("KW-ARB-MODE-001");
-        ArbiterFactSet facts = Facts(
-            ("plan.development-mode", "test-first"),
-            ("delegation.target", "react-dev"),
-            ("plan.test-contract.row", "RED: something"),
-            ("harness.observes-returns", false));
-
-        string answer = RuleEngine.Decide(mode, facts);
-
-        Assert.Equal("returns-unobservable", answer);
-        Assert.Equal(RuleEffects.Allow, mode.Effects["returns-unobservable"]);
-    }
-
-    [Fact]
-    public void Mode001_WhenReturnsObserved_RedMissing_StillEscalates()
-    {
-        ArbiterRule mode = Shipped("KW-ARB-MODE-001");
-        ArbiterFactSet facts = Facts(
-            ("plan.development-mode", "test-first"),
-            ("delegation.target", "react-dev"),
-            ("plan.test-contract.row", "RED: something"),
-            ("harness.observes-returns", true));
-
-        Assert.Equal("missing", RuleEngine.Decide(mode, facts));
+        // The markers do not show the dependency complete, which is a reading of prose: the model is asked.
+        Assert.Equal(RuleEngine.Undecidable, RuleEngine.Decide(ready, facts));
     }
 
     [Fact]
@@ -146,7 +122,6 @@ public sealed class ArbiterUnobservableReturnsTests
 
         Assert.DoesNotContain(diagnostics, d => d.Severity == KyberWeave.Core.Diagnostics.Severity.Error);
         Assert.Contains(ArbiterConfig.ProductDefaults.Rules, rule => rule.Id == "KW-ARB-READY-001");
-        Assert.Contains(ArbiterConfig.ProductDefaults.Rules, rule => rule.Id == "KW-ARB-MODE-001");
     }
 
     private sealed class NullEngine : IHookDecisionEngine
@@ -174,6 +149,9 @@ public sealed class ArbiterUnobservableReturnsTests
 
     private sealed class WiringProvider : IArbiterProvider
     {
+        /// <summary>When true, the readiness question is answered waiting with high confidence.</summary>
+        public bool AnswerWaiting { get; init; }
+
         public Task<ArbiterStep1BatchResult> AskStep1Async(
             IReadOnlyList<ArbiterRule> rules,
             ArbiterFactSet facts,
@@ -181,15 +159,26 @@ public sealed class ArbiterUnobservableReturnsTests
             CancellationToken cancellationToken = default)
         {
             Dictionary<string, string> answers = new(StringComparer.Ordinal);
+            Dictionary<string, ArbiterStep1Score> scores = new(StringComparer.Ordinal);
             foreach (ArbiterRule rule in rules)
             {
-                if (rule.Ask is not null)
+                if (rule.Ask is null)
+                {
+                    continue;
+                }
+
+                if (AnswerWaiting && rule.Id == "KW-ARB-READY-001")
+                {
+                    answers[rule.Id] = "waiting";
+                    scores[rule.Id] = new ArbiterStep1Score(null, 0.95, rule.Ask.ConfidenceAtLeast);
+                }
+                else
                 {
                     answers[rule.Id] = ArbiterStep1BatchResult.NotEvaluated;
                 }
             }
 
-            return Task.FromResult(new ArbiterStep1BatchResult(answers, null, null, false));
+            return Task.FromResult(new ArbiterStep1BatchResult(answers, null, null, AnswerWaiting, scores));
         }
     }
 
@@ -205,10 +194,10 @@ public sealed class ArbiterUnobservableReturnsTests
     private static string DispatchPrompt =>
         "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement the parser.";
 
-    private static HookCommand RealCommand(WiringRepo repo, string home)
+    private static HookCommand RealCommand(WiringRepo repo, string home, bool answerWaiting = false)
     {
         ArbiterHookDecisionEngine engine = new(
-            providerFactory: _ => new WiringProvider(),
+            providerFactory: _ => new WiringProvider { AnswerWaiting = answerWaiting },
             homeDirectory: () => home);
         return new HookCommand(
             HarnessAdapterRegistry.CreateDefault(engine),
@@ -271,13 +260,32 @@ public sealed class ArbiterUnobservableReturnsTests
     }
 
     [Fact]
-    public void Claude_SameDependentDispatchWithoutLedgerCompletion_StillEscalates()
+    public void Claude_SameDependentDispatchWithoutLedgerCompletion_AllowsWhenNoModelAnswers()
     {
         using WiringRepo repo = new();
         using TempDirectory home = new();
         WriteReadyOnlyConfig(repo.Path);
         WritePlanWithDependency(repo.Path);
         HookCommand command = RealCommand(repo, home.Path);
+
+        using StringWriter stdout = new();
+        using StringWriter log = new();
+        int exit = command.Run(
+            "claude", "conductor", ClaudePayload(repo.Path, DispatchPrompt), stdout, log);
+
+        // ADR 0072: completion read from markers is prose; with no model answer the dispatch proceeds.
+        Assert.Equal(0, exit);
+        Assert.DoesNotContain("\"deny\"", stdout.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Claude_SameDependentDispatch_ConfidentWaitingAnswer_Escalates()
+    {
+        using WiringRepo repo = new();
+        using TempDirectory home = new();
+        WriteReadyOnlyConfig(repo.Path);
+        WritePlanWithDependency(repo.Path);
+        HookCommand command = RealCommand(repo, home.Path, answerWaiting: true);
 
         using StringWriter stdout = new();
         using StringWriter log = new();

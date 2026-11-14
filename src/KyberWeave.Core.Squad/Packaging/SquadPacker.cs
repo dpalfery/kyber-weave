@@ -105,8 +105,7 @@ public static class SquadPacker
             string relPath = Path.GetRelativePath(sourcePath, filePath).Replace('\\', '/');
 
             // Exclude temporary or git or test artifacts if any
-            if (relPath.StartsWith(".git/", StringComparison.OrdinalIgnoreCase) ||
-                relPath.StartsWith("migration/", StringComparison.OrdinalIgnoreCase))
+            if (relPath.StartsWith(".git/", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }

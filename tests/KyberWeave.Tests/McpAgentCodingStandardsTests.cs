@@ -893,7 +893,7 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
         int charBudget = DocumentIndex.DefaultCharBudget)
     {
         MethodInfo tool = FindMcpTool();
-        return (string)tool.Invoke(tools, [technology, topic, charBudget])!;
+        return (string)tool.Invoke(tools, [technology, topic, charBudget, null])!;
     }
 
     private static MethodInfo FindMcpTool()

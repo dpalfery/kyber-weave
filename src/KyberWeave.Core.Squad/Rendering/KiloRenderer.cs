@@ -77,6 +77,9 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// run with no attached human has that ask refused, so without the key a developer agent cannot
 /// run a build, a test, <c>git</c> or <c>gh</c>. An agent's own map is merged last, so the entry
 /// wins over the default. <c>ask</c> and <c>deny</c> stay unexpressed and recorded as before.
+/// <c>delegate: allow</c> with a non-empty roster is the other exception: it renders as a <c>task</c>
+/// map naming each roster agent, because Kilo denies <c>task</c> in a sub-agent session whose own
+/// ruleset does not name it (ADR 0079).
 /// </para>
 /// <para>
 /// <b>Agent resources are projected beside their principal with a discovery-guard
@@ -120,6 +123,8 @@ public sealed class KiloRenderer : SquadHarnessRenderer
 
     private const string ProcessExecuteCapability = "process.execute";
     private const string ShellPermission = "bash";
+    private const string DelegateCapability = "delegate";
+    private const string TaskPermission = "task";
 
     private static readonly SquadHarnessSpec HarnessSpec = new(
         SquadTarget.Kilo,
@@ -181,6 +186,21 @@ public sealed class KiloRenderer : SquadHarnessRenderer
             permission[ShellPermission] = "allow";
         }
 
+        // Kilo denies `task` in a sub-agent's session unless the agent's own ruleset names it
+        // (packages/opencode/src/agent/subagent-permissions.ts, verified 2026-11-13), so a delegating
+        // sub-agent such as code-reviewer could never start its seats. One entry per roster name keeps
+        // the grant to the canonical roster. Nesting still needs the operator's `subagent_depth` above 1.
+        if (ExpressesDelegation(agent, context))
+        {
+            Dictionary<string, string> roster = new(StringComparer.Ordinal);
+            foreach (string delegateName in agent.DelegatesTo.Order(StringComparer.Ordinal))
+            {
+                roster[delegateName] = "allow";
+            }
+
+            permission[TaskPermission] = roster;
+        }
+
         if (permission.Count > 0)
         {
             frontmatter["permission"] = permission;
@@ -212,14 +232,22 @@ public sealed class KiloRenderer : SquadHarnessRenderer
         // whether an approval is emitted, and an agent that is not entitled gets no entry rather
         // than a deny, so there is no withheld-server sentence to record.
         bool shellExpressed = AllowsShell(agent, context);
+        bool delegationExpressed = ExpressesDelegation(agent, context);
         return context.CapabilitiesNotExpressible(
             agent,
             context.CapabilityVocabulary
                 .Where(profile.Permissions.ContainsKey)
                 .Where(capability => !(shellExpressed && capability == ProcessExecuteCapability))
+                .Where(capability => !(delegationExpressed && capability == DelegateCapability))
                 .ToList(),
             "Kilo's permission map is keyed by tool name, not by capability, so those decisions are unexpressed");
     }
+
+    private static bool ExpressesDelegation(SquadAgent agent, SquadHarnessRenderContext context) =>
+        agent.DelegatesTo.Count > 0 &&
+        context.CapabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile) &&
+        profile.Permissions.TryGetValue(DelegateCapability, out SquadPermissionDecision decision) &&
+        decision == SquadPermissionDecision.Allow;
 
     private static bool AllowsShell(SquadAgent agent, SquadHarnessRenderContext context) =>
         context.CapabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile) &&

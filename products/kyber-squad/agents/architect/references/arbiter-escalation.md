@@ -29,19 +29,18 @@ and never retried unchanged; there is no escalation to yourself.
 
 ## Ledger loss and attestation (D31)
 
-`READY-001` and `MODE-001` read completion and RED evidence from the ledger,
+`READY-001` reads completion from the ledger,
 and `artifacts/` is not committed. A run resumed in a fresh clone, or after
 the folder was cleaned, therefore escalates every task with a recorded
 dependency. Recovery runs through this escalation path:
 
 1. The escalation reaches you as usual.
 2. Return `STATUS: NEEDS_DECISION`, asking the user to confirm which tasks
-   are complete and which have RED evidence.
+   are complete.
 3. Once the user confirms, return `STATUS: ESCALATION_RESOLVED` carrying the
-   line `ATTESTED: <task>=complete|red, …`.
+   line `ATTESTED: <task>=complete, …`.
 4. The hook reads that line from the `delegate.planner.returned` output and
-   records it under `returns.attested`. `READY-001` and `MODE-001` then
-   count it.
+   records it under `returns.attested`. `READY-001` then counts it.
 
 Ask the user through `STATUS: NEEDS_DECISION` first; only then attest. No
 agent writes the ledger.

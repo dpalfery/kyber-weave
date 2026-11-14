@@ -104,12 +104,20 @@ internal static class ArbiterLogFiles
     /// </summary>
     internal static IReadOnlyList<string> ReadCompleteLines(string path)
     {
-        if (!File.Exists(path))
+        string text;
+        try
+        {
+            text = File.ReadAllText(path);
+        }
+        catch (FileNotFoundException)
+        {
+            return [];
+        }
+        catch (DirectoryNotFoundException)
         {
             return [];
         }
 
-        string text = File.ReadAllText(path);
         if (text.Length == 0)
         {
             return [];
@@ -302,34 +310,80 @@ public sealed class InFlightLedger
     }
 
     /// <summary>
-    /// The task files of the dispatches that were in flight at any moment
-    /// between <paramref name="preId"/> and <paramref name="postId"/>: every
-    /// other dispatch whose interval overlaps this one, including a dispatch
-    /// still unpaired (no return yet) that started before this return.
+    /// The writer dispatches (<c>delegate</c> and <c>delegate.planner</c>) that were in flight at any moment
+    /// between <paramref name="preId"/> and <paramref name="postId"/>, other than that dispatch itself: their
+    /// declared task files, and whether any of them declared none, so the paths it wrote cannot be told apart.
     /// </summary>
-    public IReadOnlyList<string> ConcurrentPaths(string preId, string postId)
+    /// <remarks>
+    /// A dispatch with no return yet overlaps from its start, unless it started more than
+    /// <see cref="UnreturnedDispatchHorizon"/> before this return: a harness that crashed never reports it, and it
+    /// must not hold a window open forever. Read-only dispatches write nothing, so they are not counted. A return
+    /// that paired with no pre event has no known start, so its window is taken as the whole horizon.
+    /// </remarks>
+    /// <param name="preId">The pre event of the dispatch that returned, or null when the return paired with none.</param>
+    /// <param name="postId">Its return.</param>
+    /// <param name="notDispatched">Pre events that were refused, so never ran.</param>
+    /// <returns>The overlap, or null when either event is not in the ledger.</returns>
+    public ConcurrentDispatches? ConcurrentWriters(string? preId, string postId, IReadOnlySet<string>? notDispatched = null)
     {
-        ArgumentNullException.ThrowIfNull(preId);
         ArgumentNullException.ThrowIfNull(postId);
         IReadOnlyList<ArbiterLedgerEvent> events = ReadAll();
-        ArbiterLedgerEvent pre = events.FirstOrDefault(e => e.Id == preId)
-            ?? throw new ArgumentException($"No ledger event '{preId}' exists.", nameof(preId));
-        ArbiterLedgerEvent post = events.FirstOrDefault(e => e.Id == postId)
-            ?? throw new ArgumentException($"No ledger event '{postId}' exists.", nameof(postId));
+        ArbiterLedgerEvent? post = events.FirstOrDefault(e => e.Id == postId);
+        ArbiterLedgerEvent? pre = preId is null ? null : events.FirstOrDefault(e => e.Id == preId);
+        if (post is null || (preId is not null && pre is null))
+        {
+            return null;
+        }
+
+        DateTimeOffset start = pre?.At ?? post.At - UnreturnedDispatchHorizon;
 
         Dictionary<string, ArbiterLedgerEvent> returnsById = events
             .Where(e => e.Phase == ArbiterLedgerPhases.Post && e.PreId is not null)
             .GroupBy(e => e.PreId!, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
 
-        return [.. events
+        List<ArbiterLedgerEvent> overlapping = [.. events
             .Where(e => e.Phase == ArbiterLedgerPhases.Pre
                 && e.Id != preId
-                && e.TaskFiles is { Count: > 0 })
-            .Where(e => Overlaps(e, returnsById.GetValueOrDefault(e.Id), pre.At, post.At))
-            .SelectMany(e => e.TaskFiles ?? [])
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(path => path, StringComparer.Ordinal)];
+                && WriterTriggers.Contains(e.Trigger ?? string.Empty)
+                && notDispatched?.Contains(e.Id) != true)
+            .Where(e => returnsById.GetValueOrDefault(e.Id) is { } otherPost
+                ? e.At <= post.At && start <= otherPost.At
+                : e.At <= post.At && post.At - e.At <= UnreturnedDispatchHorizon)];
+
+        return new ConcurrentDispatches(
+            [.. overlapping
+                .SelectMany(e => e.TaskFiles ?? [])
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(path => path, StringComparer.Ordinal)],
+            overlapping.Any(e => e.TaskFiles is not { Count: > 0 }));
+    }
+
+    /// <summary>How long a dispatch with no return still counts as in flight for <see cref="ConcurrentWriters"/>.</summary>
+    public static TimeSpan UnreturnedDispatchHorizon { get; } = TimeSpan.FromHours(4);
+
+    private static readonly HashSet<string> WriterTriggers = new(StringComparer.Ordinal) { "delegate", "delegate.planner" };
+
+    /// <summary>
+    /// The headers of the dispatch a return answers: the return's own, or else its paired pre event's, because a
+    /// specialist's headers are stripped before it runs. Null when the event is unknown or names none.
+    /// </summary>
+    public ArbiterLedgerHeaders? DispatchHeadersFor(string postId)
+    {
+        ArgumentNullException.ThrowIfNull(postId);
+        IReadOnlyList<ArbiterLedgerEvent> events = ReadAll();
+        ArbiterLedgerEvent? post = events.FirstOrDefault(e => string.Equals(e.Id, postId, StringComparison.Ordinal));
+        if (post is null)
+        {
+            return null;
+        }
+
+        if (post.Headers is not null || post.PreId is null)
+        {
+            return post.Headers;
+        }
+
+        return events.FirstOrDefault(e => string.Equals(e.Id, post.PreId, StringComparison.Ordinal))?.Headers;
     }
 
     /// <summary>
@@ -343,27 +397,6 @@ public sealed class InFlightLedger
             .SelectMany(item => CompletedTasksOf(item.Post, item.Task))
             .Distinct(StringComparer.Ordinal)
             .OrderBy(task => task, StringComparer.Ordinal)];
-
-    /// <summary>
-    /// The tasks with RED evidence: a returned <c>test-dev</c> output whose
-    /// <c>RED_EVIDENCE:</c> value states evidence, or an
-    /// attestation <c>&lt;task&gt;=red</c> (D31).
-    /// </summary>
-    /// <param name="planFile">When set, only returns for this plan count.</param>
-    public IReadOnlyList<string> RedEvidenceTasks(string? planFile = null) =>
-        [.. ReturnsFor(planFile)
-            .SelectMany(item => RedEvidenceTasksOf(item.Post, item.Task))
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(task => task, StringComparer.Ordinal)];
-
-    private static bool Overlaps(
-        ArbiterLedgerEvent otherPre,
-        ArbiterLedgerEvent? otherPost,
-        DateTimeOffset start,
-        DateTimeOffset end) =>
-        otherPost is null
-            ? otherPre.At <= end
-            : otherPre.At <= end && start <= otherPost.At;
 
     /// <summary>
     /// Each post event with the task it answers. A specialist's headers are stripped
@@ -416,21 +449,6 @@ public sealed class InFlightLedger
         return tasks;
     }
 
-    private static IEnumerable<string> RedEvidenceTasksOf(ArbiterLedgerEvent e, string? task)
-    {
-        List<string> tasks = [];
-        string? red = e.Returns?.RedEvidence;
-        if (task is not null
-            && red is not null
-            && !NoRedEvidence.IsStatedBy(red))
-        {
-            tasks.Add(task);
-        }
-
-        tasks.AddRange(AttestedTasks(e, "red"));
-        return tasks;
-    }
-
     private static IEnumerable<string> AttestedTasks(ArbiterLedgerEvent e, string value)
     {
         foreach (string attested in e.Returns?.Attested ?? [])
@@ -445,3 +463,8 @@ public sealed class InFlightLedger
         }
     }
 }
+
+/// <summary>The writer dispatches that overlapped one dispatch's window.</summary>
+/// <param name="Paths">Their declared task files.</param>
+/// <param name="AnyWithoutFiles">Whether any of them declared no task files, so what it wrote is unknown.</param>
+public sealed record ConcurrentDispatches(IReadOnlyList<string> Paths, bool AnyWithoutFiles);

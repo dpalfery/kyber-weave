@@ -27,9 +27,9 @@ public sealed class ArbiterInstallSettings : AnalysisSettings
     [Description("Install into the project root instead of the global user-home scope.")]
     public bool Project { get; set; }
 
-    /// <summary>The provider kind: none or systemone. An empty value resolves to none.</summary>
+    /// <summary>The provider kind: none or systemone. Omitted keeps the configured provider; an explicit empty value is none.</summary>
     [CommandOption("--provider <KIND>")]
-    [Description("Provider kind: none or systemone. An empty value resolves to none.")]
+    [Description("Provider kind: none or systemone. Omit to keep the configured provider (none on a fresh machine); an empty value is none.")]
     public string? Provider { get; set; }
 
     /// <summary>The TypeSafe key, stored in the OS credential store for the endpoint origin.</summary>

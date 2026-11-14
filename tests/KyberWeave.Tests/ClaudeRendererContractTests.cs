@@ -364,6 +364,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
     [Theory]
     [InlineData("test-dev")]
     [InlineData("docs-dev")]
+    [InlineData("dal-dev")]
     public async Task RenderAsync_Claude_FastProfileWorkersRunOnHaiku55(string agent)
     {
         SquadRendererRegistry registry = new([new ClaudeRenderer()]);
@@ -413,7 +414,6 @@ public sealed class ClaudeRendererContractTests : IDisposable
     /// Pins Sonnet 5.5 for Claude's general workers without changing planning membership.
     /// </summary>
     [Theory]
-    [InlineData("dal-dev")]
     [InlineData("github-devops")]
     [InlineData("pulumi-dev")]
     [InlineData("tauri-dev")]
@@ -457,6 +457,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
             ".claude/agents/azure-reader.md",
             ".claude/agents/bug-crusher.md",
             ".claude/agents/csharp-dev.md",
+            ".claude/agents/dal-dev.md",
             ".claude/agents/docs-dev.md",
             ".claude/agents/maui-dev.md",
             ".claude/agents/python-dev.md",
@@ -1120,7 +1121,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
     public async Task RenderAsync_GlobalSettingsArbiterBlock_IsByteIdenticalToItsPreShellGuardRender()
     {
         // The shell guard lives in the agent file alone. The user-level settings block keeps the three entries it
-        // carried before, byte for byte, so the Agent|Task and handback hooks are not re-rendered by this change.
+        // carried before, byte for byte, plus the worker guard on the file-writing tools.
         SquadRenderResult result = await RenderClaudeArbiterAsync(
             ProductRoot,
             SquadDeploymentScope.Global,
@@ -1137,6 +1138,8 @@ public sealed class ClaudeRendererContractTests : IDisposable
         [
             "PreToolUse {\"matcher\":\"^(Agent|Task)$\",\"hooks\":" + hooks + "}",
             "PreToolUse {\"matcher\":\"" + SubagentHandbackMatcher + "\",\"hooks\":" + hooks + "}",
+            "PreToolUse {\"matcher\":\"*\",\"hooks\":" +
+            "[{\"type\":\"command\",\"command\":\"kyber-weave-arbiter worker-guard --harness claude\",\"timeout\":5}]}",
             "PostToolUse {\"matcher\":\"^(Agent|Task)$\",\"hooks\":" + hooks + "}",
         ];
 

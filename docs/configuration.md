@@ -157,7 +157,9 @@ disable a requirement.
 
 ### Technologies drive three things at once
 
-`technologies` is the list of stacks this repository declares a coding standard for. It is
+`technologies` is the list of stacks this repository declares a coding standard for (what a
+standard holds, as opposed to a rule, is in
+[Rules and standards](documentation-ontology.md#rules-and-standards)). It is
 empty by default, because no repository has a standard until it says what it writes code in,
 and a seeded list would scaffold standards for stacks a host does not have. This repository
 declares C#, test, and TypeScript standards.
@@ -168,9 +170,9 @@ Declaring one and re-running `docs init`:
 2. publishes `<technology-coding-standard>` in the configuration registry;
 3. legalizes `technology: <technology>` in that standard's frontmatter.
 
-Passing `--kyber-standards` to `kyber-weave docs init` seeds all 11 Kyber Squad rich coding
-standards templates (`csharp`, `test`, `react`, `python`, `pulumi`, `maui`, `data-access-layer`,
-`sql`, `azure`, `github-actions`, `tauri`), merges them into `ontology.technologies`, and registers
+Passing `--kyber-standards` to `kyber-weave docs init` seeds all 14 Kyber Squad rich coding
+standards templates (`csharp`, `test`, `typescript`, `rust`, `tauri`, `go`, `react`, `python`,
+`pulumi`, `maui`, `data-access-layer`, `sql`, `azure`, `github-actions`), merges them into `ontology.technologies`, and registers
 their paths in Config Reg.
 
 One list, so the three cannot disagree — a standard whose folder, registry property and
@@ -251,6 +253,9 @@ stop-on-tool-failure: false
   between `STATUS: TOOL_FAILURE` and a `warning:` line; the conductor and `bug-crusher` instructions
   route the exit code rather than interpreting it. `kyber-weave run start` reads it for the index of
   the tree it places the branch in.
+- **What stops a run.** Only machine evidence: a non-zero `doctor --ensure` exit, or the literal line
+  `STATUS: TOOL_FAILURE` in a tool response or worker report. A worker's note that it fell back to direct
+  reads is a warning, not a failure.
 - **What it never covers.** A read-only run is never stopped by it. A repository with no governed
   docs skips the check. `doctor --check` ignores it, because a caller that asked for a verdict gets
   one. And a missing `codegraph` binary is exit `3` under either value: installing it is the user's
@@ -380,40 +385,37 @@ rather than a confident answer from somewhere else (see
 
 ### Run controls
 
-Three settings govern how a run starts, once the onboarding question above is answered.
-`stop-on-tool-failure` sits at the top level, beside `autonomy`; the other two sit under a `run:`
+Two settings govern how a run starts, once the onboarding question above is answered.
+`stop-on-tool-failure` sits at the top level, beside `autonomy`; the other sits under a `run:`
 key:
 
 ```yaml
 stop-on-tool-failure: false
 run:
   base-branch: develop
-  harness-names: true
 ```
 
 | Setting | Default | Effect |
 |---|---|---|
 | `stop-on-tool-failure` | `true` | Whether a tool that fails during the run stops it. An absent key means **stop**. |
 | `run.base-branch` | `origin/HEAD` | The branch a run branches from and is compared against. `main` is never assumed: a repository whose default branch is `develop`, or whose operator named a release branch, is compared against the branch that was actually named. A value already carrying the `origin/` prefix is used as written. |
-| `run.harness-names` | `true` | Whether a rendered artifact publishes the harness name. An absent key publishes it. |
 
-`stop-on-tool-failure` and `run.harness-names` take `true` or `false`; any other value is a
+`stop-on-tool-failure` takes `true` or `false`; any other value is a
 configuration error, because a free-form read would let `sometimes` arrive as a later `false`.
 `run.base-branch` is a branch name, and a blank value is treated as absent so that a property
 publishing an empty branch cannot look configured while resolving to nothing a run can compare
 against.
 
 **A chosen value publishes a mode property; an absent one publishes nothing.** `docs init`
-renders `<run-base-branch>` and `<run-harness-names>` into the generated block of the repository
+renders `<run-base-branch>` into the generated block of the repository
 root `AGENTS.md` only when the key was actually written:
 
 ```markdown
 - **<run-base-branch>**: `develop`
-- **<run-harness-names>**: `true`
 ```
 
 An absent key publishes no line, because an agent already applies the documented default and
-only a value somebody chose can differ from it. Declaring either name (or `stop-on-tool-failure`)
+only a value somebody chose can differ from it. Declaring that name (or `stop-on-tool-failure`)
 under `config-reg:` is rejected with the setting that owns it named in the refusal. They
 are values, not paths, so `docs validate` never resolves them as paths (`KW-CONFIG-REG-001`),
 but a missing or wrong line is a stale block (`KW-CONFIG-REG-002`). As noted above, `stop-on-tool-failure`
@@ -526,7 +528,7 @@ safely merges the ignore entry for new and existing hosts.
 ## Arbiter configuration
 
 The `arbiter:` section governs the [Kyber Arbiter](kyber-arbiter/architecture.md). With no
-section, the Arbiter is disabled, the provider is `none`, and all 32 shipped rules are
+section, the Arbiter is disabled, the provider is `none`, and all 33 shipped rules are
 enabled. Hooks render only when `enabled` is true.
 
 ```yaml
@@ -599,6 +601,10 @@ arbiter:
     retain-days: 14              # at least 1
   comment-triage:
     bot-logins: []               # blank entries are refused
+  dispatch-budget:
+    minutes: 15                  # at least 1
+    tool-calls: 150              # at least 1
+    call-minutes: 5              # at least 1
   rules:
     - id: KW-ARB-SCOPE-002
       shadow: true               # step-1 shipped rules only
@@ -612,14 +618,18 @@ arbiter:
 | `stores.max-item-bytes` | `16384` | 1 to 1048576 | `KW-ARB-CONFIG-015` |
 | `stores.retain-days` | `14` | At least 1 (values above 3650 are clamped to 3650 when swept) | `KW-ARB-CONFIG-015` |
 | `comment-triage.bot-logins` | `[]` | Non-blank login names | `KW-ARB-CONFIG-015` |
+| `dispatch-budget.minutes` / `tool-calls` | `15` / `150` | At least 1. One developer or docs dispatch may run this long, or make this many tool calls, before the worker guard denies its next call (`KW-ARB-BUDGET-001`) | `KW-ARB-CONFIG-015` |
+| `seat-budget.minutes` / `tool-calls` / `call-minutes` | `3` / `30` / `2` | At least 1. The same limits for one review council seat (`review-lens`, `review-triage`). Past them the guard denies every read and tells the seat to return what it has with a `Budget reached, not examined:` line; its seat-file write is still allowed (`KW-ARB-BUDGET-001`) | `KW-ARB-CONFIG-015` |
+| `dispatch-budget.call-minutes` | `5` | At least 1. A gap longer than this between two tool calls of one such dispatch means the earlier call hung: the guard denies the next call once, telling the worker to stop the process and record it as not verified (`KW-ARB-BUDGET-001`) | `KW-ARB-CONFIG-015` |
 | `rules[].shadow` | Per rule | `true` or `false`, on a step-1 shipped rule | `KW-ARB-CONFIG-014` on `KW-ARB-DIFFICULTY-001` and `KW-ARB-LADDER-001`, which take their state from `mode` |
 
 `KW-ARB-CONFIG-015` also refuses a host rule that uses `for-each`, or an effect only a shipped rule
 may use. The profile keys accept only the six semantic profiles above, never a concrete model id.
 
 Limits: `mode` also drives the `KW-ARB-MODEL-001` doctor check, and it is the only switch for the two
-model rules. A bad value in any of these keys makes the config loader throw, so the hook fails closed
-for the whole hook with `KW-ARB-HOOK-001`. It does not skip only the affected rule, as the design intended. This repository's
+model rules. A bad value in any of these keys makes the config loader throw, so the hook allows the dispatch
+undecided and logs `KW-ARB-HOOK-001` ([ADR 0072](adr/0072-the-arbiter-blocks-only-on-machine-facts-and-confident-model-answers.md)).
+It does not skip only the affected rule, as the design intended. This repository's
 own `.kyber-weave/kyber-weave.yml` sets none of these keys.
 
 ### Gate `applies-when`
@@ -673,8 +683,10 @@ concurrency cap (see `ReviewConfig`):
 |---|---|---|
 | `max-concurrent-workers` | `4` | Maximum concurrent workers the ready-queue dispatcher may run. A positive integer; `0` or a negative value is a configuration error (`KW-CONFIG-001`) |
 | `council-deadline-seconds` | `600` | Wall-clock budget for a `review gates --deadline` run, which the council passes. Each gate runs for the shorter of its own `timeout-seconds` and the time left; every gate still running at the deadline (a `concurrent` gate declared earlier included), every gate not yet started, and a gate stopped by its own timeout are reported as not run (`KW-REVIEW-039`, a warning) and left out of the exit code. Without `--deadline` (CI, task gates, pre-push) no run deadline applies and a timed-out blocking gate fails the run as before. `--deadline` is refused with `--gate` and `--agent`. A positive integer; `0` or a negative value is a configuration error (`KW-CONFIG-001`) |
+| `parallelism` | `2` | The most gates a `review gates` run has running at one time, `concurrent` or not. Gates still start in declaration order and each waits for the one before it unless it is `concurrent`, so a host that declares none sees no change; the bound stops several gates marked `concurrent` from piling onto one machine's cores. It does not make gates overlap by itself: only gates the host marks `concurrent` do, and the runner cannot know whether two gates share build output. A positive integer; `0` or a negative value is a configuration error (`KW-CONFIG-001`) |
 | `gates` | `[]` | Repository-wide deterministic gates, started in declaration order; each waits for the one before it unless that one is `concurrent` |
 | `task-gates` | empty | Per-agent gates each developer runs on its own change, keyed by agent slug |
+| `policy.fix-level` | `minor` | How much of what a review finds is fixed in the run; each level includes the ones before it: `critical` (failed blocking gates and critical findings: data loss, a security hole, corruption, behaviour that breaks silently), `major` (also major findings: the change is wrong or fails under conditions a normal user reaches, or a file or type sits against the documented structure), `minor` (also minor findings: real but bounded, such as a narrow edge case, a misleading comment or document statement, a missing test for a stated behaviour; the default) and `nitpick` (also nitpicks: purely stylistic points with no effect on how the application operates). Findings below the level are listed in the pull request and filed as todos; nitpicks below it appear only in the review report. It decides what is fixed, not what blocks: `policy.strictness`, `major-count-blocks` and `min-confidence` decide that. The retired `policy.minor-findings` key still reads, as `major` for `follow-up` and `minor` for `fix`. The severity it reads is the host's where the review guidance's `Severity overrides` section grades the finding ([review guidance](code-review/architecture.md#review-guidance)) |
 | `test-map` | empty | Source glob to the fully qualified test classes that cover it. A task gate's `{tests}` token expands from this map first and from the `<Stem>Tests` naming convention second; a change no class covers skips the gate with `KW-REVIEW-026` rather than passing it |
 
 Every .NET `dotnet build` invocation in the gate path carries
@@ -690,6 +702,7 @@ that names `{task}` refuses the run when no `--task` slug was given.
 review:
   max-concurrent-workers: 4
   council-deadline-seconds: 600
+  parallelism: 2
 ```
 
 `test-map` is what lets a task gate run tests at all: this repository's single product test project
@@ -727,9 +740,7 @@ order, so every gate declared before it has finished, and then runs alongside th
 instead of holding them up. The report still lists it at its declared place. It is stopped at its own
 `timeout-seconds` like any gate and reported as timed out, never as passed. A run given `--stop-on-failure`
 that meets a blocking failure stops a concurrent gate that is still running and leaves it out of the report,
-as it does the gates that never started. The `inspectcode` gate here sets it: it is declared straight after
-`build` and overlaps the test run, and it runs through `scripts/report-gate.sh`, described in
-[the code review architecture](code-review/architecture.md#repository-gate-scoping-and-caching-in-this-repository). Set it only on a gate that neither reads nor writes what later gates
+as it does the gates that never started. No gate in this repository sets it. Set it only on a gate that neither reads nor writes what later gates
 produce; the runner does not check that.
 
 ## Harness profiles

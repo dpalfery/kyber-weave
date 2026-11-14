@@ -62,8 +62,23 @@ public sealed partial class PlanTaskFileValidator
     /// <summary>A copy of a task file left beside it under another name, such as <c>&lt;plan&gt;.tasks.json.new</c>.</summary>
     public const string SidecarTaskFile = "KW-DOC-TASKS-007";
 
+    /// <summary>A task cites a decision or test contract row the plan does not have, or cites more than its packet can carry. A warning.</summary>
+    public const string UnresolvedReference = "KW-DOC-TASKS-008";
+
+    /// <summary>A task points at plan content without saying which ("see above", "as described in the plan"). A warning.</summary>
+    public const string VagueReference = "KW-DOC-TASKS-009";
+
+    // KW-DOC-TASKS-010 (a test task ordered before the code its tests name) is retired: a test-first task's one
+    // worker writes the tests and the code together, so no task's tests wait on another task. The id is not reused.
+
+    /// <summary>Info: text a task listed as files that is not a repository path was left out of its file scope.</summary>
+    public const string NotARepositoryPath = "KW-DOC-TASKS-012";
+
+    /// <summary>A model that read only a task's packet says a developer could not do the task from it. A warning.</summary>
+    public const string PacketNotSelfContained = "KW-DOC-TASKS-011";
+
     /// <summary>The schema version this build reads.</summary>
-    private const int SchemaVersion = 1;
+    internal const int SchemaVersion = 1;
 
     private const string PlanExtension = ".md";
     private const string TaskFileSuffix = ".tasks.json";
@@ -76,15 +91,6 @@ public sealed partial class PlanTaskFileValidator
     private const string SpecTaskListKind = "specification task list";
 
     private static readonly char[] WhitespaceSeparators = [' ', '\t', '\n', '\r'];
-
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        // The names are pinned per property, so a document that misspells one loses that field
-        // and fails to parse rather than being silently read as a different file.
-        PropertyNameCaseInsensitive = false,
-        ReadCommentHandling = JsonCommentHandling.Disallow,
-        AllowTrailingCommas = false
-    };
 
     private readonly string _repoRoot;
     private readonly KyberWeaveConfig _config;
@@ -246,8 +252,8 @@ public sealed partial class PlanTaskFileValidator
             "'<plan>.tasks.json', so this file is dead weight that the merge would carry.",
             relative,
             relative,
-            Hint: "Delete it. If a live plan still needs its task file, write it in place at " +
-            "'<plan>.tasks.json', never through a temporary sibling."));
+            Hint: "Delete it. If a live plan still needs its task file, run " +
+            "'kyber-weave docs tasks <plan> --write', which writes it in place at '<plan>.tasks.json'."));
     }
 
     /// <summary>
@@ -325,7 +331,7 @@ public sealed partial class PlanTaskFileValidator
     /// against the folder it actually uses. These are the same directories the Arbiter publishes
     /// as <c>config.planning-dirs</c>, which is what lets one detector answer both rules.
     /// </remarks>
-    private static IReadOnlyList<string> PlanningDirectories(IReadOnlyList<ConfigRegEntry> registry)
+    internal static IReadOnlyList<string> PlanningDirectories(IReadOnlyList<ConfigRegEntry> registry)
     {
         string[] properties =
         [
@@ -386,14 +392,14 @@ public sealed partial class PlanTaskFileValidator
                     $"to dispatch from {taskFile}.",
                     artifact.RelativePath,
                     artifact.RelativePath,
-                    Hint: "Write the task file at finalization, with one prompt per task, or move the " +
-                    "status back until it is written."));
+                    Hint: $"Run {TaskFileCommand.Write(artifact.RelativePath)}: it writes the task file from the " +
+                    $"{kind}, so nothing is written by hand. Or move the status back until it is written."));
             }
 
             return;
         }
 
-        if (!TryRead(taskFile, report, out PlanTaskFile? file))
+        if (!TryRead(taskFile, artifact.RelativePath, report, out PlanTaskFile? file))
         {
             return;
         }
@@ -407,8 +413,8 @@ public sealed partial class PlanTaskFileValidator
                 $"version {SchemaVersion}.",
                 artifact.RelativePath,
                 taskFile,
-                Hint: "Regenerate the file with an architect that writes this schema version, rather than " +
-                "reading a newer file as if its fields were this one's."));
+                Hint: $"Run {TaskFileCommand.Write(artifact.RelativePath)}: it rewrites the file at the schema " +
+                "version this build reads, rather than reading a newer file as if its fields were this one's."));
             return;
         }
 
@@ -420,7 +426,7 @@ public sealed partial class PlanTaskFileValidator
                 $"Task file '{taskFile}' declares no plan, so nothing can tell which {kind} it was written from.",
                 artifact.RelativePath,
                 taskFile,
-                Hint: $"Add \"plan\": \"{artifact.RelativePath}\"."));
+                Hint: $"Run {TaskFileCommand.Write(artifact.RelativePath)}: it fills in the plan path."));
             return;
         }
 
@@ -432,29 +438,29 @@ public sealed partial class PlanTaskFileValidator
                 $"Task file '{taskFile}' names plan '{file.Plan}' and sits beside '{artifact.RelativePath}'.",
                 artifact.RelativePath,
                 taskFile,
-                Hint: $"A task file belongs to the {kind} it sits beside; correct the {kind} path or move the file."));
+                Hint: $"A task file belongs to the {kind} it sits beside. Run {TaskFileCommand.Write(artifact.RelativePath)} to rewrite it for this {kind}."));
         }
 
-        CheckTasks(parsed, file, taskFile, report);
+        CheckTasks(parsed, file, taskFile, artifact.RelativePath, report);
         CheckDigest(parsed, artifact.RelativePath, kind, file, taskFile, report);
 
         foreach (PlanTaskFileEntry? entry in file.Tasks ?? [])
         {
             if (entry is not null)
             {
-                CheckPrompt(entry, taskFile, planningDirectories, report);
+                CheckPrompt(entry, taskFile, artifact.RelativePath, planningDirectories, report);
             }
         }
     }
 
     /// <summary>Reads and parses the file, reporting <see cref="Malformed"/> when either fails.</summary>
-    private bool TryRead(string taskFile, DiagnosticReport report, out PlanTaskFile? file)
+    private bool TryRead(string taskFile, string artifactPath, DiagnosticReport report, out PlanTaskFile? file)
     {
         file = null;
         try
         {
             string json = File.ReadAllText(FullPath(taskFile));
-            file = JsonSerializer.Deserialize<PlanTaskFile>(json, JsonOptions);
+            file = JsonSerializer.Deserialize<PlanTaskFile>(json, PlanTaskFileJson.ReadOptions);
         }
         catch (JsonException exception)
         {
@@ -464,8 +470,7 @@ public sealed partial class PlanTaskFileValidator
                 $"Task file '{taskFile}' is not the JSON this rule reads: {exception.Message}",
                 taskFile,
                 taskFile,
-                Hint: "Regenerate the file rather than repairing it by hand: the digest below it is about to " +
-                "be stale anyway."));
+                Hint: $"Do not repair the file by hand. Run {TaskFileCommand.Write(artifactPath)}: it rewrites the whole file from the plan."));
             return false;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
@@ -476,7 +481,7 @@ public sealed partial class PlanTaskFileValidator
                 $"Task file '{taskFile}' could not be read: {exception.Message}",
                 taskFile,
                 taskFile,
-                Hint: "Make the file readable, then re-run docs validate."));
+                Hint: $"Make the file readable, then run {TaskFileCommand.Write(artifactPath)}."));
             return false;
         }
 
@@ -491,17 +496,19 @@ public sealed partial class PlanTaskFileValidator
             $"Task file '{taskFile}' is empty or holds no task-file object.",
             taskFile,
             taskFile,
-            Hint: "Regenerate the file with the schema version, the plan path, the digest and one entry per task."));
+            Hint: $"Run {TaskFileCommand.Write(artifactPath)}: it writes the schema version, the plan path, the digest and one entry per task."));
         return false;
     }
 
     /// <summary>Reports each task, file scope and dependency on which the file disagrees with the plan.</summary>
-    private static void CheckTasks(
+    private void CheckTasks(
         PlanDocument plan,
         PlanTaskFile file,
         string taskFile,
+        string artifactPath,
         DiagnosticReport report)
     {
+        string fix = TaskFileCommand.Write(artifactPath);
         Dictionary<string, PlanTask> byId = new(StringComparer.Ordinal);
         foreach (PlanTask task in plan.Tasks)
         {
@@ -520,7 +527,7 @@ public sealed partial class PlanTaskFileValidator
                     $"Task file '{taskFile}' carries a task with no id, or two tasks sharing the id '{id}'.",
                     entry?.Id ?? taskFile,
                     taskFile,
-                    Hint: "Give every entry the id of the plan task it was written from, once each."));
+                    Hint: $"Run {fix}: it writes one entry per plan task, with the plan's id."));
             }
         }
 
@@ -533,7 +540,7 @@ public sealed partial class PlanTaskFileValidator
                 "dispatch it.",
                 task.Id,
                 taskFile,
-                Hint: $"Add an entry for '{task.Id}' with its role, files, dependencies and prompt."));
+                Hint: $"Run {fix}: it adds an entry for '{task.Id}' with its capabilities, files, dependencies and prompt."));
         }
 
         foreach (string id in declared.Keys.Where(id => !byId.ContainsKey(id)))
@@ -544,9 +551,10 @@ public sealed partial class PlanTaskFileValidator
                 $"Task file '{taskFile}' carries task '{id}', which the plan does not declare.",
                 id,
                 taskFile,
-                Hint: "The plan is the authority: remove the entry, or add the task to the plan first."));
+                Hint: $"The plan is the authority. Run {fix} to drop the entry, or add the task to the plan first and then run it."));
         }
 
+        PlanFileScope fileScope = new(_repoRoot);
         foreach ((string id, PlanTaskFileEntry entry) in declared)
         {
             if (!byId.TryGetValue(id, out PlanTask? task))
@@ -563,20 +571,22 @@ public sealed partial class PlanTaskFileValidator
                     "every entry must name a file or a task.",
                     id,
                     taskFile,
-                    Hint: "Remove the empty entry, or copy the plan's file scope and dependencies."));
+                    Hint: $"Run {fix}: it copies the plan's file scope and dependencies."));
             }
 
-            if (!SameSet(task.Files, entry.Files ?? []))
+            // The task file keeps the repository paths among the plan's file entries, so that is what it is compared to.
+            IReadOnlyList<string> planFiles = fileScope.Filter(task.Files).Kept;
+            if (!SameSet(planFiles, entry.Files ?? []))
             {
                 report.Add(new Diagnostic(
                     DiffersFromPlan,
                     Severity.Error,
                     $"Task '{id}' declares files {Describe(entry.Files ?? [])} in task file '{taskFile}' and " +
-                    $"{Describe(task.Files)} in the plan.",
+                    $"{Describe(planFiles)} in the plan.",
                     id,
                     taskFile,
-                    Hint: "Copy the plan's file scope. A narrower scope in the file lets a worker be held to a " +
-                    "scope it was never given, and a wider one authorizes files the plan did not approve."));
+                    Hint: $"Run {fix}: it copies the plan's file scope. A narrower scope in the file lets a worker be " +
+                    "held to a scope it was never given, and a wider one authorizes files the plan did not approve."));
             }
 
             if (!SameSet(task.DependsOn, entry.DependsOn ?? []))
@@ -588,8 +598,8 @@ public sealed partial class PlanTaskFileValidator
                     $"{Describe(task.DependsOn)} in the plan.",
                     id,
                     taskFile,
-                    Hint: "Copy the plan's dependencies, so the conductor dispatches in the order the plan's graph " +
-                    "declares."));
+                    Hint: $"Run {fix}: it copies the plan's dependencies, so the conductor dispatches in the order " +
+                    "the plan's graph declares."));
             }
         }
     }
@@ -609,8 +619,8 @@ public sealed partial class PlanTaskFileValidator
             return;
         }
 
-        // The hint names the command that prints the digest rather than the digest itself: a
-        // printed value would let someone repair a stale file without regenerating its prompts.
+        // The hint names the command that writes the file, never a digest to paste: a pasted value
+        // would let someone repair a stale file without regenerating its prompts.
         report.Add(new Diagnostic(
             StaleDigest,
             Severity.Error,
@@ -619,21 +629,23 @@ public sealed partial class PlanTaskFileValidator
                 : $"Task file '{taskFile}' records a stale execution digest: the {kind} moved after the file was written.",
             taskFile,
             taskFile,
-            Hint: $"Regenerate the file's prompts from the {kind} as it now stands: run " +
-            $"kyber-weave arbiter plan {ShellQuote.Quote(artifactPath)} -f json and copy its execution-digest into the file. " +
-            "The digest covers the tasks, their text, files, dependencies and skills, the test contract rows, " +
-            "the out-of-scope paths and the mode, so a status or decisions-row edit is not what moved it."));
+            Hint: $"Run {TaskFileCommand.Write(artifactPath)}: it recomputes the digest and rewrites the prompts " +
+            $"from the {kind} as it now stands. Never type a digest by hand. The digest covers the tasks, their " +
+            "text, files, dependencies and skills, the test contract rows, the out-of-scope paths and the mode, " +
+            "so a status or decisions-row edit is not what moved it."));
     }
 
     /// <summary>Reports a prompt with no command, no acceptance criteria, or a plan read in it.</summary>
     private static void CheckPrompt(
         PlanTaskFileEntry entry,
         string taskFile,
+        string artifactPath,
         IReadOnlyList<string> planningDirectories,
         DiagnosticReport report)
     {
         string id = string.IsNullOrWhiteSpace(entry.Id) ? taskFile : entry.Id;
         string prompt = entry.Prompt ?? string.Empty;
+        string fix = TaskFileCommand.Write(artifactPath);
 
         if (string.IsNullOrWhiteSpace(prompt))
         {
@@ -643,8 +655,8 @@ public sealed partial class PlanTaskFileValidator
                 $"Task '{id}' carries no prompt, so it carries neither a command nor acceptance criteria.",
                 id,
                 taskFile,
-                Hint: "Write the prompt: the files with their symbols, the exact command, the full test class " +
-                "names and the acceptance criteria."));
+                Hint: $"Run {fix}: it writes the prompt from the plan task. If it reports a gap, add the " +
+                "command or the acceptance criteria to that plan task first."));
             return;
         }
 
@@ -656,8 +668,8 @@ public sealed partial class PlanTaskFileValidator
                 $"Task '{id}' carries no command: nothing in its prompt runs.",
                 id,
                 taskFile,
-                Hint: "Name the exact command the worker runs to verify the change, in backticks or a fenced " +
-                "block, with a program and at least one argument."));
+                Hint: $"Add a line to the plan task such as 'Command: `dotnet test --filter FullyQualifiedName~MyTests`' " +
+                $"(a program and at least one argument, in backticks), then run {fix}."));
         }
 
         if (!HasAcceptanceCriteria(prompt))
@@ -669,7 +681,8 @@ public sealed partial class PlanTaskFileValidator
                 "the change is done.",
                 id,
                 taskFile,
-                Hint: "Add an 'Acceptance criteria:' line stating the observable result the command shows."));
+                Hint: "Add a line to the plan task such as 'Acceptance criteria: the class reports a non-zero total " +
+                $"with no failures.', then run {fix}. Never edit the prompt by hand."));
         }
 
         IReadOnlyList<string> instructions = PlanReadInstruction.Find(prompt, planningDirectories);
@@ -681,8 +694,9 @@ public sealed partial class PlanTaskFileValidator
                 $"Task '{id}' tells the worker to open a plan: \"{instructions[0]}\".",
                 id,
                 taskFile,
-                Hint: "Paste what the worker needs into the prompt instead. The read guard is advisory where a " +
-                "harness's hooks are, so the prompt is the only place the ban can be kept."));
+                Hint: $"Remove that instruction from the plan task and put what the worker needs in the task text, " +
+                $"then run {fix}. The read guard is advisory where a harness's hooks are, so the prompt is the " +
+                "only place the ban can be kept."));
         }
     }
 
@@ -695,7 +709,7 @@ public sealed partial class PlanTaskFileValidator
     /// setting — and prose that mentions tests does not run them; this repository shipped prompts
     /// whose runner matched no test class, which is the failure a bare mention hides.
     /// </remarks>
-    private static bool HasCommand(string prompt)
+    internal static bool HasCommand(string prompt)
     {
         foreach (Match match in FencedBlockRegex().Matches(prompt))
         {
@@ -721,9 +735,9 @@ public sealed partial class PlanTaskFileValidator
 
     /// <summary>
     /// True when the prompt states acceptance criteria: text after an <c>Acceptance criteria</c>
-    /// label, on its line or in the indented block below it.
+    /// or <c>Acceptance</c> label, on its line or in the indented block below it.
     /// </summary>
-    private static bool HasAcceptanceCriteria(string prompt)
+    internal static bool HasAcceptanceCriteria(string prompt)
     {
         string[] lines = prompt.Split('\n');
         for (int index = 0; index < lines.Length; index++)
@@ -779,18 +793,30 @@ public sealed partial class PlanTaskFileValidator
     /// The task file beside an artifact: <c>&lt;plan&gt;.tasks.json</c> for a plan, and the folder's
     /// <c>tasks.json</c> beside a specification's <c>tasks.md</c>.
     /// </summary>
-    private static string TaskFilePath(DocumentModel artifact)
+    private static string TaskFilePath(DocumentModel artifact) =>
+        TaskFilePathFor(artifact.RelativePath, IsSpecTaskList(artifact));
+
+    /// <summary>
+    /// The task file's repository-relative path for a plan or specification task list at
+    /// <paramref name="artifactPath"/>.
+    /// </summary>
+    /// <param name="artifactPath">The plan, or the specification's <c>tasks.md</c>, repository-relative.</param>
+    /// <param name="isSpecTaskList">True when the path is a specification's task list.</param>
+    internal static string TaskFilePathFor(string artifactPath, bool isSpecTaskList)
     {
-        string path = artifact.RelativePath;
-        if (IsSpecTaskList(artifact))
+        if (isSpecTaskList)
         {
-            return path[..(path.LastIndexOf('/') + 1)] + SpecTaskFileName;
+            return artifactPath[..(artifactPath.LastIndexOf('/') + 1)] + SpecTaskFileName;
         }
 
-        return path.EndsWith(PlanExtension, StringComparison.OrdinalIgnoreCase)
-            ? path[..^PlanExtension.Length] + TaskFileSuffix
-            : path + TaskFileSuffix;
+        return artifactPath.EndsWith(PlanExtension, StringComparison.OrdinalIgnoreCase)
+            ? artifactPath[..^PlanExtension.Length] + TaskFileSuffix
+            : artifactPath + TaskFileSuffix;
     }
+
+    /// <summary>Whether a path names a specification's task list, by its file name.</summary>
+    internal static bool IsSpecTaskListPath(string relativePath) =>
+        string.Equals(FileNameOf(relativePath), SpecTaskListFileName, StringComparison.OrdinalIgnoreCase);
 
     private string FullPath(string relativePath) =>
         Path.Combine(_repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
@@ -830,7 +856,7 @@ public sealed partial class PlanTaskFileValidator
     private static partial Regex InlineSpanRegex();
 
     [GeneratedRegex(
-        @"^[ \t]*(?:[-*+][ \t]+)?\**acceptance criteria\**\s*:[ \t]*(?<text>.*)$",
+        @"^[ \t]*(?:[-*+][ \t]+)?\**acceptance(?:[ \t]+criteria)?\**\s*:[ \t]*(?<text>.*)$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex AcceptanceLabelRegex();
 

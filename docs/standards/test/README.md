@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: test
 owner: dpalfery
-last-reviewed: 2026-11-11
+last-reviewed: 2026-11-12
 decided-by:
   - adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint
 ---
@@ -110,6 +110,64 @@ test that pins one of those numbers is pinning a documented claim — if you cha
 change the document in the same commit. `RetrievalRegressionTests` in particular guards
 whether real questions find real answers; treat a failure there as a product regression,
 not a test to adjust.
+
+## Prose rules
+
+Agent and docs prose (`products/kyber-squad/**`, governed docs) is tested for what it says, not for
+its words ([ADR 0073](../../adr/0073-prose-rules-are-graded-by-meaning-not-pinned-by-phrase.md)):
+
+- **Structure and protocol tokens are deterministic checks.** File existence, frontmatter, rosters,
+  `delegates-to`, reference resolution, baseline injection, single-home markers, word budgets, and the
+  short tokens code parses or emits (`STATUS:` values, `PLAN_FILE:`, `TASK_GATE:`, rule ids, flags).
+  Assert a token against its C# constant where one exists.
+- **Meaning is graded by Jev.** Each rule is one entry in the rule catalog,
+  [`tests/KyberWeave.Tests/Fixtures/prose-rules/catalog.yml`](../../../tests/KyberWeave.Tests/Fixtures/prose-rules/catalog.yml):
+  a one-sentence `statement`, the `stated-in` files that must state it, at least one negative `control`
+  that must be judged not to, and, where an old rule must not come back, a `retired` statement with the
+  files it must stay `absent-from` and an `example` the grader must recognise. The worker rule map's ids
+  (A1 to G7) are catalog ids; [the map](../../kyber-squad/worker-rule-map.md) names its catalog rule in
+  each row.
+- **No phrase pins, forbidden-phrase pins or hash pins on prose.** A test that asserts a sentence, or a
+  word from one, breaks on every rewording and says nothing about whether the rule is still stated.
+
+*Stabilisation, from 2026-11-13:* the last phrase pins are deleted, and a prose change does not need a
+new catalog rule. The catalog runs as a net at merge points; a rule whose subject is deleted is retired,
+and a moved rule's home is repointed. Rules for prose written in this period are added in the later
+refinement phase.
+
+`ProseRuleCatalogTests` runs offline on every build: every file, section heading, seed file and anchor
+the catalog names exists, and every rule has a home and a control. Deleting a file, a heading or a catalog
+entry fails there.
+
+`ProseRuleGradingTests` sends each document to Jev through `SystemOneClient`, one two-option `choice`
+question per rule and document. A home passes at the catalog's `confidence-floor` (0.8); a control or an
+absent-from file must be judged not to state the rule at the same floor. A home is sent whole; a file over
+the model's budget is sent as the section the catalog names, and the report says so. An absent-from file is
+judged one part (one or a few `##` sections) at a time. Outcomes: an answer that points the right way but
+lands below the floor is a warning, listed in the report and not a failure; a confident wrong answer, or a
+wrong-way answer below the floor, fails; a provider error or timeout skips the test with a warning; a
+refused key fails.
+
+**Adding a rule.** Write the statement as one narrow judgment, in the documents' own terms (split an "and"
+into two rules). Name the homes, and give the section heading for any file over about 60 KB. Pick a control
+that plainly does not state it (cutting the home's section with `without-section` works only when no other
+section repeats the rule). Run the grader on the rule. If a home keeps drawing warnings after a rewording,
+give that home an `anchor` (a protocol token or heading it already carries, never a sentence of the rule)
+instead of a grade; if an absent-from file keeps drawing warnings, drop it and say why in the commit.
+
+**Running it locally.** The key comes from `TYPESAFE_API_KEY` or the OS credential store entry for the
+endpoint's origin:
+
+```bash
+KW_PROSE_GRADE=1 scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj \
+  -c Release --filter "FullyQualifiedName~ProseRuleGradingTests"
+```
+
+`KW_PROSE_GRADE_ENDPOINT` and `KW_PROSE_GRADE_MODEL` default to `https://openrouter.ai/api/v1` and
+`typesafe/jev-1.14`. `KW_PROSE_GRADE_RULES=<id,id>` grades only those rules, `KW_PROSE_GRADE_OUT=<file>`
+writes every answer as JSON lines and the report beside it, and `KW_PROSE_GRADE_CATALOG=<file>` grades
+another catalog. A full run is about 1,100 questions, 3 million input tokens, $0.13 and 30 seconds; the
+test stops at 12 million tokens or $2.
 
 ## Fixtures
 
@@ -263,5 +321,5 @@ the total and treat zero as nothing verified.
 When the build used `--artifacts-path <dir>` with `-c Release`, the direct runner reads `<dir>/bin/KyberWeave.Tests/release/KyberWeave.Tests.dll` (the configuration is lowercase there) instead of `tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll`; in your own isolated worktree without that flag the `bin/Release` command above is correct.
 
 - **Build once, test many (`--no-build`)**: Compile the test project once before iteration. Subsequent targeted test executions against non-code or single-class edits run directly via the compiled assembly runner or pass `--no-build` to bypass redundant MSBuild restore and rebuild evaluation.
-- **Reserve the full suite for the review council and CI**: Running the complete test suite across all classes is reserved for the review council's `test` gate, which runs it once per review cycle, on the integrated head, and for CI. No dev agent runs it, and a cross-cutting change is no exception. At task end, run only the test classes the task touched: the classes the task packet's runner command names, plus any other test class that references a symbol the task changed. If no class covers the change, run none and report `TESTS: total=0` with the reason, because zero tests run is not zero failures. If the change reaches shared test infrastructure (fixtures, base classes and shared helpers, meaning anything referenced by more than one test class, which `codegraph_explore` on the type shows; and test-project build settings, which every test class depends on), run a targeted set: the classes that reference what changed or, for a change every class depends on, a few representative classes. Name what you did not run; the council and CI cover it.
-- **Zero-stash RED proofs**: When proving a test fails before implementation (RED proof in TDD), never use `git stash` to toggle between dirty working tree states. `git stash` creates uncommitted stash commits that conflict with parallel task execution and risk race conditions across agents. Instead, run RED proofs against a clean base checkout, throwaway working tree copy, or isolated `git worktree`.
+- **Reserve the full suite for the review council and CI**: Running the complete test suite across all classes is reserved for the review council's `test` gate, which runs it on the integrated head in the first full review, and for CI. No dev agent runs it, and a cross-cutting change is no exception. At task end, run only the test classes the task touched: the classes the task packet's runner command names, plus any other test class that references a symbol the task changed. If no class covers the change, run none and report `TESTS: total=0` with the reason, because zero tests run is not zero failures. If the change reaches shared test infrastructure (fixtures, base classes and shared helpers, meaning anything referenced by more than one test class, which `codegraph_explore` on the type shows; and test-project build settings, which every test class depends on), run a targeted set: the classes that reference what changed or, for a change every class depends on, a few representative classes. Name what you did not run; the council and CI cover it.
+- **The failing run is the task's own**: In test-first mode the worker that writes a task's code writes its tests first and runs its task gate with `--red` before implementing, then runs the gate again once the tests pass; the two reports are the proof ([ADR 0076](../../adr/0076-test-first-is-one-worker-per-task.md)). Never stash or revert work to fake a failing run.

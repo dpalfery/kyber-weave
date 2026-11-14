@@ -13,6 +13,11 @@ sections:
   frontmatter:
     keywords:
       - frontmatter keys
+  rules-and-standards:
+    keywords:
+      - rule or standard
+      - placement test
+      - rules folder
 ---
 
 # The documentation ontology
@@ -82,10 +87,9 @@ which stacks it writes code in. That one list creates each standard's folder, pu
 property in the [configuration registry](../AGENTS.md), and legalizes the value here, so the
 three cannot disagree.
 
-A `coding-standard` is how one technology's code is written *in this repository*. It is
-distinct from `rule`, which governs the repository as a whole regardless of language, and it
-is what a portable agent resolves when it needs the local answer rather than the default it
-shipped with.
+A `coding-standard` is how one technology's code is written *in this repository*; a `rule`
+governs every task regardless of language. Which statement goes where is
+[Rules and standards](#rules-and-standards).
 
 Adding a member is a change to the ontology, made in
 [`.kyber-weave/kyber-weave.yml`](../.kyber-weave/kyber-weave.yml) — not an authoring
@@ -95,6 +99,34 @@ The managed glossary introduced by documentation analysis conforms to this ontol
 is a `reference` document whose lifecycle uses the existing `needs-review` and `current`
 statuses; `proposed`, `approved`, and `rejected` describe sense rows, not document status.
 No glossary-specific document type or ontology widening is required.
+
+## Rules and standards
+
+Every instruction a repository gives its agents is either a rule or part of a standard. The two
+are read differently, so a statement in the wrong one costs every agent on every task.
+
+| | Rules | Standards |
+|---|---|---|
+| Applies to | Every task, whatever the technology | Work in one technology (C#, React, SQL, tests) |
+| Breaking it | Never acceptable | A review finding, graded against the standard |
+| Read | Always: every agent, every dispatch | On demand, by the agent working in that technology, through `docs_get_coding_standard_for_technology` |
+| Lives in | The root `AGENTS.md` and the `rules` folder (`<rules-index>`); scoped `AGENTS.md` for a subtree | `<standards-root>/<technology>/README.md`, `doc-type: coding-standard` |
+| Shape | Few and short; ideally checkable by a gate or the Arbiter, not only by reading | As long as it needs, with examples; has a lifecycle (`status`, `owner`) |
+
+Typical rules cover secrets, what may be committed or pushed, architecture boundaries, scope, and
+what needs human approval.
+
+**The placement test.** Does the statement apply to every task, and is breaking it never OK? Yes
+means a rule. Anything else goes in a standard.
+
+**One home per statement.** A rule may point to a standard for detail, but the text lives in one
+place. The layer boundary is a one-line rule; what goes in which project or folder is in the
+language's standard.
+
+**A size budget.** Everything always loaded (the root `AGENTS.md`, the files it tells every agent
+to read, and any harness instruction file such as `CLAUDE.md`) should fit in about 3 KB. A rule
+set that outgrows it contains standards. The `kw-onboarding` skill's conflict check measures it and
+proposes the moves.
 
 ## The required-key matrix
 

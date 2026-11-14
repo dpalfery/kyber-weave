@@ -216,6 +216,23 @@ public sealed class RunStartCommandTests : IDisposable
             "A refused request must create no branch.");
     }
 
+    /// <summary>The type refusal lists the valid types, the one a near miss meant, and the defaults.</summary>
+    [Theory]
+    [InlineData("feature", "Did you mean 'feat'?")]
+    [InlineData("fixx", "Did you mean 'fix'?")]
+    [InlineData("plan", null)]
+    public void TheTypeRefusalSuggestsTheClosestTypeAndTheDefaults(string type, string? suggestion)
+    {
+        Assert.False(RunStartPlanner.TryNameBranch("claude", type, "tighten-the-gate", out _, out string refusal));
+
+        Assert.Contains("Use one of: build, chore, ci, docs, feat, fix,", refusal, StringComparison.Ordinal);
+        Assert.Contains("A feature is 'feat' and a defect is 'fix'.", refusal, StringComparison.Ordinal);
+        if (suggestion is null)
+            Assert.DoesNotContain("Did you mean", refusal, StringComparison.Ordinal);
+        else
+            Assert.Contains(suggestion, refusal, StringComparison.Ordinal);
+    }
+
     /// <summary>
     ///     A missing CodeGraph binary is its own exit code, <c>3</c>, so the caller can tell "install
     ///     something" apart from "something broke".

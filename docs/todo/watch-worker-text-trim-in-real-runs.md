@@ -24,8 +24,8 @@ runs recorded before the trim:
 
 - **Rework dispatches per run**, and what they were for. The trim's own estimate is that a rule lost
   to a worker shows up here first, as a second dispatch for something the old text stated.
-- **InspectCode findings at the end-of-run review**, and specifically redundant qualifiers. The
-  mechanical `dotnet jb cleanupcode` pass left the task-end text in the same change, so a rise here is
+- **Analyzer and format findings at the end-of-run review**, and specifically redundant qualifiers. The
+  mechanical `dotnet format` pass left the task-end text in the same change, so a rise here is
   the signal it was carrying real work rather than the ban on it.
 - **Task-gate failures by gate id**, to see whether a failure a worker used to fix by reading the agent
   body now arrives at the review instead.
@@ -34,7 +34,7 @@ runs recorded before the trim:
 
 ## What would close this
 
-Three observations with no unexplained rework growth close it. If InspectCode rework rises, the answer
+Three observations with no unexplained rework growth close it. If analyzer-finding rework rises, the answer
 is a scoped step back — restore that one rule to the place the worker reads at the moment it acts —
 not a rollback of the trim, because the rule map already records which home each rule moved to and no
 other row needs to move with it.

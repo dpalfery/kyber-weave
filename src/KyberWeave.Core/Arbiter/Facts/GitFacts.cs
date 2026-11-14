@@ -64,6 +64,37 @@ public static class GitFacts
         return string.IsNullOrWhiteSpace(root) ? null : root;
     }
 
+    /// <summary>
+    /// The working trees of the repository at <paramref name="workingDirectory"/>, main first, from
+    /// <c>git worktree list --porcelain</c>. Empty outside a repository or when git cannot run.
+    /// </summary>
+    public static IReadOnlyList<string> ListWorktrees(string workingDirectory, string gitExecutable = "git")
+    {
+        string? output = RunGit(workingDirectory, gitExecutable, string.Empty, "worktree", "list", "--porcelain");
+        if (output is null)
+            return [];
+
+        const string Prefix = "worktree ";
+        return [.. output.Split('\n')
+            .Select(line => line.TrimEnd('\r'))
+            .Where(line => line.StartsWith(Prefix, StringComparison.Ordinal))
+            .Select(line => line[Prefix.Length..])
+            .Where(path => path.Length > 0)];
+    }
+
+    /// <summary>
+    /// Reads the repository's common git directory as an absolute path: the one directory every worktree of
+    /// a repository shares, so it names the repository whichever worktree asks.
+    /// </summary>
+    /// <returns>The directory, or <c>null</c> outside a repository.</returns>
+    public static string? GetCommonDirectory(string workingDirectory, string gitExecutable = "git")
+    {
+        string? output = RunGit(
+            workingDirectory, gitExecutable, string.Empty, "rev-parse", "--path-format=absolute", "--git-common-dir");
+        string directory = output?.Trim() ?? string.Empty;
+        return string.IsNullOrWhiteSpace(directory) ? null : directory;
+    }
+
     /// <summary>Reads the current branch name.</summary>
     /// <returns>The branch, or <c>null</c> on a detached head or outside a repository.</returns>
     public static string? GetCurrentBranch(string workingDirectory, string gitExecutable = "git")

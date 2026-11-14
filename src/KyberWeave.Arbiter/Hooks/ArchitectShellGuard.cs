@@ -37,6 +37,8 @@ public static class ArchitectShellGuard
     /// </summary>
     private const string KyberWeaveCli = "kyber-weave";
 
+    private static readonly HashSet<string> BriefFlags = new(StringComparer.Ordinal) { "--path", "--plan", "--autonomy", "--mode", "--harness" };
+
     private static readonly IReadOnlySet<string> SortSafeLongFlags = new HashSet<string>(StringComparer.Ordinal)
     {
         "--reverse", "--numeric-sort", "--unique", "--key", "--field-separator", "--ignore-case",
@@ -153,9 +155,11 @@ public static class ArchitectShellGuard
         {
             ["kyber-weave docs validate . --merge-ready"] = new("kyber-weave docs validate . --merge-ready", true),
             ["kyber-weave docs drift ."] = new("kyber-weave docs drift .", true),
+            ["kyber-weave docs tasks <plan file> --write"] = new("kyber-weave docs tasks docs/plans/x.md --write", true),
             ["kyber-weave arbiter plan <plan file> -f json"] = new("kyber-weave arbiter plan docs/plans/x.md -f json", true),
             ["codegraph explore \"…\""] = new("codegraph explore \"x\"", true),
             ["kyber-weave doctor --ensure"] = new("kyber-weave doctor --ensure", true),
+            ["kyber-weave squad brief architect …"] = new("kyber-weave squad brief architect --path plan --plan docs/plans/x.md --mode test-first", true),
             ["git"] = new("git status", true),
             ["log"] = new("git log -1", true),
             ["diff"] = new("git diff main...HEAD", true),
@@ -939,6 +943,14 @@ public static class ArchitectShellGuard
             && words.Count == 4
             && string.Equals(words[2], "drift", StringComparison.Ordinal)
             && !IsFlag(words[3]);
+        // The task file writer: exactly one path operand, then --write or --check. The command derives the file from
+        // the plan and writes only <plan>.tasks.json beside it, so the guard needs no path rule of its own.
+        bool docsTasks = docs
+            && words.Count == 5
+            && string.Equals(words[2], "tasks", StringComparison.Ordinal)
+            && !IsFlag(words[3])
+            && (string.Equals(words[4], "--write", StringComparison.Ordinal)
+                || string.Equals(words[4], "--check", StringComparison.Ordinal));
         // doctor --ensure takes no operand: an extra path would be a second target the form does not name.
         bool doctor = words.Count == 3
             && string.Equals(words[1], "doctor", StringComparison.Ordinal)
@@ -953,11 +965,20 @@ public static class ArchitectShellGuard
             && string.Equals(words[4], "-f", StringComparison.Ordinal)
             && string.Equals(words[5], "json", StringComparison.Ordinal);
 
-        return validate || drift || doctor || arbiterPlan
+        // The architect's own brief: read-only, for the architect alone, and only flags that each take one value.
+        bool brief = words.Count >= 4
+            && words.Count % 2 == 0
+            && string.Equals(words[1], "squad", StringComparison.Ordinal)
+            && string.Equals(words[2], "brief", StringComparison.Ordinal)
+            && string.Equals(words[3], "architect", StringComparison.Ordinal)
+            && Enumerable.Range(0, (words.Count - 4) / 2).All(pair =>
+                BriefFlags.Contains(words[4 + (2 * pair)]) && !IsFlag(words[5 + (2 * pair)]));
+
+        return validate || drift || docsTasks || doctor || arbiterPlan || brief
             ? null
             : new Refusal(
                 "is not a kyber-weave form on the architect's list",
-                "Use kyber-weave docs validate <dir> --merge-ready, docs drift <dir>, doctor --ensure, or arbiter plan <plan file> -f json");
+                "Use kyber-weave docs validate <dir> --merge-ready, docs drift <dir>, docs tasks <plan file> --write, doctor --ensure, arbiter plan <plan file> -f json, or squad brief architect with --path, --plan, --autonomy or --mode");
     }
 
     private static Refusal? CheckGit(List<string> words)
@@ -1502,10 +1523,6 @@ public static class ArchitectShellGuard
     // ---- Small predicates --------------------------------------------------------------------------
 
     private static bool IsFlag(string word) => word.StartsWith('-');
-
-    private static bool IsOption(string argument, string option) =>
-        string.Equals(argument, option, StringComparison.Ordinal)
-        || argument.StartsWith(option + "=", StringComparison.Ordinal);
 
     private static bool HasShortFlag(string argument, char flag) =>
         argument.Length > 1 && argument[0] == '-' && argument[1] != '-' && argument.IndexOf(flag, 1) > 0;

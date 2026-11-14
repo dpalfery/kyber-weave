@@ -1,6 +1,13 @@
 using System.Text.Json;
+using KyberWeave.Core.Arbiter.Facts;
 
 namespace KyberWeave.Core.RunStart;
+
+/// <summary>Where a run started: the facts <c>run start</c> records beside the base, read back by the dispatch guard.</summary>
+/// <param name="Repository">The repository's common git directory, absolute.</param>
+/// <param name="Worktree">The directory the run works in: its worktree, or the checkout it branched in place.</param>
+/// <param name="StartedAt">When the run started.</param>
+public sealed record RunStartPlace(string Repository, string Worktree, DateTimeOffset StartedAt);
 
 /// <summary>
 /// The base a run branched from, kept where a later dispatch hook can read it: a
@@ -32,16 +39,132 @@ public static class RunBaseState
 
     /// <summary>
     /// Records <paramref name="baseRef" /> as the base <paramref name="branch" /> was
-    /// created from, replacing any earlier record.
+    /// created from, replacing any earlier record. <paramref name="place" />, when given,
+    /// records where the run works, which the dispatch guard reads (<see cref="HasLiveRun" />).
     /// </summary>
-    public static void Write(string homeDirectory, string branch, string baseRef)
+    public static void Write(string homeDirectory, string branch, string baseRef, RunStartPlace? place = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(baseRef);
 
         string path = StatePath(homeDirectory, branch);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, JsonSerializer.Serialize(new StateDocument(baseRef), JsonOptions));
+        StateDocument document = new(baseRef, place?.Repository, branch, place?.Worktree, place?.StartedAt);
+        File.WriteAllText(path, JsonSerializer.Serialize(document, JsonOptions));
     }
+
+    /// <summary>
+    /// Whether a run is live for <paramref name="repository" />: a record names that repository, and its
+    /// worktree still exists with the run's branch checked out. Both halves are machine facts: the record
+    /// <c>run start</c> wrote, and git's answer for the worktree.
+    /// </summary>
+    /// <remarks>
+    /// A record written before <c>run start</c> recorded its place names no repository and is skipped: it
+    /// predates this version, so it cannot be the run in progress. A run left live by an earlier session
+    /// also counts, because nothing on disk ties a run to a harness session.
+    /// </remarks>
+    /// <param name="homeDirectory">The operator's home, which holds <c>.kyber-weave/runs</c>.</param>
+    /// <param name="repository">The repository's common git directory.</param>
+    /// <returns>True or false when the records were read; null when the runs directory could not be read.</returns>
+    public static bool? HasLiveRun(string homeDirectory, string repository)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repository);
+
+        string directory = Path.Combine(homeDirectory, StateDirectoryName, RunsDirectoryName);
+        string[] files;
+        try
+        {
+            if (!Directory.Exists(directory))
+            {
+                return false;
+            }
+
+            files = Directory.GetFiles(directory, "*" + StateExtension);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+
+        string wanted = NormalizeDirectory(repository);
+        foreach (string file in files)
+        {
+            StateDocument? document;
+            try
+            {
+                document = JsonSerializer.Deserialize<StateDocument>(File.ReadAllText(file), JsonOptions);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                return null;
+            }
+            catch (JsonException)
+            {
+                continue;
+            }
+
+            if (document is { Repository: { Length: > 0 } recorded, Branch: { Length: > 0 } branch, Worktree: { Length: > 0 } worktree }
+                && string.Equals(NormalizeDirectory(recorded), wanted, PathComparison)
+                && Directory.Exists(worktree)
+                && string.Equals(GitFacts.GetCurrentBranch(worktree), branch, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Every run record that names its repository, branch and worktree. Records written before <c>run start</c>
+    /// recorded its place, and records that do not parse, are skipped.
+    /// </summary>
+    /// <param name="homeDirectory">The operator's home, which holds <c>.kyber-weave/runs</c>.</param>
+    /// <returns>The records, empty when there are none; null when the runs directory or a record could not be read.</returns>
+    public static IReadOnlyList<RunRecord>? ReadRecords(string homeDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
+
+        string directory = Path.Combine(homeDirectory, StateDirectoryName, RunsDirectoryName);
+        List<RunRecord> records = [];
+        try
+        {
+            if (!Directory.Exists(directory))
+            {
+                return records;
+            }
+
+            foreach (string file in Directory.GetFiles(directory, "*" + StateExtension))
+            {
+                StateDocument? document;
+                try
+                {
+                    document = JsonSerializer.Deserialize<StateDocument>(File.ReadAllText(file), JsonOptions);
+                }
+                catch (JsonException)
+                {
+                    continue;
+                }
+
+                if (document is { Repository: { Length: > 0 } repository, Branch: { Length: > 0 } branch, Worktree: { Length: > 0 } worktree })
+                {
+                    records.Add(new RunRecord(repository, branch, worktree));
+                }
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+
+        return records;
+    }
+
+    private static StringComparison PathComparison =>
+        OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+
+    private static string NormalizeDirectory(string directory) =>
+        Path.GetFullPath(directory).Replace('\\', '/').TrimEnd('/');
 
     /// <summary>
     /// Reads the base <paramref name="branch" /> was created from. Absent, unreadable, or
@@ -104,5 +227,10 @@ public static class RunBaseState
         return flat + "-" + Convert.ToHexStringLower(hash)[..8];
     }
 
-    private sealed record StateDocument(string BaseRef);
+    private sealed record StateDocument(
+        string BaseRef,
+        string? Repository = null,
+        string? Branch = null,
+        string? Worktree = null,
+        DateTimeOffset? StartedAt = null);
 }

@@ -10,7 +10,7 @@ The conductor supplies `DEVELOPMENT_MODE`. If omitted, record `test-first`. Reco
 
 ## Work
 
-Produce a numbered checkbox task list with at most two hierarchy levels. Group tasks under `###` headings, and use checkbox items only for dispatchable tasks, because every checkbox item needs its own task-file entry. Every task includes a concrete objective, exact files or components, acceptance criteria, dependencies, required skills, and requirement ids. Tasks must be executable by a cold worker without design decisions.
+Produce a numbered checkbox task list with at most two hierarchy levels. Group tasks under `###` headings, and use checkbox items only for dispatchable tasks, because every checkbox item needs its own task-file entry. Every task includes a concrete objective, exact files or components, acceptance criteria, dependencies, a `Capabilities:` line naming in plain words the abilities the work needs (never an agent or skill name), and requirement ids. Tasks must be executable by a cold worker without design decisions.
 
 Persist:
 
@@ -23,28 +23,27 @@ Persist:
 
 ### Test-first mode
 
-Include a Test contract for every implementation task: exact test project or file, runner command, observable behavior, expected RED reason, and GREEN acceptance. Sequence RED → GREEN → REFACTOR; implementation cannot start before valid RED evidence exists.
+Each implementation task is one unit of behaviour that one specialist owns, tests and code together; never split it into a test task and an implementation task, or add a stub task so another task's tests compile. Give each task a Test contract row: exact test project or file, runner command, observable behavior, the failing run's expected reason, and passing acceptance. The worker runs the tests failing before implementing, in the same task.
 
 ### Standard mode
 
-Include a verification contract for every implementation task: exact automated test surface and command plus any build, analyzer, package, deployment, or read-only integration evidence. Sequence implementation → verification → review. Historical RED evidence is not required, but appropriate automated tests and current evidence remain mandatory.
+Include a verification contract for every implementation task: exact automated test surface and command plus any build, analyzer, package, deployment, or read-only integration evidence. Sequence implementation → verification → review. The failing run is not required, but appropriate automated tests and current evidence remain mandatory.
 
 Mark any genuinely no-test task explicitly and name its replacement validation. A contract change after approval requires reapproval.
 
 ## Task file
 
-Beside `tasks.md`, the tracked task file `<spec-folder>/tasks.json` is the specification form of the same contract a plan uses, and it is written only at finalization (see below). It carries a schema version, the specification's path, the execution digest, and one entry per task: id, role, dependencies, file scope, `session` group and the full prompt, each prompt naming files by path plus symbol, the full test class names and the exact commands.
+Beside `tasks.md`, the tracked task file `<spec-folder>/tasks.json` is the specification form of the same contract a plan uses, and the conductor writes it with `kyber-weave docs tasks` before finalization (see below). It carries a schema version, the specification's path, the execution digest, and one entry per task: id, role, dependencies, file scope, `session` group and the full prompt, each prompt naming files by path plus symbol, the full test class names and the exact commands.
 
 Only two slots stay unfilled — `{worktree}` and `{prior_results}` — because the conductor fills them at dispatch from what no authoring phase can know.
 
-The file is written at finalization, not during the tasks phase: write it in place at its final path with the edit tools, never through a sibling or temporary file. Its `plan` field holds the repository-relative path of `tasks.md`. `product-owner` has no shell, so the conductor passes the execution digest as `SPEC_DIGEST`. Never compute the digest by hand or with a script.
+The conductor writes the file with `kyber-weave docs tasks <spec-folder>/tasks.md --write` before the finalization invocation; it derives every field, the digest and each prompt from `tasks.md`, so `product-owner` never writes, edits or computes `tasks.json`. Put what each prompt needs in the task itself: its `Command:` line (a backticked program and argument) and its `Acceptance criteria:` line, or the test contract row's runner and acceptance cells. An optional `Session:` line sets the worker session group (default: the task id); add `Role: <agent>` only when the owner assigned the task to a named agent.
 
 Finalization runs in this order:
 
-1. Check the digest before anything is written. A finalization invocation without `SPEC_DIGEST`, or one made after a task, contract-row, out-of-scope or mode edit since the digest was computed, returns `STATUS: BLOCKED` naming `task-file digest: run kyber-weave arbiter plan <spec-folder>/tasks.md -f json in <checkout>`. `product-owner` has no shell, so it cannot recompute the digest: the conductor must run the producer immediately before every finalization invocation and pass that fresh value, never one carried over from before a `tasks.md` edit; the owner blocks only when `SPEC_DIGEST` is absent, and `KW-DOC-TASKS-003` in validation catches a stale one. Nothing else is written, so the spec is not left Ready without a task file.
-2. Record the approval rows, write the spec Ready line (`**Status:** Ready`) in `tasks.md`, and synchronize the index.
-3. Write `tasks.json` with the digest from the conductor's `SPEC_DIGEST` as `execution-digest`.
-4. Return `SPEC_FINALIZED` with `TASK_FILE: <spec-folder>/tasks.json`.
+1. Check that `tasks.json` exists beside `tasks.md`. If not, return `STATUS: BLOCKED` naming `task file: run kyber-weave docs tasks <spec-folder>/tasks.md --write in <checkout>`. Nothing else is written, so the spec is not left Ready without a task file.
+2. Record the approval rows, write the spec Ready line (`**Status:** Ready`) in `tasks.md`, and synchronize the index. A status edit does not move the digest.
+3. Return `SPEC_FINALIZED` with `TASK_FILE: <spec-folder>/tasks.json`.
 
 ## Gaps and coverage
 

@@ -53,11 +53,15 @@ public sealed class ArbiterExistsFalseRuleTests
         Assert.Equal(
             new HashSet<string>(StringComparer.Ordinal)
             {
-                "KW-ARB-PLAN-001",
                 "KW-ARB-SCOPE-001",
+                "KW-ARB-SCOPE-002",
                 "KW-ARB-READY-001",
-                "KW-ARB-MODE-001",
+                "KW-ARB-OWNER-001",
+                "KW-ARB-MODE-002",
+                "KW-ARB-DIFF-001",
+                "KW-ARB-PLANNER-DIFF-001",
                 "KW-ARB-PLANNER-001",
+                "KW-ARB-PLANREAD-001",
                 "KW-ARB-READONLY-001",
                 "KW-ARB-GATE-REPORT-001",
                 "KW-ARB-LADDER-001",
@@ -68,26 +72,35 @@ public sealed class ArbiterExistsFalseRuleTests
     }
 
     [Fact]
-    public void ADispatchWithNoPlanFileAnswersTheMissingClauseOfPlan001()
+    public void ADispatchWithNoPlanFileLeavesPlan001ToTheModelAndTheTaskRulesAllow()
     {
-        // KW-ARB-PLAN-001's `delegation.plan-file exists: false` clause is the whole
-        // "missing" branch of the rule. It could not fire while a null-valued fact
-        // counted as present.
+        // Whether a dispatch names a plan is a reading of prose (ADR 0072): step 0 cannot say no, so PLAN-001 is
+        // undecidable and asks. The rules that need a plan task answer their no-task guard, which allows; a
+        // null-valued fact has to count as absent for those guards to fire at all.
         KyberWeaveConfig config = Config();
-        ArbiterRule rule = Assert.Single(config.Arbiter.Rules, r => r.Id == "KW-ARB-PLAN-001");
         ArbiterFactSet facts = BuildDelegateFacts(config);
+        ArbiterRule plan = Assert.Single(config.Arbiter.Rules, r => r.Id == "KW-ARB-PLAN-001");
 
-        Assert.Equal("missing", RuleEngine.Decide(rule, facts));
+        Assert.Equal(RuleEngine.Undecidable, RuleEngine.Decide(plan, facts));
+        Assert.NotNull(plan.Ask);
+        foreach (string id in new[] { "KW-ARB-SCOPE-002", "KW-ARB-READY-001", "KW-ARB-OWNER-001" })
+        {
+            ArbiterRule rule = Assert.Single(config.Arbiter.Rules, r => r.Id == id);
+            Assert.Equal("no-task", RuleEngine.Decide(rule, facts));
+            Assert.Equal(RuleEffects.Allow, rule.Effects["no-task"]);
+        }
     }
 
     [Fact]
-    public void ADispatchWithNoMarkersAnswersPlanner001()
+    public void ADispatchWithNoMarkersLeavesPlanner001ToTheModel()
     {
+        // A marker is an agent-written line; step 0 only recognises the exact forms and asks about the rest.
         KyberWeaveConfig config = Config();
         ArbiterRule rule = Assert.Single(config.Arbiter.Rules, r => r.Id == "KW-ARB-PLANNER-001");
         ArbiterFactSet facts = BuildDelegatePlannerFacts(config);
 
-        Assert.NotEqual(RuleEngine.Undecidable, RuleEngine.Decide(rule, facts));
+        Assert.Equal(RuleEngine.Undecidable, RuleEngine.Decide(rule, facts));
+        Assert.NotNull(rule.Ask);
     }
 
     [Fact]
@@ -102,7 +115,8 @@ public sealed class ArbiterExistsFalseRuleTests
         {
             foreach (RuleDecideClause clause in rule.Decide!)
             {
-                if (MentionsExistsFalse(clause.When))
+                // A clause that is itself the absence test; a compound clause also tests other facts.
+                if (clause.When.Operator == RuleOperator.Exists && clause.When.Operand?.LiteralValue is false)
                 {
                     Assert.True(
                         clause.When.Evaluate(facts),

@@ -135,18 +135,14 @@ public sealed class ConfigRegConfig
     public const string RunBaseBranchProperty = "run-base-branch";
 
     /// <summary>
-    /// Registry property carrying whether a harness name is published at all. A
-    /// <see cref="ConfigRegEntryKind.Mode"/> entry, published from <c>run.harness-names</c> and
-    /// reserved: a host may not declare it under <c>config-reg:</c>.
-    /// </summary>
-    public const string RunHarnessNamesProperty = "run-harness-names";
-
-    /// <summary>
     /// The branch a run is compared against when the operator named none. <c>origin/HEAD</c>
     /// rather than <c>main</c>: the default branch differs per repository, and a hard-coded
     /// <c>main</c> compares against a branch that may not exist while looking authoritative.
     /// </summary>
     public const string DefaultBaseBranch = "origin/HEAD";
+
+    /// <summary>Registry property for the rules folder's index.</summary>
+    public const string RulesIndexProperty = "rules-index";
 
     /// <summary>Suffix that turns a declared technology into its registry property name.</summary>
     public const string CodingStandardSuffix = "-coding-standard";
@@ -164,7 +160,7 @@ public sealed class ConfigRegConfig
         ("specs", SpecificationIndexProperty),
         ("todo", TodoIndexProperty),
         ("adr", "adr-index"),
-        ("rules", "rules-index"),
+        ("rules", RulesIndexProperty),
         ("reference", "reference-index")
     ];
 
@@ -218,16 +214,6 @@ public sealed class ConfigRegConfig
     /// </summary>
     public string BaseBranch =>
         string.IsNullOrWhiteSpace(RunBaseBranch) ? DefaultBaseBranch : RunBaseBranch;
-
-    /// <summary>
-    /// The <c>run.harness-names</c> setting as the operator wrote it, or null when the
-    /// repository did not set one. Read <see cref="PublishesHarnessNames"/> for the effective
-    /// setting.
-    /// </summary>
-    public bool? RunHarnessNames { get; init; }
-
-    /// <summary>Whether a harness name is published in a rendered artifact; absent means yes.</summary>
-    public bool PublishesHarnessNames => RunHarnessNames ?? true;
 
     public static ConfigRegConfig ProductDefaults { get; } = new();
 
@@ -299,14 +285,6 @@ public sealed class ConfigRegConfig
             entries.Add(new ConfigRegEntry(
                 RunBaseBranchProperty,
                 RunBaseBranch,
-                ConfigRegEntryKind.Mode));
-        }
-
-        if (RunHarnessNames is not null)
-        {
-            entries.Add(new ConfigRegEntry(
-                RunHarnessNamesProperty,
-                ModeWord(RunHarnessNames.Value),
                 ConfigRegEntryKind.Mode));
         }
 

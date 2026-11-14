@@ -24,7 +24,7 @@ public enum ArbiterStoreStatus
 }
 
 /// <summary>
-/// Holds the text of review findings and worker failures under <c>&lt;arbiter-dir&gt;/stores/</c>,
+/// Holds the text of review findings, worker failures and the tails of worker returns under <c>&lt;arbiter-dir&gt;/stores/</c>,
 /// outside the decision log and the ledger, so a rule can read a finding back without the decision
 /// log ever carrying its text.
 /// </summary>
@@ -45,6 +45,29 @@ public sealed class ArbiterRunStore
     private const string StoresDirectoryName = "stores";
     private const string FindingsFileName = "findings.jsonl";
     private const string FailuresFileName = "failures.jsonl";
+    private const string ReturnsFileName = "returns.jsonl";
+
+    /// <summary>
+    /// The most bytes of a plan's returns file one read looks at, taken from the end. An active plan's file is never
+    /// swept, so reading all of it would make every evaluation cost more as the plan ages; the newest returns are
+    /// the only ones a caller wants.
+    /// </summary>
+    internal const long MaxReturnsReadBytes = 1024 * 1024;
+
+    /// <summary>
+    /// The most bytes of a plan's failures file one read looks at, taken from the end. The only consumer takes the
+    /// latest stored failure of one cluster, so the newest items are all it needs; a cluster whose last failure is
+    /// older than the window reads as a first failure.
+    /// </summary>
+    internal const long MaxFailuresReadBytes = 1024 * 1024;
+
+    /// <summary>
+    /// The most bytes of a review run's findings file one read looks at, taken from the end. The consumers look up
+    /// the stored item of one finding and the few findings stored just before it, and a refutation runs soon after
+    /// its finding is stored, so the newest items are the ones that matter. Sized at 2 MiB, enough for about 130
+    /// items of the largest permitted size and many times that at a typical size.
+    /// </summary>
+    internal const long MaxFindingsReadBytes = 2 * 1024 * 1024;
 
     /// <summary>
     /// The longest retention the sweep honours: ten years. A larger configured value is clamped to this, because a
@@ -139,7 +162,43 @@ public sealed class ArbiterRunStore
     public IReadOnlyList<string> ReadFailures(string? planFile, string? planDigest, string? session)
     {
         string path = Path.Combine(FailureDirectory(planFile, planDigest, session), FailuresFileName);
-        return ReadItems(path);
+        return ReadItems(path, MaxFailuresReadBytes);
+    }
+
+    /// <summary>
+    /// Appends the tail of one worker's return to the store of its plan, so a later dispatch's model question can
+    /// read what the worker reported rather than only the markers the ledger parsed from it.
+    /// </summary>
+    /// <param name="planFile">The plan file the return's dispatch named.</param>
+    /// <param name="text">The stored text: the task, the target and the report tail.</param>
+    /// <param name="ct">Cancels the append.</param>
+    /// <returns>Whether the item was stored, refused for size, or the store was unavailable.</returns>
+    public Task<ArbiterStoreStatus> AppendReturnAsync(string planFile, string text, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(planFile);
+        ArgumentNullException.ThrowIfNull(text);
+        return AppendAsync(ReturnsDirectory(planFile), ReturnsFileName, text, ct);
+    }
+
+    /// <summary>Reads the return tails stored for a plan, oldest first; empty when none or unreadable.</summary>
+    /// <param name="planFile">The plan file the returns belong to.</param>
+    /// <returns>The stored texts, in append order.</returns>
+    public IReadOnlyList<string> ReadReturns(string planFile)
+    {
+        ArgumentNullException.ThrowIfNull(planFile);
+        return ReadItems(Path.Combine(ReturnsDirectory(planFile), ReturnsFileName), MaxReturnsReadBytes);
+    }
+
+    /// <summary>Keyed by the plan file alone, so an amended plan still sees the returns made before the amendment.</summary>
+    private string ReturnsDirectory(string planFile)
+    {
+        string normalized = planFile.Trim().Replace('\\', '/');
+        if (normalized.StartsWith("./", StringComparison.Ordinal))
+        {
+            normalized = normalized[2..];
+        }
+
+        return Path.Combine(_storesDirectory, "returns-" + Digest(normalized));
     }
 
     private string FailureDirectory(string? planFile, string? planDigest, string? session)
@@ -163,7 +222,7 @@ public sealed class ArbiterRunStore
     {
         ArgumentNullException.ThrowIfNull(reviewRun);
         string path = Path.Combine(ReviewDirectory(reviewRun), FindingsFileName);
-        return ReadItems(path);
+        return ReadItems(path, MaxFindingsReadBytes);
     }
 
     private async Task<ArbiterStoreStatus> AppendAsync(string directory, string fileName, string text, CancellationToken ct)
@@ -261,17 +320,39 @@ public sealed class ArbiterRunStore
         return newest ?? directory.LastWriteTimeUtc;
     }
 
-    private static IReadOnlyList<string> ReadItems(string path)
+    /// <summary>
+    /// Reads the items of <paramref name="path"/>, looking only at its last <paramref name="tailBytes"/> bytes. There
+    /// is no default: every caller names the window its consumers need, so a new caller cannot read a file that only
+    /// grows in full.
+    /// </summary>
+    /// <remarks>
+    /// When the file is longer than the window, the read starts at the window's first byte. That byte starts an item
+    /// only when the byte before it is a newline (an item is one line, its own newlines escaped); otherwise the
+    /// first line is the end of an item cut by the seek and is dropped, so a whole item is never lost.
+    /// A missing file reads as empty.
+    /// </remarks>
+    internal static IReadOnlyList<string> ReadItems(string path, long tailBytes)
     {
-        if (!File.Exists(path))
-        {
-            return [];
-        }
-
+        ArgumentOutOfRangeException.ThrowIfLessThan(tailBytes, 1);
         try
         {
             List<string> items = [];
-            foreach (string line in File.ReadLines(path))
+            using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            bool partialFirstLine = false;
+            if (stream.Length > tailBytes)
+            {
+                stream.Seek(stream.Length - tailBytes - 1, SeekOrigin.Begin);
+                partialFirstLine = stream.ReadByte() != '\n';
+            }
+
+            using StreamReader reader = new(stream);
+            if (partialFirstLine)
+            {
+                // The seek landed mid-line (and possibly mid-character); the fragment is not an item.
+                reader.ReadLine();
+            }
+
+            while (reader.ReadLine() is { } line)
             {
                 StoredItem? item = TryDeserialize(line);
                 if (item is not null)
@@ -284,6 +365,7 @@ public sealed class ArbiterRunStore
         }
         catch (IOException)
         {
+            // Includes a file that is absent when opened; a store that cannot be read has no items to offer.
             return [];
         }
         catch (UnauthorizedAccessException)

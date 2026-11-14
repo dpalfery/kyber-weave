@@ -48,10 +48,10 @@ skills:
   - pr-review-fix-comments
   - product-owner
   - python-dev
-  - resharper-clt
+  - review-council
   - rust-dev
   - security-review
   - setup-dev-environment
   - task-gate
-  - test-dev
+  - testing
   - typescript-dev

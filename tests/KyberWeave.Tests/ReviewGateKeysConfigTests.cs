@@ -239,13 +239,30 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
                 - id: build
                   run: [dotnet, build]
                 - id: analyze
-                  run: [dotnet, jb, inspectcode]
+                  run: [dotnet, build, -warnaserror]
                   concurrent: true
             """).Review;
 
         Assert.False(config.Gates[0].Concurrent);
         Assert.True(config.Gates[1].Concurrent);
         Assert.Empty(config.Warnings);
+    }
+
+    [Fact]
+    public void ParallelismDefaultsToTwoAndReadsAHostValue()
+    {
+        Assert.Equal(2, KyberWeaveConfigLoader.LoadFromYaml("review:\n  gates: []\n").Review.Parallelism);
+        Assert.Equal(3, KyberWeaveConfigLoader.LoadFromYaml("review:\n  parallelism: 3\n").Review.Parallelism);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-1")]
+    public void ParallelismBelowOneIsRefusedWhereTheOperatorWroteIt(string value)
+    {
+        Exception error = Assert.ThrowsAny<Exception>(() => KyberWeaveConfigLoader.LoadFromYaml($"review:\n  parallelism: {value}\n"));
+
+        Assert.Contains("review.parallelism must be greater than zero", error.ToString(), StringComparison.Ordinal);
     }
 
     /// <summary>

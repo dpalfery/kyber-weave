@@ -1,0 +1,30 @@
+{
+  "schema": "kyber-weave.review-gates/v1",
+  "gates": [
+    {
+      "id": "dotnet-build",
+      "blocking": true,
+      "exitCode": 0,
+      "summary": "RED accepted: compile failed only on missing symbols: JobStatusCountsDto, JobRepository.GetJobStatusCountsAsync",
+      "durationMilliseconds": 28998,
+      "notApplicableReason": null,
+      "outcome": "completed",
+      "passed": true,
+      "notApplicable": false
+    },
+    {
+      "id": "tests",
+      "blocking": true,
+      "exitCode": 1,
+      "summary": "at Microsoft.DotNet.Cli.Commands.Test.TestApplication.RunAsync() | at Microsoft.DotNet.Cli.Commands.Test.TestApplication.RunAsync() | at Microsoft.DotNet.Cli.Commands.Test.TestApplicationActionQueue.Read(BuildOptions buildOptions, TestOptions testOptions, TestResultsDirectoryResolver resultsDirectoryResolver, TerminalTestReporter output, Action\u00601 onHelpRequested)",
+      "durationMilliseconds": 388,
+      "notApplicableReason": null,
+      "outcome": "completed",
+      "passed": false,
+      "notApplicable": false
+    }
+  ],
+  "coverage": null,
+  "coverageReports": [],
+  "base": null
+}

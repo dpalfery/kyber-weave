@@ -110,15 +110,76 @@ public sealed class SquadHarnessTokenRenderTests
     }
 
     /// <summary>
+    ///     One render per shipped harness answers <c>{{subagents-dispatch}}</c> with <c>yes</c> exactly where
+    ///     the catalogue says a dispatched agent can dispatch agents of its own, and leaves no braces behind.
+    /// </summary>
+    /// <param name="target">The harness being rendered.</param>
+    [Theory]
+    [MemberData(nameof(ShippedTargets))]
+    public async Task EachHarnessRenderAnswersWhetherSubagentsDispatch(SquadTarget target)
+    {
+        const string placeholder = "{{subagents-dispatch}}";
+        const string label = "Carried subagent dispatch: ";
+        string expected = SquadTargetCatalog.GetSubagentDispatch(target) == SquadSubagentDispatch.Nested ? "yes" : "no";
+
+        SquadRenderResult probe = await RendererFor(target).RenderAsync(
+            new SquadRenderRequest(
+                ProductRoot,
+                [target],
+                SquadDeploymentScope.Project,
+                PreloadedSource: SourceWithProbe(label + placeholder)));
+        Assert.True(probe.Success, string.Join("; ", probe.Errors));
+
+        Assert.DoesNotContain(probe.Files, file => Text(file).Contains(placeholder, StringComparison.Ordinal));
+        Assert.Contains(probe.Files, file => Text(file).Contains(label + expected, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    ///     One render per shipped harness answers <c>{{dispatch-tool}}</c> with the catalogue's tool name for
+    ///     that harness and leaves no braces behind.
+    /// </summary>
+    /// <param name="target">The harness being rendered.</param>
+    [Theory]
+    [MemberData(nameof(ShippedTargets))]
+    public async Task EachHarnessRenderNamesItsDispatchTool(SquadTarget target)
+    {
+        const string placeholder = "{{dispatch-tool}}";
+        const string label = "Carried dispatch tool: ";
+        string expected = SquadTargetCatalog.GetSubagentDispatchTool(target);
+
+        SquadRenderResult probe = await RendererFor(target).RenderAsync(
+            new SquadRenderRequest(
+                ProductRoot,
+                [target],
+                SquadDeploymentScope.Project,
+                PreloadedSource: SourceWithProbe(label + placeholder)));
+        Assert.True(probe.Success, string.Join("; ", probe.Errors));
+
+        Assert.DoesNotContain(probe.Files, file => Text(file).Contains(placeholder, StringComparison.Ordinal));
+        Assert.Contains(probe.Files, file => Text(file).Contains(label + expected, StringComparison.Ordinal));
+    }
+
+    /// <summary>The harnesses verified to nest are the ones the catalogue marks nested; every other one takes the safe path.</summary>
+    [Fact]
+    public void OnlyVerifiedHarnessesAreMarkedAsNesting()
+    {
+        SquadTarget[] nested = SquadTargetCatalog.All
+            .Where(target => SquadTargetCatalog.GetSubagentDispatch(target) == SquadSubagentDispatch.Nested)
+            .ToArray();
+
+        Assert.Equal([SquadTarget.Cursor, SquadTarget.Claude, SquadTarget.Copilot, SquadTarget.Pi], nested);
+    }
+
+    /// <summary>
     ///     The canonical corpus with one probe line appended to one agent's body. Appending leaves the
     ///     shared-identity body comparison and every other rendered byte untouched.
     /// </summary>
-    private static SquadSource SourceWithProbe()
+    private static SquadSource SourceWithProbe(string probeLine = ProbeLine)
     {
         SquadSource canonical = TestSquadCorpus.CanonicalSource;
         SquadAgent[] agents = canonical.Agents
             .Select(agent => agent.Name == ProbeAgentName
-                ? agent with { InstructionBody = agent.InstructionBody + "\n\n" + ProbeLine + "\n" }
+                ? agent with { InstructionBody = agent.InstructionBody + "\n\n" + probeLine + "\n" }
                 : agent)
             .ToArray();
 

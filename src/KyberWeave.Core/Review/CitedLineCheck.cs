@@ -67,12 +67,15 @@ public static class CitedLineCheck
             if (!DocsRootPath.IsContainedFile(repositoryRoot, path, []))
                 return new FileLines(null, $"{path} is not a file in the repository, or is reached through a link");
 
-            return new FileLines(File.ReadAllLines(Path.Combine(repositoryRoot, path)), null);
+            string full = Path.Combine(repositoryRoot, path);
+            if (new FileInfo(full).Length > ReviewSeatInput.MaxFileBytes)
+                return new FileLines(null, $"{path} is larger than {ReviewSeatInput.MaxFileBytes} bytes, so it was not read");
+
+            return new FileLines(File.ReadAllLines(full), null);
         }
-        // ArgumentException and NotSupportedException: a seat can write a path holding a character no file
-        // system accepts, such as a NUL from a quoted "\0".
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
-                                       or NotSupportedException)
+        // A seat can write a path holding a character no file system accepts, such as a NUL from a quoted "\0", or
+        // name a root the process may not look in; the one shared filter says which failures are answers.
+        catch (Exception ex) when (ReviewSeatInput.IsFileFailure(ex))
         {
             // The exception message can carry the absolute path, which does not belong in a review report.
             return new FileLines(null, $"{path} could not be read ({ex.GetType().Name})");
@@ -85,10 +88,9 @@ public static class CitedLineCheck
         if (finding.Line >= 1 && finding.Line <= lines.Length)
             return CitedLineResult.Unchanged(finding);
 
-        string? anchor = finding.Excerpt?
-            .Split('\n')
-            .Select(line => line.Trim())
-            .FirstOrDefault(line => line.Length > 0);
+        string? anchor = finding.Excerpt is { } excerpt && ReviewSeatInput.ExcerptWithinLimits(excerpt)
+            ? excerpt.Split('\n').Select(line => line.Trim()).FirstOrDefault(line => line.Length > 0)
+            : null;
         if (anchor is null)
         {
             return CitedLineResult.Unresolved(

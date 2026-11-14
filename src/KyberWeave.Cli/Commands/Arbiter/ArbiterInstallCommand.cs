@@ -114,13 +114,38 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
             return 2;
         }
 
-        string kindName = providerKind == ArbiterProviderKind.Systemone ? "systemone" : "none";
         bool isProjectScope = settings.Project;
         string root = isProjectScope
             ? Path.GetFullPath(string.IsNullOrWhiteSpace(settings.PathOption)
                 ? (string.IsNullOrWhiteSpace(settings.Path) ? "." : settings.Path)
                 : settings.PathOption)
             : Path.GetFullPath(ArbiterCommandComposition.HomeDirectory());
+
+        ArbiterProviderKind existingKind;
+        ArbiterProviderKind effectiveKind;
+        try
+        {
+            (existingKind, effectiveKind) = ReadExistingProviderKind(root, settings.Config, isProjectScope);
+        }
+        catch (YamlException ex)
+        {
+            WriteError(ex.Message);
+            return 1;
+        }
+
+        bool providerOmitted = settings.Provider is null;
+        if (providerOmitted)
+            providerKind = existingKind;
+
+        string kindName = KindName(providerKind);
+        string overrideNote = effectiveKind != providerKind
+            ? $" The per-user override sets {KindName(effectiveKind)}, which takes precedence."
+            : string.Empty;
+        AnsiConsole.MarkupLine(providerOmitted
+            ? $"Arbiter provider: [bold]{kindName}[/] (kept; pass --provider to change it).{Markup.Escape(overrideNote)}"
+            : providerKind == existingKind
+                ? $"Arbiter provider: [bold]{kindName}[/] (unchanged).{Markup.Escape(overrideNote)}"
+                : $"Arbiter provider: [bold]{kindName}[/] (changed from {KindName(existingKind)}).{Markup.Escape(overrideNote)}");
 
         if (!string.IsNullOrWhiteSpace(settings.ArbiterKey))
         {
@@ -487,6 +512,28 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
             AnsiConsole.MarkupLine(
                 $"  {Markup.Escape(token)} | {Markup.Escape(reason)} | {Markup.Escape(path)} | {Markup.Escape(reason)} | {Markup.Escape(trust)}");
         }
+    }
+
+    private static string KindName(ArbiterProviderKind kind) =>
+        kind == ArbiterProviderKind.Systemone ? "systemone" : "none";
+
+    /// <summary>
+    /// The provider kind the host config holds before this run (none when nothing is configured),
+    /// and the kind in effect once the per-user override is applied over it.
+    /// </summary>
+    /// <exception cref="YamlException">Thrown when the per-user override is malformed.</exception>
+    private static (ArbiterProviderKind Configured, ArbiterProviderKind Effective) ReadExistingProviderKind(
+        string root, string? configOption, bool projectScope)
+    {
+        KyberWeaveConfigLoadResult loaded = projectScope
+            ? KyberWeaveConfigLoader.TryLoad(root, configOption)
+            : KyberWeaveConfigLoader.TryLoadUserConfig(root, configOption);
+        ArbiterProviderConfig repository = loaded.Success && loaded.Config is not null
+            ? loaded.Config.Arbiter.Provider
+            : KyberWeaveConfig.ProductDefaults.Arbiter.Provider;
+        ArbiterProviderKind effective =
+            ArbiterUserSettings.ApplyTo(repository, ArbiterCommandComposition.HomeDirectory()).Kind;
+        return (repository.Kind, effective);
     }
 
     private static bool TryParseProvider(string? raw, out ArbiterProviderKind kind)

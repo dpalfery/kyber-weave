@@ -40,6 +40,14 @@ public sealed class ReviewGatesSettings : AnalysisSettings
     [Description("Run each task gate's fix command before its verify command. Requires --agent.")]
     public bool Fix { get; set; }
 
+    [CommandOption("--red")]
+    [Description("Judge the agent's gate runs as a test-first task's failing run, after its tests are written and before it is implemented: they pass when tests ran and " +
+                 "failed, or when the build failed only on missing-symbol errors (C# CS0103/CS0117/CS0234/CS0246/CS1061, " +
+                 "TypeScript TS2304/TS2305/TS2307/TS2339) in the files the task changed; they fail when the build breaks " +
+                 "for any other reason or every test passes. The report written is the proof of the failing run, and the run ends " +
+                 "with the passing-run command to use next. Requires --agent.")]
+    public bool Red { get; set; }
+
     [CommandOption("--all")]
     [Description("Run all declared repository gates on the host OS without include path filtering.")]
     public bool All { get; set; }
@@ -62,11 +70,17 @@ public sealed class ReviewGatesSettings : AnalysisSettings
                  "no run deadline applies and a timed-out blocking gate fails the run. Not with --gate or --agent.")]
     public bool Deadline { get; set; }
 
+    [CommandOption("--full")]
+    [Description("With --council, run every declared gate even in a verifier cycle. Without it, a council run in a " +
+                 "cycle after the first runs only the gates whose inputs changed or that did not pass, and carries " +
+                 "the others' earlier passing results into the report.")]
+    public bool Full { get; set; }
+
     /// <summary>
     ///     Whether an option that only makes sense for one agent was given. <c>--paths</c> and <c>--base</c> also
     ///     scope the repository-wide council gates, so they are not agent-only.
     /// </summary>
-    public bool HasAgentOnlyOptions => TaskSlug is not null || Fix;
+    public bool HasAgentOnlyOptions => TaskSlug is not null || Fix || Red;
 }
 
 /// <summary>Settings for <c>review suppressions</c>.</summary>
@@ -90,7 +104,9 @@ public sealed class ReviewDuplicatesSettings : AnalysisSettings
 public sealed class ReviewVerdictSettings : AnalysisSettings
 {
     [CommandOption("--findings <PATH>")]
-    [Description("Path to the council's findings JSON document.")]
+    [Description("Path to the council's findings JSON document. With neither --findings nor --seats, the newest " +
+                 "cycle folder of the review is used: its seats, gates.json and recorded not-seated lenses, its " +
+                 "findings.json as --out, and the cycle before it as --prior.")]
     public string? Findings { get; set; }
 
     [CommandOption("--gates <PATH>")]
@@ -122,8 +138,42 @@ public sealed class ReviewVerdictSettings : AnalysisSettings
                  "counts as covered, carried from that cycle; its findings are not re-read.")]
     public string? Prior { get; set; }
 
+    [CommandOption("--base <REF>")]
+    [Description("With --prior: git ref the change's base is resolved against when checking the prior cycle belongs to this change. Defaults to origin/HEAD.")]
+    public string? BaseRef { get; set; }
+
     [CommandOption("--out <PATH>")]
     [Description("Write the findings document the verdict was computed from (after --drop and the cited-line " +
                  "check), with per-lens coverage, to this path as JSON. The verdict itself is printed, not written.")]
     public string? Out { get; set; }
+
+    [CommandOption("--candidates")]
+    [Description("List the refutation candidates (KW-REVIEW-046) from the seat files saved so far, while other seats " +
+                 "still run. A lens with no seat file yet is not refused, and no verdict or findings document is " +
+                 "written; the verdict still needs a full run. With a decision model configured, a candidate whose " +
+                 "cited code it confidently found to support the claim is not listed, and its answers are kept beside " +
+                 "the seat folder for the verdict run.")]
+    public bool Candidates { get; set; }
+
+    [CommandOption("--task <ID>")]
+    [Description("With no --seats or --findings: the task id whose review folder holds the cycle. Omitted: the only " +
+                 "review folder, or the one named for the current branch.")]
+    public string? Task { get; set; }
+
+    [CommandOption("--no-decision-model")]
+    [Description("Do not ask the decision model (arbiter.provider) to merge duplicates, drop minor nitpicks, check " +
+                 "refutation candidates' claims or note severities. Without a configured model nothing is asked anyway.")]
+    public bool NoDecisionModel { get; set; }
+}
+
+/// <summary>Settings for <c>review cycle</c>.</summary>
+public sealed class ReviewCycleSettings : AnalysisSettings
+{
+    [CommandOption("--task <ID>")]
+    [Description("The task id whose review folder, .agent_scratchpad/<task-id>/review, holds the run's cycles. Any spelling: it is lower-cased and matched to the folder. Omitted: the only review folder, or the one named for the current branch.")]
+    public string? Task { get; set; }
+
+    [CommandOption("--base <REF>")]
+    [Description("Git ref the change's base is resolved against when deciding which recorded cycles belong to this change. Defaults to origin/HEAD.")]
+    public string? BaseRef { get; set; }
 }

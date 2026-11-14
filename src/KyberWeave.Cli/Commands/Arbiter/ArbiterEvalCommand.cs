@@ -145,7 +145,7 @@ public sealed class ArbiterEvalCommand : Command<ArbiterSettings>
             report.Add(new Diagnostic(
                 result.ErrorCode ?? ArbiterEvaluator.HookErrorCode,
                 Severity.Error,
-                result.ErrorMessage ?? "The dry-run evaluation failed closed.",
+                result.ErrorMessage ?? "The dry-run evaluation failed; a hook would allow the dispatch and log this error.",
                 "--event"));
         }
 

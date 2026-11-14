@@ -50,6 +50,12 @@ than keep trying. A fourth attempt is the loop this section exists to stop: each
 the same context, spends the same time, and is no likelier to converge than the three before it.
 Halting is the correct outcome, and the escalation below is how the work continues.
 
+## When the Arbiter stops the dispatch
+
+A tool call refused with `KW-ARB-BUDGET-001` means this dispatch has used its budget of tool calls or
+minutes. Make no more tool calls. Return a report whose first line is `STATUS: BUDGET_EXCEEDED`, then what
+is done, what is not, and the last failure you saw. It is not a circuit-breaker escalation.
+
 ## The escalation
 
 Halt the task and return this block in place of the completion digest:

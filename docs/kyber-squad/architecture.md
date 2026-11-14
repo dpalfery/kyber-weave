@@ -8,6 +8,7 @@ owner: dpalfery
 last-reviewed: 2026-11-12
 status: current
 decided-by:
+  - adr/0076-test-first-is-one-worker-per-task
   - adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude
   - adr/0068-doctor-owns-a-marked-block-in-the-shared-post-checkout-hook
   - adr/0067-copilot-system-prompt-override-is-machine-wide
@@ -1142,8 +1143,9 @@ and validates.
   delegation would reach every profile rather than the canonical `delegates-to` roster.
   `DevinRenderer` emits neither and records `permission-not-expressible` naming the roster.
   The lowered conductor is unaffected, because it runs in the main session. The delegating roles
-  carry their own fallback: `code-reviewer` applies each lens itself, in turn, and says in its
-  report that the council ran in-process; `architect` gathers its own sweeps and returns a live
+  carry their own fallback: the conductor loads the `review-council` skill, which starts
+  `code-reviewer`'s council seats from the main session, as on every harness whose sub-agents
+  cannot dispatch ([ADR 0079](../adr/0079-the-reviewer-starts-its-own-seats-where-sub-agents-can-dispatch.md)); `architect` gathers its own sweeps and returns a live
   Azure question as `STATUS: BLOCKED`, which the conductor puts to `azure-reader` and answers.
   Agents use Devin's directory layout so each resource closure stays inside its own agent's
   directory and authored links resolve verbatim; see the `DevinRenderer` class remarks for the
@@ -1211,7 +1213,7 @@ and validates.
 - **Copilot emit today**: `CopilotRenderer` writes each agent's
   `.github/agents/<name>.agent.md` and each skill's `.github/skills/<name>/SKILL.md`, then
   `SquadResourceProjection.Append` places every file that owner's Markdown links reach beside
-  the principal. A fresh Copilot render is 150 files — 24 agents, 29 skills, plus projected
+  the principal. A fresh Copilot render is 149 files — 24 agents, 28 skills, plus projected
   closures — with authored relative links resolving in the output; every skill resource
   reaches this render except `skills/setup-dev-environment/agents/openai.yaml`, which stays
   packaged-only Codex skill-UI metadata. That count is the current
@@ -1494,9 +1496,15 @@ to every dispatched worker's body exactly once.
 
 **What the block carries.** The Discovery order (`codegraph_explore` first, then the `kw-docs` tools,
 a direct read only for what an index does not cover, with that file and the reason named in the
-report); the plan-read ban (`<plan-index>` and `<specification-index>` are the conductor's, and an
-insufficient packet returns a blocker); the full-suite ban (run the classes the task names, because the
-review council and CI run the full suite on the integrated head); and the batched-reads line. The four
+report; tools are called directly, tool search only when the harness lists them as deferred, a failed
+call falls back to the shell form and then direct reads, and a tool is called unavailable only with
+the quoted error text of a call that was made); the plan-read ban (`<plan-index>` and `<specification-index>` are the conductor's, and an
+insufficient packet returns a blocker); the scope rule (the task's named files are the scope in any layer, a worker never returns BLOCKED or asks for a handoff over one, and unnamed work or any issue outside its task is reported as an `Open item:` line, never fixed, ADR 0080 and ADR 0082); the documented-rule line (a documented rule wins over nearby code that contradicts it, and the conflict is an open item); the full-suite ban (run the classes the task names, because the
+review council and CI run the full suite on the integrated head); the batched-reads line; and the
+skills-location line, which names the directory this render's skills were installed to
+(`{{skills-root}}` in the source, answered per harness and scope in the render pipeline: repository-relative
+at project scope, `~/…` at global scope) and forbids searching the filesystem for a skill or reading one
+from another repository. A global render with no root resolver omits that line instead of guessing. The
 rules and the check that holds each one are tabulated in [the worker rule map](worker-rule-map.md).
 
 **Where it is injected, and where it is not.** The block is applied in the render pipeline beside the
@@ -1513,8 +1521,8 @@ and the shipped corpus still cannot go quiet.
 
 **One source, not one copy per audience.** The block is read from the source directory rather than
 embedded in the binary, so the shipped text and this repository's text cannot differ. The rendered
-body's digest is deliberately untouched by the injection, so a migration report still describes the
-authored body a host migrated from. A standard template keeps its own test-runner line: a standard
+body's digest is deliberately untouched by the injection, so it still identifies the authored body
+rather than the render-time projection. A standard template keeps its own test-runner line: a standard
 ships into a host repository, is read on its own, and has no Squad render around it, so that line is
 the host's copy of the rule rather than a duplicate of this one.
 
@@ -1547,7 +1555,7 @@ product claim is here.
 flowchart TD
     Cluster["Failure cluster\n(first-observed test ID)"]
     Worker["Implementation or rework dispatch\n3 incremental fixes"]
-    Conductor["Conductor run\n2 rework dispatches"]
+    Conductor["Conductor run\n3 rework dispatches"]
     JEV["JEV tripwire or cap"]
     Escalation["STATUS: ESCALATION"]
     Finding["ESCALATION: circuit-breaker"]
@@ -1598,13 +1606,9 @@ and retained sessions stay available until task gates and run-level findings set
 
 **The architect declares the session group, not the conductor.** Each task in a plan's task file
 carries a `session` group, and tasks sharing one continue a single worker session where the harness
-allows it; the conductor does not invent one at dispatch. **RED and GREEN never share a group**,
-because the adversarial split is the reason the two are separate dispatches at all, and the
-separation is what decides whether a task is bundled. A follow-up fix and a later same-role task on
-one change do share a group: changing one assertion took a fresh worker 11 minutes, because the
-fresh worker re-derived context the previous one already had. The architect may therefore merge two
-RED tasks into one group when the later one needs no earlier GREEN, and never merges a RED with its
-GREEN.
+allows it; the conductor does not invent one at dispatch. A follow-up fix and a later task needing the same
+abilities on one change share a group: changing one assertion took a fresh worker 11 minutes, because the
+fresh worker re-derived context the previous one already had.
 
 Continuation is a harness capability, not a guarantee made by a renderer or model.
 Stateless delegation uses the recovery brief; resumable delegation uses its returned
@@ -1617,10 +1621,10 @@ preserving a cache entry.
 | Level | Cap | Scope |
 |---|---|---|
 | Worker inner loop | 3 incremental test-fix-verify attempts | Same failing fixture or cluster, one implementation or rework dispatch |
-| Conductor rework | 2 rework dispatches | Same cluster, entire delivery run |
+| Conductor rework | 3 rework dispatches | Same cluster, entire delivery run |
 
-A third unresolved worker attempt, or a third conductor dispatch of the same cluster,
-trips `CIRCUIT_BREAKER_TRIGGER: ITERATION_CAP_EXCEEDED`.
+A worker still not green after its third attempt, or a conductor dispatch of a cluster whose
+tally is already 3, trips `CIRCUIT_BREAKER_TRIGGER: ITERATION_CAP_EXCEEDED`.
 
 ### Oscillation (Q2)
 
@@ -1684,7 +1688,7 @@ execution throughput, conductor does not serialize all task execution or test ru
   symbol scopes do not overlap execute concurrently up to `review.max-concurrent-workers`.
 - **Worktree and artifact isolation**: Each concurrent worker executes in an isolated git
   worktree (`git worktree add`, or harness `Workspace: share`/`branch`) or uses dedicated per-task
-  artifact paths (`dotnet build --artifacts-path .agent_scratchpad/<task-id>/artifacts` for compiler intermediates and `kyber-weave review gates` `--out artifacts/task-gate-<task-id>.json` for gate reports) and direct
+  artifact paths (`dotnet build --artifacts-path .agent_scratchpad/<task-id>/artifacts` for compiler intermediates and `kyber-weave review gates` `--out .agent_scratchpad/<task-id>/task-gate.json` for gate reports) and direct
   assembly runner execution (`-class "<namespace>.<Class>"`). Workers author code and run
   targeted tests simultaneously without mutual interference or file locks.
 - **Worktree MCP canonical binding**: Parallel workers running in ephemeral worktrees bind MCP servers
@@ -1713,23 +1717,26 @@ execution throughput, conductor does not serialize all task execution or test ru
   integration boundary. All read-only tasks, test runs, and non-overlapping task implementations
   run in parallel.
 
-### Adversarial RED/GREEN role boundary and same-role task bundling
+### One worker per test-first task
 
-Quality and verification rigor depend on objective, adversarial test authorship:
+A test-first task is one unit of behaviour owned by one specialist, who writes its tests, runs the
+task gate with `--red` (the failing run), implements, and runs the task gate again (the passing run),
+all in one dispatch ([ADR 0076](../adr/0076-test-first-is-one-worker-per-task.md)). The two reports
+in the task's scratch folder, failing run first, are the proof; `KW-ARB-MODE-002` records on
+each return whether they show it. `test-dev` takes only tasks whose deliverable is tests. The split this replaces —
+`test-dev` writing RED tests in one task and a developer making them pass in another — deadlocked
+compiled test projects and stopped headless runs on stub and evidence rules. What it gave up, an
+independent test author, is covered by the council's `test-adequacy` lens, which reads every added
+test as an outsider; its findings per run are how the decision is monitored.
 
-- **Strict two-agent adversarial separation**: `test-dev` authors the failing contract test (RED)
-  with a distinct adversarial mindset, and the implementation specialist (`csharp-dev`, etc.)
-  implements production code (GREEN). RED and GREEN are never collapsed into a single worker
-  dispatch; the repository deliberately pays the dispatch and context cost to retain adversarial
-  tension and prevent confirmation bias.
-- **Same-role task bundling**: Conductor avoids unnecessary dispatch latency by bundling small
-  adjacent micro-tasks strictly within the same specialist role (for example, combining all
-  related contract test assertions into one `test-dev` dispatch, or bundling small related
-  implementation edits across 1–3 files within the same specialist role into one dispatch), rather
-  than over-splitting.
-- **Independent verification pass**: Combining small tasks never bypasses verification. The
-  deterministic `task-gate` exit check and final council review execute against the integrated
-  working tree, ensuring all contract tests pass and no false positives or uncommitted changes survive.
+Both runs are one command, `kyber-weave review gates . --agent <name> --task <id>` (with `--red`
+for the failing run), which the packet prints filled in: it takes the task's files and declared
+test classes from the plan, writes each report where the Arbiter reads it, and prints failures in
+a few lines with the full log beside the report. How to write the tests — the test-first sequence,
+what to assert, unit or integration, test data and parallel safety — is one shared skill,
+`testing`, that every developer agent names instead of carrying its own copy; how tests work in a
+given repository is that repository's test standard, which the skill reads first through
+`docs_get_coding_standard_for_technology`.
 
 Operational contracts remain in
 `products/kyber-squad/agents/conductor.md`,
@@ -1745,7 +1752,7 @@ Regression pins live in `tests/KyberWeave.Tests/SquadCanonicalContentTests.cs` a
 ### The tracked task file and the paste-and-fill dispatch
 
 The conductor no longer derives its own prompts from the plan. Each prompt goes into a tracked
-task file at finalization: the architect writes a plan's — `docs/plans/<plan>.tasks.json` beside the plan — and `product-owner` writes a specification's — `<spec-folder>/tasks.json` inside the specification folder — each committed with its artifact
+task file at finalization: `kyber-weave docs tasks` derives a plan's — `docs/plans/<plan>.tasks.json` beside the plan — and a specification's — `<spec-folder>/tasks.json` inside the specification folder — from the plan or `tasks.md`, each committed with its artifact. No agent writes the file: it is a machine format, with a hash in it
 ([ADR 0063](../adr/0063-the-task-file-is-tracked-and-the-plan-stays-authoritative.md)). Tracking it
 rather than keeping it in `artifacts/` is what lets a push carry it to another machine, which is
 what makes resuming a run somewhere else possible at all.
@@ -1755,9 +1762,20 @@ what makes resuming a run somewhere else possible at all.
   because an earlier task on the same file moves them. The measured run's prompts carried none of
   this — the authoring contract asked for "exact files or symbols" and no commands — so a worker
   could not name the class that proved its change and reported a green suite it never ran.
-- **Two slots, and nothing else.** The conductor pastes each prompt **unchanged** and fills only
-  `{worktree}` and `{prior_results}`, pasting earlier worker reports as they were written. No plan
-  can know either: the second GREEN prompt in that run needed a cause an earlier worker had found.
+- **The conductor chooses the agent.** A plan task names the capabilities its work needs in plain
+  words, never an agent or a skill, so a new agent needs no change to the architect. The finalize
+  tool's ready queue shows each task's capabilities, and the conductor dispatches the agent whose
+  description fits them; a `Role:` line in the plan is the owner's override. The worker loads the
+  skills its own agent file names
+  ([ADR 0080](../adr/0080-plan-tasks-name-capabilities-and-the-conductor-chooses-the-agent.md)).
+- **The machine delivers the packet.** The conductor dispatches by task id; the worker runs
+  `kyber-weave docs packet <task id> --agent <its name>`, which resolves the one Ready plan, checks the task file against
+  its execution digest (a stale file is refused with the fix), and prints only that task's packet with
+  `{worktree}` filled in. `--prior-results <file>` fills `{prior_results}` with earlier worker reports as
+  they were written; without it that section says none were supplied. No plan can know either slot:
+  a later prompt in that run needed a cause an earlier worker had found. A conductor that
+  could not read a 33 KB file and retyped it through helpers left its worker blocked; the machine
+  prints the packet so no one retypes it.
 - **The plan stays authoritative.** The owner approves the plan, it holds the `## Decisions` table,
   and the Arbiter reads task ids, files, dependencies, skills, task text, test rows and out-of-scope
   items from it. Only the conductor stops reading it — 68 KB in the measured run.
@@ -1772,9 +1790,7 @@ what makes resuming a run somewhere else possible at all.
   title, text, files, dependencies, skills), the test contract rows, the out-of-scope paths and the
   development mode. A status flip or an edit to a Decisions row is therefore not stale; any task
   edit is. Stale means the conductor refuses the file until the architect regenerates it. The
-  architect takes the digest from `kyber-weave arbiter plan -f json` after its last plan edit, only when the command exits 0 with no `KW-ARB-PARSE-001` and no `KW-ARB-PLAN-001` finding, writes
-  the task file, then validates, and returns `PLAN_FINALIZED` only with no `KW-DOC-TASKS-*` finding;
-  a shell-less architect gets the digest from the conductor as `PLAN_DIGEST`. The task file is written in place at its final path, never through a sibling or temporary file such as a `.new` or `.tmp` copy. A specification's digest is over its `tasks.md`: the conductor runs `kyber-weave arbiter plan` and passes the digest to `product-owner` as `SPEC_DIGEST` before finalization. The parser ends a Depends value at the next bullet at the same or a shallower indent (deeper sub-bullets stay in the value), and ends a Files bullet list at the next bold-labelled bullet, so a spec item's `_Requirements:_` line and `**Acceptance:**` bullet are not taken as dependencies or files.
+  architect runs `kyber-weave docs tasks <plan> --write` after its last plan edit: the command derives every field, the digest (SHA-256 over the parsed document, `PlanDocumentParser.ExecutionDigest`) and each prompt from the plan, writes the file in place, and leaves it untouched when already current. Finalization runs the same generator: the conductor's `docs_finalize_approved_plan_and_write_task_file` tool (CLI twin `docs finalize`, [ADR 0078](../adr/0078-the-conductor-finalizes-and-archives-plans-through-two-docs-tools.md)) records the approval, sets the plan Ready and writes the file, and refuses, undoing every change, on any `KW-DOC-TASKS-*` error; the architect's `FINALIZE` path is the fallback. A prompt is the plan task's own text plus a `Command:` and an `Acceptance criteria:` line taken from the task or its test contract row, the `{worktree}` slot and the `{prior_results}` slot. When the plan lacks one, the command writes nothing and names the task and the line to add (`-004`). `--check` exits 1 and names each difference without writing. A shell-less architect has the conductor run the command. A specification's digest is over its `tasks.md`: the conductor runs the same command on it before finalization. The parser ends a Depends value at the next bullet at the same or a shallower indent (deeper sub-bullets stay in the value), and ends a Files bullet list at the next bold-labelled bullet, so a spec item's `_Requirements:_` line and `**Acceptance:**` bullet are not taken as dependencies or files.
 - **Each finished task commits with a `Task:` line.** The worker commits on the feature branch with
   `Task: <id>` and its report in the commit body, and the branch is pushed after each integrated
   task, so `run start --resume` can read the completed tasks and their results from the commits
@@ -1782,16 +1798,16 @@ what makes resuming a run somewhere else possible at all.
   mid-run push carried nothing and a resumed run opened with an architect pass to assess progress
   (225 seconds and 64 tool calls in the measured run).
 - **The session group is the architect's.** See [task session continuity](#task-session-continuity)
-  above: tasks sharing a `session` group continue one worker session, and RED and GREEN never do.
+  above: tasks sharing a `session` group continue one worker session.
 
 ```mermaid
 flowchart TD
-    Architect["architect at finalization\nwrites plan + tasks.json"]
+    Architect["conductor finalize tool\nsets plan Ready + writes tasks.json"]
     Validate["conductor validates the file\nthrough the docs tools"]
-    Paste["conductor pastes each prompt\nfills {worktree} and {prior_results}"]
+    Paste["conductor dispatches by task id\nworker runs docs packet"]
     Worker["worker dispatches, commits\nTask: id + report"]
     Resume["run start --resume\nreads the Task: lines"]
-    Archive["docs-dev archives the plan\nand removes the file with git rm"]
+    Archive["docs-dev harvests, then the conductor's\narchive tool archives the plan\nand removes the file"]
 
     Architect --> Validate
     Validate --> Paste
@@ -1922,7 +1938,12 @@ What follows is why it is shaped that way
   exact command and a `RUN-START: true` marker. `KW-ARB-PLAN-001` escalates a `delegate` dispatch
   that names no `PLAN_FILE`, which would refuse the very route the marker exists for, so
   `TriggerClassifier` classifies the marker as `investigate` and the roster check and
-  `KW-ARB-READONLY-001` still apply to the dispatch.
+  `KW-ARB-READONLY-001` still apply to the dispatch. Skipping it is caught on machine facts: the
+  command records the repository's common git directory, the run's worktree and the start time
+  under `~/.kyber-weave/runs/`, and `KW-ARB-RUN-001` refuses a writer dispatch while no recorded
+  run is live ([runbook](../kyber-arbiter/runbook.md#reading-a-run-start-refusal)). A `--type`
+  outside the conventional-commit set exits `2` with the valid types, the closest one when the
+  value looks like a typo of it, and the defaults (`feat` for a feature, `fix` for a defect).
 - **The onboarding answer is checked first after configuration loads, ahead of tool checks and fetch.** A configured repository whose
   configuration carries no `onboarding:` value has never chosen the technologies, gates and
   standards the run will be held to, so the run stops there — before the CodeGraph probe and before
@@ -1951,13 +1972,14 @@ description and does not gate readiness. Review that follows is ordinary post-re
 not a conductor gate. The conductor never merges. Unresolved circuit-breakers are listed as pending human review, not held back
 ([ADR 0045](../adr/0045-conductor-operator-channel-opt-in.md)).
 
-The end-of-run council is a loop, not a single pass. After `REQUEST_CHANGES`, every critical and
-major finding and every failed blocking gate goes to the worker that owns its scope, and the
-council re-reviews until it returns `APPROVE`; every cycle after the first is a verifier cycle over
-the fix delta. The hard stop is 5 cycles, or 3 cycles in a row in which the count of surviving
-critical and major findings does not fall: the findings still open are then listed in the pull
+The end-of-run council is a loop, not a single pass. After `REQUEST_CHANGES` or an `APPROVE` that
+leaves anything to fix, every finding at or above `review.policy.fix-level` (default `minor`) and every failed blocking gate goes to the worker that owns
+its scope, one dispatch per worker, and the council re-reviews until the verdict prints `fix round:
+none`; every cycle after the first is a verifier cycle over
+the fix delta. The hard stop, computed by `review verdict`, is 5 cycles, or 3 cycles in a row in which the count of
+findings to fix does not fall: the findings still open are then listed in the pull
 request as pending human review, and delivery continues. Each cycle keeps its seat files,
-`gates.json`, the `findings.json` the verdict command writes, and `head` in
+`gates.json`, the `findings.json` the verdict command writes, and `cycle.json` (the branch, base and head it reviewed) in
 `.agent_scratchpad/<task-id>/review/cycle-<n>/` until the run ends, and the conductor passes the
 prior cycle folder to the next review. The loop runs on the open pull request, so ready stays
 decided by required CI alone. The procedure is in
@@ -1999,6 +2021,11 @@ not a convenience, and **a failure stops the run**
   `STATUS: TOOL_FAILURE` with the doctor's `fix:` line and dispatches nothing, in supervised mode and
   under `autonomy: autonomous` alike. `autonomy: autonomous` stops rather than parking the item for
   human review, because a run with no code search produces findings nobody can trust.
+- **Only machine evidence stops a run.** A non-zero `doctor --ensure` exit, or a tool response or worker
+  report carrying the literal line `STATUS: TOOL_FAILURE`, stops it. A worker's note that it fell back to
+  direct reads, or a `Discovery:` line with zeros, is a warning in the run report and the run continues.
+  A conductor that doubts the tooling dispatches one `doctor --ensure` and the exit code decides, never a
+  question to the user in autonomous mode.
 - **The setting is read, not judged.** `stop-on-tool-failure` in `.kyber-weave/kyber-weave.yml`
   decides it, and the doctor reads that setting itself, so no agent interprets a degraded result:
   **absent means stop**, `false` means the tool's failure is reported and the run continues. A value
@@ -2212,6 +2239,44 @@ when the prompt file is absent, and under `--ensure` it turns each failure into 
 checks, their ids, and the log line they read are in the [runbook](copilot-prompt-runbook.md).
 
 ---
+
+### Briefs: only the reference sections a run uses
+
+An agent's `references/*.md` files are progressive disclosure on paper and were read whole in
+practice: a conductor run used one route in one autonomy mode and still read every route's contract.
+The route, the autonomy and the plan's development mode are known before a model reads anything, so
+`kyber-weave squad brief <agent>` selects the sections that apply and prints only those.
+
+- **One map.** `src/KyberWeave.Core.Squad/Briefs/Resources/briefs.yml`, embedded in the binary, lists each
+  agent's reference files in output order. A file carries a condition (`path=plan`, `autonomy=autonomous`,
+  `mode=test-first`, clauses joined by `;`) and each heading in it carries one more. A section carries its
+  sub-headings.
+- **Fail open.** A heading the map does not mention is included and named on the diagnostics line as
+  unmapped; a reference file the map does not list is named as read whole; a fact the run does not know
+  keeps every section that depends on it. Rewriting a reference file can therefore only make a brief
+  longer, never lose an instruction. A mapped heading that a file no longer has fails
+  `SquadBriefMapTests`, naming the heading.
+- **Facts.** Given on the command line, else resolved: autonomy from the prompt, then the root
+  `AGENTS.md` Config Reg, then the configuration, then `supervised`; mode and the `plan` route from
+  `--plan` (resolved by the shared plan resolver, parsed by the plan parser). The plan's frontmatter
+  status labels the header but never cuts a section, because it changes during a run.
+- **Where the files are.** `--from <DIR>`, else the installed copy for `--harness` (every harness when it
+  is not given) at project scope under the run's checkout, then global scope, then the product source
+  tree. Harnesses install references beside the agent file or beside its entry-point skill, as
+  `.markdown` where the harness scans for `*.md`; `SquadReferenceLocator` names those directories and a
+  test renders the squad for every harness to keep them true.
+- **`run start --brief`.** Appends the conductor's brief to the run-start report (a `brief` field under
+  `--json`) for `--path` and `--autonomy`. It is opt-in so the report keeps its shape, and a brief that
+  cannot be built is a warning: the branch exists, the run is ready, and the conductor reads the
+  references whole.
+- **Who runs it.** The conductor runs `run start … --brief` itself and reads a whole reference only when
+  there is no brief, an error or a diagnostics line; its run-start text lives in `conductor.md`, because it
+  runs before any brief exists. The architect runs `squad brief architect --path <intake|plan|finalize|escalation>`
+  first, the `finalize` path selecting the finalization sections of `plan-authoring.md` and the `plan` path
+  the drafting ones. The Copilot conductor's guard allows exactly `run start`, `squad brief`, `docs tasks
+  <plan> --list` and `doctor --ensure`, one command per call; the architect's shell allowlist
+  (`KW-ARB-SHELL-001`) allows `squad brief architect` with `--path`, `--plan`, `--autonomy`, `--mode` and
+  `--harness`.
 
 ## Arbiter savings in the roles
 

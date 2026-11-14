@@ -1,0 +1,112 @@
+# Which parts of each agent's reference files apply to a run, keyed by the facts the machine knows before
+# the model reads anything. Read by `kyber-weave squad brief` and `kyber-weave run start --brief`.
+#
+# A `when` is `always`, or clauses joined by `;` that must all hold. A clause is `fact=a|b`. Facts:
+#   path      intake | plan | finalize | spec | escalation   which route or dispatch the brief is for
+#   autonomy  supervised | autonomous                        who answers the gates
+#   mode      test-first | standard                          the plan's development mode
+# A fact the run does not know satisfies every clause on it, so a missing fact never drops text.
+#
+# `file` is the authored file name under agents/<agent>/references. A file's `when` gates the whole file.
+# `sections` maps a heading to the extra condition for that section and everything beneath it. Headings are
+# matched ignoring case, punctuation and level. A heading missing from this map is INCLUDED and reported as
+# unmapped, so rewriting a reference file can never silently drop its instructions.
+#
+# The conductor's run-start text is not here: it runs before any brief exists, so it lives in conductor.md.
+schema: kyber-squad.briefs/v1
+agents:
+  conductor:
+    - file: intake-path.md
+      when: path=intake
+      sections:
+        Todo and Open-Request Intake Path: always
+        Intent first: always
+        Defect diagnosis: always
+        Assessment: always
+        Arbiter intake shortcut: always
+        Promotion: always
+        Planner dispatches: always
+    - file: plan-path.md
+      when: path=plan
+      sections:
+        Plan Path: always
+        Route by lifecycle: always
+        Draft and approval protocol: always
+        Planner dispatches: always
+        Review and its command: always
+        Mode contract: always
+    - file: spec-path.md
+      when: path=spec
+      sections:
+        Spec Path: always
+        Route by persisted state: always
+        Headless phase protocol: always
+        Gate collapse in autonomous mode: autonomy=autonomous
+        Revisions and mode changes: always
+        Planner dispatches: always
+    - file: autonomy.md
+      when: always
+      sections:
+        Autonomy: always
+        Resolution: always
+        Autonomous behaviour: autonomy=autonomous
+        Hard-block escalation: autonomy=autonomous
+        Gaps and open questions: autonomy=autonomous
+        Delivery: always
+        Autonomous approval of the run's delivery: autonomy=autonomous
+        Supervised delivery: autonomy=supervised
+        Hard stops: autonomy=autonomous
+        Circuit-breakers are non-fatal: autonomy=autonomous
+        Circuit-breakers in supervised mode: autonomy=supervised
+        Final report: always
+        Autonomous decisions in the report: autonomy=autonomous
+  architect:
+    - file: plan-authoring.md
+      when: path=plan|finalize
+      sections:
+        Plan Authoring: always
+        Start or resume: path=plan
+        Status vocabulary: always
+        Required plan contract: path=plan
+        Documented rules over existing code: path=plan
+        Task granularity: path=plan
+        Session groups: path=plan
+        Decisions: always
+        Open decisions while drafting: path=plan
+        Autonomous drafting: autonomy=autonomous
+        Documentation gates after plan writes: always
+        With a shell: always
+        With no shell: always
+        Ready: path=plan
+        Finalization: path=finalize
+        Task file: path=finalize
+        Write errors: always
+        Planning inside a worktree: always
+    - file: intake-assessment.md
+      when: path=intake
+      sections:
+        Intake Assessment: always
+        Diagnosed Ready-task assessment: always
+        Intent check: always
+        Classification: always
+    - file: arbiter-escalation.md
+      when: path=escalation
+      sections:
+        Arbiter Escalation: always
+        Outcomes: always
+        Investigator dispatches: always
+        Ledger loss and attestation (D31): always
+    - file: test-first-contract.md
+      when: mode=test-first;path=plan|finalize|escalation
+      sections:
+        Test-First Contract: always
+    - file: standard-verification.md
+      when: mode=standard;path=plan|finalize|escalation
+      sections:
+        Standard Verification Contract: always
+    - file: autonomy-decisions.md
+      when: autonomy=autonomous
+      sections:
+        Autonomous Decisions: always
+        Three checks per open decision: always
+        Escalation (hard block): always

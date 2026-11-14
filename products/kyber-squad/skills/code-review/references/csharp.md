@@ -14,10 +14,9 @@ applies.
 
 ## Review procedure
 
-- **ReSharper InspectCode** is a declared gate, not a reading exercise. Its findings arrive
-  through the `static-analysis-triage` lens; the `resharper-clt` skill owns how the gate is
-  declared and what its inspections mean. Do not re-derive by eye what the tool already
-  reported by rule id.
+- **Compiler and analyzer warnings** from the build gate are not a reading exercise. They
+  arrive through the `static-analysis-triage` lens. Do not re-derive by eye what the tool
+  already reported by rule id.
 - **Cross-file duplication is not the analyzer's.** `DuplicatedStatements` sees one
   statement's branches and `RedundantOverload` one method group; neither looks across files.
   The `duplicate-implementation` lens and its CodeGraph-backed gate hold that concern, and

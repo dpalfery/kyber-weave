@@ -29,7 +29,7 @@ public static class ReviewConfigLoader
 
     /// <summary>Keys the typed reader maps on <c>review.policy</c>. Any other key is ignored and reported.</summary>
     private static readonly string[] PolicyKeys =
-        ["major-count-blocks", "min-confidence", "strictness", "suppressions"];
+        ["fix-level", "major-count-blocks", "min-confidence", "minor-findings", "strictness", "suppressions"];
 
     /// <summary>Merges the parsed <c>review:</c> section over the defaults.</summary>
     /// <param name="defaults">The configuration a host gets when a key is absent.</param>
@@ -62,6 +62,7 @@ public static class ReviewConfigLoader
                 ParseMaxConcurrentWorkers(section.MaxConcurrentWorkers, defaults.MaxConcurrentWorkers),
             CouncilDeadlineSeconds =
                 ParseCouncilDeadlineSeconds(section.CouncilDeadlineSeconds, defaults.CouncilDeadlineSeconds),
+            Parallelism = ParseParallelism(section.Parallelism, defaults.Parallelism),
             Policy = ParsePolicy(section.Policy, defaults.Policy),
             Warnings = warnings ?? defaults.Warnings
         };
@@ -783,6 +784,17 @@ public static class ReviewConfigLoader
         return seconds;
     }
 
+    private static int ParseParallelism(int? configured, int defaults)
+    {
+        if (configured is not { } gates)
+            return defaults;
+
+        if (gates <= 0)
+            throw new YamlException("review.parallelism must be greater than zero.");
+
+        return gates;
+    }
+
     private static ReviewPolicy ParsePolicy(ReviewPolicyYaml? policy, ReviewPolicy defaults)
     {
         if (policy is null)
@@ -815,11 +827,31 @@ public static class ReviewConfigLoader
             Strictness = strictness,
             MajorCountBlocks = majorBlocks,
             MinConfidence = minConfidence,
+            FixLevel = policy.FixLevel is not null
+                ? ParseFixLevel(policy.FixLevel)
+                : policy.MinorFindings is null ? defaults.FixLevel : ParseLegacyMinorFindings(policy.MinorFindings),
             Suppressions = policy.Suppressions is null
                 ? defaults.Suppressions
                 : ParseSuppressions(policy.Suppressions)
         };
     }
+
+    private static ReviewFixLevel ParseFixLevel(string value) => value.Trim() switch
+    {
+        "critical" => ReviewFixLevel.Critical,
+        "major" => ReviewFixLevel.Major,
+        "minor" => ReviewFixLevel.Minor,
+        "nitpick" => ReviewFixLevel.Nitpick,
+        _ => throw new YamlException($"review.policy.fix-level '{value}' is not recognised; use critical, major, minor or nitpick.")
+    };
+
+    /// <summary>The key before <c>fix-level</c>, which never shipped: <c>follow-up</c> stood for <c>major</c>, <c>fix</c> for <c>minor</c>.</summary>
+    private static ReviewFixLevel ParseLegacyMinorFindings(string value) => value.Trim() switch
+    {
+        "follow-up" => ReviewFixLevel.Major,
+        "fix" => ReviewFixLevel.Minor,
+        _ => throw new YamlException($"review.policy.minor-findings '{value}' is not recognised; it is replaced by review.policy.fix-level (critical, major, minor or nitpick).")
+    };
 
     private static ReviewStrictness ParseStrictness(string value) =>
         value.Trim() is { Length: > 0 } trimmed && char.IsLetter(trimmed[0]) &&

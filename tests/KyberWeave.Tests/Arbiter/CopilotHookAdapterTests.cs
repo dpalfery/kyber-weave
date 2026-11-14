@@ -438,36 +438,32 @@ public sealed class CopilotHookAdapterTests
     }
 
     [Fact]
-    public void InternalError_LocalSchema_WritesLocalBlock()
+    public void InternalError_LocalSchema_AllowsAndLogs()
     {
         ScriptedEngine engine = new() { ThrowOnPre = true };
         string stdin = VsCodeFixture("pre-runsubagent-dispatch.json").Replace(
             "toolu-copilot-vs-dispatch-1", "toolu-copilot-vs-error-1", StringComparison.Ordinal);
 
-        (int exit, string stdout, _) = Run(CopilotHookAdapter.VsCodeToken, stdin, "conductor", engine);
+        (int exit, string stdout, string log) = Run(CopilotHookAdapter.VsCodeToken, stdin, "conductor", engine);
 
+        // ADR 0072: a fault the host cannot decide on allows, with the code in the log.
         Assert.Equal(0, exit);
-        using JsonDocument doc = JsonDocument.Parse(stdout);
-        JsonElement output = doc.RootElement.GetProperty("hookSpecificOutput");
-        Assert.Equal("deny", output.GetProperty("permissionDecision").GetString());
-        string reason = output.GetProperty("permissionDecisionReason").GetString() ?? string.Empty;
-        Assert.Contains(HookCommand.FailClosedCode, reason, StringComparison.Ordinal);
-        Assert.Contains("ANSWER: error", reason, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, stdout);
+        Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void InternalError_CliSchema_WritesCliBlock()
+    public void InternalError_CliSchema_AllowsAndLogs()
     {
         ScriptedEngine engine = new() { ThrowOnPre = true };
 
-        (int exit, string stdout, _) = Run(
+        (int exit, string stdout, string log) = Run(
             CopilotHookAdapter.CliToken, CliFixture("pre-task-object.json"), null, engine);
 
+        // ADR 0072: a fault the host cannot decide on allows, with the code in the log.
         Assert.Equal(0, exit);
-        using JsonDocument doc = JsonDocument.Parse(stdout);
-        Assert.Equal("deny", doc.RootElement.GetProperty("permissionDecision").GetString());
-        string reason = doc.RootElement.GetProperty("permissionDecisionReason").GetString() ?? string.Empty;
-        Assert.Contains(HookCommand.FailClosedCode, reason, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, stdout);
+        Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
     }
 
     [Fact]

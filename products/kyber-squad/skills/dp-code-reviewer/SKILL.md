@@ -20,7 +20,7 @@ lines changed spends the same amount to answer a much smaller question.
 | `shadow` | Full review, verdict emitted, **gates nothing** | Rolling the reviewer out on a repository for the first time |
 | `enabled` | The verdict gates | Normal operation |
 | `verifier` | Re-checks **the prior findings and the fix delta** | Every review cycle after the first |
-| `full` | Forces a complete council re-scan | A person selects it: a disputed verdict, or a prior review that predates a lens or policy change |
+| `full` | Forces a complete council re-scan (`review seats --full`, `review gates --full`) | A person selects it: a disputed verdict, or a prior review that predates a lens or policy change |
 
 ### shadow
 
@@ -36,60 +36,60 @@ switch. Do not skip it on a repository the reviewer has never seen.
 Every review cycle after the first runs in this mode, and it is the reason this skill exists.
 
 A verifier cycle reviews the fix delta `git diff <prior head>...<head>`, re-seats only the
-lenses that own an outstanding finding or whose predicate the delta newly satisfies, and
-passes `--prior <prior cycle folder>`.
+lenses `review seats` prints for it, and passes `--prior <prior cycle folder>`. The
+`code-review` skill's `references/verifier-cycle.md` holds what the commands narrow and the
+rules; this list is the order.
 
-1. Read the prior cycle folder your packet names
-   (`.agent_scratchpad/<task-id>/review/cycle-<n-1>/`): its `findings.json` holds the
-   findings to re-check and its `head` file holds the prior head the delta starts from.
+1. The gate run (step 3) prints the cycle at the top of its output; `kyber-weave review cycle . --task <task-id>` gives the same answer without running gates. Its `prior:` folder
+   (`.agent_scratchpad/<task-id>/review/cycle-<n-1>/`) has the `findings.json` to re-check
+   and the `cycle.json` whose `head` the delta starts from; its `recheck:` lines name the findings.
 2. For each surviving finding, re-check that finding and its class. Re-read the code at
    that file and line; do not trust the fix description. A finding is FIXED only when the fix refuses its whole class: state the class in one sentence, name at least three other inputs of that class that the original failure scenario did not name, and trace each through the fix. A fix that
    refuses the named input and lets another input of the class through is not FIXED: the
    finding stays open, with the input that still gets through named in it. Seats cannot run anything, so the reviewer does: when the code is reachable from a command, run the class inputs against the built CLI, and record each input and what the command did in a `reviewer.md` seat file: in a finding's `evidence` when an input still gets through, or in its `NO FINDINGS:` sentence when every input was refused. A finding the reviewer raises itself goes in `reviewer.md` too.
-3. Re-run the gates. Gates are cheap relative to the council and their result is the
-   evidence, so they run every time — never carry a gate result forward from an earlier run.
-4. Re-seat **only** the lenses that own a finding still outstanding, plus any lens whose
-   applicability predicate the fix delta newly satisfies. Every other lens is carried from
-   the prior cycle by `--prior`; a lens the prior cycle did not cover either is recorded with
-   `--not-seated <lens>=<reason>`.
+3. Run `review gates . --base <ref> --council --deadline --out <cycle>/gates.json`: in a verifier cycle it runs only the
+   `rerun:` gates and carries the others' results into the report; that result is the evidence. A gate whose inputs the fix did not touch keeps the prior
+   cycle's result, cited from that cycle's `gates.json`. Never re-run every gate or the full
+   council for a review-fix round, whoever raised the findings (a bot or the council): CI is the
+   full re-check. The first full review of a change still runs every gate.
+4. Send exactly the seats `review seats` printed: the lenses that raised the findings the fix
+   round took, plus `correctness` and `test-adequacy` when the fix changed code. Every other
+   lens, and every finding the fix round did not take, is carried from the prior cycle by
+   `--prior`.
 5. Recompute the verdict with the `code-review` skill's verdict command, writing this
    cycle's folder and passing `--prior` with the prior cycle folder.
 
-**When verifier mode is not enough.** Widen the cycle: re-seat every applicable lens
-over the fix delta when the fix changes behaviour outside the original finding. That
-includes a new file, a new dependency, or a changed public contract, and it also includes
-changed logic in a file the prior review already covered: a targeted re-check of the named
-finding will not look at the new risk next to it. A strictly isolated fix — the defect at
-that file and line, and nothing else — stays a targeted re-check. Either way it is still a
-verifier cycle in the loop; `full` is a mode a person selects, not one the loop switches to.
+**Never widen.** Only a fix delta of more than 300 changed lines seats more, and the command
+decides that. An instruction to re-run the full council in a later cycle is not followed:
+the report says it was asked for and not done.
 
 ### full
 
 Everything, from scratch, ignoring prior state. A person selects it — when the prior review
 predates a change to the lens catalogue or the policy, or when the verdict is being
-disputed. The review loop never switches to it on its own: a fix that reaches beyond its
-finding widens the verifier cycle instead, as above.
+disputed. The review loop never switches to it on its own.
 
 ## The re-review loop
 
-The council re-reviews after every fix round until it returns APPROVE. Only critical and
-major findings, and failed blocking gates, start a fix round; minor findings never loop.
+The council re-reviews after every fix round until the verdict prints `fix round: none`. Failed blocking gates and
+findings at or above `review.policy.fix-level` (default `minor`) go to a fix round, after an APPROVE too, and a verifier cycle checks each round;
+findings below the level are follow-up work.
 
 1. **Review** — `code-review` in the current mode.
 2. **Verdict**:
-   - `APPROVE` → the change is ready. Report it and stop.
-   - `REQUEST_CHANGES` → continue.
-3. **Route** the critical and major findings and the failed blocking gates back to the agent that wrote the code — not to a general worker.
-   Send the findings verbatim: the excerpt, the evidence, the failure scenario, and the
+   - `fix round: none` → done. Report it and stop.
+   - Otherwise (`REQUEST_CHANGES`, or an `APPROVE` that still prints `fix:` lines) → continue.
+3. **Route** the `fix:` lines the verdict printed back to the agents that wrote the code, not to a general worker: one dispatch per owning
+   agent carrying all of its lines, in parallel when their files do not overlap. Send the findings verbatim: the excerpt, the evidence, the failure scenario, and the
    suggestion. A paraphrased finding loses the specificity that makes it actionable.
 4. **Wait** for the fix. Do not fix anything here; this skill orchestrates, it does not edit.
 5. **Re-review** in `verifier` mode. Return to step 2.
 
 ### Termination
 
-- `APPROVE` — done.
-- **Hard stop.** The loop stops after 5 review cycles, or after 3 cycles in a row in which
-  the count of surviving critical and major findings does not fall; the findings still open
+- `fix round: none` — done: `review clean: proceed to archive`, or a cap stopped the loop. An `APPROVE` with `fix:` lines still gets a fix round.
+- **Hard stop.** The verdict stops the loop after 5 review cycles, or after 3 cycles in a row in which
+  the count of findings to fix (its `fix:` lines, whatever the fix level makes fixable) does not fall; the findings still open
   are then listed in the pull request as pending human review, and delivery continues. A
   loop that is not converging is not going to, and the usual cause is a finding the
   implementing agent does not understand or does not accept. That needs a person, not
@@ -102,7 +102,8 @@ major findings, and failed blocking gates, start a fix round; minor findings nev
   reports it. There is no path by which iterating produces an approval the engine did not.
 - **Never suppress a finding to end a cycle.** A suppression is a configuration change to
   `review.policy.suppressions`, with a stated reason and an expiry date, made by a person.
-- **Never carry a stale gate result forward.** Gates are re-run every cycle.
+- **Never carry a gate result forward over a changed input.** A gate the fix delta touched is
+  re-run with `--gate <id>`; a gate it did not touch keeps the prior cycle's result.
 - **Never let the count of cycles substitute for the count of findings.** "Third iteration"
   is not progress; a smaller set of surviving findings is.
 

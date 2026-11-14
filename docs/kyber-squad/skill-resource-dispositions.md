@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-10-30
+last-reviewed: 2026-11-13
 ---
 
 # Skill-resource dispositions and policy-line ledger
@@ -57,6 +57,11 @@ it stands, not this ledger's quotations of what it used to say.
 |---|---|---|---|---|---|
 | `skills/code-review-loop/code-review-loop.md` | procedure | retain-in-place | rendered | — | Kyber-authored review-remediation procedure across platforms; linked from its `SKILL.md` and delivered beside the principal in every harness. |
 | `skills/code-review/references/azure.md` | review-pointer | pointer-already-#126 | rendered | the declared `<azure-coding-standard>` | Pointer-only since #126 (finding 7); resolves the `<azure-coding-standard>` registry token where the host declares one. |
+| `skills/code-review/references/configuration.md` | procedure | retain-in-place | rendered | — | The host's `review:` configuration keys, moved out of `SKILL.md` because the reviewer does not read them on a cycle. Split out of `SKILL.md` on 2026-11-13 so each review cycle reads only its own part. |
+| `skills/code-review/references/first-review.md` | procedure | retain-in-place | rendered | — | The council fan-out and the lens catalogue, read only in a first full review; the council's gate run names it on its `next:` line. Split out of `SKILL.md` on 2026-11-13 so each review cycle reads only its own part. |
+| `skills/code-review/references/pre-push.md` | procedure | retain-in-place | rendered | — | The pre-push self-review gate, read only when a session reviews its own change after the draft push. Split out of `SKILL.md` on 2026-11-13 so each review cycle reads only its own part. |
+| `skills/code-review/references/quick-review.md` | procedure | retain-in-place | rendered | — | The quick review of a change of at most 300 lines, read alone. Split out of `SKILL.md` on 2026-11-13 so each review cycle reads only its own part. |
+| `skills/code-review/references/verifier-cycle.md` | procedure | retain-in-place | rendered | — | The review loop and what a verifier cycle re-checks, read in every cycle after the first; the gate run names it on its `next:` line. Split out of `SKILL.md` on 2026-11-13 so each review cycle reads only its own part. |
 | `skills/code-review/references/csharp.md` | review-pointer | pointer-already-#126 | rendered | the declared `<csharp-coding-standard>` | Pointer-only since #126; resolves `<csharp-coding-standard>` where declared. |
 | `skills/code-review/references/github-actions.md` | review-pointer | pointer-already-#126 | rendered | the declared `<github-actions-coding-standard>` | Pointer-only since #126; resolves `<github-actions-coding-standard>` where declared. |
 | `skills/code-review/references/go.md` | review-pointer | pointer-already-#126 | rendered | the declared `<go-coding-standard>` | Pointer-only; names the `<go-coding-standard>` registry token and reports "no Go standard declared" when undeclared. Linked from `SKILL.md` under Technology checklists. |
@@ -84,6 +89,7 @@ it stands, not this ledger's quotations of what it used to say.
 | `skills/code-review/references/sql.md` | review-pointer | pointer-already-#126 | rendered | the declared `<sql-coding-standard>` | Pointer-only since #126 (finding 7 verified this file directly); resolves `<sql-coding-standard>` where declared. |
 | `skills/code-review/references/tauri.md` | review-pointer | pointer-already-#126 | rendered | the declared `<tauri-coding-standard>` | Pointer-only; names the `<tauri-coding-standard>` registry token and reports "no Tauri standard declared" when undeclared. Linked from `SKILL.md` under Technology checklists. |
 | `skills/code-review/references/typescript.md` | review-pointer | pointer-already-#126 | rendered | the declared `<typescript-coding-standard>` | Pointer-only; names the `<typescript-coding-standard>` registry token (`docs/standards/typescript/README.md`). Linked from `SKILL.md` under Technology checklists. |
+| `skills/create-pull-request/assets/pull-request-description.md` | procedure | retain-in-place | rendered | — | The default pull request description template the skill fills when the host declares none. |
 | `skills/create-pull-request/providers/azure-devops.md` | provider-guidance | retain-in-place | rendered | — | Rewritten by the archived [provider-aware create-pull-request plan](../archive/plans/2026-09-28-provider-aware-create-pull-request.md); provider facts are sourced and cited in this file (D2). |
 | `skills/create-pull-request/providers/github.md` | provider-guidance | retain-in-place | rendered | — | Rewritten by the archived provider-aware create-pull-request plan; provider facts are sourced and cited in this file (D2). |
 | `skills/create-pull-request/scripts/github-create-pr.ps1` | script | retain-in-place | rendered | — | Rewritten by the archived provider-aware create-pull-request plan when `create-pull-request-github`'s scripts were relinked here (D2). |
@@ -134,12 +140,12 @@ it stands, not this ledger's quotations of what it used to say.
 | `skills/setup-dev-environment/agents/openai.yaml` | metadata | retain-in-place | packaged-only | — | Codex skill-UI metadata (display name, default prompt, implicit-invocation policy); no instruction references it, so no closure reaches it (D2, D6). |
 | `skills/setup-dev-environment/references/inventory.md` | inventory | retain-in-place | rendered | — | Host bootstrap inventory reference; not a host-reversible policy (D2). |
 | `skills/task-gate/references/rework.md` | procedure | retain-in-place | rendered | — | The failure loop a gate failure sends a worker round: what to fix, when to rework, when to stop. Kyber-authored procedure rather than host-reversible policy, and the single home the trim in slice 8 moved the copies to. |
-| `skills/test-dev/references/e2e-test-patterns.md` | technique | retain-in-place | rendered | — | Playwright E2E technique; not a host-reversible policy (D2). |
-| `skills/test-dev/references/integration-test-patterns.md` | policy-bearing | policy-migrated-to-template | rendered | test standard | 9 Policy-line ledger rows below: 7 duplicate lines point to `<test-coding-standard>`; 2 migrated gaps move into the existing `test § Isolation` section. |
-| `skills/test-dev/references/mock-usage-analysis.md` | technique | retain-in-place | rendered | — | Mocking-analysis technique; not a host-reversible policy (D2). |
-| `skills/test-dev/references/rust-go-test-patterns.md` | technique | retain-in-place | rendered | — | Rust and Go test technique; runner and assertion policy lives in `<test-coding-standard>` § Rust and § Go (D2). |
-| `skills/test-dev/references/test-maintainability.md` | technique | retain-in-place | rendered | — | Test-maintainability technique; not a host-reversible policy (D2). |
-| `skills/test-dev/references/unit-test-patterns.md` | policy-bearing | policy-migrated-to-template | rendered | test standard | 8 duplicate Policy-line ledger rows below point to `<test-coding-standard>`. |
+| `skills/testing/references/e2e-test-patterns.md` | technique | retain-in-place | rendered | — | Playwright E2E technique; not a host-reversible policy (D2). |
+| `skills/testing/references/integration-test-patterns.md` | policy-bearing | policy-migrated-to-template | rendered | test standard | 9 Policy-line ledger rows below: 7 duplicate lines point to `<test-coding-standard>`; 2 migrated gaps move into the existing `test § Isolation` section. |
+| `skills/testing/references/mock-usage-analysis.md` | technique | retain-in-place | rendered | — | Mocking-analysis technique; not a host-reversible policy (D2). |
+| `skills/testing/references/rust-go-test-patterns.md` | technique | retain-in-place | rendered | — | Rust and Go test technique; runner and assertion policy lives in `<test-coding-standard>` § Rust and § Go (D2). |
+| `skills/testing/references/test-maintainability.md` | technique | retain-in-place | rendered | — | Test-maintainability technique; not a host-reversible policy (D2). |
+| `skills/testing/references/unit-test-patterns.md` | policy-bearing | policy-migrated-to-template | rendered | test standard | 8 duplicate Policy-line ledger rows below point to `<test-coding-standard>`. |
 | `skills/typescript-dev/references/data-access.md` | technique | retain-in-place | rendered | — | Column-selection, N+1, bounded-read, and transaction technique; data-access policy lives in `<typescript-coding-standard>` (D2). |
 | `skills/typescript-dev/references/errors-and-async.md` | technique | retain-in-place | rendered | — | Error-subclass, promise, cancellation, and shutdown technique; the policy lives in `<typescript-coding-standard>` (D2). |
 | `skills/typescript-dev/references/esm-and-gates.md` | procedure | retain-in-place | rendered | — | ESM conventions and the per-platform procedure for running the TypeScript gates; the commands themselves are named by `<typescript-coding-standard>` (D2). |
@@ -216,7 +222,7 @@ in the three policy-bearing maui-dev references. One hundred sixteen rows: 20 `m
 | `skills/dal-dev/references/migration-scripts.md` | 60 | `for audit timestamp columns, not hardcoded values` | retained | — | | Technique: FluentMigrator convention for audit-timestamp defaults, not a host-reversible policy (D2). |
 | `skills/dal-dev/references/migration-scripts.md` | 62 | `Schema-qualify all table references` | duplicate | sql § T-SQL authoring | `Schema-qualify every object reference` | — |
 | `skills/dal-dev/references/migration-scripts.md` | 63 | `verify with the SQL database project dacpac that schema state matches expectations` | retained | — | | Procedure: post-migration verification step, not a host-reversible policy (D2). |
-| `skills/dal-dev/references/migration-scripts.md` | 71 | `Stop — do not apply the migration` | retained | — | | Procedure: the conflict-resolution escalation sequence, not a host-reversible policy (D2). |
+| `skills/dal-dev/references/migration-scripts.md` | 71 | `Do not apply the migration` | retained | — | | Procedure: the conflict-resolution sequence (report the divergence, do not apply), not a host-reversible policy (D2). |
 | `skills/csharp-dev/references/aspnetcore-webapi.md` | 11 | `for request/response DTOs. The compiler generates` | duplicate | csharp § Types | `Request and response DTOs are` | — |
 | `skills/csharp-dev/references/aspnetcore-webapi.md` | 33 | `produces strongly-typed return values that are reflected in the OpenAPI schema` | duplicate | csharp § Stack | `TypedResults` | — |
 | `skills/csharp-dev/references/aspnetcore-webapi.md` | 54 | `Reject invalid input with structured` | duplicate | csharp § Errors | `not a bare string` | — |
@@ -255,23 +261,23 @@ in the three policy-bearing maui-dev references. One hundred sixteen rows: 20 `m
 | `skills/csharp-dev/references/azure-ai-rag.md` | 92 | `Microsoft.SemanticKernel` | superseded | — | | Host project fact (same rule as :25), not portable policy (D4). |
 | `skills/csharp-dev/references/azure-ai-rag.md` | 93 | `Use direct Azure SDK calls outside the persistence wrapper layer` | superseded | — | | Host wrapper-layer names, not portable policy (D4). |
 | `skills/csharp-dev/references/azure-ai-rag.md` | 94 | `Hardcode Azure endpoints, keys, or connection strings` | duplicate | csharp § Safety | `Secrets come from User Secrets locally and Key Vault` | — |
-| `skills/test-dev/references/integration-test-patterns.md` | 8 | `CRITICAL: Never Mock the Database` | duplicate | test § Layer boundaries | `Never mock the database in integration tests.` | — |
-| `skills/test-dev/references/integration-test-patterns.md` | 10 | `Integration tests must hit a real SQL Server instance` | duplicate | test § Layer boundaries | `Never mock the database in integration tests.` | — |
-| `skills/test-dev/references/integration-test-patterns.md` | 114 | `Each test must arrange its own data` | duplicate | test § Isolation | `Each test arranges its own data` | — |
-| `skills/test-dev/references/integration-test-patterns.md` | 115 | `Tests must be order-independent — don't assume another test ran first` | duplicate | test § Isolation | `Tests run in any order and do not depend on each other` | — |
-| `skills/test-dev/references/integration-test-patterns.md` | 116 | `Clean up test data in` | migrated | test § Isolation | `Clean up test data in DisposeAsync or use a transaction-per-test pattern` | — |
-| `skills/test-dev/references/integration-test-patterns.md` | 117 | `Use unique identifiers (GUID) for test records` | migrated | test § Isolation | `Use unique identifiers for test records to avoid conflicts with parallel runs` | — |
-| `skills/test-dev/references/integration-test-patterns.md` | 123 | `Real SQL Server only` | duplicate | test § Layer boundaries | `Use a real SQL Server instance` | — |
-| `skills/test-dev/references/integration-test-patterns.md` | 124 | `or polling helpers with timeout` | duplicate | test § What to assert | `polling helper with a timeout` | — |
-| `skills/test-dev/references/integration-test-patterns.md` | 125 | `Regression test for every bug fix` | duplicate | test § What to assert | `regression test whose name encodes the scenario that was broken` | — |
-| `skills/test-dev/references/unit-test-patterns.md` | 11 | `NSubstitute (prefer over Moq` | duplicate | test § Stack | `Prefer it over Moq` | — |
-| `skills/test-dev/references/unit-test-patterns.md` | 20 | `MethodName_StateUnderTest_ExpectedBehavior` | duplicate | test § Stack | `MethodName_StateUnderTest_ExpectedBehavior` | — |
-| `skills/test-dev/references/unit-test-patterns.md` | 51 | `Blank lines between Arrange, Act, Assert sections` | duplicate | test § Stack | `Arrange / Act / Assert with blank-line separation` | — |
-| `skills/test-dev/references/unit-test-patterns.md` | 53 | `No test logic shared via inheritance` | duplicate | test § Stack | `no test logic shared via inheritance` | — |
-| `skills/test-dev/references/unit-test-patterns.md` | 80 | `Prefer builder classes over inline object creation` | duplicate | test § What to assert | `Prefer builder classes over inline object creation` | — |
-| `skills/test-dev/references/unit-test-patterns.md` | 95 | `or polling helpers with timeout` | duplicate | test § What to assert | `polling helper with a timeout` | — |
-| `skills/test-dev/references/unit-test-patterns.md` | 98 | `Regression tests for every bug fix` | duplicate | test § What to assert | `regression test whose name encodes the scenario that was broken` | — |
-| `skills/test-dev/references/unit-test-patterns.md` | 106 | `mock at I/O boundary, never inside domain logic` | duplicate | test § Stack | `Mock at the I/O boundary, never inside domain logic` | — |
+| `skills/testing/references/integration-test-patterns.md` | 8 | `CRITICAL: Never Mock the Database` | duplicate | test § Layer boundaries | `Never mock the database in integration tests.` | — |
+| `skills/testing/references/integration-test-patterns.md` | 10 | `Integration tests must hit a real SQL Server instance` | duplicate | test § Layer boundaries | `Never mock the database in integration tests.` | — |
+| `skills/testing/references/integration-test-patterns.md` | 114 | `Each test must arrange its own data` | duplicate | test § Isolation | `Each test arranges its own data` | — |
+| `skills/testing/references/integration-test-patterns.md` | 115 | `Tests must be order-independent — don't assume another test ran first` | duplicate | test § Isolation | `Tests run in any order and do not depend on each other` | — |
+| `skills/testing/references/integration-test-patterns.md` | 116 | `Clean up test data in` | migrated | test § Isolation | `Clean up test data in DisposeAsync or use a transaction-per-test pattern` | — |
+| `skills/testing/references/integration-test-patterns.md` | 117 | `Use unique identifiers (GUID) for test records` | migrated | test § Isolation | `Use unique identifiers for test records to avoid conflicts with parallel runs` | — |
+| `skills/testing/references/integration-test-patterns.md` | 123 | `Real SQL Server only` | duplicate | test § Layer boundaries | `Use a real SQL Server instance` | — |
+| `skills/testing/references/integration-test-patterns.md` | 124 | `or polling helpers with timeout` | duplicate | test § What to assert | `polling helper with a timeout` | — |
+| `skills/testing/references/integration-test-patterns.md` | 125 | `Regression test for every bug fix` | duplicate | test § What to assert | `regression test whose name encodes the scenario that was broken` | — |
+| `skills/testing/references/unit-test-patterns.md` | 11 | `NSubstitute (prefer over Moq` | duplicate | test § Stack | `Prefer it over Moq` | — |
+| `skills/testing/references/unit-test-patterns.md` | 20 | `MethodName_StateUnderTest_ExpectedBehavior` | duplicate | test § Stack | `MethodName_StateUnderTest_ExpectedBehavior` | — |
+| `skills/testing/references/unit-test-patterns.md` | 51 | `Blank lines between Arrange, Act, Assert sections` | duplicate | test § Stack | `Arrange / Act / Assert with blank-line separation` | — |
+| `skills/testing/references/unit-test-patterns.md` | 53 | `No test logic shared via inheritance` | duplicate | test § Stack | `no test logic shared via inheritance` | — |
+| `skills/testing/references/unit-test-patterns.md` | 80 | `Prefer builder classes over inline object creation` | duplicate | test § What to assert | `Prefer builder classes over inline object creation` | — |
+| `skills/testing/references/unit-test-patterns.md` | 95 | `or polling helpers with timeout` | duplicate | test § What to assert | `polling helper with a timeout` | — |
+| `skills/testing/references/unit-test-patterns.md` | 98 | `Regression tests for every bug fix` | duplicate | test § What to assert | `regression test whose name encodes the scenario that was broken` | — |
+| `skills/testing/references/unit-test-patterns.md` | 106 | `mock at I/O boundary, never inside domain logic` | duplicate | test § Stack | `Mock at the I/O boundary, never inside domain logic` | — |
 | `skills/maui-dev/references/data-binding.md` | 11 | `faster than reflection-based bindings` | duplicate | maui § MVVM | `to its ViewModel so bindings compile` | — |
 | `skills/maui-dev/references/data-binding.md` | 27 | `this re-enables reflection and defeats compile-time checking` | retained | — | | Technique: framework-correctness detail about `x:DataType` scope, distinct from the policy choice already ledgered at :11 (D2). |
 | `skills/maui-dev/references/collectionview.md` | 25 | `enables compiled bindings and catches typos at build time` | duplicate | maui § MVVM | `to its ViewModel so bindings compile` | — |

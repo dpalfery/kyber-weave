@@ -71,6 +71,78 @@ public static class ChangedFiles
             .ToArray();
     }
 
+    /// <summary>The checked-out branch name, or an empty string on a detached head.</summary>
+    /// <exception cref="InvalidOperationException">git could not answer.</exception>
+    public static string CurrentBranch(string workingDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        string[] output = RunGitPaths(workingDirectory, "branch", "--show-current");
+        return output.Length == 0 ? string.Empty : output[0].Trim();
+    }
+
+    /// <summary>The commit <c>HEAD</c> names.</summary>
+    /// <exception cref="InvalidOperationException">git could not answer.</exception>
+    public static string HeadCommit(string workingDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        string[] output = RunGitPaths(workingDirectory, "rev-parse", "--verify", "HEAD");
+        return output.Length == 0 ? string.Empty : output[0].Trim();
+    }
+
+    /// <summary>The merge-base commit of <paramref name="baseRef"/> and <c>HEAD</c>.</summary>
+    /// <exception cref="InvalidOperationException">git could not answer.</exception>
+    public static string MergeBaseCommit(string workingDirectory, string baseRef)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseRef);
+        string[] output = RunGitPaths(workingDirectory, "merge-base", baseRef, "HEAD");
+        return output.Length == 0 ? string.Empty : output[0].Trim();
+    }
+
+    /// <summary>Whether <paramref name="commit"/> is <c>HEAD</c> or one of its ancestors; false when git does not know it.</summary>
+    public static bool IsAncestorOfHead(string workingDirectory, string commit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(commit);
+        try
+        {
+            RunGitPaths(workingDirectory, "merge-base", "--is-ancestor", commit, "HEAD");
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Lists every path the working tree changed since <paramref name="commit"/>, deleted paths included,
+    /// together with untracked files.
+    /// </summary>
+    /// <remarks>
+    /// A deleted file can break a gate as surely as an edited one, so unlike <see cref="Resolve"/> this keeps it.
+    /// A commit git does not know, such as one a rebase dropped, is an error: the caller then cannot compare.
+    /// </remarks>
+    /// <param name="workingDirectory">The repository root. Paths come back relative to it.</param>
+    /// <param name="commit">The commit to compare the working tree with.</param>
+    /// <exception cref="InvalidOperationException">git could not list the files.</exception>
+    public static IReadOnlyList<string> ResolveSince(string workingDirectory, string commit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(commit);
+
+        string[] changed = RunGitPaths(workingDirectory, "diff", "-z", "--name-only", "--relative", commit, "--");
+        string[] untracked = RunGitPaths(
+            workingDirectory,
+            "ls-files", "-z", "--others", "--exclude-standard", "--");
+
+        return changed
+            .Concat(untracked)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+    }
+
     /// <summary>
     /// Lists the paths changed since the merge base of <paramref name="baseRef"/> and
     /// <c>HEAD</c> with the kind of each change, together with untracked files.
@@ -142,6 +214,34 @@ public static class ChangedFiles
     }
 
     /// <summary>
+    /// The unified diff from the merge base of <paramref name="baseRef"/> and <c>HEAD</c> to the files on disk, so
+    /// staged and uncommitted edits are in it. Untracked files are not: <see cref="ResolveSinceMergeBase"/> lists them.
+    /// </summary>
+    /// <returns>The merge-base commit and the patch text.</returns>
+    /// <exception cref="InvalidOperationException">No merge base resolves, or git could not produce the diff.</exception>
+    public static (string MergeBase, string Patch) DiffSinceMergeBase(string workingDirectory, string baseRef)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseRef);
+
+        string[] output = RunGitPaths(workingDirectory, "merge-base", baseRef, "HEAD");
+        if (output.Length == 0)
+            throw new InvalidOperationException($"'{baseRef}' and HEAD have no common commit");
+
+        string mergeBase = output[0].Trim();
+        return (mergeBase, DiffSince(workingDirectory, mergeBase));
+    }
+
+    /// <summary>The unified diff from <paramref name="commit"/> to the files on disk; untracked files are not in it.</summary>
+    /// <exception cref="InvalidOperationException">git could not produce the diff.</exception>
+    public static string DiffSince(string workingDirectory, string commit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(commit);
+        return RunGit(workingDirectory, "diff", "--no-color", "--relative", commit, "--");
+    }
+
+    /// <summary>
     /// Resolves the merge base of <paramref name="baseRef"/> and <c>HEAD</c>, failing
     /// closed with a fetch hint when the history on disk cannot answer.
     /// </summary>
@@ -186,7 +286,10 @@ public static class ChangedFiles
         };
     }
 
-    private static string[] RunGitPaths(string workingDirectory, params string[] arguments)
+    private static string[] RunGitPaths(string workingDirectory, params string[] arguments) =>
+        RunGit(workingDirectory, arguments).Split('\0', StringSplitOptions.RemoveEmptyEntries);
+
+    private static string RunGit(string workingDirectory, params string[] arguments)
     {
         ProcessStartInfo startInfo = new("git")
         {
@@ -208,6 +311,6 @@ public static class ChangedFiles
                 $"git {string.Join(' ', arguments)} exited with code {result.ExitCode}: {result.StandardError.Trim()}");
         }
 
-        return result.StandardOutput.Split('\0', StringSplitOptions.RemoveEmptyEntries);
+        return result.StandardOutput;
     }
 }

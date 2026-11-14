@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 
@@ -15,7 +16,7 @@ namespace KyberWeave.Arbiter.Hooks;
 /// holds structurally: there is deliberately no name-based carve-out. Shell commands
 /// match by substring, which is best effort because indirection escapes it (R24).
 /// </remarks>
-public static class ReadGuard
+public static partial class ReadGuard
 {
     private static readonly IReadOnlySet<string> GuardedProfiles = new HashSet<string>(StringComparer.Ordinal)
     {
@@ -110,6 +111,13 @@ public static class ReadGuard
                 return ReadGuardResult.Allow;
             }
 
+            // The one command that hands a worker its own task's packet reads the plan itself, so the worker
+            // never has to; it may name the plan, and it may not chain anything else behind it.
+            if (PacketCommandRegex().IsMatch(command))
+            {
+                return ReadGuardResult.Allow;
+            }
+
             string normalized = NormalizeCommand(command);
             foreach (string dir in protectedDirs)
             {
@@ -182,6 +190,13 @@ public static class ReadGuard
 
         return ReadGuardResult.Allow;
     }
+
+    // `kyber-weave docs packet <task> [--agent <name>] [--plan <plan>] [--prior-results <file>]` and nothing else: one
+    // line (horizontal whitespace only, anchored at both ends of the whole text), no separator, newline, redirect,
+    // substitution or second command, and no such character in the path before the program name, so the exemption
+    // cannot carry a read of a plan.
+    [GeneratedRegex(@"\A[ \t]*(?:[^\s;&|<>`$()\\]*/)?kyber-weave[ \t]+docs[ \t]+packet(?:[ \t]+[^\s;&|<>`$()\\]+)*[ \t]*\z", RegexOptions.CultureInvariant)]
+    private static partial Regex PacketCommandRegex();
 
     private static ReadGuardResult Deny(string toolName, string value, string dir) =>
         new(

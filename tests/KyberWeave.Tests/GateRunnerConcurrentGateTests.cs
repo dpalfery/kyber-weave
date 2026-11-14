@@ -122,6 +122,31 @@ public sealed class GateRunnerConcurrentGateTests : IDisposable
         Assert.False(report.Gates[0].Passed);
     }
 
+    /// <summary>
+    /// The number of gates running at once is bounded by <c>review.parallelism</c>: three gates that each need to
+    /// be alone (an atomic <c>mkdir</c> of one lock directory, held for a second) all pass with a bound of one and
+    /// collide with a bound of three. The results and their order are the same either way.
+    /// </summary>
+    [Fact]
+    public void AtMostParallelismGatesRunAtOnceAndTheReportKeepsDeclarationOrder()
+    {
+        if (OperatingSystem.IsWindows())
+            return;
+
+        ReviewGate Exclusive(string id, bool concurrent) =>
+            new(id, ["sh", "-c", "mkdir lock 2>/dev/null || exit 7; sleep 1; rmdir lock"], TimeoutSeconds: 30) { Concurrent = concurrent };
+
+        ReviewGate[] gates = [Exclusive("a", true), Exclusive("b", true), Exclusive("c", false)];
+
+        GateReport bounded = GateRunner.Run(new ReviewConfig { Gates = gates, Parallelism = 1 }, _root.Path);
+        GateReport unbounded = GateRunner.Run(new ReviewConfig { Gates = gates, Parallelism = 3 }, _root.Path);
+
+        Assert.Equal(["a", "b", "c"], bounded.Gates.Select(gate => gate.Id));
+        Assert.All(bounded.Gates, gate => Assert.True(gate.Passed, $"{gate.Id}: {gate.Summary}"));
+        Assert.Equal(["a", "b", "c"], unbounded.Gates.Select(gate => gate.Id));
+        Assert.Contains(unbounded.Gates, gate => !gate.Passed);
+    }
+
     private static string[] WaitForReleaseFile() => WaitForFile(ReleaseFile, exitCode: 0);
 
     private static string[] FailAfterRelease() => WaitForFile(ReleaseFile, exitCode: 3);

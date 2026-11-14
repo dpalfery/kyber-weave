@@ -39,6 +39,20 @@ the canonical skills, plus the Kyber-Weave skills it ships beside them, with tra
 recovery and state governance. Thirteen harness targets are declared; all thirteen are currently
 implemented and registered.
 
+**New here? Use the guided setup.** The skill arrives with the squad, so first deploy the squad
+for the harness you use (`kyber-weave squad install --global --target <harness>`), then ask your
+agent in that harness to run the `kw-onboarding` skill. It checks the
+machine with `kyber-weave doctor`, makes sure the code index and the `kw-docs` and `codegraph` MCP
+servers answer, installs the squad and the Arbiter hooks for the harnesses you pick, lists every
+setting with its default so you choose which to change, checks the Arbiter's decision-model
+key, and checks the repository's own rules and instructions for conflicts, stale names and
+statements that belong in a [coding standard](../documentation-ontology.md#rules-and-standards)
+rather than a rule. It looks before it asks: it first shows what it found on the machine and in
+the repository, and every question then says what the choice is, why it matters, what each answer
+does, how to undo it, and what it recommends. It never removes the squad from a harness you did not
+ask to remove. It asks before every change outside the repository and is safe to run again. The
+commands below are what it runs.
+
 ---
 
 ## Command Reference
@@ -132,6 +146,25 @@ Rendering canonical source into a harness's native files is Kyber-Weave's own co
 - **Deployment root selection**: The root comes from the positional `[path]`, which defaults to the current directory (`.`); `--path <PATH>` wins over that default. Supplying both a non-default positional and `--path` is rejected with **exit code 2** and a hint naming both forms. Under `--global` the root is the home directory and this selection is ignored, with a warning.
 - **Update**: An explicit `--target` list is the complete desired deployment target set and takes precedence over the existing receipt. When `--target` is omitted, update reuses the receipt roster. Update never auto-detects filesystem markers.
 - **Uninstall**: Uses the recorded target roster from the existing deployment receipt and never performs marker detection.
+
+### Review council and nested sub-agents
+
+The final review is one `code-reviewer` dispatch where a dispatched agent can start agents of its
+own: the reviewer starts every lens itself. Elsewhere the conductor loads the `review-council`
+skill, which starts the lenses from the main session
+([ADR 0079](../adr/0079-the-reviewer-starts-its-own-seats-where-sub-agents-can-dispatch.md)). The
+render decides which, per harness:
+
+| Harness | Path | What nesting needs |
+|---|---|---|
+| Claude | one dispatch | `Agent(...)` in the reviewer's `tools`, which Squad renders; nesting is on by default (three layers) |
+| Copilot | one dispatch | Nothing on Copilot CLI. VS Code needs the user setting `chat.subagents.allowInvocationsFromSubagents: true`, which Squad does not write; without it the reviewer applies the lenses itself and says so |
+| Cursor | one dispatch | Task tool access in the current mode; Cursor allows one nested layer |
+| Pi | one dispatch | `allowed_subagents` on the reviewer, which Squad renders from its roster; depth 2 by default |
+| OpenCode, Kilo | `review-council` | The reviewer's `task` permission, which Squad renders, and `subagent_depth` of 2 or more in the harness config, which Squad does not write (default 1) |
+| Factory | `review-council` | Not possible: a droid gets no `Task` tool |
+| Devin | `review-council` | Not enabled: nested delegation cannot be limited to a roster |
+| Codex, Antigravity, Warp, ZCode, Command Code | `review-council` | Unverified |
 
 ### Codex notes
 
@@ -363,8 +396,8 @@ frontier model:
 |---|---|---|
 | `architect` | `claude-opus-5-5-high` | architect |
 | `deep-planning` | `claude-opus-5-5-high` | bug-crusher-investigator, sql-database-architect |
-| `general` | `swe-2-high` | dal-dev, github-devops, go-dev, product-owner, pulumi-dev, rust-dev, tauri-dev, typescript-dev |
-| `fast` | `deepseek-v4-1-flash-high` | azure-reader, csharp-dev, docs-dev, maui-dev, python-dev, react-dev, research-agent, test-dev |
+| `general` | `swe-2-high` | github-devops, go-dev, product-owner, pulumi-dev, rust-dev, tauri-dev, typescript-dev |
+| `fast` | `deepseek-v4-1-flash-high` | azure-reader, csharp-dev, dal-dev, docs-dev, maui-dev, python-dev, react-dev, research-agent, test-dev |
 | `reviewer` | `grok-4-7-high` | code-reviewer, review-lens, review-triage |
 
 The `conductor` skill runs on whatever you select in the model picker; Fusion is Devin's
@@ -425,8 +458,8 @@ two root wrappers `product-owner` and `bug-crusher` through their own canonical 
 session, which dispatches the specialists as subagents. Its orchestrator boundary — no searching, editing, running commands,
 or reading the web — is instruction-only on Devin, as on Pi. Subagents cannot delegate further
 on Devin: Devin cannot limit nested delegation to a roster, so Squad
-does not enable it. `code-reviewer` therefore applies each review lens itself and says in its
-report that the council ran in-process; `architect` does its own sweeps and hands a live Azure
+does not enable it. The conductor therefore loads the `review-council` skill, which starts `code-reviewer`'s lenses
+from the main session; `architect` does its own sweeps and hands a live Azure
 question back for the conductor to put to `azure-reader`; `product-owner` does its own external
 research. The receipt records a `permission-not-expressible` degradation for each.
 
@@ -921,9 +954,9 @@ HydraFusion Cascade was not observed, so its coverage is an open limit.
 
 ## Kyber-Weave skills in a Squad deployment
 
-Kyber-Squad deploys its Kyber-Weave skills beside its Squad skills: `codegraph`, `kyber-docs-authoring`,
-`kyber-docs-integrity-review`, `kyber-docs-onboarding-and-assessment`, `kyber-weave-cli`,
-`kyber-weave-model-profile`, and `spec-conductor`. They come from `.apm/skills/` in the repository.
+Kyber-Squad deploys its Kyber-Weave skills beside its Squad skills: `codegraph`, `kw-onboarding`,
+`kyber-docs-authoring`, `kyber-docs-integrity-review`, `kyber-docs-onboarding-and-assessment`,
+`kyber-weave-cli`, `kyber-weave-model-profile`, and `spec-conductor`. They come from `.apm/skills/` in the repository.
 Every directory there that holds a `SKILL.md` ships, so a skill added later ships with the next
 release. They follow the Squad lifecycle at the same scope and on the same targets as the Squad
 skills:
@@ -969,7 +1002,8 @@ bytes match the release, `kyber-weave squad install --global --adopt` claims it 
 
 ### First-Time Installation
 
-To install the squad into a project:
+The guided path is the `kw-onboarding` skill (see the top of this page). By hand, to install the
+squad into a project:
 
 ```bash
 kyber-weave squad install
@@ -992,6 +1026,18 @@ To install into a directory other than the current one, name the deployment root
 ```bash
 kyber-weave squad install --path /path/to/project --target claude,cursor
 ```
+
+### Copilot CLI: raise the large-output limit
+
+If you use the `copilot` target with GitHub Copilot CLI, set this once in the shell that starts it:
+
+```bash
+export COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES=32000   # PowerShell: $env:COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES = "32000"
+```
+
+Copilot CLI saves any tool result over 20 KiB to a file instead of showing it to the agent, and CodeGraph answers
+run larger, so agents stop using the code index. `kyber-weave doctor` checks this and warns (it never fails); see
+[the runbook](../docgraph/mcp-runbook.md#the-copilot-cli-large-output-limit). Kyber-Weave does not edit your shell profile.
 
 ### Adopting Existing Files
 
@@ -1299,7 +1345,7 @@ self-contained recovery brief with previous findings, decisions, and failed appr
 The conductor records session handles and replacement reasons on the execution artifact.
 
 Deployed `conductor`, `csharp-dev`, `test-dev`, and `github-devops` agents stop
-unbounded test-fix loops: 3 incremental fixes per implementation or rework dispatch, 2 conductor
+unbounded test-fix loops: 3 incremental fixes per implementation or rework dispatch, 3 conductor
 rework dispatches per failure cluster per run, A→B→A oscillation detection, and
 escalation through `STATUS: ESCALATION` / `ESCALATION: circuit-breaker`. Caps,
 cluster identity, JEV checkpoints, and the closed trigger set are in
@@ -1325,7 +1371,7 @@ Neither entry point restates the rules; if you are editing one of them, the cont
 belongs in the skill.
 
 **What bug-crusher delegates.** Its roster carries the agents its escalated path actually starts:
-`architect` (planning the escalated defect), `test-dev` (establishing RED), `code-reviewer` (the
+`architect` (planning the escalated defect), `test-dev` (a failing test when no developer takes the fix), `code-reviewer` (the
 finished fix), and the twelve developer agents a task routes to, alongside the investigator,
 `docs-dev`, and the two council seats it starts when the reviewer cannot start its own. Discovery
 is the architect's own delegation and the owner is the human, so `research-agent`,
@@ -1339,15 +1385,20 @@ of `architect` with the gate id, not an edit by the orchestrating session.
 
 ### Inlined task packets (zero plan context hunting)
 
-Conductor task packets are self-contained, and the conductor no longer writes them. `architect` saves
-one prompt per task in the plan's tracked task file at finalization — `docs/plans/<plan>.tasks.json`
-beside a plan — and `product-owner` writes a specification's to `<spec-folder>/tasks.json`, committed with its artifact, so
+Conductor task packets are self-contained, and the conductor no longer writes them. `kyber-weave docs tasks`
+derives one prompt per task from the plan, at finalization, into its tracked task file — `docs/plans/<plan>.tasks.json`
+beside a plan, `<spec-folder>/tasks.json` beside a specification — committed with its artifact, so
 a push carries it to whichever machine resumes the run
 ([ADR 0063](../adr/0063-the-task-file-is-tracked-and-the-plan-stays-authoritative.md)). At dispatch
-the conductor validates that file, **pastes each prompt unchanged**, and fills exactly two slots:
-`{worktree}`, and `{prior_results}` with the earlier workers' reports as they were written. Nothing
-else is edited, added or re-derived, because a prompt the conductor rewrites is a prompt nobody
-validated.
+the conductor validates that file, picks each task's agent by matching the capabilities the task
+needs against the descriptions of the agents it can dispatch
+([ADR 0080](../adr/0080-plan-tasks-name-capabilities-and-the-conductor-chooses-the-agent.md)), and
+dispatches each worker by **task id** alone. The worker's first
+action is `kyber-weave docs packet <task id> --agent <its name>`, which finds the Ready plan, checks the task file
+against it, and prints that one packet with `{worktree}` filled in; `--prior-results <file>` adds the
+earlier workers' reports as they were written. The conductor never pastes or paraphrases a packet,
+because a packet the conductor retypes is a packet nobody validated. `kyber-weave docs tasks <plan>
+--list` prints one line per task.
 
 Rather than pointing workers to large plan or specification documents under `<plan-index>` or
 `<specification-index>` (which workers are forbidden from reading), each prompt carries five
@@ -1357,7 +1408,7 @@ essential items:
 2. **Entry-file table**: Exact relative file paths, roles, key symbols, and assigned actions.
 3. **Acceptance criteria checklist**: Complete checklist that the worker must satisfy before handoff.
 4. **Pre-computed test runner command**: The exact direct assembly runner invocation targeting the assigned test class.
-5. **Test/verification contract**: Required RED evidence, test commands, and exit gate expectations.
+5. **Test/verification contract**: The tests the task writes, what its failing run must show in test-first mode, the test commands, and exit gate expectations.
 
 `docs validate` and the docs MCP validate tool check the file before a run relies on it: it must
 agree with its plan (`KW-DOC-TASKS-002`), carry a digest that still describes the plan (`-003`), hold
@@ -1370,10 +1421,9 @@ the Arbiter reads its tasks.
 **The `session` group keeps related work in one worker session.** Each task's `session` value is the
 architect's decision, not the conductor's. Tasks that share one continue a single worker session
 where the harness allows continuation, so a follow-up fix does not pay to rediscover context a
-previous worker already had. **RED and GREEN never share a group**: the adversarial split between
-test authorship and implementation is the reason those are two dispatches, and bundling them removes
-the independence the split exists for. The architect may merge two RED tasks into one group when the
-later one needs no earlier GREEN.
+previous worker already had. In test-first mode a task's tests and its code are already one
+dispatch: one worker writes the tests, runs its task gate with `--red`, implements, and runs the gate
+again ([ADR 0076](../adr/0076-test-first-is-one-worker-per-task.md)).
 
 **Each finished task commits with `Task: <id>` and its report in the commit body**, and the branch
 is pushed after each integrated task, so `kyber-weave run start --resume <branch>` lists what is done
@@ -1391,8 +1441,8 @@ dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "<
 Workers build once (`dotnet build KyberWeave.sln -c Release`), then execute class-filtered tests
 against the compiled DLL with `--no-build`. This avoids multi-second MSBuild project re-evaluation
 on every inner loop turn, reducing test feedback latency to sub-seconds (<500ms). Full test suite
-runs are reserved strictly for the final council review, which runs it once per review cycle, on the
-integrated head, and for CI. No worker runs the full suite, and the conductor never dispatches
+runs are reserved strictly for the final council review, which runs it on the
+integrated head in the first full review, and for CI. No worker runs the full suite, and the conductor never dispatches
 a full run, even for a cross-cutting change: the worker runs a targeted set and names what it
 did not run. A worker's task end runs only the test classes its task touched. A task with no
 covering class reports `TESTS: total=0` with the reason; zero tests run is not zero failures.
@@ -1405,7 +1455,7 @@ Workers report dispatch completion using an unambiguous 6-field schema:
 STATUS: PASS | FAIL | ESCALATION
 FILES: <comma-separated-paths>
 TESTS: total=N failed=N passed=N
-COMMIT: <commit-sha | NONE>
+COMMIT: <commit-sha>
 REMOTE_HEAD: <remote-head-sha | UNPUSHED>
 TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE — agent=… gates=… failed=… skipped=… report=… runs=…
 ```
@@ -1463,7 +1513,7 @@ The MCP servers stay bound to the canonical checkout on purpose, so a worker in 
 |---|---|---|---|
 | Developers, `test-dev`, `docs-dev`, investigator (shell) | `codegraph explore` from the worktree's shell, against its own index. Never the MCP `codegraph_explore` when `branch=` differs. | `kw-docs` for standards, which rarely differ by branch. Direct read of the worktree's copy for any document being edited. | `doctor --ensure` follows `stop-on-tool-failure` |
 | `code-reviewer` (shell) | Same, before any lens | CLI `docs validate` and `docs drift` in the worktree | Same |
-| `review-lens`, `review-triage` (no shell) | The packet carries `.agent_scratchpad/<task-id>/review-diff.patch` and, when the run uses one, the absolute worktree path. The lens passes that path as `codegraph_explore`'s `projectPath`, which answers from the worktree's own index; with no worktree named it uses the server's default project. Direct reads only when that call cannot answer for the packet's branch: an error, a not-indexed reply, or a provenance `branch=` that differs, naming the mode as `projectPath: error`, `projectPath: not-indexed` or `projectPath: wrong-branch <got> vs <wanted>` in the direct-read reason. They read the worktree the packet names, and the checkout itself only on a run that names no worktree. | `kw-docs` for standards | A lens that cannot read reports `SKIPPED` with the reason |
+| `review-lens`, `review-triage` (no shell) | The packet carries the cycle's `evidence.md`, which names the diff, and, when the run uses one, the absolute worktree path. The lens passes that path as `codegraph_explore`'s `projectPath`, which answers from the worktree's own index; with no worktree named it uses the server's default project. Direct reads only when that call cannot answer for the packet's branch: an error, a not-indexed reply, or a provenance `branch=` that differs, naming the mode as `projectPath: error`, `projectPath: not-indexed` or `projectPath: wrong-branch <got> vs <wanted>` in the direct-read reason. They read the worktree the packet names, and the checkout itself only on a run that names no worktree. | `kw-docs` for standards | A lens that cannot read reports `SKIPPED` with the reason |
 | `architect` (shell) | The packet carries `RUN_BASE`, `RUN_BRANCH` and, when present, `WORKTREE: <absolute path>`. If provenance `rev=` and `branch=` match, normal discovery. If not, `codegraph explore "…"` from the worktree's shell against its own index (`kyber-weave doctor --ensure` creates it), counted as a CLI discovery call. | The server cannot see a plan written into a worktree, so the architect writes to `<WORKTREE>/docs/plans/…` and runs `kyber-weave docs validate . --merge-ready` and `kyber-weave docs drift .` there. Where a harness gives it no shell it returns `STATUS: BLOCKED` naming "server root differs: run the docs checks in the worktree" and is re-invoked with `DOCS_CHECKS: <results>`. | `BLOCKED` when no worktree path was given |
 
 A session started inside a worktree is already correct, because `--repo-root .` resolves there. A

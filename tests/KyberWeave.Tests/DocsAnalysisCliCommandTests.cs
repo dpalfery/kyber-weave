@@ -44,7 +44,9 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
         DocsIntegrityCheckSettings settings = new DocsIntegrityCheckSettings();
 
         Assert.Equal("none", settings.FailOn);
-        Assert.Equal("table", settings.Format);
+        Assert.Null(settings.Format);
+        Assert.Equal(OutputFormat.Lines, settings.ParsedFormat);
+        Assert.Equal(OutputFormat.Table, new DocsIntegrityCheckSettings { Format = "table" }.ParsedFormat);
         Assert.Equal(OutputFormat.Json,
             new DocsIntegrityCheckSettings { Format = "json" }.ParsedFormat);
         Assert.Equal(OutputFormat.Sarif,

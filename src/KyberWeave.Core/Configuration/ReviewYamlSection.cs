@@ -22,6 +22,9 @@ internal sealed class ReviewYamlSection
 
     /// <summary>Seconds the full council gate run may take before the deadline stops it.</summary>
     public int? CouncilDeadlineSeconds { get; init; }
+
+    /// <summary>The most gates a run has running at one time.</summary>
+    public int? Parallelism { get; init; }
 }
 
 /// <summary>The <c>review.duplicates</c> mapping.</summary>
@@ -102,6 +105,11 @@ internal sealed class ReviewPolicyYaml
     public int? MinConfidence { get; init; }
 
     public string? Strictness { get; init; }
+
+    public string? FixLevel { get; init; }
+
+    /// <summary>The key <c>fix-level</c> replaced: <c>follow-up</c> reads as <c>major</c>, <c>fix</c> as <c>minor</c>.</summary>
+    public string? MinorFindings { get; init; }
 
     public List<ReviewSuppressionYaml>? Suppressions { get; init; }
 }

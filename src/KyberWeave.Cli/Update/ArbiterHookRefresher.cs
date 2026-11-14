@@ -370,7 +370,11 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
                                 ["command"] = commandLine,
                                 ["timeout"] = timeoutSeconds,
                             })
-                    }
+                    },
+                    CreateMatcherGroup(
+                        ClaudeRenderer.WorkerGuardMatcher,
+                        ArbiterHookWiring.WorkerGuardCommandLine(SquadTargetCatalog.GetToken(SquadTarget.Claude)),
+                        timeoutSeconds)
                 ];
                 postToolUse =
                 [

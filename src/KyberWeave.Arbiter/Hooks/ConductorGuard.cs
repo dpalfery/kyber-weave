@@ -1,7 +1,10 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using KyberWeave.Core.Arbiter;
+using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.RunStart;
 
 namespace KyberWeave.Arbiter.Hooks;
 
@@ -11,7 +14,8 @@ namespace KyberWeave.Arbiter.Hooks;
 /// them at run time and restates the workflow on every model-facing message.
 /// </summary>
 /// <remarks>
-/// The hook is scoped to the conductor by the agent file, so it needs no configuration. It
+/// The hook is scoped to the conductor by the agent file, so it needs no configuration; it reads the
+/// repository's, best effort, only for the planning directories its Config Reg names. It
 /// writes nothing for a permitted tool, which leaves Copilot's normal permission flow in charge.
 /// A deny is always explicit: Copilot runs the tool when a hook times out, prints nothing, or
 /// prints invalid JSON, so an unreadable event is denied rather than ignored.
@@ -47,6 +51,8 @@ public static partial class ConductorGuard
         "ask_user",
         "task_complete",
         "rename_chat",
+        // The conductor's own todo list: it writes no project file and runs nothing.
+        "update_todo",
     };
 
     private static readonly string[] DocsServerPrefixes = ["kyber-weave-docs_", "kw-docs-docs_"];
@@ -63,14 +69,25 @@ public static partial class ConductorGuard
 
     private static readonly string[] ContractDirectories = ["plans", "specs", "todo"];
 
+    // A plans/specs/todo segment can also name project code (web/specs/login.spec.ts), so outside the
+    // configured planning directories only plan documents and their task files are readable.
+    private static readonly string[] ContractExtensions = [".md", ".json"];
+
     /// <summary>Answers one hook event. Always returns 0: a deny rides stdout.</summary>
     /// <param name="stdin">The hook event as JSON.</param>
     /// <param name="stdout">Receives the decision document, and nothing else.</param>
     /// <param name="log">Receives diagnostics.</param>
     /// <param name="allowedMcpServer">An MCP server whose tools the conductor may call, or null.</param>
     /// <param name="copilotHome">Copilot's home directory, or null to resolve it from the environment.</param>
+    /// <param name="homeDirectory">The operator's home, which holds the run records, or null for the user profile.</param>
     /// <returns>The process exit code.</returns>
-    public static int Run(string stdin, TextWriter stdout, TextWriter log, string? allowedMcpServer = null, string? copilotHome = null)
+    public static int Run(
+        string stdin,
+        TextWriter stdout,
+        TextWriter log,
+        string? allowedMcpServer = null,
+        string? copilotHome = null,
+        string? homeDirectory = null)
     {
         ArgumentNullException.ThrowIfNull(stdin);
         ArgumentNullException.ThrowIfNull(stdout);
@@ -80,7 +97,12 @@ public static partial class ConductorGuard
         try
         {
             using JsonDocument document = JsonDocument.Parse(stdin);
-            answer = Decide(document.RootElement, allowedMcpServer, copilotHome ?? ResolveCopilotHome());
+            answer = Decide(
+                document.RootElement,
+                allowedMcpServer,
+                copilotHome ?? ResolveCopilotHome(),
+                homeDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                log);
         }
         catch (Exception ex)
         {
@@ -119,7 +141,7 @@ public static partial class ConductorGuard
     private static string OneLine(string message) =>
         message.Replace("\r\n", " ", StringComparison.Ordinal).Replace('\n', ' ').Replace('\r', ' ');
 
-    private static string? Decide(JsonElement root, string? allowedMcpServer, string copilotHome)
+    private static string? Decide(JsonElement root, string? allowedMcpServer, string copilotHome, string home, TextWriter log)
     {
         List<ToolCall> calls = ReadCalls(root);
         if (calls.Count == 0)
@@ -135,8 +157,60 @@ public static partial class ConductorGuard
         }
 
         string? cwd = TryGetText(root, "cwd", out string? directory) ? directory : null;
-        ToolCall? denied = calls.Find(call => !IsPermitted(call, cwd, allowedMcpServer, copilotHome));
-        return denied is null ? null : Deny($"{DenyReason} Blocked tool: {denied.Name}.");
+        ToolCall? denied = calls.Find(call => !IsPermitted(call, cwd, allowedMcpServer, copilotHome, home));
+        if (denied is not null)
+        {
+            return Deny($"{DenyReason} Blocked tool: {denied.Name}.");
+        }
+
+        foreach (ToolCall call in calls)
+        {
+            if (RunStartRefusal(call, cwd, home, log) is { } refusal)
+            {
+                return Deny(refusal);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The conductor-side half of <c>KW-ARB-RUN-001</c>. This hook is scoped to the conductor, so it knows
+    /// the caller even where the harness payload names none (a Copilot CLI root agent). A dispatch of a
+    /// specialist that writes project files is refused while no run is live for the repository; evidence
+    /// that cannot be read allows and is logged.
+    /// </summary>
+    private static string? RunStartRefusal(ToolCall call, string? cwd, string home, TextWriter log)
+    {
+        if (!string.Equals(call.Name, "task", StringComparison.Ordinal)
+            || call.Arguments is not { } arguments
+            || !TryGetText(arguments, "agent_type", out string? target)
+            || !ArbiterSquadCatalog.LoadEmbedded().Agents.TryGetValue(target, out ArbiterSquadAgent? agent)
+            || !RunStartEvidence.IsWriterProfile(agent.CapabilityProfile))
+        {
+            return null;
+        }
+
+        string prompt = TryGetText(arguments, "prompt", out string? text) ? text : string.Empty;
+        if (string.Equals(
+                TriggerClassifier.PlannerMarkerFor(prompt, HeaderBlock.Parse(prompt).Headers),
+                "RUN-START",
+                StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        bool? started = cwd is null ? null : RunStartEvidence.Started(cwd, home);
+        if (started is null)
+        {
+            TryLog(log, $"conductor guard could not read whether a run was started for '{cwd}'; the dispatch to {target} continues.");
+            return null;
+        }
+
+        return started.Value
+            ? null
+            : $"KW-ARB-RUN-001: no run has been started for this repository, so {target} would write into a checkout " +
+              $"with no branch of its own. Next: {RunStartEvidence.Remedy}";
     }
 
     /// <summary>
@@ -209,7 +283,7 @@ public static partial class ConductorGuard
         return parsed.RootElement.Clone();
     }
 
-    private static bool IsPermitted(ToolCall call, string? cwd, string? allowedMcpServer, string copilotHome)
+    private static bool IsPermitted(ToolCall call, string? cwd, string? allowedMcpServer, string copilotHome, string home)
     {
         if (PermittedTools.Contains(call.Name)
             || DocsServerPrefixes.Any(prefix => call.Name.StartsWith(prefix, StringComparison.Ordinal))
@@ -226,13 +300,20 @@ public static partial class ConductorGuard
 
         return call.Name switch
         {
-            "view" => TryGetText(arguments, "path", out string? path) && IsContractPath(path, cwd, copilotHome),
+            "view" => TryGetText(arguments, "path", out string? path) && IsContractPath(path, cwd, copilotHome, home),
             "bash" or "powershell" => TryGetText(arguments, "command", out string? command) && RunStartCommand().IsMatch(command),
             _ => false,
         };
     }
 
-    private static bool IsContractPath(string path, string? cwd, string copilotHome)
+    /// <summary>
+    /// A file the conductor may read: its own references and skills, the run records under
+    /// <c>~/.kyber-weave/runs</c>, and, in the working directory or any other worktree of the same repository (a run
+    /// works in a worktree of its own), an <c>AGENTS.md</c>, anything under the configured planning directories, and
+    /// a <c>.md</c> or <c>.json</c> file under a <c>plans</c>, <c>specs</c> or <c>todo</c> directory, such as a plan's
+    /// <c>.tasks.json</c>. Reading is all <c>view</c> does.
+    /// </summary>
+    private static bool IsContractPath(string path, string? cwd, string copilotHome, string home)
     {
         if (cwd is null && !Path.IsPathRooted(path))
         {
@@ -240,15 +321,18 @@ public static partial class ConductorGuard
         }
 
         string fullPath = Normalize(cwd is null ? Path.GetFullPath(path) : Path.GetFullPath(path, cwd));
-        if (!fullPath.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
 
         if (Path.IsPathRooted(copilotHome)
-            && fullPath.StartsWith(DirectoryPrefix(Path.Combine(copilotHome, "agents", "conductor")), StringComparison.OrdinalIgnoreCase))
+            && (fullPath.StartsWith(DirectoryPrefix(Path.Combine(copilotHome, "agents", "conductor")), StringComparison.OrdinalIgnoreCase)
+                || fullPath.StartsWith(DirectoryPrefix(Path.Combine(copilotHome, "skills")), StringComparison.OrdinalIgnoreCase)))
         {
             return !HasLinkBelow(DirectoryPrefix(copilotHome), fullPath);
+        }
+
+        if (Path.IsPathRooted(home)
+            && fullPath.StartsWith(DirectoryPrefix(Path.Combine(home, ".kyber-weave", "runs")), StringComparison.OrdinalIgnoreCase))
+        {
+            return !HasLinkBelow(DirectoryPrefix(home), fullPath);
         }
 
         if (cwd is null)
@@ -256,18 +340,66 @@ public static partial class ConductorGuard
             return false;
         }
 
-        string root = DirectoryPrefix(cwd);
-        if (!fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+        if (fullPath.StartsWith(DirectoryPrefix(cwd), StringComparison.OrdinalIgnoreCase))
         {
-            return false;
+            return IsContractUnder(DirectoryPrefix(cwd), fullPath);
         }
 
+        // Started only for a path outside the working directory: git names the repository's other worktrees, so a
+        // directory that merely looks like one is never trusted. The deepest match wins, for a nested worktree.
+        string? worktree = GitFacts.ListWorktrees(cwd)
+            .Select(DirectoryPrefix)
+            .Where(root => fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(root => root.Length)
+            .FirstOrDefault();
+        return worktree is not null && IsContractUnder(worktree, fullPath);
+    }
+
+    /// <summary>Whether <paramref name="fullPath"/>, inside the worktree <paramref name="root"/>, is a contract file there.</summary>
+    private static bool IsContractUnder(string root, string fullPath)
+    {
         string relative = fullPath[root.Length..];
         string[] segments = relative.Split('/');
         bool contract = relative.StartsWith(".github/agents/conductor/", StringComparison.OrdinalIgnoreCase)
+            || relative.StartsWith(".github/skills/", StringComparison.OrdinalIgnoreCase)
             || string.Equals(segments[^1], "AGENTS.md", StringComparison.OrdinalIgnoreCase)
-            || segments[..^1].Any(segment => ContractDirectories.Contains(segment, StringComparer.OrdinalIgnoreCase));
+            || (segments[..^1].Any(segment => ContractDirectories.Contains(segment, StringComparer.OrdinalIgnoreCase))
+                && ContractExtensions.Contains(Path.GetExtension(relative), StringComparer.OrdinalIgnoreCase))
+            || ConfiguredPlanningDirectories(root).Any(directory => relative.StartsWith(directory, StringComparison.OrdinalIgnoreCase));
         return contract && !HasLinkBelow(root, fullPath);
+    }
+
+    /// <summary>
+    /// The plan, specification and todo directories the repository's Config Reg names, as
+    /// repository-relative prefixes ending in <c>/</c>. A configuration that does not load names none.
+    /// </summary>
+    private static IEnumerable<string> ConfiguredPlanningDirectories(string cwd)
+    {
+        KyberWeaveConfigLoadResult loaded;
+        try
+        {
+            loaded = KyberWeaveConfigLoader.TryLoad(cwd);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            yield break;
+        }
+
+        if (!loaded.Success || loaded.Config is not { } config)
+        {
+            yield break;
+        }
+
+        foreach (ConfigRegEntry entry in config.ConfigReg.Resolve(config.Ontology))
+        {
+            if ((string.Equals(entry.Name, ConfigRegConfig.PlanIndexProperty, StringComparison.Ordinal)
+                    || string.Equals(entry.Name, ConfigRegConfig.SpecificationIndexProperty, StringComparison.Ordinal)
+                    || string.Equals(entry.Name, ConfigRegConfig.TodoIndexProperty, StringComparison.Ordinal))
+                && Path.GetDirectoryName(Normalize(entry.Path)) is { Length: > 0 } directory)
+            {
+                yield return $"{Normalize(directory).Trim('/')}/";
+            }
+        }
     }
 
     /// <summary>
@@ -321,10 +453,17 @@ public static partial class ConductorGuard
             ["permissionDecisionReason"] = reason,
         }.ToJsonString();
 
-    // Each run start value has its own shape: names and slugs are lowercase tokens, a version has no
-    // slash, and a resume branch may hold slashes but never "..", a leading dot, or a leading slash.
+    // The conductor's whole shell: four kyber-weave commands, one per call, nothing chained, piped or redirected.
+    // Each value has its own token shape: names and slugs are lowercase tokens, a version has no slash, a resume
+    // branch may hold slashes but never "..", a leading dot or a leading slash, and a plan path is a relative or
+    // absolute path of plain characters with no "..". `docs tasks` is allowed only with --list, which writes nothing.
     [GeneratedRegex(
-        @"\A[ \t]*kyber-weave[ \t]+(?:run[ \t]+start(?:[ \t]+(?:--(?:harness|type)[ \t]+[a-z][a-z0-9-]*|--slug[ \t]+[a-z0-9]+(?:-[a-z0-9]+)*|--failing-version[ \t]+(?!\S*\.\.)[A-Za-z0-9][A-Za-z0-9.+-]*|--resume[ \t]+(?!\S*\.\.)(?!\S*//)[A-Za-z0-9_][A-Za-z0-9._/+@-]*))+(?:[ \t]+--json)?|doctor[ \t]+--ensure(?:[ \t]+[A-Za-z0-9._/~:\\][A-Za-z0-9._/~:\\-]*)?)[ \t]*\z",
+        @"\A[ \t]*kyber-weave[ \t]+(?:" +
+        @"run[ \t]+start(?:[ \t]+(?:--(?:harness|type)[ \t]+[a-z][a-z0-9-]*|--slug[ \t]+[a-z0-9]+(?:-[a-z0-9]+)*|--failing-version[ \t]+(?!\S*\.\.)[A-Za-z0-9][A-Za-z0-9.+-]*|--resume[ \t]+(?!\S*\.\.)(?!\S*//)[A-Za-z0-9_][A-Za-z0-9._/+@-]*|--brief|--path[ \t]+(?:intake|plan|spec)|--autonomy[ \t]+(?:supervised|autonomous)))+(?:[ \t]+--json)?" +
+        @"|squad[ \t]+brief[ \t]+[a-z][a-z0-9-]*(?:[ \t]+(?:--path[ \t]+[a-z]+|--autonomy[ \t]+(?:supervised|autonomous)|--mode[ \t]+(?:test-first|standard)|--harness[ \t]+[a-z][a-z0-9-]*|--plan[ \t]+(?!\S*\.\.)[A-Za-z0-9._/~:\\][A-Za-z0-9._/~:\\-]*))*" +
+        @"|docs[ \t]+tasks[ \t]+(?!\S*\.\.)[A-Za-z0-9._/~:\\][A-Za-z0-9._/~:\\-]*[ \t]+--list" +
+        @"|doctor[ \t]+--ensure(?:[ \t]+[A-Za-z0-9._/~:\\][A-Za-z0-9._/~:\\-]*)?" +
+        @")[ \t]*\z",
         RegexOptions.CultureInvariant)]
     private static partial Regex RunStartCommand();
 

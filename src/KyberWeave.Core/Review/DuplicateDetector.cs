@@ -68,7 +68,7 @@ public sealed record DuplicateReport(
 /// <remarks>
 /// <para>
 /// This exists because nothing else in the chain can answer the question. JetBrains retired
-/// <c>dupfinder</c>, and the inspections InspectCode still ships that touch duplication —
+/// <c>dupfinder</c>, and the ReSharper inspections that touch duplication —
 /// <c>DuplicatedStatements</c>, <c>RedundantOverload</c> — are scoped to one statement or one
 /// method group. Neither sees across files, which is where duplication that matters lives.
 /// </para>
@@ -280,13 +280,11 @@ public static class DuplicateDetector
 
         try
         {
-            if (File.Exists(full)) lines = File.ReadAllLines(full);
+            // The same cap every other read of a path a seat or an index names applies: an oversized file is unreadable.
+            if (File.Exists(full) && new FileInfo(full).Length <= ReviewSeatInput.MaxFileBytes)
+                lines = File.ReadAllLines(full);
         }
-        catch (IOException)
-        {
-            lines = null;
-        }
-        catch (UnauthorizedAccessException)
+        catch (Exception ex) when (ReviewSeatInput.IsFileFailure(ex))
         {
             lines = null;
         }

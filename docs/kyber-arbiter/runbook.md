@@ -10,12 +10,13 @@ decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
   - adr/0054-squad-owned-blocks-in-shared-hook-files
   - adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude
+  - adr/0072-the-arbiter-blocks-only-on-machine-facts-and-confident-model-answers
 ---
 
 # Kyber Arbiter runbook
 
-Operating the Arbiter: wiring hooks, granting trust, staying fail-closed, and diagnosing a
-host. For what it is and why, see the [architecture](architecture.md).
+Operating the Arbiter: wiring hooks, granting trust, reading what it allowed and blocked, and
+diagnosing a host. For what it is and why, see the [architecture](architecture.md).
 
 ## Hooks
 
@@ -61,14 +62,14 @@ With no project config, the user-level config is used and the per-root ledger li
 
 **Claude's user-level block after updating.** A release with the Claude fix does not change the block on
 its own: `kyber-weave update` refreshes only the harnesses listed in `arbiter.global.targets`, and a machine
-that installed Claude before may not list it there. After updating, run the install once, passing the
-`provider.kind` that `~/.kyber-weave/kyber-weave.yml` already holds (`none` below), because the install
-writes that file's kind and omitting the option writes `none`. It never touches the per-user override
+that installed Claude before may not list it there. After updating, run the install once. Omitting `--provider` keeps the
+`provider.kind` that `~/.kyber-weave/kyber-weave.yml` already holds and prints the provider in effect; pass
+`--provider` only to change it. The install never touches the per-user override
 `~/.config/kyber-weave/arbiter.yml`, which is where a machine's real provider, model and endpoint usually
 live, so those stay as they are:
 
 ```bash
-kyber-weave arbiter install --target claude --provider none --yes
+kyber-weave arbiter install --target claude --yes
 ```
 
 This adds `claude` to `arbiter.global.targets`, rewrites the Claude hook block with `PreToolUse` and
@@ -84,7 +85,7 @@ owned block in the shared `.codex/hooks.json`), and Cursor (owned entries in the
 `.cursor/hooks.json`). Phase 3 adds Kilo (the `.kilo/plugin/kyber-arbiter.ts` shim),
 Antigravity (the owned `kyber-arbiter` group in `.agents/hooks.json`), Factory (the owned
 block in `.factory/hooks.json`, dropped while the user's hooks live in
-`.factory/settings.json` — see fail-closed behaviour below), and Devin (the owned block
+`.factory/settings.json` — see failure behaviour below), and Devin (the owned block
 in `.devin/hooks.v1.json`). Warp and ZCode render no hooks at project scope: they are
 fallback-only — see the MCP fallback below. The hook binary is invoked as:
 
@@ -132,7 +133,9 @@ never spawning with a possibly-wrong cwd.
 
 When the Arbiter is enabled, the Copilot conductor's agent file runs `kyber-weave-arbiter guard` on `preToolUse` and `userPromptTransformed`. It denies the conductor's own project work and restates the workflow on every model-facing message, because VS Code requires the conductor to hold tools its workers need. See [ADR 0066](../adr/0066-the-copilot-conductor-holds-tools-a-hook-denies-it.md).
 
-A denial names the blocked tool. If the conductor genuinely needs a new Copilot tool, add it to `ConductorGuard`. The guard is rendered only when the Arbiter is enabled at install. Once rendered it reads no configuration, so setting `arbiter.enabled: false` later does not remove it until the agents are rendered again.
+The guard permits the conductor's bookkeeping: delegation, its own todo list (`update_todo`), the docs tools, and `view` of its own references and skills (`~/.copilot/agents/conductor/`, `~/.copilot/skills/`, `.github/agents/conductor/`, `.github/skills/`), the run records under `~/.kyber-weave/runs/`, and, in the working directory or any other worktree git lists for the same repository (a run works in a worktree of its own), any `AGENTS.md`, any `.md` or `.json` file under a `plans`, `specs` or `todo` directory, and any file under a planning directory the Config Reg names, so a plan's `.tasks.json` reads without a subagent. Writes and shell stay denied, except the exact run-start and `doctor --ensure` commands. Other harnesses render no such guard: their conductor's tool list grants reads and the todo tool directly.
+
+A denial names the blocked tool. If the conductor genuinely needs a new Copilot tool, add it to `ConductorGuard`. The guard also refuses a `task` dispatch of a specialist that writes files while no run is live, as `KW-ARB-RUN-001` does; see [reading a run-start refusal](#reading-a-run-start-refusal). The guard is rendered only when the Arbiter is enabled at install. Once rendered it reads configuration only for the planning directories, so setting `arbiter.enabled: false` later does not remove it until the agents are rendered again.
 
 ## The architect shell guard
 
@@ -168,7 +171,7 @@ runs a command in the worktree, and `git -C <dir>` does the same for git. `cd` c
 in place of `.`. `sort` accepts only the flags on its allowlist, and `rg` accepts any flag except the ones on its
 denylist. `touch` operands resolve as described in the list above. `codegraph explore` takes exactly one query, and `doctor --ensure` takes no operand. `rg` refuses `--pre`, `--pre-glob`, `-z`, `--search-zip`, `--hostname-bin` and `--hyperlink-format`, and abbreviations of them; `--pretty` is allowed. `kyber-weave arbiter plan <plan file> -f json` is read-only
 and is the architect's one way to read a task file's execution digest; it is on the architect's command list and in
-the guard. The command list itself lives in `architect.md`, which the sync test binds to the guard.
+the guard. `kyber-weave docs tasks <plan> --write` writes a plan's task file and is on the list too. The command list itself lives in `architect.md`, which the sync test binds to the guard.
 
 **Reading a denial.** A denial names the command the architect tried. The architect is told to return
 `STATUS: BLOCKED` with that command rather than work around it, so a denial is the list working. Find
@@ -183,9 +186,8 @@ the `KW-ARB-SHELL-001` line in the hook log. If the command is one the planner r
    `DocumentedForms` key;
 3. the sync test `KyberWeave.Tests.Arbiter.ArchitectShellGuardSyncTests`, which binds those spans to the keys.
 
-Changing `architect.md` also changes its body digest, so update `final-body-sha256` in
-`products/kyber-squad/migration/architect.md` from the value `SquadCanonicalContentTests` prints, then
-re-render with `kyber-weave squad update` (add `--global` for the user-scope copy).
+After changing `architect.md`, re-render with `kyber-weave squad update` (add `--global` for the
+user-scope copy).
 
 **Harness matrix.** The guard is enforced on Claude only, for the `Bash` and `PowerShell` tools at project and
 user scope. Every other harness keeps the list as instruction only, and the architect keeps it by its own
@@ -223,23 +225,41 @@ observed — so grant trust at install time:
 
 `arbiter install`, `squad install`, and `squad update` print the applicable step for the rendered targets.
 
-## Fail-closed behaviour
+## Failure behaviour: allow and log
 
-Any internal hook error blocks the dispatch with an explicit reason carrying
-`KW-ARB-HOOK-001` — never a silent pass. On conductor triggers the block carries an
-escalation envelope for architect; the conductor dispatches architect with it and never
-retries the blocked dispatch unchanged. The exception is a refused planner dispatch
-(`KW-ARB-PLANNER-001`): its envelope names a corrected dispatch, and the conductor re-issues
-that planner dispatch instead of sending it to architect. Timeouts are bounded by `provider.timeout-ms` plus
-the harness budget; a hook killed mid-evaluation still leaves its ledger event, which
-`audit` reports as a decision-less entry.
+**The Arbiter blocks only on a machine fact or a confident model answer that names a
+violation** ([ADR 0072](../adr/0072-the-arbiter-blocks-only-on-machine-facts-and-confident-model-answers.md)).
+When it cannot decide, the dispatch proceeds and the reason is logged, never a block:
+
+| What happened | What the dispatch sees | Where it is recorded |
+|---|---|---|
+| A header, plan or report line the parser could not read | Allowed, unless the model confidently names a violation | The decision record: the rule's step-1 row and its answer |
+| Provider `none` | Allowed | Step-1 rows read `not-evaluated` |
+| Provider error, timeout, or a request over budget | Allowed | Provider status `error` or `over-budget`; the hook log carries `KW-ARB-HOOK-001` for an error |
+| An answer below the rule's confidence floor | Allowed | The step-1 row reads `undecidable` beside the confidence it scored |
+| An exception in the evaluator, the hook host, or the process | Allowed | The hook log (stderr) carries `KW-ARB-HOOK-001` with the message; the ledger event appended before evaluation stays |
+| A usage error (`--harness` missing or unknown) | Exit 1, which Claude and Copilot treat as non-blocking | stderr |
+
+Look for `KW-ARB-HOOK-001` in the hook output your harness keeps, and for `undecidable` and
+`not-evaluated` rows in `artifacts/arbiter/decisions.jsonl`, to see what went unjudged.
+
+A block is still an escalation envelope. On conductor triggers the conductor dispatches architect
+with it and never retries the blocked dispatch unchanged. The exception is a refused planner dispatch
+(`KW-ARB-PLANNER-001` answered `malformed`): the conductor re-issues that planner dispatch as planning
+work instead of sending it to architect.
+
+Timeouts are bounded by `provider.timeout-ms` plus the harness budget. The hook timeout is rendered
+as `ceil(timeout-ms / 1000) + 2` seconds from the repository's configuration; a user override that
+raises `timeout-ms` without re-rendering the hooks makes the hook log, and `arbiter doctor` report,
+`KW-ARB-CONFIG-016`. A hook the harness kills mid-evaluation still leaves its ledger event, which
+`audit` reports as a decision-less entry, and the dispatch proceeds as the harness treats a killed hook.
 
 Pre-dispatch denies block on every target. Post-dispatch limits differ by harness: some
 targets deliver outcomes only as context, and Antigravity and Devin deliver none. The
 [harness notes](architecture.md#harness-facts) state each limit, and the
 [degradation taxonomy](../kyber-squad/requirements.md#degradation-taxonomy) lists the records.
-Antigravity cannot observe returns, so `READY-001`'s completion check and `MODE-001`'s RED
-check answer `returns-unobservable` there, which allows and is logged; the in-flight overlap
+Antigravity cannot observe returns, so `READY-001`'s completion check answers
+`returns-unobservable` there, which allows and is logged; the in-flight overlap
 check finds nothing there, since no dispatch ever closes.
 Devin's dispatch target and prompt are read from `tool_input.profile` and
 `tool_input.prompt`. The vendor documents only that the tool "takes a profile", so those
@@ -285,25 +305,105 @@ fan-out. On Squad-rendered fallback targets the tools are granted through the
 `decision.query` capability, allowed only for the `orchestrator` and `reviewer` profiles —
 the conductor and code-reviewer.
 
+## Reading a run-start refusal
+
+`KW-ARB-RUN-001` stops an orchestrator (`conductor` or `bug-crusher`) handing a specialist that writes
+project files (capability profile `worker` or `documentation`, or a planner: `architect` or
+`product-planning`) any work while no run is live for the repository. Without it, a conductor that skipped
+run start sent every developer to edit the canonical checkout on the default branch, and a conductor that
+planned first left the plan and its task file untracked there. `NEXT` names the fix: run
+`kyber-weave run start --harness <harness> --type <type> --slug <slug>`, or dispatch `github-devops` with
+`RUN-START: true` and that command, then send the dispatch again.
+
+A run is live when a record under `~/.kyber-weave/runs/` names this repository's common git directory and
+its recorded worktree still has the run's branch checked out. `run start` writes that record. The check
+reads only those facts:
+
+- Read-only and `github-devops` dispatches are never refused, nor is the run-start dispatch itself.
+- A caller that is not a Squad orchestrator is never refused: a developer agent a person invokes directly
+  has no `delegates-to` list.
+- When git cannot name the repository or the records cannot be read, the dispatch is allowed and the
+  answer is `undecidable`.
+- A run left live by an earlier session also counts, because nothing on disk ties a run to a harness
+  session. A record written before `run start` recorded its worktree is skipped.
+
+On Copilot CLI the payload names no caller for the root agent, so the conductor guard below makes the same
+check on the conductor's own `task` calls, and logs instead of denying when it cannot read the evidence.
+
+## Reading a canonical-checkout refusal
+
+A subagent starts in the repository's canonical checkout (its main worktree) and is told the run's worktree
+in prose, so it can write to the wrong one. `KW-ARB-CHECKOUT-001` catches that on machine facts, in two
+places:
+
+- **Before the write, where the harness hooks it.** `kyber-weave-arbiter worker-guard` runs on every Copilot
+  CLI tool call (the user-level `~/.copilot/hooks/kyber-arbiter.json` only, because the CLI runs the project
+  file too and a call would count twice) and every Claude tool call (the user-level settings block), and
+  checks Copilot CLI's `edit` and `create` and Claude's `Edit`, `Write`, `MultiEdit` and `NotebookEdit`. It denies a Squad subagent's write into the canonical
+  checkout while a live run of that repository works in a worktree of its own, and the reason names the same
+  path in the run worktree. A root agent (a person's own session) is never checked, and a project that sets
+  `arbiter.enabled: false` is never refused. The guard reads only the run records and the checkout's git
+  files, starts no process, and allows anything it cannot read. A shell command that writes a file is not
+  seen by it; the return check below catches that.
+- **On the return, everywhere returns are observed.** Before a dispatch to a specialist that writes files,
+  the hook snapshots the canonical checkout; on the return it diffs it. Paths that changed are listed in the
+  escalation's evidence, and `NEXT` asks for the same specialist to move them into the run worktree and
+  restore them in the canonical checkout. Only paths still dirty there count, so the clean-up dispatch
+  passes, and `.agent_scratchpad/` never counts. A person editing the canonical checkout during the dispatch
+  is counted too, because git cannot tell who wrote a file. On Copilot CLI a root conductor names no caller,
+  so its dispatch to a developer returns as `investigate.returned`, which the rule also covers.
+
+A run that branched in place works in the canonical checkout, so neither check applies to it.
+
+## Reading a budget stop
+
+`KW-ARB-BUDGET-001` ends a developer or `docs-dev` dispatch that thrashes. The worker guard counts each
+subagent's tool calls and minutes from its first call, keyed by the harness's subagent id, in append-only
+files under `~/.kyber-weave/arbiter/budgets/` (swept after two days). A harness may resume the same subagent
+for a rework under the same id, so a window ends when the subagent has been idle longer than the budget's
+minutes, or for a minute after it was stopped; the resumed dispatch starts a fresh one. Past `arbiter.dispatch-budget`
+(default 15 minutes or 150 tool calls) it denies every further call and tells the worker to return
+`STATUS: BUDGET_EXCEEDED` with what is done and what is not. A review council seat (`review-lens` or
+`review-triage`, the `review-seat` profile) has its own `arbiter.seat-budget` (default 3 minutes or 30 tool
+calls, 2 minutes for one call): past it every read is denied with the instruction to return the findings it has
+and a `Budget reached, not examined: …` line, and the write of its seat file is still allowed. Reviewers,
+planners and `github-devops` are not budgeted, because a full test run or a CI wait is long by design.
+
+A single hung call is caught sooner. The guard sees only the start of each call, so when the gap since the
+dispatch's previous call is past `dispatch-budget.call-minutes` (default 5; the gap includes the model's own
+time after that call), it denies the next call once: the worker is told to stop the hung process, record
+`NOT VERIFIED: <command> — timed out` and move on. The denied call is counted, so the retry that follows is
+allowed. A gap longer than the budget's minutes starts a fresh window instead, as above.
+
+The conductor treats the return as a failed attempt, never sends the same packet back to the same worker on
+the same model, and sends the rework one model up or to `architect` (the `delivery-execution` skill). The
+ladder rule reads `STATUS: BUDGET_EXCEEDED` as `fail`, so under `model-targeting.mode: enforce` the rework
+dispatch climbs one rung, but only where the harness takes a per-dispatch model (Claude); elsewhere the
+conductor's prose carries the escalation.
+
+Only Copilot CLI and Claude run the worker guard: they are the harnesses whose user-level hooks see a
+subagent's own tool calls with its id and type. Every other harness hooks only the dispatch and its return.
+
 ## Reading a planner refusal
 
 A planner refusal is the Arbiter stopping a dispatch to a planner, such as `architect`,
-because the `PLAN_FILE:` or marker it carried was not acceptable. The envelope's `ANSWER`
-line names the cause, `CALLER` shows the caller the Arbiter resolved, and `NEXT` says what
-to do. The conductor re-issues the planner dispatch with the correction; it does not send
-the refused dispatch to `architect`. Rule `KW-ARB-PLANNER-001` gives four answers:
+because its decision model was confident the dispatch asks for something other than planning
+work. The envelope's `ANSWER` line names the cause, `CALLER` shows the caller the Arbiter
+resolved, and `NEXT` says what to do. The conductor re-issues the planner dispatch with the
+correction; it does not send the refused dispatch to `architect`. Rule `KW-ARB-PLANNER-001`
+gives two answers:
 
-- **`malformed`**: the prompt has no recognised marker. Re-issue the dispatch with one, such
-  as `INTAKE:`, `FINDINGS:`, the `STATUS: ARBITER_ESCALATION` envelope, or a `FEATURE:` and
-  `PHASE:` pair. `FINALIZE` only counts with a `PLAN_FILE:` alongside it.
-- **`plan-file-invalid`**: the `PLAN_FILE:` was sent but rejected, so it is treated as a
-  refusal even when the body has a valid marker. The usual cause is an absolute path,
-  such as a worktree path. Re-issue with the plan's repository-relative path: `/`
-  separators, no leading `/`, no `..`, no backslash, no space and no tab.
-- **`plan-file-outside-planning-dirs`**: the path is valid but is not under the plan, spec
-  or todo directories. Re-issue with a `PLAN_FILE:` under one of those directories.
-- **`recognised`** is the pass answer, not a refusal. It is the answer a corrected dispatch
-  gets: a planning-directory `PLAN_FILE:`, or a marker that needs no `PLAN_FILE:`.
+- **`recognised`** is the pass answer. Step 0 gives it for an exact marker (`INTAKE:`,
+  `FINDINGS:`, the `STATUS: ARBITER_ESCALATION` envelope, a `FEATURE:` and `PHASE:` pair, or
+  `FINALIZE` with a `PLAN_FILE:`) with a `PLAN_FILE:` under the plan, spec or todo directories
+  or none at all; the model gives it for anything else that is planning work.
+- **`malformed`** (step 1 only): the model was confident the dispatch asks the planner for
+  work that is not planning, such as writing code. Re-issue the dispatch as planning work with
+  a recognised marker.
+
+A `PLAN_FILE:` that is absolute, has a space, or sits outside the planning directories is no
+longer a refusal by itself. Where the planner actually writes is checked on its return by
+`KW-ARB-PLANNER-DIFF-001` against git.
 
 `REPEAT` counts earlier refusals from the same session when the dispatch has no
 `PLAN_FILE:`, because there is no plan to key on. A refusal that is the first in its session
@@ -482,15 +582,14 @@ Check the dispatch's own transcript if you need to know which model ran.
 
 ## Phase 3 rules: reading and enforcing
 
-Nine phase 3 rules ship in shadow: `KW-ARB-NITPICK-001`, `KW-ARB-NITPICK-002`, `KW-ARB-DUP-001`,
-`KW-ARB-TRIAGE-001`, `KW-ARB-INTAKE-001`, `KW-ARB-DOCIMPACT-001`, `KW-ARB-FAILURE-001`,
+Seven phase 3 rules ship in shadow: `KW-ARB-NITPICK-002`, `KW-ARB-TRIAGE-001`, `KW-ARB-INTAKE-001`, `KW-ARB-DOCIMPACT-001`, `KW-ARB-FAILURE-001`,
 `KW-ARB-TRIM-001` and `KW-ARB-COMMENT-001`. Until a rule is enforced, a dispatch behaves as it did
 before: the lens is still spawned, the finding still reaches the host, and the investigator, planner
 or docs-dev still runs. Read the shadow entries in `decisions.jsonl` first.
 
-- A `would-effect` of `drop` (nitpick filter) means the finding would have been set aside as
-  `ARBITER_DROPPED`. Compare a sample against the findings the council kept.
-- A `would-effect` of `duplicate` means the refutation would have been denied as `ARBITER_DUPLICATE`.
+- `KW-ARB-NITPICK-001` and `KW-ARB-DUP-001` are asked by `review verdict` and enforced there. Their
+  decisions carry the finding id as `candidate` and the effect in `evidence` (`review command: dropped
+  as nitpick`, `merged`). Set `shadow: true` on either under `arbiter.rules` to return it to logging only.
 - A `would-effect` of `answer` on a shortcut means the worker would have been withheld and the
   substitute digest returned. Check the digest's `ARBITER_DECISION` against the worker's own report
   before trusting it.

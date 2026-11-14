@@ -705,7 +705,7 @@ public sealed class ReviewTaskGatesConfigTests
     {
         IReadOnlyList<ReviewGate> gates = RepositoryReviewGates();
 
-        Assert.Equal(34, gates.Count);
+        Assert.Equal(39, gates.Count);
         List<string> missing = [];
         foreach (ReviewGate gate in gates)
             if (gate.Include.Count == 0)
@@ -776,14 +776,14 @@ public sealed class ReviewTaskGatesConfigTests
     }
 
     /// <summary>
-    ///     The .NET source-only gates (format-whitespace, format-style, inspectcode, duplicates) must match C#
+    ///     The .NET source-only gates (format-whitespace, format-style, duplicates) must match C#
     ///     and solution files, but must not match embedded markdown products, review guidance, general docs, or dash.
     /// </summary>
     [Fact]
     public void NetSourcePathsExcludeProductsAndDocs()
     {
         IReadOnlyList<ReviewGate> gates = RepositoryReviewGates();
-        string[] gateIds = ["format-whitespace", "format-style", "inspectcode", "duplicates"];
+        string[] gateIds = ["format-whitespace", "format-style", "duplicates"];
 
         string[] shouldMatch =
         [
@@ -816,22 +816,28 @@ public sealed class ReviewTaskGatesConfigTests
     }
 
     /// <summary>
-    ///     The inspectcode review gate must pin --caches-home=artifacts/inspectcode-cache so analysis caches
-    ///     are kept within the task/run artifacts directory and reused across runs.
+    ///     InspectCode is removed from the squad and from this repository's gates (ADR 0075): no review gate
+    ///     may run the ReSharper command-line tools, which never exit on the reference machine.
     /// </summary>
     [Fact]
-    public void InspectCodeGateCarriesCachesHome()
+    public void NoReviewGateRunsTheReSharperCommandLineTools()
     {
         IReadOnlyList<ReviewGate> gates = RepositoryReviewGates();
-        ReviewGate inspectCode = Assert.Single(gates, gate => gate.Id == "inspectcode");
 
-        Assert.Contains(
-            "--caches-home=artifacts/inspectcode-cache",
-            inspectCode.Run);
+        string[] offenders =
+        [
+            .. gates
+                .Where(gate => gate.Id == "inspectcode" || gate.Run.Contains("jb"))
+                .Select(gate => gate.Id)
+        ];
+
+        Assert.True(
+            offenders.Length == 0,
+            "InspectCode was removed from the gates (ADR 0075). Still declared: " + string.Join(", ", offenders));
     }
 
     /// <summary>
-    ///     Format analyzers is redundant with inspectcode and Roslyn build analyzers, so no developer agent
+    ///     Format analyzers is redundant with the Roslyn build analyzers, so no developer agent
     ///     in review.task-gates may declare a format-analyzers gate.
     /// </summary>
     [Fact]

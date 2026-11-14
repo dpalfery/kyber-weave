@@ -1,6 +1,6 @@
 ---
 name: python-dev
-description: Use when writing Python code, debugging with Pylance, applying automated refactorings, or configuring Python environments. Do not use for test authorship or CI/CD.
+description: Use when writing Python code, debugging with Pylance, applying automated refactorings, or configuring Python environments. Do not use for CI/CD; writing and running tests is the testing skill.
 license: MIT
 ---
 

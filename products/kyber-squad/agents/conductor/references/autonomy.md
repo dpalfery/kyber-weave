@@ -18,7 +18,7 @@ Ask the user nothing that this section answers. The goal is no human in the loop
 
 - **Intake:** take the architect's `INTAKE_RECOMMENDATION` plan or spec as the choice and record it.
 - **Decisions:** accept the specialist's `RECOMMENDED` option on a `STATUS: NEEDS_DECISION`, unless the item carries `ESCALATION: hard_block`.
-- **Gates:** approve each phase `READY_FOR_REVIEW`, the final **approve and execute**, and each mode-change re-approval. The conductor never writes the row: it re-invokes the owning specialist (`architect` for a plan, `product-owner` for a specification) with an explicit `AUTONOMOUS_APPROVAL: <gate id>` input, and that specialist records the approval in `## Decisions` with provenance `autonomous: recommendation accepted`, exactly as it records a human approval.
+- **Gates:** approve each phase `READY_FOR_REVIEW`, the final **approve and execute**, and each mode-change re-approval. The conductor re-invokes the owning specialist (`architect` for a plan, `product-owner` for a specification) with an explicit `AUTONOMOUS_APPROVAL: <gate id>` input, and that specialist records the approval in `## Decisions` with provenance `autonomous: recommendation accepted`, exactly as it records a human approval. The plan's final **approve and execute** is the exception: never dispatch `architect` for it. The conductor calls the finalize tool right after `PLAN_READY` (plan path); the tool records the approval and accepts any decision still marked `RECOMMENDED`.
 - **Specialist decisions:** a specialist in autonomous mode decides open items itself and records `autonomous: low-confidence, no authoritative source` where no source answered. Accept those rows as written.
 
 ## Hard-block escalation
@@ -41,15 +41,23 @@ Do not relay `GAPS` or `OPEN_QUESTIONS` that carry a recommended option: accept 
 
 ## Delivery
 
-Both modes deliver the same way. When the work is ready to leave the machine (with the applicable closeout done), the conductor commits to a feature branch (never the default branch), pushes it, and opens a **draft** pull request. The draft pull request is pushed before the review council runs, so the council reviews a pull request that already exists. Delivery never waits for the council.
+Both modes deliver the same way. When the work is ready to leave the machine (with the applicable closeout done), the conductor commits to a feature branch (never the default branch), pushes it, and opens a **draft** pull request, all in one call to the deliver tool (the `delivery-execution` skill's Delivery section). The review council reviews the pushed branch, or the local branch when the push fails; it never waits for a pull request, and its verdict is posted on the pull request when one exists. Delivery never waits for the council.
 
-The draft is marked ready once required CI passes. The `create-pull-request` skill, run by `github-devops`, waits at most 60 minutes for CI. If CI fails or is not done in that time, the pull request stays draft and the report says what it is waiting for. No review or human approval is needed before ready.
+### Autonomous approval of the run's delivery
 
-The council verdict goes in the PR description. It does not gate ready: required CI does. The council re-reviews after every fix round until it returns APPROVE. The loop runs on the open pull request: delivery never waits for it, and required CI alone decides ready. The loop stops after 5 review cycles, or after 3 cycles in a row in which the count of surviving critical and major findings does not fall; the findings still open are then listed in the pull request as pending human review, and delivery continues. The `delivery-execution` skill owns the loop itself.
+**Autonomous mode is the user's approval for the run's own delivery.** `autonomy: autonomous`, set in the prompt or in the Config Reg, is the user's explicit approval for the run's commits on its run branch, the push of that branch, and its draft pull request. A host rule that asks for approval before a commit or push (an `AGENTS.md` line, for example) is satisfied by it, so do not stop to ask. It approves nothing outside the run branch: no commit to the default branch, no force-push, no reset, restore, clean or rebase of work the run did not create, and no merge.
+
+The plan, its task file and the plan index are committed together before the first dispatch, in both modes, without asking: the finalize tool does it. Delivery never asks, and a pull request that cannot be opened (no supported remote host, no credentials) is not a broken step that stops the run: finish everything local (commits, the push if a remote accepts it, the final council review, closeout) and report `NOT DELIVERED: pull request — <reason>`.
+
+The draft is marked ready once required CI passes. The deliver tool does not wait for CI and never marks a pull request ready: it returns the checks GitHub reports when it reads the pull request back. The pull request stays draft and the report says what CI is waiting for. Only on the delivery agent fallback does the `create-pull-request` skill, run by `github-devops`, wait at most 60 minutes for CI. No review or human approval is needed before ready.
+
+The council verdict goes in the PR description when there is one. It does not gate ready: required CI does. The council re-reviews after every fix round until the verdict prints `fix round: none`. The loop runs on the pushed branch: delivery never waits for it, and required CI alone decides ready. The verdict stops the loop after 5 review cycles, or after 3 cycles in a row in which the count of findings to fix does not fall; the findings still open are then listed in the pull request as pending human review, and delivery continues. The `delivery-execution` skill owns the loop itself.
 
 Human and bot review happens after the pull request is ready. A reviewer asking for changes at that point is ordinary PR review (`kilo-review-loop` or `pr-review-fix-comments`), not a conductor gate.
 
 Delivery requires DOCS_REVIEW: rows and, for plan/spec-backed work, CLOSEOUT_COMPLETE evidence; the draft PR carries both. Assign the PR to the invoking user, and request reviewers when the repository names them, so it is notified. CI minutes triggered by the push are expected cost, not the "spend" hard stop. Never merge.
+
+### Supervised delivery
 
 In supervised mode the conductor runs the same push, draft, and CI-only ready step, then stops and asks the user how to proceed.
 
@@ -60,7 +68,9 @@ These stay human in autonomous mode:
 - a hard-block escalation with `RECOMMENDED: none`;
 - merge, publish, delete, or spend (committing to a feature branch, pushing it, and opening a draft pull request are allowed, as above);
 - an unresolvable `STATUS: BLOCKED` or write error (`PLAN_WRITE_ERROR`, `SPEC_WRITE_ERROR`), such as missing credentials or access;
-- a tool that cannot repair itself: `STATUS: TOOL_FAILURE`, which is what the run-start `kyber-weave doctor --ensure` returns under `stop-on-tool-failure`, and what a docs or CodeGraph tool answers with when it cannot read the index its joins come from. The run stops before the next worker is dispatched, because the remedy is an install the run may not perform and every worker after it would answer from joins that are silently absent. A repository that sets `stop-on-tool-failure: false` gets a warning line instead, and the run continues. A read-only run never stops on it. This is not a circuit-breaker: no rework clears it.
+- a tool that cannot repair itself: `STATUS: TOOL_FAILURE`, which is what the run-start `kyber-weave doctor --ensure` returns under `stop-on-tool-failure`, and what a docs or CodeGraph tool answers with when it cannot read the index its joins come from. The run stops before the next worker is dispatched, because the remedy is an install the run may not perform and every worker after it would answer from joins that are silently absent. A repository that sets `stop-on-tool-failure: false` gets a warning line instead, and the run continues. A read-only run never stops on it. This is not a circuit-breaker: no rework clears it. A run stops for a tool failure only on machine evidence: a non-zero `doctor --ensure` exit, or a tool response or worker report carrying the literal line `STATUS: TOOL_FAILURE`. A worker's note that it fell back to direct reads, or a `Discovery:` line with zeros, is not a tool failure: record it in the run report as a warning and continue. If you doubt the tooling, dispatch one `kyber-weave doctor --ensure` and let its exit code decide. In autonomous mode this is never a question to the user.
+
+A check that a missing local dependency stops (a database not running, an unset environment variable) is not a hard stop, even when reported as `STATUS: BLOCKED`: record `NOT VERIFIED: <command> — <reason>` in the run report and the PR description, and continue delivery. The PR stays draft until required CI passes.
 
 ## Circuit-breakers are non-fatal
 
@@ -70,15 +80,21 @@ A circuit-breaker that `architect` mediation cannot resolve keeps rework on that
 
 Finish every unaffected queued task and the closeout, then deliver as above. A review finding still open when the review loop stops is handled the same way: it is listed in the PR as pending human review, and it never holds back delivery.
 
+## Circuit-breakers in supervised mode
+
 Supervised behaviour is unchanged: an unresolved circuit-breaker finding escalates to the user and blocks completion until the user resolves it.
 
 ## Final report
 
 Add to the completion report:
 
-- every `autonomous: low-confidence` decision: ID, decision, and why no source answered, so the user can overturn it without opening the plan;
-- the count of auto-approved gates;
 - every open circuit-breaker finding, and every review finding still open when the review loop stopped, listed as pending human review;
-- the draft pull request link and its CI state (ready, or what it is waiting for).
+- the draft pull request link and its CI state (ready, or what it is waiting for);
+- the todos filed for follow-up work, one line each with its path, and, as the report's last line, one question: whether to start a fresh run (new branch, new pull request) for them. Never start that run yourself, in either mode: the user answers the question.
+
+### Autonomous decisions in the report
+
+- every `autonomous: low-confidence` decision: ID, decision, and why no source answered, so the user can overturn it without opening the plan;
+- the count of auto-approved gates.
 
 A run-start `doctor --ensure` failure is not a final-report item: under `stop-on-tool-failure` it ends the run with `STATUS: TOOL_FAILURE` before any delivery, and a repository that sets the setting to `false` carries its warning line in the run record.

@@ -154,4 +154,63 @@ public sealed class PlanInventoryValidatorTests
 
         Assert.True(report.Items.Count == 0, Describe(report));
     }
+
+    private const string Columns = "| Plan | Status | Goal |\n|---|---|---|\n";
+
+    [Fact]
+    public void AnOpenRowWhosePlanFileIsGoneIsKWDOCLIFECYCLE006()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write(PlanIndex, Index(Columns + "| [Cards](2026-11-13-cards.md) | Ready | Add cards. |"));
+
+        DiagnosticReport report = Validate(fixture);
+
+        Assert.Contains(report.Items, i => i.Code == PlanInventoryValidator.StaleOpenEntry && i.Message.Contains("2026-11-13-cards.md", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AProseSentenceRestatingAPlansStatusIsKWDOCLIFECYCLE006()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write(PlanIndex, Index("**One active plan:** `Cards` (Draft). Every other plan is archived.\n\n" + Columns));
+
+        DiagnosticReport report = Validate(fixture);
+
+        Assert.Contains(report.Items, i => i.Code == PlanInventoryValidator.StaleOpenEntry);
+    }
+
+    [Fact]
+    public void AnOpenRowForAnExistingPlanIsClean()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write(PlanIndex, Index(Columns + "| [Cards](2026-11-13-cards.md) | Ready | Add cards. |"))
+            .Write("6-Docs/plans/2026-11-13-cards.md", Plan("plans/cards"));
+
+        DiagnosticReport report = Validate(fixture);
+
+        Assert.True(report.Items.Count == 0, Describe(report));
+    }
+
+    [Fact]
+    public void AnExistingPlanTheIndexOmitsIsStillKWDOCLIFECYCLE001()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write(PlanIndex, Index(Columns))
+            .Write("6-Docs/plans/2026-11-13-cards.md", Plan("plans/cards"));
+
+        DiagnosticReport report = Validate(fixture);
+
+        Assert.Contains(report.Items, i => i.Code == PlanInventoryValidator.UnlistedPlan);
+    }
+
+    [Fact]
+    public void AnIndexLeftAfterArchiveWithNoOpenRowOrSentenceIsClean()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write(PlanIndex, Index("No plans are open.\n\n| [Cards](../archive/plans/cards.md) | Archived | Add cards. |"));
+
+        DiagnosticReport report = Validate(fixture);
+
+        Assert.True(report.Items.Count == 0, Describe(report));
+    }
 }

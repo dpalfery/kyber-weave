@@ -319,19 +319,16 @@ public sealed class CodexHookAdapterTests
     }
 
     [Fact]
-    public void InternalError_WritesDenyShape()
+    public void InternalError_AllowsAndLogs()
     {
         ScriptedEngine engine = new() { ThrowOnPre = true };
 
-        (int exit, string stdout, _) = Run(Fixture("pre-spawn-dispatch.json"), null, engine);
+        (int exit, string stdout, string log) = Run(Fixture("pre-spawn-dispatch.json"), null, engine);
 
+        // ADR 0072: a fault the host cannot decide on allows, with the code in the log.
         Assert.Equal(0, exit);
-        using JsonDocument doc = JsonDocument.Parse(stdout);
-        JsonElement output = doc.RootElement.GetProperty("hookSpecificOutput");
-        Assert.Equal("deny", output.GetProperty("permissionDecision").GetString());
-        string reason = output.GetProperty("permissionDecisionReason").GetString() ?? string.Empty;
-        Assert.Contains(HookCommand.FailClosedCode, reason, StringComparison.Ordinal);
-        Assert.Contains("ANSWER: error", reason, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, stdout);
+        Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
     }
 
     [Fact]

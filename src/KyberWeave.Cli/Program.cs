@@ -7,6 +7,7 @@ using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Cli.Commands.Run;
 using KyberWeave.Cli.Commands.Skills;
 using KyberWeave.Cli.Commands.Squad;
+using KyberWeave.Cli.Commands.Squad.Brief;
 using KyberWeave.Cli.Commands.Update;
 using KyberWeave.Cli.Commands.Utilities;
 using KyberWeave.Cli.Rendering;
@@ -110,6 +111,27 @@ app.Configure(config =>
             .WithExample("docs", "validate", ".")
             .WithExample("docs", "validate", ".", "--merge-ready");
 
+        docs.AddCommand<DocsTasksCommand>("tasks")
+            .WithDescription(
+                "Derive a plan's task file (<plan>.tasks.json) and its execution digest from the plan; write or check it (KW-DOC-TASKS-*).")
+            .WithExample("docs", "tasks", "docs/plans/2026-11-12-my-plan.md", "--write")
+            .WithExample("docs", "tasks", "docs/plans/2026-11-12-my-plan.md", "--check");
+
+        docs.AddCommand<DocsPacketCommand>("packet")
+            .WithDescription(
+                "Print one task's packet for the worker dispatched on it: the plan is found from the repository, " +
+                "the task file is checked against it, and {worktree} is filled in (KW-DOC-TASKS-CLI-*).")
+            .WithExample("docs", "packet", "T1", "--agent", "csharp-dev")
+            .WithExample("docs", "packet", "T2", "--prior-results", "results.txt");
+
+        docs.AddCommand<DocsCloseoutCommand>("closeout")
+            .WithDescription(DocsCloseoutCommand.Description)
+            .WithExample("docs", "closeout", "docs/plans/2026-11-12-my-plan.md")
+            .WithExample("docs", "closeout", "docs/plans/2026-11-12-my-plan.md", "--archive");
+        docs.AddCommand<DocsFinalizeCommand>("finalize")
+            .WithDescription(DocsFinalizeCommand.Description)
+            .WithExample("docs", "finalize", "docs/plans/2026-11-12-my-plan.md", "--approval-mode", "autonomous", "--approval", "AUTONOMOUS_APPROVAL: approve-and-execute");
+
         docs.AddCommand<DocsDriftCommand>("drift")
             .WithDescription("Resolve documented code references against the CodeGraph index (KW-DOC-DRIFT-*).")
             .WithExample("docs", "drift", ".");
@@ -210,6 +232,11 @@ app.Configure(config =>
             .WithDescription("Launch an isolated harness instance configured with the active project preset.")
             .WithExample("squad", "run", "claude")
             .WithExample("squad", "run", "codex", "--", "--model", "custom-model");
+
+        squad.AddCommand<SquadBriefCommand>("brief")
+            .WithDescription("Print only the parts of an agent's installed reference files that apply to this run.")
+            .WithExample("squad", "brief", "conductor", "--path", "plan", "--autonomy", "supervised")
+            .WithExample("squad", "brief", "architect", "--plan", "my-plan", "--format", "json");
 
         squad.AddBranch("copilot-prompt", copilotPrompt =>
         {
@@ -318,6 +345,14 @@ app.Configure(config =>
             .WithExample("review", "duplicates", ".")
             .WithExample("review", "duplicates", ".", "--out", "duplicates.json");
 
+        review.AddCommand<ReviewCycleCommand>("cycle")
+            .WithDescription(ReviewCycleCommand.Description)
+            .WithExample("review", "cycle", ".", "--task", "my-task");
+
+        review.AddCommand<ReviewSeatsCommand>("seats")
+            .WithDescription(ReviewSeatsCommand.Description)
+            .WithExample("review", "seats", ".", "--base", "origin/main");
+
         review.AddCommand<ReviewVerdictCommand>("verdict")
             .WithDescription(ReviewVerdictCommand.Description)
             .WithExample("review", "verdict", ".", "--seats", "seats", "--gates", "gates.json", "--out", "findings.json");
@@ -328,7 +363,7 @@ app.Configure(config =>
     // repository, not a governed artifact class.
     config.AddBranch("run", run =>
     {
-        run.SetDescription("Start a run: fetch, resolve the base, and create the branch the work belongs on.");
+        run.SetDescription("Start a run on its own branch, and deliver it as a draft pull request when it is finished.");
 
         run.AddCommand<RunStartCommand>("start")
             .WithDescription(
@@ -341,6 +376,10 @@ app.Configure(config =>
             .WithExample(
                 "run", "start", "--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate",
                 "--resume", "claude/fix/existing-fix", "--json");
+
+        run.AddCommand<RunDeliverCommand>("deliver")
+            .WithDescription(RunDeliverCommand.Description)
+            .WithExample("run", "deliver", ".", "--summary", "Plans now finalize through a tool, so a run saves a minute per plan.");
     });
 
     // Kyber-Arbiter Human Surfaces — validate, list, inspect, dry-run, audit,

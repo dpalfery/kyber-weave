@@ -32,7 +32,8 @@ public static class GateRunner
     /// <remarks>
     /// Gates start in declaration order and each waits for the one before it, except a gate declared
     /// <c>concurrent</c>: it starts at its place and runs alongside the gates declared after it. The report
-    /// lists results in declaration order either way.
+    /// lists results in declaration order either way. At most <see cref="ReviewConfig.Parallelism"/> gates run at one
+    /// time, concurrent or not.
     /// <para>
     /// The deadline is opt-in rather than read from <paramref name="config"/>, because a single named gate, a task
     /// gate, and a run outside the council are not spending the council's budget and must never be cut by it.
@@ -77,31 +78,28 @@ public static class GateRunner
         bool stopped = false;
 
         using CancellationTokenSource stop = new();
+        using SemaphoreSlim slots = new(Math.Max(1, config.Parallelism));
         try
         {
             for (int index = 0; index < gates.Count && !stopped; index++)
             {
                 ReviewGate gate = gates[index];
 
-                // The time left is taken when the gate would start, so a concurrent gate is cut at the same
-                // deadline as a sequential one, and a gate the deadline has already passed never starts.
-                TimeSpan? timeLeft = deadline - Stopwatch.GetElapsedTime(started);
                 GateResult? settled;
                 if (AppliesWhenReason(gate, changedPaths) is string reason)
                     settled = NotApplicable(gate, reason);
-                else if (deadline is { } passed && timeLeft <= TimeSpan.Zero)
+                else if (deadline is { } passed && deadline - Stopwatch.GetElapsedTime(started) <= TimeSpan.Zero)
                     settled = DeadlinePassedBeforeStart(gate, passed);
                 else
                     settled = MissingRequirement(gate, workingDirectory);
 
-                RunBudget? budget = deadline is { } limit ? new RunBudget(limit, timeLeft) : null;
                 if (settled is null && gate.Concurrent)
                 {
-                    alongside.Add((index, Task.Run(() => RunUnlessStopped(gate, workingDirectory, budget, stop.Token))));
+                    alongside.Add((index, Task.Run(() => RunInSlot(gate, workingDirectory, deadline, started, slots, stop.Token))));
                     continue;
                 }
 
-                results[index] = settled ?? RunOne(gate, workingDirectory, budget, CancellationToken.None);
+                results[index] = settled ?? RunInSlot(gate, workingDirectory, deadline, started, slots, CancellationToken.None);
 
                 stopped = stopOnBlockingFailure
                           && (StopsTheRun(gate, results[index], deadline)
@@ -174,11 +172,13 @@ public static class GateRunner
     /// <param name="workingDirectory">The repository root the gates run against.</param>
     /// <param name="fix">Whether to run each gate's fix command before its verify command.</param>
     /// <param name="stopOnBlockingFailure">Whether to skip the remaining gates once a blocking one fails.</param>
+    /// <param name="observer">Sees each verify command's output and result, and may skip a later gate, for a caller that classifies them.</param>
     public static TaskGateRun RunTaskGates(
         IReadOnlyList<PlannedTaskGate> gates,
         string workingDirectory,
         bool fix,
-        bool stopOnBlockingFailure = false)
+        bool stopOnBlockingFailure = false,
+        TaskGateObserver? observer = null)
     {
         ArgumentNullException.ThrowIfNull(gates);
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
@@ -201,9 +201,17 @@ public static class GateRunner
                     fixFailures.Add(applied);
             }
 
+            if (observer?.SkipReason?.Invoke(gate) is { } skipReason)
+            {
+                results.Add(new GateResult(gate.Id, gate.Blocking, 0, skipReason, 0, skipReason));
+                continue;
+            }
+
             GateResult result = RunArgv(
-                gate.Id, gate.Blocking, gate.Run, gate.TimeoutSeconds, gateDirectory, gate.FailOnOutput);
+                gate.Id, gate.Blocking, gate.Run, gate.TimeoutSeconds, gateDirectory, gate.FailOnOutput,
+                captureOutput: observer?.Output);
             results.Add(result);
+            observer?.After?.Invoke(gate, result);
 
             if (stopOnBlockingFailure && gate.Blocking && !result.Passed)
                 break;
@@ -289,19 +297,46 @@ public static class GateRunner
         && !(deadline is not null && VerdictEngine.IsStoppedForTime(result));
 
     /// <summary>
-    /// Runs a concurrent gate, or returns null when the run was stopped before the gate finished: a stopped
-    /// gate has no result, and is left out of the report like a gate that never started.
+    /// Runs a gate once one of the run's slots is free, or returns null when the run was stopped before the gate
+    /// finished: a stopped gate has no result, and is left out of the report like a gate that never started.
     /// </summary>
-    private static GateResult? RunUnlessStopped(
-        ReviewGate gate, string workingDirectory, RunBudget? budget, CancellationToken stop)
+    /// <remarks>
+    /// The time left on the deadline is taken once the slot is held, so a gate that waited for a slot is cut at the
+    /// same deadline as one that did not, and a gate the deadline passed while it waited never starts.
+    /// </remarks>
+    private static GateResult? RunInSlot(
+        ReviewGate gate,
+        string workingDirectory,
+        TimeSpan? deadline,
+        long runStarted,
+        SemaphoreSlim slots,
+        CancellationToken stop)
     {
         try
         {
+            slots.Wait(stop);
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+
+        try
+        {
+            TimeSpan? timeLeft = deadline - Stopwatch.GetElapsedTime(runStarted);
+            if (deadline is { } passed && timeLeft <= TimeSpan.Zero)
+                return DeadlinePassedBeforeStart(gate, passed);
+
+            RunBudget? budget = deadline is { } limit ? new RunBudget(limit, timeLeft) : null;
             return RunOne(gate, workingDirectory, budget, stop);
         }
         catch (OperationCanceledException)
         {
             return null;
+        }
+        finally
+        {
+            slots.Release();
         }
     }
 
@@ -309,7 +344,7 @@ public static class GateRunner
     {
         string gateDirectory = ResolveWorkingDirectory(workingDirectory, gate.WorkingDirectory);
         return RunArgv(
-            gate.Id, gate.Blocking, gate.Run, gate.TimeoutSeconds, gateDirectory, gate.FailOnOutput, budget, stop);
+            gate.Id, gate.Blocking, gate.Run, gate.TimeoutSeconds, gateDirectory, gate.FailOnOutput, budget, stop: stop);
     }
 
     /// <summary>The run deadline and the time left on it when a gate starts.</summary>
@@ -335,6 +370,7 @@ public static class GateRunner
         string workingDirectory,
         bool failOnOutput,
         RunBudget? budget = null,
+        Action<string, string>? captureOutput = null,
         CancellationToken stop = default)
     {
         if (!Directory.Exists(workingDirectory))
@@ -369,6 +405,7 @@ public static class GateRunner
         try
         {
             ProcessResult process = ProcessRunner.Run(startInfo, string.Empty, timeout, cancellationToken: stop);
+            captureOutput?.Invoke(id, process.StandardOutput + "\n" + process.StandardError);
 
             // A tool that reports by listing (gofmt -l exits 0 on Go before 1.26 even when files differ) can
             // only fail through its output. The exit code is rewritten to 1 so GateResult.Passed stays the single
@@ -418,6 +455,8 @@ public static class GateRunner
         }
     }
 
+    private const int MaxSummaryLineLength = 200;
+
     private static string SummarizeOutput(string output)
     {
         string[] lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -438,8 +477,22 @@ public static class GateRunner
         string[] lines = output
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
+        // Each line is capped too: one runner line can be tens of kilobytes, and the summary is printed.
         return lines.Length == 0
             ? $"exit code {process.ExitCode}"
-            : string.Join(" | ", lines.TakeLast(3));
+            : string.Join(" | ", lines.TakeLast(3).Select(line => line.Length <= MaxSummaryLineLength ? line : line[..MaxSummaryLineLength] + "…"));
     }
+}
+
+/// <summary>What a caller sees while task gates run: each command's output and result, and a say in skipping later gates.</summary>
+public sealed class TaskGateObserver
+{
+    /// <summary>Receives a verify command's gate id and its standard output followed by standard error.</summary>
+    public Action<string, string>? Output { get; init; }
+
+    /// <summary>Called after a gate's verify command has run, with its result.</summary>
+    public Action<PlannedTaskGate, GateResult>? After { get; init; }
+
+    /// <summary>Called before a gate starts; a non-null reason skips it and is recorded as the gate's not-applicable reason.</summary>
+    public Func<PlannedTaskGate, string?>? SkipReason { get; init; }
 }

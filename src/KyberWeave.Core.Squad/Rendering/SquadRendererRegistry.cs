@@ -553,6 +553,33 @@ public sealed class SquadRendererRegistry : ISquadRenderer
             : null;
     }
 
+    /// <summary>
+    /// Every project-relative folder a renderer writes skills into, such as <c>.claude/skills</c>,
+    /// in target order. The harnesses read these folders themselves, so a skill of the same name
+    /// placed in any of them can be the one an agent loads.
+    /// </summary>
+    internal static IReadOnlyList<string> ProjectSkillRoots()
+    {
+        return
+        [
+            .. SquadTargetCatalog.All
+                .Select(ProjectSkillsRoot)
+                .OfType<string>()
+                .Distinct(StringComparer.Ordinal)
+        ];
+    }
+
+    /// <summary>
+    /// The directory <paramref name="target"/> installs project-scope skills to, or null when the
+    /// target has no skill directory.
+    /// </summary>
+    internal static string? ProjectSkillsRoot(SquadTarget target)
+    {
+        const string suffix = "/x/SKILL.md";
+        HashSet<string> none = new(StringComparer.Ordinal);
+        return SkillOutputPath(target, "x", none) is { } path ? path[..^suffix.Length] : null;
+    }
+
     private static string? SkillOutputPath(
         SquadTarget target,
         string name,

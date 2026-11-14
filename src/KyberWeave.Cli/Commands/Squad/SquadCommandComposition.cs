@@ -257,9 +257,7 @@ internal static class SquadCommandComposition
     public static SquadArbiterWiring ResolveArbiterWiring(Core.Arbiter.ArbiterConfig arbiter)
     {
         ArgumentNullException.ThrowIfNull(arbiter);
-        long timeoutMs = Math.Max(1, arbiter.Provider.TimeoutMs);
-        int hookTimeoutSeconds = (int)Math.Min(int.MaxValue, (timeoutMs + 999) / 1000 + 2);
-        return new SquadArbiterWiring(arbiter.Enabled, hookTimeoutSeconds);
+        return new SquadArbiterWiring(arbiter.Enabled, Core.Arbiter.ArbiterHookTimeout.SecondsFor(arbiter.Provider.TimeoutMs));
     }
 
     /// <summary>

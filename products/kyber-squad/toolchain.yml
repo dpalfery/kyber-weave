@@ -26,12 +26,15 @@ required-mcp-tools:
     - query-docs
   kw-docs:
     - docs_answer_question_from_repo_documentation
+    - docs_archive_plan_after_closeout_is_complete
     - docs_detect_drift_between_documents_and_code
     - docs_find_documents_citing_code_symbol
+    - docs_finalize_approved_plan_and_write_task_file
     - docs_find_duplicates_conflicts_ambiguous_terms
     - docs_get_coding_standard_for_technology
     - docs_get_source_repository_and_revision
     - docs_look_up_glossary_term_definition
+    - docs_push_run_branch_and_open_draft_pull_request
     - docs_validate_governed_document_schema
   kw-arbiter:
     - arbiter_check_configuration_and_key_readiness
