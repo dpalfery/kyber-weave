@@ -129,6 +129,8 @@ The attestation line is the same on both forms. It shows the guidance was read a
 
 When the header block at the start of your invocation carries `REFUTE: <lens>/<slug>` — the id of a finding another seat reported, as `REFUTE: security/key-in-argv` — the run is a refutation. The finding's YAML follows the header block exactly as it was reported (when several follow, the header names the first; take each in turn). Read it, then read the code it points at, and argue the finding is wrong.
 
+**A refutation cut short by the budget** answers `SUPPORTED: <id> — budget reached before it could be refuted` for every finding it did not defeat with evidence: an unfinished refutation never drops a finding.
+
 **You default to refuted.** A finding survives only if the code and the evidence establish it — the same bar it was held to when it was written. Nothing in this mode relaxes the evidence rules: a refutation with nothing cited behind it is an opinion, and the reviewer discards it along with the finding.
 
 Answer once per finding id, one line each, in the order the findings arrived:

@@ -156,6 +156,48 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
+    public void VerdictCandidatesListsMajorsFromTheSeatsSoFarWithoutRefusingOrWriting()
+    {
+        Write("src/a.cs", "int x = 1;\n");
+        Commit("work");
+        string seats = Path.Combine(CycleFolder(1), "seats");
+        Write($".agent_scratchpad/{Task}/review/cycle-1/seats/correctness.md", """
+            - id: correctness/x
+              lens: correctness
+              severity: major
+              confidence: 9
+              file: src/a.cs
+              line: 1
+              excerpt: |
+                int x = 1;
+              claim: x is wrong.
+              evidence: src/a.cs:1
+              failure_scenario: Any caller reads 1 where 2 is required.
+              suggestion: Use 2.
+            Budget reached, not examined: src/b.cs
+            Discovery: codegraph 1, docs 0, direct reads 0
+            Input sites: 0 traced, 1 files with none
+            REVIEW.md sections checked: [R2]
+            """);
+        string findings = Path.Combine(CycleFolder(1), "findings.json");
+
+        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() => CreateApp().Run(
+            ["review", "verdict", _repo, "--seats", seats, "--out", findings, "--candidates", "--format", "json"]));
+
+        Assert.Equal(0, run.Result);
+        Assert.Contains("KW-REVIEW-046", run.Output, StringComparison.Ordinal);
+        Assert.Contains("correctness/x", run.Output, StringComparison.Ordinal);
+        Assert.Contains("KW-REVIEW-054", run.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("KW-REVIEW-024", run.Output, StringComparison.Ordinal);
+        Assert.False(File.Exists(findings));
+
+        CapturedConsoleExecution<int> full = ProcessConsoleCapture.Run(() => CreateApp().Run(
+            ["review", "verdict", _repo, "--seats", seats, "--out", findings, "--format", "lines"]));
+        Assert.Contains("KW-REVIEW-041", full.Output, StringComparison.Ordinal);
+        Assert.NotEqual(0, full.Result);
+    }
+
+    [Fact]
     public void AVerifierCyclesEvidenceDiffIsTheFixDeltaFromThePriorHead()
     {
         string baseCommit = Git("rev-parse", "HEAD").Trim();

@@ -10,8 +10,9 @@ metadata:
 # Review council
 
 On this harness a dispatched agent cannot start agents, so `code-reviewer` cannot start its own
-lens seats. You start them for it. The reviewer still indexes the tree, runs the gates, writes the
-packets, adjudicates and computes the verdict; you only start seats and pass paths.
+lens seats. You start them for it. The reviewer still prepares the seats (its `review seats`
+writes the packets), runs the gates, adjudicates and computes the verdict; you only start seats and
+pass paths.
 
 **Keep your context small.** You never read a packet, a seat file or `evidence.md`, and you never
 pass findings: every seat writes its output to its own seat file in the cycle folder, and the

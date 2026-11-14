@@ -98,7 +98,7 @@ flowchart TD
         RT["review-triage ×3<br/>model-profile: fast"]
     end
 
-    Council -->|"seat files · one per lens"| Confirm["3. Adversarial confirm<br/>one batched refuter over the KW-REVIEW-046 candidates"]
+    Council -->|"seat files · one per lens"| Confirm["3. Adversarial confirm<br/>one refuter per KW-REVIEW-046 candidate, in parallel"]
     Confirm --> Adjudicate
     Gates -->|"gates.json"| Adjudicate
 
@@ -141,7 +141,7 @@ packet and the evidence path, and adjudicates and computes the verdict. A review
 tool to start agents never applies a lens itself; only one with none applies them itself and says
 so. On a harness where a sub-agent cannot start sub-agents, the main session loads the
 `review-council` skill instead: the reviewer runs in hand-back mode and returns
-`STATUS: COUNCIL_SEATS_NEEDED` with one `SEAT:` block per seat, the main session starts them, each
+`STATUS: COUNCIL_SEATS_NEEDED` with the `review seats` dispatch blocks, the main session starts them, each
 seat writes its output to its own seat file, and the reviewer is re-invoked to adjudicate. The
 render tells each harness which path it is on. The reasons are in
 [ADR 0079](../adr/0079-the-reviewer-starts-its-own-seats-where-sub-agents-can-dispatch.md).
@@ -399,11 +399,11 @@ while the exemption stays. On the day after it lapses the finding returns on its
 ### Adversarial confirmation and refutation guardrails
 
 Step 3 sends every refutation candidate — the accepted `major` and `critical` findings the
-verdict command lists under `KW-REVIEW-046` — to **one batched** `review-lens` spawn. Its single
-`REFUTE:` header names the first candidate, because a repeated header would leave the Arbiter
-without the fact it reads; the body carries every candidate's YAML, and the refuter answers once
-per finding id. The reviewer drops each refuted finding with `--drop <id>=refuted: <reason>` and
-computes the verdict again. A verifier cycle sends only the candidates no earlier cycle refuted.
+verdict command lists under `KW-REVIEW-046` (`review verdict --candidates` lists them while other
+seats still run) — to its own `review-lens` spawn, all of them in one parallel batch. Each spawn's
+`REFUTE:` header names its finding and the body carries that finding's YAML; a refuter stopped by its
+seat budget answers `SUPPORTED`, so an unfinished refutation never drops a finding. The reviewer
+drops each refuted finding with `--drop <id>=refuted: <reason>` and computes the verdict once. A verifier cycle sends only the candidates no earlier cycle refuted.
 However, to prevent adversarial refuters from invalidating verified standards through specious dismissals, the refutation pass enforces strict **refutation guardrails**:
 - Refuters must adhere to Ground Rule 1: every finding stating a concrete failure scenario must be refuted with concrete proof of why that failure cannot occur, never an opinion or stylistic argument.
 - Refuters cannot dismiss findings under 'repo-idiom' excuses or familiarity arguments.

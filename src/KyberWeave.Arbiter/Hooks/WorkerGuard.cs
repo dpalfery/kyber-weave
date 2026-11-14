@@ -214,9 +214,10 @@ public static class WorkerGuard
                 ? null
                 : $"{BudgetRuleId}: this review seat has made {calls} tool calls in {(int)elapsed.TotalMinutes} minutes, past " +
                   $"its budget of {maxCalls} calls or {minutes} minutes. Make no more reads or lookups. Return your output now " +
-                  "from what you have: the findings you can support, then, among the closing lines, " +
-                  $"'{SeatBudgetLine} <what your lens did not reach>'. If your packet names a Seat file, write it there " +
-                  "(that write is allowed); otherwise reply with it.";
+                  "from what you have: as a lens seat, the findings you can support, then, among the closing lines, " +
+                  $"'{SeatBudgetLine} <what your lens did not reach>'; as a refutation, SUPPORTED for every finding you " +
+                  "have not defeated with evidence. If your invocation names a Seat file, write it there (that write is " +
+                  "allowed); otherwise reply with it.";
         }
 
         return $"{BudgetRuleId}: this dispatch has made {calls} tool calls in {(int)elapsed.TotalMinutes} minutes, past its " +

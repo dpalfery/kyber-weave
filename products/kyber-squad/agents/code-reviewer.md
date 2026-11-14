@@ -58,7 +58,7 @@ Add `--hand-back` in hand-back mode. In seconds it syncs the tree's CodeGraph in
 
 ## 2. Seats and gates together
 
-**First batch, at once:** the `run:` command and every `now:` block, in one parallel tool batch. Send each block unchanged, the lines between `--- seat <lens> agent=<agent> ---` and `--- end ---`, as the prompt to the agent the marker names, one lens per spawn. If a shell call would hold up the rest of the batch, start the gates in the background first (Copilot CLI: the shell tool's async mode) and dispatch right after. Where seats can run in the background, collect each as it finishes and act on it at once.
+**First batch, at once:** the `run:` command and every `now:` block, in one parallel tool batch. Send each block unchanged, the lines between `--- seat <lens> agent=<agent> ---` and `--- end ---`, as the prompt to the agent the marker names, one lens per spawn. If a shell call would hold up the rest of the batch, start the gates in the background first (Copilot CLI: the shell tool's async mode; elsewhere append `> <cycle>/gates.log 2>&1 &`), dispatch right after, and read the gate output (or that log's last lines) when the gates finish. Where seats can run in the background, collect each as it finishes and act on it at once.
 
 **When the gates finish** they rewrite `evidence.md` with every gate's result and the coverage, write `duplicates.json`, and print `not-seated:` lines for the gate-proven skips and `after-gates: send <lenses>`. Send those blocks in one batch, together with every retry and refutation already due. `test-adequacy` is always among them unless `review seats` ruled it out.
 

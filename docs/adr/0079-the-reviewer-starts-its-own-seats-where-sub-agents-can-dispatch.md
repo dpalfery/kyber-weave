@@ -74,9 +74,10 @@ apply, which the changed-file list already showed.
    no such tool applies the lenses itself, and its report says so.
 2. **The `review-council` skill where they cannot.** The session a human started loads it in place
    of the one dispatch. The skill dispatches `code-reviewer` in hand-back mode (first body line
-   `COUNCIL-SEATS: hand-back`). The reviewer runs the gates and returns `STATUS: COUNCIL_SEATS_NEEDED`
-   with one `SEAT:` block per seat. The main session starts every seat in one batch and re-invokes the
-   reviewer with one outcome line per seat. Each seat writes its output to the `Seat file:` its block
+   `COUNCIL-SEATS: hand-back`). The reviewer runs `review seats --hand-back` and returns
+   `STATUS: COUNCIL_SEATS_NEEDED` with its dispatch blocks. The main session starts the first seats
+   in one batch together with a second reviewer dispatch that runs the gates, then the after-gates
+   seats, and re-invokes the reviewer with one outcome line per seat. Each seat writes its output to the `Seat file:` its block
    names and replies with that path, so findings never enter the main session. The reviewer and the
    verdict command read the seat files. The conductor's own instruction is one sentence: dispatch
    `code-reviewer`; where sub-agents cannot dispatch, load `review-council`.
