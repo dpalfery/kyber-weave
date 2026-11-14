@@ -722,6 +722,18 @@
       "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git ls-files -z in the repository root."
     },
     {
+      "file": "tests/KyberWeave.Tests/CliHelpRenderingTests.cs",
+      "text": "ProcessStartInfo startInfo = new(host)",
+      "count": 1,
+      "bound": "Started by RunCli: Timeout (60 s) kills the tree; the built CLI host rendering --help or its command model."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/CliHelpRenderingTests.cs",
+      "text": "return ProcessRunner.Run(startInfo, string.Empty, Timeout);",
+      "count": 1,
+      "bound": "Timeout (60 s) kills the tree; the built CLI host rendering --help or its command model."
+    },
+    {
       "file": "tests/KyberWeave.Tests/UtilitiesCliCommandTests.cs",
       "text": "ProcessStartInfo startInfo = new(CliHostPath())",
       "count": 1,
