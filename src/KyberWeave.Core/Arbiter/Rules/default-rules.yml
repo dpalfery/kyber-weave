@@ -442,8 +442,12 @@ rules:
       type: choice
       state: { dispatch: delegation.body-head, planning-paths: delegation.planning-paths }
       criteria:
-        names-plan: The dispatch tells the worker to open, read or follow one of the planning-paths files.
-        mentions-only: The dispatch mentions a planning-paths file only to say which plan or task the work serves.
+        names-plan: >-
+          The dispatch tells the worker to open, read or follow one of the planning-paths files as the source of
+          its work, or as its only way to get the task.
+        mentions-only: >-
+          The dispatch mentions a planning-paths file only to say which plan or task the work serves, or names the
+          task file only as a fallback beside the <packet command> marker, which is how the worker gets its task.
       confidence-at-least: 0.8
       tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
     effects: { names-plan: escalate, mentions-only: allow, no-plan: allow, closeout: allow, not-a-task: allow }

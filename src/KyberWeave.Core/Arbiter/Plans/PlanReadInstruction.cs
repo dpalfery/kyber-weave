@@ -124,10 +124,43 @@ public static partial class PlanReadInstruction
     }
 
     /// <summary>
-    /// The text without any <c>kyber-weave docs packet …</c> command: the machine prints the packet, so naming the
-    /// plan to that command sends the worker nowhere.
+    /// The text a model question may read as evidence of a plan read: the dispatch without its routing metadata.
+    /// </summary>
+    /// <remarks>
+    /// The routing header lines (<c>PLAN_FILE:</c>, <c>TASK:</c>, <c>development-mode:</c>, <c>autonomy:</c> and the
+    /// rest of the closed set) name the plan so the machine can identify the dispatch; they are not an instruction to
+    /// the worker. The product's own packet command, <c>kyber-weave docs packet …</c> or
+    /// <c>kyber-weave docs tasks &lt;plan&gt; --task &lt;id&gt;</c>, is how a worker gets its brief. Both are removed, so
+    /// a question about what the dispatch tells the worker to read never sees the plan named by the machinery.
+    /// </remarks>
+    /// <param name="text">A dispatch prompt, with or without its header block.</param>
+    /// <returns>The text with those lines and commands replaced by a neutral marker; unchanged when it holds none.</returns>
+    public static string WithoutRoutingMetadata(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+
+        string[] lines = text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        List<string> kept = new(lines.Length);
+        for (int index = 0; index < lines.Length; index++)
+        {
+            if (index < RoutingScanLines && RoutingLineRegex().IsMatch(lines[index]))
+            {
+                continue;
+            }
+
+            kept.Add(lines[index]);
+        }
+
+        return WithoutPacketCommands(string.Join('\n', kept)).TrimStart('\n');
+    }
+
+    /// <summary>
+    /// The text without any packet command: the machine prints the packet, so naming the plan to that command sends
+    /// the worker nowhere.
     /// </summary>
     private static string WithoutPacketCommands(string text) => PacketCommandRegex().Replace(text, "docs packet");
+
+    private const int RoutingScanLines = 40;
 
     /// <summary>
     /// Lexically normalizes a path: collapses redundant separators, removes <c>.</c> segments,
@@ -229,8 +262,14 @@ public static partial class PlanReadInstruction
         }
     }
 
-    [GeneratedRegex(@"kyber-weave\s+docs\s+packet\b(?:\s+(?!--)[\w.\-]+)?(?:\s+--(?:plan|prior-results)(?:\s+|=)[^\s`]+)*", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    // `docs packet <id> [--agent a] [--plan p] [--prior-results f]`, and `docs tasks <plan> --task <id>`: both print one
+    // task's packet. `docs tasks <plan> --list` and `--write` are the conductor's and architect's, not a worker's brief.
+    [GeneratedRegex(@"kyber-weave\s+docs\s+(?:packet\b(?:\s+(?!--)[\w.\-]+)?(?:\s+--(?:plan|prior-results|agent)(?:\s+|=)[^\s`]+)*|tasks\s+[^\s`]+\s+--task(?:\s+|=)[\w.\-]+)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex PacketCommandRegex();
+
+    // A routing header line: the closed header names plus the run-mode lines the conductor writes beside them.
+    [GeneratedRegex(@"^\s*[-*]?\s*\**`?(?:KYBER-ARBITER|PLAN_FILE|TASK|LENS|REFUTE|REVIEW_RUN|development-mode|autonomy)`?\**\s*:", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex RoutingLineRegex();
 
     [GeneratedRegex(@"(?<=[.!?])[ \t]+", RegexOptions.CultureInvariant)]
     private static partial Regex SentenceBoundaryRegex();

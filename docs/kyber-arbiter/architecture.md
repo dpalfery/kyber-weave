@@ -270,7 +270,7 @@ each, what stays at step 0 and which answer only the model can give.
 **The plan-read ban is enforced at dispatch (`KW-ARB-PLANREAD-001`).** Workers treat their dispatch
 packet as their whole context and do not open plan or specification files, and until this rule the
 only enforcement was a Read guard — advisory wherever a harness's hooks are. On a `delegate` trigger
-the rule removes the routing header block, then asks whether what remains names a path under
+the rule removes the routing header block, the run-mode lines beside it (`development-mode:`, `autonomy:`) and the product's own packet commands (`kyber-weave docs packet …`, `kyber-weave docs tasks <plan> --task <id>`), then asks whether what remains names a path under
 `config.planning-dirs`. The detector reads prose, so a named path goes to the model, which escalates
 only when it is confident the worker is told to open the file; a dispatch that mentions its plan to say
 which task it serves allows. The header is removed first because that

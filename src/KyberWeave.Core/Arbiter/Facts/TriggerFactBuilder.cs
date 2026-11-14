@@ -196,7 +196,7 @@ public static class TriggerFactBuilder
                 // Bounded excerpts for model questions: the raw head keeps the header block as written, the body
                 // head is the dispatch the worker reads. Raw header values keep what validation rejected.
                 "delegation.head" => TextExcerpts.Head(prompt),
-                "delegation.body-head" => TextExcerpts.Head(stripped),
+                "delegation.body-head" => TextExcerpts.Head(PlanReadInstruction.WithoutRoutingMetadata(stripped)),
                 "delegation.plan-file-raw" => block.RawValues.TryGetValue("PLAN_FILE", out string? rawPlan) ? rawPlan : null,
                 "delegation.task-raw" => block.RawValues.TryGetValue("TASK", out string? rawTask) ? rawTask : null,
                 // The shortcut rules' questions read the dispatch body: the defect the investigator was sent to
@@ -207,7 +207,7 @@ public static class TriggerFactBuilder
                 // The plan-read rule's question, asked by the one detector the docs
                 // validator also uses, so a spelling the rule accepts is a spelling
                 // KW-DOC-TASKS-005 accepts.
-                "delegation.planning-paths" => PlanReadInstruction.NamesPathUnder(stripped, planningDirs),
+                "delegation.planning-paths" => PlanReadInstruction.NamesPathUnder(PlanReadInstruction.WithoutRoutingMetadata(stripped), planningDirs),
                 "delegation.plan-file" => planFile,
                 // Absent (null) unless PLAN_FILE was present but failed validation or repeated.
                 "delegation.plan-file-rejected" => block.RejectedNames.Contains("PLAN_FILE") ? true : null,

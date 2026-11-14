@@ -68,6 +68,12 @@ public sealed class ArbiterPlanReadRuleTests
             });
     }
 
+    private static object Fact(ArbiterFactSet facts, string name)
+    {
+        Assert.True(facts.TryGet(name, out ArbiterFact? fact));
+        return fact!.Value!;
+    }
+
     /// <summary>The shipped rule's step-0 answer for those facts.</summary>
     private static string Answer(string prompt, string target = "csharp-dev") => RuleEngine.Decide(Rule(), Facts(prompt, target));
 
@@ -95,6 +101,41 @@ public sealed class ArbiterPlanReadRuleTests
         Assert.Equal(RuleEffects.Allow, Effect(prompt));
         Assert.Equal(RuleEffects.Escalate, Rule().Effects["names-plan"]);
         Assert.Contains("names-plan", Rule().Ask!.Criteria!.Keys);
+    }
+
+    /// <summary>
+    /// Routing metadata is not evidence of a plan read: the header lines, the run-mode lines beside them and the
+    /// product's own packet commands name the plan so the machine can identify the dispatch, and never reach the question.
+    /// </summary>
+    [Theory]
+    [InlineData("Fetch your packet with `kyber-weave docs packet T1 --agent dal-dev`.")]
+    [InlineData("Fetch your packet with `kyber-weave docs tasks docs/plans/2026-11-07-ready-tasks.md --task T1` (from the worktree).")]
+    [InlineData("Your first action is `kyber-weave docs packet T1 --plan docs/plans/2026-11-07-ready-tasks.md`.")]
+    public void RoutingMetadataAndPacketCommandsNameNoPlanToTheQuestion(string body)
+    {
+        string prompt = "PLAN_FILE: docs/plans/2026-11-07-ready-tasks.md\nTASK: T1\ndevelopment-mode: test-first\nautonomy: autonomous\n\n" + body;
+        ArbiterFactSet facts = Facts(prompt);
+
+        Assert.Empty(Assert.IsAssignableFrom<IReadOnlyList<string>>(Fact(facts, "delegation.planning-paths")));
+        string head = Assert.IsType<string>(Fact(facts, "delegation.body-head"));
+        Assert.DoesNotContain("PLAN_FILE", head, StringComparison.Ordinal);
+        Assert.DoesNotContain("development-mode", head, StringComparison.Ordinal);
+        Assert.DoesNotContain("docs/plans", head, StringComparison.Ordinal);
+        Assert.Equal("no-plan", Answer(prompt));
+    }
+
+    /// <summary>A read instruction that is not a packet command still names the plan, with its header lines removed.</summary>
+    [Fact]
+    public void AnInstructionToReadThePlanStillReachesTheQuestionWithoutItsHeaders()
+    {
+        string prompt = "PLAN_FILE: docs/plans/2026-11-07-ready-tasks.md\nTASK: T1\ndevelopment-mode: test-first\n\n" +
+            "Open docs/plans/2026-11-07-ready-tasks.md and implement task 2 from it.";
+        ArbiterFactSet facts = Facts(prompt);
+
+        Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<string>>(Fact(facts, "delegation.planning-paths")));
+        string head = Assert.IsType<string>(Fact(facts, "delegation.body-head"));
+        Assert.StartsWith("Open docs/plans/", head, StringComparison.Ordinal);
+        Assert.Equal(RuleEngine.Undecidable, Answer(prompt));
     }
 
     /// <summary>

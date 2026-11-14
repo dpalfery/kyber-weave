@@ -329,8 +329,10 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
                 : new HookOutcome(HookOutcomeKind.Deny, digest);
         }
 
-        ArbiterDecisionRecord? record = decisions
-            .LastOrDefault(decision => string.Equals(decision.LedgerId, result.LedgerId, StringComparison.Ordinal));
+        // A secondary (delegate.model) shares the primary's ledger id and is written after it, so the last record on
+        // the ledger is not the dispatch's decision. The record that carries the event's outcome is.
+        ArbiterDecisionRecord? record = DecisionWithOutcome(decisions, result.LedgerId, result.Outcome)
+            ?? decisions.LastOrDefault(decision => string.Equals(decision.LedgerId, result.LedgerId, StringComparison.Ordinal));
         if (record is null)
         {
             return AllowLoudly(
