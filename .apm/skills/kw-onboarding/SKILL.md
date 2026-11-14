@@ -82,9 +82,9 @@ Load [references/harnesses.md](references/harnesses.md) now.
    - Adding a harness globally: `kyber-weave squad install --global --target <new>`; the others stay.
    - Adding a harness to a project that has others: `kyber-weave squad update . --target <every deployed token>,<new>`.
    - Nothing deployed in the project yet: `kyber-weave squad install . --target <tokens>`.
-5. For each chosen harness, `kyber-weave arbiter install --target <token> --provider <current>`
-   (add `--project` for project scope). `<current>` is the provider `arbiter status` reports
-   (`none` or `systemone`): an omitted `--provider` resets it to `none`.
+5. For each chosen harness, `kyber-weave arbiter install --target <token>`
+   (add `--project` for project scope). It keeps the provider already configured; pass `--provider`
+   only to change it.
 6. Show the harness's row from the reference: its trust step and any setting it needs. Offer to
    apply a setting only where the reference says how, and never edit a shell profile or harness
    settings file without a yes.

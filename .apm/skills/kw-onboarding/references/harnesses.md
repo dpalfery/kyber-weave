@@ -15,13 +15,13 @@ known.
 | Deploy into this repository only | `kyber-weave squad install . --target <token>` |
 | Already deployed: refresh | `kyber-weave squad update [--global]` with no `--target` (an explicit list replaces the deployed set, so name every target to keep when you do pass one) |
 | What gates each harness, and the current provider | `kyber-weave arbiter status` |
-| Arbiter hooks, every repository | `kyber-weave arbiter install --target <token> --provider <current>` (one target per run) |
-| Arbiter hooks, this repository only | `kyber-weave arbiter install --project --target <token> --provider <current>` |
+| Arbiter hooks, every repository | `kyber-weave arbiter install --target <token>` (one target per run) |
+| Arbiter hooks, this repository only | `kyber-weave arbiter install --project --target <token>` |
 
 `squad install` and `arbiter install` print the root they will write and ask to confirm; add
 `--dry-run` first when the user wants a preview. Adding a harness to an existing global install
-keeps the others. Always pass the provider `arbiter status` reports: `arbiter install` without
-`--provider` sets it back to `none`. The Arbiter is the decision gate that checks each agent dispatch against the
+keeps the others. `arbiter install` without
+`--provider` keeps the configured provider and prints which one is in effect. The Arbiter is the decision gate that checks each agent dispatch against the
 plan; `arbiter install` turns it on and installs the harness hook that calls it.
 
 ## Per harness
