@@ -413,6 +413,83 @@ public sealed class PlanFinalizeTests
     }
 
     [Fact]
+    public void RestoreNamesEveryFileItCannotUndoAndStillUndoesTheRest()
+    {
+        using DocFixture fixture = Repository();
+        string plan = PlanTaskFileProbe.PlanPath;
+        string index = PlanTaskFileProbe.PlanIndexPath;
+        string indexBefore = Read(fixture, index);
+        string finalizedPlan = Read(fixture, plan);
+        // A folder where the plan and the task file belong: neither can be written or deleted as a file.
+        File.Delete(Absolute(fixture, plan));
+        Directory.CreateDirectory(Absolute(fixture, plan));
+        Directory.CreateDirectory(Absolute(fixture, PlanTaskFileProbe.TaskFilePath));
+        File.WriteAllText(Absolute(fixture, index), "changed by finalize");
+
+        List<string> notUndone = Finalizer(fixture).Restore(
+            plan, finalizedPlan, index, indexBefore, PlanTaskFileProbe.TaskFilePath, taskFileBefore: null);
+
+        Assert.Equal([plan, PlanTaskFileProbe.TaskFilePath], notUndone);
+        Assert.Equal(indexBefore, Read(fixture, index));
+    }
+
+    [Fact]
+    public void RestoreReportsNothingWhenEveryFileIsPutBack()
+    {
+        using DocFixture fixture = Repository();
+        string planBefore = Read(fixture, PlanTaskFileProbe.PlanPath);
+        File.WriteAllText(Absolute(fixture, PlanTaskFileProbe.PlanPath), "changed by finalize");
+        File.WriteAllText(Absolute(fixture, PlanTaskFileProbe.TaskFilePath), "{}");
+
+        List<string> notUndone = Finalizer(fixture).Restore(
+            PlanTaskFileProbe.PlanPath, planBefore, planIndex: null, indexText: null, PlanTaskFileProbe.TaskFilePath, taskFileBefore: null);
+
+        Assert.Empty(notUndone);
+        Assert.Equal(planBefore, Read(fixture, PlanTaskFileProbe.PlanPath));
+        Assert.False(Exists(fixture, PlanTaskFileProbe.TaskFilePath));
+    }
+
+    [Fact]
+    public void ACouldNotUndoReportNamesTheFilesAndTellsAnUntrackedTaskFileToBeDeletedByHand()
+    {
+        DiagnosticReport report = new();
+
+        PlanFinalize.ReportNotUndone(
+            report, "6-Docs/plans/p.md", ["6-Docs/plans/p.md", "6-Docs/plans/p.tasks.json"], createdTaskFile: "6-Docs/plans/p.tasks.json");
+
+        Diagnostic error = Assert.Single(report.Items);
+        Assert.Equal(PlanFinalize.PlanNeedsArchitect, error.Code);
+        Assert.Equal("Could not undo the change to: 6-Docs/plans/p.md, 6-Docs/plans/p.tasks.json.", error.Message);
+        Assert.Contains("git checkout -- <file>", error.Hint, StringComparison.Ordinal);
+        Assert.Contains("Restore 6-Docs/plans/p.md with", error.Hint, StringComparison.Ordinal);
+        Assert.DoesNotContain("Restore 6-Docs/plans/p.md, 6-Docs/plans/p.tasks.json", error.Hint, StringComparison.Ordinal);
+        Assert.Contains("'6-Docs/plans/p.tasks.json' did not exist before this step", error.Hint, StringComparison.Ordinal);
+        Assert.Contains("delete it by hand", error.Hint, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ATrackedTaskFileThatCannotBeRestoredGetsTheCheckoutAdvice()
+    {
+        DiagnosticReport report = new();
+
+        PlanFinalize.ReportNotUndone(report, "p.md", ["p.tasks.json"], createdTaskFile: null);
+
+        Diagnostic error = Assert.Single(report.Items);
+        Assert.Contains("git checkout -- <file>", error.Hint, StringComparison.Ordinal);
+        Assert.DoesNotContain("delete it by hand", error.Hint, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NothingIsReportedWhenNothingWasLeftBehind()
+    {
+        DiagnosticReport report = new();
+
+        PlanFinalize.ReportNotUndone(report, "p.md", [], createdTaskFile: "p.tasks.json");
+
+        Assert.Empty(report.Items);
+    }
+
+    [Fact]
     public void RestoringReportsAFileOrAFolderAlreadyGoneAsDeleted()
     {
         using DocFixture fixture = Repository();

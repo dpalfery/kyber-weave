@@ -255,11 +255,19 @@ public sealed partial class PlanCloseout
     /// last look is never overwritten. False when the path is already taken (a file or a folder is there) or this
     /// process may not create it; either way nothing is overwritten and the caller refuses. Which of those it was is
     /// read from the failed create itself, never from a second look at the path, which could change in between. A
-    /// failure while writing (a full disk, an unencodable character) removes the partial file this call created and
-    /// propagates, so it is never mistaken for "already there" and never leaves a truncated archive behind.
+    /// failure while writing (a full disk, an unencodable character) removes the partial file this call created, best
+    /// effort, and propagates, so it is never mistaken for "already there"; a partial file whose removal also fails is left on disk, and the write
+    /// error, not the removal error, is what propagates.
     /// </summary>
-    internal static bool TryWriteNew(string path, string text)
+    internal static bool TryWriteNew(string path, string text) => TryWriteNew(path, text, File.Delete);
+
+    /// <summary><see cref="TryWriteNew(string, string)"/> with the removal of a partial file supplied, so a failing removal can be tested.</summary>
+    /// <param name="path">The file to create.</param>
+    /// <param name="text">What to write.</param>
+    /// <param name="deletePartial">Removes the file this call created when writing it failed.</param>
+    internal static bool TryWriteNew(string path, string text, Action<string> deletePartial)
     {
+        ArgumentNullException.ThrowIfNull(deletePartial);
         bool created = false;
         try
         {
@@ -280,7 +288,17 @@ public sealed partial class PlanCloseout
         }
         catch when (created)
         {
-            File.Delete(path);
+            // Best effort: the write failure is the error to report, and a removal that fails too must not replace it.
+            // A partial file that cannot be removed stays on disk; the caller sees the write error, not a clean refusal.
+            try
+            {
+                deletePartial(path);
+            }
+            catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException)
+            {
+                // The original exception is rethrown below.
+            }
+
             throw;
         }
     }

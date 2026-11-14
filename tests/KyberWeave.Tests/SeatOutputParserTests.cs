@@ -388,11 +388,11 @@ public sealed class SeatOutputParserTests
     }
 
     /// <summary>
-    /// A seat may write more than one YAML document. The parser must read every document or refuse the file;
-    /// silently reading the first and dropping the rest is the defect this fact guards against.
+    /// A seat may write more than one YAML document. The parser reads every document, in order; silently reading
+    /// the first and dropping the rest is the defect this fact guards against.
     /// </summary>
     [Fact]
-    public void AMultiDocumentSeatIsReadInFullOrRefused()
+    public void AMultiDocumentSeatIsReadInFull()
     {
         List<string> body =
         [
@@ -401,15 +401,9 @@ public sealed class SeatOutputParserTests
             .. FindingLines(id: "correctness/second")
         ];
 
-        try
-        {
-            SeatOutput seat = SeatOutputParser.Parse("correctness", Fenced(body));
-            Assert.Equal(2, seat.Findings.Count);
-        }
-        catch (SeatOutputException)
-        {
-            // Refusing the file is the other allowed outcome.
-        }
+        SeatOutput seat = SeatOutputParser.Parse("correctness", Fenced(body));
+
+        Assert.Equal(["correctness/first", "correctness/second"], seat.Findings.Select(finding => finding.Id));
     }
 
     // -----------------------------------------------------------------------------------------

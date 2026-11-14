@@ -493,6 +493,30 @@ public sealed class DocsCloseoutCommandTests
     }
 
     /// <summary>
+    /// When removing the partial file fails too, the write error is still what propagates: a cleanup failure must not
+    /// replace the error the caller needs to see.
+    /// </summary>
+    [Fact]
+    public void AFailingCleanupDoesNotMaskTheWriteError()
+    {
+        using DocFixture fixture = Repository();
+        string path = Absolute(fixture, "6-Docs/archive/plans/stuck.md");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        List<string> deleteAttempts = [];
+
+        Assert.ThrowsAny<EncoderFallbackException>(() => PlanCloseout.TryWriteNew(
+            path,
+            "text then a lone surrogate \uD800 here",
+            attempted =>
+            {
+                deleteAttempts.Add(attempted);
+                throw new IOException("the file is in use");
+            }));
+
+        Assert.Equal([path], deleteAttempts);
+    }
+
+    /// <summary>
     /// A folder where the archive file belongs fails the exclusive create without a file being there to find: Windows
     /// answers with an access error, Unix with "exists". Either is a taken path, refused with nothing overwritten and no
     /// second look at the path to decide it.

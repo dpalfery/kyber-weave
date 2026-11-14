@@ -232,7 +232,7 @@ public sealed partial class PlanFinalize
                 report.Add(new Diagnostic(PlanNeedsArchitect, Severity.Error,
                     "The finalized plan failed validation, so every change was undone.", plan, plan, Hint: ArchitectHint));
                 IReadOnlyList<string> notUndone = Restore(plan, planText, planIndex, indexText, taskFile, taskFileBefore);
-                ReportNotUndone(report, plan, notUndone);
+                ReportNotUndone(report, plan, notUndone, taskFileBefore is null ? taskFile : null);
                 return Refused();
             }
         }
@@ -244,7 +244,7 @@ public sealed partial class PlanFinalize
                     ? $"Finalizing failed and every change was undone: {exception.Message}"
                     : $"Finalizing failed: {exception.Message}",
                 plan, plan));
-            ReportNotUndone(report, plan, notUndone);
+            ReportNotUndone(report, plan, notUndone, taskFileBefore is null ? taskFile : null);
             return Refused();
         }
 
@@ -530,7 +530,7 @@ public sealed partial class PlanFinalize
     /// others or crash the refusal that is being reported.
     /// </summary>
     /// <returns>The files that could not be restored, for the report to name.</returns>
-    private List<string> Restore(string plan, string planText, string? planIndex, string? indexText, string taskFile, string? taskFileBefore)
+    internal List<string> Restore(string plan, string planText, string? planIndex, string? indexText, string taskFile, string? taskFileBefore)
     {
         List<string> notUndone = [];
         if (!TryWrite(_files.Absolute(plan), planText))
@@ -545,14 +545,31 @@ public sealed partial class PlanFinalize
         return notUndone;
     }
 
-    private static void ReportNotUndone(DiagnosticReport report, string plan, IReadOnlyList<string> notUndone)
+    /// <summary>
+    /// Names the files a refusal could not put back, with the instruction that works for each: a file git tracks is
+    /// restored with <c>git checkout --</c>; a task file this step created has no committed version, so git has nothing
+    /// to restore and it is deleted by hand.
+    /// </summary>
+    /// <param name="report">The refusal being reported.</param>
+    /// <param name="plan">The plan, which the diagnostic is filed against.</param>
+    /// <param name="notUndone">The files that could not be restored.</param>
+    /// <param name="createdTaskFile">The task file when this step created it (it was absent before); otherwise null.</param>
+    internal static void ReportNotUndone(DiagnosticReport report, string plan, IReadOnlyList<string> notUndone, string? createdTaskFile)
     {
         if (notUndone.Count == 0)
             return;
 
+        List<string> tracked = [.. notUndone.Where(file => !string.Equals(file, createdTaskFile, StringComparison.Ordinal))];
+        bool createdLeft = createdTaskFile is not null && notUndone.Contains(createdTaskFile, StringComparer.Ordinal);
+        List<string> advice = [];
+        if (tracked.Count > 0)
+            advice.Add($"Restore {string.Join(", ", tracked)} with 'git checkout -- <file>', or fix it by hand.");
+        if (createdLeft)
+            advice.Add($"'{createdTaskFile}' did not exist before this step and git has nothing to restore it from: delete it by hand.");
+
         report.Add(new Diagnostic(PlanNeedsArchitect, Severity.Error,
             $"Could not undo the change to: {string.Join(", ", notUndone)}.", plan, plan,
-            Hint: "Check each named file by hand, or restore it with 'git checkout --'."));
+            Hint: string.Join(' ', advice)));
     }
 
     private static bool TryWrite(string path, string text)
