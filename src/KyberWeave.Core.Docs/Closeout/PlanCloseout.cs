@@ -210,7 +210,7 @@ public sealed partial class PlanCloseout
     private string InventoryRow(DocumentModel archived, string name, string archivedText, DateOnly date)
     {
         string stamp = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        string created = Created().Match(archivedText) is { Success: true } match ? match.Groups[1].Value : stamp;
+        string created = Created().Match(archivedText) is { Success: true } match ? match.Groups[1].Value : string.Empty;
         List<string> destinations = [];
         foreach (string[] cells in ArchiveCloseoutValidator.TableRows(archived, "Closeout mapping") ?? [])
         {
@@ -310,6 +310,6 @@ public sealed partial class PlanCloseout
     [GeneratedRegex(@"^owner:[ \t]*(\S[^\r\n]*?)[ \t]*$", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     private static partial Regex Owner();
 
-    [GeneratedRegex(@"^created:\s*(\S+)", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^created:[ \t]*(\S+)", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     private static partial Regex Created();
 }

@@ -258,6 +258,23 @@ public sealed class DocsCloseoutCommandTests
         Assert.Contains("reference/missing.md", output, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(false, "|  | 2026-11-13 |")]
+    [InlineData(true, "| 2026-10-20 | 2026-11-13 |")]
+    public void TheInventoryRowShowsTheCreatedDateOnlyWhenThePlanRecordedOne(bool recorded, string cells)
+    {
+        string plan = CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready");
+        if (recorded)
+            plan = plan.Replace("status: ready", "status: ready\ncreated: 2026-10-20", StringComparison.Ordinal);
+        using DocFixture fixture = Repository(plan);
+
+        (int exit, string output) = Run(fixture, archive: true);
+
+        Assert.True(exit == 0, output);
+        string row = Read(fixture, Inventory).Split('\n').First(line => line.StartsWith("| [2026-10-20-widget.md]", StringComparison.Ordinal));
+        Assert.Contains(cells, row, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void AMissingArchiveInventoryIsCreatedWithTheTableHeaderAndTheRow()
     {
