@@ -71,6 +71,24 @@ public class ReviewDuplicatesTests : IDisposable
         Assert.Equal(["A.cs", "B.cs"], cluster.Members.Select(m => m.File));
     }
 
+    /// <summary>
+    /// The duplicates gate reads each symbol's file whole, so a file over the size cap every other read of a named
+    /// path applies is treated as unreadable: its symbols are not compared. A file at the cap is still read.
+    /// </summary>
+    [Theory]
+    [InlineData(0, 1)]
+    [InlineData(1, 0)]
+    public void AFileOverTheSizeCapIsNotReadAndItsSymbolsAreNotCompared(int bytesOverTheCap, int clusters)
+    {
+        int total = checked((int)ReviewSeatInput.MaxFileBytes + bytesOverTheCap);
+        Write("A.cs", Body + "\n" + new string('/', total - Body.Length - 1));
+        Write("B.cs", Body);
+
+        DuplicateReport report = Detect([Method("Total", "A.cs", 1, 7), Method("Total", "B.cs", 1, 7)]);
+
+        Assert.Equal(clusters, report.Clusters.Count);
+    }
+
     [Fact]
     public void DifferentNamesOverTheSameBodyStillCluster()
     {

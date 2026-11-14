@@ -326,13 +326,7 @@ public static class ReviewJson
 
     private static string Describe(JsonNode? node)
     {
-        const int limit = 60;
-        string text = node?.ToJsonString() ?? "null";
-        if (text.Length <= limit)
-            return text;
-
-        // Back off one character rather than split a surrogate pair at the cut.
-        return text[..(char.IsHighSurrogate(text[limit - 1]) ? limit - 1 : limit)] + "…";
+        return ReviewSeatInput.Clip(node?.ToJsonString() ?? "null", 60);
     }
 
     private static void BindSnakeCaseFailureScenario(JsonObject finding)

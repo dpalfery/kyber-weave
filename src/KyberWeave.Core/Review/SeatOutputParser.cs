@@ -494,16 +494,7 @@ public static partial class SeatOutputParser
     }
 
     /// <summary>A value from the seat's text, cut short so a runaway value cannot flood a diagnostic.</summary>
-    /// <remarks>The cut backs off one character rather than split a surrogate pair.</remarks>
-    private static string Clip(string value)
-    {
-        const int limit = 200;
-        if (value.Length <= limit)
-            return value;
-
-        int cut = char.IsHighSurrogate(value[limit - 1]) ? limit - 1 : limit;
-        return value[..cut] + "…";
-    }
+    private static string Clip(string value) => ReviewSeatInput.Clip(value, 200);
 
     /// <summary>The trimmed text of a scalar field, or null when the field is absent or empty.</summary>
     private static string? Optional(SeatItem item, string key, string where)

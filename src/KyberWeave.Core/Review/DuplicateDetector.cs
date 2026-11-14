@@ -280,7 +280,9 @@ public static class DuplicateDetector
 
         try
         {
-            if (File.Exists(full)) lines = File.ReadAllLines(full);
+            // The same cap every other read of a path a seat or an index names applies: an oversized file is unreadable.
+            if (File.Exists(full) && new FileInfo(full).Length <= ReviewSeatInput.MaxFileBytes)
+                lines = File.ReadAllLines(full);
         }
         catch (Exception ex) when (ReviewSeatInput.IsFileFailure(ex))
         {

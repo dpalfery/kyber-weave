@@ -43,13 +43,20 @@ internal static class ReviewSeatInput
         excerpt.Length <= MaxExcerptCharacters && excerpt.AsSpan().Count('\n') < MaxExcerptLines;
 
     /// <summary>The text cut to <see cref="MaxTextCharacters"/>, with a marker when it was cut; null stays null.</summary>
-    /// <remarks>The cut backs off one character rather than split a surrogate pair.</remarks>
-    public static string? Clip(string? text)
+    public static string? Clip(string? text) => text is null ? null : Clip(text, MaxTextCharacters);
+
+    /// <summary>The text cut to <paramref name="limit"/> characters, with a marker when it was cut.</summary>
+    /// <remarks>The one cut-and-mark rule for seat text. It backs off one character rather than split a surrogate pair.</remarks>
+    /// <param name="text">The text to cut.</param>
+    /// <param name="limit">The most characters kept before the marker; at least 1.</param>
+    public static string Clip(string text, int limit)
     {
-        if (text is null || text.Length <= MaxTextCharacters)
+        ArgumentNullException.ThrowIfNull(text);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        if (text.Length <= limit)
             return text;
 
-        int cut = char.IsHighSurrogate(text[MaxTextCharacters - 1]) ? MaxTextCharacters - 1 : MaxTextCharacters;
+        int cut = char.IsHighSurrogate(text[limit - 1]) ? limit - 1 : limit;
         return text[..cut] + "…";
     }
 }
