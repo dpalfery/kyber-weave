@@ -66,6 +66,8 @@ decisions a host may reasonably reverse — a line length, a state-management li
 convention. Reversing one is the point of the standard being project-specific; what matters is
 that the repository says which way it went.
 
+A template holds only what applies to work in its technology; a statement that applies to every task and is never OK to break is a rule and belongs in the host's root `AGENTS.md` or rules folder (see "Rules and standards" in the host's documentation ontology).
+
 ## #128 additions
 
 [Issue 128](https://github.com/dpalfery/kyber-weave/issues/128) moved the portable rules the
