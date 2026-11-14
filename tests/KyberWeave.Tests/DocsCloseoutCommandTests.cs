@@ -1,6 +1,12 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Docs;
+using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Docs.Closeout;
+using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Processes;
 using Xunit;
 
@@ -362,6 +368,213 @@ public sealed class DocsCloseoutCommandTests
         Assert.Equal(1, taken);
         Assert.Contains("KW-DOC-CLOSEOUT-002", takenOutput, StringComparison.Ordinal);
         Assert.True(Exists(fixture, Plan));
+    }
+
+    private const string EarlierArchive = "# an earlier archive entry that is not ours\n";
+
+    private static string Absolute(DocFixture fixture, string relative) =>
+        Path.Combine(fixture.Root, relative.Replace('/', Path.DirectorySeparatorChar));
+
+    private static PlanCloseout Closer(DocFixture fixture, Action<string>? afterActivePlanCheck = null, Action<string>? beforeWriteTarget = null) =>
+        new(fixture.Root, KyberWeaveConfig.ProductDefaults,
+            () => new DocumentLoader(fixture.Root, KyberWeaveConfig.ProductDefaults.Ontology))
+        {
+            AfterActivePlanCheck = afterActivePlanCheck,
+            BeforeWriteTarget = beforeWriteTarget
+        };
+
+    private static DateOnly ArchiveDate => DateOnly.Parse(Date, CultureInfo.InvariantCulture);
+
+    private static Diagnostic SingleError(PlanCloseoutOutcome outcome) =>
+        Assert.Single(outcome.Report.Items, item => item.Severity == Severity.Error);
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AnArchiveEntryThatIsAlreadyThereIsRefusedAndKeptByteForByte(bool archive)
+    {
+        using DocFixture fixture = Repository();
+        fixture.Write(Archived, EarlierArchive);
+
+        (int exit, string output) = Run(fixture, archive);
+
+        Assert.Equal(1, exit);
+        Assert.Contains(PlanCloseout.ArchiveTargetExists, output, StringComparison.Ordinal);
+        Assert.Equal(EarlierArchive, Read(fixture, Archived));
+        Assert.True(Exists(fixture, Plan));
+        Assert.True(Exists(fixture, TaskFile));
+        Assert.Contains("2026-10-20-widget.md", Read(fixture, PlanIndex), StringComparison.Ordinal);
+        Assert.DoesNotContain("2026-10-20-widget", Read(fixture, Inventory), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnArchiveEntryThatAppearsJustBeforeTheDryRunWriteIsRefusedNotOverwrittenAndNotDeleted()
+    {
+        using DocFixture fixture = Repository();
+
+        PlanCloseoutOutcome outcome = Closer(fixture, beforeWriteTarget: target => File.WriteAllText(target, EarlierArchive))
+            .Run(Plan, ArchiveDate, archive: false);
+
+        Assert.False(outcome.Archived);
+        Assert.Equal(PlanCloseout.ArchiveTargetExists, SingleError(outcome).Code);
+        Assert.Equal(EarlierArchive, Read(fixture, Archived));
+        Assert.True(Exists(fixture, Plan));
+        Assert.True(Exists(fixture, TaskFile));
+    }
+
+    [Fact]
+    public void AnArchiveEntryThatAppearsJustBeforeTheRealMoveIsRefusedAndNothingMoves()
+    {
+        using DocFixture fixture = Repository();
+        int creates = 0;
+
+        // The first create is the evidence check's copy, which the run removes again; the second is the real move.
+        PlanCloseoutOutcome outcome = Closer(fixture, beforeWriteTarget: target =>
+            {
+                creates++;
+                if (creates == 2)
+                    File.WriteAllText(target, EarlierArchive);
+            })
+            .Run(Plan, ArchiveDate, archive: true);
+
+        Assert.Equal(2, creates);
+        Assert.False(outcome.Archived);
+        Diagnostic refusal = SingleError(outcome);
+        Assert.Equal(PlanCloseout.ArchiveTargetExists, refusal.Code);
+        Assert.Contains("Nothing was moved", refusal.Message, StringComparison.Ordinal);
+        Assert.Equal(EarlierArchive, Read(fixture, Archived));
+        Assert.True(Exists(fixture, Plan));
+        Assert.True(Exists(fixture, TaskFile));
+        Assert.Contains("2026-10-20-widget.md", Read(fixture, PlanIndex), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheExclusiveCreateRefusesAnExistingFileAndLeavesItsBytesAlone()
+    {
+        using DocFixture fixture = Repository();
+        string path = Absolute(fixture, Archived);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, EarlierArchive);
+
+        bool written = PlanCloseout.TryWriteNew(path, "replacement");
+
+        Assert.False(written);
+        Assert.Equal(EarlierArchive, File.ReadAllText(path));
+    }
+
+    [Fact]
+    public void TheExclusiveCreateWritesANewFileWithoutAByteOrderMark()
+    {
+        using DocFixture fixture = Repository();
+        string path = Absolute(fixture, "6-Docs/archive/plans/new.md");
+
+        bool written = PlanCloseout.TryWriteNew(path, "# new\n");
+
+        Assert.True(written);
+        Assert.Equal(Encoding.UTF8.GetBytes("# new\n"), File.ReadAllBytes(path));
+    }
+
+    /// <summary>
+    /// A failure while writing is not "the archive already exists": it propagates, and the partial file this call
+    /// created is removed so the next closeout is not refused on it. A lone surrogate cannot be encoded, which fails
+    /// the write after the file was created, as a full disk would.
+    /// </summary>
+    [Fact]
+    public void AWriteThatFailsAfterTheCreatePropagatesAndRemovesThePartialFile()
+    {
+        using DocFixture fixture = Repository();
+        string path = Absolute(fixture, "6-Docs/archive/plans/partial.md");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+
+        Assert.ThrowsAny<EncoderFallbackException>(() => PlanCloseout.TryWriteNew(path, "text then a lone surrogate \uD800 here"));
+
+        Assert.False(File.Exists(path));
+    }
+
+    [Fact]
+    public void ThePathHoldingAFolderIsAnOpenFailureThatPropagatesNotAnExistingArchive()
+    {
+        using DocFixture fixture = Repository();
+        string path = Absolute(fixture, "6-Docs/archive/plans/folder.md");
+        Directory.CreateDirectory(path);
+
+        Assert.ThrowsAny<Exception>(() => PlanCloseout.TryWriteNew(path, "text"));
+
+        Assert.True(Directory.Exists(path));
+    }
+
+    [Fact]
+    public void APlanThatVanishesAfterTheActiveCheckIsRefusedAsMissingAndNothingIsCreated()
+    {
+        using DocFixture fixture = Repository();
+
+        PlanCloseoutOutcome outcome = Closer(fixture, afterActivePlanCheck: File.Delete).Run(Plan, ArchiveDate, archive: true);
+
+        Assert.False(outcome.Archived);
+        Diagnostic refusal = Assert.Single(outcome.Report.Items, item => item.Code == PlanCloseout.NotAnActivePlan);
+        Assert.Contains("does not exist", refusal.Message, StringComparison.Ordinal);
+        Assert.False(Exists(fixture, Archived));
+    }
+
+    [Fact]
+    public void AnUnreadablePlanIndexIsNamedInTheReportNotThrown()
+    {
+        using DocFixture fixture = Repository();
+        string index = Absolute(fixture, PlanIndex);
+        File.Delete(index);
+        Directory.CreateDirectory(index);
+
+        (int exit, string output) = Run(fixture, archive: true);
+
+        Assert.Equal(1, exit);
+        Assert.Contains(PlanCloseout.IndexNotEditable, output, StringComparison.Ordinal);
+        Assert.Contains("could not be read", output, StringComparison.Ordinal);
+        Assert.True(Exists(fixture, Plan));
+        Assert.False(Exists(fixture, Archived));
+    }
+
+    [Fact]
+    public void AnUnreadableArchiveInventoryIsNamedInTheReportAndTheCheckCopyIsRemoved()
+    {
+        using DocFixture fixture = Repository();
+        string inventory = Absolute(fixture, Inventory);
+        File.Delete(inventory);
+        Directory.CreateDirectory(inventory);
+
+        (int exit, string output) = Run(fixture, archive: true);
+
+        Assert.Equal(1, exit);
+        Assert.Contains(PlanCloseout.IndexNotEditable, output, StringComparison.Ordinal);
+        Assert.Contains("could not be read", output, StringComparison.Ordinal);
+        Assert.True(Exists(fixture, Plan));
+        Assert.False(Exists(fixture, Archived));
+    }
+
+    [Fact]
+    public void AnUnreadablePlanIsNamedInTheReportNotThrown()
+    {
+        if (OperatingSystem.IsWindows())
+            return;
+
+        using DocFixture fixture = Repository();
+        string plan = Absolute(fixture, Plan);
+        File.SetUnixFileMode(plan, UnixFileMode.None);
+        try
+        {
+            if (Environment.UserName == "root")
+                return;
+
+            (int exit, string output) = Run(fixture, archive: true);
+
+            Assert.Equal(1, exit);
+            Assert.Contains(PlanCloseout.NotAnActivePlan, output, StringComparison.Ordinal);
+            Assert.Contains("could not be read", output, StringComparison.Ordinal);
+            Assert.False(Exists(fixture, Archived));
+        }
+        finally
+        {
+            File.SetUnixFileMode(plan, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
     }
 
     [Fact]

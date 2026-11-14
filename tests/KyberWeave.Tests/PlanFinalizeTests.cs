@@ -1,5 +1,10 @@
+using System.Globalization;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Docs;
+using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Docs.Closeout;
+using KyberWeave.Core.Docs.Parsing;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -153,7 +158,7 @@ public sealed class PlanFinalizeTests
     [InlineData("[]", null)]
     public void TheReadyQueueSaysNoTasksForAValidEmptyFileAndNothingForAnUnreadableOne(string taskFile, string? expected)
     {
-        Assert.Equal(expected, KyberWeave.Core.Docs.Closeout.PlanFinalize.ReadyQueueOf(taskFile));
+        Assert.Equal(expected, PlanFinalize.ReadyQueueOf(taskFile));
     }
 
     [Fact]
@@ -291,6 +296,98 @@ public sealed class PlanFinalizeTests
 
         AssertRefusedUnchanged(fixture, run, "KW-DOC-FINALIZE-005", plan, index);
         Assert.Contains("architect", run.Output, StringComparison.Ordinal);
+    }
+
+    private static PlanFinalize Finalizer(DocFixture fixture, Action<string>? afterActivePlanCheck = null) =>
+        new(fixture.Root, KyberWeaveConfig.ProductDefaults,
+            () => new DocumentLoader(fixture.Root, KyberWeaveConfig.ProductDefaults.Ontology))
+        {
+            AfterActivePlanCheck = afterActivePlanCheck
+        };
+
+    private static string Absolute(DocFixture fixture, string relative) =>
+        Path.Combine(fixture.Root, relative.Replace('/', Path.DirectorySeparatorChar));
+
+    /// <summary>A folder where the plan index should be: reading it throws, and must become a finding, not a crash.</summary>
+    private static void ReplaceIndexWithFolder(DocFixture fixture)
+    {
+        string index = Absolute(fixture, PlanTaskFileProbe.PlanIndexPath);
+        File.Delete(index);
+        Directory.CreateDirectory(index);
+    }
+
+    [Fact]
+    public void AnUnreadablePlanIndexIsARefusalThatChangesNothing()
+    {
+        using DocFixture fixture = Repository();
+        string plan = Read(fixture, PlanTaskFileProbe.PlanPath);
+        ReplaceIndexWithFolder(fixture);
+
+        (int exit, string output) = Run(fixture);
+
+        Assert.Equal(1, exit);
+        Assert.Contains("KW-DOC-FINALIZE-005", output, StringComparison.Ordinal);
+        Assert.Contains("The plan index could not be read", output, StringComparison.Ordinal);
+        Assert.Equal(plan, Read(fixture, PlanTaskFileProbe.PlanPath));
+        Assert.False(Exists(fixture, PlanTaskFileProbe.TaskFilePath));
+    }
+
+    [Fact]
+    public void AnAlreadyReadyPlanWhosePlanIndexIsUnreadableIsAFindingNotACrash()
+    {
+        using DocFixture fixture = Repository();
+        Assert.Equal(0, Run(fixture).Exit);
+        string plan = Read(fixture, PlanTaskFileProbe.PlanPath);
+        ReplaceIndexWithFolder(fixture);
+
+        (int exit, string output) = Run(fixture);
+
+        Assert.Equal(1, exit);
+        Assert.Contains("KW-DOC-FINALIZE-005", output, StringComparison.Ordinal);
+        Assert.Contains("The plan index could not be read, so nothing was committed", output, StringComparison.Ordinal);
+        Assert.Equal(plan, Read(fixture, PlanTaskFileProbe.PlanPath));
+    }
+
+    [Fact]
+    public void APlanThatVanishesAfterTheActiveCheckIsRefusedAsMissingAndNothingIsWritten()
+    {
+        using DocFixture fixture = Repository();
+
+        PlanFinalizeOutcome outcome = Finalizer(fixture, File.Delete)
+            .Run(PlanTaskFileProbe.PlanPath, PlanApprovalMode.Autonomous, Approval, DateOnly.Parse(Date, CultureInfo.InvariantCulture));
+
+        Assert.False(outcome.Finalized);
+        Diagnostic refusal = Assert.Single(outcome.Report.Items, item => item.Severity == Severity.Error);
+        Assert.Equal(PlanFinalize.NotAnActivePlan, refusal.Code);
+        Assert.Contains("does not exist", refusal.Message, StringComparison.Ordinal);
+        Assert.False(Exists(fixture, PlanTaskFileProbe.PlanPath));
+        Assert.False(Exists(fixture, PlanTaskFileProbe.TaskFilePath));
+    }
+
+    [Fact]
+    public void RestoringAfterTheTaskFileFolderVanishedDeletesNothingAndDoesNotThrow()
+    {
+        using DocFixture fixture = Repository();
+        string gone = Absolute(fixture, "6-Docs/vanished/plan.tasks.json");
+
+        PlanFinalize.DeleteIfPresent(gone);
+
+        Assert.False(File.Exists(gone));
+        Assert.False(Directory.Exists(Path.GetDirectoryName(gone)));
+        Assert.True(Exists(fixture, PlanTaskFileProbe.PlanPath));
+    }
+
+    [Fact]
+    public void RestoringDeletesAnExistingFileButNotItsFolder()
+    {
+        using DocFixture fixture = Repository();
+        string file = Absolute(fixture, PlanTaskFileProbe.TaskFilePath);
+        File.WriteAllText(file, "{}");
+
+        PlanFinalize.DeleteIfPresent(file);
+
+        Assert.False(File.Exists(file));
+        Assert.True(Directory.Exists(Path.GetDirectoryName(file)));
     }
 
     [Fact]

@@ -52,6 +52,18 @@ public sealed partial class PlanCloseout
     private readonly Func<DocumentLoader> _loaderFactory;
     private readonly ActivePlanFiles _files;
 
+    /// <summary>
+    /// Test seam, called with the plan's absolute path once the plan has passed the active-plan check and before it is
+    /// read: the moment a plan can vanish between the check and the read.
+    /// </summary>
+    internal Action<string>? AfterActivePlanCheck { get; init; }
+
+    /// <summary>
+    /// Test seam, called with the archive target's absolute path just before each exclusive create: the moment another
+    /// process can put a file there after the existence check.
+    /// </summary>
+    internal Action<string>? BeforeWriteTarget { get; init; }
+
     /// <summary>Creates the closeout over a repository, its effective configuration and the loader the gate reads with.</summary>
     public PlanCloseout(string repoRoot, KyberWeaveConfig config, Func<DocumentLoader> loaderFactory)
     {
@@ -97,16 +109,40 @@ public sealed partial class PlanCloseout
             return new PlanCloseoutOutcome(report, false);
         }
 
+        AfterActivePlanCheck?.Invoke(_files.Absolute(plan));
+
         // Every problem is collected before anything is reported: the caller is an agent that fixes what it is
-        // told, so a refusal that names one gap per run costs a run per gap.
-        string? planIndexText = PresentFile.ReadIfPresent(_files.Absolute(planIndex));
-        if (planIndexText is null)
+        // told, so a refusal that names one gap per run costs a run per gap. A file that is there but cannot be
+        // read is one of those problems, never an exception that skips the report.
+        string? planIndexText = null;
+        try
         {
-            report.Add(new Diagnostic(IndexNotEditable, Severity.Error, $"'{planIndex}' does not exist.", plan, planIndex,
-                Hint: $"Restore it with 'git checkout -- {planIndex}', then run the closeout again."));
+            planIndexText = PresentFile.ReadIfPresent(_files.Absolute(planIndex));
+            if (planIndexText is null)
+            {
+                report.Add(new Diagnostic(IndexNotEditable, Severity.Error, $"'{planIndex}' does not exist.", plan, planIndex,
+                    Hint: $"Restore it with 'git checkout -- {planIndex}', then run the closeout again."));
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            report.Add(new Diagnostic(IndexNotEditable, Severity.Error, $"'{planIndex}' could not be read: {exception.Message}", plan, planIndex,
+                Hint: "Make the plan index a readable file, then run the closeout again."));
         }
 
-        if (PresentFile.ReadIfPresent(_files.Absolute(plan)) is not { } planText)
+        string? planText;
+        try
+        {
+            planText = PresentFile.ReadIfPresent(_files.Absolute(plan));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            report.Add(new Diagnostic(NotAnActivePlan, Severity.Error, $"'{plan}' could not be read: {exception.Message}", plan, plan,
+                Hint: "Make the plan a readable file, then run the closeout again."));
+            return new PlanCloseoutOutcome(report, false);
+        }
+
+        if (planText is null)
         {
             report.Add(new Diagnostic(NotAnActivePlan, Severity.Error, $"'{plan}' does not exist.", plan, plan,
                 Hint: "Name a plan file directly under the plans folder, not its index and not an archived plan."));
@@ -130,6 +166,7 @@ public sealed partial class PlanCloseout
         bool wroteTarget = false;
         try
         {
+            BeforeWriteTarget?.Invoke(_files.Absolute(target));
             if (!TryWriteNew(_files.Absolute(target), archivedText))
             {
                 report.Add(new Diagnostic(ArchiveTargetExists, Severity.Error,
@@ -150,7 +187,17 @@ public sealed partial class PlanCloseout
             }
 
             row = InventoryRow(_loaderFactory().LoadArchivedDocument(target), name, archivedText, date);
-            (newInventory, inventoryAction) = WithInventoryRow(inventory, planIndexText ?? string.Empty, row, date);
+            try
+            {
+                (newInventory, inventoryAction) = WithInventoryRow(inventory, planIndexText ?? string.Empty, row, date);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                report.Add(new Diagnostic(IndexNotEditable, Severity.Error, $"'{inventory}' could not be read: {exception.Message}", plan, inventory,
+                    Hint: "Make the archived plan inventory a readable file, then run the closeout again."));
+                return new PlanCloseoutOutcome(report, false);
+            }
+
             (newPlanIndex, planRowRemoved) = RemovePlanRow(planIndexText ?? string.Empty, name);
         }
         finally
@@ -176,6 +223,7 @@ public sealed partial class PlanCloseout
         }
 
         Directory.CreateDirectory(archiveDirectory);
+        BeforeWriteTarget?.Invoke(_files.Absolute(target));
         if (!TryWriteNew(_files.Absolute(target), archivedText))
         {
             report.Add(new Diagnostic(ArchiveTargetExists, Severity.Error,
@@ -204,20 +252,29 @@ public sealed partial class PlanCloseout
 
     /// <summary>
     /// Writes <paramref name="text"/> to a file that must not exist yet, in one step, so a file that appeared since the
-    /// last look is never overwritten. False when the file is already there.
+    /// last look is never overwritten. False when the file is already there. A failure while writing (a full disk, an
+    /// unencodable character) removes the partial file this call created and propagates, so it is never mistaken for
+    /// "already there" and never leaves a truncated archive behind.
     /// </summary>
-    private static bool TryWriteNew(string path, string text)
+    internal static bool TryWriteNew(string path, string text)
     {
+        bool created = false;
         try
         {
             using FileStream stream = new(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-            using StreamWriter writer = new(stream, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            created = true;
+            using StreamWriter writer = new(stream, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true));
             writer.Write(text);
             return true;
         }
-        catch (IOException) when (File.Exists(path))
+        catch (IOException) when (!created && File.Exists(path))
         {
             return false;
+        }
+        catch when (created)
+        {
+            File.Delete(path);
+            throw;
         }
     }
 

@@ -73,6 +73,12 @@ public sealed partial class PlanFinalize
     private readonly ActivePlanFiles _files;
     private readonly IPlanTaskAgentPicker? _picker;
 
+    /// <summary>
+    /// Test seam, called with the plan's absolute path once the plan has passed the active-plan check and before it is
+    /// read: the moment a plan can vanish between the check and the read.
+    /// </summary>
+    internal Action<string>? AfterActivePlanCheck { get; init; }
+
     /// <summary>Creates the finalize step over a repository, its effective configuration and the loader validation reads with.</summary>
     public PlanFinalize(string repoRoot, KyberWeaveConfig config, Func<DocumentLoader> loaderFactory)
         : this(repoRoot, config, loaderFactory, null)
@@ -117,6 +123,7 @@ public sealed partial class PlanFinalize
             return Refused();
         }
 
+        AfterActivePlanCheck?.Invoke(_files.Absolute(plan));
         if (PresentFile.ReadIfPresent(_files.Absolute(plan)) is not { } planText)
         {
             report.Add(new Diagnostic(NotAnActivePlan, Severity.Error, $"'{plan}' does not exist.", plan, plan,
@@ -262,8 +269,18 @@ public sealed partial class PlanFinalize
         Say(report, plan, $"{plan} is already Ready and {taskFile} is current; nothing changed.");
         List<string> own = [plan, taskFile];
         string? index = _files.PlanIndexPath();
-        if (index is not null && PresentFile.ReadIfPresent(_files.Absolute(index)) is not null)
-            own.Add(index);
+        try
+        {
+            if (index is not null && PresentFile.ReadIfPresent(_files.Absolute(index)) is not null)
+                own.Add(index);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            report.Add(new Diagnostic(PlanNeedsArchitect, Severity.Error,
+                $"The plan index could not be read, so nothing was committed: {exception.Message}", plan, plan, Hint: ArchitectHint));
+            return new PlanFinalizeOutcome(report, false, false, taskFile);
+        }
+
         if (!HasOtherStaged(own, plan, report))
             _files.CommitOnly(own, CommitMessage(plan), report, plan, Step);
         return new PlanFinalizeOutcome(report, false, true, taskFile, ReadyQueue(taskFile));
@@ -502,7 +519,7 @@ public sealed partial class PlanFinalize
             DeleteIfPresent(_files.Absolute(taskFile));
     }
 
-    private static void DeleteIfPresent(string path)
+    internal static void DeleteIfPresent(string path)
     {
         try
         {
