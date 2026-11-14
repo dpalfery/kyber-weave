@@ -189,7 +189,11 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
     {
         HashSet<string> scoped = [.. events.Where(e => InScope(e, settings, since, planFilter)).Select(e => e.Id)];
         List<ArbiterDecisionRecord> inScope = [.. records.Where(record => scoped.Contains(record.LedgerId))];
-        int evaluations = inScope.Sum(record => record.Rules.Count(rule =>
+        // Model targeting rides every writer dispatch whether or not a plan task resolved, so its answers would mask
+        // a run whose judgement rules never ran: only the judgement rules on the other triggers count.
+        int evaluations = inScope
+            .Where(record => !string.Equals(record.Trigger, "delegate.model", StringComparison.Ordinal))
+            .Sum(record => record.Rules.Count(rule =>
             rule.Step == 1 && !string.Equals(rule.Answer, ArbiterStep1BatchResult.NotEvaluated, StringComparison.Ordinal)));
         int implementationDispatches = inScope
             .Where(record => !record.Trigger.EndsWith(".returned", StringComparison.Ordinal)

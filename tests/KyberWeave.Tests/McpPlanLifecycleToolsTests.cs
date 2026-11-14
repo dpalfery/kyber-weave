@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
+using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Core.Processes;
 using KyberWeave.Mcp;
 using ModelContextProtocol.Server;
@@ -93,6 +94,47 @@ public sealed class McpPlanLifecycleToolsTests
         Assert.Contains(PlanTaskFileProbe.PlanIndexPath, committed, StringComparison.Ordinal);
         Assert.DoesNotContain("stray.txt", committed, StringComparison.Ordinal);
         Assert.Contains("?? stray.txt", Git(fixture.Root, "status", "--porcelain"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FinalizeWithAConfiguredModel_WritesThePickAndTheReadyQueueNamesTheAgent()
+    {
+        using DocFixture fixture = GitRepository(PlanFinalizeTests.Repository());
+        Git(fixture.Root, "config", "user.name", "t");
+        Git(fixture.Root, "config", "user.email", "t@example.com");
+        Git(fixture.Root, "add", "-A");
+        Git(fixture.Root, "commit", "-q", "-m", "init");
+        Func<KyberWeave.Core.Configuration.KyberWeaveConfig, PlanTaskAgentPick?> before = PlanTaskAgentPick.ForConfig;
+        PlanTaskAgentPick.ForConfig = _ => new PlanTaskAgentPick(new PickingProvider(), PlanTaskAgentPick.ImplementationAgents());
+        try
+        {
+            string response = Tools(fixture.Root).FinalizePlan(fixture.Root, PlanTaskFileProbe.PlanPath, "autonomous",
+                "AUTONOMOUS_APPROVAL: approve-and-execute");
+
+            Assert.Contains("result: finalized", response, StringComparison.Ordinal);
+            Assert.Contains("| agent=csharp-dev |", response, StringComparison.Ordinal);
+            Assert.Contains("\"agent\": \"csharp-dev\"",
+                File.ReadAllText(Path.Combine(fixture.Root, PlanTaskFileProbe.TaskFilePath)), StringComparison.Ordinal);
+        }
+        finally
+        {
+            PlanTaskAgentPick.ForConfig = before;
+        }
+    }
+
+    private sealed class PickingProvider : KyberWeave.Core.Arbiter.Providers.IArbiterProvider
+    {
+        public Task<KyberWeave.Core.Arbiter.Providers.ArbiterStep1BatchResult> AskStep1Async(
+            IReadOnlyList<KyberWeave.Core.Arbiter.Rules.ArbiterRule> rules,
+            KyberWeave.Core.Arbiter.ArbiterFactSet facts,
+            IReadOnlyDictionary<string, string>? step0Answers = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new KyberWeave.Core.Arbiter.Providers.ArbiterStep1BatchResult(
+                rules.ToDictionary(rule => rule.Id, _ => "csharp-dev"),
+                "stub",
+                null,
+                true,
+                rules.ToDictionary(rule => rule.Id, _ => new KyberWeave.Core.Arbiter.Providers.ArbiterStep1Score(null, 0.95, 0.8))));
     }
 
     [Fact]

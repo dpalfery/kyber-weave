@@ -122,6 +122,10 @@ rules:
         answer: ready
       - when: { fact: plan.task.depends-on, subset-of: ledger.completed-tasks }
         answer: ready
+      # The ledger and the stored reports are keyed by the PLAN_FILE and TASK headers, so a dispatch identified from
+      # machine facts cannot see its dependencies' returns: asking would judge an absence it cannot see (ADR 0082).
+      - when: { fact: delegation.identity, equals: machine }
+        answer: returns-unread
       - when: { fact: harness.observes-returns, equals: false }
         answer: returns-unobservable
       - when: { fact: ledger.task-returns, exists: false }

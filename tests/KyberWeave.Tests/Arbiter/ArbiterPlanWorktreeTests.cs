@@ -142,4 +142,49 @@ public sealed class ArbiterPlanWorktreeTests
         Assert.Contains(record.Rules, rule => rule.Id == "KW-ARB-PLAN-001" && rule.Answer == "has-tasks");
         Assert.DoesNotContain(record.Rules, rule => rule.Effect == "escalate");
     }
+
+    /// <summary>
+    /// A Copilot CLI root conductor's dispatch with no routing headers, from a hook in the main checkout: the worktree
+    /// the dispatch names holds the run's one Ready plan, and the task label names its task (ADR 0082).
+    /// </summary>
+    [Fact]
+    public void AHeaderlessCopilotDispatch_ResolvesItsPlanAndTaskInTheRunWorktree()
+    {
+        using RunStartProbe probe = RunStartProbe.Create();
+        using TempDirectory home = new();
+        string worktree = AddWorktree(probe, "run-wt");
+        string plan = Path.Combine(worktree, PlanRelative);
+        Directory.CreateDirectory(Path.GetDirectoryName(plan)!);
+        File.WriteAllText(plan, "# Plan\n\n**Status: Ready.**\n\n## Tasks\n\n### T7 — Status cards tests\nFiles: tests/StatusCardsTests.cs\n");
+        Directory.CreateDirectory(Path.Combine(probe.Root, ".kyber-weave"));
+        File.WriteAllText(
+            Path.Combine(probe.Root, ".kyber-weave", "kyber-weave.yml"),
+            "ontology:\n  docs-root: docs\narbiter:\n  enabled: true\n  provider:\n    kind: none\n");
+
+        ArbiterHookDecisionEngine engine = new(providerFactory: _ => new NoneProvider(), homeDirectory: () => home.Path);
+        HookCommand command = new(HarnessAdapterRegistry.CreateDefault(engine), Composition.LoadHostConfig, () => "wt-2");
+        string prompt = $"TASK_ID: T7\nWORKTREE: {worktree}\n\nWrite the failing tests in tests/StatusCardsTests.cs.";
+        string stdin = JsonSerializer.Serialize(new Dictionary<string, object>
+        {
+            ["sessionId"] = "s-cli",
+            ["timestamp"] = 1_731_400_000_000,
+            ["cwd"] = probe.Root,
+            ["toolName"] = "task",
+            ["toolArgs"] = JsonSerializer.Serialize(new { agent_type = "test-dev", description = "T7", prompt }),
+        });
+        using StringWriter stdout = new();
+        using StringWriter log = new();
+
+        Assert.Equal(0, command.Run("copilot-cli", null, stdin, stdout, log, homeDirectory: home.Path));
+
+        Assert.DoesNotContain("\"deny\"", stdout.ToString(), StringComparison.Ordinal);
+        ArbiterDecisionRecord record = new DecisionLog(Path.Combine(worktree, "artifacts", "arbiter")).ReadAll()
+            .Concat(new DecisionLog(Path.Combine(probe.Root, "artifacts", "arbiter")).ReadAll())
+            .First(decision => decision.Trigger == "delegate");
+        Assert.Contains(record.Rules, rule => rule.Id == "KW-ARB-PLAN-001" && rule.Answer == "has-tasks");
+        // The task resolved, so the task rules read it rather than their unknown-task answers.
+        Assert.Contains(record.Rules, rule => rule.Id == "KW-ARB-READY-001" && rule.Answer == "ready");
+        Assert.DoesNotContain(record.Rules, rule => rule.Answer is "task-unknown" or "no-task");
+        Assert.DoesNotContain(record.Rules, rule => rule.Effect == "escalate");
+    }
 }

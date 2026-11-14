@@ -175,8 +175,8 @@ public static partial class PlanFacts
             : null;
 
     /// <summary>
-    /// The plan task a headerless dispatch names: a task label at the start of a line (<c>TASK_ID: T3</c>,
-    /// <c>TASK: T3</c>, <c>Task T3</c>) wins; otherwise the one task id of the plan that the text names, with
+    /// The plan task a headerless dispatch names: one task label at the start of a line (<c>TASK_ID: T3</c>,
+    /// <c>TASK: T3</c>, <c>Task T3</c>) wins, and labels naming several tasks leave it unknown; otherwise the one task id of the plan that the text names, with
     /// <c>task</c> or <c>packet</c> before it. Several ids, or none, leave the task unknown.
     /// </summary>
     internal static PlanTask? TaskNamedIn(PlanDocument document, string prompt)
@@ -184,12 +184,17 @@ public static partial class PlanFacts
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(prompt);
 
+        List<PlanTask> labelled = [];
         foreach (Match label in TaskLabelRegex().Matches(prompt))
         {
-            PlanTask? labelled = FindTask(document, label.Groups["id"].Value);
-            if (labelled is not null)
-                return labelled;
+            PlanTask? found = FindTask(document, label.Groups["id"].Value);
+            if (found is not null && !labelled.Contains(found))
+                labelled.Add(found);
         }
+
+        // One labelled task names the dispatch's task; several (a closeout listing every task) name none.
+        if (labelled.Count > 0)
+            return labelled.Count == 1 ? labelled[0] : null;
 
         List<PlanTask> named = [];
         foreach (Match mention in TaskMentionRegex().Matches(prompt))

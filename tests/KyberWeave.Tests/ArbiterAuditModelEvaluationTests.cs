@@ -51,7 +51,15 @@ public sealed class ArbiterAuditModelEvaluationTests : IDisposable
         Assert.DoesNotContain(ArbiterAuditCommand.NoModelEvaluations, output, StringComparison.Ordinal);
     }
 
-    private string Audit(string provider, int step)
+    [Fact]
+    public void ModelTargetingAnswersAlone_DoNotHideAJudgementGap()
+    {
+        string output = Audit(provider: "systemone", step: 1, trigger: "delegate.model");
+
+        Assert.Contains(ArbiterAuditCommand.NoModelEvaluations, output, StringComparison.Ordinal);
+    }
+
+    private string Audit(string provider, int step, string trigger = "delegate")
     {
         string root = Path.Combine(_temp.Path, "host");
         Directory.CreateDirectory(Path.Combine(root, ".kyber-weave"));
@@ -69,7 +77,7 @@ public sealed class ArbiterAuditModelEvaluationTests : IDisposable
         File.WriteAllText(
             Path.Combine(arbiter, "decisions.jsonl"),
             "{\"id\":\"0000000000000009-bbbbbbbb\",\"at\":\"2026-11-14T00:00:00Z\",\"source\":\"hook\",\"harness\":\"copilot-cli\"," +
-            $"\"ledger-id\":\"{LedgerId}\",\"trigger\":\"delegate\",\"caller-source\":\"none\",\"target\":\"csharp-dev\"," +
+            $"\"ledger-id\":\"{LedgerId}\",\"trigger\":\"{trigger}\",\"caller-source\":\"none\",\"target\":\"csharp-dev\"," +
             "\"rule-set\":\"x\",\"rules\":[{\"id\":\"KW-ARB-SCOPE-002\",\"step\":" + step + ",\"answer\":\"" + answer +
             "\",\"effect\":\"allow\",\"facts\":[]}],\"provider\":{\"kind\":\"systemone\",\"latency-ms\":1,\"status\":\"answered\"}," +
             "\"outcome\":\"allow\",\"repeat\":1,\"duration-ms\":1,\"schema\":\"kyber-arbiter.decision/v1\"}\n");

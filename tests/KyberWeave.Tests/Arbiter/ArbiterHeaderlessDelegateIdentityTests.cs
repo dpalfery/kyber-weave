@@ -118,6 +118,18 @@ public sealed class ArbiterHeaderlessDelegateIdentityTests : IDisposable
     }
 
     [Fact]
+    public void AMachineIdentifiedTaskWithAnUnfinishedDependency_IsNotJudgedOnReturnsItCannotSee()
+    {
+        (_, ArbiterFactSet facts) = Facts("csharp-dev", ApiTask);
+        facts = facts
+            .With("ledger.completed-tasks", new List<string>(), ArbiterFactLabel.Derived)
+            .With("ledger.task-returns", new List<string> { "task: T3\ntarget: react-dev\nRESULT: done" }, ArbiterFactLabel.Derived)
+            .With("harness.observes-returns", true, ArbiterFactLabel.Derived);
+
+        Assert.Equal("returns-unread", Decide("KW-ARB-READY-001", facts));
+    }
+
+    [Fact]
     public void AHeaderlessDispatchWithNoActivePlan_IsAllowedWithoutAskingTheModel()
     {
         File.Delete(Path.Combine(_repo.Path, "docs", "plans", "cards.md"));
@@ -185,6 +197,7 @@ public sealed class ArbiterHeaderlessDelegateIdentityTests : IDisposable
     [InlineData("Task T3: build the cards.", "T3")]
     [InlineData("TASK PACKET \u2014 T1 (test-first). Work ONLY in worktree: /work/run.", "T1")]
     [InlineData("Implement task T1 and task T2.", null)]
+    [InlineData("Task T1: the data layer.\nTask T2: the API.", null)]
     [InlineData("Implement task T9.", null)]
     [InlineData("Build the cards.", null)]
     public void TheTaskId_IsTakenFromALabelOrOneUnambiguousMention(string prompt, string? expected)
