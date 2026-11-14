@@ -14,11 +14,23 @@ public static class NotSeatedRecord
 
     /// <summary>Adds <paramref name="decisions"/> to the cycle's record, keeping the decisions already in it.</summary>
     /// <exception cref="IOException">The record could not be written.</exception>
-    public static void Add(string cycleFolder, IReadOnlyDictionary<string, string> decisions)
+    public static void Add(string cycleFolder, IReadOnlyDictionary<string, string> decisions) =>
+        Replace(cycleFolder, [], decisions);
+
+    /// <summary>
+    /// Records <paramref name="decisions"/> as the current answer for the <paramref name="owned"/> lenses: an earlier
+    /// entry for an owned lens that is no longer decided is removed, so a re-run never leaves a reason that stopped
+    /// holding (a gate that passed before and fails now).
+    /// </summary>
+    /// <exception cref="IOException">The record could not be written.</exception>
+    public static void Replace(string cycleFolder, IEnumerable<string> owned, IReadOnlyDictionary<string, string> decisions)
     {
         ArgumentNullException.ThrowIfNull(cycleFolder);
+        ArgumentNullException.ThrowIfNull(owned);
         ArgumentNullException.ThrowIfNull(decisions);
         Dictionary<string, string> merged = new(Read(cycleFolder), StringComparer.Ordinal);
+        foreach (string lens in owned)
+            merged.Remove(lens);
         foreach ((string lens, string reason) in decisions)
             merged[lens] = reason;
 

@@ -840,12 +840,15 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
             settings.Gates = gates;
         if (!settings.Candidates)
             settings.Out ??= Path.Combine(cycle, PriorFindingsFile);
+        // The prior is the newest earlier cycle that belongs to this change, by the same test review seats applies, so a
+        // folder left by another change is never taken.
         if (settings.Prior is null
             && ReviewCycleView.TryFromOutPath(Path.Combine(cycle, PriorFindingsFile), out string reviewFolder, out int number)
-            && number > 1
-            && File.Exists(Path.Combine(reviewFolder, $"cycle-{number - 1}", PriorFindingsFile)))
+            && ReviewWorkTree.Prior(tree, settings.BaseRef, ReviewCycles.ReadFinished(reviewFolder)).Valid
+                .Where(record => record.Number < number && File.Exists(record.FindingsPath))
+                .MaxBy(record => record.Number) is { } prior)
         {
-            settings.Prior = Path.Combine(reviewFolder, $"cycle-{number - 1}");
+            settings.Prior = prior.Folder;
         }
 
         return true;
@@ -872,20 +875,41 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
         if (!model.Configured)
             return findings;
 
-        (List<ReviewFinding> kept, List<MergedFindings> merged) =
-            ReviewVerdictDecisions.MergeDuplicatesAsync(model, findings, cancellationToken).GetAwaiter().GetResult();
+        // The reviewer's drops take part in the merge, so a copy of a finding the reviewer dropped (refuted, say) goes
+        // with it instead of coming back on its own.
+        ReviewFinding[] reviewerDropped = [.. dropped.Where(entry => entry.Code == FindingDropped).Select(entry => entry.Finding)];
+        (List<ReviewFinding> kept, List<MergedFindings> merged) = ReviewVerdictDecisions
+            .MergeDuplicatesAsync(model, [.. findings, .. reviewerDropped], cancellationToken).GetAwaiter().GetResult();
+        kept.RemoveAll(finding => reviewerDropped.Contains(finding));
         foreach (MergedFindings group in merged)
         {
-            foreach ((ReviewFinding finding, double? confidence) in group.Merged)
+            ReviewFinding? droppedMember = reviewerDropped.Contains(group.Kept)
+                ? group.Kept
+                : group.Merged.Select(item => item.Finding).FirstOrDefault(reviewerDropped.Contains);
+            foreach ((ReviewFinding finding, double? confidence) in group.Merged.Prepend((group.Kept, null)))
             {
-                dropped.Add(new DroppedFinding(
-                    finding, ReviewVerdictDecisions.Code, $"decision model: duplicate of {group.Kept.Id} (confidence {ReviewDecisionModel.Format(confidence)})"));
+                if (reviewerDropped.Contains(finding))
+                    continue;
+                if (droppedMember is not null)
+                {
+                    kept.Remove(finding);
+                    dropped.Add(new DroppedFinding(
+                        finding, ReviewVerdictDecisions.Code, $"decision model: duplicate of '{droppedMember.Id}', which was dropped"));
+                }
+                else if (!ReferenceEquals(finding, group.Kept))
+                {
+                    dropped.Add(new DroppedFinding(
+                        finding, ReviewVerdictDecisions.Code, $"decision model: duplicate of {group.Kept.Id} (confidence {ReviewDecisionModel.Format(confidence)})"));
+                }
             }
 
             report.Add(new Diagnostic(
                 ReviewVerdictDecisions.Code,
                 Severity.Info,
-                $"Merged as duplicates (decision model): kept '{group.Kept.Id}'; merged " +
+                droppedMember is not null
+                    ? $"Merged as duplicates (decision model): {string.Join(", ", group.Merged.Select(item => item.Finding).Prepend(group.Kept).Where(finding => !ReferenceEquals(finding, droppedMember)).Select(finding => $"'{finding.Id}'"))} " +
+                      $"dropped with '{droppedMember.Id}', which the reviewer dropped"
+                    : $"Merged as duplicates (decision model): kept '{group.Kept.Id}'; merged " +
                 string.Join(", ", group.Merged.Select(item => $"'{item.Finding.Id}' (confidence {ReviewDecisionModel.Format(item.Confidence)})")),
                 group.Kept.Lens,
                 group.Kept.File,

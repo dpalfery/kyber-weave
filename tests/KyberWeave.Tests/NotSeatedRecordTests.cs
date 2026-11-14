@@ -28,6 +28,19 @@ public sealed class NotSeatedRecordTests : IDisposable
     }
 
     [Fact]
+    public void ARerunReplacesTheLensesItOwnsSoAStaleReasonDoesNotSurvive()
+    {
+        string cycle = Path.Combine(_temp.Path, "review", "cycle-1");
+        NotSeatedRecord.Add(cycle, new Dictionary<string, string> { ["infra-workflow"] = "patterns", ["static-analysis-triage"] = "gates passed" });
+
+        NotSeatedRecord.Replace(cycle, CouncilSeating.GateProvenLenses, new Dictionary<string, string>());
+
+        IReadOnlyDictionary<string, string> read = NotSeatedRecord.Read(cycle);
+        Assert.False(read.ContainsKey("static-analysis-triage"));
+        Assert.Equal("patterns", read["infra-workflow"]);
+    }
+
+    [Fact]
     public void AMissingOrBrokenRecordReadsAsEmpty()
     {
         string cycle = Path.Combine(_temp.Path, "review", "cycle-1");

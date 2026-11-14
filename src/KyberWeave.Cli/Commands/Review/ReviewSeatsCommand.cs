@@ -104,7 +104,7 @@ public sealed class ReviewSeatsCommand : Command<ReviewSeatsSettings>
                 config.Review.Policy.MinConfidence,
                 GuidancePath(root, config),
                 Path.Combine(folder, "duplicates.json")));
-            NotSeatedRecord.Add(folder, seats.NotSeated);
+            NotSeatedRecord.Replace(folder, ReviewLensCatalogue.Names, seats.NotSeated);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

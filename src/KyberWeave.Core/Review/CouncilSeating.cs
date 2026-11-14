@@ -19,6 +19,9 @@ public static class CouncilSeating
     public static IReadOnlyList<string> AfterGates { get; } =
         ["duplicate-implementation", "static-analysis-triage", "test-adequacy"];
 
+    /// <summary>The lenses <see cref="GateProvenSkips"/> decides once the gates finish.</summary>
+    public static IReadOnlyList<string> GateProvenLenses { get; } = ["duplicate-implementation", "static-analysis-triage"];
+
     /// <summary>The lenses that run on <c>review-triage</c>; every other lens runs on <c>review-lens</c>.</summary>
     public static IReadOnlyList<string> TriageLenses { get; } =
         ["dependency-supply-chain", "duplicate-implementation", "static-analysis-triage"];

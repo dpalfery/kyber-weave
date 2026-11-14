@@ -495,7 +495,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
         IReadOnlyDictionary<string, string> skips = CouncilSeating.GateProvenSkips(written, duplicates, changed);
         try
         {
-            NotSeatedRecord.Add(cycle.Folder!, skips);
+            NotSeatedRecord.Replace(cycle.Folder!, CouncilSeating.GateProvenLenses, skips);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
