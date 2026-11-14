@@ -117,7 +117,13 @@ public sealed partial class PlanFinalize
             return Refused();
         }
 
-        string planText = File.ReadAllText(_files.Absolute(plan));
+        if (PresentFile.ReadIfPresent(_files.Absolute(plan)) is not { } planText)
+        {
+            report.Add(new Diagnostic(NotAnActivePlan, Severity.Error, $"'{plan}' does not exist.", plan, plan,
+                Hint: "Name a plan file directly under the plans folder, not its index and not an archived plan."));
+            return Refused();
+        }
+
         if (ReadyStatus().IsMatch(planText))
             return AlreadyReady(plan, report, taskFile);
 

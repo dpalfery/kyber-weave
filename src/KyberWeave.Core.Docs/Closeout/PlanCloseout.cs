@@ -106,7 +106,14 @@ public sealed partial class PlanCloseout
                 Hint: $"Restore it with 'git checkout -- {planIndex}', then run the closeout again."));
         }
 
-        string archivedText = WithArchivedStatus(File.ReadAllText(_files.Absolute(plan)), date);
+        if (PresentFile.ReadIfPresent(_files.Absolute(plan)) is not { } planText)
+        {
+            report.Add(new Diagnostic(NotAnActivePlan, Severity.Error, $"'{plan}' does not exist.", plan, plan,
+                Hint: "Name a plan file directly under the plans folder, not its index and not an archived plan."));
+            return new PlanCloseoutOutcome(report, false);
+        }
+
+        string archivedText = WithArchivedStatus(planText, date);
         string taskFile = PlanTaskFileGenerator.TaskFilePathOf(plan);
         bool hasTaskFile = File.Exists(_files.Absolute(taskFile));
 
