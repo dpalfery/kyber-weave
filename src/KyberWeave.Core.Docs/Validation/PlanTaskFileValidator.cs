@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Docs.Closeout;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Processes;
 
@@ -459,7 +460,7 @@ public sealed partial class PlanTaskFileValidator
         file = null;
         try
         {
-            string json = File.ReadAllText(FullPath(taskFile));
+            string json = BoundedFile.ReadAllText(FullPath(taskFile));
             file = JsonSerializer.Deserialize<PlanTaskFile>(json, PlanTaskFileJson.ReadOptions);
         }
         catch (JsonException exception)
@@ -473,7 +474,7 @@ public sealed partial class PlanTaskFileValidator
                 Hint: $"Do not repair the file by hand. Run {TaskFileCommand.Write(artifactPath)}: it rewrites the whole file from the plan."));
             return false;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or InvalidDataException)
         {
             report.Add(new Diagnostic(
                 Malformed,

@@ -263,11 +263,11 @@ public sealed partial class RunDelivery
         if (pendingTodoFiles.Count > 0 && !CommitTodoFiles(todoFolder, report))
             return new DeliveryOutcome(report, false);
 
-        PullRequestContent content = Content(request, summary, facts, plan, type, slug, branch, mergeBase) with
+        PullRequestContent content = Content(request, summary, facts, plan, type, slug, branch, mergeBase, report) with
         {
             FollowUps = FiledTodos(mergeBase, todoFolder)
         };
-        PullRequestDescription.HostTemplate hostTemplate = PullRequestDescription.ReadHostTemplate(_repoRoot, ReadTemplateFile ?? File.ReadAllText);
+        PullRequestDescription.HostTemplate hostTemplate = PullRequestDescription.ReadHostTemplate(_repoRoot, ReadTemplateFile ?? BoundedFile.ReadAllText);
         foreach (string unreadable in hostTemplate.Unreadable)
         {
             report.Add(new Diagnostic(Step, Severity.Warning,
@@ -335,19 +335,19 @@ public sealed partial class RunDelivery
         return $"{type}{scope}: {words} [{harness}]";
     }
 
-    private PullRequestContent Content(DeliveryRequest request, string summary, PlanFacts? facts, string? plan, string type, string slug, string branch, string mergeBase)
+    private PullRequestContent Content(DeliveryRequest request, string summary, PlanFacts? facts, string? plan, string type, string slug, string branch, string mergeBase, DiagnosticReport report)
     {
         List<string> validation = [];
         List<string> notVerified = [.. (facts?.NotVerified ?? []).Select(item => char.ToUpperInvariant(item[0]) + item[1..])];
 
-        (string? taskLine, IReadOnlyList<string> taskNotVerified) = RunEvidence.SummarizeTaskGates(TaskGateReports(mergeBase));
+        (string? taskLine, IReadOnlyList<string> taskNotVerified) = RunEvidence.SummarizeTaskGates(TaskGateReports(mergeBase, report));
         if (taskLine is null)
             notVerified.Add("No per-task check results were recorded for this run.");
         else
             validation.Add(taskLine);
         notVerified.AddRange(taskNotVerified);
 
-        ReviewEvidence? review = Review(branch, mergeBase);
+        ReviewEvidence? review = Review(branch, mergeBase, report);
         (string reviewLine, IReadOnlyList<string> pending) = RunEvidence.SummarizeReview(review);
         if (review is null)
             notVerified.Add("No code review result was recorded for this branch.");
@@ -570,7 +570,7 @@ public sealed partial class RunDelivery
     /// this change's base. A test-first failing run is written to <c>task-gate-red.json</c> (or, in older runs, a
     /// <c>-red</c> folder) and is never read as a failed check.
     /// </summary>
-    private List<GateReport> TaskGateReports(string mergeBase)
+    private List<GateReport> TaskGateReports(string mergeBase, DiagnosticReport report)
     {
         string scratch = Path.Combine(_repoRoot, ScratchFolder);
         if (!Directory.Exists(scratch))
@@ -585,16 +585,18 @@ public sealed partial class RunDelivery
                 continue;
             try
             {
-                GateReport report = ReviewJson.ReadGates(File.ReadAllText(file));
+                GateReport gates = ReviewJson.ReadGates(BoundedFile.ReadAllText(file));
                 bool thisRun = started is { } at
                     ? File.GetLastWriteTimeUtc(file) >= at.UtcDateTime
-                    : string.Equals(report.Base, mergeBase, StringComparison.Ordinal);
+                    : string.Equals(gates.Base, mergeBase, StringComparison.Ordinal);
                 if (thisRun)
-                    reports.Add(report);
+                    reports.Add(gates);
             }
-            catch (Exception exception) when (exception is JsonException or IOException or UnauthorizedAccessException or ArgumentException)
+            catch (Exception exception) when (IsEvidenceFailure(exception))
             {
-                // An unreadable report is evidence the run cannot use; the description then says none was recorded.
+                // An unreadable report is evidence the run cannot use; the description then says none was recorded, and
+                // this warning says why, so "never ran" and "could not be read" are not the same silence.
+                WarnUnreadable(report, $"The task gate report '{Path.GetRelativePath(_repoRoot, file).Replace('\\', '/')}'", exception);
             }
         }
 
@@ -606,20 +608,22 @@ public sealed partial class RunDelivery
         string branch = Git("symbolic-ref", "--quiet", "--short", "HEAD").StandardOutput.Trim();
         try
         {
-            using JsonDocument record = JsonDocument.Parse(File.ReadAllText(RunBaseState.StatePath(_homeDirectory, branch)));
+            using JsonDocument record = JsonDocument.Parse(BoundedFile.ReadAllText(RunBaseState.StatePath(_homeDirectory, branch)));
             return record.RootElement.TryGetProperty("StartedAt", out JsonElement at) && at.ValueKind == JsonValueKind.String
                    && DateTimeOffset.TryParse(at.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTimeOffset value)
                 ? value
                 : null;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
+        catch (Exception exception) when (IsEvidenceFailure(exception))
         {
+            // No readable start record: reports are matched to this change by their base. A corrupt record never
+            // reaches here; delivery refuses it earlier (KW-DELIVER-002).
             return null;
         }
     }
 
     /// <summary>The last review cycle that belongs to this change: this branch, this base, a head HEAD descends from.</summary>
-    private ReviewEvidence? Review(string branch, string mergeBase)
+    private ReviewEvidence? Review(string branch, string mergeBase, DiagnosticReport report)
     {
         string scratch = Path.Combine(_repoRoot, ScratchFolder);
         if (!Directory.Exists(scratch))
@@ -641,16 +645,26 @@ public sealed partial class RunDelivery
         ReviewCycleRecord last = belonging.OrderBy(cycle => cycle.Number).ThenBy(cycle => File.GetLastWriteTimeUtc(cycle.FindingsPath)).Last();
         try
         {
-            FindingsReport findings = ReviewJson.ReadFindings(File.ReadAllText(last.FindingsPath));
+            FindingsReport findings = ReviewJson.ReadFindings(BoundedFile.ReadAllText(last.FindingsPath));
             IReadOnlyList<GateResult> gates = last.Gates?.Gates ?? [];
             ReviewOutcome outcome = VerdictEngine.Evaluate(findings.Findings, gates, _config.Review, DateOnly.FromDateTime(DateTime.UtcNow));
             return new ReviewEvidence(last.Number, outcome, gates);
         }
-        catch (Exception exception) when (exception is JsonException or IOException or UnauthorizedAccessException or ArgumentException)
+        catch (Exception exception) when (IsEvidenceFailure(exception))
         {
+            WarnUnreadable(report, $"The findings of review cycle {last.Number.ToString(CultureInfo.InvariantCulture)}", exception);
             return null;
         }
     }
+
+    /// <summary>Whether <paramref name="exception"/> is a way a scratch evidence file can fail to read: I/O, permission, malformed JSON or too large.</summary>
+    private static bool IsEvidenceFailure(Exception exception) =>
+        exception is JsonException or IOException or UnauthorizedAccessException or ArgumentException or InvalidDataException;
+
+    /// <summary>Records that a piece of run evidence exists but could not be used, so a reader of the report can tell that from evidence never recorded.</summary>
+    private static void WarnUnreadable(DiagnosticReport report, string what, Exception exception, string? consequence = null) =>
+        report.Add(new Diagnostic(Step, Severity.Warning,
+            $"{what} could not be read ({exception.GetType().Name}: {exception.Message}); {consequence ?? "the description says none was recorded"}.", "deliver"));
 
     /// <summary>The folder the <c>todo-index</c> registry entry lives in, or empty when the host declares none.</summary>
     private string TodoFolder()

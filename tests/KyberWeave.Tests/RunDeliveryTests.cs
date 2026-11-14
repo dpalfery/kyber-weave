@@ -1,9 +1,11 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Reflection;
 using System.Runtime.Versioning;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Docs.Closeout;
 using KyberWeave.Core.Docs.Delivery;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review;
@@ -542,6 +544,108 @@ public sealed class RunDeliveryTests : IDisposable
         Assert.Contains(".github/pull_request_template.md", warning.Message, StringComparison.Ordinal);
         Assert.Contains("standard description format", warning.Message, StringComparison.Ordinal);
         Assert.Contains("## Summary", gh.Bodies.Single(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [UnsupportedOSPlatform("windows")]
+    public void AFolderThatCannotBeListedNamesItsTemplateAsUnreadableAndTheDeliveryGoesOn()
+    {
+        Assert.SkipWhen(
+            OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess,
+            "Unix file modes are not enforced on Windows or for a privileged user, so an unlistable folder cannot be simulated.");
+
+        string repo = Path.Combine(_root, "template-repo");
+        Directory.CreateDirectory(Path.Combine(repo, "docs"));
+        Directory.CreateDirectory(Path.Combine(repo, ".github"));
+        File.WriteAllText(Path.Combine(repo, ".github", "pull_request_template.md"), "## Why\n");
+        string locked = Path.Combine(repo, "docs");
+        File.SetUnixFileMode(locked, UnixFileMode.None);
+        try
+        {
+            PullRequestDescription.HostTemplate read = PullRequestDescription.ReadHostTemplate(repo, File.ReadAllText);
+
+            Assert.Equal("## Why\n", read.Text);
+            Assert.Equal(["docs/pull_request_template.md"], read.Unreadable);
+        }
+        finally
+        {
+            File.SetUnixFileMode(locked, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    [Fact]
+    public void AHostTemplateLargerThanTheCapIsNotReadAndIsNamedAsUnreadable()
+    {
+        string repo = Path.Combine(_root, "template-repo");
+        Directory.CreateDirectory(repo);
+        File.WriteAllText(Path.Combine(repo, "pull_request_template.md"), new string('x', (int)BoundedFile.MaxBytes + 1));
+
+        PullRequestDescription.HostTemplate read = PullRequestDescription.ReadHostTemplate(repo, BoundedFile.ReadAllText);
+
+        Assert.Null(read.Text);
+        Assert.Equal(["pull_request_template.md"], read.Unreadable);
+    }
+
+    [Fact]
+    public void AFileAtTheCapIsReadAndOneByteOverIsRefusedByNameOfItsSize()
+    {
+        string atCap = Path.Combine(_root, "at-cap.txt");
+        string overCap = Path.Combine(_root, "over-cap.txt");
+        File.WriteAllText(atCap, new string('x', (int)BoundedFile.MaxBytes));
+        File.WriteAllText(overCap, new string('x', (int)BoundedFile.MaxBytes + 1));
+
+        Assert.Equal((int)BoundedFile.MaxBytes, BoundedFile.ReadAllText(atCap).Length);
+        InvalidDataException error = Assert.Throws<InvalidDataException>(() => BoundedFile.ReadAllText(overCap));
+        Assert.Contains((BoundedFile.MaxBytes + 1).ToString(CultureInfo.InvariantCulture), error.Message, StringComparison.Ordinal);
+        Assert.Throws<FileNotFoundException>(() => BoundedFile.ReadAllText(Path.Combine(_root, "absent.txt")));
+    }
+
+    // ---------------------------------------------------------------- run evidence that exists but cannot be used
+
+    [Fact]
+    public void ACorruptTaskGateReportIsWarnedAboutAndTheDescriptionSaysNoneWasRecorded()
+    {
+        GitRunRepository(archivePending: false);
+        Write(".agent_scratchpad/T3/task-gate.json", "{ this is not json");
+        ScriptedGh gh = new();
+
+        DeliveryOutcome outcome = Deliver(gh, new DeliveryRequest("S."));
+
+        Assert.True(outcome.Delivered, Findings(outcome));
+        Diagnostic warning = Assert.Single(outcome.Report.Items, item => item.Severity == Severity.Warning);
+        Assert.Contains(".agent_scratchpad/T3/task-gate.json", warning.Message, StringComparison.Ordinal);
+        Assert.Contains("could not be read", warning.Message, StringComparison.Ordinal);
+        Assert.Contains("No per-task check results were recorded", gh.Bodies.Single(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ATaskGateReportLargerThanTheCapIsWarnedAboutNotLoaded()
+    {
+        GitRunRepository(archivePending: false);
+        Write(".agent_scratchpad/T3/task-gate.json", new string(' ', (int)BoundedFile.MaxBytes + 1));
+        ScriptedGh gh = new();
+
+        DeliveryOutcome outcome = Deliver(gh, new DeliveryRequest("S."));
+
+        Assert.True(outcome.Delivered, Findings(outcome));
+        Diagnostic warning = Assert.Single(outcome.Report.Items, item => item.Severity == Severity.Warning);
+        Assert.Contains("InvalidDataException", warning.Message, StringComparison.Ordinal);
+        Assert.Contains("more than the", warning.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ACorruptReviewFindingsFileIsWarnedAboutAndTheDescriptionSaysNoReviewWasRecorded()
+    {
+        GitRunRepository(archivePending: false);
+        Write(".agent_scratchpad/review/review/cycle-1/findings.json", "{ this is not json");
+        ScriptedGh gh = new();
+
+        DeliveryOutcome outcome = Deliver(gh, new DeliveryRequest("S."));
+
+        Assert.True(outcome.Delivered, Findings(outcome));
+        Diagnostic warning = Assert.Single(outcome.Report.Items, item => item.Severity == Severity.Warning);
+        Assert.Contains("findings of review cycle 1", warning.Message, StringComparison.Ordinal);
+        Assert.Contains("No code review result was recorded", gh.Bodies.Single(), StringComparison.Ordinal);
     }
 
     /// <summary>The same failure with a real unreadable file, where the platform and the user allow one.</summary>

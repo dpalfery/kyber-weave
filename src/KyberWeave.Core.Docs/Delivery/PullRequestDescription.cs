@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using KyberWeave.Core.Docs.Closeout;
 
 namespace KyberWeave.Core.Docs.Delivery;
 
@@ -70,7 +71,7 @@ public static partial class PullRequestDescription
         ["pull_request_template.md", "docs/pull_request_template.md", ".github/pull_request_template.md"];
 
     /// <summary>Reads the host's default pull request template, matching the file name case-insensitively, or null when it has none or none can be read.</summary>
-    public static string? ReadHostTemplate(string repoRoot) => ReadHostTemplate(repoRoot, File.ReadAllText).Text;
+    public static string? ReadHostTemplate(string repoRoot) => ReadHostTemplate(repoRoot, BoundedFile.ReadAllText).Text;
 
     /// <summary>
     /// Reads the host's default pull request template through <paramref name="read"/>. A candidate that cannot be read is
@@ -83,12 +84,23 @@ public static partial class PullRequestDescription
         List<string> unreadable = [];
         foreach (string location in HostTemplateLocations)
         {
-            string folder = Path.Combine(repoRoot, Path.GetDirectoryName(location) ?? string.Empty);
-            if (!Directory.Exists(folder))
-                continue;
+            string? match;
+            try
+            {
+                string folder = Path.Combine(repoRoot, Path.GetDirectoryName(location) ?? string.Empty);
+                if (!Directory.Exists(folder))
+                    continue;
 
-            string? match = Directory.EnumerateFiles(folder)
-                .FirstOrDefault(file => string.Equals(Path.GetFileName(file), Path.GetFileName(location), StringComparison.OrdinalIgnoreCase));
+                match = Directory.EnumerateFiles(folder)
+                    .FirstOrDefault(file => string.Equals(Path.GetFileName(file), Path.GetFileName(location), StringComparison.OrdinalIgnoreCase));
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // A folder that cannot be listed may hold the template: it is named as unreadable, not skipped in silence.
+                unreadable.Add(location);
+                continue;
+            }
+
             if (match is null)
                 continue;
 
@@ -96,9 +108,9 @@ public static partial class PullRequestDescription
             {
                 return new HostTemplate(read(match), unreadable);
             }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
             {
-                // A template that cannot be read is not worth failing the delivery for: the next location, or the standard format, is used.
+                // A template that cannot be read, or is larger than a template can be, is not worth failing the delivery for: the next location, or the standard format, is used.
                 unreadable.Add(location);
             }
         }

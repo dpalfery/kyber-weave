@@ -5,6 +5,7 @@ using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Docs.Closeout;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Validation;
@@ -96,6 +97,20 @@ public sealed class PlanTaskFileValidatorTests
 
         AssertReports(run, Malformed);
         Assert.Equal(1, run.Exit);
+    }
+
+    /// <summary>A task file larger than the validator reads is reported as one that could not be read, never loaded whole.</summary>
+    [Fact]
+    public void ATaskFileLargerThanTheValidatorReadsIsKWDOCTASKS001AndNamesWhy()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        fixture.Write(PlanTaskFileProbe.TaskFilePath, new string(' ', (int)BoundedFile.MaxBytes + 1));
+
+        ReportedFindings run = Validate(fixture);
+
+        AssertReports(run, Malformed);
+        Assert.Equal(1, run.Exit);
+        Assert.Contains("could not be read", run.Output, StringComparison.Ordinal);
     }
 
     /// <summary>
