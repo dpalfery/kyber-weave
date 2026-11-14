@@ -418,7 +418,7 @@ public sealed class PiRendererContractTests : IDisposable
                 .ToArray();
             Assert.Equal(expectedKeyOrder, actualKeys);
 
-            string expectedBody = NormalizeBody(agent.InstructionBody);
+            string expectedBody = NormalizeBody(TestSquadCorpus.ExpectedRenderText(SquadTarget.Pi, agent.InstructionBody));
             Assert.Contains(expectedBody, body, StringComparison.Ordinal);
         }
     }

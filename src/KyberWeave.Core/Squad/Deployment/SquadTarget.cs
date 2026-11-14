@@ -155,6 +155,19 @@ public static class SquadTargetCatalog
     };
 
     /// <summary>
+    /// Names the tool a dispatched agent on <paramref name="target"/> calls to start a sub-agent, as the
+    /// model sees it, so canonical text can say the tool literally instead of describing it. Copilot CLI
+    /// exposes <c>task</c> (parameter <c>agent_type</c>) and VS Code <c>agent</c>; one rendered file serves both.
+    /// </summary>
+    public static string GetSubagentDispatchTool(SquadTarget target) => target switch
+    {
+        SquadTarget.Claude => "`Agent` tool (parameter `subagent_type`)",
+        SquadTarget.Copilot => "`task` tool (parameter `agent_type`; in VS Code the tool is `agent`)",
+        SquadTarget.Cursor => "`Task` tool",
+        _ => "tool that starts a sub-agent"
+    };
+
+    /// <summary>
     /// Resolves one exact canonical token without throwing. Returns <see langword="false"/> for an
     /// unknown or null token, so recovery paths can degrade instead of aborting.
     /// </summary>

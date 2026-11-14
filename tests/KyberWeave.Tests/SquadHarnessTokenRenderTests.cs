@@ -134,6 +134,31 @@ public sealed class SquadHarnessTokenRenderTests
         Assert.Contains(probe.Files, file => Text(file).Contains(label + expected, StringComparison.Ordinal));
     }
 
+    /// <summary>
+    ///     One render per shipped harness answers <c>{{dispatch-tool}}</c> with the catalogue's tool name for
+    ///     that harness and leaves no braces behind.
+    /// </summary>
+    /// <param name="target">The harness being rendered.</param>
+    [Theory]
+    [MemberData(nameof(ShippedTargets))]
+    public async Task EachHarnessRenderNamesItsDispatchTool(SquadTarget target)
+    {
+        const string placeholder = "{{dispatch-tool}}";
+        const string label = "Carried dispatch tool: ";
+        string expected = SquadTargetCatalog.GetSubagentDispatchTool(target);
+
+        SquadRenderResult probe = await RendererFor(target).RenderAsync(
+            new SquadRenderRequest(
+                ProductRoot,
+                [target],
+                SquadDeploymentScope.Project,
+                PreloadedSource: SourceWithProbe(label + placeholder)));
+        Assert.True(probe.Success, string.Join("; ", probe.Errors));
+
+        Assert.DoesNotContain(probe.Files, file => Text(file).Contains(placeholder, StringComparison.Ordinal));
+        Assert.Contains(probe.Files, file => Text(file).Contains(label + expected, StringComparison.Ordinal));
+    }
+
     /// <summary>The harnesses verified to nest are the ones the catalogue marks nested; every other one takes the safe path.</summary>
     [Fact]
     public void OnlyVerifiedHarnessesAreMarkedAsNesting()

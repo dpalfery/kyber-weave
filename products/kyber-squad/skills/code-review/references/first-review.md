@@ -14,10 +14,7 @@ findings form and its `NO FINDINGS` form (a `review-triage` seat lists `Ground r
 findings or `NO FINDINGS` seat without that line has not shown it applied the guidance; the
 report records that as a coverage gap under Council coverage. `SKIPPED` seats return no
 attestation, and a missing attestation is never a verdict input. The reviewer dispatches every seat
-itself, all in one parallel batch, whoever dispatched it; where sub-agents cannot dispatch, the
-`review-council` skill starts the seats from the main session instead. A reviewer that holds a tool to
-start agents never applies a lens itself. Only one with no such tool applies the lenses itself, one at
-a time, with the same guidance sections and the same attestation line, and says so in its report.
+itself, all in one parallel batch, whoever dispatched it, and never opens a lens charter: each seat reads its own. Where sub-agents cannot dispatch, the `review-council` skill starts the seats from the main session instead. A reviewer applies a lens itself only after one dispatch attempt returned a tool-not-found or permission-denied error, which it quotes in its report; a claim of unavailability with no quoted failed call is not allowed. Then it applies the lenses one at a time, with the same guidance sections and the same attestation line.
 
 ## The lens catalogue
 

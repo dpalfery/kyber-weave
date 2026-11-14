@@ -50,6 +50,22 @@ public sealed class PacketTestCommandTests
     }
 
     [Fact]
+    public void TheClassesTheContractRowNamesFillTheTestsGateEvenBeforeTheTestFilesExist()
+    {
+        PlanContractRow row = new(
+            "T1", "tests/Acme.Tests/OrdersTests.cs", "FullyQualifiedName~Acme.Tests.OrdersTests|FullyQualifiedName~Acme.Tests.CartTests", null, null, null);
+        PlanTaskFileEntry task = Task with { Files = ["src/Acme/Orders.cs", "tests/Acme.Tests/OrdersTests.cs"] };
+
+        string? text = PacketTestCommand.Render(KyberWeaveTestPaths.ToolRoot, Config(), "csharp-dev", task, row, windows: false);
+
+        Assert.NotNull(text);
+        Assert.EndsWith(
+            "    bash scripts/run-task-tests.sh 'FullyQualifiedName~Acme.Tests.OrdersTests|FullyQualifiedName~Acme.Tests.CartTests' .agent_scratchpad/t1/artifacts",
+            text,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AFilterOfSeveralClassesIsQuotedSoTheShellKeepsThePipe()
     {
         Assert.Equal("'FullyQualifiedName~A|FullyQualifiedName~B'", PacketTestCommand.Quote("FullyQualifiedName~A|FullyQualifiedName~B", windows: false));

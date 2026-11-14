@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
@@ -11,11 +12,12 @@ namespace KyberWeave.Core.Docs.Validation;
 /// </summary>
 /// <remarks>
 /// The task's Test contract row wins when it names a runner command, printed as the plan wrote it. Otherwise the
-/// agent's task gates that use <c>{tests}</c> are expanded by <see cref="TaskGateSelection.Plan"/> over the task's
-/// files, the same call <c>review gates --agent</c> makes, so the packet and the gate cannot disagree. When neither
-/// resolves, nothing is printed: a guessed command is worse than none.
+/// agent's task gates that use <c>{tests}</c> are expanded with the gate runner's own expansion: over the test classes
+/// the row names in a <c>FullyQualifiedName</c> filter (<see cref="TaskGateSelection.ExpandForClasses"/>), else over
+/// the classes <see cref="TaskGateSelection.Plan"/> finds for the task's files, the call <c>review gates --agent</c>
+/// makes. When none resolves, nothing is printed: a guessed command is worse than none.
 /// </remarks>
-public static class PacketTestCommand
+public static partial class PacketTestCommand
 {
     /// <summary>The heading the printed section starts with.</summary>
     public const string Heading = "## Test command";
@@ -44,7 +46,7 @@ public static class PacketTestCommand
         if (PlanTaskFileGenerator.CommandFromContract(row) is { } contract)
             return $"{Heading}\n\nThis task's Test contract runner command, ready to paste:\n\n    {contract}";
 
-        IReadOnlyList<string> gated = FromTaskGates(repoRoot, config, agent, entry, windows);
+        IReadOnlyList<string> gated = FromTaskGates(repoRoot, config, agent, entry, DeclaredClasses(row), windows);
         if (gated.Count == 0)
             return null;
 
@@ -55,28 +57,56 @@ public static class PacketTestCommand
         return text.ToString();
     }
 
+    /// <summary>The test classes the task's Test contract row names in a <c>FullyQualifiedName</c> filter, in order.</summary>
+    internal static IReadOnlyList<string> DeclaredClasses(PlanContractRow? row)
+    {
+        List<string> classes = [];
+        foreach (string? cell in new[] { row?.RunnerFilter, row?.TestProjectOrFile })
+        {
+            foreach (Match match in FilterClassRegex().Matches(cell ?? string.Empty))
+            {
+                if (!classes.Contains(match.Groups["name"].Value))
+                    classes.Add(match.Groups["name"].Value);
+            }
+        }
+
+        return classes;
+    }
+
     private static IReadOnlyList<string> FromTaskGates(
-        string repoRoot, KyberWeaveConfig config, string? agent, PlanTaskFileEntry entry, bool windows)
+        string repoRoot, KyberWeaveConfig config, string? agent, PlanTaskFileEntry entry, IReadOnlyList<string> declared, bool windows)
     {
         if (agent is null || !config.Review.TaskGates.TryGetValue(agent, out IReadOnlyList<ReviewTaskGate>? gates))
             return [];
 
         ReviewTaskGate[] testGates = [.. gates.Where(gate => gate.Run.Any(element => element.Contains(TestsToken, StringComparison.Ordinal)))];
+        string slug = TaskSlug.Normalise(entry.Id);
+
+        // Classes the plan declares come first: in test-first work they do not exist yet, so the gate's own lookup from
+        // the task's files would find none.
+        if (declared.Count > 0 && slug.Length > 0)
+        {
+            return [.. testGates
+                .Select(gate => (Gate: gate, Run: TaskGateSelection.ExpandForClasses(gate, declared, slug)))
+                .Where(pair => pair.Run is not null && (pair.Gate.Os is null || pair.Gate.Os == (windows ? "windows" : "unix")))
+                .Select(pair => Line(pair.Gate.WorkingDirectory, pair.Run!, windows))];
+        }
         string[] files = [.. (entry.Files ?? [])
             .Where(path => path.IndexOfAny(['*', '?', '[']) < 0 && TaskGateSelection.ValidatePath(repoRoot, path) is null)];
-        string task = TaskSlug.Normalise(entry.Id);
-        if (testGates.Length == 0 || files.Length == 0 || task.Length == 0)
+        if (testGates.Length == 0 || files.Length == 0 || slug.Length == 0)
             return [];
 
         TaskGatePlan plan = TaskGateSelection.Plan(
-            testGates, files, task, windows ? "windows" : "unix", repoRoot, config.Review.TestMap);
+            testGates, files, slug, windows ? "windows" : "unix", repoRoot, config.Review.TestMap);
         if (plan.Refusals.Count > 0)
             return [];
 
-        return [.. plan.Gates.Select(gate =>
-            (gate.WorkingDirectory is null ? string.Empty : $"cd {Quote(gate.WorkingDirectory, windows)} && ")
-            + string.Join(' ', gate.Run.Select(element => Quote(element, windows))))];
+        return [.. plan.Gates.Select(gate => Line(gate.WorkingDirectory, gate.Run, windows))];
     }
+
+    private static string Line(string? workingDirectory, IReadOnlyList<string> run, bool windows) =>
+        (workingDirectory is null ? string.Empty : $"cd {Quote(workingDirectory, windows)} && ")
+        + string.Join(' ', run.Select(element => Quote(element, windows)));
 
     /// <summary>The argument as a shell reads it back unchanged: bare when it holds only safe characters, else quoted.</summary>
     internal static string Quote(string element, bool windows)
@@ -91,4 +121,7 @@ public static class PacketTestCommand
             ? "\"" + element.Replace("\"", "\\\"", StringComparison.Ordinal) + "\""
             : "'" + element.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
     }
+
+    [GeneratedRegex(@"FullyQualifiedName[~=](?<name>[A-Za-z_][\w.]*)", RegexOptions.CultureInvariant)]
+    private static partial Regex FilterClassRegex();
 }

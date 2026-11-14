@@ -40,6 +40,9 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
     /// </summary>
     private const string SubagentDispatchPlaceholder = "{{subagents-dispatch}}";
 
+    /// <summary>Where canonical text names the tool that starts a sub-agent on this harness, as the model sees it.</summary>
+    private const string DispatchToolPlaceholder = "{{dispatch-tool}}";
+
     private protected SquadHarnessRenderer(SquadHarnessSpec spec)
     {
         ArgumentNullException.ThrowIfNull(spec);
@@ -105,7 +108,11 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
                 : request with { GlobalRoots = new MemoizedGlobalRoots(request.GlobalRoots) };
 
             SquadSource renderSource = SquadWorkerBaselineInjector.Apply(
-                SubstituteHarnessToken(source, Spec.Token, SubagentDispatchAnswer(Spec.Target)),
+                SubstituteHarnessToken(
+                    source,
+                    Spec.Token,
+                    SubagentDispatchAnswer(Spec.Target),
+                    SquadTargetCatalog.GetSubagentDispatchTool(Spec.Target)),
                 SquadWorkerBaselineInjector.BindSkillsRoot(
                     SquadWorkerBaselineInjector.ReadBlock(request.SourceDirectory),
                     ResolveSkillsRoot(Spec, request)));
@@ -248,11 +255,12 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
     /// adopted the placeholder renders byte for byte as it did before.
     /// </para>
     /// </remarks>
-    private static SquadSource SubstituteHarnessToken(SquadSource source, string token, string subagentDispatch)
+    private static SquadSource SubstituteHarnessToken(SquadSource source, string token, string subagentDispatch, string dispatchTool)
     {
         string ReplaceText(string text) =>
             text.Replace(HarnessPlaceholder, token, StringComparison.Ordinal)
-                .Replace(SubagentDispatchPlaceholder, subagentDispatch, StringComparison.Ordinal);
+                .Replace(SubagentDispatchPlaceholder, subagentDispatch, StringComparison.Ordinal)
+                .Replace(DispatchToolPlaceholder, dispatchTool, StringComparison.Ordinal);
 
         IReadOnlyList<SquadResource> ReplaceResources(IReadOnlyList<SquadResource> resources) =>
             [.. resources.Select(resource => resource with { Content = ReplaceText(resource.Content) })];

@@ -336,6 +336,24 @@ public static class TaskGateSelection
     }
 
     /// <summary>
+    /// One gate's verify command with <c>{tests}</c> built from test classes the caller already knows, such as those a
+    /// plan's Test contract names, and <c>{task}</c> from the task slug, by the same expansion <see cref="Plan"/> uses.
+    /// </summary>
+    /// <returns>The expanded argv, or <see langword="null"/> when the gate names <c>{changed}</c>, which no task id can fill.</returns>
+    public static IReadOnlyList<string>? ExpandForClasses(ReviewTaskGate gate, IReadOnlyList<string> classes, string task)
+    {
+        ArgumentNullException.ThrowIfNull(gate);
+        ArgumentNullException.ThrowIfNull(classes);
+        ArgumentException.ThrowIfNullOrWhiteSpace(task);
+
+        if (classes.Count == 0 || classes.Count > MaxTestClassesInFilter || gate.Run.Contains(ChangedToken)
+            || NamesTestsInProgram(gate) || ValidateTask(task) is not null)
+            return null;
+
+        return Expand(gate.Id, gate.Run, [], task, TestsFilter(classes), []);
+    }
+
+    /// <summary>
     /// The filter that selects the resolved classes: one <c>FullyQualifiedName~</c> clause per class,
     /// joined by <c>|</c>, which is the form <c>dotnet test --filter</c> reads as "any of these".
     /// </summary>
