@@ -1545,12 +1545,12 @@ archived more than one plan. In order, it:
 
 1. checks the branch is a run branch with a run record naming its base, and not the base or default
    branch;
-2. checks the origin remote is on github.com, and that nothing is uncommitted outside the plans and
-   archived-plans folders (the scratch folder is ignored);
+2. checks the origin remote is on github.com, and that nothing is uncommitted outside the plans,
+   archived-plans and todo folders (the scratch folder is ignored);
 3. finds the plan the branch archived, and refuses a plan it added but did not archive;
 4. checks the title convention and that `gh` runs and is signed in;
-5. commits the archived plan when the archive left it staged, then pushes the branch to `origin`
-   (never forced, never another branch);
+5. commits the archived plan when the archive left it staged, and the todos the follow-up filing
+   wrote, then pushes the branch to `origin` (never forced, never another branch);
 6. creates the pull request into the run's base, as a draft and assigned to the signed-in user, or
    updates the title and description of the open one for that branch; then reads it back once.
 
@@ -1558,7 +1558,8 @@ The description is the create-pull-request skill's one format
 (`assets/pull-request-description.md`, shipped as a hash-checked copy), or the host's pull request
 template when it has one. It is filled from the archived plan (changes, `NOT VERIFIED` items,
 low-confidence autonomous decisions), the per-task `task-gate.json` reports written since the run
-started, and the last review cycle tied to this branch; a missing piece is reported as missing. The
+started, the last review cycle tied to this branch, and the todos the branch added (listed under
+Follow-up work filed); a missing piece is reported as missing. The
 body goes to `gh` on standard input, so no file is written. It never marks the pull request ready,
 merges, requests reviewers or waits for CI.
 

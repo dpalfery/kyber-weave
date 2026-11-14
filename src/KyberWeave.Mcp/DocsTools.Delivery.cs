@@ -29,7 +29,7 @@ public sealed partial class DocsTools
     internal string? DeliveryHome { get; set; }
 
     /// <summary>
-    /// Delivers a finished run: commits the archived plan move if it is still pending, pushes the run branch (never
+    /// Delivers a finished run: commits the archived plan move and the filed todos if still pending, pushes the run branch (never
     /// forced), and creates its draft pull request on GitHub, or updates the open one, with a description assembled from
     /// the plan, the task gates and the review. Refuses, changing nothing, off a run branch, with uncommitted changes it
     /// does not own, with a plan not yet archived, or when GitHub's CLI is missing or signed out.
@@ -37,7 +37,7 @@ public sealed partial class DocsTools
     [McpServerTool(Name = DeliverToolName, ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = true)]
     [Description("""
         Use when a run is finished and ready to leave the machine — its plan archived and the
-        merge-ready checks passed: it commits the archived plan if that is still pending, pushes
+        merge-ready checks passed: it commits the archived plan and filed todos if still pending, pushes
         the run branch (never forced, never another branch), and opens a draft pull request
         into the run's base on GitHub, or updates the open one, with a title and description
         assembled from the plan, the per-task checks and the review. Call it once; it reads the

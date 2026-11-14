@@ -34,6 +34,9 @@ public sealed record PullRequestContent
     /// <summary>Review findings still open; empty leaves the section out.</summary>
     public IReadOnlyList<string> PendingReview { get; init; } = [];
 
+    /// <summary>The todos filed for work found outside the change's scope, one line each; empty leaves the section out.</summary>
+    public IReadOnlyList<string> FollowUps { get; init; } = [];
+
     /// <summary>The documentation-impact outcome, or null when the run did not record one.</summary>
     public string? DocumentationImpact { get; init; }
 
@@ -57,7 +60,7 @@ public static partial class PullRequestDescription
     private const string HostSectionNotCovered = "Not covered by this run; the reviewer completes it.";
 
     /// <summary>The sections that follow a host template when it does not ask for them, because a reviewer must see them.</summary>
-    private static readonly string[] AlwaysShown = ["not-verified", "decisions", "pending-review", "notes"];
+    private static readonly string[] AlwaysShown = ["not-verified", "decisions", "pending-review", "follow-ups", "notes"];
 
     /// <summary>The embedded description template, comment included.</summary>
     public static string Template { get; } = ReadTemplate();
@@ -149,6 +152,8 @@ public static partial class PullRequestDescription
             return "decisions";
         if (ContainsAny(h, "pending"))
             return "pending-review";
+        if (ContainsAny(h, "follow-up", "follow up", "followup"))
+            return "follow-ups";
         if (ContainsAny(h, "type"))
             return "type";
         if (ContainsAny(h, "link", "issue", "ticket", "related", "work item"))
@@ -179,6 +184,7 @@ public static partial class PullRequestDescription
         ["not-verified"] = List(content.NotVerified) ?? NothingUnverified,
         ["decisions"] = List(content.Decisions),
         ["pending-review"] = List(content.PendingReview),
+        ["follow-ups"] = List(content.FollowUps),
         ["documentation-impact"] = string.IsNullOrWhiteSpace(content.DocumentationImpact)
             ? "Not recorded by the run."
             : content.DocumentationImpact.Trim(),

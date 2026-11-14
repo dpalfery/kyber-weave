@@ -34,6 +34,16 @@ public static partial class RunEvidence
 {
     private const int MaxAnswerLength = 160;
 
+    /// <summary>A governed document's title: its frontmatter <c>title</c>, else its first level-one heading; null when it has neither.</summary>
+    public static string? DocumentTitle(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        string normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal);
+        string? title = Frontmatter(normalized, "title")
+                        ?? normalized.Split('\n').Select(line => H1().Match(line)).FirstOrDefault(m => m.Success)?.Groups[1].Value;
+        return string.IsNullOrWhiteSpace(title) ? null : title.Trim();
+    }
+
     /// <summary>Reads the reviewer-facing facts out of a plan's text.</summary>
     public static PlanFacts ReadPlan(string planText)
     {

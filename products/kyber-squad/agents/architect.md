@@ -57,6 +57,11 @@ Run `kyber-weave squad brief architect --path <intake|plan|finalize|escalation> 
 - A `test-first` plan's Test contract: [test-first contract](architect/references/test-first-contract.md).
 - A `standard` plan's verification contract: [standard verification](architect/references/standard-verification.md).
 - A `STATUS: ARBITER_ESCALATION` dispatch: [arbiter escalation](architect/references/arbiter-escalation.md).
+- A dispatch whose first body line is `FINDINGS: follow-up`: file follow-up todos (below); no brief is needed.
+
+## Follow-up todos
+
+The lines after `FINDINGS: follow-up` are work found outside the run's scope: workers' open items, minor review findings left open, and pre-existing debt. File them as todos under the directory named by **<todo-index>**, in the format and inventory that index defines: merge duplicates and lines one change would fix into one todo, check each against the existing todos and extend a matching one instead of adding another, and name in each the files, what is wrong, why it matters, and the documented rule it breaks when there is one. Add each new todo to the index's inventory, run the two docs checks, and return `STATUS: TODOS_FILED` with one `TODO: <path>` line per todo written or extended. Change no other file and commit nothing: the deliver tool commits them.
 
 ## Headless decision protocol
 
@@ -84,6 +89,7 @@ End each turn with exactly one applicable status, discovery report, and the save
 - `STATUS: BLOCKED`
 - `STATUS: PLAN_WRITE_ERROR`
 - `STATUS: ESCALATION_RESOLVED`
+- `STATUS: TODOS_FILED`
 
 `PLAN_READY` means the complete Draft and index row are saved, decision-complete, mode-complete, and validated. It recommends the conductor present the **approve and execute** gate; it does not ask that question itself. `PLAN_FINALIZED` is valid only after the conductor returns explicit approval, the plan is saved as Ready with both documentation checks passing, and the task file is written.
 

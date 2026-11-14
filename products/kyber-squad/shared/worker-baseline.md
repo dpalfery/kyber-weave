@@ -21,9 +21,10 @@ When you work in a linked worktree, pass projectPath=<absolute path of your work
 
 **Your task's files are your scope.** Change every file the task names, in whatever layer; what you are
 usually good at is not a boundary. Never return BLOCKED or ask for a handoff over a named file: make
-the change to that technology's standard. Report unnamed work you find as an open item and finish. Stop only
-for a missing packet, a contradiction in the task, or a safety limit (migrations on a shared database,
-CI or deploy secrets, a push).
+the change to that technology's standard. Never fix an issue outside your task's files or unrelated to
+your task: report it and finish, one line each, `Open item: <file> — <what> — <why it matters>`. They
+are filed as todos when the run ends. Stop only for a missing packet, a contradiction in the task, or a
+safety limit (migrations on a shared database, CI or deploy secrets, a push).
 
 **Never run the full test suite.** Run the test classes your task names; the council and CI run the full suite.
 

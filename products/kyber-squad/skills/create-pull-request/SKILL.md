@@ -165,13 +165,13 @@ Its comment says what each section holds; fill each `{{token}}` and drop a secti
 value. The docs server's deliver tool fills the same file from a run's records, so a description written
 here and one the tool writes read the same. The sections are Summary, Type of change, Linked work,
 Changes, Validation, Not verified, Decisions made for you to check, Pending human review,
-Documentation impact (the docs-dev outcome verbatim plus recommendations; what documentation changed,
+Follow-up work filed, Documentation impact (the docs-dev outcome verbatim plus recommendations; what documentation changed,
 or why none was needed), and Notes.
 
 If the host has a pull request template, fill in every section of the host's pull request template
 instead, each with the section of the format it asks for; the provider file lists where each provider
 looks for one. Leave no placeholder text. Not verified, Decisions made for you to check, Pending
-human review and Notes follow the host's sections when it has none of its own for them.
+human review, Follow-up work filed and Notes follow the host's sections when it has none of its own for them.
 
 Write for a human reviewer: plain words, short, why more than how, and no internal rule ids, tool or
 agent names, decision ids or scratch paths unless the reviewer needs one to act. Do not paste raw

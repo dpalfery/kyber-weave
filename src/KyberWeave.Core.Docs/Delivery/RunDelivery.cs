@@ -58,7 +58,7 @@ public sealed record DeliveryOutcome(
 }
 
 /// <summary>
-/// Delivers a finished run: commits the archived plan move if it is still pending, pushes the run branch, and creates
+/// Delivers a finished run: commits the archived plan move and the filed todos if still pending, pushes the run branch, and creates
 /// or updates its draft pull request on GitHub, with the title and description assembled from what the run recorded.
 /// </summary>
 /// <remarks>
@@ -191,13 +191,15 @@ public sealed partial class RunDelivery
             return Refused(UncommittedChanges, $"git status failed: {FirstLine(status.StandardError)}. Nothing was changed.");
 
         (string plansFolder, string archiveFolder) = PlanFolders();
+        string todoFolder = TodoFolder();
         List<string> dirty = [.. ChangedPaths(status.StandardOutput).Where(path => !IsUnder(path, ScratchFolder))];
         List<string> pendingPlanFiles = [.. dirty.Where(path => IsUnder(path, plansFolder) || IsUnder(path, archiveFolder))];
-        List<string> foreign = [.. dirty.Except(pendingPlanFiles, StringComparer.Ordinal)];
+        List<string> pendingTodoFiles = [.. dirty.Where(path => IsUnder(path, todoFolder))];
+        List<string> foreign = [.. dirty.Except(pendingPlanFiles, StringComparer.Ordinal).Except(pendingTodoFiles, StringComparer.Ordinal)];
         if (foreign.Count > 0)
         {
             return Refused(UncommittedChanges,
-                $"Uncommitted changes outside the plan files: {string.Join(", ", foreign.Take(5))}{(foreign.Count > 5 ? $" and {foreign.Count - 5} more" : string.Empty)}. Nothing was changed.",
+                $"Uncommitted changes outside the plan and todo files: {string.Join(", ", foreign.Take(5))}{(foreign.Count > 5 ? $" and {foreign.Count - 5} more" : string.Empty)}. Nothing was changed.",
                 "Each worker commits its own changes. Send these to the worker that owns them, or restore files a tool touched by mistake, then call this again.");
         }
 
@@ -224,8 +226,14 @@ public sealed partial class RunDelivery
 
         if (pendingPlanFiles.Count > 0 && !CommitPlanFiles([.. new[] { plansFolder, archiveFolder }.Where(folder => Directory.Exists(_files.Absolute(folder)))], plan, report))
             return new DeliveryOutcome(report, false);
+        if (pendingTodoFiles.Count > 0 && !CommitTodoFiles(todoFolder, report))
+            return new DeliveryOutcome(report, false);
 
-        string body = PullRequestDescription.Render(Content(request, summary, facts, plan, type, slug, branch, mergeBase), PullRequestDescription.ReadHostTemplate(_repoRoot));
+        PullRequestContent content = Content(request, summary, facts, plan, type, slug, branch, mergeBase) with
+        {
+            FollowUps = FiledTodos(mergeBase, todoFolder)
+        };
+        string body = PullRequestDescription.Render(content, PullRequestDescription.ReadHostTemplate(_repoRoot));
 
         ProcessResult push = Git("push", "--porcelain", Remote, $"refs/heads/{branch}:refs/heads/{branch}");
         if (push.ExitCode != 0)
@@ -590,6 +598,49 @@ public sealed partial class RunDelivery
         {
             return null;
         }
+    }
+
+    /// <summary>The folder the <c>todo-index</c> registry entry lives in, or empty when the host declares none.</summary>
+    private string TodoFolder()
+    {
+        string? index = _config.ConfigReg.Resolve(_config.Ontology)
+            .FirstOrDefault(entry => string.Equals(entry.Name, ConfigRegConfig.TodoIndexProperty, StringComparison.Ordinal))
+            ?.Path;
+        return index is null ? string.Empty : Path.GetDirectoryName(index)?.Replace('\\', '/') ?? string.Empty;
+    }
+
+    /// <summary>
+    /// One line per todo this branch added, committed by now: its title and path. These are the follow-up work the run
+    /// filed for what it found outside its scope.
+    /// </summary>
+    private List<string> FiledTodos(string mergeBase, string todoFolder)
+    {
+        if (todoFolder.Length == 0)
+            return [];
+
+        return [.. Git("diff", "--name-only", "--diff-filter=A", "-z", mergeBase, "HEAD", "--")
+            .StandardOutput.Split('\0', StringSplitOptions.RemoveEmptyEntries)
+            .Where(path => IsPlanFile(path, todoFolder) && File.Exists(_files.Absolute(path)))
+            .Order(StringComparer.Ordinal)
+            .Select(path => $"{RunEvidence.DocumentTitle(File.ReadAllText(_files.Absolute(path))) ?? Path.GetFileNameWithoutExtension(path)} (`{path}`)")];
+    }
+
+    /// <summary>Commits the todo folder, which the follow-up filing wrote after the review and nobody committed.</summary>
+    private bool CommitTodoFiles(string todoFolder, DiagnosticReport report)
+    {
+        const string message = "docs(todo): file the follow-up work this run found";
+        ProcessResult add = Git("add", "-A", "--", todoFolder);
+        ProcessResult commit = add.ExitCode == 0 ? Git("commit", "-m", message, "--", todoFolder) : add;
+        if (commit.ExitCode != 0)
+        {
+            report.Add(new Diagnostic(UncommittedChanges, Severity.Error,
+                $"Committing the pending todo files failed: {FirstLine(commit.StandardError + commit.StandardOutput)}. Nothing was pushed.", "deliver",
+                Hint: "The files may be left staged; commit them, then call this again."));
+            return false;
+        }
+
+        Say(report, $"Committed the pending todo files on the run branch: {message}.");
+        return true;
     }
 
     private (string Plans, string Archive) PlanFolders()

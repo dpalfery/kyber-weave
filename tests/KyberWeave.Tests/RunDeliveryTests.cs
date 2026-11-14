@@ -297,6 +297,40 @@ public sealed class RunDeliveryTests : IDisposable
         AssertRefusedBeforeAnythingLeaves(Deliver(gh, new DeliveryRequest("S.")), gh, RunDelivery.NotARunBranch);
     }
 
+    /// <summary>
+    /// The follow-up filing writes todos after the review and nobody commits them: the deliver step commits the todo
+    /// folder, and the pull request lists each todo the branch added under Follow-up work filed.
+    /// </summary>
+    [Fact]
+    public void CommitsTheFiledTodosAndListsThemUnderFollowUpWorkFiled()
+    {
+        GitRunRepository(archivePending: false);
+        Write("docs/todo/README.md", "# Todos\n\n- [Move the shared DTOs](move-shared-dtos.md)\n");
+        Write("docs/todo/move-shared-dtos.md",
+            "---\nid: todo/move-shared-dtos\ntitle: Move the shared DTOs out of the Domain project\ndoc-type: todo\n---\n\n# Move the shared DTOs\n");
+        ScriptedGh gh = new();
+
+        DeliveryOutcome outcome = Deliver(gh, new DeliveryRequest("S."));
+
+        Assert.True(outcome.Delivered, Findings(outcome));
+        Assert.Equal(string.Empty, Git(_work, "status", "--porcelain").Trim());
+        Assert.Contains("docs(todo): file the follow-up work this run found", Git(_work, "log", "-1", "--format=%s"), StringComparison.Ordinal);
+        Assert.Contains(
+            "## Follow-up work filed\n\n- Move the shared DTOs out of the Domain project (`docs/todo/move-shared-dtos.md`)",
+            gh.Bodies.Single(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AFollowUpSectionFollowsAHostTemplateThatDoesNotAskForIt()
+    {
+        string body = PullRequestDescription.Render(
+            new PullRequestContent { Summary = "S.", FollowUps = ["Move the shared DTOs (`docs/todo/move-shared-dtos.md`)"] },
+            "## Summary\n\n<!-- what -->\n");
+
+        Assert.Equal(["Summary", "Not verified", "Follow-up work filed"], Headings(body));
+    }
+
     [Fact]
     public void RefusesChangesItDoesNotOwn()
     {

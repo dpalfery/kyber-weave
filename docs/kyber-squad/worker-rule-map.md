@@ -343,7 +343,9 @@ gave it.
 Single home: the baseline block, first rule after the plan-read ban. A worker changes every file its
 task names, in whatever layer, following that technology's standard. An agent's "Good at" line says
 what it is usually best at; it is not a boundary, so no worker returns BLOCKED or asks for a handoff
-over a named file. Unnamed work that turns out to be necessary is reported as an open item while the
-task is finished. The only stops are a missing packet, an unresolvable contradiction in the task, and
+over a named file. Unnamed work, and any issue outside the task's files or unrelated to the task, is
+reported as one `Open item: <file> — <what> — <why it matters>` line and never fixed by the worker; the
+conductor files those lines as todos when the run ends. A diagnostic the worker's own
+change introduced is still the worker's to fix. The only stops are a missing packet, an unresolvable contradiction in the task, and
 the safety limits (migrations on a shared database, CI or deploy secrets, commit or push beyond the
 contract). The per-agent "You own / You do not own" lists and the data-layer handoff sections are gone.

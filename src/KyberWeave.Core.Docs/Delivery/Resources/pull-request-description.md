@@ -13,7 +13,8 @@ heading and all. When the host repository has its own pull request template, fil
 sections instead: each host section takes the section below whose subject it asks for (summary,
 type, linked work, changes, testing, documentation, notes); a host section none of these answers
 keeps its checklist for the reviewer; and the sections below the host template does not ask for
-(Not verified, Decisions made for you to check, Pending human review, Notes) follow it.
+(Not verified, Decisions made for you to check, Pending human review, Follow-up work filed, Notes)
+follow it.
 
 - summary: the problem and the outcome, in one to three sentences.
 - type: bug fix, feature, breaking change, refactor, documentation, and so on.
@@ -26,10 +27,12 @@ keeps its checklist for the reviewer; and the sections below the host template d
   reason; "Nothing: every check listed above ran." when there is none.
 - decisions: decisions made without a person (autonomous mode) that rest on no authoritative
   source, one line each, so the reviewer can overturn them; omit when there are none.
-- pending-review: review findings still open, one line each; omit when the review approved.
+- pending-review: review findings still open, one line each; omit when there are none.
+- follow-ups: the todos filed for work found outside this change's scope, one line each with its
+  path; omit when none was filed.
 - documentation-impact: the documentation-impact outcome verbatim, plus what documentation
   changed or why none was needed.
-- notes: anything else reviewers should know, and follow-ups.
+- notes: anything else reviewers should know.
 -->
 ## Summary
 
@@ -62,6 +65,10 @@ keeps its checklist for the reviewer; and the sections below the host template d
 ## Pending human review
 
 {{pending-review}}
+
+## Follow-up work filed
+
+{{follow-ups}}
 
 ## Documentation impact
 

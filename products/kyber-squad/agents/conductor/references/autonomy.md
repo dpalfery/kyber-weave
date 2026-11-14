@@ -89,7 +89,8 @@ Supervised behaviour is unchanged: an unresolved circuit-breaker finding escalat
 Add to the completion report:
 
 - every open circuit-breaker finding, and every review finding still open when the review loop stopped, listed as pending human review;
-- the draft pull request link and its CI state (ready, or what it is waiting for).
+- the draft pull request link and its CI state (ready, or what it is waiting for);
+- the todos filed for follow-up work, one line each with its path, and, as the report's last line, one question: whether to start a fresh run (new branch, new pull request) for them. Never start that run yourself, in either mode: the user answers the question.
 
 ### Autonomous decisions in the report
 
