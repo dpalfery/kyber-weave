@@ -102,6 +102,45 @@ public static class CouncilSeating
     }
 
     /// <summary>
+    ///     The fix-delta size above which a verifier cycle seats every applicable lens over the delta: the same 300
+    ///     changed lines that separate a quick review from a full council.
+    /// </summary>
+    public const int LargeFixLines = 300;
+
+    /// <summary>
+    ///     The seating of a verifier cycle. It seats only the lenses that raised the findings the fix round took, plus
+    ///     <c>correctness</c> and <c>test-adequacy</c> when the fix changed anything but Markdown; every other lens is
+    ///     carried from the prior cycle by the verdict, so none is listed as not seated. Only a fix delta larger than
+    ///     <see cref="LargeFixLines"/> widens the cycle, to <see cref="Plan"/> over the delta's own files.
+    /// </summary>
+    /// <param name="recheck">The prior findings the fix round took.</param>
+    /// <param name="fixPaths">The paths the fix changed since the prior cycle's head, or null when git could not name them.</param>
+    /// <param name="fixChangedLines">The fix delta's added plus removed lines.</param>
+    public static CouncilSeatPlan VerifierPlan(
+        IReadOnlyList<ReviewFinding> recheck, IReadOnlyList<string>? fixPaths, int fixChangedLines)
+    {
+        ArgumentNullException.ThrowIfNull(recheck);
+
+        if (fixChangedLines > LargeFixLines)
+            return Plan(fixPaths);
+
+        HashSet<string> seated = new(
+            recheck.Select(finding => finding.Lens).Where(lens => ReviewLensCatalogue.Names.Contains(lens, StringComparer.Ordinal)),
+            StringComparer.Ordinal);
+        if (fixPaths is null || fixPaths.Any(path => !PathGlob.IsMatch("**/*.md", path)))
+        {
+            seated.Add("correctness");
+            seated.Add("test-adequacy");
+        }
+
+        string[] ordered = [.. ReviewLensCatalogue.Names.Where(seated.Contains)];
+        return new CouncilSeatPlan(
+            [.. ordered.Where(lens => !AfterGates.Contains(lens, StringComparer.Ordinal))],
+            [.. ordered.Where(lens => AfterGates.Contains(lens, StringComparer.Ordinal))],
+            new Dictionary<string, string>(StringComparer.Ordinal));
+    }
+
+    /// <summary>
     ///     The gate-proven skips, decided once the gates finished: <c>static-analysis-triage</c> when every gate that ran
     ///     passed, and <c>duplicate-implementation</c> when the duplicates report names no changed file.
     /// </summary>

@@ -90,7 +90,7 @@ Report queue changes as dispatching, running, blocked, and accumulated change. R
 
 ## Completion
 
-Report the objective complete only when the queue and findings collection are empty, all required task contracts have current passing evidence, `code-reviewer` returned `APPROVE` or the review loop reached its hard stop with the open findings listed in the pull request, and the applicable plan or specification closeout is done. The council re-reviews after every fix round until it returns APPROVE. The `delivery-execution` skill owns that loop and its stop. Report outcomes and evidence; do not independently re-interpret technical correctness.
+Report the objective complete only when the queue and findings collection are empty, all required task contracts have current passing evidence, `code-reviewer` returned `APPROVE` or the review loop reached its hard stop with the open findings listed in the pull request, and the applicable plan or specification closeout is done. The council re-reviews after every fix round until the verdict prints `fix round: none`. The `delivery-execution` skill owns that loop and its stop. Report outcomes and evidence; do not independently re-interpret technical correctness.
 
 
 ## Arbiter fallback

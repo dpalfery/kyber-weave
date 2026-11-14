@@ -507,6 +507,7 @@ review:
     strictness: balanced   # lenient | balanced | strict
     # major-count-blocks: 3               # optional; overrides the strictness preset
     # min-confidence: 7                    # optional; overrides the strictness preset
+    minor-findings: follow-up              # follow-up (default) | fix
     suppressions:
       - id: correctness/generated-nullable
         reason: Regenerated client, tracked separately.
@@ -520,6 +521,12 @@ review:
 strictness to every lens so a strict host receives lower-confidence findings rather than having
 them withheld at the source. Minor findings never block at any level, which keeps the
 autonomous-gate rule that only critical and major findings gate a change.
+
+**Minor findings.** `policy.minor-findings` decides what a fix round does with them. `follow-up`
+(the default) leaves them out of the fix round: the pull request lists them under pending human
+review and the conductor files them as todos with the run's other follow-up work. `fix` sends
+them to the same fix round as the majors. Either way they never block and never start a cycle by
+themselves.
 
 `run` is **argv, not a command line**, because `ProcessRunner` refuses a shell and refuses a
 concatenated argument string. A host cannot express a pipeline or a redirect here — and neither
@@ -1036,13 +1043,21 @@ rather than performing it.
 | `verifier` | Re-checks only the prior findings and the fix delta | Every review cycle after the first |
 | `full` | Forces a complete council re-scan | Selected by a person: a disputed verdict, or a stale prior review |
 
-**The review loop.** After `REQUEST_CHANGES`, every critical and major finding, and every
-failed blocking gate, goes to the worker that owns its scope; the council then re-reviews, and
-it keeps doing so until it returns `APPROVE`. Minor findings never start a cycle. Every cycle
+**The review loop.** The verdict prints what the fix round takes, one `fix:` line each (every
+failed blocking gate and every critical and major finding, and the minor ones too when
+`review.policy.minor-findings` is `fix`), what becomes follow-up work (`follow-up:`: minor
+findings under the default `follow-up`, and findings dropped as `pre-existing debt`), and a
+closing `fix round:` line (`KW-REVIEW-056`). Each `fix:` line goes to the worker that owns its
+scope, after `REQUEST_CHANGES` and after an `APPROVE` alike; an `APPROVE` gets one fix round, and
+when the cycle after it approves too, what is still open is printed as `open:` and goes to human
+review. The council re-reviews until the verdict prints `fix round: none`. Minor findings never
+start a cycle by themselves. Every cycle
 after the first is a `verifier` cycle, a fact the council's own gate run (`review gates --council`) and the read-only `kyber-weave review cycle . --task <task-id>` query both read from the finished cycle folders (those holding the verdict's `findings.json`) rather than from how a dispatch is worded: it reviews the fix delta `git diff <prior head>...<head>`,
-re-seats only the lenses that own an outstanding finding or whose predicate the delta newly
-satisfies, and passes `--prior <prior cycle folder>` so the lenses it did not re-seat keep their
-coverage. A fix round re-runs only the gates whose inputs the fix touched, because their result *is* the evidence; a gate the fix did not touch keeps the prior cycle's result. The council's gate run does this itself: in a later cycle it prints `cycle: <n> mode: verifier` with the `recheck:` findings and the `rerun:`/`carry:` gates at the top of its output, before the first gate starts, and repeats a one-line `cycle: … ran: … carried: … failed: …` summary as its last line; it runs only the `rerun:` gates, and writes each `carry:` gate's earlier passing result into `gates.json` as carried (`KW-REVIEW-048`), so the report is complete (`--full` runs every gate). `review cycle` ends with the exact command (`run:`); `--gate` runs written to one `--out` file merge into it, so gates run one at a time still add up to one report. A carried gate is one that passed and whose inputs are unchanged; the verdict applies the same rule to a gate missing from the report and refuses one whose inputs changed (`KW-REVIEW-049`). CI is the full re-check. A finding is FIXED only
+and `review seats` seats only the lenses that raised the findings the fix round took, plus
+`correctness` and `test-adequacy` when the fix changed anything but Markdown; only a fix delta
+of more than 300 changed lines seats every lens the delta's own files call for. It passes
+`--prior <prior cycle folder>`, so the lenses it did not re-seat keep their coverage and each
+prior finding the fix round did not take is carried into this cycle's `findings.json`. A fix round re-runs only the gates whose inputs the fix touched, because their result *is* the evidence; a gate the fix did not touch keeps the prior cycle's result. The council's gate run does this itself: in a later cycle it prints `cycle: <n> mode: verifier` with the `recheck:` findings and the `rerun:`/`carry:` gates at the top of its output, before the first gate starts, and repeats a one-line `cycle: … ran: … carried: … failed: …` summary as its last line; it runs only the `rerun:` gates, and writes each `carry:` gate's earlier passing result into `gates.json` as carried (`KW-REVIEW-048`), so the report is complete (`--full` runs every gate). `review cycle` ends with the exact command (`run:`); `--gate` runs written to one `--out` file merge into it, so gates run one at a time still add up to one report. A carried gate is one that passed and whose inputs are unchanged; the verdict applies the same rule to a gate missing from the report and refuses one whose inputs changed (`KW-REVIEW-049`). CI is the full re-check. A finding is FIXED only
 when the fix refuses its whole class: the verifier states the class in one sentence, names at
 least three other inputs of that class that the original failure scenario did not name, and
 traces each through the fix. A fix that refuses only the input the finding named leaves the

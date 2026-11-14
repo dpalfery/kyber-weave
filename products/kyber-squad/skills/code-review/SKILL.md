@@ -121,7 +121,7 @@ If the host has declared no gates, the command says so. Record that: a review wi
 executed evidence is a weaker review, and the report must not read as though everything
 passed.
 
-**Council.** In a first full review, seat the council as [references/first-review.md](references/first-review.md) says: the `now:` blocks in one parallel batch with the `run:` line, then the `after-gates:` blocks the gate run still lists, each seat ending with the attestation line `REVIEW.md sections checked: [<ids>]`. A verifier cycle re-seats only the lenses [references/verifier-cycle.md](references/verifier-cycle.md) names. Every seat starts from the cycle's `evidence.md`; the gate run rewrites it with every gate's result and the coverage, and no seat re-runs a gate or rediscovers the change. A seat that returns nothing is sent once more in the next batch; a seat has about 3 minutes or 30 tool calls (`arbiter.seat-budget`) and one stopped by it closes with `Budget reached, not examined: …` (`KW-REVIEW-054`). The reviewer starts every seat itself; only where sub-agents cannot dispatch does the `review-council` skill start them for it, from the main session. And:
+**Council.** In a first full review, seat the council as [references/first-review.md](references/first-review.md) says: the `now:` blocks in one parallel batch with the `run:` line, then the `after-gates:` blocks the gate run still lists, each seat ending with the attestation line `REVIEW.md sections checked: [<ids>]`. A verifier cycle seats only the lenses `review seats` prints for it ([references/verifier-cycle.md](references/verifier-cycle.md)). Every seat starts from the cycle's `evidence.md`; the gate run rewrites it with every gate's result and the coverage, and no seat re-runs a gate or rediscovers the change. A seat that returns nothing is sent once more in the next batch; a seat has about 3 minutes or 30 tool calls (`arbiter.seat-budget`) and one stopped by it closes with `Budget reached, not examined: …` (`KW-REVIEW-054`). The reviewer starts every seat itself; only where sub-agents cannot dispatch does the `review-council` skill start them for it, from the main session. And:
 
 Seat one lens per spawn. Save each seat's output unchanged as `<lens>.md` in the cycle's `seats` folder before you adjudicate. The verdict command matches a seat file to a lens by its name alone, so a file named for two lenses at once (`prior-art-performance.md`) keeps its findings but covers no lens and draws a `KW-REVIEW-041` warning; one spawn per lens and one file per lens avoids it. When one lens is split by file across two or more spawns, save their outputs unchanged, one after another, as that lens's one `<lens>.md`; the verdict command sums the repeated `Input sites:` and `Discovery:` lines per counter, and one malformed repeated line makes that count unreadable (`KW-REVIEW-044` or `KW-REVIEW-047`). `Index fallback:` lines are not summed: a repeated identical line is fine, but two different ones draw `KW-REVIEW-044` and only the first is kept. When the parts fell back in different modes, merge them into one line naming each mode, separated by a semicolon (`Index fallback: projectPath: error; projectPath: not-indexed`), so no evidence is discarded. A finding you raise yourself, such as a claim with no gate behind it, goes in `reviewer.md` in the same folder.
 
@@ -177,6 +177,9 @@ The reviewer applies the checks no individual lens can, because no lens sees the
 - **Reconcile duplicates** — keep the most concrete, note the corroboration, and drop the
   others with `--drop <id>=duplicate of <kept id>`.
 - **Reconcile contradictions** — read the code and resolve, or escalate as unresolved.
+- **Mark pre-existing debt.** A finding about code the change did not touch is dropped with
+  `--drop <id>=pre-existing debt: <one line>`; it blocks nothing and the verdict lists it as
+  follow-up work. Code the change touched or extends is the change's own.
 - **Check the claims against the gates.** Any assertion that something was built, tested, or
   verified, with no corresponding gate result, is a `critical` finding, written in
   `reviewer.md` in the seats folder.
@@ -219,7 +222,7 @@ number. Minor findings never block at any level. Pass the strictness and the eff
 findings instead of having them dropped at the source and a lenient host is not flooded. The
 security lens is the one exception: it keeps its own floor of 8 (see its lens file).
 
-**Review loop.** The council re-reviews after every fix round until it returns APPROVE; every cycle after the first is a verifier cycle, set out in [references/verifier-cycle.md](references/verifier-cycle.md).
+**Fix round.** The verdict prints what the fix round takes (`fix:` lines: failed blocking gates, critical and major findings, after an APPROVE too) and what becomes follow-up work (`follow-up:` lines: minor findings and pre-existing debt), then `fix round:` saying whether the loop ends: the council re-reviews after every fix round until the verdict prints `fix round: none`. `review.policy.minor-findings` decides the minor findings: `follow-up` (the default) lists them in the pull request and files them as todos; `fix` sends them to the same round as the majors. Every cycle after the first is a verifier cycle, set out in [references/verifier-cycle.md](references/verifier-cycle.md).
 
 **Risk** (`LOW` / `MEDIUM` / `HIGH`) is graded from what was found and what was touched,
 never from diff size. A twelve-line migration dropping a column outranks a three-thousand-line
@@ -277,6 +280,10 @@ Most severe first:
   - **Failure:** the concrete scenario.
   - **Guidance:** the review-guidance rule id (or section, for an untagged bullet) applied, when the finding applies one.
   - **Suggestion:** the specific fix.
+
+### Fix round
+The verdict's `fix:`, `open:`, `follow-up:` and `fix round:` lines, unchanged: the conductor
+dispatches from them.
 
 ### Council coverage
 Every lens, and its outcome: findings, `NO FINDINGS`, `SKIPPED` with the reason, or

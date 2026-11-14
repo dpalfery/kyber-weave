@@ -1302,6 +1302,124 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
     }
 
     // -----------------------------------------------------------------------------------------
+    // The fix round: what it takes, what becomes follow-up work, and what a later cycle carries.
+    // -----------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// An APPROVE with a surviving major still names it for one fix round, and by default the minor finding is
+    /// follow-up work rather than fixed.
+    /// </summary>
+    [Fact]
+    public void AnApprovalWithAMajorNamesItForTheFixRoundAndLeavesTheMinorAsFollowUp()
+    {
+        WriteSeat("correctness", FindingSeat(severity: "major"));
+        WriteSeat("security", FindingSeat(lens: "security", id: "security/name-unclear", severity: "minor"));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness", "security")]);
+
+        Assert.Equal(0, run.Result);
+        IReadOnlyList<string> lines = MessagesWithCode(run.Output, FixRound);
+        Assert.Contains("fix: correctness/off-by-one (major) src/Foo.cs:12", lines);
+        Assert.Contains("follow-up: security/name-unclear (minor) src/Foo.cs:12", lines);
+        Assert.Contains(lines, line => line.StartsWith("fix round: 1 item(s)", StringComparison.Ordinal));
+    }
+
+    /// <summary>With <c>review.policy.minor-findings: fix</c> the minor finding joins the same fix round.</summary>
+    [Fact]
+    public void TheFixPolicySendsTheMinorFindingToTheSameFixRound()
+    {
+        UsePolicy("    minor-findings: fix\n");
+        WriteSeat("correctness", FindingSeat(severity: "major"));
+        WriteSeat("security", FindingSeat(lens: "security", id: "security/name-unclear", severity: "minor"));
+
+        CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, .. NotSeatedExcept("correctness", "security")]);
+
+        IReadOnlyList<string> lines = MessagesWithCode(run.Output, FixRound);
+        Assert.Contains("fix: security/name-unclear (minor) src/Foo.cs:12", lines);
+        Assert.DoesNotContain(lines, line => line.StartsWith("follow-up:", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A finding dropped as pre-existing debt blocks nothing and is listed as follow-up work, so it becomes a todo; a
+    /// clean review says the loop ends.
+    /// </summary>
+    [Fact]
+    public void AFindingDroppedAsPreExistingDebtIsFollowUpWorkAndTheLoopEnds()
+    {
+        WriteSeat("correctness", FindingSeat(severity: "major"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--drop", "correctness/off-by-one=pre-existing debt: the file is not in this change",
+                .. NotSeatedExcept("correctness")]);
+
+        Assert.Equal(0, run.Result);
+        IReadOnlyList<string> lines = MessagesWithCode(run.Output, FixRound);
+        Assert.Contains("follow-up: correctness/off-by-one (major) src/Foo.cs:12 (pre-existing debt)", lines);
+        Assert.Contains("fix round: none; the review loop ends here.", lines);
+    }
+
+    /// <summary>
+    /// A later cycle carries the prior minor finding the fix round did not take, so the last cycle, which the pull
+    /// request reads, still lists it; the major the fix round took is not carried.
+    /// </summary>
+    [Fact]
+    public void ALaterCycleCarriesThePriorMinorFindingButNotTheMajorTheFixRoundTook()
+    {
+        WriteSource("public int Total(int[] items)\n{\n    if (i < count)\n    return total;\n}\n");
+        JsonObject minor = PriorFinding();
+        minor["id"] = "security/name-unclear";
+        minor["lens"] = "security";
+        minor["severity"] = "minor";
+        minor["line"] = 3;
+        minor["excerpt"] = "if (i < count)";
+        minor["claim"] = "The name does not say what it counts.";
+        minor["evidence"] = "src/Foo.cs:3";
+        minor["failureScenario"] = "A reader takes the count for a total.";
+        WritePrior("findings", "lower", new JsonArray(PriorFinding(), minor));
+        string priorPath = Path.Combine(PriorFolder, "findings.json");
+        JsonObject priorDocument = JsonNode.Parse(File.ReadAllText(priorPath))!.AsObject();
+        priorDocument["coverage"] = new JsonArray(new JsonObject { ["lens"] = "security", ["outcome"] = "findings", ["reason"] = null });
+        File.WriteAllText(priorPath, priorDocument.ToJsonString());
+        WriteSeat("correctness", NoFindingsSeat("correctness"));
+        string report = Path.Combine(_temp.Path, "report.json");
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--prior", PriorFolder, "--out", report, .. NotSeatedExcept("correctness", "security")]);
+
+        Assert.Equal(0, run.Result);
+        Assert.Equal(["security/name-unclear"], ReadFindingIds(report));
+    }
+
+    /// <summary>
+    /// An approval gets one fix round: when the prior cycle approved and this one approves too, a major still open is
+    /// listed for human review and the loop ends, rather than starting another round.
+    /// </summary>
+    [Fact]
+    public void AfterTheOneFixRoundAnApprovalListsTheStillOpenMajorForHumanReviewAndEndsTheLoop()
+    {
+        JsonObject major = PriorFinding();
+        major["claim"] = "The loop bound excludes the final element.";
+        major["evidence"] = "src/Foo.cs";
+        major["failureScenario"] = "The last element is never processed.";
+        WritePrior("findings", "lower", new JsonArray(major));
+        WriteSeat("correctness", FindingSeat(severity: "major"));
+
+        CapturedConsoleExecution<int> run = Verdict(
+            ["--seats", _seats, "--prior", PriorFolder, .. NotSeatedExcept("correctness")]);
+
+        IReadOnlyList<string> lines = MessagesWithCode(run.Output, FixRound);
+        Assert.Contains("open: correctness/off-by-one (major) src/Foo.cs:12", lines);
+        Assert.Contains(lines, line => line.StartsWith("fix round: none; the one fix round after an approval is done", StringComparison.Ordinal));
+    }
+
+    private void UsePolicy(string extra) =>
+        File.WriteAllText(
+            Path.Combine(_repo, ".kyber-weave", "kyber-weave.yml"),
+            "ontology:\n  docs-root: docs\nreview:\n  policy:\n    strictness: balanced\n" + extra);
+
+    private const string FixRound = "KW-REVIEW-056";
+
+    // -----------------------------------------------------------------------------------------
     // Harness.
     // -----------------------------------------------------------------------------------------
 

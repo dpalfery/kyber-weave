@@ -227,6 +227,31 @@ public class ReviewConfigTests
     public void OutOfRangePolicyValuesAreRejected(string line, string expected) =>
         Assert.Contains(expected, Invalid($"review:\n  policy:\n    {line}\n").Message, StringComparison.Ordinal);
 
+    /// <summary>
+    /// <c>review.policy.minor-findings</c> decides whether a fix round takes the minor findings: by default it does
+    /// not, so they become follow-up work; <c>fix</c> sends them to the same round as the majors. Majors always go.
+    /// </summary>
+    [Theory]
+    [InlineData("review:\n  policy: {}\n", false)]
+    [InlineData("review:\n  policy:\n    minor-findings: follow-up\n", false)]
+    [InlineData("review:\n  policy:\n    minor-findings: fix\n", true)]
+    public void TheMinorFindingsPolicyDecidesWhetherAFixRoundTakesAMinorFinding(string yaml, bool takesMinor)
+    {
+        ReviewPolicy policy = Load(yaml).Policy;
+        ReviewFinding minor = new("security/name", "security", ReviewSeverity.Minor, 9, "src/A.cs", 1);
+        ReviewFinding major = minor with { Severity = ReviewSeverity.Major };
+
+        Assert.Equal(takesMinor, policy.FixRoundTakes(minor));
+        Assert.True(policy.FixRoundTakes(major));
+    }
+
+    [Fact]
+    public void AnUnknownMinorFindingsValueIsRejectedNamingTheChoices() =>
+        Assert.Contains(
+            "use follow-up or fix",
+            Invalid("review:\n  policy:\n    minor-findings: ignore\n").Message,
+            StringComparison.Ordinal);
+
     [Fact]
     public void CoverageOutsideZeroToOneHundredIsRejected() =>
         Assert.Contains(

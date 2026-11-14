@@ -64,6 +64,48 @@ public sealed class CouncilSeatingTests
         Assert.Contains("documentation-accuracy", plan.Now);
     }
 
+    /// <summary>
+    ///     A verifier cycle seats only the lenses that raised the findings being fixed, plus correctness and test-adequacy
+    ///     because the fix changed code; it lists nothing as not seated, so every other lens is carried from the prior cycle.
+    /// </summary>
+    [Fact]
+    public void AVerifierCycleSeatsOnlyTheLensesThatRaisedTheFindingsPlusCorrectnessAndTestAdequacy()
+    {
+        ReviewFinding placement = new("model-placement/dto-in-domain", "model-placement", ReviewSeverity.Major, 9, "src/Domain/A.cs", 3);
+        ReviewFinding reviewer = new("reviewer/unbacked-claim", "reviewer", ReviewSeverity.Critical, 9, "src/A.cs", 1);
+
+        CouncilSeatPlan plan = CouncilSeating.VerifierPlan([placement, reviewer], ["src/Contracts/A.cs", "tests/ATests.cs"], 40);
+
+        Assert.Equal(["correctness", "model-placement"], plan.Now.Order(StringComparer.Ordinal));
+        Assert.Equal(["test-adequacy"], plan.AfterGates);
+        Assert.Empty(plan.NotSeated);
+    }
+
+    [Fact]
+    public void AVerifierCycleWhoseFixChangedOnlyMarkdownSeatsOnlyTheFindingsLenses()
+    {
+        ReviewFinding stale = new("documentation-accuracy/stale", "documentation-accuracy", ReviewSeverity.Major, 9, "docs/a.md", 3);
+
+        CouncilSeatPlan plan = CouncilSeating.VerifierPlan([stale], ["docs/a.md"], 4);
+
+        Assert.Equal(["documentation-accuracy"], plan.Now);
+        Assert.Empty(plan.AfterGates);
+    }
+
+    /// <summary>Only a fix delta above the quick-review threshold widens the cycle, to every lens its own files call for.</summary>
+    [Fact]
+    public void AVerifierCycleWidensOnlyWhenTheFixDeltaIsLarge()
+    {
+        ReviewFinding placement = new("model-placement/dto-in-domain", "model-placement", ReviewSeverity.Major, 9, "src/Domain/A.cs", 3);
+
+        CouncilSeatPlan atLimit = CouncilSeating.VerifierPlan([placement], ["src/A.cs"], CouncilSeating.LargeFixLines);
+        CouncilSeatPlan large = CouncilSeating.VerifierPlan([placement], ["src/A.cs"], CouncilSeating.LargeFixLines + 1);
+
+        Assert.Equal(3, atLimit.Now.Count + atLimit.AfterGates.Count);
+        Assert.Equal(CouncilSeating.Plan(["src/A.cs"]).Now, large.Now);
+        Assert.Contains("security", large.Now);
+    }
+
     [Fact]
     public void AnUnknownChangedSetSeatsEveryLens()
     {

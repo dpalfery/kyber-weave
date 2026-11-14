@@ -20,6 +20,7 @@ review:
     strictness: balanced                  # lenient | balanced | strict; explicit keys below override it
     # major-count-blocks: 3               # optional; overrides the strictness preset
     # min-confidence: 7                    # optional; overrides the strictness preset
+    minor-findings: follow-up             # follow-up | fix; minor findings on an approved review: todo, or same fix round
     suppressions:
       - id: correctness/generated-nullable
         reason: Regenerated client, tracked separately.

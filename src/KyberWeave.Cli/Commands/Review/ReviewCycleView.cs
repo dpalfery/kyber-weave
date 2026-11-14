@@ -1,4 +1,5 @@
 using System.Text.Json;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Review;
 
@@ -113,10 +114,14 @@ internal static class ReviewCycleView
         }
     }
 
-    /// <summary>The prior cycle's critical and major findings, which this cycle re-checks.</summary>
+    /// <summary>
+    ///     The prior cycle's findings the fix round took, which this cycle re-checks: every critical and major one, and the
+    ///     minor ones too when <c>review.policy.minor-findings</c> is <c>fix</c>.
+    /// </summary>
     /// <returns>False, with a finding added to <paramref name="report"/>, when the findings cannot be read.</returns>
     public static bool TryReadRecheck(
         ReviewCycleRecord prior,
+        ReviewPolicy policy,
         DiagnosticReport report,
         List<ReviewFinding> recheck,
         string unreadableCode,
@@ -126,7 +131,7 @@ internal static class ReviewCycleView
         try
         {
             FindingsReport findings = ReviewJson.ReadFindings(File.ReadAllText(prior.FindingsPath));
-            recheck.AddRange(findings.Findings.Where(finding => finding.Severity >= ReviewSeverity.Major));
+            recheck.AddRange(findings.Findings.Where(policy.FixRoundTakes));
             return true;
         }
         catch (Exception ex) when (ex is JsonException or ArgumentException or NotSupportedException
@@ -156,7 +161,7 @@ internal static class ReviewCycleView
             yield return $"recheck: {finding.Id} ({SeverityName(finding.Severity)}) {finding.File}:{finding.Line}";
 
         if (recheck.Count == 0)
-            yield return "recheck: none (the prior cycle left no critical or major finding)";
+            yield return "recheck: none (the prior cycle left no finding for a fix round)";
 
         foreach (GateCycleDecision gate in plan.Gates.Where(gate => gate.Action != GateCycleAction.NotApplicable))
             yield return $"{(gate.Action == GateCycleAction.Rerun ? "rerun" : "carry")}: {gate.GateId} ({gate.Reason})";
@@ -193,6 +198,10 @@ internal static class ReviewCycleView
     public static string Relative(string root, string path) =>
         Path.GetRelativePath(root, path).Replace('\\', '/');
 
-    private static string SeverityName(ReviewSeverity severity) =>
-        severity == ReviewSeverity.Critical ? "critical" : "major";
+    private static string SeverityName(ReviewSeverity severity) => severity switch
+    {
+        ReviewSeverity.Critical => "critical",
+        ReviewSeverity.Major => "major",
+        _ => "minor"
+    };
 }

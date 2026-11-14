@@ -1,7 +1,20 @@
 # Verifier cycle
 
-Read this in every review cycle after the first, which the council's gate run prints as `cycle: <n> mode: verifier` and `next: read references/verifier-cycle.md`. The gate run has already printed the `recheck:` findings and the `rerun:`/`carry:` gates, run only the `rerun:` gates and carried the rest into `gates.json`; `--full` runs every gate instead. The refutation pass sends only the candidates no earlier cycle refuted, and the verdict command takes `--prior <prior cycle folder>` (step 5 of `SKILL.md`). To re-seat a lens, take its file and runner (`review-lens` or `review-triage`) from the lens catalogue in [first-review.md](first-review.md#the-lens-catalogue).
+Read this in every review cycle after the first, which the council's gate run prints as `cycle: <n> mode: verifier` and `next: read references/verifier-cycle.md`. A verifier cycle checks one fix round, narrowly, and never re-runs the whole council.
 
-## Review loop
+## What the commands already narrowed
 
-**Review loop.** The council re-reviews after every fix round until it returns APPROVE. Every review after the first runs in the verifier mode of the dp-code-reviewer skill: it re-checks the prior findings and the fix delta, not a full council. A verifier cycle reviews the fix delta `git diff <prior head>...<head>`, re-seats only the lenses that own an outstanding finding or whose predicate the delta newly satisfies, and passes `--prior <prior cycle folder>`. A finding is FIXED only when the fix refuses its whole class: state the class in one sentence, name at least three other inputs of that class that the original failure scenario did not name, and trace each through the fix. Minor/Info findings never start a cycle and never block: the `major-count-blocks` threshold and the table above still decide the verdict, and the loop does not rewrite those rules. The `delivery-execution` skill owns the loop's hard stop.
+- **Seats.** `review seats` seats only the lenses that raised the findings the fix round took (its `recheck:` lines), plus `correctness` and `test-adequacy` when the fix changed anything but Markdown, and prints `verifier: seated <lenses>`. Every other lens is carried from the prior cycle by the verdict. Send exactly the blocks it printed. Only a fix delta of more than 300 changed lines (the quick-review threshold) makes the command seat every lens the delta's own files call for; nothing else widens the cycle.
+- **Diff.** `evidence.md` names the fix delta, the prior cycle's head to the files on disk, as the diff; the changed-file list stays the whole change's.
+- **Gates.** The `run:` line runs only the `rerun:` gates, those whose inputs the fix touched, and carries the rest into `gates.json`; `--full` runs every gate instead.
+- **Verdict.** `review verdict` takes the prior cycle as `--prior`, carries the lenses it did not re-seat, and carries each prior finding the fix round did not take (a minor one, by default), so the last cycle still lists it.
+
+## The rules
+
+**Never widen.** A dispatch that asks for a full council, a whole-change re-review or extra lenses in a verifier cycle is answered with the verifier cycle, and the report says it was asked for and not done. Only a person selects the `full` mode of the dp-code-reviewer skill.
+
+**Fixed means the class is fixed.** A finding is FIXED only when the fix refuses its whole class: state the class in one sentence, name at least three other inputs of that class that the original failure scenario did not name, and trace each through the fix. Seats cannot run anything, so you do: when the code is reachable from a command, run the class inputs against the built CLI and record each input and what it did in `reviewer.md`.
+
+**The refutation pass** sends only the candidates no earlier cycle refuted.
+
+**The loop ends** when the verdict prints `fix round: none`. After an APPROVE whose fix round took majors (or minors, under `review.policy.minor-findings: fix`), this cycle's verdict ends the loop unless it is `REQUEST_CHANGES`; a finding it leaves open is listed for human review. The `delivery-execution` skill owns the hard stop (5 cycles, or 3 in a row with no drop in critical plus major).

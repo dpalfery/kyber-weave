@@ -332,7 +332,10 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
             {
                 foreach ((string lens, string reason) in gateProven.OrderBy(pair => pair.Key, StringComparer.Ordinal))
                     Console.WriteLine($"not-seated: --not-seated \"{lens}={reason}\"");
-                string[] send = [.. CouncilSeating.AfterGates.Where(lens => !gateProven.ContainsKey(lens))];
+                // Only lenses review seats wrote a packet for: a verifier cycle seats fewer, and none is widened here.
+                string packets = Path.Combine(cycle.Folder!, "packets");
+                string[] send = [.. CouncilSeating.AfterGates.Where(lens => !gateProven.ContainsKey(lens)
+                    && (!Directory.Exists(packets) || File.Exists(Path.Combine(packets, lens + ".md"))))];
                 Console.WriteLine($"after-gates: send {(send.Length == 0 ? "none" : string.Join(", ", send))}");
                 Console.WriteLine($"next: {ReviewSeatsCommand.VerdictCommand(null)}");
             }
@@ -421,7 +424,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
         folder ??= Path.Combine(reviewFolder, $"cycle-{plan.Number}");
         List<ReviewFinding> recheck = [];
         if (plan.Prior is { } priorCycle)
-            ReviewCycleView.TryReadRecheck(priorCycle, report, recheck, PriorFindingsUnreadable, Severity.Warning, "review gates");
+            ReviewCycleView.TryReadRecheck(priorCycle, config.Review.Policy, report, recheck, PriorFindingsUnreadable, Severity.Warning, "review gates");
 
         return new CouncilCycle(
             plan,

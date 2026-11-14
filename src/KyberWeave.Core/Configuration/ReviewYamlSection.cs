@@ -106,6 +106,8 @@ internal sealed class ReviewPolicyYaml
 
     public string? Strictness { get; init; }
 
+    public string? MinorFindings { get; init; }
+
     public List<ReviewSuppressionYaml>? Suppressions { get; init; }
 }
 

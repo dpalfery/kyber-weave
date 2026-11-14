@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using KyberWeave.Core.Review;
 
 namespace KyberWeave.Core.Configuration;
 
@@ -167,6 +168,16 @@ public enum ReviewStrictness
     Strict
 }
 
+/// <summary>What happens to the minor findings an approved review leaves open.</summary>
+public enum ReviewMinorFindings
+{
+    /// <summary>The product default: not fixed in this run; listed in the pull request and filed as follow-up work.</summary>
+    FollowUp,
+
+    /// <summary>Fixed in the same fix round as the major findings.</summary>
+    Fix
+}
+
 /// <summary>The rules the verdict engine may not decide for itself.</summary>
 public sealed class ReviewPolicy
 {
@@ -181,6 +192,19 @@ public sealed class ReviewPolicy
 
     /// <summary>Active finding suppressions.</summary>
     public IReadOnlyList<ReviewSuppression> Suppressions { get; init; } = [];
+
+    /// <summary>Whether a fix round also takes the minor findings (<c>review.policy.minor-findings</c>).</summary>
+    public ReviewMinorFindings MinorFindings { get; init; } = ReviewMinorFindings.FollowUp;
+
+    /// <summary>
+    /// Whether a fix round takes <paramref name="finding"/>: every critical and major finding, and a minor one only
+    /// when <see cref="MinorFindings"/> is <see cref="ReviewMinorFindings.Fix"/>.
+    /// </summary>
+    public bool FixRoundTakes(ReviewFinding finding)
+    {
+        ArgumentNullException.ThrowIfNull(finding);
+        return finding.Severity >= ReviewSeverity.Major || MinorFindings == ReviewMinorFindings.Fix;
+    }
 
     /// <summary>Product defaults for a host that declares no policy.</summary>
     public static ReviewPolicy ProductDefaults { get; } = new();

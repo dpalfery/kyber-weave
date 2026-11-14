@@ -69,7 +69,7 @@ public sealed class ReviewSeatsCommand : Command<ReviewSeatsSettings>
             commit => ReviewCycleView.TryChangedSince(tree, commit));
         List<ReviewFinding> recheck = [];
         if (plan.Prior is { } priorCycle
-            && !ReviewCycleView.TryReadRecheck(priorCycle, report, recheck, UnreadableInput, Severity.Error, "review seats"))
+            && !ReviewCycleView.TryReadRecheck(priorCycle, config.Review.Policy, report, recheck, UnreadableInput, Severity.Error, "review seats"))
         {
             CommandHelpers.Finish(report, settings, "review seats", "Review");
             return 1;
@@ -89,9 +89,10 @@ public sealed class ReviewSeatsCommand : Command<ReviewSeatsSettings>
         IReadOnlyList<string>? changed = ChangedPaths(root, baseRef);
 
         string evidence;
-        CouncilSeatPlan seats = CouncilSeating.Plan(changed);
         ReviewDecisionModel model = ReviewDecisionModelFactory.Create(root, config, settings.NoDecisionModel, null);
-        seats = WithDecisionModel(root, baseRef, changed, seats, model, cancellationToken);
+        CouncilSeatPlan seats = plan.Prior is { } verified
+            ? VerifierSeats(tree, verified, recheck)
+            : WithDecisionModel(root, baseRef, changed, CouncilSeating.Plan(changed), model, cancellationToken);
         try
         {
             evidence = ReviewEvidence.Write(
@@ -131,7 +132,8 @@ public sealed class ReviewSeatsCommand : Command<ReviewSeatsSettings>
         {
             foreach (string line in ReviewCycleView.VerifierLines(plan, recheck))
                 Say(line);
-            Say("verifier: send only the blocks for lenses that own a recheck finding or whose applicability the fix delta newly meets.");
+            string[] seated = [.. seats.Now.Concat(seats.AfterGates)];
+            Say($"verifier: seated {(seated.Length == 0 ? "none" : string.Join(", ", seated))} over the fix delta; every other lens is carried from the prior cycle. Send only the blocks below and widen nothing.");
         }
 
         Say($"run: {ReviewCycleView.GatesCommand(root, gatesPath, settings.BaseRef)} --deadline");
@@ -198,6 +200,37 @@ public sealed class ReviewSeatsCommand : Command<ReviewSeatsSettings>
             notSeated[lens] = reason;
         return new CouncilSeatPlan([.. seats.Now.Where(lens => !ruledOut.ContainsKey(lens))], seats.AfterGates, notSeated);
     }
+
+    /// <summary>
+    ///     The verifier cycle's seats, measured on the fix delta from the prior cycle's head: what the fix changed, and how
+    ///     many lines. A head git cannot compare with leaves the files unknown, which still seats the narrow set.
+    /// </summary>
+    private static CouncilSeatPlan VerifierSeats(string tree, ReviewCycleRecord prior, IReadOnlyList<ReviewFinding> recheck)
+    {
+        IReadOnlyList<string>? fixPaths = null;
+        int fixLines = 0;
+        if (prior.Head is { } head)
+        {
+            fixPaths = ReviewCycleView.TryChangedSince(tree, head);
+            try
+            {
+                fixLines = ChangedLineCount(ChangedFiles.DiffSince(tree, head));
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or TimeoutException)
+            {
+                fixLines = 0;
+            }
+        }
+
+        return CouncilSeating.VerifierPlan(recheck, fixPaths, fixLines);
+    }
+
+    /// <summary>Added plus removed lines in a unified diff, file headers excluded.</summary>
+    internal static int ChangedLineCount(string patch) =>
+        patch.Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Split('\n')
+            .Count(line => (line.StartsWith('+') && !line.StartsWith("+++", StringComparison.Ordinal))
+                           || (line.StartsWith('-') && !line.StartsWith("---", StringComparison.Ordinal)));
 
     private static string StrictnessName(ReviewStrictness strictness) => strictness switch
     {

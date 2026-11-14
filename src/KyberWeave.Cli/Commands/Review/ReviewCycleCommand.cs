@@ -63,7 +63,7 @@ public sealed class ReviewCycleCommand : Command<ReviewCycleSettings>
             commit => ReviewCycleView.TryChangedSince(tree, commit));
 
         List<ReviewFinding> recheck = [];
-        if (plan.Prior is { } priorCycle && !ReviewCycleView.TryReadRecheck(priorCycle, report, recheck, UnreadableInput, Severity.Error, "review cycle"))
+        if (plan.Prior is { } priorCycle && !ReviewCycleView.TryReadRecheck(priorCycle, config.Review.Policy, report, recheck, UnreadableInput, Severity.Error, "review cycle"))
         {
             CommandHelpers.Finish(report, settings, "review cycle", "Review");
             return 1;

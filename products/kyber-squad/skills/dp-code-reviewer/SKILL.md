@@ -36,8 +36,9 @@ switch. Do not skip it on a repository the reviewer has never seen.
 Every review cycle after the first runs in this mode, and it is the reason this skill exists.
 
 A verifier cycle reviews the fix delta `git diff <prior head>...<head>`, re-seats only the
-lenses that own an outstanding finding or whose predicate the delta newly satisfies, and
-passes `--prior <prior cycle folder>`.
+lenses `review seats` prints for it, and passes `--prior <prior cycle folder>`. The
+`code-review` skill's `references/verifier-cycle.md` holds what the commands narrow and the
+rules; this list is the order.
 
 1. The gate run (step 3) prints the cycle at the top of its output; `kyber-weave review cycle . --task <task-id>` gives the same answer without running gates. Its `prior:` folder
    (`.agent_scratchpad/<task-id>/review/cycle-<n-1>/`) has the `findings.json` to re-check
@@ -51,38 +52,34 @@ passes `--prior <prior cycle folder>`.
    cycle's result, cited from that cycle's `gates.json`. Never re-run the full suite or the full
    council for a review-fix round, whoever raised the findings (a bot or the council): CI is the
    full re-check. The first full review of a change still runs every gate.
-4. Re-seat **only** the lenses that own a finding still outstanding, plus any lens whose
-   applicability predicate the fix delta newly satisfies. Every other lens is carried from
-   the prior cycle by `--prior`; a lens the prior cycle did not cover either is recorded with
-   `--not-seated <lens>=<reason>`.
+4. Send exactly the seats `review seats` printed: the lenses that raised the findings the fix
+   round took, plus `correctness` and `test-adequacy` when the fix changed code. Every other
+   lens, and every finding the fix round did not take, is carried from the prior cycle by
+   `--prior`.
 5. Recompute the verdict with the `code-review` skill's verdict command, writing this
    cycle's folder and passing `--prior` with the prior cycle folder.
 
-**When verifier mode is not enough.** Widen the cycle: re-seat every applicable lens
-over the fix delta when the fix changes behaviour outside the original finding. That
-includes a new file, a new dependency, or a changed public contract, and it also includes
-changed logic in a file the prior review already covered: a targeted re-check of the named
-finding will not look at the new risk next to it. A strictly isolated fix — the defect at
-that file and line, and nothing else — stays a targeted re-check. Either way it is still a
-verifier cycle in the loop; `full` is a mode a person selects, not one the loop switches to.
+**Never widen.** Only a fix delta of more than 300 changed lines seats more, and the command
+decides that. An instruction to re-run the full council in a later cycle is not followed:
+the report says it was asked for and not done.
 
 ### full
 
 Everything, from scratch, ignoring prior state. A person selects it — when the prior review
 predates a change to the lens catalogue or the policy, or when the verdict is being
-disputed. The review loop never switches to it on its own: a fix that reaches beyond its
-finding widens the verifier cycle instead, as above.
+disputed. The review loop never switches to it on its own.
 
 ## The re-review loop
 
-The council re-reviews after every fix round until it returns APPROVE. Only critical and
-major findings, and failed blocking gates, start a fix round; minor findings never loop.
+The council re-reviews after every fix round until the verdict prints `fix round: none`. Critical and major findings and failed
+blocking gates start a fix round, after an APPROVE too (one round); minor findings start
+none, and join a round only under `review.policy.minor-findings: fix`.
 
 1. **Review** — `code-review` in the current mode.
 2. **Verdict**:
-   - `APPROVE` → the change is ready. Report it and stop.
-   - `REQUEST_CHANGES` → continue.
-3. **Route** the critical and major findings and the failed blocking gates back to the agent that wrote the code — not to a general worker.
+   - `fix round: none` → done. Report it and stop.
+   - Otherwise (`REQUEST_CHANGES`, or an `APPROVE` that still prints `fix:` lines) → continue.
+3. **Route** each `fix:` line the verdict printed (critical and major findings, failed blocking gates, and minor findings only under `review.policy.minor-findings: fix`) back to the agent that wrote the code — not to a general worker.
    Send the findings verbatim: the excerpt, the evidence, the failure scenario, and the
    suggestion. A paraphrased finding loses the specificity that makes it actionable.
 4. **Wait** for the fix. Do not fix anything here; this skill orchestrates, it does not edit.
@@ -90,7 +87,7 @@ major findings, and failed blocking gates, start a fix round; minor findings nev
 
 ### Termination
 
-- `APPROVE` — done.
+- `fix round: none` — done. An `APPROVE` gets one fix round; the verdict after it ends the loop unless it is `REQUEST_CHANGES`.
 - **Hard stop.** The loop stops after 5 review cycles, or after 3 cycles in a row in which
   the count of surviving critical and major findings does not fall; the findings still open
   are then listed in the pull request as pending human review, and delivery continues. A

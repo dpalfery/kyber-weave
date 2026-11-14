@@ -218,6 +218,47 @@ public sealed class ReviewGatesCycleTests : IDisposable
         Assert.Contains("src/a.cs", evidence, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A later cycle seats only the lens that raised the finding being fixed, plus correctness and test-adequacy because
+    /// the fix changed code; it writes no packet for any other lens, and the gate run's after-gates line follows suit.
+    /// </summary>
+    [Fact]
+    public void ReviewSeatsInALaterCycleSeatsOnlyTheFindingsLensesAndTheGateRunWidensNothing()
+    {
+        string baseCommit = Git("rev-parse", "HEAD").Trim();
+        Write("src/Domain/JobStatusSummaryDto.cs", "// first\n");
+        Commit("work");
+        FinishCycle1(baseCommit: ReviewWorkTree.IdentityOf(_repo, baseCommit)!.Base);
+        Write(
+            $".agent_scratchpad/{Task}/review/cycle-1/findings.json",
+            ReviewJson.Write(new FindingsReport(
+                FindingsReport.CurrentSchema,
+                [
+                    new ReviewFinding("model-placement/dto-in-domain", "model-placement", ReviewSeverity.Major, 9, "src/Domain/JobStatusSummaryDto.cs", 1),
+                    new ReviewFinding("prior-art/name", "prior-art", ReviewSeverity.Minor, 9, "src/Domain/JobStatusSummaryDto.cs", 1)
+                ],
+                [],
+                0)));
+        Write("src/Contracts/JobStatusSummaryDto.cs", "// moved\n");
+        Commit("fix");
+
+        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() => CreateApp().Run(
+            ["review", "seats", _repo, "--task", Task, "--base", baseCommit]));
+
+        Assert.Equal(0, run.Result);
+        Assert.StartsWith("cycle: 2 mode: verifier", run.Output, StringComparison.Ordinal);
+        Assert.Contains("recheck: model-placement/dto-in-domain (major)", run.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("recheck: prior-art/name", run.Output, StringComparison.Ordinal);
+        Assert.Contains("verifier: seated correctness, model-placement, test-adequacy over the fix delta", run.Output, StringComparison.Ordinal);
+        Assert.Equal(
+            ["correctness.md", "model-placement.md", "test-adequacy.md"],
+            Directory.EnumerateFiles(Path.Combine(CycleFolder(2), "packets")).Select(Path.GetFileName).Order(StringComparer.Ordinal));
+        Assert.DoesNotContain("--- seat security", run.Output, StringComparison.Ordinal);
+
+        (_, string gates) = Gates(2, "--base", baseCommit);
+        Assert.Contains("after-gates: send test-adequacy", gates, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void ABaseGitCannotResolveStillWritesTheGatesAndSaysWhyThereIsNoDiff()
     {

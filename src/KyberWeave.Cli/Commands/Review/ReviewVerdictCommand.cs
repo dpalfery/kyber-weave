@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Configuration;
@@ -42,6 +43,7 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
     private const string GateCarried = "KW-REVIEW-048";
     private const string GateNotRerun = "KW-REVIEW-049";
     private const string PriorNotThisChange = "KW-REVIEW-050";
+    private const string FixRoundCode = "KW-REVIEW-056";
     private const string CorrectnessLens = "correctness";
     private const string ReviewerSeat = "reviewer";
     private const string PriorFindingsFile = "findings.json";
@@ -74,7 +76,7 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
         if (settings.Prior is not null && !PriorBelongsToThisChange(root, settings, report))
             return Fail(report, settings);
 
-        if (!TryReadInput(settings, report, out FindingsReport? input) || input is null)
+        if (!TryReadInput(settings, config.Review.Policy, report, out FindingsReport? input) || input is null)
             return Fail(report, settings);
 
         // A missing gate report is not an error: a change may legitimately be reviewed
@@ -135,6 +137,8 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
             $"{outcome.Accepted.Count} finding(s) accepted, {outcome.Dropped.Count} dropped.",
             Subject));
 
+        ReportFixRound(outcome, gateResults, config.Review.Policy, PriorApproved(settings, config), report);
+
         report.AddMetric("verdict", outcome.Verdict.ToString());
         report.AddMetric("risk", outcome.Risk.ToString());
         report.AddMetric("accepted", outcome.Accepted.Count);
@@ -149,6 +153,76 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
 
         CommandHelpers.Finish(report, settings, "review verdict", "Review");
         return report.HasErrors && outcome.Verdict == ReviewVerdict.Approve ? 1 : outcome.ExitCode;
+    }
+
+    /// <summary>The drop reason that marks a finding about pre-existing code the change did not touch.</summary>
+    internal const string PreExistingDebt = "pre-existing debt";
+
+    /// <summary>
+    /// Says what the fix round takes and what becomes follow-up work, one line each, so the conductor dispatches from
+    /// the lines and never decides the scope itself. <c>fix:</c> lines are every critical and major finding and every
+    /// failed blocking gate, and the minor findings too when <c>review.policy.minor-findings</c> is <c>fix</c>; an
+    /// APPROVE with any <c>fix:</c> line still gets one fix round. <c>follow-up:</c> lines are the minor findings the
+    /// policy leaves open and each finding dropped as pre-existing debt.
+    /// </summary>
+    private static void ReportFixRound(
+        ReviewOutcome outcome, IReadOnlyList<GateResult> gates, ReviewPolicy policy, bool priorApproved, DiagnosticReport report)
+    {
+        List<string> fix = [.. gates
+            .Where(gate => gate.Blocking && !gate.Passed && gate.NotApplicableReason is null && !VerdictEngine.IsStoppedForTime(gate))
+            .Select(gate => $"gate {gate.Id}")];
+        fix.AddRange(outcome.Accepted.Where(policy.FixRoundTakes).Select(Line));
+        List<string> followUp = [.. outcome.Accepted.Where(finding => !policy.FixRoundTakes(finding)).Select(Line)];
+        followUp.AddRange(outcome.Dropped
+            .Where(drop => drop.Reason.StartsWith(PreExistingDebt, StringComparison.OrdinalIgnoreCase))
+            .Select(drop => $"{Line(drop.Finding)} ({PreExistingDebt})"));
+
+        // An approval gets one fix round: when the prior cycle approved too, what is still open goes to human review.
+        bool roundDone = priorApproved && outcome.Verdict == ReviewVerdict.Approve;
+        foreach (string line in fix)
+            report.Add(new Diagnostic(FixRoundCode, Severity.Info, $"{(roundDone ? "open" : "fix")}: {line}", Subject));
+        foreach (string line in followUp)
+            report.Add(new Diagnostic(FixRoundCode, Severity.Info, $"follow-up: {line}", Subject));
+        report.Add(new Diagnostic(
+            FixRoundCode,
+            Severity.Info,
+            fix.Count == 0 || roundDone
+                ? roundDone && fix.Count > 0
+                    ? "fix round: none; the one fix round after an approval is done, so each open: line goes to human review."
+                    : "fix round: none; the review loop ends here."
+                : $"fix round: {fix.Count} item(s); send each fix: line to the worker that owns it, then review again with the fixed verifier request.",
+            Subject));
+
+        static string SeverityWord(ReviewSeverity severity) => severity switch
+        {
+            ReviewSeverity.Critical => "critical",
+            ReviewSeverity.Major => "major",
+            _ => "minor"
+        };
+
+        static string Line(ReviewFinding finding) =>
+            $"{finding.Id} ({SeverityWord(finding.Severity)}) {finding.File}:{finding.Line.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+    }
+
+    /// <summary>Whether the prior cycle, recomputed from its own findings and gates, approved; false when there is none.</summary>
+    private static bool PriorApproved(ReviewVerdictSettings settings, KyberWeaveConfig config)
+    {
+        if (settings.Prior is null)
+            return false;
+
+        try
+        {
+            FindingsReport prior = ReviewJson.ReadFindings(File.ReadAllText(Path.Combine(settings.Prior, PriorFindingsFile)));
+            IReadOnlyList<ReviewCycleRecord> history = ReviewCycles.ReadThrough(settings.Prior);
+            IReadOnlyList<GateResult> gates = history.Count == 0 ? [] : history[^1].Gates?.Gates ?? [];
+            return VerdictEngine.Evaluate(prior.Findings, gates, config.Review, DateOnly.FromDateTime(DateTime.UtcNow)).Verdict
+                   == ReviewVerdict.Approve;
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException or ArgumentException
+                                       or NotSupportedException or InvalidOperationException)
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -344,7 +418,8 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
     /// The findings the verdict is computed from: the seat folder, or the deprecated findings document. A seat
     /// folder's report has no changed-path facts, because the seats do not measure the change.
     /// </summary>
-    private static bool TryReadInput(ReviewVerdictSettings settings, DiagnosticReport report, out FindingsReport? input)
+    private static bool TryReadInput(
+        ReviewVerdictSettings settings, ReviewPolicy policy, DiagnosticReport report, out FindingsReport? input)
     {
         input = null;
         if (settings.Seats is not null && settings.Findings is not null)
@@ -396,9 +471,14 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
         if (report.HasErrors)
             return false;
 
+        // A finding the fix round did not take (a minor one, by default) is carried, so the last cycle still lists it.
+        List<ReviewFinding> seated = [.. seats.SelectMany(seat => seat.Findings)];
+        IEnumerable<ReviewFinding> carried = (prior?.Findings ?? [])
+            .Where(finding => !policy.FixRoundTakes(finding)
+                              && !seated.Any(other => string.Equals(other.Id, finding.Id, StringComparison.Ordinal)));
         input = new FindingsReport(
             FindingsReport.CurrentSchema,
-            [.. seats.SelectMany(seat => seat.Findings)],
+            [.. seated, .. carried],
             [],
             0,
             Coverage: coverage);
