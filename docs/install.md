@@ -56,7 +56,11 @@ post-install add-on, not a peer path. Everything else is deliberately unsupporte
 | Release `.zip` | Windows | [download and verify](#verifying-a-download) |
 | KyberDash tray (post-install add-on) | macOS, Windows | `kyberdash menubar`, or `install.sh --with-menubar` on macOS |
 
-After installing, run [Verify](#verify), then read [Updating](#updating). Configuration
+After installing, run [Verify](#verify), then read [Updating](#updating). For a guided setup
+of a machine and a repository, ask your agent to run the `kw-onboarding` skill once the squad's
+skills are on the machine: it runs the doctor, wires the docs and code-index MCP servers, installs
+the squad and Arbiter hooks for the harnesses you choose, and walks the settings with you
+([Kyber-Squad adoption guide](kyber-squad/onboarding.md)). Configuration
 splits the same way as the products: [Configuration](configuration.md) for Kyber-Weave, and
 [KyberDash configure](dash/onboarding.md#configure) for KyberDash.
 

@@ -39,6 +39,13 @@ the canonical skills, plus the Kyber-Weave skills it ships beside them, with tra
 recovery and state governance. Thirteen harness targets are declared; all thirteen are currently
 implemented and registered.
 
+**New here? Use the guided setup.** Ask your agent to run the `kw-onboarding` skill. It checks the
+machine with `kyber-weave doctor`, makes sure the code index and the `kw-docs` and `codegraph` MCP
+servers answer, installs the squad and the Arbiter hooks for the harnesses you pick, lists every
+setting with its default so you choose which to change, and checks the Arbiter's decision-model
+key. It asks before every change outside the repository and is safe to run again. The commands
+below are what it runs.
+
 ---
 
 ## Command Reference
@@ -940,9 +947,9 @@ HydraFusion Cascade was not observed, so its coverage is an open limit.
 
 ## Kyber-Weave skills in a Squad deployment
 
-Kyber-Squad deploys its Kyber-Weave skills beside its Squad skills: `codegraph`, `kyber-docs-authoring`,
-`kyber-docs-integrity-review`, `kyber-docs-onboarding-and-assessment`, `kyber-weave-cli`,
-`kyber-weave-model-profile`, and `spec-conductor`. They come from `.apm/skills/` in the repository.
+Kyber-Squad deploys its Kyber-Weave skills beside its Squad skills: `codegraph`, `kw-onboarding`,
+`kyber-docs-authoring`, `kyber-docs-integrity-review`, `kyber-docs-onboarding-and-assessment`,
+`kyber-weave-cli`, `kyber-weave-model-profile`, and `spec-conductor`. They come from `.apm/skills/` in the repository.
 Every directory there that holds a `SKILL.md` ships, so a skill added later ships with the next
 release. They follow the Squad lifecycle at the same scope and on the same targets as the Squad
 skills:
@@ -988,7 +995,8 @@ bytes match the release, `kyber-weave squad install --global --adopt` claims it 
 
 ### First-Time Installation
 
-To install the squad into a project:
+The guided path is the `kw-onboarding` skill (see the top of this page). By hand, to install the
+squad into a project:
 
 ```bash
 kyber-weave squad install

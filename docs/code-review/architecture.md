@@ -870,7 +870,7 @@ partitioned by ecosystem:
 
 - **Pure C# formatting and duplicate detection** (`format-whitespace`, `format-style`, `duplicates`): scoped to `&net-source-paths` (`["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets", "**/*.sln*", "**/NuGet.config", "**/.editorconfig"]`).
 - **.NET build and test** (`build`, `test`): scoped to `&net-test-paths`, which extends C# source paths to cover tested non-C# repository assets and build/test configuration: `products/**` (tested by Squad canonical content, rendering, and preset tests, and verified by `KyberWeave.Core.csproj`'s pre-build SHA-256 hash guard), `REVIEW.md` (tested by review guidance council contract tests), `.kyber-weave/kyber-weave.yml`, `apm.yml`, `.apm/**`, `global.json`, and `scripts/**` — while strictly excluding `dash/**` and `docs/**`. When `net-test-paths` match, the full .NET test suite runs to preserve ADR 0005 guarantees across solution dependencies.
-- **APM skill gates** (`skill-*`, 15 gates): scoped to their respective `.apm/skills/<skill-name>/**`, `src/KyberWeave.Cli/**`, and `src/KyberWeave.Core/Skills/**`.
+- **APM skill gates** (`skill-*`, 21 gates): scoped to their respective `.apm/skills/<skill-name>/**`, `src/KyberWeave.Cli/**`, and `src/KyberWeave.Core/Skills/**`.
 - **Documentation gates**: `docs-validate` scoped to `["docs/**", "**/*.md", ".kyber-weave/kyber-weave.yml", "src/**"]`; `docs-drift` adds `"dash/**"` so `KyberDash` `code-refs` and `api-endpoints` drift is caught when `dash/` changes (~0.8s).
 - **TypeScript gates** (`ts-*`): scoped to `["dash/**"]` (which also keeps `display-layer.test.ts` active when `dash/tray/**` changes).
 - **Rust gates** (`cargo-*`): scoped to `["dash/tray/src-tauri/**"]`.

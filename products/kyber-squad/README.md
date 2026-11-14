@@ -167,8 +167,9 @@ resources today. Every retained resource now has a reviewed disposition in the
 non-policy content stays in its skill directory as its durable home, portable policy lives in the
 `products/kyber-squad/standards/` templates, and nothing was deleted.
 
-The six Kyber-Weave skills under `.apm/skills/` (`kyber-docs-authoring`, `kyber-docs-integrity-review`,
-`kyber-docs-onboarding-and-assessment`, `kyber-weave-cli`, `kyber-weave-model-profile`, and `spec-conductor`)
+The Kyber-Weave skills under `.apm/skills/` (`codegraph`, `kw-onboarding`, `kyber-docs-authoring`,
+`kyber-docs-integrity-review`, `kyber-docs-onboarding-and-assessment`, `kyber-weave-cli`,
+`kyber-weave-model-profile`, and `spec-conductor`)
 are authored once, in `.apm/skills/`, which stays their only source. The Kyber-Docs APM package reads that
 folder, and Kyber-Squad ships every skill in it as well. `squad pack` and the checkout release source add
 them beside the canonical skills, so every Squad deployment carries them. They are not copied into

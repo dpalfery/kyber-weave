@@ -138,7 +138,7 @@ which is the only honest way to ship a skill from a skill-governance tool.
 It is distributed as an [APM](https://microsoft.github.io/apm) package, so on the `docs init` path the
 harness layout for each runtime is APM's problem rather than a second copy of that mapping here. It
 also ships through [Kyber-Squad](../kyber-squad/architecture.md), beside the Squad skills, under
-[ADR 0049](../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md). The five other Kyber-Weave
+[ADR 0049](../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md). The other Kyber-Weave
 skills in `.apm/skills/` ship the same two ways.
 
 ### `codegraph`
@@ -153,6 +153,23 @@ is registered here as the second shipped skill.
   `codegraph` itself. See the [`doctor` verb](../cli-command-surface.md#doctor--repository-documentation-tooling).
 - **Gates:** `skill-validate-codegraph`, `skill-lint-codegraph` (`--min-desc-score 70`), and
   `skill-scan-codegraph` (`--fail-on critical`) in [`.kyber-weave/kyber-weave.yml`](../../.kyber-weave/kyber-weave.yml).
+
+### `kw-onboarding`
+
+`kw-onboarding`, at `.apm/skills/kw-onboarding/`, is the guided first-time setup of a machine and a
+repository, run by an agent together with the user.
+
+- **Trigger:** use when a user asks to set up, onboard, get started with, or configure Kyber-Weave
+  or Kyber-Squad. Documentation onboarding (`kyber-docs-onboarding-and-assessment`) and preset
+  authoring (`kyber-weave-model-profile`) are excluded; the skill hands over to both.
+- **Behaviour:** an ordered walkthrough that skips what is already done: [`doctor --check`](../cli-command-surface.md#doctor--repository-documentation-tooling),
+  the code index and the `kw-docs` and `codegraph` MCP servers, harness selection with `squad install`
+  and `arbiter install`, one list of every setting with its default for the user to pick from, the
+  model profile per harness, and the Arbiter decision-model key. It asks before every change outside
+  the repository and never handles a secret. The per-harness table and the settings inventory live in
+  its `references/` folder.
+- **Gates:** `skill-validate-kw-onboarding`, `skill-lint-kw-onboarding` (`--min-desc-score 70`), and
+  `skill-scan-kw-onboarding` (`--fail-on critical`) in [`.kyber-weave/kyber-weave.yml`](../../.kyber-weave/kyber-weave.yml).
 
 ## Deployment control plane with Kyber-Squad
 

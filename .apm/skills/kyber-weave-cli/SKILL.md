@@ -22,6 +22,10 @@ and exit-code contract; this skill is the entry point, not a second copy of that
 If you are here to author or validate governed documents rather than run the products,
 stop — that is the `kyber-docs-authoring` skill. This skill does not write documentation.
 
+For a first-time setup, use the `kw-onboarding` skill instead: it walks the user through the
+doctor, the MCP servers, harness installs, every setting, models, and the Arbiter key, asking
+before each change.
+
 ## Install
 
 Both binaries install from the same one-liner on macOS and Linux:

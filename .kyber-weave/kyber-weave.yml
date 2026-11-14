@@ -185,6 +185,20 @@ review:
       include: *skill-model-profile-paths
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/kyber-weave-model-profile, --fail-on, critical]
       blocking: true
+    # The onboarding skill walks a new user through the whole setup, so its command examples
+    # and per-harness tables are gated like the other skills' surfaces.
+    - id: skill-validate-kw-onboarding
+      include: &skill-kw-onboarding-paths [".apm/skills/kw-onboarding/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Core/Skills/**"]
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kw-onboarding]
+      blocking: true
+    - id: skill-lint-kw-onboarding
+      include: *skill-kw-onboarding-paths
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, lint, .apm/skills/kw-onboarding, --min-desc-score, "70"]
+      blocking: true
+    - id: skill-scan-kw-onboarding
+      include: *skill-kw-onboarding-paths
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/kw-onboarding, --fail-on, critical]
+      blocking: true
     - id: docs-validate
       include: ["docs/**", "**/*.md", ".kyber-weave/kyber-weave.yml", "src/**"]
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, docs, validate, .]

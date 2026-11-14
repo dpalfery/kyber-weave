@@ -686,7 +686,7 @@ sibling product repos — without Azure or container scans, which do not apply h
 | Trivy filesystem | Dependency, misconfig, secret, and license findings at HIGH/CRITICAL |
 | Semgrep Community | Additional SAST (`p/default`, ERROR) |
 | gitleaks | Secret scan of the full history fetch |
-| Skill and docs gate | Dogfoods the PR's CLI: `skill validate` / `lint` / `scan` on `.apm/skills/kyber-docs-authoring`, `.apm/skills/kyber-docs-integrity-review`, `.apm/skills/kyber-docs-onboarding-and-assessment`, `.apm/skills/kyber-weave-cli`, and `.apm/skills/kyber-weave-model-profile`, plus `docs validate` |
+| Skill and docs gate | Dogfoods the PR's CLI: `skill validate` / `lint` / `scan` on `.apm/skills/kyber-docs-authoring`, `.apm/skills/kyber-docs-integrity-review`, `.apm/skills/kyber-docs-onboarding-and-assessment`, `.apm/skills/kyber-weave-cli`, `.apm/skills/kyber-weave-model-profile`, `.apm/skills/codegraph`, and `.apm/skills/kw-onboarding`, plus `docs validate` |
 
 CodeQL excludes exactly one rule, `js/http-to-file-access`, by id and never by path: no file
 or directory is excluded. Its only open-alert sink as of 2026-11-04 (alert 288) is the live gate's evidence writer

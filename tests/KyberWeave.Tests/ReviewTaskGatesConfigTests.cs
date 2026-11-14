@@ -705,7 +705,7 @@ public sealed class ReviewTaskGatesConfigTests
     {
         IReadOnlyList<ReviewGate> gates = RepositoryReviewGates();
 
-        Assert.Equal(33, gates.Count);
+        Assert.Equal(36, gates.Count);
         List<string> missing = [];
         foreach (ReviewGate gate in gates)
             if (gate.Include.Count == 0)
