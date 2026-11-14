@@ -492,6 +492,10 @@ public sealed class RunDeliveryTests : IDisposable
 
         Assert.True(outcome.Delivered, Findings(outcome));
         Assert.Contains($"unreadable-follow-up (`{Unreadable}`)", gh.Bodies.Single(), StringComparison.Ordinal);
+        Diagnostic warning = Assert.Single(outcome.Report.Items, item => item.Severity == Severity.Warning);
+        Assert.Contains(Unreadable, warning.Message, StringComparison.Ordinal);
+        Assert.Contains("could not be read", warning.Message, StringComparison.Ordinal);
+        Assert.Contains("listed by its file name alone", warning.Message, StringComparison.Ordinal);
     }
 
     /// <summary>

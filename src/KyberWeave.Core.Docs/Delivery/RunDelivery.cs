@@ -265,7 +265,7 @@ public sealed partial class RunDelivery
 
         PullRequestContent content = Content(request, summary, facts, plan, type, slug, branch, mergeBase, report) with
         {
-            FollowUps = FiledTodos(mergeBase, todoFolder)
+            FollowUps = FiledTodos(mergeBase, todoFolder, report)
         };
         PullRequestDescription.HostTemplate hostTemplate = PullRequestDescription.ReadHostTemplate(_repoRoot, ReadTemplateFile ?? BoundedFile.ReadAllText);
         foreach (string unreadable in hostTemplate.Unreadable)
@@ -679,7 +679,7 @@ public sealed partial class RunDelivery
     /// One line per todo this branch added, committed by now: its title and path. These are the follow-up work the run
     /// filed for what it found outside its scope.
     /// </summary>
-    private List<string> FiledTodos(string mergeBase, string todoFolder)
+    private List<string> FiledTodos(string mergeBase, string todoFolder, DiagnosticReport report)
     {
         if (todoFolder.Length == 0)
             return [];
@@ -688,7 +688,7 @@ public sealed partial class RunDelivery
             .StandardOutput.Split('\0', StringSplitOptions.RemoveEmptyEntries)
             .Where(path => IsPlanFile(path, todoFolder))
             .Order(StringComparer.Ordinal)
-            .Select(path => (Path: path, Text: ReadTodo(path)))
+            .Select(path => (Path: path, Text: ReadTodo(path, report)))
             .Where(todo => todo.Text is not null)
             .Select(todo => $"{RunEvidence.DocumentTitle(todo.Text!) ?? Path.GetFileNameWithoutExtension(todo.Path)} (`{todo.Path}`)")];
     }
@@ -697,7 +697,7 @@ public sealed partial class RunDelivery
     /// A todo's text, or null when it is gone. One that is there but unreadable is still follow-up work the run filed, so
     /// it is listed by its file name (empty text) rather than failing the delivery or being left out.
     /// </summary>
-    private string? ReadTodo(string path)
+    private string? ReadTodo(string path, DiagnosticReport report)
     {
         try
         {
@@ -705,6 +705,7 @@ public sealed partial class RunDelivery
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
+            WarnUnreadable(report, $"The filed todo '{path}'", exception, "it is listed by its file name alone");
             return string.Empty;
         }
     }
