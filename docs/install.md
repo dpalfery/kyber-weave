@@ -757,6 +757,11 @@ index** at `.codegraph/codegraph.db`. CodeGraph is a separate, host-owned tool;
 Kyber-Weave opens that index read-only and never creates or writes it. The `sqlite3` CLI
 must also be on PATH.
 
+On GitHub Copilot CLI, also raise its large-output limit so CodeGraph answers are shown to the agent
+instead of saved to a file: `export COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES=32000` (PowerShell:
+`$env:COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES = "32000"`), set in the environment Copilot CLI starts from.
+`kyber-weave doctor` checks it. See [the runbook](docgraph/mcp-runbook.md#the-copilot-cli-large-output-limit).
+
 ## Installing in CI
 
 See the [workflow runbook](ci-pipelines/workflows-runbook.md).

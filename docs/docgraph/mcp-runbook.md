@@ -1649,6 +1649,9 @@ so a server that stops answering is killed rather than left behind. The rule and
 | `mcp.docs_explore` | `docs_answer_question_from_repo_documentation` returned an error, did not answer, or its reply was not a tool result | `kyber-weave update`, or a retry with a larger `--mcp-timeout` |
 | `mcp.root` | The server answers from a different checkout, or its reply names no provenance root | `stop the stale kyber-weave-mcp server and re-run: kyber-weave doctor --check`, or `kyber-weave update` |
 
+`copilot.large-output-limit` is an advisory check that always passes. It is described in
+[The Copilot CLI large-output limit](#the-copilot-cli-large-output-limit).
+
 ### Output contract
 
 Each check prints one line. A passing check prints `PASS <check-id> <reason>`. A failing check
@@ -1769,6 +1772,43 @@ Windows. If `kyber-weave` is not found on `PATH` there, the block does nothing, 
 `kyber-weave doctor --ensure .`. The block is taken out and the other lines of the hook are kept; the file is deleted
 when only its `#!` line is left. You can also delete the lines between `# >>> kyber-weave worktree index >>>` and
 `# <<< kyber-weave worktree index <<<` by hand. Doing neither leaves the hook running on every new worktree.
+
+### The Copilot CLI large-output limit
+
+Copilot CLI saves any tool result larger than 20 KiB to a temporary file and gives the model only the path and a
+preview. A CodeGraph answer can run to 25,000 characters, so by default many of them are saved instead of shown, and
+agents then stop using the code index and fall back to text search. In live runs, 40% of CodeGraph answers spilled.
+The variable `COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES` raises the limit; it is documented in GitHub's
+[Copilot CLI context management](https://docs.github.com/en/copilot/concepts/agents/copilot-cli/context-management)
+page. Setting it to `32000` keeps every CodeGraph answer inline.
+
+**The check: `copilot.large-output-limit`.** It is reported only when Copilot is in use: a Copilot CLI home exists
+(`$COPILOT_HOME`, else `~/.copilot`), or the repository holds the files the Squad Copilot target installs
+(`.github/agents/` or `.github/copilot-instructions.md`). It reads the variable from the environment `doctor` runs in.
+It is advisory: it always passes, in every mode, so it never changes the exit code and never stops a run. Doctor writes
+nothing; it does not touch your shell profile.
+
+| Reason | Meaning | Fix |
+|---|---|---|
+| `COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES is <n>; large tool results stay inline` | Set to `32000` or more | None |
+| `warning: ... is not set` | Unset, so the 20 KiB default applies | Set it, below |
+| `warning: ... is <n>, below 32000` | Too low for CodeGraph's largest answers | Set it, below |
+| `warning: ... is not a whole number of bytes` | Copilot CLI cannot use the value | Set it, below |
+
+The fix, for the shell Copilot CLI starts from (bash or zsh, then PowerShell):
+
+```bash
+export COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES=32000
+```
+
+```powershell
+$env:COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES = "32000"
+```
+
+Put the line in the profile of the shell that launches Copilot CLI, or in the launcher's environment, and start a new
+session. A variable set in a different terminal does not reach it, and `doctor` run from another shell reports on that
+shell. A larger limit leaves less room for the conversation, so `32000` is the recommended value, not the largest one.
+The threshold is `CopilotLargeOutputProbe.RecommendedThresholdBytes`.
 
 ### Provisioning rules
 

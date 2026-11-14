@@ -1012,6 +1012,18 @@ To install into a directory other than the current one, name the deployment root
 kyber-weave squad install --path /path/to/project --target claude,cursor
 ```
 
+### Copilot CLI: raise the large-output limit
+
+If you use the `copilot` target with GitHub Copilot CLI, set this once in the shell that starts it:
+
+```bash
+export COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES=32000   # PowerShell: $env:COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES = "32000"
+```
+
+Copilot CLI saves any tool result over 20 KiB to a file instead of showing it to the agent, and CodeGraph answers
+run larger, so agents stop using the code index. `kyber-weave doctor` checks this and warns (it never fails); see
+[the runbook](../docgraph/mcp-runbook.md#the-copilot-cli-large-output-limit). Kyber-Weave does not edit your shell profile.
+
 ### Adopting Existing Files
 
 If a project already contains agent or skill files that match canonical Squad content byte-for-byte, `squad install` normally treats pre-existing unmanaged files as a conflict. Use `--adopt` to claim exact-match files into Squad ownership:

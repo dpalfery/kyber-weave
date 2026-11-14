@@ -606,6 +606,10 @@ Mode rule:
   `codegraph init` writes. It reads `worktree-index-hook` and does nothing when it is `false`.
   The hook's details are in the [MCP runbook](docgraph/mcp-runbook.md#the-worktree-index-hook).
 
+- With Copilot in use, every mode also reports `copilot.large-output-limit`, an advisory check that always passes.
+  It warns when `COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES` is unset or below `32000`, and never changes the exit code
+  ([runbook](docgraph/mcp-runbook.md#the-copilot-cli-large-output-limit)).
+
 Exit codes for `doctor` (the `kyber-weave` binary):
 
 | Exit | Meaning |

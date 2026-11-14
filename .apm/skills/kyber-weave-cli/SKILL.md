@@ -115,6 +115,20 @@ is in `docs/docgraph/onboarding.md`. KyberDash install, update, and configure ar
 `docs/dash/onboarding.md`. The configure flow for both products is at
 `docs/cli-command-surface.md#configure`.
 
+## Check the machine
+
+`kyber-weave doctor` checks a repository's CodeGraph index and docs server, and recommends
+machine settings. If the user runs GitHub Copilot CLI it warns, without failing, when
+`COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES` is unset or below 32000: Copilot CLI then saves large tool
+results to a file instead of showing them to the agent, and agents stop using the code index.
+Tell the user to set it themselves in the shell Copilot CLI starts from; never edit their profile.
+
+```bash
+export COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES=32000   # PowerShell: $env:COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES = "32000"
+```
+
+Details: `docs/docgraph/mcp-runbook.md#the-copilot-cli-large-output-limit`.
+
 ## Where the full surface lives
 
 Every entry below is a section of `docs/cli-command-surface.md`. Follow the anchor rather
