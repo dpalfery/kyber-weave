@@ -70,7 +70,7 @@ public class ArbiterSettings : AnalysisSettings
 
     /// <summary>The candidate thresholds for <c>tune</c>.</summary>
     [CommandOption("--thresholds <CSV>")]
-    [Description("Comma-separated candidate thresholds in [0, 1] for tune. Defaults to 0.5,0.6,0.7,0.8,0.9.")]
+    [Description("Comma-separated candidate thresholds in [[0, 1]] for tune. Defaults to 0.5,0.6,0.7,0.8,0.9.")]
     public string? Thresholds { get; set; }
 
     /// <summary>Whether <c>tune</c> writes machine-readable JSON rather than the text report.</summary>

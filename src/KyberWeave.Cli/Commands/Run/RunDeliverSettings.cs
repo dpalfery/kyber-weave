@@ -22,7 +22,7 @@ public sealed class RunDeliverSettings : DocsSettings
 
     /// <summary>A title that replaces the composed one.</summary>
     [CommandOption("--title <TEXT>")]
-    [Description("A title to use instead of the composed '<type>(<scope>): <summary> [<harness>]'.")]
+    [Description("A title to use instead of the composed '<type>(<scope>): <summary> [[<harness>]]'.")]
     public string? Title { get; set; }
 
     /// <summary>Opens a new pull request ready for review instead of as a draft.</summary>
