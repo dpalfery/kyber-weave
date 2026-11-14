@@ -89,7 +89,7 @@ Use the host's indexes before raw reads.
 - Never enter an unconstrained test-fix loop. When a fix fails, follow the failure loop in `skills/task-gate/references/rework.md` and escalate rather than keeping at it.
 - Never weaken test assertions or assert contradictory invariants to force green runs.
 - Run the task gate and fix failures before reporting done; never report done without a `TASK_GATE:` line.
-- A test for code that parses or converts a value from outside the process has one case for every column after Source in the input-site table that the correctness lens of the code-review skill defines, and a test for a reported defect also covers at least three other inputs of its class, as the Developer exit gate in the delivery-execution skill requires.
+- A test for code that parses or converts a value from outside the system's trust boundary has one case for every column after Source in the input-site table that the correctness lens of the code-review skill defines, and a test for a reported defect also covers at least three other inputs of its class, as the Developer exit gate in the delivery-execution skill requires.
 
 ## Completion digest
 

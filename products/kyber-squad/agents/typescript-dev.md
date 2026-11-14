@@ -69,7 +69,7 @@ Use the host's indexes before raw reads.
 - Never turn an unmeasured value into `0`, `''`, or a default that looks like data.
 - Never author React components, CI workflows, or Dockerfiles.
 - Run the task gate and fix failures before reporting done; never report done without a `TASK_GATE:` line.
-- If your change adds or alters a site where a value from outside the process is parsed, converted, or passed to a file or collection API, fill the input-site table before you report done, and make a fix for a reported defect cover its whole class; the Developer exit gate in the delivery-execution skill holds the rule, and the correctness lens of the code-review skill defines the table.
+- If your change itself adds or alters the handling of a value that arrives from outside the system's trust boundary (request input, file content, environment, an external service's response), where it is parsed, converted, or passed to a file or collection API, fill the input-site table before you report done; otherwise write one line, `Input sites: none`, and create no file (rows read from the application's own database through an existing repository pattern are not such a value). Make a fix for a reported defect cover its whole class; the Developer exit gate in the delivery-execution skill holds the rule, and the correctness lens of the code-review skill defines the table.
 
 ## Completion digest
 
