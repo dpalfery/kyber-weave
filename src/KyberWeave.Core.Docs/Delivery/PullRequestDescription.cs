@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Closeout;
 
 namespace KyberWeave.Core.Docs.Delivery;
@@ -75,9 +76,14 @@ public static partial class PullRequestDescription
 
     /// <summary>
     /// Reads the host's default pull request template through <paramref name="read"/>. A candidate that cannot be read is
-    /// skipped and named in <see cref="HostTemplate.Unreadable"/>, and the next location is tried.
+    /// skipped and named in <see cref="HostTemplate.Unreadable"/>, and the next location is tried. A template reached
+    /// through a symbolic link is treated the same way, because a link can point outside the repository and the template's
+    /// lines are published in the pull request.
     /// </summary>
-    internal static HostTemplate ReadHostTemplate(string repoRoot, Func<string, string> read)
+    /// <param name="repoRoot">The repository root.</param>
+    /// <param name="read">Reads one template file.</param>
+    /// <param name="listFolder">Lists a folder's files; the file system when null. A seam for a folder that cannot be listed.</param>
+    internal static HostTemplate ReadHostTemplate(string repoRoot, Func<string, string> read, Func<string, IEnumerable<string>>? listFolder = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(read);
@@ -91,7 +97,7 @@ public static partial class PullRequestDescription
                 if (!Directory.Exists(folder))
                     continue;
 
-                match = Directory.EnumerateFiles(folder)
+                match = (listFolder ?? (static path => Directory.EnumerateFiles(path)))(folder)
                     .FirstOrDefault(file => string.Equals(Path.GetFileName(file), Path.GetFileName(location), StringComparison.OrdinalIgnoreCase));
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -103,6 +109,12 @@ public static partial class PullRequestDescription
 
             if (match is null)
                 continue;
+
+            if (!DocsRootPath.IsContainedFile(repoRoot, Path.GetRelativePath(repoRoot, match), []))
+            {
+                unreadable.Add(location);
+                continue;
+            }
 
             try
             {

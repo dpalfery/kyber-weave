@@ -574,6 +574,41 @@ public sealed class RunDeliveryTests : IDisposable
     }
 
     [Fact]
+    public void AFolderWhoseListingFailsNamesItsTemplateAsUnreadableOnEveryPlatform()
+    {
+        string repo = Path.Combine(_root, "listing-repo");
+        Directory.CreateDirectory(Path.Combine(repo, "docs"));
+        Directory.CreateDirectory(Path.Combine(repo, ".github"));
+        File.WriteAllText(Path.Combine(repo, ".github", "pull_request_template.md"), "## Why\n");
+
+        PullRequestDescription.HostTemplate read = PullRequestDescription.ReadHostTemplate(
+            repo,
+            File.ReadAllText,
+            folder => string.Equals(Path.GetFileName(folder), "docs", StringComparison.Ordinal)
+                ? throw new UnauthorizedAccessException("denied")
+                : Directory.EnumerateFiles(folder));
+
+        Assert.Equal("## Why\n", read.Text);
+        Assert.Equal(["docs/pull_request_template.md"], read.Unreadable);
+    }
+
+    [Fact]
+    public void AHostTemplateThatIsASymbolicLinkIsNotReadAndIsNamedAsUnreadable()
+    {
+        string repo = Path.Combine(_root, "link-repo");
+        string outside = Path.Combine(_root, "outside-template.md");
+        Directory.CreateDirectory(Path.Combine(repo, ".github"));
+        File.WriteAllText(outside, "## Leaked\n- [ ] outside\n");
+        File.CreateSymbolicLink(Path.Combine(repo, "pull_request_template.md"), outside);
+        File.WriteAllText(Path.Combine(repo, ".github", "pull_request_template.md"), "## Why\n");
+
+        PullRequestDescription.HostTemplate read = PullRequestDescription.ReadHostTemplate(repo, File.ReadAllText);
+
+        Assert.Equal("## Why\n", read.Text);
+        Assert.Equal(["pull_request_template.md"], read.Unreadable);
+    }
+
+    [Fact]
     public void AHostTemplateLargerThanTheCapIsNotReadAndIsNamedAsUnreadable()
     {
         string repo = Path.Combine(_root, "template-repo");
