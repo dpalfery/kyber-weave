@@ -218,7 +218,11 @@ public sealed partial class RunDelivery
         if (!TryFindPlan(request.PlanFile, mergeBase, plansFolder, archiveFolder, status.StandardOutput, report, out string? plan))
             return new DeliveryOutcome(report, false);
 
-        PlanFacts? facts = plan is null ? null : RunEvidence.ReadPlan(File.ReadAllText(_files.Absolute(plan)));
+        string? planText = plan is null ? null : PresentFile.ReadIfPresent(_files.Absolute(plan));
+        if (plan is not null && planText is null)
+            return Refused(PlanNotDeliverable, $"The plan '{plan}' is no longer there. Nothing was changed.");
+
+        PlanFacts? facts = planText is null ? null : RunEvidence.ReadPlan(planText);
         string title = Title(request.Title, facts, harness, type, slug);
         if (!TitleFollowsConvention(title, harness))
         {
@@ -379,16 +383,13 @@ public sealed partial class RunDelivery
         string target;
         if (existing is { } open)
         {
-            if (open.ValueKind != JsonValueKind.Object
-                || !open.TryGetProperty("number", out JsonElement numberElement)
-                || numberElement.ValueKind != JsonValueKind.Number
-                || !numberElement.TryGetInt32(out int openNumber))
+            if (!GhJson.TryRequiredNumber(open, "number", out int openNumber, out string? listProblem)
+                || !GhJson.TryRequiredText(open, "baseRefName", out string openBase, out listProblem))
             {
-                return Failed("gh pr list answered an open pull request with no usable number.");
+                return Failed($"gh pr list answered an open pull request with an unusable field: {listProblem}.");
             }
 
             string number = openNumber.ToString(CultureInfo.InvariantCulture);
-            string openBase = Text(open, "baseRefName") ?? string.Empty;
             if (!string.Equals(openBase, baseBranch, StringComparison.Ordinal))
                 return Failed($"Pull request #{number} from '{branch}' is open into '{openBase}', not the run's base '{baseBranch}'. A person decides which base is right; it was not changed.");
 
@@ -420,21 +421,17 @@ public sealed partial class RunDelivery
         {
             using JsonDocument read = JsonDocument.Parse(view.StandardOutput);
             JsonElement pr = read.RootElement;
-            if (pr.ValueKind != JsonValueKind.Object
-                || !pr.TryGetProperty("number", out JsonElement numberElement)
-                || numberElement.ValueKind != JsonValueKind.Number
-                || !numberElement.TryGetInt32(out int prNumber)
-                || !pr.TryGetProperty("isDraft", out JsonElement draftElement)
-                || draftElement.ValueKind is not (JsonValueKind.True or JsonValueKind.False)
-                || Text(pr, "url") is not { } url
-                || Text(pr, "baseRefName") is not { } readBase
-                || Text(pr, "headRefName") is not { } readHead)
+            if (!GhJson.TryRequiredNumber(pr, "number", out int prNumber, out string? viewProblem)
+                || !GhJson.TryRequiredBoolean(pr, "isDraft", out bool readDraft, out viewProblem)
+                || !GhJson.TryRequiredText(pr, "url", out string url, out viewProblem)
+                || !GhJson.TryRequiredText(pr, "baseRefName", out string readBase, out viewProblem)
+                || !GhJson.TryRequiredText(pr, "headRefName", out string readHead, out viewProblem)
+                || !GhJson.TryRequiredText(pr, "title", out string readTitle, out viewProblem)
+                || !GhJson.TryRequiredString(pr, "body", out string readBody, out viewProblem))
             {
-                return Failed("gh pr view answered without a usable number, url, draft flag, base or head.");
+                return Failed($"gh pr view answered with an unusable field: {viewProblem}.");
             }
 
-            string readTitle = Text(pr, "title") ?? string.Empty;
-            string readBody = Text(pr, "body") ?? string.Empty;
             if (!string.Equals(readTitle, title, StringComparison.Ordinal) || !string.Equals(Normalized(readBody), Normalized(body), StringComparison.Ordinal))
             {
                 report.Add(new Diagnostic(Step, Severity.Warning,
@@ -444,7 +441,7 @@ public sealed partial class RunDelivery
             return new DeliveryOutcome(report, true, created,
                 url,
                 prNumber,
-                draftElement.GetBoolean(),
+                readDraft,
                 readBase,
                 readHead,
                 Checks(pr.TryGetProperty("statusCheckRollup", out JsonElement rollup) ? rollup : default),
@@ -466,8 +463,8 @@ public sealed partial class RunDelivery
         int pending = 0, failed = 0, passed = 0;
         foreach (JsonElement check in rollup.EnumerateArray())
         {
-            string state = (Text(check, "conclusion") is { Length: > 0 } conclusion ? conclusion : Text(check, "state") ?? string.Empty).ToUpperInvariant();
-            string progress = (Text(check, "status") ?? "COMPLETED").ToUpperInvariant();
+            string state = (GhJson.OptionalText(check, "conclusion") is { Length: > 0 } conclusion ? conclusion : GhJson.OptionalText(check, "state") ?? string.Empty).ToUpperInvariant();
+            string progress = (GhJson.OptionalText(check, "status") ?? "COMPLETED").ToUpperInvariant();
             if (progress != "COMPLETED" || state is "" or "PENDING" or "EXPECTED")
                 pending++;
             else if (state is "SUCCESS" or "NEUTRAL" or "SKIPPED")
@@ -478,12 +475,6 @@ public sealed partial class RunDelivery
 
         return $"{rollup.GetArrayLength().ToString(CultureInfo.InvariantCulture)} CI checks reported: {passed} passed, {failed} failed, {pending} pending";
     }
-
-    /// <summary>A string property of a JSON object; null when the element is not an object or the property is absent or not a string.</summary>
-    private static string? Text(JsonElement element, string name) =>
-        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String
-            ? value.GetString()
-            : null;
 
     private bool TryFindPlan(string? named, string mergeBase, string plansFolder, string archiveFolder, string porcelain, DiagnosticReport report, out string? plan)
     {
@@ -652,9 +643,11 @@ public sealed partial class RunDelivery
 
         return [.. Git("diff", "--name-only", "--diff-filter=A", "-z", mergeBase, "HEAD", "--")
             .StandardOutput.Split('\0', StringSplitOptions.RemoveEmptyEntries)
-            .Where(path => IsPlanFile(path, todoFolder) && File.Exists(_files.Absolute(path)))
+            .Where(path => IsPlanFile(path, todoFolder))
             .Order(StringComparer.Ordinal)
-            .Select(path => $"{RunEvidence.DocumentTitle(File.ReadAllText(_files.Absolute(path))) ?? Path.GetFileNameWithoutExtension(path)} (`{path}`)")];
+            .Select(path => (Path: path, Text: PresentFile.ReadIfPresent(_files.Absolute(path))))
+            .Where(todo => todo.Text is not null)
+            .Select(todo => $"{RunEvidence.DocumentTitle(todo.Text!) ?? Path.GetFileNameWithoutExtension(todo.Path)} (`{todo.Path}`)")];
     }
 
     /// <summary>Commits the todo folder, which the follow-up filing wrote after the review and nobody committed.</summary>

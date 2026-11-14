@@ -296,6 +296,12 @@ public sealed class RunDeliveryTests : IDisposable
     [InlineData("""[{"number":"1","baseRefName":"main"}]""")]
     [InlineData("""[{"number":99999999999,"baseRefName":"main"}]""")]
     [InlineData("""["not an object"]""")]
+    [InlineData("""[{"number":1}]""")]
+    [InlineData("""[{"number":1,"baseRefName":""}]""")]
+    [InlineData("""[{"number":1,"baseRefName":"   "}]""")]
+    [InlineData("""[{"number":1,"baseRefName":5}]""")]
+    [InlineData("""[{"number":1,"baseRefName":null}]""")]
+    [InlineData("""[{"number":1.5,"baseRefName":"main"}]""")]
     public void AMalformedPullRequestListIsARefusalThatNamesThePushedBranch(string list)
     {
         GitRunRepository(archivePending: false);
@@ -313,6 +319,17 @@ public sealed class RunDeliveryTests : IDisposable
     [InlineData("""{"number":"7","url":"u","isDraft":true,"baseRefName":"main","headRefName":"h"}""")]
     [InlineData("""{"number":7,"url":"u","isDraft":"yes","baseRefName":"main","headRefName":"h"}""")]
     [InlineData("""{"number":7,"url":5,"isDraft":true,"baseRefName":"main","headRefName":"h"}""")]
+    [InlineData("""{"number":7,"url":"","isDraft":true,"baseRefName":"main","headRefName":"h","title":"t","body":""}""")]
+    [InlineData("""{"number":7,"url":"  ","isDraft":true,"baseRefName":"main","headRefName":"h","title":"t","body":""}""")]
+    [InlineData("""{"number":7,"url":"u","isDraft":true,"baseRefName":"","headRefName":"h","title":"t","body":""}""")]
+    [InlineData("""{"number":7,"url":"u","isDraft":true,"baseRefName":"main","headRefName":" \t","title":"t","body":""}""")]
+    [InlineData("""{"number":7,"url":"","isDraft":true,"baseRefName":"","headRefName":"","title":"t","body":""}""")]
+    [InlineData("""{"number":7,"url":"u","isDraft":true,"baseRefName":"main","title":"t","body":""}""")]
+    [InlineData("""{"number":7,"url":"u","isDraft":true,"baseRefName":"main","headRefName":"h","body":""}""")]
+    [InlineData("""{"number":7,"url":"u","isDraft":true,"baseRefName":"main","headRefName":"h","title":"","body":""}""")]
+    [InlineData("""{"number":7,"url":"u","isDraft":true,"baseRefName":"main","headRefName":"h","title":"t"}""")]
+    [InlineData("""{"number":7,"url":"u","isDraft":true,"baseRefName":"main","headRefName":"h","title":"t","body":null}""")]
+    [InlineData("""{"number":7,"url":"u","isDraft":null,"baseRefName":"main","headRefName":"h","title":"t","body":""}""")]
     [InlineData("[]")]
     public void AMalformedPullRequestViewIsARefusalThatNamesThePushedBranch(string view)
     {
@@ -324,6 +341,19 @@ public sealed class RunDeliveryTests : IDisposable
         Assert.False(outcome.Delivered);
         var refusal = Assert.Single(outcome.Report.Items, item => item.Code == RunDelivery.PullRequestFailed);
         Assert.Contains($"Branch '{Branch}' is already pushed", refusal.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnOpenPullRequestWithNoUsableBaseSaysSoInsteadOfNamingAnEmptyBase()
+    {
+        GitRunRepository(archivePending: false);
+        ScriptedGh gh = new() { OpenPullRequest = """[{"number":42,"baseRefName":""}]""" };
+
+        DeliveryOutcome outcome = Deliver(gh, new DeliveryRequest("S."));
+
+        var refusal = Assert.Single(outcome.Report.Items, item => item.Code == RunDelivery.PullRequestFailed);
+        Assert.Contains("'baseRefName' is empty", refusal.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("open into ''", refusal.Message, StringComparison.Ordinal);
     }
 
     [Fact]
