@@ -255,7 +255,7 @@ public sealed partial class PlanFinalize
         Say(report, plan, $"Wrote {taskFile}.");
         _files.Stage(touched, report, plan, Step);
         _files.CommitOnly(touched, CommitMessage(plan), report, plan, Step);
-        return new PlanFinalizeOutcome(report, true, false, taskFile, ReadyQueue(taskFile));
+        return new PlanFinalizeOutcome(report, true, false, taskFile, ReadyQueue(taskFile, plan, report));
     }
 
     /// <summary>Reads an approval mode, <c>autonomous</c> or <c>supervised</c>, case-insensitively.</summary>
@@ -300,7 +300,7 @@ public sealed partial class PlanFinalize
 
         if (!HasOtherStaged(own, plan, report))
             _files.CommitOnly(own, CommitMessage(plan), report, plan, Step);
-        return new PlanFinalizeOutcome(report, false, true, taskFile, ReadyQueue(taskFile));
+        return new PlanFinalizeOutcome(report, false, true, taskFile, ReadyQueue(taskFile, plan, report));
     }
 
     private bool HasOtherStaged(IReadOnlyList<string> own, string plan, DiagnosticReport report)
@@ -322,16 +322,31 @@ public sealed partial class PlanFinalize
     }
 
     /// <summary>One line per task in the task file, then the tasks with no unmet dependency.</summary>
-    private string? ReadyQueue(string taskFile)
+    internal string? ReadyQueue(string taskFile, string plan, DiagnosticReport report)
     {
+        string? queue = null;
+        string problem = "it is not there";
         try
         {
-            return PresentFile.ReadIfPresent(_files.Absolute(taskFile)) is { } text ? ReadyQueueOf(text) : null;
+            if (PresentFile.ReadIfPresent(_files.Absolute(taskFile)) is { } text)
+            {
+                queue = ReadyQueueOf(text);
+                problem = "it is not a valid task file";
+            }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            return null;
+            problem = $"it could not be read ({exception.GetType().Name}: {exception.Message})";
         }
+
+        if (queue is null)
+        {
+            report.Add(new Diagnostic(Step, Severity.Warning,
+                $"The ready queue is not listed because {problem}: {taskFile}.", plan, taskFile,
+                Hint: "Read the task file itself for the tasks that can start."));
+        }
+
+        return queue;
     }
 
     /// <summary>
@@ -537,9 +552,11 @@ public sealed partial class PlanFinalize
             notUndone.Add(plan);
         if (planIndex is not null && indexText is not null && !TryWrite(_files.Absolute(planIndex), indexText))
             notUndone.Add(planIndex);
+        // Absent before the step means "this step created it", except a link: a dangling one also reads as absent, but it
+        // is the owner's, this step never creates one, and deleting it would remove the link rather than a written file.
         bool taskFileRestored = taskFileBefore is not null
             ? TryWrite(_files.Absolute(taskFile), taskFileBefore)
-            : DeleteIfPresent(_files.Absolute(taskFile));
+            : IsLink(_files.Absolute(taskFile)) || DeleteIfPresent(_files.Absolute(taskFile));
         if (!taskFileRestored)
             notUndone.Add(taskFile);
         return notUndone;
@@ -570,6 +587,18 @@ public sealed partial class PlanFinalize
         report.Add(new Diagnostic(PlanNeedsArchitect, Severity.Error,
             $"Could not undo the change to: {string.Join(", ", notUndone)}.", plan, plan,
             Hint: string.Join(' ', advice)));
+    }
+
+    private static bool IsLink(string path)
+    {
+        try
+        {
+            return new FileInfo(path).LinkTarget is not null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private static bool TryWrite(string path, string text)

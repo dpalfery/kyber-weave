@@ -521,4 +521,56 @@ public sealed class PlanFinalizeTests
         AssertRefusedUnchanged(fixture, Run(fixture, path: "src/Placeholder.cs"), "KW-DOC-FINALIZE-001", plan, index);
         Assert.Equal("// the repository's existing source", Read(fixture, "src/Placeholder.cs"));
     }
+
+    [Fact]
+    public void RestoreLeavesADanglingLinkAtTheTaskFilePathAlone()
+    {
+        using DocFixture fixture = Repository();
+        string taskFile = Absolute(fixture, PlanTaskFileProbe.TaskFilePath);
+        File.CreateSymbolicLink(taskFile, Path.Combine(fixture.Root, "nowhere.json"));
+        string planBefore = Read(fixture, PlanTaskFileProbe.PlanPath);
+
+        List<string> notUndone = Finalizer(fixture).Restore(
+            PlanTaskFileProbe.PlanPath, planBefore, planIndex: null, indexText: null, PlanTaskFileProbe.TaskFilePath, taskFileBefore: null);
+
+        Assert.Empty(notUndone);
+        Assert.NotNull(new FileInfo(taskFile).LinkTarget);
+    }
+
+    [Fact]
+    public void TheReadyQueueIsListedFromAReadableTaskFileAndSaysNothingExtra()
+    {
+        using DocFixture fixture = Repository();
+        File.WriteAllText(Absolute(fixture, PlanTaskFileProbe.TaskFilePath), "{\"schema-version\":1,\"tasks\":[]}");
+        DiagnosticReport report = new();
+
+        string? queue = Finalizer(fixture).ReadyQueue(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.PlanPath, report);
+
+        Assert.Equal("(no tasks)", queue);
+        Assert.Empty(report.Items);
+    }
+
+    [Fact]
+    public void ADroppedReadyQueueIsReportedWithItsCause()
+    {
+        using DocFixture fixture = Repository();
+        // A folder where the task file belongs: it is there, but cannot be read as a file.
+        Directory.CreateDirectory(Absolute(fixture, PlanTaskFileProbe.TaskFilePath));
+        DiagnosticReport unreadable = new();
+        DiagnosticReport corrupt = new();
+        DiagnosticReport absent = new();
+
+        Assert.Null(Finalizer(fixture).ReadyQueue(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.PlanPath, unreadable));
+        Directory.Delete(Absolute(fixture, PlanTaskFileProbe.TaskFilePath));
+        Assert.Null(Finalizer(fixture).ReadyQueue(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.PlanPath, absent));
+        File.WriteAllText(Absolute(fixture, PlanTaskFileProbe.TaskFilePath), "not json");
+        Assert.Null(Finalizer(fixture).ReadyQueue(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.PlanPath, corrupt));
+
+        Diagnostic cause = Assert.Single(unreadable.Items);
+        Assert.Equal(Severity.Warning, cause.Severity);
+        Assert.Contains("could not be read", cause.Message, StringComparison.Ordinal);
+        Assert.Contains(PlanTaskFileProbe.TaskFilePath, cause.Message, StringComparison.Ordinal);
+        Assert.Contains("it is not there", Assert.Single(absent.Items).Message, StringComparison.Ordinal);
+        Assert.Contains("not a valid task file", Assert.Single(corrupt.Items).Message, StringComparison.Ordinal);
+    }
 }

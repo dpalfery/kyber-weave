@@ -46,4 +46,24 @@ public sealed class PresentFileTests : IDisposable
 
         Assert.ThrowsAny<Exception>(() => PresentFile.ReadIfPresent(path));
     }
+
+    [Fact]
+    public void AFileOverTheCapIsNotLoadedAndIsReportedAsUnreadable()
+    {
+        string path = Path.Combine(_temp.Path, "big.json");
+        File.WriteAllText(path, new string(' ', (int)BoundedFile.MaxBytes + 1));
+
+        IOException error = Assert.Throws<IOException>(() => PresentFile.ReadIfPresent(path));
+
+        Assert.Contains((BoundedFile.MaxBytes + 1).ToString(System.Globalization.CultureInfo.InvariantCulture), error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AFileExactlyAtTheCapIsStillRead()
+    {
+        string path = Path.Combine(_temp.Path, "edge.json");
+        File.WriteAllText(path, new string(' ', (int)BoundedFile.MaxBytes));
+
+        Assert.Equal((int)BoundedFile.MaxBytes, PresentFile.ReadIfPresent(path)!.Length);
+    }
 }
