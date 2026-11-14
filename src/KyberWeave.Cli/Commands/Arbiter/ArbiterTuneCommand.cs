@@ -389,7 +389,7 @@ public sealed class ArbiterTuneCommand : Command<ArbiterSettings>
 
     private sealed record JsonTuneReport(
         [property: JsonPropertyName("rules")] IReadOnlyList<JsonRuleReport> Rules,
-        [property: JsonPropertyName("truncated")] [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Truncated);
+        [property: JsonPropertyName("truncated")][property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Truncated);
 
     private sealed record JsonRuleReport(
         [property: JsonPropertyName("id")] string Id,
