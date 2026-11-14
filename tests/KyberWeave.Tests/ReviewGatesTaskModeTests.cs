@@ -1,4 +1,5 @@
 using KyberWeave.Cli.Commands.Docs;
+using KyberWeave.Core.Arbiter.Facts;
 using Xunit;
 using Xunit.Sdk;
 
@@ -94,7 +95,8 @@ public sealed class ReviewGatesTaskModeTests : IDisposable
     public void ACompileFailureOnSymbolsTheTaskHasNotWrittenIsTheFailingRunAndWritesTheFailingReport()
     {
         SkipOnWindows();
-        string ownFile = PlanTaskFileProbe.FirstTaskFiles[1];
+        // The test file the Test contract names is the task's own even though the task's file list leaves it out.
+        string ownFile = PlanTaskFileProbe.SecondTaskFiles[0];
         Gate($"/repo/{ownFile}(12,17): error CS0246: The type or namespace name 'PlanTaskFileShape' could not be found [/repo/x.csproj]\nBuild FAILED.", 1);
 
         (int exit, string output) = Run("--red");
@@ -105,6 +107,38 @@ public sealed class ReviewGatesTaskModeTests : IDisposable
         Assert.True(File.Exists(Path.Combine(_fixture.Root, ".agent_scratchpad/t1/task-gate-red.json")), output);
         Assert.False(File.Exists(Path.Combine(_fixture.Root, ".agent_scratchpad/t1/task-gate.json")), output);
         Assert.Contains("  kyber-weave review gates . --agent csharp-dev --task t1", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheFailingRunThenThePassingRunOnTheDefaultsReadAsAFailingRunFirst()
+    {
+        SkipOnWindows();
+        Gate("  Failed Acme.Tests.T [1 ms]\n  Error Message:\n   Assert.True() Failure\nFailed!  - Failed:     1, Passed:    0, Skipped:     0, Total:    1, Duration: 1 s", 1);
+        (int redExit, string redOutput) = Run("--red");
+        Assert.True(redExit == 0, redOutput);
+
+        Gate("Passed!  - Failed:     0, Passed:    1, Skipped:     0, Total:    1, Duration: 1 s", 0);
+        (int passExit, string passOutput) = Run();
+        Assert.True(passExit == 0, passOutput);
+
+        string red = Path.Combine(_fixture.Root, ".agent_scratchpad/t1/task-gate-red.json");
+        string pass = Path.Combine(_fixture.Root, ".agent_scratchpad/t1/task-gate.json");
+        File.SetLastWriteTimeUtc(pass, File.GetLastWriteTimeUtc(red).AddSeconds(1));
+        string digest = $"TASK_GATE: PASS — agent=csharp-dev gates=1 failed=none skipped=0 report={pass} runs=2";
+        Assert.True(GateReportFacts.FailingRunFirst(digest, _fixture.Root));
+    }
+
+    [Fact]
+    public void ATaskNoActivePlanHasSaysWhyTheLookupFailed()
+    {
+        SkipOnWindows();
+        Gate("Passed!  - Failed:     0, Passed:    1, Skipped:     0, Total:    1, Duration: 1 s", 0);
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
+            () => CommandAppFixture.ReviewGates().Run(["review", "gates", _fixture.Root, "--agent", "csharp-dev", "--task", "T9"]));
+
+        // The fixture's .git is empty, so the git fallback is refused too; either way the reason the plan lookup failed is printed.
+        Assert.Contains("'T9' names no one task in", execution.Output, StringComparison.Ordinal);
     }
 
     [Fact]

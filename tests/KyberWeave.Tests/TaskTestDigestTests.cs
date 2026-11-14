@@ -66,6 +66,30 @@ public sealed class TaskTestDigestTests
     }
 
     [Fact]
+    public void AFilterThatMatchedNoTestIsNeverReportedAsAPass()
+    {
+        IReadOnlyList<string> lines = TaskTestDigest.Lines("tests", passed: true, "No test matches the given testcase filter `FullyQualifiedName~Nope`", null);
+
+        Assert.StartsWith("tests: NO TESTS RAN", Assert.Single(lines), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ATestWhoseNameStartsAnotherTestsNameGetsItsOwnError()
+    {
+        string[] output =
+        [
+            "  Failed Acme.Tests.OrdersTests.Total_WhenEmpty [1 ms]",
+            "  Error Message:",
+            "   the longer test's error",
+            "  Failed Acme.Tests.OrdersTests.Total [1 ms]",
+            "  Error Message:",
+            "   the shorter test's error",
+        ];
+
+        Assert.Equal("the shorter test's error", TaskTestDigest.FirstErrorLine(output, "Acme.Tests.OrdersTests.Total"));
+    }
+
+    [Fact]
     public void APassingRunIsOneLineWithItsTotals()
     {
         IReadOnlyList<string> lines = TaskTestDigest.Lines(

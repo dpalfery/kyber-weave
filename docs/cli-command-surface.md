@@ -516,13 +516,15 @@ verdict engine under [Review council architecture](code-review/architecture.md#h
 `review gates --agent <NAME>` selects the [task gates](code-review/architecture.md#task-gates)
 declared for that agent under `review.task-gates` and runs them against the files that agent
 changed, instead of running the repository-wide `review.gates`. With `--task` and no `--paths`,
-the files are the task's own from the one Ready or In progress plan, and the test classes its Test
-contract names fill `{tests}` (the lookup `docs packet` prints from); when no active plan has the
-task, the files are the git change as before. Without `--out` and `--fix`, `--task` writes the
+the files are the task's own from the one Ready or In progress plan plus the test file its Test
+contract names, and the classes that contract names fill `{tests}` ahead of the classes mapped from
+the files (the lookup `docs packet` prints from). The run prints a `task:` line naming the plan and
+files; when no active plan has the task it says why, and the files are the git change as before. Without `--out` and `--fix`, `--task` writes the
 report to `.agent_scratchpad/<task>/task-gate.json`, or `task-gate-red.json` with `--red`. Each test
 gate and each failed gate is then printed in a few lines: pass or fail, the test totals, each
 failing test with the first line of its error (or each compile error), at most 10 items of at most
-200 characters, and the path of its full output under `.agent_scratchpad/<task>/logs/`. In human output it ends with a
+200 characters, and the path of its full output under `.agent_scratchpad/<task>/logs/`. A test gate
+that exits 0 having run no test prints `NO TESTS RAN`, never a pass. In human output it ends with a
 `next:` line naming the worker's next step: after `--red`, the passing-run command; after a
 `--fix` run, the verification run; after a failure, the 2-cycle cap and the escalation lines with
 the failing gate's id; after a passing verification run, the completion digest with `STATUS`,

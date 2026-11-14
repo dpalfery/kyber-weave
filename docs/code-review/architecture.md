@@ -531,7 +531,10 @@ lens prompt. That is the injection surface closed at the point the value is writ
 `review.task-gates` is the developer exit gate's counterpart to `review.gates`: a map from an
 agent slug to that agent's ordered gates, run by `kyber-weave review gates --agent <slug>`
 against the files that agent changed. It is optional; absent, no agent has task gates and
-`--agent` reports `KW-REVIEW-027`.
+`--agent` reports `KW-REVIEW-027`. With `--task <id>` and no `--paths`, the files and the test
+classes for `{tests}` come from the task in the active plan, the report goes to the task's scratch
+folder, and each test gate prints a short result (failing tests with their first error line) with
+the full output in a log beside it; see the [command surface](../cli-command-surface.md).
 
 ```yaml
 review:

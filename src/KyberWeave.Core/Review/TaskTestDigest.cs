@@ -41,6 +41,10 @@ public static class TaskTestDigest
             lines.AddRange(errors.Take(MaxItems).Select(error => Item($"{error.File}: {error.Code} {error.Message}")));
             AddRemainder(lines, errors.Count);
         }
+        else if (passed && (run is { Total: 0 } || RedLanguages.All.Any(language => language.ZeroTests(0, output))))
+        {
+            lines.Add($"{gateId}: NO TESTS RAN — its filter matched no test, so nothing is verified; check the test class names");
+        }
         else if (run is not null && runner is not null)
         {
             lines.Add($"{gateId}: {(passed ? "PASS" : "FAIL")} — tests: total={run.Total} failed={run.Failed} passed={run.Total - run.Failed}");
@@ -74,7 +78,7 @@ public static class TaskTestDigest
     {
         for (int index = 0; index < outputLines.Count; index++)
         {
-            if (!outputLines[index].Contains(name, StringComparison.Ordinal))
+            if (!NamesTest(outputLines[index], name))
                 continue;
 
             for (int next = index + 1; next < outputLines.Count && next <= index + LinesSearchedAfterName; next++)
@@ -94,6 +98,19 @@ public static class TaskTestDigest
         }
 
         return null;
+    }
+
+    /// <summary>Whether <paramref name="line"/> names <paramref name="name"/> itself, not a longer name that starts with it.</summary>
+    private static bool NamesTest(string line, string name)
+    {
+        for (int at = line.IndexOf(name, StringComparison.Ordinal); at >= 0; at = line.IndexOf(name, at + 1, StringComparison.Ordinal))
+        {
+            int end = at + name.Length;
+            if (end == line.Length || !(char.IsLetterOrDigit(line[end]) || line[end] == '_'))
+                return true;
+        }
+
+        return false;
     }
 
     private static string WithoutRunnerPrefix(string line)

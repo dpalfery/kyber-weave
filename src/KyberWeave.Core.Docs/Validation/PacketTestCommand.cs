@@ -81,7 +81,7 @@ public static class PacketTestCommand
 
         ReviewTaskGate[] testGates = [.. gates.Where(gate => gate.Run.Any(element => element.Contains(TestsToken, StringComparison.Ordinal)))];
         string slug = TaskSlug.Normalise(entry.Id);
-        IReadOnlyList<string> files = PlanTaskTarget.Files(repoRoot, entry);
+        IReadOnlyList<string> files = PlanTaskTarget.Files(repoRoot, entry, row);
         if (testGates.Length == 0 || files.Count == 0 || slug.Length == 0)
             return [];
 

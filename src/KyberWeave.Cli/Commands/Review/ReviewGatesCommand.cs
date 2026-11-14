@@ -633,15 +633,16 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
 
         // With --task and no --paths, the task's own files and declared test classes come from the active plan, the
         // lookup docs packet prints its test command from, so the worker passes nothing it could get wrong.
+        string? targetMissing = null;
         PlanTaskTargetMatch? target = settings.TaskSlug is not null && settings.Paths.Length == 0
-            ? PlanTaskTarget.Find(EnclosingRepositoryRoot(root), config, settings.TaskSlug, out _)
+            ? PlanTaskTarget.Find(EnclosingRepositoryRoot(root), config, settings.TaskSlug, out targetMissing)
             : null;
 
         if (settings.TaskSlug is not null && TaskSlug.Normalise(settings.TaskSlug) is { Length: > 0 } normalised)
             settings.TaskSlug = normalised;
 
         if (target is not null)
-            settings.Paths = [.. PlanTaskTarget.Files(root, target.Entry)];
+            settings.Paths = [.. PlanTaskTarget.Files(root, target.Entry, target.Row)];
 
         // The report goes where the Arbiter reads the evidence; a --fix run never counts, so it writes none by default.
         if (settings.Out is null && settings.TaskSlug is not null && !settings.Fix)
@@ -691,7 +692,8 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
             }
             catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or TimeoutException)
             {
-                return RefuseInput(report, settings, [$"Could not list the changed files with git: {ex.Message}"]);
+                return RefuseInput(report, settings, [$"Could not list the changed files with git: {ex.Message}"
+                    + (targetMissing is null ? string.Empty : $" The task was not found in a plan either ({targetMissing}); pass --paths.")]);
             }
 
             // Paths git reports are checked with the same rules as --paths, because they reach argv the same way.
@@ -771,6 +773,12 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
         CommandHelpers.Finish(report, settings, "review gates", "Gate");
         if (ReportRenderer.IsHuman(settings.ParsedFormat))
         {
+            // Which files were gated, and from where, so a lookup that fell back to the git change is never silent.
+            Console.WriteLine(target is not null
+                ? $"task: {target.Entry.Id} from {target.Plan} — files: {string.Join(", ", changed)}"
+                : targetMissing is not null
+                    ? $"task: not found in a plan ({targetMissing}), so the files git reports changed were gated; pass --paths to name them"
+                    : $"files: {string.Join(", ", changed)}");
             WriteLines(digest);
             if (redOutcome is not null)
             {

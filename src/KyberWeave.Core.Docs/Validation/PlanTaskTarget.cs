@@ -75,10 +75,21 @@ public static partial class PlanTaskTarget
     /// The task's own files as the gate takes them: literal paths only (a glob names no file) that pass the gate's path
     /// check. Files the task has not created yet are kept, because a test-first task's failing run comes before them.
     /// </summary>
-    public static IReadOnlyList<string> Files(string root, PlanTaskFileEntry entry)
+    /// <param name="root">The repository root.</param>
+    /// <param name="entry">The task.</param>
+    /// <param name="row">
+    /// The task's Test contract row. A test file it names is the task's own too, even when the task's file list leaves
+    /// it out, so a compile error in it reads as this task's failing run.
+    /// </param>
+    public static IReadOnlyList<string> Files(string root, PlanTaskFileEntry entry, PlanContractRow? row = null)
     {
         ArgumentNullException.ThrowIfNull(entry);
-        return [.. (entry.Files ?? [])
+        string? contractFile = row?.TestProjectOrFile?.Trim().Trim('`').Trim();
+        IEnumerable<string> candidates = entry.Files ?? [];
+        if (!string.IsNullOrEmpty(contractFile) && Path.HasExtension(contractFile) && !contractFile.Contains(' ', StringComparison.Ordinal))
+            candidates = candidates.Append(contractFile);
+
+        return [.. candidates
             .Where(path => path.IndexOfAny(['*', '?', '[']) < 0 && TaskGateSelection.ValidatePath(root, path) is null)
             .Distinct(StringComparer.Ordinal)];
     }

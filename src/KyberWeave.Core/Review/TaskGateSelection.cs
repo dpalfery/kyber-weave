@@ -133,8 +133,8 @@ public static class TaskGateSelection
     /// <see langword="null"/> when the host declares none.
     /// </param>
     /// <param name="declaredClasses">
-    /// Test classes the task's plan names in its Test contract. When given, they fill <c>{tests}</c> instead of the
-    /// classes looked up from the changed files.
+    /// Test classes the task's plan names in its Test contract. They fill <c>{tests}</c> ahead of the classes looked up
+    /// from the changed files.
     /// </param>
     /// <exception cref="ArgumentException">
     /// <paramref name="currentOs"/> is neither <c>windows</c> nor <c>unix</c>. Any other host value would
@@ -244,9 +244,9 @@ public static class TaskGateSelection
                 IReadOnlyList<string> classes;
                 try
                 {
-                    // Classes a plan declares win: in test-first work they may not exist yet, so a lookup from the
-                    // changed files would find none.
-                    classes = declaredClasses is { Count: > 0 } ? declaredClasses : TestClassMapping.Resolve(root, matches, testMap);
+                    // Classes a plan declares come first: in test-first work they may not exist yet, so a lookup from
+                    // the changed files would miss them. The mapped classes still run, so existing coverage is kept.
+                    classes = [.. (declaredClasses ?? []).Concat(TestClassMapping.Resolve(root, matches, testMap)).Distinct(StringComparer.Ordinal)];
                 }
                 catch (Exception ex) when (ex is InvalidOperationException)
                 {
