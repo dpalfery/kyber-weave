@@ -66,7 +66,7 @@ Reported only when the `plan-index` or `todo-index` registry property names a do
 |---|---|---|
 | `KW-DOC-FINALIZE-001` | Error | The path is not an active plan file directly under the plans folder |
 | `KW-DOC-FINALIZE-002` | Error | The plan's body status is neither Draft nor Ready |
-| `KW-DOC-FINALIZE-003` | Error | No usable approval: missing, more than one line, over 300 characters, or an autonomous approval of a plan whose frontmatter is not `autonomy: autonomous` |
+| `KW-DOC-FINALIZE-003` | Error | No usable approval: missing, more than one line, over 300 characters, or an autonomous approval of a plan whose frontmatter says `autonomy: supervised` |
 | `KW-DOC-FINALIZE-004` | Error | The plan has no `## Decisions` table, or a decision is still `OPEN` or `RECOMMENDED` |
 | `KW-DOC-FINALIZE-005` | Error | The task file cannot be written from the plan, or the finalized plan, index or task file fails validation (every change is undone); also a Ready plan whose task file is not current |
 | `KW-DOC-FINALIZE-006` | Info / Warning | A step taken. Warning: `git add` could not stage the touched files |

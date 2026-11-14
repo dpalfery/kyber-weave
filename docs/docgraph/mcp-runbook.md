@@ -1510,7 +1510,7 @@ twin. `projectPath` is required (the run's worktree); `approvalMode` is `autonom
 
 It edits only the plan, its task file and the plan index, and refuses, changing nothing, with
 `KW-DOC-FINALIZE-001` (not a plan file under the plans folder), `-002` (not Draft), `-003` (no usable
-approval, or an autonomous approval of a plan whose frontmatter is not `autonomy: autonomous`), `-004`
+approval, or an autonomous approval of a plan whose frontmatter says `autonomy: supervised`), `-004`
 (no Decisions table, or a decision still `OPEN` or `RECOMMENDED`) or `-005` (the task file cannot be
 written from the plan, or the finalized files fail validation; it writes, validates, and restores
 the original bytes). A plan already Ready with a current task file reports `result: already-ready`.

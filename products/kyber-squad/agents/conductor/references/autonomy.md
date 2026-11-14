@@ -18,7 +18,7 @@ Ask the user nothing that this section answers. The goal is no human in the loop
 
 - **Intake:** take the architect's `INTAKE_RECOMMENDATION` plan or spec as the choice and record it.
 - **Decisions:** accept the specialist's `RECOMMENDED` option on a `STATUS: NEEDS_DECISION`, unless the item carries `ESCALATION: hard_block`.
-- **Gates:** approve each phase `READY_FOR_REVIEW`, the final **approve and execute**, and each mode-change re-approval. The conductor never writes the row: it re-invokes the owning specialist (`architect` for a plan, `product-owner` for a specification) with an explicit `AUTONOMOUS_APPROVAL: <gate id>` input, and that specialist records the approval in `## Decisions` with provenance `autonomous: recommendation accepted`, exactly as it records a human approval.
+- **Gates:** approve each phase `READY_FOR_REVIEW`, the final **approve and execute**, and each mode-change re-approval. The conductor re-invokes the owning specialist (`architect` for a plan, `product-owner` for a specification) with an explicit `AUTONOMOUS_APPROVAL: <gate id>` input, and that specialist records the approval in `## Decisions` with provenance `autonomous: recommendation accepted`, exactly as it records a human approval. The plan's final **approve and execute** is the exception: the conductor records it with the finalize tool (plan path).
 - **Specialist decisions:** a specialist in autonomous mode decides open items itself and records `autonomous: low-confidence, no authoritative source` where no source answered. Accept those rows as written.
 
 ## Hard-block escalation

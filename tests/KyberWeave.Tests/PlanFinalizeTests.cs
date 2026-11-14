@@ -148,6 +148,30 @@ public sealed class PlanFinalizeTests
     }
 
     [Fact]
+    public void AnAutonomousApprovalOfAPlanThatDeclaresNoAutonomyIsAccepted()
+    {
+        using DocFixture fixture = Repository(DraftPlan().Replace("autonomy: autonomous\n", string.Empty, StringComparison.Ordinal));
+
+        (int exit, string output) = Run(fixture);
+
+        Assert.True(exit == 0, output);
+    }
+
+    /// <summary>A plan that derives a task file but then fails validation is restored byte for byte.</summary>
+    [Fact]
+    public void AFinalizedPlanThatFailsValidationIsRestoredAndGoesBackToTheArchitect()
+    {
+        using DocFixture fixture = Repository(DraftPlan().Replace("owner: Maintainers\n", string.Empty, StringComparison.Ordinal));
+        string plan = Read(fixture, PlanTaskFileProbe.PlanPath);
+        string index = Read(fixture, PlanTaskFileProbe.PlanIndexPath);
+
+        (int Exit, string Output) run = Run(fixture);
+
+        AssertRefusedUnchanged(fixture, run, "KW-DOC-FINALIZE-005", plan, index);
+        Assert.Contains("undone", run.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void APlanThatIsNotDraftIsRefused()
     {
         using DocFixture fixture = Repository(DraftPlan().Replace("**Status: Draft.**", "**Status: Blocked.**", StringComparison.Ordinal));

@@ -50,7 +50,7 @@ server's tools.
 2. **Mechanical only.** Each tool edits only the plan, its task file, the plan index and the archive,
    and refuses any path that is not a plan file directly under the plans folder. Each refuses,
    changing nothing, when a precondition fails: finalize on a missing or multi-line approval, an
-   autonomous approval of a plan whose frontmatter is not `autonomy: autonomous`, a plan that is not
+   autonomous approval of a plan whose frontmatter says `autonomy: supervised`, a plan that is not
    Draft, an open decision, a plan the task file cannot be written from, or a result that fails
    validation (it writes, validates, and restores the original bytes on failure). A plan already
    Ready with a current task file reports done. Archive keeps every check `docs closeout` makes.

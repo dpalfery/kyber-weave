@@ -134,6 +134,13 @@ public sealed partial class PlanFinalize
             : null;
         string? newIndex = indexText is null ? null : WithReadyIndexRow(indexText, Path.GetFileName(plan));
         string newPlan = WithReadyStatus(withApproval, date);
+        if (!ReadyStatus().IsMatch(newPlan))
+        {
+            report.Add(new Diagnostic(NotDraft, Severity.Error,
+                $"The Draft status line of '{plan}' is not in a form this step can rewrite. Nothing was changed.", plan, plan,
+                Hint: "Write the body status line as '**Status: Draft.**' or '**Status:** Draft'."));
+            return Refused();
+        }
 
         string? taskFileBefore = File.Exists(_files.Absolute(taskFile)) ? File.ReadAllText(_files.Absolute(taskFile)) : null;
         try
@@ -210,8 +217,8 @@ public sealed partial class PlanFinalize
         string? problem = text.Length == 0 ? "No approval was given."
             : text.Contains('\n', StringComparison.Ordinal) || text.Contains('\r', StringComparison.Ordinal) ? "The approval must be one line."
             : text.Length > MaxApprovalLength ? $"The approval is longer than {MaxApprovalLength} characters."
-            : mode == PlanApprovalMode.Autonomous && !AutonomousPlan().IsMatch(FrontmatterOf(planText))
-                ? "An autonomous approval needs a plan whose frontmatter says 'autonomy: autonomous'."
+            : mode == PlanApprovalMode.Autonomous && SupervisedPlan().IsMatch(FrontmatterOf(planText))
+                ? "The plan's frontmatter says 'autonomy: supervised', so only the owner can approve it."
                 : null;
         if (problem is null)
             return text.Replace("|", "\\|", StringComparison.Ordinal);
@@ -393,8 +400,8 @@ public sealed partial class PlanFinalize
     [GeneratedRegex(@"^status:[^\r\n]*", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     private static partial Regex FrontmatterStatus();
 
-    [GeneratedRegex(@"^autonomy:[ \t]*autonomous[ \t]*$", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
-    private static partial Regex AutonomousPlan();
+    [GeneratedRegex(@"^autonomy:[ \t]*supervised[ \t]*$", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
+    private static partial Regex SupervisedPlan();
 
     [GeneratedRegex(@"^##[ \t]+Decisions[ \t]*$", RegexOptions.CultureInvariant)]
     private static partial Regex DecisionsHeading();

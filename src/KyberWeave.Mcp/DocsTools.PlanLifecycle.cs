@@ -49,9 +49,13 @@ public sealed partial class DocsTools
     {
         if (string.IsNullOrWhiteSpace(projectPath))
             return Provenance() + "\nresult: refused\nprojectPath is required: pass the absolute path of the run's worktree.";
-        if (Redirect(projectPath, tools => tools.FinalizePlan(projectPath, planFile, approvalMode, approval)) is { } redirected)
+        if (Redirect(projectPath, tools => tools.FinalizeHere(planFile, approvalMode, approval)) is { } redirected)
             return redirected;
+        return FinalizeHere(planFile, approvalMode, approval);
+    }
 
+    private string FinalizeHere(string planFile, string approvalMode, string approval)
+    {
         string provenance = Provenance();
         DiagnosticReport report = new();
         if (!TryResolveLifecyclePlan(planFile, report, out KyberWeaveConfig config, out string plan))
@@ -94,9 +98,13 @@ public sealed partial class DocsTools
     {
         if (string.IsNullOrWhiteSpace(projectPath))
             return Provenance() + "\nresult: refused\nprojectPath is required: pass the absolute path of the run's worktree.";
-        if (Redirect(projectPath, tools => tools.ArchivePlan(projectPath, planFile)) is { } redirected)
+        if (Redirect(projectPath, tools => tools.ArchiveHere(planFile)) is { } redirected)
             return redirected;
+        return ArchiveHere(planFile);
+    }
 
+    private string ArchiveHere(string planFile)
+    {
         string provenance = Provenance();
         DiagnosticReport report = new();
         if (!TryResolveLifecyclePlan(planFile, report, out KyberWeaveConfig config, out string plan))

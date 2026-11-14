@@ -67,6 +67,34 @@ public sealed class McpPlanLifecycleToolsTests
         Assert.Contains("**Status: Ready,", Read(fixture, PlanTaskFileProbe.PlanPath), StringComparison.Ordinal);
     }
 
+    /// <summary>A linked worktree named by projectPath is finalized and archived in that worktree, not refused.</summary>
+    [Fact]
+    public void BothToolsWorkInALinkedWorktree()
+    {
+        using DocFixture fixture = GitRepository(PlanFinalizeTests.Repository());
+        Git(fixture.Root, "add", "-A");
+        Git(fixture.Root, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "init");
+        string worktree = fixture.Root + "-wt";
+        Git(fixture.Root, "worktree", "add", "-q", worktree);
+        try
+        {
+            DocsTools tools = Tools(fixture.Root);
+
+            string finalized = tools.FinalizePlan(worktree, PlanTaskFileProbe.PlanPath, "autonomous", "AUTONOMOUS_APPROVAL: approve-and-execute");
+            string archive = tools.ArchivePlan(worktree, PlanTaskFileProbe.PlanPath);
+
+            Assert.Contains("result: finalized", finalized, StringComparison.Ordinal);
+            Assert.True(File.Exists(Path.Combine(worktree, PlanTaskFileProbe.TaskFilePath.Replace('/', Path.DirectorySeparatorChar))));
+            Assert.False(Exists(fixture, PlanTaskFileProbe.TaskFilePath));
+            Assert.Contains("result: refused", archive, StringComparison.Ordinal);
+            Assert.DoesNotContain("projectPath was refused", archive, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Git(fixture.Root, "worktree", "remove", "--force", worktree);
+        }
+    }
+
     [Theory]
     [InlineData("", "autonomous")]
     [InlineData("ROOT", "approve")]

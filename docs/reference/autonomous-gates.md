@@ -45,8 +45,9 @@ Each row names:
 - **Autonomous behavior** — one of three:
   - `auto-approve with provenance` — conductor re-invokes the owner with
     `AUTONOMOUS_APPROVAL: <gate id>`; the owner records the approval in
-    `## Decisions` with `autonomous: recommendation accepted`. The conductor
-    never writes the row itself.
+    `## Decisions` with `autonomous: recommendation accepted`. The final plan
+    approval is the exception: the conductor records it through the finalize
+    tool, which writes only the approval row and the status.
   - `park` — stop reworking that one item (a circuit-breaker cluster, or a
     gap whose recommendation was accepted) and list its id in the draft pull
     request. Park never holds back delivery; the run continues with
