@@ -124,6 +124,12 @@ public sealed partial class RunDelivery
     private readonly string _homeDirectory;
     private readonly ActivePlanFiles _files;
 
+    /// <summary>
+    /// Test seam, called with the absolute path of the archived plan once it is found and before it is read: the
+    /// moment the plan can vanish between the search and the read.
+    /// </summary>
+    internal Action<string>? AfterPlanFound { get; init; }
+
     /// <summary>Creates the deliver step for one checkout.</summary>
     /// <param name="repoRoot">The run's worktree.</param>
     /// <param name="config">The repository's effective configuration.</param>
@@ -217,6 +223,9 @@ public sealed partial class RunDelivery
 
         if (!TryFindPlan(request.PlanFile, mergeBase, plansFolder, archiveFolder, status.StandardOutput, report, out string? plan))
             return new DeliveryOutcome(report, false);
+
+        if (plan is not null)
+            AfterPlanFound?.Invoke(_files.Absolute(plan));
 
         string? planText = plan is null ? null : PresentFile.ReadIfPresent(_files.Absolute(plan));
         if (plan is not null && planText is null)

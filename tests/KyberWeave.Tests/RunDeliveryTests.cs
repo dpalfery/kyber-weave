@@ -432,6 +432,52 @@ public sealed class RunDeliveryTests : IDisposable
         AssertRefusedBeforeAnythingLeaves(Deliver(gh, new DeliveryRequest("S.")), gh, RunDelivery.PlanNotDeliverable);
     }
 
+    /// <summary>The archived plan is found by git and read a moment later; if it is gone by then the run refuses and says so.</summary>
+    [Fact]
+    public void RefusesAPlanThatVanishesBetweenBeingFoundAndBeingRead()
+    {
+        GitRunRepository(archivePending: false);
+        ScriptedGh gh = new();
+
+        DeliveryOutcome outcome = Deliver(gh, new DeliveryRequest("S."), afterPlanFound: File.Delete);
+
+        AssertRefusedBeforeAnythingLeaves(outcome, gh, RunDelivery.PlanNotDeliverable);
+        Assert.Contains("is no longer there", Findings(outcome), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A todo the branch added is listed by git and read a moment later. One that is gone by then is left out of the
+    /// follow-up list, and the delivery goes on with the todos that are still there.
+    /// </summary>
+    [Fact]
+    public void ATodoThatVanishesWhileTheFollowUpsAreListedIsLeftOutAndTheRestAreListed()
+    {
+        GitRunRepository(archivePending: false);
+        const string Kept = "docs/todo/kept-follow-up.md";
+        const string Vanishing = "docs/todo/vanishing-follow-up.md";
+        Write("docs/todo/README.md", "# Todos\n");
+        Write(Kept, "---\nid: todo/kept-follow-up\ntitle: Keep this follow-up\ndoc-type: todo\n---\n\n# Keep\n");
+        Write(Vanishing, "---\nid: todo/vanishing-follow-up\ntitle: Lose this follow-up\ndoc-type: todo\n---\n\n# Lose\n");
+        int listings = 0;
+        ScriptedGh gh = new()
+        {
+            AfterGit = arguments =>
+            {
+                // The second listing of added files is the follow-up one; the first finds the archived plan.
+                if (arguments.Contains("--diff-filter=A") && ++listings == 2)
+                    File.Delete(Path.Combine(_work, "docs", "todo", "vanishing-follow-up.md"));
+            }
+        };
+
+        DeliveryOutcome outcome = Deliver(gh, new DeliveryRequest("S."));
+
+        Assert.True(outcome.Delivered, Findings(outcome));
+        Assert.Equal(2, listings);
+        string body = gh.Bodies.Single();
+        Assert.Contains($"Keep this follow-up (`{Kept}`)", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("vanishing-follow-up", body, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void AnAzureDevOpsRemoteSendsTheConductorToTheDeliveryAgent()
     {
@@ -529,8 +575,8 @@ public sealed class RunDeliveryTests : IDisposable
 
     private const string Config = "ontology:\n  docs-root: docs\n";
 
-    private DeliveryOutcome Deliver(ScriptedGh gh, DeliveryRequest request) =>
-        new RunDelivery(_work, KyberWeaveConfigLoader.LoadFromYaml(Config), gh, _home).Run(request);
+    private DeliveryOutcome Deliver(ScriptedGh gh, DeliveryRequest request, Action<string>? afterPlanFound = null) =>
+        new RunDelivery(_work, KyberWeaveConfigLoader.LoadFromYaml(Config), gh, _home) { AfterPlanFound = afterPlanFound }.Run(request);
 
     private void AssertRefusedBeforeAnythingLeaves(DeliveryOutcome outcome, ScriptedGh gh, string code)
     {
@@ -658,6 +704,9 @@ public sealed class RunDeliveryTests : IDisposable
 
         public string? ViewResponse { get; init; }
 
+        /// <summary>Called with the arguments of each git command after it ran, to change the checkout between two steps.</summary>
+        public Action<string[]>? AfterGit { get; init; }
+
         public List<string[]> Calls { get; } = [];
 
         public List<string> Bodies { get; } = [];
@@ -669,7 +718,11 @@ public sealed class RunDeliveryTests : IDisposable
         {
             string[] arguments = [.. startInfo.ArgumentList];
             if (startInfo.FileName == "git")
-                return RealGit(startInfo.WorkingDirectory, arguments, standardInput);
+            {
+                ProcessResult result = RealGit(startInfo.WorkingDirectory, arguments, standardInput);
+                AfterGit?.Invoke(arguments);
+                return result;
+            }
 
             Calls.Add(arguments);
             if (!Installed)
