@@ -786,7 +786,9 @@ public sealed class SquadStateMigrationTests
     [UnsupportedOSPlatform("windows")]
     public void LedgerThatCannotBeOpenedIsReadAsEmptyWithAReason()
     {
-        Assert.SkipWhen(OperatingSystem.IsWindows(), "Unix file modes are not enforced on Windows, so a ledger that cannot be opened cannot be simulated.");
+        Assert.SkipWhen(
+            OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess,
+            "Unix file modes are not enforced on Windows, so a ledger that cannot be opened cannot be simulated; a privileged process (root) ignores the mode too, so it is skipped there as well.");
 
         using TempDirectory fixture = new TempDirectory();
         MigrationScenario scenario = CreateScenario(fixture);

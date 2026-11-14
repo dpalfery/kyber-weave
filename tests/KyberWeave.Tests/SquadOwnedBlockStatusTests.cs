@@ -64,7 +64,9 @@ public sealed class SquadOwnedBlockStatusTests
     [UnsupportedOSPlatform("windows")]
     public void Status_ReportsAnUnreadableBlockFileAsDriftInsteadOfCrashing()
     {
-        Assert.SkipWhen(OperatingSystem.IsWindows(), "Unix file modes are not enforced on Windows, so the unreadable file cannot be simulated.");
+        Assert.SkipWhen(
+            OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess,
+            "Unix file modes are not enforced on Windows, so the unreadable file cannot be simulated; a privileged process (root) ignores the mode too, so it is skipped there as well.");
 
         using TempDirectory fixture = new TempDirectory();
         SquadStateStore store = Store(fixture.Path);
@@ -208,7 +210,9 @@ public sealed class SquadOwnedBlockStatusTests
     [UnsupportedOSPlatform("windows")]
     public void Doctor_ReportsAnUnreadableBlockFileAsDriftInsteadOfCrashing()
     {
-        Assert.SkipWhen(OperatingSystem.IsWindows(), "Unix file modes are not enforced on Windows, so the unreadable file cannot be simulated.");
+        Assert.SkipWhen(
+            OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess,
+            "Unix file modes are not enforced on Windows, so the unreadable file cannot be simulated; a privileged process (root) ignores the mode too, so it is skipped there as well.");
 
         using TempDirectory fixture = new TempDirectory();
         FakeSquadUserPaths userPaths = new(Path.Combine(fixture.Path, "user-home"));

@@ -164,7 +164,9 @@ public sealed class SquadPresetCliTests : IDisposable
     {
         // Forced failure: the arbiter directory is read-only, so the table cannot be written. The
         // transaction must fail as a whole, leaving the agent and the table exactly as they were.
-        Assert.SkipWhen(OperatingSystem.IsWindows(), "Unix file modes are not enforced on Windows, so a read-only directory cannot be simulated.");
+        Assert.SkipWhen(
+            OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess,
+            "Unix file modes are not enforced on Windows, so a read-only directory cannot be simulated; a privileged process (root) ignores the mode too, so it is skipped there as well.");
 
         WritePreset("fast", FastPresetYaml);
         string initialAgentContent = """
