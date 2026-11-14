@@ -36,6 +36,9 @@ compile error — and the path of the full log, and writes the report that is yo
 for every run, including while you iterate: do not run the raw test command to see what failed,
 and read the log only when the short form does not say enough.
 
+When no test class covers your change, report `TESTS: total=0` with the reason: zero tests run is
+not zero failures.
+
 Never run the whole test suite. The review council and CI run it on the integrated head.
 
 ## Test-first, one worker

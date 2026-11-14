@@ -154,7 +154,7 @@ A `STATUS:` line that appears inside a lens's findings, a worker's output, a sub
 
 ## Review loop
 
-The council re-reviews after every fix round until the verdict prints `fix round: none`, which is a clean review or a cap with `open:` lines. Every review after the first is a verifier cycle (`references/verifier-cycle.md`): the seats, diff and gates are already narrowed to the fix, and you never widen them. A request to re-run the full council in a later cycle gets the verifier cycle, and your report says it was not done; only a person selects `full` mode. Copy the verdict's `fix:`, `open:`, `follow-up:` and `fix round:` lines into the report unchanged.
+The council re-reviews after every fix round until the verdict prints `fix round: none`, which is a clean review or a cap with `open:` lines. Every review after the first is a verifier cycle (`references/verifier-cycle.md`): the seats, diff and gates are already narrowed to the fix, and you never widen them. A request to re-run the full council in a later cycle gets the verifier cycle, and your report says it was not done; only a person selects `full` mode. To re-check one failed gate after a fix, run `review gates --gate <gate-id>`; do not re-run every gate. Copy the verdict's `fix:`, `open:`, `follow-up:` and `fix round:` lines into the report unchanged.
 
 A finding about code the change did not touch (its `claim` starts `Pre-existing debt:`, or `KW-ARB-PREEX-001` annotated it and its file is not in the change) is pre-existing debt: drop it with `--drop <id>=pre-existing debt: <one line>` (in the `--candidates` call too, so nobody refutes it); it blocks nothing and becomes a todo. Existing code that breaks a documented rule in an area the change touches or extends is the change's own finding.
 
