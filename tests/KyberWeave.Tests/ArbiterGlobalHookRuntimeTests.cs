@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Arbiter;
 using KyberWeave.Core.Squad.Deployment;
@@ -312,6 +313,93 @@ public sealed class ArbiterGlobalHookRuntimeTests
         Assert.Equal(0, project.Exit);
         Assert.False(ArbiterGlobalHookScenario.ClaimsFolderExists(scenario.ProjectRoot),
             "A non-dispatch Read event must not create a claims folder.");
+    }
+
+    // Shell guard (KW-ARB-SHELL-001) at global scope: the user-level hook evaluates an architect Bash call
+    // against the same allowlist as the project hook, under the same configuration rules.
+
+    private const string ShellRuleId = "KW-ARB-SHELL-001";
+
+    [Fact]
+    public async Task GlobalScope_ArchitectBashOutsideTheList_DeniesUnderTheProjectConfig_WithoutAClaim()
+    {
+        using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create();
+
+        HookRun global = await scenario.RunGlobal(ShellPayload(scenario.ProjectRoot, "grep x | sed y"));
+
+        Assert.Equal(0, global.Exit);
+        Assert.Contains(ShellRuleId, global.Stdout, StringComparison.Ordinal);
+        Assert.Equal("deny", DenyDecision(global.Stdout));
+        Assert.Empty(ClaimFiles(scenario.ProjectRoot));
+    }
+
+    [Fact]
+    public async Task GlobalScope_ArchitectBashOutsideTheList_DeniesUnderTheUserConfigWhenTheProjectHasNone()
+    {
+        string projectRoot = CreateTempDirectory();
+        string home = CreateTempDirectory();
+        WriteUserConfig(home, "arbiter:\n  enabled: true\n");
+
+        using StringReader stdin = new(ShellPayload(projectRoot, "grep x | sed y"));
+        using StringWriter stdout = new();
+        using StringWriter stderr = new();
+
+        int exit = await Composition.DispatchAsync(
+            ["hook", "--harness", Harness, "--scope", "global", "--home", home],
+            stdin,
+            stdout,
+            stderr);
+
+        Assert.Equal(0, exit);
+        Assert.Contains(ShellRuleId, stdout.ToString(), StringComparison.Ordinal);
+        Assert.Equal("deny", DenyDecision(stdout.ToString()));
+    }
+
+    [Fact]
+    public async Task GlobalScope_ArchitectBashOutsideTheList_AllowsWithoutEvaluationWhenTheProjectOptsOut()
+    {
+        using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create(projectEnabled: false);
+
+        HookRun global = await scenario.RunGlobal(ShellPayload(scenario.ProjectRoot, "grep x | sed y"));
+
+        Assert.Equal(0, global.Exit);
+        Assert.True(string.IsNullOrWhiteSpace(global.Stdout),
+            $"An opted-out project must get no decision from the user-level hook. Output: {global.Stdout}");
+        Assert.DoesNotContain(EvaluatingLog, global.Stderr, StringComparison.Ordinal);
+        Assert.Equal(0, ArbiterGlobalHookScenario.DecisionLines(scenario.ProjectRoot));
+    }
+
+    /// <summary>A Bash PreToolUse payload from the shipped fixture, run as the architect in the given project.</summary>
+    private static string ShellPayload(string projectRoot, string command)
+    {
+        string fixturePath = Path.Combine(
+            KyberWeaveTestPaths.ToolRoot,
+            "tests",
+            "KyberWeave.Tests",
+            "Fixtures",
+            "arbiter-hooks",
+            "claude",
+            "pre-bash-denied.json");
+
+        JsonObject root = JsonNode.Parse(File.ReadAllText(fixturePath))!.AsObject();
+        root["cwd"] = projectRoot;
+        root["transcript_path"] = Path.Combine(projectRoot, "transcript.jsonl");
+        root["agent_type"] = "architect";
+        root["tool_input"] = new JsonObject { ["command"] = command };
+        return root.ToJsonString();
+    }
+
+    private static string DenyDecision(string stdout)
+    {
+        using JsonDocument doc = JsonDocument.Parse(stdout);
+        return doc.RootElement.GetProperty("hookSpecificOutput").GetProperty("permissionDecision").GetString()
+            ?? string.Empty;
+    }
+
+    private static IReadOnlyList<string> ClaimFiles(string root)
+    {
+        string claims = Path.Combine(root, "artifacts", "arbiter", "claims");
+        return Directory.Exists(claims) ? Directory.GetFiles(claims) : [];
     }
 
     private static string ConductorSkillWithDispatchHook() =>

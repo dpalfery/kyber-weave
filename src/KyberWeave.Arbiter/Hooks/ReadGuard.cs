@@ -81,7 +81,7 @@ public static class ReadGuard
     }
 
     /// <summary>
-    /// Checks one read tool call (<c>Read</c>, <c>Grep</c>, <c>Glob</c>, <c>Bash</c>)
+    /// Checks one read tool call (<c>Read</c>, <c>Grep</c>, <c>Glob</c>, <c>Bash</c>, <c>PowerShell</c>)
     /// against <paramref name="protectedDirs"/>. Path-valued inputs resolve after
     /// normalisation relative to <paramref name="repoRoot"/>; shell commands match by
     /// substring. The reason names Req 25.
@@ -101,7 +101,8 @@ public static class ReadGuard
             return ReadGuardResult.Allow;
         }
 
-        if (string.Equals(toolName, "Bash", StringComparison.Ordinal))
+        if (string.Equals(toolName, "Bash", StringComparison.Ordinal)
+            || string.Equals(toolName, "PowerShell", StringComparison.Ordinal))
         {
             string? command = GetString(toolInput, "command");
             if (string.IsNullOrEmpty(command))

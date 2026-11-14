@@ -5,11 +5,12 @@ doc-type: architecture
 component: KyberArbiter
 source-root: src/KyberWeave.Core/Arbiter
 owner: dpalfery
-last-reviewed: 2026-11-11
+last-reviewed: 2026-11-12
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
   - adr/0054-squad-owned-blocks-in-shared-hook-files
+  - adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude
 code-refs:
   - ArbiterEvaluator
   - RuleEngine
@@ -249,6 +250,15 @@ model targets file, `KW-ARB-KEY-001` for a missing key,
 `KW-ARB-PARSE-001`/`-002` for plan parsing, `KW-ARB-AUDIT-001`…`-004` for the ledger audit,
 and `KW-ARB-HOOK-001` for a fail-closed hook error. See the
 [rule reference](../ci-pipelines/rule-reference.md).
+
+**Hook guards sit beside the read guard, outside the rules.** `ReadGuard` (the worker plan-read guard) and
+`ConductorGuard` are stateless checks that run in a harness hook and write no ledger event. On Claude,
+`ArchitectShellGuard` (`KW-ARB-SHELL-001`) joins them: it denies an architect `Bash` or `PowerShell` call
+outside the command set `architect.md` documents, before the call runs. It is not a shipped rule, because the
+rule engine evaluates dispatch triggers only, every decision becomes a ledger event, and a shell call has no
+claim key, so a global and a project hook could both record one call. Hosts cannot tune or disable a guard by id; the only off switch is `arbiter.enabled: false`, which turns the whole
+Arbiter off, and with it the guard. Each `ArchitectShellGuard` decision writes a hook-log line rather than a ledger event. The rule-engine count above is unchanged. See the [runbook](runbook.md#the-architect-shell-guard) and
+[ADR 0071](../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md).
 
 ## Secondary triggers, families and effects
 
@@ -801,6 +811,14 @@ alternatives are in [ADR 0070](../adr/0070-the-user-level-claude-hook-evaluates-
 
 Claude's user-level block is written only under `hooks.PreToolUse` and `hooks.PostToolUse`. See
 [Squad architecture](../kyber-squad/architecture.md) for the owned-block rule.
+
+The architect's shell guard is not in this block. It is a `PreToolUse` entry with matcher `^(Bash|PowerShell)$`
+in the architect's user-level agent file, and Claude Code runs a user-level sub-agent's frontmatter hooks without
+the trust step while that sub-agent is active. A matcher in the user-level `settings.json` would start the hook
+process for every shell call of every agent on the machine, and would fire twice beside a project agent-file hook.
+In the agent file exactly one file's hooks fire, because a project sub-agent of the same name outranks the user
+one. Rendering it there is an exception to the rule that user-scope agents carry no per-agent hooks
+([ADR 0071](../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md)).
 
 ### Per-dispatch model sources
 

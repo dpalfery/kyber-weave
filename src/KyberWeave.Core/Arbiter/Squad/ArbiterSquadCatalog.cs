@@ -35,6 +35,12 @@ public sealed record ArbiterSquadLens(string Name, string Applicability);
 /// </remarks>
 public sealed class ArbiterSquadCatalog
 {
+    /// <summary>
+    /// The architect's capability profile. The architect shell guard (<c>KW-ARB-SHELL-001</c>) and the Squad
+    /// wiring that renders it both key on this one name, so it is declared once here.
+    /// </summary>
+    public const string ArchitectCapabilityProfile = "architect";
+
     private const string AgentResourcePrefix = "Arbiter.Roster.";
     private const string LensResourcePrefix = "Arbiter.Lens.";
     private const string MarkdownSuffix = ".md";
@@ -81,7 +87,7 @@ public sealed class ArbiterSquadCatalog
         return capabilityProfile switch
         {
             "worker" or "publishing-worker" or "documentation" => "implementation",
-            "architect" or "product-planning" => "planner",
+            ArchitectCapabilityProfile or "product-planning" => "planner",
             "investigator" or "read-only" or "reviewer" => "read-only",
             _ => "not-squad",
         };

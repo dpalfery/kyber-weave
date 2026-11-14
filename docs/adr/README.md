@@ -4,7 +4,7 @@ title: Architecture decision records
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-11
+last-reviewed: 2026-11-12
 ---
 
 # Architecture decision records
@@ -89,6 +89,7 @@ existing record.
 | [0068](0068-doctor-owns-a-marked-block-in-the-shared-post-checkout-hook.md) | [doctor --ensure owns a marked block in the clone's shared post-checkout hook to index new worktrees](0068-doctor-owns-a-marked-block-in-the-shared-post-checkout-hook.md) | Accepted | 2026-11-11 | `doctor --ensure` installs and repairs one owned block in the clone's shared `post-checkout` hook, which starts the CodeGraph index of each new worktree in the background; the block never fails a checkout, the background run restores only the files `codegraph init` writes, and `worktree-index-hook: false` turns it off. Rejected: a hook per harness, and indexing only in `run start` and the review gates. |
 | [0069](0069-the-review-council-loops-until-approve-and-computes-its-verdict-from-seat-output.md) | [The review council loops until APPROVE and computes its verdict from seat output](0069-the-review-council-loops-until-approve-and-computes-its-verdict-from-seat-output.md) | Accepted | 2026-11-11 | After `REQUEST_CHANGES` the council re-reviews each fix round in verifier mode until `APPROVE`, under a hard stop of 5 cycles or 3 without the critical and major count falling (open findings listed in the PR, delivery continues); the verdict is computed by `review verdict --seats` from seat output the reviewer can only keep or drop with a reason. Alternatives rejected: one remediation pass then park, hand-built findings JSON, holding ready until the loop ends. |
 | [0070](0070-the-user-level-claude-hook-evaluates-unless-a-project-hook-covers-it.md) | [The user-level Claude Arbiter hook evaluates a dispatch under the project unless the project opts out or a project hook covers it](0070-the-user-level-claude-hook-evaluates-unless-a-project-hook-covers-it.md) | Accepted | 2026-11-11 | The user-level Claude hook no longer defers whenever a project enables Arbiter: it defers only when the project sets `arbiter.enabled: false` or a project hook covers the dispatch, probed per dispatch from the settings, agent and skill files; one evaluation per dispatch through a claim file in the project ledger folder; other harnesses keep the deferral, now naming it. Alternatives rejected: a static rule only, always evaluating, and a home ledger. |
+| [0071](0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md) | [The Arbiter enforces the architect shell allowlist on Claude as a hook guard, rendered in the user-level agent file](0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md) | Accepted | 2026-11-12 | `ArchitectShellGuard` (`KW-ARB-SHELL-001`) denies an architect `Bash` or `PowerShell` call outside its documented command set before it runs. A hook guard and not a rule, rendered in the architect's user-level agent file as an exception to Req 22.2; Claude only, enforced at once, instruction-only elsewhere. Refines ADR 0053 and ADR 0070. |
 
 ## Writing one
 
