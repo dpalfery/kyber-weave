@@ -1238,7 +1238,7 @@ public sealed class PiRendererContractTests : IDisposable
 internal sealed class PiModelOverrideFixture : IDisposable
 {
     internal const string OverriddenProfile = "general";
-    internal const string OverriddenAgentName = "dal-dev";
+    internal const string OverriddenAgentName = "go-dev";
     internal const string OverrideModel = "acme/pi-test-model";
     internal const string InheritProfile = "fast";
     internal const string InheritAgentName = "csharp-dev";
@@ -1469,7 +1469,7 @@ internal sealed class PiFileReadDeniedFixture : IDisposable
 /// </summary>
 internal sealed class PiThinkingSuffixFixture : IDisposable
 {
-    internal const string TestAgentName = "dal-dev";
+    internal const string TestAgentName = "go-dev";
 
     private readonly TempDirectory _temp = new();
 

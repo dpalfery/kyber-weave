@@ -3,7 +3,7 @@ schema: kyber-squad.agent/v1
 name: dal-dev
 description: "Implements the data-access layer: ADO.NET repositories, IRepository<T>, ISqlConnectionFactory, and FluentMigrator migrations. Use when the change touches repository code or adds a migration against an approved schema. Do not use when the deliverable is the schema design itself rather than the code that reads it."
 invocation: subagent
-model-profile: general
+model-profile: fast
 capability-profile: worker
 copilot-tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kw-docs/*", "context7/resolve-library-id", "context7/query-docs", search, execute, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]
 delegates-to: []
