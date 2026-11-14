@@ -55,6 +55,21 @@ public sealed class ArbiterRunStore
     internal const long MaxReturnsReadBytes = 1024 * 1024;
 
     /// <summary>
+    /// The most bytes of a plan's failures file one read looks at, taken from the end. The only consumer takes the
+    /// latest stored failure of one cluster, so the newest items are all it needs; a cluster whose last failure is
+    /// older than the window reads as a first failure.
+    /// </summary>
+    internal const long MaxFailuresReadBytes = 1024 * 1024;
+
+    /// <summary>
+    /// The most bytes of a review run's findings file one read looks at, taken from the end. The consumers look up
+    /// the stored item of one finding and the few findings stored just before it, and a refutation runs soon after
+    /// its finding is stored, so the newest items are the ones that matter. Sized at 2 MiB, enough for about 130
+    /// items of the largest permitted size and many times that at a typical size.
+    /// </summary>
+    internal const long MaxFindingsReadBytes = 2 * 1024 * 1024;
+
+    /// <summary>
     /// The longest retention the sweep honours: ten years. A larger configured value is clamped to this, because a
     /// span past the largest representable time span cannot be formed, and the append must still store its item.
     /// </summary>
@@ -147,7 +162,7 @@ public sealed class ArbiterRunStore
     public IReadOnlyList<string> ReadFailures(string? planFile, string? planDigest, string? session)
     {
         string path = Path.Combine(FailureDirectory(planFile, planDigest, session), FailuresFileName);
-        return ReadItems(path);
+        return ReadItems(path, MaxFailuresReadBytes);
     }
 
     /// <summary>
@@ -207,7 +222,7 @@ public sealed class ArbiterRunStore
     {
         ArgumentNullException.ThrowIfNull(reviewRun);
         string path = Path.Combine(ReviewDirectory(reviewRun), FindingsFileName);
-        return ReadItems(path);
+        return ReadItems(path, MaxFindingsReadBytes);
     }
 
     private async Task<ArbiterStoreStatus> AppendAsync(string directory, string fileName, string text, CancellationToken ct)
@@ -305,21 +320,29 @@ public sealed class ArbiterRunStore
         return newest ?? directory.LastWriteTimeUtc;
     }
 
-    private static IReadOnlyList<string> ReadItems(string path, long tailBytes = long.MaxValue)
+    /// <summary>
+    /// Reads the items of <paramref name="path"/>, looking only at its last <paramref name="tailBytes"/> bytes. There
+    /// is no default: every caller names the window its consumers need, so a new caller cannot read a file that only
+    /// grows in full.
+    /// </summary>
+    /// <remarks>
+    /// When the file is longer than the window, the read starts at the window's first byte. That byte starts an item
+    /// only when the byte before it is a newline (an item is one line, its own newlines escaped); otherwise the
+    /// first line is the end of an item cut by the seek and is dropped, so a whole item is never lost.
+    /// A missing file reads as empty.
+    /// </remarks>
+    internal static IReadOnlyList<string> ReadItems(string path, long tailBytes)
     {
-        if (!File.Exists(path))
-        {
-            return [];
-        }
-
+        ArgumentOutOfRangeException.ThrowIfLessThan(tailBytes, 1);
         try
         {
             List<string> items = [];
             using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            bool partialFirstLine = stream.Length > tailBytes;
-            if (partialFirstLine)
+            bool partialFirstLine = false;
+            if (stream.Length > tailBytes)
             {
-                stream.Seek(-tailBytes, SeekOrigin.End);
+                stream.Seek(stream.Length - tailBytes - 1, SeekOrigin.Begin);
+                partialFirstLine = stream.ReadByte() != '\n';
             }
 
             using StreamReader reader = new(stream);
@@ -342,6 +365,7 @@ public sealed class ArbiterRunStore
         }
         catch (IOException)
         {
+            // Includes a file that is absent when opened; a store that cannot be read has no items to offer.
             return [];
         }
         catch (UnauthorizedAccessException)

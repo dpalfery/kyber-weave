@@ -104,12 +104,20 @@ internal static class ArbiterLogFiles
     /// </summary>
     internal static IReadOnlyList<string> ReadCompleteLines(string path)
     {
-        if (!File.Exists(path))
+        string text;
+        try
+        {
+            text = File.ReadAllText(path);
+        }
+        catch (FileNotFoundException)
+        {
+            return [];
+        }
+        catch (DirectoryNotFoundException)
         {
             return [];
         }
 
-        string text = File.ReadAllText(path);
         if (text.Length == 0)
         {
             return [];

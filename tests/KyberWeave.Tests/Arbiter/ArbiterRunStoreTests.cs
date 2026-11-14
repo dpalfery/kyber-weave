@@ -161,6 +161,102 @@ public sealed class ArbiterRunStoreTests : IDisposable
         Assert.All(returns, item => Assert.StartsWith("task: T", item, StringComparison.Ordinal));
     }
 
+    private async Task<(string Path, long[] LineStarts, long Length)> WriteFindingLinesAsync(string run, params string[] texts)
+    {
+        ArbiterRunStore store = Store(Now);
+        foreach (string text in texts)
+        {
+            Assert.Equal(ArbiterStoreStatus.Stored, await store.AppendFindingAsync(run, text));
+        }
+
+        string file = Directory.GetFiles(ArbiterDirectory, "findings.jsonl", SearchOption.AllDirectories).Single();
+        byte[] bytes = await File.ReadAllBytesAsync(file);
+        List<long> starts = [0];
+        for (int i = 0; i < bytes.Length - 1; i++)
+        {
+            if (bytes[i] == (byte)'\n')
+            {
+                starts.Add(i + 1);
+            }
+        }
+
+        return (file, [.. starts], bytes.Length);
+    }
+
+    [Fact]
+    public async Task ATailThatStartsExactlyOnALineStartKeepsThatWholeItem()
+    {
+        (string path, long[] starts, long length) = await WriteFindingLinesAsync("RUN-TAIL", "first", "second", "third");
+
+        IReadOnlyList<string> read = ArbiterRunStore.ReadItems(path, length - starts[1]);
+
+        Assert.Equal(["second", "third"], read);
+    }
+
+    [Fact]
+    public async Task ATailThatStartsMidLineDropsOnlyTheCutItem()
+    {
+        (string path, long[] starts, long length) = await WriteFindingLinesAsync("RUN-TAIL", "first", "second", "third");
+
+        IReadOnlyList<string> read = ArbiterRunStore.ReadItems(path, length - starts[1] - 3);
+
+        Assert.Equal(["third"], read);
+    }
+
+    [Fact]
+    public async Task ATailThatStartsOnTheLastByteOfTheEarlierLineDropsNothingItShouldKeep()
+    {
+        (string path, long[] starts, long length) = await WriteFindingLinesAsync("RUN-TAIL", "first", "second", "third");
+
+        // The window opens on the newline that ends "first": only that empty remainder is dropped.
+        IReadOnlyList<string> read = ArbiterRunStore.ReadItems(path, length - starts[1] + 1);
+
+        Assert.Equal(["second", "third"], read);
+    }
+
+    [Fact]
+    public async Task AFileExactlyAtTheWindowKeepsEveryItemAndOneByteOverKeepsTheRestAfterTheCutLine()
+    {
+        (string path, _, long length) = await WriteFindingLinesAsync("RUN-TAIL", "first", "second");
+
+        Assert.Equal(["first", "second"], ArbiterRunStore.ReadItems(path, length));
+        Assert.Equal(["first", "second"], ArbiterRunStore.ReadItems(path, length + 1));
+        Assert.Equal(["second"], ArbiterRunStore.ReadItems(path, length - 1));
+    }
+
+    [Fact]
+    public void AMissingFileAndANonPositiveWindowAreHandledExplicitly()
+    {
+        Assert.Empty(ArbiterRunStore.ReadItems(Path.Combine(_root, "no", "such.jsonl"), 10));
+        Assert.Throws<ArgumentOutOfRangeException>(() => ArbiterRunStore.ReadItems(Path.Combine(_root, "x.jsonl"), 0));
+    }
+
+    [Fact]
+    public async Task ReadingFindingsAndFailuresLooksOnlyAtTheirTailWindows()
+    {
+        ArbiterRunStore store = Store(Now, new ArbiterStoreOptions(MaxItemBytes: 16384, RetainDays: 14));
+        string body = new('x', 8000);
+        int findings = (int)(ArbiterRunStore.MaxFindingsReadBytes / 8000) + 40;
+        int failures = (int)(ArbiterRunStore.MaxFailuresReadBytes / 8000) + 40;
+        for (int i = 0; i < findings; i++)
+        {
+            await store.AppendFindingAsync("RUN-GROW", $"n{i}\n{body}");
+        }
+
+        for (int i = 0; i < failures; i++)
+        {
+            await store.AppendFailureAsync("plan.md", "d", null, $"n{i}\n{body}");
+        }
+
+        IReadOnlyList<string> readFindings = store.ReadFindings("RUN-GROW");
+        IReadOnlyList<string> readFailures = store.ReadFailures("plan.md", "d", null);
+
+        Assert.InRange(readFindings.Count, 41, findings - 1);
+        Assert.StartsWith($"n{findings - 1}\n", readFindings[^1], StringComparison.Ordinal);
+        Assert.InRange(readFailures.Count, 41, failures - 1);
+        Assert.StartsWith($"n{failures - 1}\n", readFailures[^1], StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task ReadingReturnsOfAFileUnderTheCapKeepsEveryItem()
     {
