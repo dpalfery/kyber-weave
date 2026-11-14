@@ -108,6 +108,37 @@ public sealed class PlanFinalizeTests
     }
 
     [Fact]
+    public void AnUnreadableExistingTaskFileIsARefusalThatChangesNothing()
+    {
+        if (OperatingSystem.IsWindows())
+            return;
+
+        using DocFixture fixture = Repository();
+        string plan = Read(fixture, PlanTaskFileProbe.PlanPath);
+        string index = Read(fixture, PlanTaskFileProbe.PlanIndexPath);
+        string taskPath = Path.Combine(fixture.Root, PlanTaskFileProbe.TaskFilePath.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(taskPath)!);
+        File.WriteAllText(taskPath, "{}");
+        File.SetUnixFileMode(taskPath, UnixFileMode.None);
+        try
+        {
+            if (Environment.UserName == "root")
+                return;
+
+            (int exit, string output) = Run(fixture);
+
+            Assert.Equal(1, exit);
+            Assert.Contains("could not be read", output, StringComparison.Ordinal);
+            Assert.Equal(plan, Read(fixture, PlanTaskFileProbe.PlanPath));
+            Assert.Equal(index, Read(fixture, PlanTaskFileProbe.PlanIndexPath));
+        }
+        finally
+        {
+            File.SetUnixFileMode(taskPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+    }
+
+    [Fact]
     public void ASecondRunReportsAlreadyReadyAndChangesNothing()
     {
         using DocFixture fixture = Repository();

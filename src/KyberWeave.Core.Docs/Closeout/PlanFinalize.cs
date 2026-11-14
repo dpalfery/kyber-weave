@@ -167,7 +167,19 @@ public sealed partial class PlanFinalize
             return Refused();
         }
 
-        string? taskFileBefore = File.Exists(_files.Absolute(taskFile)) ? File.ReadAllText(_files.Absolute(taskFile)) : null;
+        string? taskFileBefore;
+        try
+        {
+            taskFileBefore = File.Exists(_files.Absolute(taskFile)) ? File.ReadAllText(_files.Absolute(taskFile)) : null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Nothing has been written yet, so there is nothing to restore; restoring from an unread copy would delete the file.
+            report.Add(new Diagnostic(PlanNeedsArchitect, Severity.Error,
+                $"The existing task file could not be read, so nothing was changed: {exception.Message}", plan, plan, Hint: ArchitectHint));
+            return Refused();
+        }
+
         try
         {
             File.WriteAllText(_files.Absolute(plan), newPlan);
