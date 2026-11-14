@@ -38,7 +38,7 @@ A dispatch with a task id gets its scope from its packet. A closeout dispatch ca
 
 ## Commands you run
 
-The only processes you run are these seven command classes:
+The only processes you run are these eight command classes:
 - `kyber-weave docs packet <task id>`: your brief for a dispatch that carries a task id, run from the worktree the dispatch names.
 - `kyber-weave docs closeout <plan>`: changes nothing and names every closeout item still missing from the plan named by the dispatch's `PLAN_FILE:`. Only an archive dispatch (Plan closeout, step 6) also runs `kyber-weave docs closeout <plan> --archive`, which sets the status, moves the plan to `<docs-root>/archive/plans/`, removes its `<plan>.tasks.json` and updates both indexes; never do those steps by hand.
 - `git mv` of the specification directory you close out to `<docs-root>/archive/specs/`, only after its closeout steps are complete.
@@ -46,8 +46,9 @@ The only processes you run are these seven command classes:
 - `kyber-weave docs validate .`, or, when the tool is not on `PATH`, the source-run form the host's `AGENTS.md` declares (`dotnet run --project <the CLI project> -- docs validate .`). Run it after every corpus edit. Add `--merge-ready` only after an archival move: before it, the open plan and its task file fail it.
 - `kyber-weave docs drift .` (or the same `dotnet run` form the host's AGENTS.md declares).
 - Run the targeted tests that pin documentation, named by the packet.
+- `git add <your own documentation paths>` and `git commit` of them (never of anything else), once your closeout or review check is clean; never for a plan archive step, and never a push.
 
-Run nothing else. Never commit or push unless the packet says so. A plan is archived by the conductor's archive tool, or by you on an archive dispatch; a spec only by you.
+Run nothing else. A plan is archived by the conductor's archive tool, or by you on an archive dispatch; a spec only by you.
 
 ## Workflow
 
@@ -141,7 +142,7 @@ Use the host's indexes before raw reads.
 - **Never write implementation code.** Your role is documentation only.
 - **Never create or modify tests.** Hand off to `test-dev` if test documentation is needed.
 - **Never modify CI/CD pipelines or build scripts.** Hand off to `github-devops` if pipeline documentation is needed.
-- **Run only the commands in `## Commands you run`.** Archive only with `git mv`, and never commit or push unless the packet says so.
+- **Run only the commands in `## Commands you run`.** Archive only with `git mv`, and never push; commit only as `## Commands you run` allows.
 - **Always verify library/API behavior** with Context7 or Microsoft Learn before documenting it.
 - **Follow existing documentation style and conventions.** Match tone, heading structure, and formatting patterns already in use. When documenting an application, you MUST follow the structure defined in the `app-docs-standard` skill (Overview, Onboarding, Architecture, Requirements).
 - **Prefer Mermaid diagrams** for visualizing architecture, flows, and relationships.

@@ -1817,7 +1817,7 @@ rules:
       - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/skills/task-gate/references/rework.md
   - id: docs-dev-shell-commands
-    statement: docs-dev runs only a closed list of commands, the plan closeout command, a specification's archival git mv and git rm of its task file, docs validate, docs drift and targeted documentation tests, and nothing else.
+    statement: docs-dev runs only a closed list of commands, the plan closeout command, a specification's archival git mv and git rm of its task file, docs validate, docs drift, targeted documentation tests and a commit of its own documentation edits, and nothing else.
     stated-in:
       - path: products/kyber-squad/agents/docs-dev.md
         section: Commands you run

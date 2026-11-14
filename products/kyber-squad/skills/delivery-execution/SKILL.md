@@ -32,6 +32,8 @@ The conductor dispatches by task id. It does not open the plan or the task file 
 
 A finished task commits on the feature branch with a `Task: <id>` line, so a resumed run can tell which tasks completed and where the work stopped. The worker's report goes in the commit message body — its completion digest and the message that explains it — and the `Task:` line sits in the trailer area beneath, which is what `kyber-weave run start --resume` reads back.
 
+The `docs-dev` harvest commits its own documentation edits the same way once its closeout check is clean, without a `Task:` line since it has no task id, so nothing waits uncommitted for a separate commit or a read-only git check before the review.
+
 Commit per task, and push after each integrated task. A run that stops early then leaves a record of everything it finished, where a run that committed once at the end leaves nothing to resume from.
 
 ## Task session continuity
