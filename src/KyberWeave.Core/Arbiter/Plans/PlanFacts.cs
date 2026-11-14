@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Arbiter.Plans;
 
@@ -83,7 +84,7 @@ public static partial class PlanFacts
             content = File.ReadAllText(resolved);
             document = PlanDocumentParser.Parse(content);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             return facts.With("plan.exists", false, ArbiterFactLabel.Derived);
         }
@@ -156,7 +157,7 @@ public static partial class PlanFacts
                         active.Add(Path.GetRelativePath(repositoryRoot, file).Replace('\\', '/'));
                 }
             }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            catch (Exception exception) when (FileFailure.Is(exception))
             {
                 return null;
             }

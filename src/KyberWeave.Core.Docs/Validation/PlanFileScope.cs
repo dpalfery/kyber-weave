@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Processes;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Docs.Validation;
 
@@ -145,7 +146,7 @@ internal sealed partial class PlanFileScope
             files = Directory.GetFiles(directory);
             directories = Directory.GetDirectories(directory);
         }
-        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             yield break;
         }

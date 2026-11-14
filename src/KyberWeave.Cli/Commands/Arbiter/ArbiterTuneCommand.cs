@@ -7,6 +7,7 @@ using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Diagnostics;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Cli.Commands.Arbiter;
 
@@ -88,11 +89,7 @@ public sealed class ArbiterTuneCommand : Command<ArbiterSettings>
 
             truncationNote = ArbiterLogProblems.TruncationNote(ledgerRead, decisionRead);
         }
-        catch (Exception exception) when (exception is IOException
-            or UnauthorizedAccessException
-            or System.Text.Json.JsonException
-            or NotSupportedException
-            or InvalidDataException)
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is System.Text.Json.JsonException or InvalidDataException)
         {
             report.Add(new Diagnostic(
                 ArbiterEvaluator.HookErrorCode,

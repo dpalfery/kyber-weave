@@ -1,5 +1,6 @@
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Arbiter.Providers;
 
@@ -36,8 +37,7 @@ public static class ConfiguredProvider
         {
             provider = ArbiterUserSettings.ApplyTo(config.Arbiter.Provider, homeDirectory);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException
-                                              or YamlDotNet.Core.YamlException)
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or YamlDotNet.Core.YamlException)
         {
             provider = config.Arbiter.Provider;
         }
@@ -67,8 +67,7 @@ public static class ConfiguredProvider
             {
                 return ArbiterKeyResolver.Resolve(uri.ToString(), store, userOverride);
             }
-            catch (Exception exception) when (exception is InvalidOperationException or IOException or UnauthorizedAccessException
-                                                  or System.ComponentModel.Win32Exception)
+            catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception)
             {
                 return null;
             }

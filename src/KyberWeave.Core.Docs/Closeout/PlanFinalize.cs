@@ -5,6 +5,7 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Docs.Closeout;
 
@@ -129,7 +130,7 @@ public sealed partial class PlanFinalize
         {
             planRead = PresentFile.ReadIfPresent(_files.Absolute(plan));
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             report.Add(new Diagnostic(NotAnActivePlan, Severity.Error, $"'{plan}' could not be read: {exception.Message}", plan, plan,
                 Hint: "Make the plan a readable file, then run the finalize again."));
@@ -160,7 +161,7 @@ public sealed partial class PlanFinalize
         {
             indexText = planIndex is null ? null : PresentFile.ReadIfPresent(_files.Absolute(planIndex));
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             report.Add(new Diagnostic(PlanNeedsArchitect, Severity.Error,
                 $"The plan index could not be read, so nothing was changed: {exception.Message}", plan, plan, Hint: ArchitectHint));
@@ -208,7 +209,7 @@ public sealed partial class PlanFinalize
             // may a restore delete it.
             taskFileBefore = PresentFile.ReadIfPresent(_files.Absolute(taskFile));
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             // Nothing has been written yet, so there is nothing to restore; restoring from an unread copy would delete the file.
             report.Add(new Diagnostic(PlanNeedsArchitect, Severity.Error,
@@ -243,7 +244,7 @@ public sealed partial class PlanFinalize
                 return Refused();
             }
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             IReadOnlyList<string> notUndone = Restore(plan, planText, planIndex, indexText, taskFile, taskFileBefore);
             report.Add(new Diagnostic(PlanNeedsArchitect, Severity.Error,
@@ -298,7 +299,7 @@ public sealed partial class PlanFinalize
             if (index is not null && PresentFile.ReadIfPresent(_files.Absolute(index)) is not null)
                 own.Add(index);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             report.Add(new Diagnostic(PlanNeedsArchitect, Severity.Error,
                 $"The plan index could not be read, so nothing was committed: {exception.Message}", plan, plan, Hint: ArchitectHint));
@@ -341,7 +342,7 @@ public sealed partial class PlanFinalize
                 problem = "it is not a valid task file";
             }
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             problem = $"it could not be read ({exception.GetType().Name}: {exception.Message})";
         }
@@ -602,7 +603,7 @@ public sealed partial class PlanFinalize
         {
             return new FileInfo(path).LinkTarget is not null;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             return false;
         }
@@ -620,7 +621,7 @@ public sealed partial class PlanFinalize
             File.WriteAllText(path, text);
             return true;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             return false;
         }
@@ -644,7 +645,7 @@ public sealed partial class PlanFinalize
             // The folder is gone, so the file is too.
             return true;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             return false;
         }

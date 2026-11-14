@@ -5,6 +5,7 @@ using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Closeout;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Docs.Validation;
 
@@ -539,7 +540,7 @@ public sealed partial class PlanTaskFileGenerator
 
             return BoundedFile.ReadAllText(full);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidDataException)
         {
             report.Add(new Diagnostic(
                 PlanNotReadable,
@@ -614,7 +615,7 @@ public sealed partial class PlanTaskFileGenerator
                     found[id] = entry;
             }
         }
-        catch (Exception exception) when (exception is JsonException or IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is JsonException)
         {
             // An unreadable file keeps no picks; the check reports the file itself.
         }
@@ -648,7 +649,7 @@ public sealed partial class PlanTaskFileGenerator
             File.WriteAllText(full, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
             return true;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             report.Add(new Diagnostic(
                 PlanTaskFileValidator.Malformed,
@@ -669,7 +670,7 @@ public sealed partial class PlanTaskFileGenerator
         {
             diskText = PresentFile.ReadIfPresent(full);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             report.Add(new Diagnostic(
                 PlanTaskFileValidator.Malformed,
@@ -700,7 +701,7 @@ public sealed partial class PlanTaskFileGenerator
             actualText = diskText;
             actual = JsonSerializer.Deserialize<PlanTaskFile>(actualText, PlanTaskFileJson.ReadOptions);
         }
-        catch (Exception exception) when (exception is JsonException or IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is JsonException)
         {
             report.Add(new Diagnostic(
                 PlanTaskFileValidator.Malformed,

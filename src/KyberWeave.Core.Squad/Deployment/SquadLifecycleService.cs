@@ -6,6 +6,7 @@ using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
 using YamlDotNet.RepresentationModel;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Squad.Deployment;
 
@@ -782,7 +783,7 @@ public sealed class SquadLifecycleService
                 dir = dir.Parent;
             }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             // Ignore filesystem errors when searching parent directories
         }
@@ -901,10 +902,7 @@ public sealed class SquadLifecycleService
             new SquadCanonicalProfileStore(_stateStore.UserPaths).Write(
                 new SquadCanonicalProfiles(version, source.ModelProfiles, agentProfiles));
         }
-        catch (Exception exception) when (exception is IOException or
-                                              UnauthorizedAccessException or
-                                              InvalidDataException or
-                                              ArgumentException)
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidDataException)
         {
             warnings.Add(
                 $"The Squad canonical profile snapshot for version '{version}' was not written " +

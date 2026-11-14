@@ -3,6 +3,7 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Squad.Briefs;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Cli.Commands.Squad.Brief;
 
@@ -167,7 +168,7 @@ internal static class SquadBriefBuilder
         {
             return File.Exists(file) ? File.ReadAllText(file) : null;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             return null;
         }

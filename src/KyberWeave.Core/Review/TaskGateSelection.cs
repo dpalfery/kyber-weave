@@ -1,4 +1,5 @@
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Review;
 
@@ -181,7 +182,7 @@ public static class TaskGateSelection
                     _ = Directory.EnumerateFileSystemEntries(root).FirstOrDefault();
                 }
             }
-            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+            catch (Exception ex) when (FileFailure.Is(ex))
             {
                 refusals.Add($"The repository root '{root}' is not accessible: {ex.Message}");
             }

@@ -6,6 +6,7 @@ using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Core.Review;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Docs.Closeout;
 
@@ -124,7 +125,7 @@ public sealed partial class PlanCloseout
                     Hint: $"Restore it with 'git checkout -- {planIndex}', then run the closeout again."));
             }
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             report.Add(new Diagnostic(IndexNotEditable, Severity.Error, $"'{planIndex}' could not be read: {exception.Message}", plan, planIndex,
                 Hint: "Make the plan index a readable file, then run the closeout again."));
@@ -135,7 +136,7 @@ public sealed partial class PlanCloseout
         {
             planText = PresentFile.ReadIfPresent(_files.Absolute(plan));
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             report.Add(new Diagnostic(NotAnActivePlan, Severity.Error, $"'{plan}' could not be read: {exception.Message}", plan, plan,
                 Hint: "Make the plan a readable file, then run the closeout again."));
@@ -191,7 +192,7 @@ public sealed partial class PlanCloseout
             {
                 (newInventory, inventoryAction) = WithInventoryRow(inventory, planIndexText ?? string.Empty, row, date);
             }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            catch (Exception exception) when (FileFailure.Is(exception))
             {
                 report.Add(new Diagnostic(IndexNotEditable, Severity.Error, $"'{inventory}' could not be read: {exception.Message}", plan, inventory,
                     Hint: "Make the archived plan inventory a readable file, then run the closeout again."));
@@ -302,7 +303,7 @@ public sealed partial class PlanCloseout
             {
                 deletePartial(path);
             }
-            catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException)
+            catch (Exception cleanup) when (FileFailure.Is(cleanup))
             {
                 // The original exception is rethrown below.
             }

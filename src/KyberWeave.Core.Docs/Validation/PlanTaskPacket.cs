@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Closeout;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Docs.Validation;
 
@@ -177,7 +178,7 @@ public static partial class PlanTaskPacket
         {
             return ActiveStatusRegex().IsMatch(BoundedFile.ReadAllText(file));
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidDataException)
         {
             return false;
         }

@@ -5,6 +5,7 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Review;
 using Spectre.Console.Cli;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Cli.Commands.Review;
 
@@ -243,7 +244,7 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
             history = ReviewWorkTree.Prior(
                 ReviewWorkTree.Of(root), settings.BaseRef, ReviewCycles.ReadThrough(settings.Prior), CurrentCycleFolder(settings)).Valid;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException)
         {
             return counts;
         }
@@ -257,8 +258,7 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
                 ReviewOutcome outcome = VerdictEngine.Evaluate(prior.Findings, gates, config.Review, DateOnly.FromDateTime(DateTime.UtcNow));
                 counts.Add(FailedGates(gates).Count() + outcome.Accepted.Count(config.Review.Policy.FixRoundTakes));
             }
-            catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException or ArgumentException
-                                           or NotSupportedException or InvalidOperationException)
+            catch (Exception ex) when (FileFailure.Is(ex) || ex is JsonException or InvalidOperationException)
             {
                 // A cycle that cannot be read adds no count: the loop then counts fewer cycles, never more.
             }
@@ -382,7 +382,7 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
         {
             ReviewCycles.WriteIdentity(folder, identity);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             // The findings were written; without the record the next cycle runs in full, which is the safe answer.
         }
@@ -556,7 +556,7 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
                 "*.md",
                 new EnumerationOptions { RecurseSubdirectories = false, AttributesToSkip = 0, IgnoreInaccessible = false });
         }
-        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             report.Add(new Diagnostic(
                 SeatUnreadable,
@@ -605,7 +605,7 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
             {
                 seats.Add(SeatOutputParser.Parse(lens, File.ReadAllText(file.FullName)));
             }
-            catch (Exception ex) when (ex is SeatOutputException or IOException or UnauthorizedAccessException)
+            catch (Exception ex) when (FileFailure.Is(ex) || ex is SeatOutputException)
             {
                 report.Add(new Diagnostic(
                     SeatUnreadable,
@@ -1262,8 +1262,7 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
         }
         // An empty or malformed document can surface as a JSON error, an argument error (a blank document), or an
         // unsupported-shape error from the serializer; each is the document being unreadable, never a crash.
-        catch (Exception ex) when (ex is System.Text.Json.JsonException or ArgumentException or NotSupportedException
-                                       or InvalidOperationException or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is System.Text.Json.JsonException or InvalidOperationException)
         {
             report.Add(new Diagnostic(
                 UnreadableInput,

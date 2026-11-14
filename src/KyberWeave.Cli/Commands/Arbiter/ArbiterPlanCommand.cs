@@ -3,6 +3,7 @@ using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Diagnostics;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Cli.Commands.Arbiter;
 
@@ -54,7 +55,7 @@ public sealed class ArbiterPlanCommand : Command<ArbiterSettings>
         {
             text = File.ReadAllText(resolved);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             report.Add(new Diagnostic(
                 PlanNotReadable,

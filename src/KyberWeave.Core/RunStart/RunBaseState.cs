@@ -1,5 +1,6 @@
 using System.Text.Json;
 using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.RunStart;
 
@@ -81,7 +82,7 @@ public static class RunBaseState
 
             files = Directory.GetFiles(directory, "*" + StateExtension);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             return null;
         }
@@ -94,7 +95,7 @@ public static class RunBaseState
             {
                 document = JsonSerializer.Deserialize<StateDocument>(File.ReadAllText(file), JsonOptions);
             }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            catch (Exception exception) when (FileFailure.Is(exception))
             {
                 return null;
             }
@@ -152,7 +153,7 @@ public static class RunBaseState
                 }
             }
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             return null;
         }
@@ -189,7 +190,7 @@ public static class RunBaseState
         {
             json = File.ReadAllText(path);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             return false;
         }

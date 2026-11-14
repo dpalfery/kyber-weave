@@ -4,6 +4,7 @@ using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Configuration;
 using YamlDotNet.Core;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Arbiter;
 
@@ -260,7 +261,7 @@ public static class Composition
                 KyberWeaveConfig config = new() { Arbiter = ArbiterConfigLoader.LoadUserConfig(yaml) };
                 return config;
             }
-            catch (Exception ex) when (ex is YamlException or InvalidOperationException or IOException or UnauthorizedAccessException)
+            catch (Exception ex) when (FileFailure.Is(ex) || ex is YamlException or InvalidOperationException)
             {
                 throw new InvalidOperationException(
                     $"{HookCommand.FailClosedCode}: malformed user config '{userConfigPath}': {OneLine(ex.Message)}",

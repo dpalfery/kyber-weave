@@ -14,6 +14,7 @@ using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Processes;
 using Spectre.Console;
 using YamlDotNet.Core;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Cli.Commands.Arbiter;
 
@@ -107,10 +108,7 @@ public static class ArbiterCommandComposition
         {
             return ResolveKey(config, endpoint);
         }
-        catch (Exception exception) when (exception is InvalidOperationException
-            or IOException
-            or UnauthorizedAccessException
-            or System.ComponentModel.Win32Exception)
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             return null;
         }
@@ -307,7 +305,7 @@ public static class ArbiterCommandComposition
             configPath = repoConfigPath;
             return true;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or YamlException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is YamlException)
         {
             config = KyberWeaveConfig.ProductDefaults;
             configPath = repoConfigPath;
@@ -455,10 +453,7 @@ public static class ArbiterCommandComposition
             if (!string.IsNullOrWhiteSpace(root))
                 return root;
         }
-        catch (Exception exception) when (exception is InvalidOperationException
-            or IOException
-            or UnauthorizedAccessException
-            or System.ComponentModel.Win32Exception)
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             // No git, no root: the caller works from the path itself.
         }
@@ -590,11 +585,7 @@ public static class ArbiterCommandComposition
         {
             return null;
         }
-        catch (IOException)
-        {
-            return null;
-        }
-        catch (UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             return null;
         }

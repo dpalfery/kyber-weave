@@ -1,4 +1,5 @@
 using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Arbiter.Plans;
 
@@ -117,7 +118,7 @@ public static class PlanRootResolver
             string gitFile = Path.Combine(directory, ".git");
             return File.Exists(gitFile) ? File.ReadAllText(gitFile).Trim() : null;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             return null;
         }

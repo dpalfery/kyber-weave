@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Review;
 
@@ -129,7 +130,7 @@ public sealed partial class SeverityOverrides
         {
             return Parse(File.ReadAllText(path), Path.GetRelativePath(root, path).Replace('\\', '/'));
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             return None;
         }

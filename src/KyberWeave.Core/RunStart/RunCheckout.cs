@@ -1,3 +1,4 @@
+using KyberWeave.Core.FileSystem;
 namespace KyberWeave.Core.RunStart;
 
 /// <summary>One run <c>run start</c> recorded: the repository, its branch, and where it works.</summary>
@@ -161,8 +162,7 @@ public static class RunCheckout
             string head = File.ReadAllText(Path.Combine(gitDirectory, "HEAD")).Trim();
             return head.StartsWith(HeadRefPrefix, StringComparison.Ordinal) ? head[HeadRefPrefix.Length..] : null;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException
-                                              or NotSupportedException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             return null;
         }
@@ -235,7 +235,7 @@ public static class RunCheckout
 
                 link = info.LinkTarget;
             }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            catch (Exception exception) when (FileFailure.Is(exception))
             {
                 link = null;
             }

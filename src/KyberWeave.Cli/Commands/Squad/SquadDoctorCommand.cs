@@ -12,6 +12,7 @@ using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Core.Squad.Validation;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Cli.Commands.Squad;
 
@@ -484,8 +485,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             {
                 receipt = stateStore.ReadReceipt(workingDirectory, scope);
             }
-            catch (Exception ex) when (ex is InvalidDataException or ArgumentException or JsonException
-                or IOException or UnauthorizedAccessException)
+            catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException or JsonException)
             {
                 // The retired-skills check above already names an unreadable receipt.
                 continue;
@@ -578,7 +578,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 retained.AddRange(SquadRetiredSkills.FindRetainedReceiptPaths(receipt));
             }
         }
-        catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException)
         {
             // An unreadable receipt is state this check could not read. Warn with the
             // reason rather than reporting healthy over unknown state; the registry
@@ -802,10 +802,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             }
         }
         catch (Exception ex) when (
-            ex is SquadRenderValidationException
-                or InvalidDataException
-                or IOException
-                or UnauthorizedAccessException or ArgumentException)
+            FileFailure.Is(ex) || ex is SquadRenderValidationException or InvalidDataException)
         {
             AnsiConsole.MarkupLine(
                 $"  [red]fail[/] Global unmanaged-collision scan failed: {Markup.Escape(ex.Message)}");
@@ -847,8 +844,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         {
             receipt = stateStore.ReadReceipt(workingDirectory, scope);
         }
-        catch (Exception ex) when (ex is InvalidDataException or ArgumentException or System.Text.Json.JsonException
-            or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException or System.Text.Json.JsonException)
         {
             AnsiConsole.MarkupLine($"  [yellow]warn[/] Owned blocks: cannot read the ownership receipt: {Markup.Escape(ex.Message)}");
             return false;
@@ -918,7 +914,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             {
                 currentJson = File.ReadAllText(fullPath);
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            catch (Exception ex) when (FileFailure.Is(ex))
             {
                 AnsiConsole.MarkupLine(
                     $"  [red]fail[/] Owned block drift: {fileLabel} (unreadable: {Markup.Escape(ex.Message)})");

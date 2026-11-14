@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Core.Review;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Arbiter.Facts;
 
@@ -87,10 +88,7 @@ public static class GateReportFacts
             string json = Encoding.UTF8.GetString(buffer);
             return ReviewJson.ReadGates(json);
         }
-        catch (Exception ex) when (ex is IOException
-            or UnauthorizedAccessException
-            or JsonException
-            or ArgumentException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is JsonException)
         {
             return null;
         }
@@ -207,7 +205,7 @@ public static class GateReportFacts
                 .Where(candidate => !string.Equals(Path.GetFullPath(candidate), Path.GetFullPath(path), StringComparison.Ordinal))
                 .Any(candidate => File.GetLastWriteTimeUtc(candidate) < passedAt && IsFailingRun(TryReadFile(candidate)));
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             return null;
         }
@@ -336,12 +334,7 @@ public static class GateReportFacts
 
             return resolved;
         }
-        catch (Exception ex) when (ex is ArgumentException
-            or NotSupportedException
-            or PathTooLongException
-            or IOException
-            or UnauthorizedAccessException
-            or System.Security.SecurityException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is PathTooLongException)
         {
             return null;
         }

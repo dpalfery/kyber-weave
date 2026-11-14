@@ -11,6 +11,7 @@ using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Cli.Commands.Review;
 
@@ -465,7 +466,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
             report.AddMetric("evidence", path);
             return path;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             report.Add(new Diagnostic(
                 ReportWriteFailed,
@@ -500,7 +501,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
         {
             NotSeatedRecord.Replace(cycle.Folder!, CouncilSeating.GateProvenLenses, skips);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             // The printed not-seated lines still carry the decisions; the verdict asks for any it cannot read.
         }
@@ -518,7 +519,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
         {
             ReviewCycles.WriteIdentity(cycle.Folder, identity);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             report.Add(new Diagnostic(
                 ReportWriteFailed,
@@ -605,8 +606,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
 
             existing = ReviewJson.ReadGates(File.ReadAllText(path));
         }
-        catch (Exception ex) when (ex is System.Text.Json.JsonException or ArgumentException or NotSupportedException
-                                       or InvalidOperationException or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is System.Text.Json.JsonException or InvalidOperationException)
         {
             return ran;
         }
@@ -837,7 +837,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
                     Directory.CreateDirectory(Path.GetDirectoryName(full)!);
                     File.WriteAllText(full, output);
                 }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                catch (Exception ex) when (FileFailure.Is(ex))
                 {
                     log = null;
                 }

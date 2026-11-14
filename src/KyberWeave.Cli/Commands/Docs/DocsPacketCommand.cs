@@ -6,6 +6,7 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Validation;
 using Spectre.Console.Cli;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Cli.Commands.Docs;
 
@@ -91,7 +92,7 @@ public sealed class DocsPacketCommand : Command<DocsPacketSettings>
             {
                 prior = File.ReadAllText(Path.GetFullPath(settings.PriorResults, current));
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            catch (Exception ex) when (FileFailure.Is(ex))
             {
                 report.Add(new Diagnostic(
                     PriorResultsUnreadable,

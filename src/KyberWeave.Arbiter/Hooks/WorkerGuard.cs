@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.RunStart;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Arbiter.Hooks;
 
@@ -356,7 +357,7 @@ public static class WorkerGuard
                     File.Delete(file);
                 }
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            catch (Exception ex) when (FileFailure.Is(ex))
             {
                 // A file another process holds is swept next time.
             }

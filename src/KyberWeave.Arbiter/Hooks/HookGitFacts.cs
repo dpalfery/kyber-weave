@@ -6,6 +6,7 @@ using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.RunStart;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Arbiter.Hooks;
 
@@ -386,7 +387,7 @@ internal sealed class HookGitFacts(
                 ? facts.With("file.surroundings", string.Join('\n', window), ArbiterFactLabel.Derived)
                 : facts;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             return facts;
         }
@@ -619,7 +620,7 @@ internal sealed class HookGitFacts(
                             {
                                 File.Delete(tempPath);
                             }
-                            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                            catch (Exception ex) when (FileFailure.Is(ex))
                             {
                             }
                         }
@@ -629,7 +630,7 @@ internal sealed class HookGitFacts(
                 }
             }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is JsonException)
         {
             // Snapshot persistence is best-effort; on failure the fact stays absent so the
             // rule stops and asks instead of judging a diff the dispatch never appeared in.
@@ -644,7 +645,7 @@ internal sealed class HookGitFacts(
         {
             return File.Exists(filePath) ? File.ReadAllText(filePath) : string.Empty;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             return string.Empty;
         }
@@ -697,7 +698,7 @@ internal sealed class HookGitFacts(
             {
                 File.Delete(temp);
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            catch (Exception ex) when (FileFailure.Is(ex))
             {
             }
         }

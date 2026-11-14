@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Closeout;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Docs.Delivery;
 
@@ -100,7 +101,7 @@ public static partial class PullRequestDescription
                 match = (listFolder ?? (static path => Directory.EnumerateFiles(path)))(folder)
                     .FirstOrDefault(file => string.Equals(Path.GetFileName(file), Path.GetFileName(location), StringComparison.OrdinalIgnoreCase));
             }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            catch (Exception exception) when (FileFailure.Is(exception))
             {
                 // A folder that cannot be listed may hold the template: it is named as unreadable, not skipped in silence.
                 unreadable.Add(location);
@@ -120,7 +121,7 @@ public static partial class PullRequestDescription
             {
                 return new HostTemplate(read(match), unreadable);
             }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+            catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidDataException)
             {
                 // A template that cannot be read, or is larger than a template can be, is not worth failing the delivery for: the next location, or the standard format, is used.
                 unreadable.Add(location);

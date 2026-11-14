@@ -1,6 +1,7 @@
 using System.Text.Json;
 using KyberWeave.Arbiter.Hooks.Adapters;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Arbiter.Hooks;
 
@@ -320,7 +321,7 @@ public sealed class HookCommand
         {
             return DispatchClaim.TryClaim(repoRoot, claim, owner) ? ClaimResult.Created : ClaimResult.Held;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             log.WriteLine($"Arbiter: could not record the dispatch claim ({OneLine(ex.Message)}); evaluating without it.");
             return ClaimResult.Unavailable;
@@ -334,7 +335,7 @@ public sealed class HookCommand
             string? owner = DispatchClaim.ReadOwner(repoRoot, claim);
             return string.IsNullOrWhiteSpace(owner) ? "another hook" : owner;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             log.WriteLine($"Arbiter: could not read the dispatch claim ({OneLine(ex.Message)}).");
             return "another hook";

@@ -7,6 +7,7 @@ using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Closeout;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Cli.Commands.Arbiter;
 
@@ -145,11 +146,7 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
         // JsonException rather than an IOException. Reading the log must fail closed the
         // same way either way, or the audit crashes on the corrupt file it exists to
         // report on.
-        catch (Exception exception) when (exception is IOException
-            or UnauthorizedAccessException
-            or System.Text.Json.JsonException
-            or NotSupportedException
-            or System.IO.InvalidDataException)
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is System.Text.Json.JsonException or System.IO.InvalidDataException)
         {
             report.Add(new Diagnostic(
                 ArbiterEvaluator.HookErrorCode,
@@ -258,8 +255,7 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
             return ArbiterUserSettings.ApplyTo(config.Arbiter.Provider, home).Kind
                    != ArbiterProviderKind.None;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
-                                              or YamlDotNet.Core.YamlException)
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is YamlDotNet.Core.YamlException)
         {
             reported++;
             report.Add(new Diagnostic(

@@ -4,6 +4,7 @@ using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Review;
 
@@ -354,7 +355,7 @@ public sealed class ReviewDecisionModel
         {
             await new DecisionLog(_logDirectory).AppendAsync(record, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             // The log is an audit trail; a review is never failed because it could not be written. The loss is counted
             // and named in the summary line, so a missing entry is not mistaken for a decision that was never made.

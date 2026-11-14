@@ -13,6 +13,7 @@ using KyberWeave.Core.RunStart;
 using KyberWeave.Core.Squad.Briefs;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Cli.Commands.Run;
 
@@ -565,7 +566,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
             RunBaseState.Write(homeDirectory, branch, baseRef, place);
             return true;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             return false;
         }

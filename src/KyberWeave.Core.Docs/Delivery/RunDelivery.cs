@@ -10,6 +10,7 @@ using KyberWeave.Core.Docs.Closeout;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review;
 using KyberWeave.Core.RunStart;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Docs.Delivery;
 
@@ -235,7 +236,7 @@ public sealed partial class RunDelivery
         {
             planText = plan is null ? null : PresentFile.ReadIfPresent(_files.Absolute(plan));
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             return Refused(PlanNotDeliverable, $"The plan '{plan}' could not be read: {exception.Message}. Nothing was changed.",
                 "Make the archived plan a readable file, then call this again.");
@@ -659,7 +660,7 @@ public sealed partial class RunDelivery
 
     /// <summary>Whether <paramref name="exception"/> is a way a scratch evidence file can fail to read: I/O, permission, malformed JSON or too large.</summary>
     private static bool IsEvidenceFailure(Exception exception) =>
-        exception is JsonException or IOException or UnauthorizedAccessException or ArgumentException or InvalidDataException;
+        FileFailure.Is(exception) || exception is JsonException or InvalidDataException;
 
     /// <summary>Records that a piece of run evidence exists but could not be used, so a reader of the report can tell that from evidence never recorded.</summary>
     private static void WarnUnreadable(DiagnosticReport report, string what, Exception exception, string? consequence = null) =>
@@ -703,7 +704,7 @@ public sealed partial class RunDelivery
         {
             return PresentFile.ReadIfPresent(_files.Absolute(path));
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             WarnUnreadable(report, $"The filed todo '{path}'", exception, "it is listed by its file name alone");
             return string.Empty;

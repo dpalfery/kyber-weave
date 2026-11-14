@@ -1,4 +1,5 @@
 using System.Text.Json;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Review;
 
@@ -52,7 +53,7 @@ public static class NotSeatedRecord
                 ? read
                 : new Dictionary<string, string>(StringComparer.Ordinal);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is JsonException)
         {
             return new Dictionary<string, string>(StringComparer.Ordinal);
         }

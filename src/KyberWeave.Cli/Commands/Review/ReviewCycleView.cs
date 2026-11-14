@@ -2,6 +2,7 @@ using System.Text.Json;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Review;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Cli.Commands.Review;
 
@@ -134,8 +135,7 @@ internal static class ReviewCycleView
             recheck.AddRange(findings.Findings.Where(policy.FixRoundTakes));
             return true;
         }
-        catch (Exception ex) when (ex is JsonException or ArgumentException or NotSupportedException
-                                       or InvalidOperationException or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is JsonException or InvalidOperationException)
         {
             report.Add(new Diagnostic(
                 unreadableCode,

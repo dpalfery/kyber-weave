@@ -12,6 +12,7 @@ using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Core.Squad.Validation;
 using KyberWeave.Core.Text;
 using Spectre.Console;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Cli.Commands.Squad;
 
@@ -220,7 +221,7 @@ internal static class SquadCommandComposition
         {
             return File.Exists(path) ? File.ReadAllText(path) : null;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             return null;
         }
@@ -349,7 +350,7 @@ internal static class SquadCommandComposition
                 dir = dir.Parent;
             }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
         }
 
@@ -404,8 +405,7 @@ internal static class SquadCommandComposition
                     if (text.Contains("name:", StringComparison.Ordinal)) return SquadSourceLoader.Load(extractionRoot);
                 }
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
-                                           or SquadSourceValidationException)
+            catch (Exception ex) when (FileFailure.Is(ex) || ex is SquadSourceValidationException)
             {
                 // Fall through to checkout lookup.
             }
@@ -421,7 +421,7 @@ internal static class SquadCommandComposition
                 dir = dir.Parent;
             }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SquadSourceValidationException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is SquadSourceValidationException)
         {
             // Ignore and return null.
         }
@@ -771,8 +771,7 @@ internal static class SquadCommandComposition
             SquadReceipt? receipt = stateStore.ReadReceipt(home, SquadDeploymentScope.Global);
             return receipt is not null && SquadDeploymentPlan.IsLegacySingleRootReceipt(receipt) ? receipt : null;
         }
-        catch (Exception ex) when (ex is InvalidDataException or ArgumentException or IOException
-                                       or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException)
         {
             // A corrupt or blank receipt is reported by the command that reads it; it does not pick an anchor here.
             return null;

@@ -14,6 +14,7 @@ using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Cli.Commands.Arbiter;
 
@@ -118,7 +119,7 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
         {
             effective = ArbiterUserSettings.ApplyTo(config.Arbiter.Provider, home);
         }
-        catch (Exception exception) when (exception is InvalidOperationException or IOException or UnauthorizedAccessException or YamlDotNet.Core.YamlException)
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or YamlDotNet.Core.YamlException)
         {
             return;
         }
@@ -180,7 +181,7 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
         {
             writtenUtc = File.GetLastWriteTimeUtc(path);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             return false;
         }
@@ -330,10 +331,7 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
                 "arbiter.provider"));
             return;
         }
-        catch (Exception exception) when (exception is InvalidOperationException
-            or IOException
-            or UnauthorizedAccessException
-            or System.ComponentModel.Win32Exception)
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             key = null;
         }
@@ -390,10 +388,7 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
             ProcessResult result = ArbiterCommandComposition.RunProcess(startInfo, string.Empty);
             return result.ExitCode == 0;
         }
-        catch (Exception exception) when (exception is InvalidOperationException
-            or IOException
-            or UnauthorizedAccessException
-            or System.ComponentModel.Win32Exception)
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             // Without git there is no evidence the log is ignored: warn, the safe direction.
             return false;
@@ -484,10 +479,7 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
             string full = Path.IsPathRooted(path) ? path : Path.Combine(root, path);
             return File.Exists(full) || Directory.Exists(full);
         }
-        catch (Exception exception) when (exception is IOException
-            or UnauthorizedAccessException
-            or ArgumentException
-            or NotSupportedException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             return false;
         }

@@ -7,6 +7,7 @@ using KyberWeave.Core.Doctor;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review;
 using Spectre.Console.Cli;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Cli.Commands.Review;
 
@@ -110,7 +111,7 @@ public sealed class ReviewSeatsCommand : Command<ReviewSeatsSettings>
                 changed));
             NotSeatedRecord.Replace(folder, ReviewLensCatalogue.Names, seats.NotSeated);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             report.Add(new Diagnostic(
                 ReportWriteFailed,

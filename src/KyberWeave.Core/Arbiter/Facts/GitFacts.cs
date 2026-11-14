@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
 using KyberWeave.Core.Processes;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Arbiter.Facts;
 
@@ -528,10 +529,7 @@ public static class GitFacts
             ProcessResult result = ProcessRunner.Run(startInfo, standardInput);
             return result.ExitCode == 0 ? result.StandardOutput : null;
         }
-        catch (Exception ex) when (ex is Win32Exception
-            or InvalidOperationException
-            or IOException
-            or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is Win32Exception or InvalidOperationException)
         {
             // Outside a repository git exits non-zero (handled above); a missing
             // binary, a dead working directory, or an unreadable pipe lands here.
@@ -721,8 +719,7 @@ public static class GitFacts
 
             return lines;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
-            or NotSupportedException or OutOfMemoryException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is OutOfMemoryException)
         {
             return null;
         }

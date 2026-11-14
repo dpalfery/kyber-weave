@@ -12,6 +12,7 @@ using KyberWeave.Core.Docs.Analysis.Model;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Search;
 using ModelContextProtocol.Server;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Mcp;
 
@@ -1047,9 +1048,7 @@ public sealed partial class DocsTools
     }
 
     private static bool IsExpectedReadFailure(Exception exception) =>
-        exception is IOException
-            or UnauthorizedAccessException
-            or InvalidDataException;
+        FileFailure.Is(exception) || exception is InvalidDataException;
 
     private static string CapToBudget(string text, int cap) =>
         text.Length <= cap ? text : text[..cap];

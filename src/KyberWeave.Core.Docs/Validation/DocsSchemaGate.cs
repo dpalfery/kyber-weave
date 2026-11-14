@@ -5,6 +5,7 @@ using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Review;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Docs.Validation;
 
@@ -105,9 +106,7 @@ public static class DocsSchemaGate
         {
             changes = ChangedFiles.ResolveSinceMergeBase(repoRoot, baseRef);
         }
-        catch (Exception ex) when (ex is InvalidOperationException
-            or IOException or UnauthorizedAccessException
-            or Win32Exception or TimeoutException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or Win32Exception or TimeoutException)
         {
             report.Add(new Diagnostic(
                 ArchiveCloseoutValidator.MissingCloseoutEvidence,

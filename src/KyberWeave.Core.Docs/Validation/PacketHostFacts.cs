@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Review;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Docs.Validation;
 
@@ -110,7 +111,7 @@ public static partial class PacketHostFacts
 
             markdown = File.ReadAllText(path);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             text.AppendLine();
             text.AppendLine(CultureInfo.InvariantCulture, $"Host rules: AGENTS.md could not be read ({ex.Message}).");

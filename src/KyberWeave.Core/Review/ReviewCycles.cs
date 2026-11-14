@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Review;
 
@@ -374,8 +375,7 @@ public static partial class ReviewCycles
             {
                 gates = ReviewJson.ReadGates(File.ReadAllText(gatesPath));
             }
-            catch (Exception ex) when (ex is JsonException or ArgumentException or NotSupportedException
-                                           or InvalidOperationException or IOException or UnauthorizedAccessException)
+            catch (Exception ex) when (FileFailure.Is(ex) || ex is JsonException or InvalidOperationException)
             {
                 gates = null;
             }
@@ -405,7 +405,7 @@ public static partial class ReviewCycles
             string? commitBase = Text("base");
             return (Text("branch"), CommitId().IsMatch(commitBase ?? string.Empty) ? commitBase : null, Text("head"));
         }
-        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is JsonException)
         {
             return (null, null, null);
         }

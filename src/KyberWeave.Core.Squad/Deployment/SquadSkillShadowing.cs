@@ -1,4 +1,5 @@
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Squad.Deployment;
 
@@ -83,7 +84,7 @@ public static class SquadSkillShadowing
         {
             text = File.ReadAllText(path);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             return null;
         }

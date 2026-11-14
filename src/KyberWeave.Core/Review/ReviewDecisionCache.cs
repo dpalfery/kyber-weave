@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Core.Arbiter.Rules;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Review;
 
@@ -35,7 +36,7 @@ internal sealed class ReviewDecisionCache
                 entries = new Dictionary<string, CachedAnswer>(read, StringComparer.Ordinal);
             }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is JsonException)
         {
             // An unreadable cache only costs the questions again.
         }
@@ -68,7 +69,7 @@ internal sealed class ReviewDecisionCache
             File.WriteAllText(_path, JsonSerializer.Serialize(_entries));
             _dirty = false;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             // Not kept: the next run asks again.
         }

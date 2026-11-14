@@ -9,6 +9,7 @@ using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Deployment;
 using YamlDotNet.Core;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Arbiter.Hooks;
 
@@ -713,7 +714,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
                 Arbiter = config.Arbiter with { Provider = merged },
             };
         }
-        catch (Exception exception) when (exception is YamlException or IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is YamlException)
         {
             throw new InvalidOperationException(
                 $"{HookCommand.FailClosedCode}: the user override " +
@@ -732,7 +733,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
                 ? null
                 : merged.Endpoint;
         }
-        catch (Exception exception) when (exception is YamlException or IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is YamlException)
         {
             return null;
         }

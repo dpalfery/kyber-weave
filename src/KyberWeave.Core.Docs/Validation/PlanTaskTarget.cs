@@ -3,6 +3,7 @@ using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Closeout;
 using KyberWeave.Core.Review;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Docs.Validation;
 
@@ -66,7 +67,7 @@ public static partial class PlanTaskTarget
             return PlanDocumentParser.Parse(markdown).ContractRows
                 .FirstOrDefault(row => string.Equals(row.TaskId, taskId, StringComparison.Ordinal));
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException)
         {
             return null;
         }

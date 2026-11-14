@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Squad.Deployment;
 
@@ -105,7 +106,7 @@ public static class SquadWorkerBaselineInjector
             CachedBlocks[normalized] = new CacheEntry(lastWrite, length, block);
             return block;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             return ReadBlockUncached(path);
         }

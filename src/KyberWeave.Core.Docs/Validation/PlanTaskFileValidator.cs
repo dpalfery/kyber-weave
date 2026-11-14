@@ -6,6 +6,7 @@ using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Closeout;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Processes;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Docs.Validation;
 
@@ -197,7 +198,7 @@ public sealed partial class PlanTaskFileValidator
                 "*",
                 new EnumerationOptions { IgnoreInaccessible = false, AttributesToSkip = 0 })];
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             // A folder the walk cannot read is a state the run reports: aborting would hide every
             // other finding, and skipping silently would read as "no sidecars".
@@ -281,7 +282,7 @@ public sealed partial class PlanTaskFileValidator
         {
             return false;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             return true;
         }
@@ -474,7 +475,7 @@ public sealed partial class PlanTaskFileValidator
                 Hint: $"Do not repair the file by hand. Run {TaskFileCommand.Write(artifactPath)}: it rewrites the whole file from the plan."));
             return false;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or InvalidDataException)
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidDataException)
         {
             report.Add(new Diagnostic(
                 Malformed,

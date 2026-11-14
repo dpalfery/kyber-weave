@@ -5,6 +5,7 @@ using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.RunStart;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Arbiter.Hooks;
 
@@ -380,7 +381,7 @@ public static partial class ConductorGuard
         {
             loaded = KyberWeaveConfigLoader.TryLoad(cwd);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             yield break;
         }
