@@ -275,10 +275,25 @@ public sealed partial class PlanFinalize
     {
         try
         {
-            PlanTaskFile? file = JsonSerializer.Deserialize<PlanTaskFile>(File.ReadAllText(_files.Absolute(taskFile)), PlanTaskFileJson.ReadOptions);
-            return file?.Tasks is { Count: > 0 } tasks ? PlanTaskPacket.ReadyQueue(tasks) : null;
+            return ReadyQueueOf(File.ReadAllText(_files.Absolute(taskFile)));
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The queue for a task file's text; "(no tasks)" for a valid file with none; null when it cannot be read as a task file.</summary>
+    internal static string? ReadyQueueOf(string taskFileText)
+    {
+        try
+        {
+            PlanTaskFile? file = JsonSerializer.Deserialize<PlanTaskFile>(taskFileText, PlanTaskFileJson.ReadOptions);
+            if (file is null)
+                return null;
+            return file.Tasks is { Count: > 0 } tasks ? PlanTaskPacket.ReadyQueue(tasks) : "(no tasks)";
+        }
+        catch (JsonException)
         {
             return null;
         }

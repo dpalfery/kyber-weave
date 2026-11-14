@@ -138,6 +138,16 @@ public sealed class PlanFinalizeTests
         }
     }
 
+    [Theory]
+    [InlineData("""{"tasks":[]}""", "(no tasks)")]
+    [InlineData("{}", "(no tasks)")]
+    [InlineData("not json", null)]
+    [InlineData("null", null)]
+    public void TheReadyQueueSaysNoTasksForAValidEmptyFileAndNothingForAnUnreadableOne(string taskFile, string? expected)
+    {
+        Assert.Equal(expected, KyberWeave.Core.Docs.Closeout.PlanFinalize.ReadyQueueOf(taskFile));
+    }
+
     [Fact]
     public void ASecondRunReportsAlreadyReadyAndChangesNothing()
     {
