@@ -1,6 +1,6 @@
 ---
 name: kw-onboarding
-description: "Guided first-time setup of Kyber-Weave on a machine and repository: runs the doctor, makes sure the CodeGraph index and the kw-docs and codegraph MCP servers answer, asks which coding harnesses to install the squad and Arbiter hooks for, lists every setting with its default so the user picks which to change, shows the model profile per harness, and checks the Arbiter decision-model key. Safe to re-run. Use when a user says set up, onboard, get started with, or configure Kyber-Weave or Kyber-Squad. Do NOT use for onboarding a repository's documentation (kyber-docs-onboarding-and-assessment) or for authoring a model preset (kyber-weave-model-profile)."
+description: "Guided first-time setup of Kyber-Weave and Kyber-Squad on a machine and repository: doctor, CodeGraph index, kw-docs and codegraph MCP servers, harness install with Arbiter hooks, every setting with its default, model profiles, the decision-model key, and a check of the repository's rules for conflicts. Safe to re-run. Use when a user says set up, onboard, get started with, or configure Kyber-Weave or Kyber-Squad, or asks to audit AGENTS.md or asks why agents get conflicting, contradictory or stale rules and instructions. Do NOT use for onboarding a repository's documentation (kyber-docs-onboarding-and-assessment) or for authoring a model preset (kyber-weave-model-profile)."
 license: MIT
 metadata:
   author: dpalfery
@@ -127,7 +127,14 @@ what the key is for and what happens without it, and if the user wants one, have
 `kyber-weave arbiter setup` (masked prompt) or `arbiter install ... --key-stdin`. Never ask the
 user to paste the key into the chat.
 
-## Step 7 — Finish
+## Step 7 — Check the repository's rules for conflicts
+
+Load [references/rules-and-structure-conflicts.md](references/rules-and-structure-conflicts.md) and
+run it: inventory every instruction source, run the mechanical checks, then the judgement pass,
+present one findings list, and apply only the findings the user selects. Asked on its own ("assess
+this repository's rules for conflicts", "audit AGENTS.md"), run Step 0 and then only this step.
+
+## Step 8 — Finish
 
 1. Re-run `kyber-weave doctor --check .` and `kyber-weave arbiter status`.
 2. Summarise in three short lists: already in place, installed or changed now, declined or left
