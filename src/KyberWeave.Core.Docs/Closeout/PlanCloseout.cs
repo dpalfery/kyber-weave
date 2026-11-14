@@ -105,7 +105,7 @@ public sealed partial class PlanCloseout
         {
             report.Add(new Diagnostic(ArchiveTargetExists, Severity.Error,
                 $"The archive already holds '{target}'.", plan, target,
-                Hint: "Rename the plan, or remove the earlier archive entry if it is a stale copy."));
+                Hint: "Rename the plan, remove the earlier archive entry if it is a stale copy, or make the archive folder writable."));
             return new PlanCloseoutOutcome(report, false);
         }
 
@@ -171,7 +171,7 @@ public sealed partial class PlanCloseout
             {
                 report.Add(new Diagnostic(ArchiveTargetExists, Severity.Error,
                     $"The archive already holds '{target}'.", plan, target,
-                    Hint: "Rename the plan, or remove the earlier archive entry if it is a stale copy."));
+                    Hint: "Rename the plan, remove the earlier archive entry if it is a stale copy, or make the archive folder writable."));
                 return new PlanCloseoutOutcome(report, false);
             }
 
@@ -228,7 +228,7 @@ public sealed partial class PlanCloseout
         {
             report.Add(new Diagnostic(ArchiveTargetExists, Severity.Error,
                 $"The archive already holds '{target}'. Nothing was moved.", plan, target,
-                Hint: "Rename the plan, or remove the earlier archive entry if it is a stale copy."));
+                Hint: "Rename the plan, remove the earlier archive entry if it is a stale copy, or make the archive folder writable."));
             return new PlanCloseoutOutcome(report, false);
         }
 
@@ -252,9 +252,11 @@ public sealed partial class PlanCloseout
 
     /// <summary>
     /// Writes <paramref name="text"/> to a file that must not exist yet, in one step, so a file that appeared since the
-    /// last look is never overwritten. False when the file is already there. A failure while writing (a full disk, an
-    /// unencodable character) removes the partial file this call created and propagates, so it is never mistaken for
-    /// "already there" and never leaves a truncated archive behind.
+    /// last look is never overwritten. False when the path is already taken (a file or a folder is there) or this
+    /// process may not create it; either way nothing is overwritten and the caller refuses. Which of those it was is
+    /// read from the failed create itself, never from a second look at the path, which could change in between. A
+    /// failure while writing (a full disk, an unencodable character) removes the partial file this call created and
+    /// propagates, so it is never mistaken for "already there" and never leaves a truncated archive behind.
     /// </summary>
     internal static bool TryWriteNew(string path, string text)
     {
@@ -267,7 +269,12 @@ public sealed partial class PlanCloseout
             writer.Write(text);
             return true;
         }
-        catch (IOException) when (!created && File.Exists(path))
+        catch (UnauthorizedAccessException) when (!created)
+        {
+            // A folder in the way, or no permission to create here: nothing was written.
+            return false;
+        }
+        catch (IOException exception) when (!created && IsPathTaken(exception))
         {
             return false;
         }
@@ -276,6 +283,17 @@ public sealed partial class PlanCloseout
             File.Delete(path);
             throw;
         }
+    }
+
+    /// <summary>Whether a failed exclusive create failed because the path already exists (EEXIST; ERROR_FILE_EXISTS or ERROR_ALREADY_EXISTS).</summary>
+    private static bool IsPathTaken(IOException exception)
+    {
+        const int Eexist = 17;
+        const int ErrorFileExists = 80;
+        const int ErrorAlreadyExists = 183;
+        return OperatingSystem.IsWindows()
+            ? (exception.HResult & 0xFFFF) is ErrorFileExists or ErrorAlreadyExists
+            : exception.HResult == Eexist;
     }
 
     /// <summary>The outermost directory on the way to <paramref name="directory"/> that does not exist yet, or null.</summary>

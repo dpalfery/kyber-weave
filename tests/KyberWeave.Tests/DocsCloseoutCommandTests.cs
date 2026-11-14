@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.Versioning;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Docs;
@@ -491,16 +492,47 @@ public sealed class DocsCloseoutCommandTests
         Assert.False(File.Exists(path));
     }
 
+    /// <summary>
+    /// A folder where the archive file belongs fails the exclusive create without a file being there to find: Windows
+    /// answers with an access error, Unix with "exists". Either is a taken path, refused with nothing overwritten and no
+    /// second look at the path to decide it.
+    /// </summary>
     [Fact]
-    public void ThePathHoldingAFolderIsAnOpenFailureThatPropagatesNotAnExistingArchive()
+    public void ThePathHoldingAFolderIsRefusedAsTakenAndTheFolderIsLeftAlone()
     {
         using DocFixture fixture = Repository();
         string path = Absolute(fixture, "6-Docs/archive/plans/folder.md");
         Directory.CreateDirectory(path);
+        File.WriteAllText(Path.Combine(path, "inside.txt"), "kept");
 
-        Assert.ThrowsAny<Exception>(() => PlanCloseout.TryWriteNew(path, "text"));
+        bool written = PlanCloseout.TryWriteNew(path, "text");
 
-        Assert.True(Directory.Exists(path));
+        Assert.False(written);
+        Assert.Equal("kept", File.ReadAllText(Path.Combine(path, "inside.txt")));
+    }
+
+    [Fact]
+    [UnsupportedOSPlatform("windows")]
+    public void AFolderThatCannotBeWrittenToIsRefusedNotThrownAndNothingIsCreated()
+    {
+        Assert.SkipWhen(
+            OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess,
+            "Unix directory modes are not enforced on Windows or for a privileged user, so a denied create cannot be simulated.");
+        using DocFixture fixture = Repository();
+        string directory = Absolute(fixture, "6-Docs/archive/plans/locked");
+        Directory.CreateDirectory(directory);
+        File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        try
+        {
+            bool written = PlanCloseout.TryWriteNew(Path.Combine(directory, "new.md"), "text");
+
+            Assert.False(written);
+            Assert.False(File.Exists(Path.Combine(directory, "new.md")));
+        }
+        finally
+        {
+            File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
     }
 
     [Fact]
@@ -551,19 +583,18 @@ public sealed class DocsCloseoutCommandTests
     }
 
     [Fact]
+    [UnsupportedOSPlatform("windows")]
     public void AnUnreadablePlanIsNamedInTheReportNotThrown()
     {
-        if (OperatingSystem.IsWindows())
-            return;
+        Assert.SkipWhen(
+            OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess,
+            "Unix file modes are not enforced on Windows or for a privileged user, so an unreadable plan cannot be simulated.");
 
         using DocFixture fixture = Repository();
         string plan = Absolute(fixture, Plan);
         File.SetUnixFileMode(plan, UnixFileMode.None);
         try
         {
-            if (Environment.UserName == "root")
-                return;
-
             (int exit, string output) = Run(fixture, archive: true);
 
             Assert.Equal(1, exit);

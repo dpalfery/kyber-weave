@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.Versioning;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Configuration;
@@ -113,10 +114,12 @@ public sealed class PlanFinalizeTests
     }
 
     [Fact]
+    [UnsupportedOSPlatform("windows")]
     public void AnUnreadableExistingTaskFileIsARefusalThatChangesNothing()
     {
-        if (OperatingSystem.IsWindows())
-            return;
+        Assert.SkipWhen(
+            OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess,
+            "Unix file modes are not enforced on Windows or for a privileged user, so an unreadable file cannot be simulated.");
 
         using DocFixture fixture = Repository();
         string plan = Read(fixture, PlanTaskFileProbe.PlanPath);
@@ -127,9 +130,6 @@ public sealed class PlanFinalizeTests
         File.SetUnixFileMode(taskPath, UnixFileMode.None);
         try
         {
-            if (Environment.UserName == "root")
-                return;
-
             (int exit, string output) = Run(fixture);
 
             Assert.Equal(1, exit);
@@ -397,6 +397,28 @@ public sealed class PlanFinalizeTests
         Assert.False(File.Exists(gone));
         Assert.False(Directory.Exists(Path.GetDirectoryName(gone)));
         Assert.True(Exists(fixture, PlanTaskFileProbe.PlanPath));
+    }
+
+    [Fact]
+    public void RestoringAFileThatCannotBeDeletedIsReportedNotThrown()
+    {
+        using DocFixture fixture = Repository();
+        string folderWhereTheFileBelongs = Absolute(fixture, PlanTaskFileProbe.TaskFilePath);
+        Directory.CreateDirectory(folderWhereTheFileBelongs);
+
+        bool gone = PlanFinalize.DeleteIfPresent(folderWhereTheFileBelongs);
+
+        Assert.False(gone);
+        Assert.True(Directory.Exists(folderWhereTheFileBelongs));
+    }
+
+    [Fact]
+    public void RestoringReportsAFileOrAFolderAlreadyGoneAsDeleted()
+    {
+        using DocFixture fixture = Repository();
+
+        Assert.True(PlanFinalize.DeleteIfPresent(Absolute(fixture, "6-Docs/vanished/plan.tasks.json")));
+        Assert.True(PlanFinalize.DeleteIfPresent(Absolute(fixture, "6-Docs/never-there.json")));
     }
 
     [Fact]

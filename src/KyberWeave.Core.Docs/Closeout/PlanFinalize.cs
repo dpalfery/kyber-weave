@@ -231,15 +231,20 @@ public sealed partial class PlanFinalize
             {
                 report.Add(new Diagnostic(PlanNeedsArchitect, Severity.Error,
                     "The finalized plan failed validation, so every change was undone.", plan, plan, Hint: ArchitectHint));
-                Restore(plan, planText, planIndex, indexText, taskFile, taskFileBefore);
+                IReadOnlyList<string> notUndone = Restore(plan, planText, planIndex, indexText, taskFile, taskFileBefore);
+                ReportNotUndone(report, plan, notUndone);
                 return Refused();
             }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            Restore(plan, planText, planIndex, indexText, taskFile, taskFileBefore);
+            IReadOnlyList<string> notUndone = Restore(plan, planText, planIndex, indexText, taskFile, taskFileBefore);
             report.Add(new Diagnostic(PlanNeedsArchitect, Severity.Error,
-                $"Finalizing failed and every change was undone: {exception.Message}", plan, plan));
+                notUndone.Count == 0
+                    ? $"Finalizing failed and every change was undone: {exception.Message}"
+                    : $"Finalizing failed: {exception.Message}",
+                plan, plan));
+            ReportNotUndone(report, plan, notUndone);
             return Refused();
         }
 
@@ -520,26 +525,70 @@ public sealed partial class PlanFinalize
                                                  || own.Contains(item.Subject.Replace('\\', '/'))));
     }
 
-    private void Restore(string plan, string planText, string? planIndex, string? indexText, string taskFile, string? taskFileBefore)
+    /// <summary>
+    /// Puts back what finalizing changed, each file on its own so one that cannot be restored does not stop the
+    /// others or crash the refusal that is being reported.
+    /// </summary>
+    /// <returns>The files that could not be restored, for the report to name.</returns>
+    private List<string> Restore(string plan, string planText, string? planIndex, string? indexText, string taskFile, string? taskFileBefore)
     {
-        File.WriteAllText(_files.Absolute(plan), planText);
-        if (planIndex is not null && indexText is not null)
-            File.WriteAllText(_files.Absolute(planIndex), indexText);
-        if (taskFileBefore is not null)
-            File.WriteAllText(_files.Absolute(taskFile), taskFileBefore);
-        else
-            DeleteIfPresent(_files.Absolute(taskFile));
+        List<string> notUndone = [];
+        if (!TryWrite(_files.Absolute(plan), planText))
+            notUndone.Add(plan);
+        if (planIndex is not null && indexText is not null && !TryWrite(_files.Absolute(planIndex), indexText))
+            notUndone.Add(planIndex);
+        bool taskFileRestored = taskFileBefore is not null
+            ? TryWrite(_files.Absolute(taskFile), taskFileBefore)
+            : DeleteIfPresent(_files.Absolute(taskFile));
+        if (!taskFileRestored)
+            notUndone.Add(taskFile);
+        return notUndone;
     }
 
-    internal static void DeleteIfPresent(string path)
+    private static void ReportNotUndone(DiagnosticReport report, string plan, IReadOnlyList<string> notUndone)
+    {
+        if (notUndone.Count == 0)
+            return;
+
+        report.Add(new Diagnostic(PlanNeedsArchitect, Severity.Error,
+            $"Could not undo the change to: {string.Join(", ", notUndone)}.", plan, plan,
+            Hint: "Check each named file by hand, or restore it with 'git checkout --'."));
+    }
+
+    private static bool TryWrite(string path, string text)
+    {
+        try
+        {
+            File.WriteAllText(path, text);
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Deletes <paramref name="path"/> if it is there. A file or folder that is already gone counts as deleted; a file
+    /// that cannot be deleted (in use, no permission, a folder in its place) is reported, never thrown, because this
+    /// runs while a refusal is being reported.
+    /// </summary>
+    /// <returns>True when the file is gone afterwards; false when it could not be deleted.</returns>
+    internal static bool DeleteIfPresent(string path)
     {
         try
         {
             File.Delete(path);
+            return true;
         }
         catch (DirectoryNotFoundException)
         {
             // The folder is gone, so the file is too.
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
         }
     }
 
