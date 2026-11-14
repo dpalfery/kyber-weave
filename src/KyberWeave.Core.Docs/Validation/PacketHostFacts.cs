@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Review;
 
 namespace KyberWeave.Core.Docs.Validation;
 
@@ -48,7 +49,7 @@ public static partial class PacketHostFacts
         text.AppendLine();
         text.AppendLine("Assembled from this repository's configuration and root AGENTS.md. Open AGENTS.md only for something this section does not answer.");
         text.AppendLine();
-        text.AppendLine(CultureInfo.InvariantCulture, $"- Scratchpad for this task: `{ScratchpadRoot}/{taskId ?? "<task-id>"}/`");
+        text.AppendLine(CultureInfo.InvariantCulture, $"- Scratchpad for this task: `{ScratchpadRoot}/{(string.IsNullOrWhiteSpace(taskId) ? "<task-id>" : TaskSlug.Normalise(taskId))}/` (the task gate uses this same folder, so a build you run by hand with `--artifacts-path` here reuses its output)");
         text.AppendLine(CultureInfo.InvariantCulture,
             $"- Commit: when your task gate passes, run `git add <the task's files and its tests>` then `git commit -m \"<type>(<scope>): <summary>\" -m \"Task: {taskId ?? "<task-id>"}\" -- <the same paths>`, and return the sha as COMMIT. Commits on this run's branch are approved, so a host rule below that asks for approval first is met. Never push.");
         foreach (ConfigRegEntry entry in config.ConfigReg.Resolve(config.Ontology))

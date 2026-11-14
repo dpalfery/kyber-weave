@@ -46,6 +46,49 @@ public sealed class ReviewGatesRedModeTests : IDisposable
     }
 
     [Fact]
+    public void AnUnusedUsingErrorBesideAMissingSymbolInTheTasksFileDoesNotDisqualifyTheRun()
+    {
+        string output = string.Join('\n',
+            CSharpError(TestFile, "CS0246", "The type or namespace name 'WidgetRepository' could not be found"),
+            CSharpError(TestFile, "IDE0005", "Using directive is unnecessary. (https://learn.microsoft.com/dotnet/fundamentals/code-analysis/style-rules/ide0005)"),
+            "Build FAILED.");
+
+        RedOutcome outcome = Judge(output);
+
+        Assert.True(outcome.Passed, outcome.Reason);
+        Assert.Equal(["WidgetRepository"], outcome.MissingSymbols);
+    }
+
+    [Fact]
+    public void AnUnusedUsingErrorWithNoMissingSymbolIsRefusedAndNamesItsFile()
+    {
+        RedOutcome outcome = Judge(CSharpError(TestFile, "IDE0005", "Using directive is unnecessary.") + "\nBuild FAILED.");
+
+        Assert.False(outcome.Passed);
+        Assert.Contains("IDE0005 in /work/repo/" + TestFile, outcome.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("no source file", outcome.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ABuildErrorThatIsNotACompilerErrorIsQuotedInTheReason()
+    {
+        string output = "/work/repo/Directory.Build.props(4,3): error MSB4057: The target \"Frobnicate\" does not exist in the project.\nBuild FAILED.";
+
+        RedOutcome outcome = Judge(output);
+
+        Assert.False(outcome.Passed);
+        Assert.Contains("MSB4057", outcome.Reason, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("tests", "bash 5-Test/run-task-tests.sh 'FullyQualifiedName~X' out", true)]
+    [InlineData("ts-test", "node run.js", true)]
+    [InlineData("dotnet-build", "dotnet build App.sln", false)]
+    [InlineData("build", "dotnet test App.sln", true)]
+    public void AGateIsATestGateByItsCommandOrByTheHostsNameForIt(string id, string command, bool expected) =>
+        Assert.Equal(expected, RedClassifier.IsTestGate(id, command));
+
+    [Fact]
     public void ADuplicatedErrorFromTwoTargetFrameworksIsListedOnce()
     {
         string line = CSharpError(TestFile, "CS0246", "The type or namespace name 'WidgetRepository' could not be found");

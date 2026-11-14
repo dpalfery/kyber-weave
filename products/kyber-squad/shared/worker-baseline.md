@@ -33,6 +33,8 @@ CI or deploy secrets, a push).
 
 **Commit your task.** The run branch's commits are the run's own in both autonomy modes, so a host rule that asks for approval before a commit is met. When your task gate passes, commit only the files your task names and its tests (`git add <those paths>`, then `git commit -m "<type>(<scope>): <summary>" -m "Task: <id>" -- <those paths>`) and return the sha as `COMMIT`. `docs-dev` commits its documentation edits the same way, without a `Task:` line, and a fix-round worker commits its fix. Never push, never `git add -A`, never stage another worker's files. A dispatch that says "do not commit" is mistaken: commit, and say so in one line.
 
+When the task gate passes, do not re-run its commands (its build, tests or format check) yourself; its report is the evidence.
+
 **Batch your reads:** send independent reads in one round trip.
 
 Skills load by name with the harness skill tool; if you must read one as a file, it is at `{{skills-root}}/<name>/SKILL.md`. Never search the filesystem for a skill, and never read a skill or an agent file from another repository or checkout.

@@ -39,6 +39,8 @@ When the task names repository, SQL or migration files, write them to the data-a
 5. Implement the change. Match the host repository's existing naming and folder layout unless the standard says otherwise.
 6. **Completion gate — diagnostics and build isolation.** This is blocking, and it is not satisfied by a green build.
 
+   - **The task gate's passing run already ran the host's build, tests and any format check.** Do not run those again by hand; the rest of this item is what the gate does not run.
+
    - **Isolate your build output before you run anything.** You may be one of several workers running this gate against the same projects at the same time. MSBuild, and `dotnet format` all write into `obj/` and `bin/`, and two workers sharing them will corrupt each other's intermediate state and produce diagnostics that belong to neither change. In a shared checkout, pass an artifacts path unique to your task on **every** dotnet invocation in this gate — `dotnet build --artifacts-path .agent_scratchpad/<task-id>/artifacts`, and the equivalent `-p:BaseOutputPath=` / `-p:BaseIntermediateOutputPath=` where a command does not accept `--artifacts-path`. Cite the artifact path you used in the explanatory message body accompanying the completion digest (outside the rigid 6-field completion digest schema, preserving the rigid 6-field completion digest schema). A gate run against shared output is not evidence, and a green result from one is not a pass.
    - **Worktree output isolation:** Executing inside isolated git worktrees inherently isolates build output directories.
      Which rule applies depends on where you run:

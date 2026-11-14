@@ -210,7 +210,7 @@ public static partial class RedLanguages
     [GeneratedRegex(@"^\s*(?<line>[\w./-]+_test\.go:\d+: .+)$", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     private static partial Regex GoAssertionLine();
 
-    [GeneratedRegex(@"^\s*(?<file>.+?)\(\d+,\d+(?:,\d+,\d+)?\): error (?<code>CS\d+): (?<message>.*?)(?: \[[^\]]+\])?\s*$", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^\s*(?<file>.+?)\(\d+,\d+(?:,\d+,\d+)?\): error (?<code>(?:CS|IDE)\d+): (?<message>.*?)(?: \[[^\]]+\])?\s*$", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     private static partial Regex CSharpDiagnostic();
 
     [GeneratedRegex(@"^\s*(?:(?<file>[^\s(][^():]*?)\(\d+,\d+\): error|(?<file>[^\s:][^:]*?):\d+:\d+ - error) (?<code>TS\d+): (?<message>.*?)\s*$", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
@@ -409,6 +409,10 @@ public static partial class RedClassifier
 {
     private const int ExamplesShown = 3;
 
+    // Style errors the build raises only because a symbol is missing: the using that would name the missing type
+    // looks unused. They are consequences of the missing code, so they do not disqualify a failing run.
+    private static readonly HashSet<string> ConsequenceCodes = new(StringComparer.Ordinal) { "IDE0005" };
+
     /// <summary>The compiler errors in <paramref name="output"/>, de-duplicated (a multi-target build prints each twice).</summary>
     public static IReadOnlyList<CompileError> ParseErrors(string output)
     {
@@ -470,6 +474,13 @@ public static partial class RedClassifier
     public static bool IsTestCommand(string command) =>
         RedLanguages.All.Any(language => language.CommandMarker.IsMatch(command));
 
+    /// <summary>
+    /// Whether a gate runs tests: its command is a known test runner, or the host named it a tests gate. A host that
+    /// wraps its runner in a script (<c>bash run-task-tests.sh</c>) is recognised by the gate's id.
+    /// </summary>
+    public static bool IsTestGate(string id, string command) =>
+        IsTestCommand(command) || id.Contains("test", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>The reason recorded for a test gate skipped after a build accepted as RED on missing symbols.</summary>
     public static string BuildSkipReason(IReadOnlyList<string> symbols) =>
         $"not run — RED build (missing symbols {string.Join(", ", symbols)})";
@@ -520,6 +531,8 @@ public static partial class RedClassifier
             IReadOnlyList<CompileError> errors = ParseErrors(gate.Output);
             if (errors.Count > 0 || HasUnparsedError(gate.Output, errors))
             {
+                bool anyMissing = errors.Any(error => error.Symbol is not null && IsOwnFile(error.File, ownFiles));
+                errors = [.. errors.Where(error => !(anyMissing && ConsequenceCodes.Contains(error.Code) && IsOwnFile(error.File, ownFiles)))];
                 List<CompileError> other = [.. errors.Where(error => error.Symbol is null || !IsOwnFile(error.File, ownFiles))];
                 if (other.Count > 0 || HasUnparsedError(gate.Output, errors))
                 {
@@ -527,7 +540,7 @@ public static partial class RedClassifier
                         ? "the build failed for a reason other than a missing symbol in this task's files: "
                           + string.Join("; ", other.Take(ExamplesShown).Select(Describe))
                           + (other.Count > ExamplesShown ? $"; and {other.Count - ExamplesShown} more" : string.Empty)
-                        : "the build printed an error that names no source file, which is not a missing symbol";
+                        : "the build printed an error that is not a compiler error in a source file: " + FirstOtherError(gate.Output);
                     continue;
                 }
 
@@ -636,7 +649,14 @@ public static partial class RedClassifier
     private static string Describe(CompileError error) =>
         error.Symbol is not null && error.File.Length > 0
             ? $"{error.Code} for '{error.Symbol}' in {error.File}, which this task did not change"
-            : $"{error.Code} {error.Message}".Trim();
+            : $"{error.Code} in {error.File}: {Shorten(error.Message)}".Replace(" in :", ":", StringComparison.Ordinal).Trim();
+
+    private static string Shorten(string message) => message.Length <= 140 ? message : message[..140] + "...";
+
+    private static string FirstOtherError(string output) =>
+        OtherErrorLine().Match(output) is { Success: true } match
+            ? Shorten(output[match.Index..].Split('\n')[0].Trim())
+            : "an error line the classifier could not read";
 
     private static string? MissingSymbol(RedLanguage language, string code, string message)
     {
@@ -649,7 +669,7 @@ public static partial class RedClassifier
         return match.Groups["owner"].Success ? match.Groups["owner"].Value + "." + symbol : symbol;
     }
 
-    [GeneratedRegex(@"^\s*(?:[^\s(][^()]*\(\d+,\d+\): )?error (?!CS\d+:|TS\d+:)[A-Za-z]+\d+:", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^\s*(?:[^\s(][^()]*\(\d+,\d+\): )?error (?!CS\d+:|IDE\d+:|TS\d+:)[A-Za-z]+\d+:", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     private static partial Regex OtherErrorLine();
 
     /// <summary>Whether the output prints an error the language patterns did not read (a build-system or restore error).</summary>

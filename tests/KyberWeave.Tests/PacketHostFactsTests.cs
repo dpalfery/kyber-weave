@@ -30,7 +30,7 @@ public sealed class PacketHostFactsTests : IDisposable
         string facts = PacketHostFacts.Render(_root, Config(), "csharp-dev", "T4");
 
         Assert.StartsWith(PacketHostFacts.Heading, facts, StringComparison.Ordinal);
-        Assert.Contains("`.agent_scratchpad/T4/`", facts, StringComparison.Ordinal);
+        Assert.Contains("`.agent_scratchpad/t4/`", facts, StringComparison.Ordinal);
         Assert.Contains("<plan-index>: `handbook/plans/README.md`", facts, StringComparison.Ordinal);
     }
 

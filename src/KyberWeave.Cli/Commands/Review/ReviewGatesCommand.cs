@@ -745,7 +745,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
                     brokenBuildSymbols = RedClassifier.AcceptedMissingSymbols(
                         new RedGateObservation(gate.Id, string.Join(' ', gate.Run), result.ExitCode, output), changed);
             },
-            SkipReason = gate => settings.Red && brokenBuildSymbols is not null && RedClassifier.IsTestCommand(string.Join(' ', gate.Run))
+            SkipReason = gate => settings.Red && brokenBuildSymbols is not null && RedClassifier.IsTestGate(gate.Id, string.Join(' ', gate.Run))
                 ? RedClassifier.BuildSkipReason(brokenBuildSymbols)
                 : null,
         };
