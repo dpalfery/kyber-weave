@@ -349,6 +349,10 @@ app.Configure(config =>
             .WithDescription(ReviewCycleCommand.Description)
             .WithExample("review", "cycle", ".", "--task", "my-task");
 
+        review.AddCommand<ReviewSeatsCommand>("seats")
+            .WithDescription(ReviewSeatsCommand.Description)
+            .WithExample("review", "seats", ".", "--base", "origin/main");
+
         review.AddCommand<ReviewVerdictCommand>("verdict")
             .WithDescription(ReviewVerdictCommand.Description)
             .WithExample("review", "verdict", ".", "--seats", "seats", "--gates", "gates.json", "--out", "findings.json");

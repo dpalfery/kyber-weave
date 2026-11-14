@@ -144,6 +144,12 @@ public sealed class ReviewVerdictSettings : AnalysisSettings
     [Description("Write the findings document the verdict was computed from (after --drop and the cited-line " +
                  "check), with per-lens coverage, to this path as JSON. The verdict itself is printed, not written.")]
     public string? Out { get; set; }
+
+    [CommandOption("--candidates")]
+    [Description("List the refutation candidates (KW-REVIEW-046) from the seat files saved so far, while other seats " +
+                 "still run. A lens with no seat file yet is not refused, and nothing is written; the verdict still " +
+                 "needs a full run.")]
+    public bool Candidates { get; set; }
 }
 
 /// <summary>Settings for <c>review cycle</c>.</summary>

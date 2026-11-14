@@ -133,7 +133,8 @@ public static class ArbiterConfigLoader
             ModelTargeting = modelTargeting,
             Stores = MergeStores(defaults.Stores, section.Stores),
             CommentTriage = MergeCommentTriage(defaults.CommentTriage, section.CommentTriage),
-            DispatchBudget = MergeDispatchBudget(defaults.DispatchBudget, section.DispatchBudget),
+            DispatchBudget = MergeDispatchBudget(defaults.DispatchBudget, section.DispatchBudget, "dispatch-budget"),
+            SeatBudget = MergeDispatchBudget(defaults.SeatBudget, section.SeatBudget, "seat-budget"),
         };
     }
 
@@ -174,6 +175,7 @@ public static class ArbiterConfigLoader
             Stores = merged.Stores,
             CommentTriage = merged.CommentTriage,
             DispatchBudget = merged.DispatchBudget,
+            SeatBudget = merged.SeatBudget,
         };
     }
 
@@ -882,7 +884,8 @@ public static class ArbiterConfigLoader
 
     private static ArbiterDispatchBudgetConfig MergeDispatchBudget(
         ArbiterDispatchBudgetConfig defaults,
-        ArbiterDispatchBudgetYaml? section)
+        ArbiterDispatchBudgetYaml? section,
+        string key)
     {
         if (section is null)
             return defaults;
@@ -893,8 +896,8 @@ public static class ArbiterConfigLoader
         if (minutes < 1 || toolCalls < 1 || callMinutes < 1)
         {
             throw new YamlException(
-                $"[{RuleValidator.SavingsValueInvalid}] arbiter.dispatch-budget.minutes, tool-calls and call-minutes must each be at least 1, " +
-                "e.g. { minutes: 15, tool-calls: 150, call-minutes: 5 }.");
+                $"[{RuleValidator.SavingsValueInvalid}] arbiter.{key}.minutes, tool-calls and call-minutes must each be at least 1, " +
+                $"e.g. {{ minutes: {defaults.Minutes}, tool-calls: {defaults.ToolCalls}, call-minutes: {defaults.CallMinutes} }}.");
         }
 
         return new ArbiterDispatchBudgetConfig(minutes, toolCalls, callMinutes);

@@ -2,6 +2,7 @@ using System.ComponentModel;
 using KyberWeave.Cli.Commands.Doctor;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Rendering;
+using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Doctor;
@@ -315,7 +316,10 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
 
         CommandHelpers.TryWriteReport(settings.Out, ReviewJson.Write(written), ReportWriteFailed, report);
         string? evidence = cycle is { WritesIdentity: true } && settings.Out is not null
-            ? WriteEvidence(cycle, root, settings, written, report)
+            ? WriteEvidence(cycle, root, settings, written, config, report)
+            : null;
+        IReadOnlyDictionary<string, string>? gateProven = evidence is not null
+            ? GateProvenSkips(cycle!, root, config, settings, written, report)
             : null;
 
         CommandHelpers.Finish(report, settings, "review gates", "Gate");
@@ -326,6 +330,14 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
             Console.WriteLine(
                 $"cycle: {cycle.Plan.Number} mode: {cycle.Mode} ran: {gates.Gates.Count} carried: {written.Gates.Count - gates.Gates.Count} " +
                 $"failed: {gates.Gates.Count(g => !g.Passed && g.NotApplicableReason is null && !(settings.Deadline && VerdictEngine.IsStoppedForTime(g)))}");
+            if (gateProven is not null)
+            {
+                foreach ((string lens, string reason) in gateProven.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+                    Console.WriteLine($"not-seated: --not-seated \"{lens}={reason}\"");
+                string[] send = [.. CouncilSeating.AfterGates.Where(lens => !gateProven.ContainsKey(lens))];
+                Console.WriteLine($"after-gates: send {(send.Length == 0 ? "none" : string.Join(", ", send))}");
+            }
+
             Console.Out.Flush();
         }
 
@@ -428,7 +440,12 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
     /// </summary>
     /// <returns>The evidence file's path, or null when it could not be written.</returns>
     private static string? WriteEvidence(
-        CouncilCycle cycle, string root, ReviewGatesSettings settings, GateReport written, DiagnosticReport report)
+        CouncilCycle cycle,
+        string root,
+        ReviewGatesSettings settings,
+        GateReport written,
+        KyberWeaveConfig config,
+        DiagnosticReport report)
     {
         try
         {
@@ -438,7 +455,8 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
                 settings.BaseRef ?? CouncilDefaultBase,
                 written,
                 settings.Out!,
-                cycle.Verifier ? cycle.Plan.Prior?.Head : null);
+                cycle.Verifier ? cycle.Plan.Prior?.Head : null,
+                config.Review.Coverage);
             report.AddMetric("evidence", path);
             return path;
         }
@@ -452,6 +470,27 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
                 Hint: "The seats then have no diff or gate summary to start from; fix the folder and run the gates again."));
             return null;
         }
+    }
+
+    /// <summary>
+    ///     Writes the duplicates report into the cycle folder and decides the two gate-proven skips from it and the gate
+    ///     report, so the reviewer seats <c>static-analysis-triage</c> and <c>duplicate-implementation</c> only when a gate
+    ///     leaves them something to say.
+    /// </summary>
+    private static IReadOnlyDictionary<string, string> GateProvenSkips(
+        CouncilCycle cycle,
+        string root,
+        KyberWeaveConfig config,
+        ReviewGatesSettings settings,
+        GateReport written,
+        DiagnosticReport report)
+    {
+        CodeGraphResolverAdapter graph = CodeGraphResolverAdapter.ForRepository(root);
+        DuplicateReport duplicates = ReviewDuplicatesCommand.Analyze(root, graph, graph, config.Review.Duplicates);
+        CommandHelpers.TryWriteReport(
+            Path.Combine(cycle.Folder!, "duplicates.json"), ReviewJson.Write(duplicates), ReportWriteFailed, report);
+        (IReadOnlyList<string>? changed, _) = ResolveCouncilChangedSet(root, settings);
+        return CouncilSeating.GateProvenSkips(written, duplicates, changed);
     }
 
     /// <summary>Records the branch, base and head this cycle reviews, so a later cycle can tell the cycle belongs to its change.</summary>

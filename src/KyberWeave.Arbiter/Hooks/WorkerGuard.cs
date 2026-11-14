@@ -44,6 +44,12 @@ public static class WorkerGuard
     /// <summary>The capability profiles whose dispatches carry a budget: the developers and docs-dev.</summary>
     private static readonly HashSet<string> BudgetedProfiles = new(StringComparer.Ordinal) { "worker", "documentation" };
 
+    /// <summary>The capability profile of a review council seat, which carries the shorter seat budget.</summary>
+    private const string SeatProfile = "review-seat";
+
+    /// <summary>The closing line a seat stopped by its budget writes, naming what it did not examine.</summary>
+    public const string SeatBudgetLine = "Budget reached, not examined:";
+
     /// <summary>Answers one tool-call event. Always returns 0: a deny rides stdout.</summary>
     /// <param name="harness">The harness token: <c>copilot-cli</c> or <c>claude</c>.</param>
     /// <param name="stdin">The hook event as JSON.</param>
@@ -52,6 +58,7 @@ public static class WorkerGuard
     /// <param name="homeDirectory">The operator's home, or null for the user profile.</param>
     /// <param name="now">The clock, or null for the system clock.</param>
     /// <param name="budgetLoader">Reads the budget for a working directory, or null to read its <c>kyber-weave.yml</c>.</param>
+    /// <param name="seatBudgetLoader">Reads a council seat's budget for a working directory, or null to read its <c>kyber-weave.yml</c>.</param>
     public static int Run(
         string harness,
         string stdin,
@@ -59,7 +66,8 @@ public static class WorkerGuard
         TextWriter log,
         string? homeDirectory = null,
         Func<DateTimeOffset>? now = null,
-        Func<string, ArbiterDispatchBudgetConfig?>? budgetLoader = null)
+        Func<string, ArbiterDispatchBudgetConfig?>? budgetLoader = null,
+        Func<string, ArbiterDispatchBudgetConfig?>? seatBudgetLoader = null)
     {
         ArgumentNullException.ThrowIfNull(harness);
         ArgumentNullException.ThrowIfNull(stdin);
@@ -75,7 +83,12 @@ public static class WorkerGuard
                 return 0;
             }
 
-            string? reason = BudgetRefusal(call, home, (now ?? (() => DateTimeOffset.UtcNow))(), budgetLoader ?? LoadBudget)
+            bool seat = string.Equals(call.Agent.CapabilityProfile, SeatProfile, StringComparison.Ordinal);
+            string? reason = BudgetRefusal(
+                                 call,
+                                 home,
+                                 (now ?? (() => DateTimeOffset.UtcNow))(),
+                                 seat ? seatBudgetLoader ?? LoadSeatBudget : budgetLoader ?? LoadBudget)
                              ?? WriteRefusal(call, home);
             if (reason is not null)
             {
@@ -129,7 +142,8 @@ public static class WorkerGuard
         DateTimeOffset now,
         Func<string, ArbiterDispatchBudgetConfig?> budgetLoader)
     {
-        if (!BudgetedProfiles.Contains(call.Agent.CapabilityProfile))
+        bool seat = string.Equals(call.Agent.CapabilityProfile, SeatProfile, StringComparison.Ordinal);
+        if (!seat && !BudgetedProfiles.Contains(call.Agent.CapabilityProfile))
         {
             return null;
         }
@@ -191,6 +205,18 @@ public static class WorkerGuard
             return previousCall is { } previous && now - previous > TimeSpan.FromMinutes(window.CallMinutes)
                 ? StalledCallRefusal(now - previous, window.CallMinutes)
                 : null;
+        }
+
+        // A seat past its budget still writes its seat file, so the partial result it was told to write is not lost.
+        if (seat)
+        {
+            return call.WritePath is not null
+                ? null
+                : $"{BudgetRuleId}: this review seat has made {calls} tool calls in {(int)elapsed.TotalMinutes} minutes, past " +
+                  $"its budget of {maxCalls} calls or {minutes} minutes. Make no more reads or lookups. Return your output now " +
+                  "from what you have: the findings you can support, then, among the closing lines, " +
+                  $"'{SeatBudgetLine} <what your lens did not reach>'. If your packet names a Seat file, write it there " +
+                  "(that write is allowed); otherwise reply with it.";
         }
 
         return $"{BudgetRuleId}: this dispatch has made {calls} tool calls in {(int)elapsed.TotalMinutes} minutes, past its " +
@@ -294,6 +320,23 @@ public static class WorkerGuard
         }
 
         return loaded.Config.Arbiter.ExplicitlyEnabled == false ? null : loaded.Config.Arbiter.DispatchBudget;
+    }
+
+    /// <summary>The project's seat budget, or the shipped one; null when the project turns the Arbiter off.</summary>
+    private static ArbiterDispatchBudgetConfig? LoadSeatBudget(string workingDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(workingDirectory))
+        {
+            return ArbiterDispatchBudgetConfig.SeatDefaults;
+        }
+
+        KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(workingDirectory);
+        if (!loaded.Success || loaded.Config is null)
+        {
+            return ArbiterDispatchBudgetConfig.SeatDefaults;
+        }
+
+        return loaded.Config.Arbiter.ExplicitlyEnabled == false ? null : loaded.Config.Arbiter.SeatBudget;
     }
 
     private static string BudgetDirectory(string home) => Path.Combine(home, ".kyber-weave", "arbiter", BudgetDirectoryName);

@@ -37,6 +37,7 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
     private const string HandBuiltFindings = "KW-REVIEW-045";
     private const string RefutationCandidates = "KW-REVIEW-046";
     private const string InputSitesMissing = "KW-REVIEW-047";
+    private const string SeatBudgetReached = "KW-REVIEW-054";
     private const string GateCarried = "KW-REVIEW-048";
     private const string GateNotRerun = "KW-REVIEW-049";
     private const string PriorNotThisChange = "KW-REVIEW-050";
@@ -103,6 +104,14 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
 
         report.AddRange(outcome.Diagnostics);
         ReportRefutationCandidates(outcome, gateResults, report);
+        if (settings.Candidates)
+        {
+            // A partial read lists candidates only: a verdict, findings.json or a recorded cycle now would let a later
+            // reader take it for the cycle's verdict.
+            CommandHelpers.Finish(report, settings, "review verdict", "Review");
+            return 0;
+        }
+
         report.Add(new Diagnostic(
             Verdict,
             outcome.Verdict == ReviewVerdict.Approve ? Severity.Info : Severity.Error,
@@ -362,7 +371,7 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
             return false;
 
         Dictionary<string, string> notSeated = ParseNotSeated(settings.NotSeated, report);
-        List<LensCoverage> coverage = AccountForLenses(seats, notSeated, prior, report);
+        List<LensCoverage> coverage = AccountForLenses(seats, notSeated, prior, report, settings.Candidates);
         if (report.HasErrors)
             return false;
 
@@ -470,6 +479,15 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
         {
             ReportDiscoveryGap(seat, report);
             ReportInputSitesGap(seat, report);
+            if (seat.BudgetNote is { } note)
+            {
+                report.Add(new Diagnostic(
+                    SeatBudgetReached,
+                    Severity.Warning,
+                    $"{seat.Lens} stopped at its budget; not examined: {note}",
+                    seat.Lens,
+                    Hint: "A coverage gap for the report's Council coverage, never a verdict input."));
+            }
         }
 
         return !report.HasErrors;
@@ -583,7 +601,8 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
         List<SeatOutput> seats,
         Dictionary<string, string> notSeated,
         FindingsReport? prior,
-        DiagnosticReport report)
+        DiagnosticReport report,
+        bool partial = false)
     {
         List<LensCoverage> coverage = [];
         List<string> unaccounted = [];
@@ -624,7 +643,15 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
             unaccounted.Add(lens);
         }
 
-        if (unaccounted.Count > 0)
+        if (unaccounted.Count > 0 && partial)
+        {
+            report.Add(new Diagnostic(
+                LensCoverageCode,
+                Severity.Info,
+                $"No seat file yet for: {string.Join(", ", unaccounted)}. Candidates are listed from the seats saved so far.",
+                Subject));
+        }
+        else if (unaccounted.Count > 0)
         {
             report.Add(new Diagnostic(
                 LensCoverageCode,

@@ -95,6 +95,12 @@ public sealed record ArbiterDispatchBudgetConfig(int Minutes, int ToolCalls, int
 {
     /// <summary>The shipped defaults: 15 minutes or 150 tool calls, whichever comes first, and 5 minutes for one call.</summary>
     public static ArbiterDispatchBudgetConfig Defaults { get; } = new(15, 150, 5);
+
+    /// <summary>
+    /// The shipped budget for one review council seat (<c>arbiter.seat-budget</c>): 3 minutes or 30 tool calls, and
+    /// 2 minutes for one call, so the slowest seat no longer sets the council's pace.
+    /// </summary>
+    public static ArbiterDispatchBudgetConfig SeatDefaults { get; } = new(3, 30, 2);
 }
 
 /// <summary>The <c>arbiter:</c> host configuration.</summary>
@@ -132,6 +138,9 @@ public sealed record ArbiterConfig
 
     /// <summary>The <c>arbiter.dispatch-budget</c> block.</summary>
     public ArbiterDispatchBudgetConfig DispatchBudget { get; init; } = ArbiterDispatchBudgetConfig.Defaults;
+
+    /// <summary>The <c>arbiter.seat-budget</c> block: the budget of one <c>review-lens</c> or <c>review-triage</c> dispatch.</summary>
+    public ArbiterDispatchBudgetConfig SeatBudget { get; init; } = ArbiterDispatchBudgetConfig.SeatDefaults;
 
     /// <summary>
     /// Product defaults for an unconfigured host: disabled, no provider, every
