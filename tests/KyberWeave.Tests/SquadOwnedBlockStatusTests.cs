@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -60,12 +61,10 @@ public sealed class SquadOwnedBlockStatusTests
     }
 
     [Fact]
+    [UnsupportedOSPlatform("windows")]
     public void Status_ReportsAnUnreadableBlockFileAsDriftInsteadOfCrashing()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Unix file modes are not enforced on Windows, so the unreadable file cannot be simulated.");
 
         using TempDirectory fixture = new TempDirectory();
         SquadStateStore store = Store(fixture.Path);
@@ -206,12 +205,10 @@ public sealed class SquadOwnedBlockStatusTests
     }
 
     [Fact]
+    [UnsupportedOSPlatform("windows")]
     public void Doctor_ReportsAnUnreadableBlockFileAsDriftInsteadOfCrashing()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Unix file modes are not enforced on Windows, so the unreadable file cannot be simulated.");
 
         using TempDirectory fixture = new TempDirectory();
         FakeSquadUserPaths userPaths = new(Path.Combine(fixture.Path, "user-home"));

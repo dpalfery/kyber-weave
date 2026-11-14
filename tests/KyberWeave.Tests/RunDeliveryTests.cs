@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
+using System.Runtime.Versioning;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -545,10 +546,12 @@ public sealed class RunDeliveryTests : IDisposable
 
     /// <summary>The same failure with a real unreadable file, where the platform and the user allow one.</summary>
     [Fact]
+    [UnsupportedOSPlatform("windows")]
     public void AHostTemplateWithNoReadPermissionIsNotUsedAndDoesNotThrow()
     {
-        if (OperatingSystem.IsWindows() || Environment.UserName == "root")
-            return;
+        Assert.SkipWhen(
+            OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess,
+            "Unix file modes are not enforced on Windows or for a privileged user, so the unreadable template cannot be simulated.");
 
         string repo = Path.Combine(_root, "template-repo");
         Directory.CreateDirectory(repo);

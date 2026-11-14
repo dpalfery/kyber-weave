@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -158,14 +159,12 @@ public sealed class SquadPresetCliTests : IDisposable
     }
 
     [Fact]
+    [UnsupportedOSPlatform("windows")]
     public void UseWhenArbiterTableCannotBeWrittenLeavesAgentsAndTableUnchanged()
     {
         // Forced failure: the arbiter directory is read-only, so the table cannot be written. The
         // transaction must fail as a whole, leaving the agent and the table exactly as they were.
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Unix file modes are not enforced on Windows, so a read-only directory cannot be simulated.");
 
         WritePreset("fast", FastPresetYaml);
         string initialAgentContent = """

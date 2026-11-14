@@ -160,7 +160,7 @@ public class MultipleDocsRootTests : IDisposable
     [Fact]
     public void CaseDistinctRootsSurviveOnCaseSensitiveHosts()
     {
-        if (OperatingSystem.IsWindows()) return;
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Windows paths are case-insensitive, so case-distinct roots cannot exist there.");
 
         OntologyConfig config = Load("""
             ontology:

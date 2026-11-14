@@ -130,8 +130,7 @@ public sealed class GateRunnerConcurrentGateTests : IDisposable
     [Fact]
     public void AtMostParallelismGatesRunAtOnceAndTheReportKeepsDeclarationOrder()
     {
-        if (OperatingSystem.IsWindows())
-            return;
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "The gates are POSIX shell commands, which Windows does not run.");
 
         ReviewGate Exclusive(string id, bool concurrent) =>
             new(id, ["sh", "-c", "mkdir lock 2>/dev/null || exit 7; sleep 1; rmdir lock"], TimeoutSeconds: 30) { Concurrent = concurrent };
