@@ -1143,4 +1143,18 @@ public sealed class SeatOutputParserTests
         Assert.Equal(SeatOutputKind.NoFindings, seat.Kind);
         Assert.Equal("src/Hot.cs", seat.BudgetNote);
     }
+
+    [Theory]
+    [InlineData("Budget reached, not examined:\nBudget reached, not examined: src/B.cs\n", "src/B.cs")]
+    [InlineData("Budget reached, not examined: src/A.cs\nBudget reached, not examined: src/B.cs\n", "src/A.cs")]
+    [InlineData("Budget reached, not examined:\n", "")]
+    public void TheFirstNonEmptyBudgetNoteWins(string budgetLines, string expected)
+    {
+        SeatOutput seat = SeatOutputParser.Parse(
+            "performance",
+            "NO FINDINGS: the loops it reached are bounded.\n" + budgetLines +
+            "Discovery: codegraph 1, docs 0, direct reads 0\nREVIEW.md sections checked: [§4]\n");
+
+        Assert.Equal(expected, seat.BudgetNote);
+    }
 }

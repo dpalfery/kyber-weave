@@ -98,7 +98,12 @@ public static partial class SeatOutputParser
             else if (line.StartsWith(InputSitesPrefix, StringComparison.Ordinal))
                 inputSiteLines.Add(ReadInputSites(trimmed));
             else if (line.StartsWith(BudgetPrefix, StringComparison.Ordinal))
-                budgetNote ??= trimmed[BudgetPrefix.Length..].Trim();
+            {
+                // An empty note still records that the budget was reached; it must not hide a later one that names files.
+                string note = trimmed[BudgetPrefix.Length..].Trim();
+                if (string.IsNullOrEmpty(budgetNote))
+                    budgetNote = note;
+            }
             else if (line.StartsWith(NoFindingsPrefix, StringComparison.Ordinal)
                      || line.StartsWith(SkippedPrefix, StringComparison.Ordinal))
             {
