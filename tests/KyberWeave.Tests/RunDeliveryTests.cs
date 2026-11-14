@@ -201,6 +201,19 @@ public sealed class RunDeliveryTests : IDisposable
         Assert.Empty(pending);
     }
 
+    /// <summary>An approval can leave a major open after its one fix round, so the line counts by severity.</summary>
+    [Fact]
+    public void AnApprovalThatLeavesAMajorOpenSaysSo()
+    {
+        ReviewFinding major = new("model-placement/dto", "model-placement", ReviewSeverity.Major, 9, "src/A.cs", 1, "x", "Misplaced.", "e", "f");
+        ReviewOutcome approved = new(ReviewVerdict.Approve, RiskGrade.Low, [major, major with { Id = "naming/a", Severity = ReviewSeverity.Minor }], [], []);
+
+        (string line, IReadOnlyList<string> pending) = RunEvidence.SummarizeReview(new KyberWeave.Core.Docs.Delivery.ReviewEvidence(2, approved, []));
+
+        Assert.Equal("Review: approved after 2 rounds; 1 major and 1 minor findings left for you, listed below.", line);
+        Assert.Equal(2, pending.Count);
+    }
+
     [Theory]
     [InlineData("feat(widget-api): export widgets as CSV [claude]", true)]
     [InlineData("feat: export widgets [claude]", true)]

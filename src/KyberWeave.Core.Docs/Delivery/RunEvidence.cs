@@ -127,9 +127,25 @@ public static partial class RunEvidence
             : failedGates == 0 ? $"; its {Count(ranGates, "check")} passed"
             : $"; {failedGates.ToString(CultureInfo.InvariantCulture)} of its {Count(ranGates, "check")} failed";
         string findings = pending.Count == 0 ? "; no open findings"
-            : review.Outcome.Verdict == ReviewVerdict.Approve ? $"; {Count(pending.Count, "minor finding")} left for you, listed below"
+            : review.Outcome.Verdict == ReviewVerdict.Approve ? $"; {BySeverity(review.Outcome.Accepted)} left for you, listed below"
             : $"; {Count(pending.Count, "finding")} open, listed below";
         return ($"Review: {verdict} after {rounds}{gates}{findings}.", pending);
+    }
+
+    /// <summary>"1 minor finding", or "1 major and 2 minor findings": an approval can leave majors open after its fix round.</summary>
+    private static string BySeverity(IReadOnlyList<ReviewFinding> findings)
+    {
+        string[] parts = [.. findings
+            .GroupBy(finding => finding.Severity)
+            .OrderByDescending(group => group.Key)
+            .Select(group => $"{group.Count().ToString(CultureInfo.InvariantCulture)} {group.Key switch
+            {
+                ReviewSeverity.Critical => "critical",
+                ReviewSeverity.Major => "major",
+                _ => "minor"
+            }}")];
+        string joined = parts.Length == 1 ? parts[0] : string.Join(", ", parts[..^1]) + " and " + parts[^1];
+        return joined + (findings.Count == 1 ? " finding" : " findings");
     }
 
     private static (List<string> LowConfidence, int Accepted) Decisions(string[] lines)

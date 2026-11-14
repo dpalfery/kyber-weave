@@ -259,6 +259,25 @@ public sealed class ReviewGatesCycleTests : IDisposable
         Assert.Contains("after-gates: send test-adequacy", gates, StringComparison.Ordinal);
     }
 
+    /// <summary>A person can still ask a later cycle for every applicable lens; the loop itself never passes --full.</summary>
+    [Fact]
+    public void ReviewSeatsWithFullInALaterCycleSeatsEveryApplicableLens()
+    {
+        string baseCommit = Git("rev-parse", "HEAD").Trim();
+        Write("src/a.cs", "// first\n");
+        Commit("work");
+        FinishCycle1(baseCommit: ReviewWorkTree.IdentityOf(_repo, baseCommit)!.Base);
+        Write("src/b.cs", "// fix\n");
+        Commit("fix");
+
+        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() => CreateApp().Run(
+            ["review", "seats", _repo, "--task", Task, "--base", baseCommit, "--full"]));
+
+        Assert.Equal(0, run.Result);
+        Assert.Contains("verifier: --full seats every applicable lens", run.Output, StringComparison.Ordinal);
+        Assert.Contains("--- seat security agent=review-lens ---", run.Output, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void ABaseGitCannotResolveStillWritesTheGatesAndSaysWhyThereIsNoDiff()
     {

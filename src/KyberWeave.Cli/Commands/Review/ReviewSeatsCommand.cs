@@ -90,7 +90,7 @@ public sealed class ReviewSeatsCommand : Command<ReviewSeatsSettings>
 
         string evidence;
         ReviewDecisionModel model = ReviewDecisionModelFactory.Create(root, config, settings.NoDecisionModel, null);
-        CouncilSeatPlan seats = plan.Prior is { } verified
+        CouncilSeatPlan seats = plan.Prior is { } verified && !settings.Full
             ? VerifierSeats(tree, verified, recheck)
             : WithDecisionModel(root, baseRef, changed, CouncilSeating.Plan(changed), model, cancellationToken);
         try
@@ -133,7 +133,9 @@ public sealed class ReviewSeatsCommand : Command<ReviewSeatsSettings>
             foreach (string line in ReviewCycleView.VerifierLines(plan, recheck))
                 Say(line);
             string[] seated = [.. seats.Now.Concat(seats.AfterGates)];
-            Say($"verifier: seated {(seated.Length == 0 ? "none" : string.Join(", ", seated))} over the fix delta; every other lens is carried from the prior cycle. Send only the blocks below and widen nothing.");
+            Say(settings.Full
+                ? "verifier: --full seats every applicable lens of the whole change, as a person asked; the diff is still the fix delta."
+                : $"verifier: seated {(seated.Length == 0 ? "none" : string.Join(", ", seated))} over the fix delta; every other lens is carried from the prior cycle. Send only the blocks below and widen nothing.");
         }
 
         Say($"run: {ReviewCycleView.GatesCommand(root, gatesPath, settings.BaseRef)} --deadline");
@@ -295,6 +297,11 @@ public sealed class ReviewSeatsSettings : AnalysisSettings
     [CommandOption("--hand-back")]
     [Description("Add a 'Seat file:' line to every block, so each seat writes its output there (the review-council skill's path).")]
     public bool HandBack { get; set; }
+
+    /// <summary>Whether a later cycle seats every applicable lens instead of only those the fix needs.</summary>
+    [CommandOption("--full")]
+    [Description("In a later cycle, seat every applicable lens instead of only the lenses that raised the findings being fixed. A person's choice (the full mode); the review loop never passes it.")]
+    public bool Full { get; set; }
 
     /// <summary>Whether the decision model is left out of the lens-applicability step.</summary>
     [CommandOption("--no-decision-model")]

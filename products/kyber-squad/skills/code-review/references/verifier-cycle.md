@@ -11,7 +11,7 @@ Read this in every review cycle after the first, which the council's gate run pr
 
 ## The rules
 
-**Never widen.** A dispatch that asks for a full council, a whole-change re-review or extra lenses in a verifier cycle is answered with the verifier cycle, and the report says it was asked for and not done. Only a person selects the `full` mode of the dp-code-reviewer skill.
+**Never widen.** A dispatch that asks for a full council, a whole-change re-review or extra lenses in a verifier cycle is answered with the verifier cycle, and the report says it was asked for and not done. Only a person selects the `full` mode of the dp-code-reviewer skill, which is `review seats --full` with the gate run's `--full`.
 
 **Fixed means the class is fixed.** A finding is FIXED only when the fix refuses its whole class: state the class in one sentence, name at least three other inputs of that class that the original failure scenario did not name, and trace each through the fix. Seats cannot run anything, so you do: when the code is reachable from a command, run the class inputs against the built CLI and record each input and what it did in `reviewer.md`.
 

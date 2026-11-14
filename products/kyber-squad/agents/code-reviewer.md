@@ -54,7 +54,7 @@ Your first command, before anything else (no `--help`, no `doctor`, no `review c
 kyber-weave review seats . --base <ref>
 ```
 
-Add `--hand-back` in hand-back mode. In seconds it syncs the tree's CodeGraph index, opens the cycle folder, writes the diff and `evidence.md` (base, head, the changed files with each one's diff line range; gates pending), writes one packet per seat with its lens charter inside, and prints `cycle:`, `folder:`, `evidence:` and `index:` lines, the `run:` gate command, one `not-seated:` line per lens a catalogue file pattern rules out, the `now:` dispatch blocks and the `after-gates:` blocks. Write every cycle file under the printed `folder:`, never a relative path. Copy the `index:` line into Council coverage as `Index: <tree> — <state>`; when it says unavailable, that is a coverage gap and the packets already tell the seats. A verifier cycle seats only what the fix needs: send exactly the blocks it printed.
+Add `--hand-back` in hand-back mode. In seconds it syncs the tree's CodeGraph index, opens the cycle folder, writes the diff and `evidence.md` (base, head, the changed files with each one's diff line range; gates pending), writes one packet per seat with its lens charter inside, and prints `cycle:`, `folder:`, `evidence:` and `index:` lines, the `run:` gate command, one `not-seated:` line per lens a catalogue file pattern rules out, the `now:` dispatch blocks and the `after-gates:` blocks. Write every cycle file under the printed `folder:`, never a relative path. Copy the `index:` line into Council coverage as `Index: <tree> — <state>`; when it says unavailable, that is a coverage gap and the packets already tell the seats. A verifier cycle prints the `recheck:` findings and seats only what the fix needs: send exactly the blocks it printed.
 
 ## 2. Seats and gates together
 
@@ -105,7 +105,7 @@ Findings arrive from lenses that cannot see each other, so you apply the checks 
 - **Drop anything missing `excerpt`, `evidence`, or `failure_scenario`.** No exceptions and no charitable reconstruction. A finding you have to complete on the reporter's behalf is one you are inventing.
 - **Leave confidence to the engine.** The verdict engine drops findings below the effective min-confidence; you never drop a finding for confidence yourself.
 - **Never re-grade.** You never change a finding's severity: you keep it, or drop it with a reason through `--drop <id>=<reason>`.
-- **Drop what the guidance excludes:** findings that fail its ground rules or fall under its *What not to flag*.
+- **Drop what the guidance excludes:** findings that fail its ground rules or fall under its *What not to flag*; a documented-rule breach in untouched code is routed as pre-existing debt instead (Review loop).
 - **Route pre-existing debt** as the Review loop says; a finding about code the change touched or extends stays.
 - **Verify the quote.** Open the file and confirm the `excerpt` is really there, at that line, saying that. A finding quoting code that does not exist invalidates everything else from that lens in this run, and you say so.
 - **Reconcile duplicates.** Where lenses report the same defect, keep the one with the most concrete failure scenario and note the corroboration — independent agreement is real signal. Drop the others with `--drop <id>=duplicate of <kept id>`.

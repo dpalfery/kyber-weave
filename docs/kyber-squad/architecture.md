@@ -1973,8 +1973,9 @@ not a conductor gate. The conductor never merges. Unresolved circuit-breakers ar
 ([ADR 0045](../adr/0045-conductor-operator-channel-opt-in.md)).
 
 The end-of-run council is a loop, not a single pass. After `REQUEST_CHANGES`, every critical and
-major finding and every failed blocking gate goes to the worker that owns its scope, and the
-council re-reviews until it returns `APPROVE`; every cycle after the first is a verifier cycle over
+major finding and every failed blocking gate goes to the worker that owns its scope (after an
+`APPROVE` too, for one round), and the council re-reviews until the verdict prints `fix round:
+none`; every cycle after the first is a verifier cycle over
 the fix delta. The hard stop is 5 cycles, or 3 cycles in a row in which the count of surviving
 critical and major findings does not fall: the findings still open are then listed in the pull
 request as pending human review, and delivery continues. Each cycle keeps its seat files,

@@ -20,7 +20,7 @@ lines changed spends the same amount to answer a much smaller question.
 | `shadow` | Full review, verdict emitted, **gates nothing** | Rolling the reviewer out on a repository for the first time |
 | `enabled` | The verdict gates | Normal operation |
 | `verifier` | Re-checks **the prior findings and the fix delta** | Every review cycle after the first |
-| `full` | Forces a complete council re-scan | A person selects it: a disputed verdict, or a prior review that predates a lens or policy change |
+| `full` | Forces a complete council re-scan (`review seats --full`, `review gates --full`) | A person selects it: a disputed verdict, or a prior review that predates a lens or policy change |
 
 ### shadow
 
@@ -49,7 +49,7 @@ rules; this list is the order.
    finding stays open, with the input that still gets through named in it. Seats cannot run anything, so the reviewer does: when the code is reachable from a command, run the class inputs against the built CLI, and record each input and what the command did in a `reviewer.md` seat file: in a finding's `evidence` when an input still gets through, or in its `NO FINDINGS:` sentence when every input was refused. A finding the reviewer raises itself goes in `reviewer.md` too.
 3. Run `review gates . --base <ref> --council --deadline --out <cycle>/gates.json`: in a verifier cycle it runs only the
    `rerun:` gates and carries the others' results into the report; that result is the evidence. A gate whose inputs the fix did not touch keeps the prior
-   cycle's result, cited from that cycle's `gates.json`. Never re-run the full suite or the full
+   cycle's result, cited from that cycle's `gates.json`. Never re-run every gate or the full
    council for a review-fix round, whoever raised the findings (a bot or the council): CI is the
    full re-check. The first full review of a change still runs every gate.
 4. Send exactly the seats `review seats` printed: the lenses that raised the findings the fix

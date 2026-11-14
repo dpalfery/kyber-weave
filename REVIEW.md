@@ -320,7 +320,8 @@ Governing standards: [`docs/standards/csharp`](docs/standards/csharp/README.md) 
 - Joke-grade or stylistic prose in comments, naming taste, or "I would have written this
   differently" with no failure scenario.
 - Suggestions to add features, abstractions, or configurability the task did not ask for.
-- Pre-existing issues the change does not touch.
+- Pre-existing issues the change does not touch. A breach of a documented rule is the exception: it is
+  reported as pre-existing debt, blocks nothing, and becomes a todo.
 - Re-raising a finding the author already answered with a justified reason, unless the reason
   is demonstrably wrong.
 
