@@ -16,6 +16,8 @@ that is absent takes the default shown.
   "what" only, and for a chosen one read its section of the product's configuration guide
   (`configuration.md` in the Kyber-Weave docs) with the user and edit by hand.
 - Leave out a group whose product is not installed, and say so in one line.
+- A value the user already changed from its default is shown as it is and recommended as it is;
+  never recommend reverting it, though you may say what the default would do.
 
 **Undo and cost, for every config setting.** It is one line in a repository file, visible in
 `git status`; change it back the same way. Nothing outside the repository changes.
@@ -87,7 +89,10 @@ empty for every seat. A seat that applies a row writes `override: <Id>` on the f
 
 Never invent a row.
 
-## Group 3: the decision gate (config `arbiter:`; `~/.kyber-weave/kyber-weave.yml` at global scope)
+## Group 3: the decision gate (config `arbiter:`)
+
+These go in the repository file. The same keys in `~/.kyber-weave/kyber-weave.yml` set them for
+every repository on the machine; edit that file only when the user asks for a machine-wide change.
 
 | Setting | Default | What it does | Why change it; what each value does | Recommend |
 |---|---|---|---|---|

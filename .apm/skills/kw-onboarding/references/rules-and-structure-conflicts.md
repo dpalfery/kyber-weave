@@ -252,7 +252,9 @@ the recommended one first and one line on what each option changes.
 
 Write findings in plain words: name the file and quote the text, explain any product term (the
 Config Reg is the generated paths block in the root `AGENTS.md`; a standard is a per-technology
-coding guide), and drop rule ids unless the user needs one to look something up.
+coding guide), and drop rule ids unless the user needs one to look something up. Replace each
+`<placeholder>` such as **<rules-index>** with the path it resolves to, or with "not declared in
+this repository" (which is itself a category-7 finding).
 
 ## Phase F — Apply the selected findings
 

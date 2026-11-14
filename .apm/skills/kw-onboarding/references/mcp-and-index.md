@@ -28,6 +28,9 @@ Ask each only where first-look found a gap.
   `.codegraph/`. Nothing leaves the machine.
 - *Recommend*: build it. A "no" stands for the rest of the run.
 
+**Add the worktree index hook?** Only after a yes to the index. The context is the
+`githook.post-checkout` row of [doctor-checks.md](doctor-checks.md).
+
 **Declare the `codegraph` server for this repository?**
 - *What*: adds `codegraph` to the list of servers this repository's agents rely on, in
   `.kyber-weave/kyber-weave.yml`.

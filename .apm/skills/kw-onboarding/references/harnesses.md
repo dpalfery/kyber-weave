@@ -21,6 +21,8 @@ removes an existing Copilot install. So:
   user chose now.
 - Say so to the user in one line before running it: "Copilot is already installed, so I am
   passing `copilot,claude` to keep it."
+- Verb: `squad update --target <union>` when the squad already exists at that scope (global or
+  this project); `squad install --target <union>` when it does not.
 - Only refreshing what is installed: `kyber-weave squad update [--global]` with no `--target`.
 - Removing a harness is a separate question, asked only when the user brings it up, with its own
   context (below). Never remove one as a side effect.
@@ -32,13 +34,14 @@ Context to give (the worked example below shows the full wording):
 - *What*: a harness, defined as above, and what installing does.
 - *Why*: the squad's agents only exist in the tools it is installed for; anywhere else the user
   gets the tool's plain behaviour.
-- *Options*: each harness found on the machine, named with a few words so the user recognises it;
-  the less common ones grouped as "other supported tools" and shown only on request. Choosing
-  nothing installs nothing.
+- *Options*: at most four: the recommended set; keeping things as they are; adding a tool found
+  on the machine but not in use; and "show me the other supported tools". Name each tool with a
+  few words so the user recognises it. Choosing nothing installs nothing.
 - *Cost and undo*: about a minute; writes the harness's home folder (global) or this repository
   (project); undo by re-running this skill, or `kyber-weave squad uninstall [--global]` for all.
 - *Found*: which tools are on the machine and which already have the squad, with its version.
-- *Recommend*: the tools found on the machine, plus every one that already has the squad.
+- *Recommend*: the tools in use (first-look: the squad is there, or its command is on `PATH`).
+  Tools with only a home folder are named once as "also found", not recommended.
 
 ### Worked example
 
@@ -69,13 +72,16 @@ Context to give (the worked example below shows the full wording):
   this machine gets it; a project install puts it inside this repository only.
 - *Why*: global means one install to keep up to date; project means the repository carries its
   own copy, which teammates get when they pull.
-- *Options*: global (`kyber-weave squad install --global --target <union>`), or project
-  (`kyber-weave squad install . --target <union>`; when the project already has the squad,
-  `kyber-weave squad update . --target <union>`).
+- *Options*: global (`kyber-weave squad install --global --target <union>`, or `squad update
+  --global --target <union>` when a global install exists), or project (`kyber-weave squad
+  install . --target <union>`, or `squad update . --target <union>` when the project has one).
 - *Cost and undo*: global writes under the home directory; project writes repository files that
   show in `git status`. `--dry-run` previews either. In an agent's shell the CLI does not prompt
-  for confirmation, so the user's yes here is the only one.
-- *Found*: whether a global or project install already exists.
+  for confirmation, so the user's yes here is the only one. A global install with OpenCode also
+  installs the KyberDash capture plugin when KyberDash is present; say so, and pass
+  `--no-capture-plugin` if the user does not want it.
+- *Found*: whether a global or project install already exists. When the squad is already
+  installed at one scope and question 1 added nothing, skip this question.
 - *Recommend*: global, unless the team wants the agents committed to the repository.
 
 ## Question 3: the decision gate (Arbiter hooks)
@@ -103,9 +109,9 @@ Context to give (the worked example below shows the full wording):
 ## Per harness
 
 After the install, give each chosen harness's "Trust step" (what the user must do once in the
-tool, or the hooks never run) and "Needs" (a setting the squad cannot write for them). For each
-"Needs" item, say what goes wrong without it, and change a user or harness settings file only
-with a yes.
+tool, or the hooks never run) and "Needs" (a setting the squad cannot write for them). Each
+"Needs" item that changes a file is its own question with the full context (what goes wrong
+without it, the file, how to undo); change a user or harness settings file only with a yes.
 
 | Harness (install name) | Trust step | Needs |
 |---|---|---|
