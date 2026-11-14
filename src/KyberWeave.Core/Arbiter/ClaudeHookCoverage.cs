@@ -126,7 +126,7 @@ public static class ClaudeHookCoverage
                 }
             }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             // An agents folder that cannot be listed contributes no agent-file hooks.
         }
@@ -229,7 +229,7 @@ public static class ClaudeHookCoverage
                 .Where(entry => entry is DirectoryInfo && entry.LinkTarget is null)
                 .ToList();
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             // A skills folder that cannot be listed carries no hooks this check can see.
             return [];
@@ -254,25 +254,31 @@ public static class ClaudeHookCoverage
         }
     }
 
-    private static bool Fires(string path, string eventName, string toolName)
+    /// <summary>Whether the source at <paramref name="path"/> fires; a source that cannot be read or parsed does not.</summary>
+    /// <param name="path">The source file.</param>
+    /// <param name="eventName">The hook event.</param>
+    /// <param name="toolName">The tool the event is for.</param>
+    /// <param name="readSource">Reads the source's text (bounded); the file system when null. Lets a test make the read fail.</param>
+    internal static bool Fires(string path, string eventName, string toolName, Func<string, string>? readSource = null)
     {
+        Func<string, string> read = readSource ?? (source => BoundedFileReader.ReadAllText(source, MaxSourceBytes));
         try
         {
             IReadOnlyList<HookGroup> groups = string.Equals(Path.GetExtension(path), ".md", StringComparison.OrdinalIgnoreCase)
-                ? FrontmatterGroups(path, eventName)
-                : JsonGroups(path, eventName);
+                ? FrontmatterGroups(path, eventName, read)
+                : JsonGroups(path, eventName, read);
             return groups.Any(group => Matches(group.Matcher, toolName) && group.Commands.Any(IsArbiterClaudeHook));
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or YamlException or InvalidDataException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is JsonException or YamlException or InvalidDataException)
         {
             // A source that cannot be read or parsed does not fire. It must not stop the dispatch.
             return false;
         }
     }
 
-    private static IReadOnlyList<HookGroup> JsonGroups(string path, string eventName)
+    private static IReadOnlyList<HookGroup> JsonGroups(string path, string eventName, Func<string, string> read)
     {
-        JsonNode? root = JsonNode.Parse(BoundedFileReader.ReadAllText(path, MaxSourceBytes));
+        JsonNode? root = JsonNode.Parse(read(path));
         if (root is not JsonObject document
             || document["hooks"] is not JsonObject hooks
             || hooks[eventName] is not JsonArray containers)
@@ -306,9 +312,9 @@ public static class ClaudeHookCoverage
         return groups;
     }
 
-    private static IReadOnlyList<HookGroup> FrontmatterGroups(string path, string eventName)
+    private static IReadOnlyList<HookGroup> FrontmatterGroups(string path, string eventName, Func<string, string> read)
     {
-        FrontmatterReadResult frontmatter = MarkdownFrontmatterReader.Read(BoundedFileReader.ReadAllText(path, MaxSourceBytes));
+        FrontmatterReadResult frontmatter = MarkdownFrontmatterReader.Read(read(path));
         if (!frontmatter.HasFrontmatter)
         {
             return [];

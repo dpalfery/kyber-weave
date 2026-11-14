@@ -11,15 +11,21 @@ internal static class BoundedFileReader
 {
     private const int ChunkBytes = 81920;
 
+    /// <summary>The largest bound accepted: the text is held in one in-memory buffer, which cannot pass this size.</summary>
+    internal const long MaxLimitBytes = int.MaxValue;
+
     /// <summary>
     /// The file's text, with a byte-order mark detected as <see cref="File.ReadAllText(string)"/> detects it. At most
     /// <paramref name="limitBytes"/> + 1 bytes are ever read.
     /// </summary>
     /// <param name="path">The file to read.</param>
-    /// <param name="limitBytes">The most bytes the file may hold.</param>
+    /// <param name="limitBytes">The most bytes the file may hold, from 0 to <see cref="MaxLimitBytes"/>.</param>
     /// <exception cref="InvalidDataException">The file holds more than <paramref name="limitBytes"/> bytes.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="limitBytes"/> is negative or above <see cref="MaxLimitBytes"/>.</exception>
     internal static string ReadAllText(string path, long limitBytes)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(limitBytes);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(limitBytes, MaxLimitBytes);
         using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         return ReadAllText(stream, limitBytes);
     }
@@ -31,6 +37,8 @@ internal static class BoundedFileReader
     internal static string ReadAllText(Stream stream, long limitBytes)
     {
         ArgumentNullException.ThrowIfNull(stream);
+        ArgumentOutOfRangeException.ThrowIfNegative(limitBytes);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(limitBytes, MaxLimitBytes);
         using MemoryStream bytes = new();
         byte[] chunk = new byte[ChunkBytes];
         long total = 0;

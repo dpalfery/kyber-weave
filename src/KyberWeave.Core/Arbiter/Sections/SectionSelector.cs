@@ -46,7 +46,7 @@ public sealed class SectionSelector(IArbiterProvider provider)
             ct.ThrowIfCancellationRequested();
             text = BoundedFileReader.ReadAllText(documentPath, MaxDocumentBytes);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException)
         {
             return new SectionSelection([], FailedSafe: true);
         }

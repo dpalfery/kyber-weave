@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Arbiter.Facts;
 
@@ -122,7 +123,7 @@ internal static class ArbiterLogFiles
     /// <summary>
     /// Reads the lines inside the last <paramref name="tailBytes"/> bytes of <paramref name="path"/>. A line the
     /// window cuts the start of is dropped, so a whole line is never read as a fragment. A file that is absent or
-    /// cannot be opened or read (<see cref="IOException"/>, <see cref="UnauthorizedAccessException"/>) reads as
+    /// cannot be opened or read (see <see cref="FileFailure"/>) reads as
     /// empty: a log that cannot be read has no records to offer, and must not crash the caller.
     /// </summary>
     /// <param name="path">The file to read.</param>
@@ -148,7 +149,7 @@ internal static class ArbiterLogFiles
         {
             return new LogTail([], Truncated: false, Unreadable: null);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             return new LogTail([], Truncated: false, Unreadable: $"{exception.GetType().Name}: {exception.Message}");
         }

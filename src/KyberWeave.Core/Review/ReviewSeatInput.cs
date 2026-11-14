@@ -1,4 +1,4 @@
-using System.Security;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Review;
 
@@ -30,7 +30,7 @@ internal static class ReviewSeatInput
     /// cannot take. Every such failure is an answer ("could not be read"), not a crash.
     /// </summary>
     public static bool IsFileFailure(Exception exception) =>
-        exception is IOException or UnauthorizedAccessException or SecurityException or ArgumentException or NotSupportedException;
+        FileFailure.Is(exception);
 
     /// <summary>Whether a line number is one a finding may cite: from 0 (no line) to <see cref="MaxLine"/>.</summary>
     public static bool IsLineNumber(long line) => line is >= 0 and <= MaxLine;

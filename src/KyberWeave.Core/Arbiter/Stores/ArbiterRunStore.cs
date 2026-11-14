@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Arbiter.Stores;
 
@@ -256,11 +257,7 @@ public sealed class ArbiterRunStore
             await ArbiterLogFiles.AppendLineAsync(directory, fileName, line, ct);
             return ArbiterStoreStatus.Stored;
         }
-        catch (IOException)
-        {
-            return ArbiterStoreStatus.Unavailable;
-        }
-        catch (UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             return ArbiterStoreStatus.Unavailable;
         }
@@ -289,7 +286,7 @@ public sealed class ArbiterRunStore
                 SweepEntry(entry, keep, now, retain);
             }
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             // The sweep is best effort: an unreadable stores directory is left for a later append, and the item
             // being appended is still stored.
@@ -312,7 +309,7 @@ public sealed class ArbiterRunStore
                 directory.Delete(recursive: true);
             }
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             // One unreadable or undeletable sibling is left for a later append; see the type remarks.
         }
