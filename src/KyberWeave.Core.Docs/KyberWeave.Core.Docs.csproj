@@ -34,6 +34,8 @@
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\tauri\README.md" LogicalName="Standards.tauri.md" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\test\README.md" LogicalName="Standards.test.md" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\typescript\README.md" LogicalName="Standards.typescript.md" />
+    <!-- The one pull request description format: the create-pull-request skill and the deliver tool both fill it. -->
+    <EmbeddedResource Include="..\..\products\kyber-squad\skills\create-pull-request\assets\pull-request-description.md" LogicalName="Delivery.pull-request-description.md" />
   </ItemGroup>
 
   <ItemGroup>

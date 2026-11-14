@@ -34,6 +34,7 @@ required-mcp-tools:
     - docs_get_coding_standard_for_technology
     - docs_get_source_repository_and_revision
     - docs_look_up_glossary_term_definition
+    - docs_push_run_branch_and_open_draft_pull_request
     - docs_validate_governed_document_schema
   kw-arbiter:
     - arbiter_check_configuration_and_key_readiness

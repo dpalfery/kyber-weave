@@ -1478,6 +1478,30 @@
       "bound": "ProcessRunner.Run with GitTimeout = 60 s; the process tree is killed on expiry. git argv only (add, diff --cached, status, commit) for the paths the closeout or finalize touched; never push."
     },
     {
+      "file": "src/KyberWeave.Core.Docs/Delivery/RunDelivery.cs",
+      "text": "ProcessStartInfo startInfo = new(program)",
+      "count": 1,
+      "bound": "Builds only; started through the injected IProcessExecutor, whose production form is the BoundedExecutor below (3 min per call). program is git or gh only."
+    },
+    {
+      "file": "src/KyberWeave.Core.Docs/Delivery/RunDelivery.cs",
+      "text": "ProcessRunner.Run(startInfo, standardInput, timeout);",
+      "count": 1,
+      "bound": "BoundedExecutor: ProcessRunner.Run with a 3-minute timeout that kills the process tree on expiry. git (status, diff, merge-base, add, commit, push without force) and gh (pr list, create, edit, view; auth status) for the run branch only."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/RunDeliveryTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "Started by the Run below: ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temporary repository whose push URL is a local bare repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/RunDeliveryTests.cs",
+      "text": "return ProcessRunner.Run(startInfo, standardInput, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temporary repository. gh is never started: the test executor answers it from a script."
+    },
+    {
       "file": "tests/KyberWeave.Tests/ReviewGatesCycleTests.cs",
       "text": "ProcessStartInfo startInfo = new(\"git\")",
       "count": 1,

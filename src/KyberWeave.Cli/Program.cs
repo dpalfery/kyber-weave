@@ -359,7 +359,7 @@ app.Configure(config =>
     // repository, not a governed artifact class.
     config.AddBranch("run", run =>
     {
-        run.SetDescription("Start a run: fetch, resolve the base, and create the branch the work belongs on.");
+        run.SetDescription("Start a run on its own branch, and deliver it as a draft pull request when it is finished.");
 
         run.AddCommand<RunStartCommand>("start")
             .WithDescription(
@@ -372,6 +372,10 @@ app.Configure(config =>
             .WithExample(
                 "run", "start", "--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate",
                 "--resume", "claude/fix/existing-fix", "--json");
+
+        run.AddCommand<RunDeliverCommand>("deliver")
+            .WithDescription(RunDeliverCommand.Description)
+            .WithExample("run", "deliver", ".", "--summary", "Plans now finalize through a tool, so a run saves a minute per plan.");
     });
 
     // Kyber-Arbiter Human Surfaces — validate, list, inspect, dry-run, audit,

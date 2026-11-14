@@ -80,14 +80,21 @@ the per-root objects (document host, analysis reader, CodeGraph schedule) live i
 built per root, kept in a four-entry least-recently-used set. Omitted means the server root.
 A new tool must take `projectPath` and start with `Redirect(projectPath, ...)`.
 
-## Two tools change files, and only plan lifecycle files
+## Three tools change files: two plan lifecycle tools and the deliver tool
 
 `docs_finalize_approved_plan_and_write_task_file` and `docs_archive_plan_after_closeout_is_complete`
-(`DocsTools.PlanLifecycle.cs`) are the only tools that write. Each is a thin wrapper over a Core.Docs
+(`DocsTools.PlanLifecycle.cs`) write only plan lifecycle files. Each is a thin wrapper over a Core.Docs
 class the CLI also runs (`PlanFinalize`, `PlanCloseout`), requires `projectPath`, refuses any path
 that is not a plan file under the plans folder, and changes nothing on a refusal. Keep any new
 writing tool to that shape: the check and the write live in Core, the tool only formats the result
 ([ADR 0078](../../docs/adr/0078-the-conductor-finalizes-and-archives-plans-through-two-docs-tools.md)).
+
+`docs_push_run_branch_and_open_draft_pull_request` (`DocsTools.Delivery.cs`) has the same shape over
+`RunDelivery`, which `kyber-weave run deliver` also runs. It is the one tool that reaches outside the
+machine (`OpenWorld = true`): it pushes the run branch and creates or updates its draft pull request
+with `gh`. Its only local write is a commit of plan files the archive left staged. Its git and gh
+calls go through an `IProcessExecutor` that tests replace (`DeliveryExecutor`), so no test contacts
+GitHub ([ADR 0081](../../docs/adr/0081-the-conductor-delivers-a-run-through-one-docs-tool.md)).
 
 ## Staleness is handled for you
 

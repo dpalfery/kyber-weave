@@ -65,6 +65,7 @@ public sealed class McpToolNameContractTests
         (ArbiterServer, "arbiter_classify_bot_review_comment"),
         (DocsServer, "docs_finalize_approved_plan_and_write_task_file"),
         (DocsServer, "docs_archive_plan_after_closeout_is_complete"),
+        (DocsServer, "docs_push_run_branch_and_open_draft_pull_request"),
     ];
 
     /// <summary>The docs server exposes exactly its eight renamed and two added tools, and the arbiter server its three renamed and two added.</summary>

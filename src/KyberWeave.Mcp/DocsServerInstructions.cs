@@ -31,7 +31,9 @@ public static class DocsServerInstructions
         Two tools change files, and only plan files: docs_finalize_approved_plan_and_write_task_file
         sets an approved Draft plan to Ready and writes its task file, and
         docs_archive_plan_after_closeout_is_complete archives a plan once its closeout evidence is
-        complete. Both need projectPath and refuse, changing nothing, when their checks fail.
+        complete. One tool delivers a finished run: docs_push_run_branch_and_open_draft_pull_request
+        pushes the run branch and opens or updates its draft pull request on GitHub. All three need
+        projectPath and refuse, changing nothing, when their checks fail.
 
         Every response starts with a provenance line naming the repository root, its branch, its
         git directory, the short revision, whether the working tree is dirty, and the document
