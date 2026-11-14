@@ -50,6 +50,7 @@ public sealed class ArbiterConfigTests
         "KW-ARB-COMMENT-001",
         "KW-ARB-CHECKOUT-001",
         "KW-ARB-MODE-002",
+        "KW-ARB-SEVERITY-001",
     ];
 
     [Fact]

@@ -403,6 +403,28 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
         Assert.Contains("correctness/off-by-one", run.Output, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// With no decision model configured (no <c>arbiter</c> block, so provider <c>none</c>), the verdict and the
+    /// candidate list print what they printed before the model was added: no decision-model line, nothing dropped or
+    /// merged, every major finding still a candidate, and no answer file written beside the seats.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WithNoDecisionModelTheVerdictIsUnchanged(bool candidates)
+    {
+        WriteSeat("correctness", FindingSeat(severity: "major"));
+        WriteSeat("security", FindingSeat(lens: "security", id: "security/off-by-one", severity: "minor"));
+        string[] args = ["--seats", _seats, .. NotSeatedExcept("correctness", "security")];
+
+        CapturedConsoleExecution<int> run = Verdict(candidates ? [.. args, "--candidates"] : args);
+
+        Assert.DoesNotContain("decision model", run.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("KW-REVIEW-055", run.Output, StringComparison.Ordinal);
+        Assert.Contains("Accepted critical and major findings: correctness/off-by-one.", run.Output, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(_temp.Path, "decision-model.json")));
+    }
+
     [Fact]
     public void TheAcceptedListIsAbsentWhenABlockingGateFailed()
     {

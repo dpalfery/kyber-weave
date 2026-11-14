@@ -157,7 +157,7 @@ public sealed class ArbiterPlanReadRuleTests
             $"the shipped rules file must live at '{ShippedRulesPath}'.");
         string[] lines = File.ReadAllLines(ShippedRulesPath);
 
-        Assert.Contains("34 shipped Arbiter rules", lines[0], StringComparison.Ordinal);
+        Assert.Contains("35 shipped Arbiter rules", lines[0], StringComparison.Ordinal);
 
         string[] ids =
         [
@@ -167,9 +167,9 @@ public sealed class ArbiterPlanReadRuleTests
                 .Select(line => line["- id: ".Length..].Trim())
         ];
 
-        Assert.Equal(34, ids.Length);
+        Assert.Equal(35, ids.Length);
         Assert.Contains(PlanReadRule, ids);
-        Assert.Equal("KW-ARB-MODE-002", ids[^1]);
+        Assert.Equal("KW-ARB-MODE-002", ids[^2]);
         Assert.Equal("delegate", Rule().Trigger);
     }
 }

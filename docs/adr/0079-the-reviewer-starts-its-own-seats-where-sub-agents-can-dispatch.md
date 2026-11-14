@@ -4,7 +4,7 @@ title: The reviewer starts its own seats where sub-agents can dispatch
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-13
+last-reviewed: 2026-11-14
 component: ReviewCouncil
 decided-by: []
 supersedes:
@@ -17,6 +17,9 @@ code-refs:
   - CouncilSeating
   - ReviewSeatsCommand
   - WorkerGuard
+  - ReviewDecisionModel
+  - ReviewVerdictDecisions
+  - ReviewLensApplicability
 ---
 
 # ADR 0079: The reviewer starts its own seats where sub-agents can dispatch
@@ -28,6 +31,8 @@ Accepted, 2026-11-13. Decided by the owner. Replaces decision 1 of
 decisions 2 to 4 (the evidence the gate run writes, no seat for what a gate proves, and the Arbiter
 classifying a seat the conductor starts) stand. Amended 2026-11-13: decisions 6 to 9 make the seats
 start while the gates run, after a replay showed the fanned-out review taking 16.7 minutes.
+Amended 2026-11-14: decision 10 moves the review's decision-model questions from the Arbiter hooks
+into the review commands.
 
 ## Context
 
@@ -132,6 +137,24 @@ apply, which the changed-file list already showed.
    candidate is refuted in its own spawn, all in one parallel batch with the after-gates seats and
    retries. The verdict command then runs once.
 
+10. **The review commands ask the decision model, when one is configured.** The Arbiter's review
+    questions hung off dispatch hooks that saw a seat-file path or no finding at all: in a replay the
+    nitpick question was asked 13 times and answered "unsure" 13 times, the lens question was asked for
+    1 of 16 seats, and the claim question was never asked while a refuter took 2.3 minutes. The
+    commands hold the diff, the changed files and the seat files, so they ask instead, through the
+    Arbiter's client, rules, floors and decision log. `review seats` asks `KW-ARB-LENS-001` for each
+    seated judgement lens and leaves a confidently inapplicable one unseated. `correctness`,
+    `test-adequacy` and the gate-reading lenses are never asked, and the question is only whether the
+    lens's subject is in the diff, never the size or risk of the change. `review verdict` merges
+    confident duplicates (`KW-ARB-DUP-001`), drops confident minor nitpicks (`KW-ARB-NITPICK-001`; never
+    major or critical), skips the refuter for a candidate whose cited code confidently supports its claim
+    (`KW-ARB-CLAIM-001`; a confident "contradicts" still goes to a refuter), and notes a severity that
+    looks out of line with its impact (`KW-ARB-SEVERITY-001`, advisory). Every change is printed with its
+    confidence. The model is optional: provider `none`, no key, `--no-decision-model`, a fault or an
+    unsure answer leaves the review exactly as it was, the first fault stops further calls, and nothing
+    depends on the Arbiter's hooks or `arbiter.enabled`. The hook side of the four rules answers from
+    step 0, so no question is asked twice.
+
 The Arbiter classification ADR 0077 added stays: on the `review-council` path the conductor or
 `bug-crusher` starts the seats, and on Factory, whose hook names no caller, the `LENS:` or `REFUTE:`
 header infers `code-reviewer`.
@@ -152,6 +175,10 @@ header infers `code-reviewer`.
   doubt; an infrastructure change in a folder no pattern names would leave `infra-workflow` unseated.
 - **The budget is enforced only where the worker guard runs** (Copilot CLI and Claude Code with the
   Arbiter on). Elsewhere it is the seat's own instruction.
+- **The decision model judges text, not code paths.** A confident "supports" spares a refuter on the
+  cited lines and the lines the evidence cites; a claim about something no line shows (a folder that
+  holds no file) stays with the refuter only because the model is then unsure. The nitpick and
+  duplicate steps are enforced by default; `shadow: true` on either rule returns it to logging only.
 - **Where nesting is off by default, the operator must turn it on.** OpenCode and Kilo stay on the
   skill path until the operator sets `subagent_depth`, and the render cannot see that setting. VS Code
   Copilot without its setting falls back to the reviewer applying the lenses itself.

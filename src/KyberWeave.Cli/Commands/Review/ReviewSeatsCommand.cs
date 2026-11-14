@@ -90,6 +90,8 @@ public sealed class ReviewSeatsCommand : Command<ReviewSeatsSettings>
 
         string evidence;
         CouncilSeatPlan seats = CouncilSeating.Plan(changed);
+        ReviewDecisionModel model = ReviewDecisionModelFactory.Create(root, config, settings.NoDecisionModel, null);
+        seats = WithDecisionModel(root, baseRef, changed, seats, model, cancellationToken);
         try
         {
             evidence = ReviewEvidence.Write(
@@ -135,6 +137,10 @@ public sealed class ReviewSeatsCommand : Command<ReviewSeatsSettings>
         foreach ((string lens, string reason) in seats.NotSeated.OrderBy(pair => pair.Key, StringComparer.Ordinal))
             Say($"not-seated: --not-seated \"{lens}={reason}\"");
 
+        int ruledOut = model.Decisions.Count(decision => decision.Effect == "not seated");
+        if (model.SummaryLine(ruledOut > 0 ? [$"{ruledOut} lens(es) not seated"] : []) is { } summaryLine)
+            Say(summaryLine);
+
         Say($"now: {seats.Now.Count} seats; send them in one batch with the run: line");
         foreach (string lens in seats.Now)
             Console.Write(Block(folder, lens, reviewRun, settings.HandBack));
@@ -148,6 +154,44 @@ public sealed class ReviewSeatsCommand : Command<ReviewSeatsSettings>
     }
 
     private static void Say(string line) => Console.WriteLine(line);
+
+    /// <summary>
+    /// Leaves out each judgement lens the decision model confidently finds does not apply to the change. With no model
+    /// configured, or no changed-file list, the seating is returned unchanged.
+    /// </summary>
+    private static CouncilSeatPlan WithDecisionModel(
+        string root,
+        string baseRef,
+        IReadOnlyList<string>? changed,
+        CouncilSeatPlan seats,
+        ReviewDecisionModel model,
+        CancellationToken cancellationToken)
+    {
+        if (!model.Configured || changed is not { Count: > 0 })
+            return seats;
+
+        string patch;
+        try
+        {
+            patch = ChangedFiles.DiffSinceMergeBase(root, baseRef).Patch;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or TimeoutException)
+        {
+            patch = string.Empty;
+        }
+
+        IReadOnlyDictionary<string, string> ruledOut = ReviewLensApplicability.NotApplicableAsync(
+                model, seats.Now, ReviewLensApplicability.Summarize(changed, patch), cancellationToken)
+            .GetAwaiter()
+            .GetResult();
+        if (ruledOut.Count == 0)
+            return seats;
+
+        Dictionary<string, string> notSeated = new(seats.NotSeated, StringComparer.Ordinal);
+        foreach ((string lens, string reason) in ruledOut)
+            notSeated[lens] = reason;
+        return new CouncilSeatPlan([.. seats.Now.Where(lens => !ruledOut.ContainsKey(lens))], seats.AfterGates, notSeated);
+    }
 
     private static string StrictnessName(ReviewStrictness strictness) => strictness switch
     {
@@ -212,4 +256,9 @@ public sealed class ReviewSeatsSettings : AnalysisSettings
     [CommandOption("--hand-back")]
     [Description("Add a 'Seat file:' line to every block, so each seat writes its output there (the review-council skill's path).")]
     public bool HandBack { get; set; }
+
+    /// <summary>Whether the decision model is left out of the lens-applicability step.</summary>
+    [CommandOption("--no-decision-model")]
+    [Description("Do not ask the decision model (arbiter.provider) whether each judgement lens applies. Without a configured model nothing is asked anyway.")]
+    public bool NoDecisionModel { get; set; }
 }

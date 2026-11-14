@@ -147,9 +147,16 @@ public sealed class ReviewVerdictSettings : AnalysisSettings
 
     [CommandOption("--candidates")]
     [Description("List the refutation candidates (KW-REVIEW-046) from the seat files saved so far, while other seats " +
-                 "still run. A lens with no seat file yet is not refused, and nothing is written; the verdict still " +
-                 "needs a full run.")]
+                 "still run. A lens with no seat file yet is not refused, and no verdict or findings document is " +
+                 "written; the verdict still needs a full run. With a decision model configured, a candidate whose " +
+                 "cited code it confidently found to support the claim is not listed, and its answers are kept beside " +
+                 "the seat folder for the verdict run.")]
     public bool Candidates { get; set; }
+
+    [CommandOption("--no-decision-model")]
+    [Description("Do not ask the decision model (arbiter.provider) to merge duplicates, drop minor nitpicks, check " +
+                 "refutation candidates' claims or note severities. Without a configured model nothing is asked anyway.")]
+    public bool NoDecisionModel { get; set; }
 }
 
 /// <summary>Settings for <c>review cycle</c>.</summary>

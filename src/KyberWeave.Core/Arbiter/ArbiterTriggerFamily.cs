@@ -72,6 +72,7 @@ public static class ArbiterTriggerFamilies
             ["advice"] = ArbiterTriggerFamily.Advice,
             ["sections.select"] = ArbiterTriggerFamily.Advice,
             ["comment.triage"] = ArbiterTriggerFamily.Advice,
+            ["review.verdict"] = ArbiterTriggerFamily.Advice,
         };
 
     /// <summary>Every trigger name the Arbiter knows.</summary>

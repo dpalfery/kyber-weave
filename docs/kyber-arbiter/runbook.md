@@ -582,15 +582,14 @@ Check the dispatch's own transcript if you need to know which model ran.
 
 ## Phase 3 rules: reading and enforcing
 
-Nine phase 3 rules ship in shadow: `KW-ARB-NITPICK-001`, `KW-ARB-NITPICK-002`, `KW-ARB-DUP-001`,
-`KW-ARB-TRIAGE-001`, `KW-ARB-INTAKE-001`, `KW-ARB-DOCIMPACT-001`, `KW-ARB-FAILURE-001`,
+Seven phase 3 rules ship in shadow: `KW-ARB-NITPICK-002`, `KW-ARB-TRIAGE-001`, `KW-ARB-INTAKE-001`, `KW-ARB-DOCIMPACT-001`, `KW-ARB-FAILURE-001`,
 `KW-ARB-TRIM-001` and `KW-ARB-COMMENT-001`. Until a rule is enforced, a dispatch behaves as it did
 before: the lens is still spawned, the finding still reaches the host, and the investigator, planner
 or docs-dev still runs. Read the shadow entries in `decisions.jsonl` first.
 
-- A `would-effect` of `drop` (nitpick filter) means the finding would have been set aside as
-  `ARBITER_DROPPED`. Compare a sample against the findings the council kept.
-- A `would-effect` of `duplicate` means the refutation would have been denied as `ARBITER_DUPLICATE`.
+- `KW-ARB-NITPICK-001` and `KW-ARB-DUP-001` are asked by `review verdict` and enforced there. Their
+  decisions carry the finding id as `candidate` and the effect in `evidence` (`review command: dropped
+  as nitpick`, `merged`). Set `shadow: true` on either under `arbiter.rules` to return it to logging only.
 - A `would-effect` of `answer` on a shortcut means the worker would have been withheld and the
   substitute digest returned. Check the digest's `ARBITER_DECISION` against the worker's own report
   before trusting it.

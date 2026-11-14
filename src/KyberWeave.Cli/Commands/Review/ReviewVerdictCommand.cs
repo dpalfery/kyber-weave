@@ -94,6 +94,11 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
 
         findings = CheckCitedLines(root, findings, report, dropped);
 
+        ReviewDecisionModel model = ReviewDecisionModelFactory.Create(
+            root, config, settings.NoDecisionModel, DecisionCachePath(settings));
+        List<string> modelEffects = [];
+        findings = ApplyDecisionModel(model, findings, settings.Candidates, report, dropped, modelEffects, cancellationToken);
+
         ReviewOutcome outcome = VerdictEngine.Evaluate(
             findings,
             gateResults,
@@ -103,7 +108,12 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
         outcome = outcome with { Dropped = [.. dropped, .. outcome.Dropped] };
 
         report.AddRange(outcome.Diagnostics);
-        ReportRefutationCandidates(outcome, gateResults, report);
+        ReportRefutationCandidates(root, model, outcome, gateResults, report, modelEffects, cancellationToken);
+        if (!settings.Candidates)
+            ReportSeverityNotes(model, outcome.Accepted, report, modelEffects, cancellationToken);
+        if (model.SummaryLine(modelEffects) is { } summaryLine)
+            report.Add(new Diagnostic(ReviewVerdictDecisions.Code, Severity.Info, summaryLine, Subject));
+
         if (settings.Candidates)
         {
             // A partial read lists candidates only: a verdict, findings.json or a recorded cycle now would let a later
@@ -785,23 +795,152 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
         return kept;
     }
 
+    /// <summary>The cycle's decision-model answer file, beside the seat folder; none for a hand-built findings file.</summary>
+    private static string? DecisionCachePath(ReviewVerdictSettings settings) =>
+        settings.Seats is null ? null : Path.Combine(Path.GetDirectoryName(Path.GetFullPath(settings.Seats).TrimEnd(Path.DirectorySeparatorChar))!, "decision-model.json");
+
+    /// <summary>
+    /// Merges the findings the decision model confidently calls one defect, then, for a verdict run, drops the minor
+    /// findings it confidently calls nitpicks. Each change is reported and kept in the dropped list with its reason, so
+    /// nothing leaves the verdict silently. With no model configured nothing is asked and nothing changes.
+    /// </summary>
+    private static List<ReviewFinding> ApplyDecisionModel(
+        ReviewDecisionModel model,
+        List<ReviewFinding> findings,
+        bool candidatesOnly,
+        DiagnosticReport report,
+        List<DroppedFinding> dropped,
+        List<string> effects,
+        CancellationToken cancellationToken)
+    {
+        if (!model.Configured)
+            return findings;
+
+        (List<ReviewFinding> kept, List<MergedFindings> merged) =
+            ReviewVerdictDecisions.MergeDuplicatesAsync(model, findings, cancellationToken).GetAwaiter().GetResult();
+        foreach (MergedFindings group in merged)
+        {
+            foreach ((ReviewFinding finding, double? confidence) in group.Merged)
+            {
+                dropped.Add(new DroppedFinding(
+                    finding, ReviewVerdictDecisions.Code, $"decision model: duplicate of {group.Kept.Id} (confidence {ReviewDecisionModel.Format(confidence)})"));
+            }
+
+            report.Add(new Diagnostic(
+                ReviewVerdictDecisions.Code,
+                Severity.Info,
+                $"Merged as duplicates (decision model): kept '{group.Kept.Id}'; merged " +
+                string.Join(", ", group.Merged.Select(item => $"'{item.Finding.Id}' (confidence {ReviewDecisionModel.Format(item.Confidence)})")),
+                group.Kept.Lens,
+                group.Kept.File,
+                StartLine: group.Kept.Line));
+        }
+
+        int mergedCount = merged.Sum(group => group.Merged.Count);
+        if (mergedCount > 0)
+            effects.Add($"{mergedCount} duplicate(s) merged");
+        if (candidatesOnly)
+            return kept;
+
+        (List<ReviewFinding> substantive, List<(ReviewFinding Finding, double? Confidence)> nitpicks) =
+            ReviewVerdictDecisions.DropNitpicksAsync(model, kept, cancellationToken).GetAwaiter().GetResult();
+        foreach ((ReviewFinding finding, double? confidence) in nitpicks)
+        {
+            string reason = $"decision model: nitpick (confidence {ReviewDecisionModel.Format(confidence)})";
+            dropped.Add(new DroppedFinding(finding, ReviewVerdictDecisions.Code, reason));
+            report.Add(new Diagnostic(
+                ReviewVerdictDecisions.Code,
+                Severity.Info,
+                $"Dropped as nitpick (decision model): '{finding.Id}' (confidence {ReviewDecisionModel.Format(confidence)})",
+                finding.Lens,
+                finding.File,
+                StartLine: finding.Line));
+        }
+
+        if (nitpicks.Count > 0)
+            effects.Add($"{nitpicks.Count} nitpick(s) dropped");
+        return substantive;
+    }
+
+    /// <summary>
+    /// Notes each accepted finding whose stated severity the decision model confidently finds out of line with its
+    /// stated impact. Advisory: the verdict was already computed on the seat's severity and does not change.
+    /// </summary>
+    private static void ReportSeverityNotes(
+        ReviewDecisionModel model,
+        IReadOnlyList<ReviewFinding> accepted,
+        DiagnosticReport report,
+        List<string> effects,
+        CancellationToken cancellationToken)
+    {
+        if (!model.Configured)
+            return;
+
+        IReadOnlyList<(ReviewFinding Finding, string Direction, double? Confidence)> notes =
+            ReviewVerdictDecisions.CheckSeveritiesAsync(model, accepted, cancellationToken).GetAwaiter().GetResult();
+        foreach ((ReviewFinding finding, string direction, double? confidence) in notes)
+        {
+            report.Add(new Diagnostic(
+                ReviewVerdictDecisions.Code,
+                Severity.Info,
+                $"'{finding.Id}': decision model: severity looks {direction} for the stated impact (confidence " +
+                $"{ReviewDecisionModel.Format(confidence)}). Advisory; the verdict keeps '{ReviewVerdictDecisions.SeverityName(finding.Severity)}'.",
+                finding.Lens,
+                finding.File,
+                StartLine: finding.Line,
+                Hint: "Re-grade with a one-line reason in the report if you agree; otherwise ignore."));
+        }
+
+        if (notes.Count > 0)
+            effects.Add($"{notes.Count} severity note(s)");
+    }
+
     /// <summary>
     /// Lists the accepted critical and major findings, the ones worth a refutation run before the verdict is
     /// acted on. Omitted when a blocking gate that ran already failed, because the change goes back either way.
+    /// With a decision model configured, a finding whose cited code it confidently found to support the claim is
+    /// reported as confirmed and left out of the list, so no refuter is sent for it.
     /// </summary>
     private static void ReportRefutationCandidates(
+        string root,
+        ReviewDecisionModel model,
         ReviewOutcome outcome,
         IReadOnlyList<GateResult> gates,
-        DiagnosticReport report)
+        DiagnosticReport report,
+        List<string> effects,
+        CancellationToken cancellationToken)
     {
         bool blockingGateFailed = gates.Any(gate =>
             gate is { Blocking: true, Passed: false, NotApplicableReason: null, Outcome: GateOutcome.Completed });
         if (blockingGateFailed)
             return;
 
-        string[] ids = [.. outcome.Accepted
-            .Where(finding => finding.Severity is ReviewSeverity.Critical or ReviewSeverity.Major)
-            .Select(finding => finding.Id)];
+        ReviewFinding[] candidates = [.. outcome.Accepted
+            .Where(finding => finding.Severity is ReviewSeverity.Critical or ReviewSeverity.Major)];
+        string[] ids = [.. candidates.Select(finding => finding.Id)];
+        if (model.Configured && candidates.Length > 0)
+        {
+            IReadOnlyList<ClaimCheck> checks =
+                ReviewVerdictDecisions.CheckClaimsAsync(model, root, candidates, cancellationToken).GetAwaiter().GetResult();
+            foreach (ClaimCheck check in checks.Where(check => check.Note is not null))
+            {
+                report.Add(new Diagnostic(
+                    ReviewVerdictDecisions.Code,
+                    Severity.Info,
+                    check.NeedsRefuter
+                        ? $"'{check.Finding.Id}': claim check (decision model): {check.Note}."
+                        : $"Claim confirmed without refutation (decision model): '{check.Finding.Id}': {check.Note}.",
+                    check.Finding.Lens,
+                    check.Finding.File,
+                    StartLine: check.Finding.Line));
+            }
+
+            int confirmed = checks.Count(check => !check.NeedsRefuter);
+            if (confirmed > 0)
+                effects.Add($"{confirmed} claim(s) confirmed without refutation");
+            ids = [.. checks.Where(check => check.NeedsRefuter).Select(check => check.Finding.Id)];
+        }
+
         if (ids.Length == 0)
             return;
 

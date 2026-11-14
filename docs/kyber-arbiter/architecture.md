@@ -247,10 +247,10 @@ each, what stays at step 0 and which answer only the model can give.
 | `KW-ARB-PLANNER-001` | `delegate.planner` | 0, then 1 (`choice`, ≥ 0.8) | Does the dispatch ask the planner for planning work? Step 0: `recognised` for an exact marker and an in-directory or absent `PLAN_FILE`. Model only: `malformed` (escalates). Where the planner writes is checked by PLANNER-DIFF-001. |
 | `KW-ARB-PLANNER-DIFF-001` | `delegate.planner.returned` | 0 | Did the planner write only plan, spec, and todo directories? Machine fact: git, read as `git.changed-paths.attributed`, the paths changed since dispatch less the task files of writer dispatches in flight in the same working tree during this one. When such a sibling declared no files and a remaining path lies outside the planning directories, the fact stays absent and the answer is `unattributed`, which allows. |
 | `KW-ARB-READONLY-001` | `investigate.returned` | 0 | Did the read-only dispatch leave the tree unchanged? It reads `git.changed-paths.attributed`, as `KW-ARB-DIFF-001` does: files that belong to writer dispatches in flight in the same working tree are set aside, and a remaining change that cannot be attributed (a sibling declared no files) answers `unattributed`, which allows. A target the catalog classes as `implementation` or `planner` answers `not-read-only` and is allowed, except the `RUN-START: true` dispatch. |
-| `KW-ARB-LENS-001` | `lens.spawn` | 0, then 1 (`noul`, skip below P 0.1) | Does the lens apply to this change? |
+| `KW-ARB-LENS-001` | `lens.spawn` | 0, then 1 (`noul`, skip below P 0.1) | Does the lens apply to this change? Asked by `review seats`. |
 | `KW-ARB-QUOTE-001` | `lens.returned` | 0 | Is each finding's excerpt present at its `file:line`? |
 | `KW-ARB-PREEX-001` | `lens.returned` | 0 | Is the excerpt inside a changed hunk? It reads `finding.changed-lines`. |
-| `KW-ARB-CLAIM-001` | `refute.spawn` | 1 (`choice`, ≥ 0.9) | Do the quoted code and surroundings support the claim? |
+| `KW-ARB-CLAIM-001` | `refute.spawn` | 1 (`choice`, ≥ 0.9) | Do the quoted code and surroundings support the claim? Asked by `review verdict`. |
 | `KW-ARB-GATE-CORROBORATED-001` | `refute.spawn` | 0 | Does a failed gate already corroborate the finding? |
 | `KW-ARB-GATE-001` | `gate.select` | 0 | Does any changed path match the gate's `applies-when.paths`? |
 | `KW-ARB-LENS-002` | `lens.spawn` | 0 | Is this lens one that has nothing to judge in a change with no code in it? See [hunk-level lens skipping](../code-review/architecture.md#hunk-level-lens-skipping-kw-arb-lens-002). |
@@ -445,22 +445,22 @@ comment-only.
 
 ## Phase 3 facts: review, shortcuts, stores, and comments
 
-Phase 3 adds nine rules. All nine ship with `shadow: true`: each is evaluated and logged with the
+Phase 3 adds nine rules. Seven ship with `shadow: true`: each is evaluated and logged with the
 effect it would have had (`would-effect`), and the host sees no effect until the rule is enforced
-by setting `shadow: false` under `arbiter.rules`. The rules are `KW-ARB-NITPICK-001`,
-`KW-ARB-NITPICK-002`, `KW-ARB-DUP-001`, `KW-ARB-TRIAGE-001`, `KW-ARB-INTAKE-001`,
-`KW-ARB-DOCIMPACT-001`, `KW-ARB-FAILURE-001`, `KW-ARB-TRIM-001` and `KW-ARB-COMMENT-001`.
+by setting `shadow: false` under `arbiter.rules`. They are `KW-ARB-NITPICK-002`,
+`KW-ARB-TRIAGE-001`, `KW-ARB-INTAKE-001`, `KW-ARB-DOCIMPACT-001`, `KW-ARB-FAILURE-001`,
+`KW-ARB-TRIM-001` and `KW-ARB-COMMENT-001`. `KW-ARB-NITPICK-001` and `KW-ARB-DUP-001` are asked by
+`review verdict`, not by a hook, and are enforced there (below); `shadow: true` on either returns it
+to logging only.
 
-- **Nitpick filter (`KW-ARB-NITPICK-001`, `-002`).** A `Critical` lens finding, or one a failed gate
-  corroborates, is substantive without a question. Any other finding is asked once, and only a
-  confident `nitpick` (≥ 0.85) drops it. A drop never blocks: after the lens returns, the hook adds
-  `ARBITER_DROPPED: <id> rule=KW-ARB-NITPICK-001 decision=<id>`. A refutation of a dropped finding is
-  skipped (`-002`, effect `verify`).
-- **Duplicate findings (`KW-ARB-DUP-001`).** The candidates are the earlier findings of the same review
-  in the same file within 20 lines, at most three, oldest first. The first candidate answered
-  `same-defect` at ≥ 0.9 makes the refutation a duplicate: it is denied with
-  `ARBITER_DUPLICATE: <id> of <earlier id> decision=<id>`. Lens and refute dispatches identify their
-  review with a `REVIEW_RUN: <id>` header, so the findings of one review share a store.
+- **Asked by the review commands, not the hooks.** `KW-ARB-LENS-001`, `KW-ARB-NITPICK-001`,
+  `KW-ARB-DUP-001` and `KW-ARB-CLAIM-001` are asked by `review seats` and `review verdict`, which hold
+  the changed files and the seat files' text; the hook received a seat-file path or no finding at all,
+  and answered almost nothing. Each rule's hook side now answers from step 0 (`asked-by-review-seats`
+  or `asked-by-review-verdict`, effect `allow`), so a question is never asked twice. The command path
+  is described in [the code-review architecture](../code-review/architecture.md#the-decision-model-in-the-review-commands).
+  `KW-ARB-NITPICK-002` stays on `refute.spawn` and has nothing to read while the hook drops nothing.
+  Lens and refute dispatches still identify their review with a `REVIEW_RUN: <id>` header.
 - **Run stores (`<arbiter-dir>/stores/`).** Finding text and worker failure text are held in stores
   under `<arbiter-dir>/stores/`, outside the decision log and the ledger. A review store is keyed by a
   digest of its `REVIEW_RUN` id. A failure store is keyed by the plan file and its content digest, or by the

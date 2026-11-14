@@ -76,6 +76,10 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
         };
 
     private static ArbiterRule Shipped(string id) =>
+        HookAskedRules.AsHookAsked(Raw(id));
+
+    /// <summary>The rule exactly as shipped, before <see cref="HookAskedRules.AsHookAsked"/>.</summary>
+    private static ArbiterRule Raw(string id) =>
         Assert.Single(
             ArbiterConfig.ProductDefaults.Rules,
             rule => string.Equals(rule.Id, id, StringComparison.Ordinal));

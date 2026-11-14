@@ -131,6 +131,10 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
         };
 
     private static ArbiterRule Shipped(string id) =>
+        HookAskedRules.AsHookAsked(Raw(id));
+
+    /// <summary>The rule exactly as shipped, before <see cref="HookAskedRules.AsHookAsked"/>.</summary>
+    private static ArbiterRule Raw(string id) =>
         Assert.Single(
             ArbiterConfig.ProductDefaults.Rules,
             rule => string.Equals(rule.Id, id, StringComparison.Ordinal));
@@ -357,12 +361,13 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
 
     /// <summary>The rule ships in shadow, so the shipped output is unchanged until the filter is enforced.</summary>
     [Fact]
-    public void TheShippedDuplicateRuleShipsInShadowMode()
+    public void TheShippedDuplicateRuleIsEnforcedByTheVerdictAndNotAskedByTheHook()
     {
-        ArbiterRule rule = Shipped(DuplicateRule);
+        ArbiterRule rule = Raw(DuplicateRule);
 
         Assert.Equal("refute.spawn", rule.Trigger);
-        Assert.True(rule.Shadow);
+        Assert.False(rule.Shadow);
+        Assert.Contains(rule.Decide!, clause => clause.Answer == "asked-by-review-verdict");
     }
 
     /// <summary>The step-1 question is a choice with a 0.9 floor, and a same-defect answer is a duplicate.</summary>

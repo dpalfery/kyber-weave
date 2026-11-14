@@ -154,6 +154,13 @@ public static class ArbiterTriggerCatalog
                 "file.text-at-line",
                 "comment.fixing-commits",
             },
+            // Asked by `review verdict` on the seat files, never by a hook.
+            ["review.verdict"] = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "finding.severity",
+                "finding.claim",
+                "finding.failure-scenario",
+            },
             ["lens.spawn"] = new HashSet<string>(StringComparer.Ordinal)
             {
                 "lens.name",

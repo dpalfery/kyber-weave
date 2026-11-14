@@ -1173,16 +1173,34 @@ Every lens and refutation dispatch of one review carries `REVIEW_RUN: <id>` in i
 block, with the same id on every seat. The id keys the review's findings in a run store under
 `<arbiter-dir>/stores/`, so a later decision in the same review can read them back.
 
-- **Nitpick filter (`KW-ARB-NITPICK-001`).** A `Critical` finding, or one a failed gate corroborates,
-  is never dropped. Any other finding is asked once, and only a confident nitpick drops it. The
-  finding is set aside and the hook adds `ARBITER_DROPPED: <id> rule=KW-ARB-NITPICK-001 decision=<id>`.
-  The reviewer records it under **Dropped** in the report and does not re-raise it.
-- **Refutation of a dropped finding (`KW-ARB-NITPICK-002`).** Skipped with `verify`, so no refuter runs.
-- **Duplicate refutation (`KW-ARB-DUP-001`).** A finding that repeats an earlier finding of the same
-  review, in the same file within 20 lines, is denied as `ARBITER_DUPLICATE: <id> of <earlier id>
-  decision=<id>`. The reviewer records it under **Dropped** and does not re-raise it.
-- **Shadow.** All three rules ship in shadow. Until a rule is enforced, no finding is dropped and every
-  refuter runs; the decision log records each would-be drop or duplicate in `would-effect`.
+The nitpick, duplicate and claim questions are no longer asked by the hooks: the review commands ask
+them on the seat files' own text (next section).
+
+## The decision model in the review commands
+
+The review commands ask the Arbiter's decision model (Jev, [the decision model](../kyber-arbiter/jev-decision-model.md))
+four narrow questions, through the same client, rules and provider configuration the Arbiter uses
+([ADR 0079](../adr/0079-the-reviewer-starts-its-own-seats-where-sub-agents-can-dispatch.md), decision 10).
+It is optional: with `arbiter.provider.kind: none`, `--no-decision-model`, no key, or an unreachable
+model, nothing is asked and both commands print exactly what they printed before. A configured model
+with no key prints `decision model: not configured (...)` once. The first fault stops every later call
+of that command run. None of it needs the Arbiter's hooks or `arbiter.enabled`.
+
+| Step | Command | Rule (floor) | Effect of a confident answer |
+|---|---|---|---|
+| Lens applies | `review seats`, after the file-pattern step | `KW-ARB-LENS-001` (`noul`, P(applies) < 0.1) | Not seated, reason `decision model: not applicable (confidence x)`. `correctness`, `test-adequacy` and the lenses that read a gate's output are never asked. |
+| Duplicates | `review verdict` and `--candidates` | `KW-ARB-DUP-001` (≥ 0.9) | Findings on one file within 20 lines that name one defect are merged; the highest severity, then confidence, then evidence is kept and the merged ids are listed. |
+| Nitpicks | `review verdict` | `KW-ARB-NITPICK-001` (≥ 0.85) | A `minor` finding is dropped from the counted set and listed under "Dropped as nitpick". `major` and `critical` are never asked. |
+| Claim check | `review verdict` and `--candidates` | `KW-ARB-CLAIM-001` (≥ 0.9) | Before a refuter: the excerpt must be at the cited lines; the model reads the claim, the quote, the cited lines and the lines the evidence cites, all from the tree. `supports` → no refuter; `contradicts` or unsure → refuter as before. |
+| Severity | `review verdict` | `KW-ARB-SEVERITY-001` (≥ 0.8) | Advisory note only; the verdict keeps the seat's severity. |
+
+Every question is one decision-log entry under `artifacts/arbiter`, and every effect is a
+`KW-REVIEW-055` line plus one summary line. Each question goes in its own request, four at a time: in
+a live replay two similar questions sharing one request came back near 50/50, and alone at 1.0.
+`--candidates` keeps its answers in `decision-model.json` beside the seat folder, so the verdict run
+agrees with it without asking again. `shadow: true` on `KW-ARB-NITPICK-001` or `KW-ARB-DUP-001` under
+`arbiter.rules` makes that step log only. Both are enforced by default: the question now reads the
+finding's own text, and every drop or merge is printed with its confidence.
 
 ## Current limitations
 
