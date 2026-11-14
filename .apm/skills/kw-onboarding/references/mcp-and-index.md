@@ -65,7 +65,7 @@ lock, a timeout, and a restore of any tracked file the index rewrites.
 ## Declaring the servers
 
 The repository declares the servers its agents rely on under `mcp.required-servers` in
-`.kyber-weave/kyber-weave.yml`. `docs init` writes the `kw-docs` entry; `codegraph` is left for
+`.kyber-weave/kyber-weave.yml`. `kyber-weave docs init .` writes the `kw-docs` entry; `codegraph` is left for
 the user to turn on:
 
 ```yaml

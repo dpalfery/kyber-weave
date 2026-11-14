@@ -70,7 +70,7 @@ After `fix-level`, offer the severity-overrides section below.
 - *Options*: add the empty section now (rows are added later, only with what the user states), or
   skip it; without it the shipped grading applies.
 - *Cost and undo*: one section in a repository file (a new `REVIEW.md` holding only that section
-  when there is none); delete it to undo. `kyber-weave docs validate` checks the rows.
+  when there is none); delete it to undo. `kyber-weave docs validate .` checks the rows.
 - *Recommend*: skip on a first setup unless the user already disagrees with a grading.
 
 The section, added empty with the format and one commented example:
@@ -141,7 +141,7 @@ editing its store. Undo the same way.
 | `squad.version` | the CLI's version | Pins the squad release; must equal the CLI's version. |
 | `arbiter.model-targeting.mode` | `shadow` | Whether the gate picks a cheaper or stronger model tier per task by difficulty: `shadow` logs its choice only, `enforce` applies it, `off` disables it. |
 | `arbiter.stores.max-item-bytes`, `retain-days` | `16384`, `14` | Size cap and retention of the gate's local records. |
-| `arbiter.rules` | shipped rules | Turn a gate rule off, put it in shadow, or change its threshold (`kyber-weave arbiter rules`, `arbiter tune`). |
+| `arbiter.rules` | shipped rules | Turn a gate rule off, put it in shadow, or change its threshold (`kyber-weave arbiter rules`, `kyber-weave arbiter tune`). |
 | `arbiter.provider.endpoint`, `model`, `timeout-ms` | `https://api.typesafe.ai/v1`, `jev-1.14.0`, `3000` | Where the decision model is called and how long to wait. OpenRouter: `https://openrouter.ai/api/v1`, model `typesafe/jev-1.14`. A per-user override may live in `~/.config/kyber-weave/arbiter.yml`. |
 | VS Code Copilot system-prompt override | off | Replaces Copilot's top-level system prompt in VS Code for every chat on the machine. `kyber-weave squad copilot-prompt install` (`--dry-run` first; `status`, `uninstall`). |
 | Operator channel (Copilot CLI, global) | off | Lets the conductor message the user during an unattended run through an MCP server the user runs. Needs `KYBER_SQUAD_OPERATOR_CHANNEL=true`, `KYBER_SQUAD_OPERATOR_CHANNEL_SERVER=<name>`, the server in Copilot CLI's `mcp-config.json`, then `kyber-weave squad update --global` (no `--target`), which also refreshes every installed harness's squad files to the CLI's version; say so and run `--dry-run` first. |

@@ -50,7 +50,7 @@ Context to give (the worked example below shows the full wording):
   on the machine but not in use; and "show me the other supported tools". Name each tool with a
   few words so the user recognises it. Choosing nothing installs nothing.
 - *Cost and undo*: about a minute; writes the harness's home folder (global) or this repository
-  (project); undo by re-running this skill, or `kyber-weave squad uninstall --global` (or `squad uninstall .` for a project install) for all.
+  (project); undo by re-running this skill, or `kyber-weave squad uninstall --global` (or `kyber-weave squad uninstall .` for a project install) for all.
 - *Found*: which tools are on the machine and which already have the squad, with its version.
 - *Recommend*: the tools in use (first-look: the squad is there, or its command is on `PATH`).
   Tools with only a home folder are named once as "also found", not recommended.
@@ -136,12 +136,12 @@ without it, the file, how to undo); change a user or harness settings file only 
 | OpenCode (`opencode`) | None documented. | `subagent_depth` of 2 or more in the OpenCode config (default 1), so the reviewer can start sub-reviewers. A global install also offers the KyberDash capture plugin (`--no-capture-plugin` skips it). |
 | Kilo (`kilo`) | None documented. | `subagent_depth` of 2 or more in the Kilo config (default 1). MCP servers go in `kilo.jsonc` under `mcp`. |
 | Pi (`pi`) | Trust the project so `.pi/extensions/` loads. | The `@tintinweb/pi-subagents` extension (0.19.0 or later) for native agents, and `pi-mcp-adapter` 6.0.0 or later (7.0.0 supported) for MCP tools. |
-| Codex (`codex`) | Trust the project's `.codex/` layer, then review and trust the hook in `/hooks`. Repeat after any `squad update` that changes the hook. | MCP servers in `~/.codex/config.toml`; custom agents inherit them. |
+| Codex (`codex`) | Trust the project's `.codex/` layer, then review and trust the hook in `/hooks`. Repeat after any `kyber-weave squad update` that changes the hook. | MCP servers in `~/.codex/config.toml`; custom agents inherit them. |
 | Factory (`factory`) | None documented. | A global install also offers the KyberDash capture plugin. Reviews run through the review-council skill, since droids cannot start droids. |
-| ZCode (`zcode`) | Set `hooks.enabled: true` in `~/.zcode/cli/config.json` (the squad never flips it). Project scope uses the Arbiter MCP fallback. | `kw-docs` wired, or every agent fails `squad doctor`. |
+| ZCode (`zcode`) | Set `hooks.enabled: true` in `~/.zcode/cli/config.json` (the squad never flips it). Project scope uses the Arbiter MCP fallback. | `kw-docs` wired, or every agent fails `kyber-weave squad doctor`. |
 | Antigravity (`antigravity`) | Allow the MCP tools through Antigravity's `mcp(server/*)` policy patterns; they default to Ask. | Must be named explicitly with `--target`; it is never auto-detected. |
 | Warp (`warp`) | No hooks. Register the Arbiter server, `kyber-weave-arbiter serve --repo-root <root>`, in Warp's MCP settings. | Agents arrive as role skills. |
-| Devin (`devin`) | None documented. | `squad doctor` warns about duplicate imports in `.devin/`. |
+| Devin (`devin`) | None documented. | `kyber-weave squad doctor` warns about duplicate imports in `.devin/`. |
 | Command Code (`commandcode`) | Register `kyber-weave-arbiter serve --repo-root <root>` through its MCP configuration. | None known. |
 
 After any install, update, hook, or MCP change, the user restarts the harness so it reloads its
