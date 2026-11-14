@@ -6,7 +6,7 @@ status: current
 component: ReviewCouncil
 source-root: src/KyberWeave.Core/Review
 owner: dpalfery
-last-reviewed: 2026-11-11
+last-reviewed: 2026-11-14
 decided-by:
   - adr/0002-three-layer-review-council-verdict-engine
   - adr/0003-cross-file-duplication-and-prior-art-lenses
@@ -797,6 +797,9 @@ command:
   land in the reviewed tree while it runs, and the documentation-impact review and any edit it
   causes finish before the council starts. A review racing an edit reviews a tree that no longer
   exists by the time its verdict is read.
+- **A wait never polls the process list.** A reviewer waits for a long-running command or agent
+  through its completion notification, never with `pgrep -f` or `ps | grep`: the polling command's
+  own command line matches the pattern, so the wait never ends.
 
 ### Repository gate scoping and caching in this repository
 

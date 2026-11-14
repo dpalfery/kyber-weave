@@ -260,3 +260,31 @@ Each developer task ends with its own `task-gate` run. The end-of-run review is 
 ## docs-dev closeout
 
 T4 is the closeout. `docs-dev` reviews the change for documentation impact against the Design harvest table before archiving.
+
+## Closeout mapping
+
+The plan was abandoned after the skeleton and the no-polling rule landed, so most decisions have no lasting record to point at. File paths are relative to the repository root.
+
+| ID | Destination |
+|---|---|
+| D1 | Documentation waiver: the `review wait` verb exists only as a skeleton that returns `1` (`src/KyberWeave.Cli/Commands/Review/ReviewWaitCommand.cs`), so the [CLI command surface](../../cli-command-surface.md) does not list it. |
+| D2 | Documentation waiver: the `.run` and `.done` marker contract was never implemented; the design lives only in this archived plan. |
+| D3 | Documentation waiver: the stale-run and settle rules were never implemented; the design lives only in this archived plan. |
+| D4 | Documentation waiver: the dead-runner check was never implemented; the design lives only in this archived plan. |
+| D5 | Documentation waiver: the exit-code contract was never implemented; the design lives only in this archived plan. |
+| D6 | Documentation waiver: the default timeout was never implemented; the design lives only in this archived plan. |
+| D7 | Documentation waiver: the output line was never implemented; the design lives only in this archived plan. |
+| D8 | Documentation waiver: rules `KW-REVIEW-048` and `KW-REVIEW-049` were never added, so the [rule reference](../../ci-pipelines/rule-reference.md) does not list them. |
+| D9 | [Review council architecture, council gates](../../code-review/architecture.md#council-gates) states the no-polling rule; the sentence also landed in the code-review skill, the code-reviewer body and the conductor body. The background-start instruction was not added. |
+| D10 | Documentation waiver: the skill's "Two commands" sentence was not rewritten (the [Kyber-Squad architecture](../../kyber-squad/architecture.md) describes no wait command), because the skill does not yet prescribe a third command in the form this plan intended. |
+| D11 | Documentation waiver: this decision is that no ADR is needed, so it has no record to point at. |
+| D12 | Documentation waiver: no change was made to `products/kyber-squad/profiles/capabilities.yml`, so nothing new is recorded. |
+| D13 | Documentation waiver: the skeleton landed in `src/KyberWeave.Cli/Commands/Review/ReviewWaitCommand.cs`; the test fixture preset and RED tests were not added; implementation detail. |
+| D14 | Documentation waiver: the dead-runner tests were never written; implementation detail. |
+| D15 | Documentation waiver: the two-shell check belonged to a pull request checklist for an unfinished feature and has no lasting record. |
+| AP1 | Documentation waiver: an approval record with no lasting design content; it lives in this archived plan. |
+| H1 | Documentation waiver: the "Waiting for a gate run" subsection of `docs/code-review/architecture.md` was never written, because the markers were never implemented. |
+| H2 | Documentation waiver: no `review wait` row was added to `docs/cli-command-surface.md`, because the verb is a skeleton. |
+| H3 | Documentation waiver: `docs/code-review/README.md` was not changed, because there is no usable wait form to list. |
+| H4 | Documentation waiver: rows for `KW-REVIEW-048` and `KW-REVIEW-049` were not added to the [rule reference](../../ci-pipelines/rule-reference.md), because the rules do not exist. |
+| H5 | [Review council architecture, council gates](../../code-review/architecture.md#council-gates) states the no-polling rule; the section 2 rewrite (D10) and the background-start instruction were not made. |
