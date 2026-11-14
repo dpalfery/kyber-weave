@@ -60,6 +60,7 @@ public sealed class ArbiterDefaultRulesTests
         "KW-ARB-CHECKOUT-001",
         "KW-ARB-MODE-002",
         "KW-ARB-SEVERITY-001",
+        "KW-ARB-OVERRIDE-001",
     ];
 
     [Fact]

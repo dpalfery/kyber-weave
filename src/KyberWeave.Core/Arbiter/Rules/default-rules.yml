@@ -797,6 +797,25 @@ rules:
       tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
     effects: { too-high: advise, about-right: keep, too-low: advise }
 
+  # Host severity overrides: `review verdict` asks it, for each finding that cites no override, once per row of the
+  # review guidance's "Severity overrides" table that applies to the finding's lens and file. A confident "belongs"
+  # grades the finding at the row's severity, reported as matched by the decision model; the most confident row wins.
+  # Set `shadow: true` on this rule to have the verdict log the answer only.
+  - id: KW-ARB-OVERRIDE-001
+    trigger: review.verdict
+    question: "Does the finding belong to the class of finding the host's severity override describes?"
+    answers: [belongs, does-not-belong, unsure]
+    ask:
+      type: choice
+      state: { finding: finding.claim, class: override.class }
+      criteria:
+        belongs: "The finding is an instance of the class of finding described: the same kind of problem, not merely the same file or topic."
+        does-not-belong: "The finding is about another kind of problem, or touches the class only in passing."
+        unsure: "The text given does not settle whether the finding belongs to the class."
+      confidence-at-least: 0.85
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
+    effects: { belongs: advise, does-not-belong: keep, unsure: keep }
+
 # The paths that count as test files. The model-targeting rules read them through the
 # plan.task.file-kinds fact, which tags each file a task touches as `test` or `source`.
 test-file-patterns: ["tests/**", "**/*.test.*", "**/*.spec.*", "**/*Tests.cs"]

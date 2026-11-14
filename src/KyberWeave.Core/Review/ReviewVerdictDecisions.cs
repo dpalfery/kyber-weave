@@ -37,6 +37,9 @@ public static partial class ReviewVerdictDecisions
     /// <summary>Does the stated severity match the stated impact.</summary>
     public const string SeverityRule = "KW-ARB-SEVERITY-001";
 
+    /// <summary>Does the finding belong to the class a host severity override describes.</summary>
+    public const string OverrideRule = "KW-ARB-OVERRIDE-001";
+
     private const int DuplicateWindowLines = 20;
     private const int SurroundingLines = 6;
     private const int MaxSurroundingsFileBytes = 1 << 20;
@@ -135,8 +138,9 @@ public static partial class ReviewVerdictDecisions
         if (!model.Configured || rule is null)
             return ([.. findings], []);
 
+        // A severity the host set by override is the host's grading; the model does not second-guess it.
         List<ReviewQuestion> questions = [.. findings
-            .Where(finding => finding.Severity == ReviewSeverity.Minor)
+            .Where(finding => finding.Severity == ReviewSeverity.Minor && finding.OverrideSource is null)
             .Select(finding => new ReviewQuestion(
                 finding.Id,
                 new Dictionary<string, object?>(StringComparer.Ordinal) { ["finding.excerpt"] = ReviewDecisionModel.FindingText(finding) }))];
@@ -152,6 +156,7 @@ public static partial class ReviewVerdictDecisions
         {
             if (!rule.Shadow
                 && finding.Severity == ReviewSeverity.Minor
+                && finding.OverrideSource is null
                 && answers.TryGetValue(finding.Id, out ReviewAnswer? answer)
                 && answer.Answer == "nitpick")
             {
@@ -251,7 +256,7 @@ public static partial class ReviewVerdictDecisions
         if (!model.Configured || rule is null)
             return [];
 
-        List<ReviewQuestion> questions = [.. findings.Select(finding => new ReviewQuestion(
+        List<ReviewQuestion> questions = [.. findings.Where(finding => finding.OverrideSource is null).Select(finding => new ReviewQuestion(
             finding.Id,
             new Dictionary<string, object?>(StringComparer.Ordinal)
             {
@@ -266,9 +271,85 @@ public static partial class ReviewVerdictDecisions
             cancellationToken).ConfigureAwait(false);
 
         return [.. findings
+            .Where(finding => finding.OverrideSource is null)
             .Select(finding => (finding, answer: answers.GetValueOrDefault(finding.Id) ?? ReviewAnswer.Undecidable))
             .Where(pair => pair.answer.Answer is "too-high" or "too-low")
             .Select(pair => (pair.finding, pair.answer.Answer == "too-high" ? "high" : "low", pair.answer.Score))];
+    }
+
+    /// <summary>
+    /// Asks, for each finding that cites no host severity override, whether it belongs to the class each override row
+    /// relevant to its lens and file describes, and grades a confident match at the row's severity. When several rows
+    /// match one finding, the most confident wins, then the row first in the table. A rule in shadow logs its answers
+    /// and changes nothing. With no model, no rule or no rows nothing is asked.
+    /// </summary>
+    /// <returns>The findings in the order given, each matched one graded at its row; and each match with its confidence.</returns>
+    public static async Task<(List<ReviewFinding> Findings, List<(ReviewFinding Finding, SeverityOverrideRow Row, double? Confidence)> Matched)> MatchOverridesAsync(
+        ReviewDecisionModel model, SeverityOverrides overrides, IReadOnlyList<ReviewFinding> findings, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(overrides);
+        ArgumentNullException.ThrowIfNull(findings);
+        ArbiterRule? rule = model.Rule(OverrideRule);
+        if (!model.Configured || rule is null || overrides.Rows.Count == 0)
+            return ([.. findings], []);
+
+        List<(int Index, SeverityOverrideRow Row, string Subject)> pairs = [];
+        List<ReviewQuestion> questions = [];
+        for (int index = 0; index < findings.Count; index++)
+        {
+            ReviewFinding finding = findings[index];
+            if (finding.Override is not null || finding.OverrideSource is not null)
+                continue;
+
+            foreach (SeverityOverrideRow row in overrides.RowsForFinding(finding.Lens, finding.File))
+            {
+                string subject = $"{finding.Id} ~ {row.Id}";
+                pairs.Add((index, row, subject));
+                questions.Add(new ReviewQuestion(
+                    subject,
+                    new Dictionary<string, object?>(StringComparer.Ordinal)
+                    {
+                        ["finding.claim"] = ReviewDecisionModel.FindingText(finding),
+                        ["override.class"] = row.FindingClass,
+                    }));
+            }
+        }
+
+        IReadOnlyDictionary<string, ReviewAnswer> answers = await model.AskAsync(
+            rule,
+            questions,
+            (question, answer) => answer.Answer == "belongs"
+                ? rule.Shadow ? "shadow: would set the severity by override" : "severity set by override"
+                : "no effect",
+            cancellationToken).ConfigureAwait(false);
+
+        List<ReviewFinding> result = [.. findings];
+        List<(ReviewFinding, SeverityOverrideRow, double?)> matched = [];
+        if (rule.Shadow)
+            return (result, matched);
+
+        foreach (IGrouping<int, (int Index, SeverityOverrideRow Row, string Subject)> group in pairs.GroupBy(pair => pair.Index))
+        {
+            (SeverityOverrideRow Row, double? Score)? best = null;
+            foreach ((_, SeverityOverrideRow row, string subject) in group)
+            {
+                ReviewAnswer answer = answers.GetValueOrDefault(subject) ?? ReviewAnswer.Undecidable;
+                if (answer.Answer != "belongs")
+                    continue;
+                if (best is null || (answer.Score ?? 0) > (best.Value.Score ?? 0))
+                    best = (row, answer.Score);
+            }
+
+            if (best is { } winner)
+            {
+                ReviewFinding graded = SeverityOverrides.Apply(findings[group.Key], winner.Row, SeverityOverrides.ModelSource);
+                result[group.Key] = graded;
+                matched.Add((graded, winner.Row, winner.Score));
+            }
+        }
+
+        return (result, matched);
     }
 
     /// <summary>The lines around a finding's cited line, wide enough to hold a multi-line excerpt; null when unreadable.</summary>

@@ -15,7 +15,7 @@ namespace KyberWeave.Core.Docs.Validation;
 public static class DocsSchemaGate
 {
     /// <summary>
-    /// Runs every frontmatter and inventory validator, the managed glossary gate, and — only
+    /// Runs every frontmatter and inventory validator, the review guidance's severity overrides, the managed glossary gate, and — only
     /// when <paramref name="mergeReady"/> is set — the open-work and archive-closeout gates.
     /// </summary>
     public static DiagnosticReport Validate(
@@ -36,6 +36,7 @@ public static class DocsSchemaGate
 
         report.AddRange(new DocSpecValidator(repoRoot, ontology).Validate(set).Items);
         report.AddRange(new ConfigRegValidator(repoRoot, config).Validate().Items);
+        report.AddRange(SeverityOverrides.Validate(repoRoot, config).Items);
         report.AddRange(new PlanInventoryValidator(config).Validate(set).Items);
         report.AddRange(new TodoInventoryValidator(config).Validate(set).Items);
         report.AddRange(new PlanTaskFileValidator(repoRoot, config).Validate(set).Items);

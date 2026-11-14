@@ -18,9 +18,11 @@ namespace KyberWeave.Cli.Commands.Review;
 /// output is parsed instead, and the command, not the reviewer, accounts for every catalogue lens.
 /// </para>
 /// <para>
-/// Nothing here changes what a seat said about a finding. A finding can be dropped only with a stated reason,
-/// or moved only when its cited line cannot exist, and both are reported; severity and confidence pass
-/// through untouched to <see cref="VerdictEngine"/>, which stays the only judge.
+/// Nothing here changes what a seat said about a finding but the host's own grading. A finding can be dropped only
+/// with a stated reason, or moved only when its cited line cannot exist, and both are reported. Its severity changes
+/// only to the severity of a host severity override (the review guidance's <c>Severity overrides</c> rows) that the
+/// seat cited or the decision model confidently matched, also reported; confidence passes through untouched to
+/// <see cref="VerdictEngine"/>, which stays the only judge.
 /// </para>
 /// </remarks>
 public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings>
@@ -99,11 +101,20 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
             return Fail(report, settings);
 
         findings = CheckCitedLines(root, findings, report, dropped);
-        findings = DropNitpicksBelowTheFixLevel(findings, config.Review.Policy, report, dropped);
+
+        // A host severity override sets the severity everything after this reads: the nitpick drop, the verdict rules,
+        // the fix-level routing and the fix counts the loop compares.
+        SeverityOverrides overrides = SeverityOverrides.Load(root, config);
+        List<Diagnostic> overrideNotes = [];
+        findings = [.. overrides.ApplyCited(findings, overrideNotes)];
+        report.AddRange(overrideNotes);
 
         ReviewDecisionModel model = ReviewDecisionModelFactory.Create(
             root, config, settings.NoDecisionModel, DecisionCachePath(settings));
         List<string> modelEffects = [];
+        findings = MatchOverrides(model, overrides, findings, report, modelEffects, cancellationToken);
+        findings = DropNitpicksBelowTheFixLevel(findings, config.Review.Policy, report, dropped);
+
         findings = ApplyDecisionModel(
             model, findings, settings.Candidates, config.Review.Policy.FixLevel == ReviewFixLevel.Nitpick, report, dropped, modelEffects, cancellationToken);
 
@@ -1000,6 +1011,31 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
         }
 
         return kept;
+    }
+
+    /// <summary>
+    /// Grades each finding that cites no host severity override at the row the decision model confidently finds it
+    /// belongs to, with a report line per match. With no model configured, or no rows, nothing is asked or changed.
+    /// </summary>
+    private static List<ReviewFinding> MatchOverrides(
+        ReviewDecisionModel model,
+        SeverityOverrides overrides,
+        List<ReviewFinding> findings,
+        DiagnosticReport report,
+        List<string> effects,
+        CancellationToken cancellationToken)
+    {
+        if (!model.Configured || overrides.Rows.Count == 0)
+            return findings;
+
+        (List<ReviewFinding> graded, List<(ReviewFinding Finding, SeverityOverrideRow Row, double? Confidence)> matched) =
+            ReviewVerdictDecisions.MatchOverridesAsync(model, overrides, findings, cancellationToken).GetAwaiter().GetResult();
+        foreach ((ReviewFinding finding, SeverityOverrideRow row, double? confidence) in matched)
+            report.Add(SeverityOverrides.Note(finding, row, $"matched by decision model, confidence {ReviewDecisionModel.Format(confidence)}"));
+
+        if (matched.Count > 0)
+            effects.Add($"{matched.Count} severity override(s) matched");
+        return graded;
     }
 
     /// <summary>

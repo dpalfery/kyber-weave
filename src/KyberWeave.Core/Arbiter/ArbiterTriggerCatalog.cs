@@ -160,6 +160,7 @@ public static class ArbiterTriggerCatalog
                 "finding.severity",
                 "finding.claim",
                 "finding.failure-scenario",
+                "override.class",
             },
             ["lens.spawn"] = new HashSet<string>(StringComparer.Ordinal)
             {

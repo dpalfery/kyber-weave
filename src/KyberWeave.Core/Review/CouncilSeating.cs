@@ -194,6 +194,7 @@ public static class CouncilSeating
         text.AppendLine(context.GuidancePath is null
             ? "- Review guidance: none declared, or the file is missing. Say so in your output."
             : $"- Review guidance: {context.GuidancePath}. Apply its ground rules and what-not-to-flag, and the sections its lens and technology maps name for your lens and the changed files.");
+        AppendSeverityOverrides(text, context, lens);
         if (string.Equals(lens, "duplicate-implementation", StringComparison.Ordinal) && context.DuplicatesPath is not null)
             text.AppendLine(CultureInfo.InvariantCulture, $"- Duplicates report: {context.DuplicatesPath}");
         text.AppendLine();
@@ -202,6 +203,25 @@ public static class CouncilSeating
         text.AppendLine(ArbiterSquadCatalog.EmbeddedLensText(lens)?.Trim()
                         ?? $"(No embedded charter for {lens}: read `references/lenses/{lens}.md` in the code-review skill.)");
         return text.ToString();
+    }
+
+    /// <summary>
+    ///     The host's severity overrides this seat is given: rows with no scope, rows for its lens, and rows for a
+    ///     technology the change touches. Nothing is written when none applies.
+    /// </summary>
+    private static void AppendSeverityOverrides(StringBuilder text, CouncilSeatContext context, string lens)
+    {
+        IReadOnlyList<SeverityOverrideRow> rows = context.Overrides?.RowsFor(lens, context.ChangedPaths) ?? [];
+        if (rows.Count == 0)
+            return;
+
+        text.AppendLine("- Severity overrides (the host's review guidance; a row outranks your lens's severity guidance and the general definitions): " +
+                        "check each finding against these rows. When one matches, grade the finding at the row's severity, up or down, and write `override: <id>` on it.");
+        foreach (SeverityOverrideRow row in rows)
+        {
+            text.AppendLine(CultureInfo.InvariantCulture,
+                $"  - {row.Id}: {SeverityOverrides.SeverityName(row.Severity)} — {row.FindingClass}{(row.Why is null ? string.Empty : $" (why: {row.Why})")}");
+        }
     }
 
     /// <summary>
@@ -259,6 +279,8 @@ public sealed record CouncilSeatPlan(
 /// <param name="FixLevel">The effective <c>review.policy.fix-level</c> name.</param>
 /// <param name="GuidancePath">The review guidance file, or null when none is declared or it is missing.</param>
 /// <param name="DuplicatesPath">The duplicates report the gate run writes.</param>
+/// <param name="Overrides">The host's severity overrides from the review guidance; null for none.</param>
+/// <param name="ChangedPaths">The changed paths that decide which technology rows apply; null when git could not name them.</param>
 public sealed record CouncilSeatContext(
     string Tree,
     string EvidencePath,
@@ -267,4 +289,6 @@ public sealed record CouncilSeatContext(
     int MinConfidence,
     string FixLevel,
     string? GuidancePath,
-    string? DuplicatesPath);
+    string? DuplicatesPath,
+    SeverityOverrides? Overrides = null,
+    IReadOnlyList<string>? ChangedPaths = null);

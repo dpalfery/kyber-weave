@@ -104,8 +104,10 @@ public sealed class ReviewSeatsCommand : Command<ReviewSeatsSettings>
                 StrictnessName(config.Review.Policy.Strictness),
                 config.Review.Policy.MinConfidence,
                 config.Review.Policy.FixLevelName,
-                GuidancePath(root, config),
-                Path.Combine(folder, "duplicates.json")));
+                SeverityOverrides.GuidancePath(root, config),
+                Path.Combine(folder, "duplicates.json"),
+                SeverityOverrides.Load(root, config),
+                changed));
             NotSeatedRecord.Replace(folder, ReviewLensCatalogue.Names, seats.NotSeated);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -268,16 +270,6 @@ public sealed class ReviewSeatsCommand : Command<ReviewSeatsSettings>
         {
             return null;
         }
-    }
-
-    /// <summary>The review guidance file the registry declares (default <c>REVIEW.md</c>), or null when it is missing.</summary>
-    private static string? GuidancePath(string root, KyberWeaveConfig config)
-    {
-        string declared = config.ConfigReg.Additions
-            .FirstOrDefault(entry => string.Equals(entry.Name, "review-guidance", StringComparison.Ordinal))?.Path
-            ?? "REVIEW.md";
-        string path = Path.GetFullPath(Path.Combine(root, declared));
-        return File.Exists(path) ? path : null;
     }
 }
 

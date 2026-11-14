@@ -44,7 +44,7 @@ public static partial class SeatOutputParser
     private static readonly HashSet<string> TextFields = new(StringComparer.Ordinal)
     {
         "id", "lens", "severity", "confidence", "file", "line", "excerpt", "claim", "evidence",
-        "failure_scenario", "failureScenario", "suggestion"
+        "failure_scenario", "failureScenario", "suggestion", "override"
     };
 
     /// <summary>
@@ -456,7 +456,8 @@ public static partial class SeatOutputParser
             Optional(item, "claim", where),
             Optional(item, "evidence", where),
             Optional(item, "failure_scenario", where) ?? Optional(item, "failureScenario", where),
-            Optional(item, "suggestion", where));
+            Optional(item, "suggestion", where),
+            Optional(item, "override", where));
     }
 
     private static string LensFromId(string id, string seatLens)
