@@ -792,7 +792,9 @@ public static class DocsScaffolder
         DocsLayout.Standards => ("Coding standards",
             "How code is written in this repository, one directory per technology. A standard\n"
             + "is project-specific; the agents and skills that read it are not, which is why they\n"
-            + "resolve it through the configuration registry rather than carrying their own."),
+            + "resolve it through the configuration registry rather than carrying their own. Only\n"
+            + "the agent working in a technology reads its standard, so per-technology detail belongs\n"
+            + "here, not in a rule (see the documentation ontology's \"Rules and standards\")."),
         "plans" => ("Plans",
             "Sequenced implementation work: what will be done, in what order, and how it will be\n"
             + "verified. A plan is a record of intent rather than current guidance — retrieval\n"
@@ -810,7 +812,10 @@ public static class DocsScaffolder
             + "removed, because git holds the history."),
         "rules" => ("Rules",
             "Repository-wide rules that govern how the system is built, independent of any one\n"
-            + "technology. A rule about one language belongs in that technology's coding standard."),
+            + "technology. Every agent reads them on every task, so a rule applies to every task and\n"
+            + "breaking it is never acceptable; anything else, including how one language is\n"
+            + "written, belongs in a coding standard (see the documentation ontology's \"Rules and\n"
+            + "standards\"). Keep each rule short."),
         "reference" => ("Reference",
             "Reference material with no other home: environment variables, naming standards, the\n"
             + "external systems this repository depends on."),
@@ -896,15 +901,17 @@ public static class DocsScaffolder
 
         ## Authority & status
 
-        When this standard is in `status: current`, it is the rule for this technology in this
-        repository. Portable agents ship no built-in default to fall back on. While it is in
+        When this standard is in `status: current`, it is how this technology is written in this
+        repository and what reviewers grade against. Portable agents ship no built-in default to fall back on. While it is in
         `status: draft` it is a proposal, but a worker never stops for it: it uses the draft as
         the best available guidance and names the draft standard it relied on in one line of its
         report.
 
-        Replace this file with the rules that actually apply, and promote `status` to
+        Replace this file with the decisions that actually apply, and promote `status` to
         `current`. A standard that restates a language's own documentation is noise; write the
-        decisions this repository has made and would otherwise have to re-argue.
+        decisions this repository has made and would otherwise have to re-argue. Only the agent
+        working in {technology} reads this file; a statement that applies to every task and is
+        never OK to break is a rule, and belongs in the root `AGENTS.md` or `rules/` instead.
 
         ## Structure
 
@@ -1037,6 +1044,24 @@ public static class DocsScaffolder
 
         A standard takes no `component`: a language's standard governs code in every component
         the catalog lists, so naming one of them would be a false claim about its reach.
+
+        ## Rules and standards
+
+        Every instruction this repository gives its agents is a rule or part of a standard.
+
+        - **Rules** apply to every task, whatever the technology, and breaking one is never
+          acceptable: secrets, what may be committed or pushed, architecture boundaries, scope,
+          what needs human approval. Every agent reads them on every dispatch, so they are few and
+          short, and ideally checkable by a gate. They live in the root `AGENTS.md` and `rules/`.
+        - **Standards** are per technology, under `standards/<technology>/`. Only the agent
+          working in that technology fetches one, through `docs_get_coding_standard_for_technology`.
+          They can be long, with examples; reviewers grade against them.
+
+        **The placement test:** does the statement apply to every task, and is breaking it never
+        OK? Yes means a rule; anything else goes in a standard. Each statement has one home: a
+        rule may point to a standard for detail, never restate it. Keep everything always loaded
+        (the root `AGENTS.md`, the files it tells every agent to read, harness instruction files)
+        to about 3 KB; a rule set larger than that contains standards.
 
         ## The pairing invariant
 

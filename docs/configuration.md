@@ -157,7 +157,9 @@ disable a requirement.
 
 ### Technologies drive three things at once
 
-`technologies` is the list of stacks this repository declares a coding standard for. It is
+`technologies` is the list of stacks this repository declares a coding standard for (what a
+standard holds, as opposed to a rule, is in
+[Rules and standards](documentation-ontology.md#rules-and-standards)). It is
 empty by default, because no repository has a standard until it says what it writes code in,
 and a seeded list would scaffold standards for stacks a host does not have. This repository
 declares C#, test, and TypeScript standards.
@@ -168,9 +170,9 @@ Declaring one and re-running `docs init`:
 2. publishes `<technology-coding-standard>` in the configuration registry;
 3. legalizes `technology: <technology>` in that standard's frontmatter.
 
-Passing `--kyber-standards` to `kyber-weave docs init` seeds all 11 Kyber Squad rich coding
-standards templates (`csharp`, `test`, `react`, `python`, `pulumi`, `maui`, `data-access-layer`,
-`sql`, `azure`, `github-actions`, `tauri`), merges them into `ontology.technologies`, and registers
+Passing `--kyber-standards` to `kyber-weave docs init` seeds all 14 Kyber Squad rich coding
+standards templates (`csharp`, `test`, `typescript`, `rust`, `tauri`, `go`, `react`, `python`,
+`pulumi`, `maui`, `data-access-layer`, `sql`, `azure`, `github-actions`), merges them into `ontology.technologies`, and registers
 their paths in Config Reg.
 
 One list, so the three cannot disagree — a standard whose folder, registry property and

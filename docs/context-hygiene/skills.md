@@ -168,6 +168,12 @@ repository, run by an agent together with the user.
   model profile per harness, and the Arbiter decision-model key. It asks before every change outside
   the repository and never handles a secret. The per-harness table and the settings inventory live in
   its `references/` folder.
+- **Rules conflict check:** its step before Finish, also run on its own ("assess this repository's rules for
+  conflicts", "audit AGENTS.md"), inventories every instruction source an agent reads, runs
+  mechanical checks (stale tool names, missing paths, technologies absent from the tree, size), then
+  a judgement pass, and lists findings by category for the user to pick. It sorts rules from
+  standards by [the placement test](../documentation-ontology.md#rules-and-standards). The procedure
+  is `references/rules-and-structure-conflicts.md`.
 - **Gates:** `skill-validate-kw-onboarding`, `skill-lint-kw-onboarding` (`--min-desc-score 70`), and
   `skill-scan-kw-onboarding` (`--fail-on critical`) in [`.kyber-weave/kyber-weave.yml`](../../.kyber-weave/kyber-weave.yml).
 

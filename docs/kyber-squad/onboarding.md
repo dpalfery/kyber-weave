@@ -44,8 +44,10 @@ for the harness you use (`kyber-weave squad install --global --target <harness>`
 agent in that harness to run the `kw-onboarding` skill. It checks the
 machine with `kyber-weave doctor`, makes sure the code index and the `kw-docs` and `codegraph` MCP
 servers answer, installs the squad and the Arbiter hooks for the harnesses you pick, lists every
-setting with its default so you choose which to change, and checks the Arbiter's decision-model
-key. It asks before every change outside the repository and is safe to run again. The commands
+setting with its default so you choose which to change, checks the Arbiter's decision-model
+key, and checks the repository's own rules and instructions for conflicts, stale names and
+statements that belong in a [coding standard](../documentation-ontology.md#rules-and-standards)
+rather than a rule. It asks before every change outside the repository and is safe to run again. The commands
 below are what it runs.
 
 ---

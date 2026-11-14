@@ -12,7 +12,9 @@ last-reviewed: 2026-11-08
 How code is written in this repository, one directory per technology. A standard is
 project-specific; the agents and skills that read it are not, which is why they resolve it
 through the configuration registry rather than carrying their own. Only standards with
-`status: current` outrank portable agent defaults; draft standards do not.
+`status: current` outrank portable agent defaults; draft standards do not. What belongs in a
+standard rather than a rule is in
+[Rules and standards](../documentation-ontology.md#rules-and-standards).
 
 This repository declares [C#](csharp/README.md), [test](test/README.md),
 [TypeScript](typescript/README.md), [Rust](rust/README.md), and [Tauri](tauri/README.md)
