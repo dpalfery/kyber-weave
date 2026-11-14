@@ -900,7 +900,7 @@ rules:
       - products/kyber-squad/agents/code-reviewer.md
       - products/kyber-squad/skills/code-review/references/first-review.md
       - path: docs/code-review/architecture.md
-        section: Materialized diff contract (Option A)
+        section: Review evidence contract
     controls:
       - products/kyber-squad/skills/task-gate/references/rework.md
       - products/kyber-squad/agents/conductor/references/autonomy.md
