@@ -386,34 +386,34 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         {
             object facts = new
             {
-                    @base = baseBranch,
-                    baseRef = startRef,
-                    branch = target,
-                    worktree = worktreePath,
-                    location = location == RunStartLocation.InPlace ? "in-place" : "worktree",
-                    revision = baseRevision,
-                    resumed = resume is not null,
-                    index = indexLabel,
-                    completed = completed.Select(task => new { id = task.Id, report = task.Report }),
-                    completedWarning,
-                    versions = new
-                    {
-                        failing = settings.FailingVersion,
-                        head = headVersion,
-                        @base = baseVersion
-                    },
-                    serverAlignment = new
-                    {
-                        remote = RunStartPlanner.Remote,
-                        host = HostOf(originUrl),
-                        remoteUrl = originUrl,
-                        head = alignmentRevision,
-                        ahead,
-                        behind,
-                        aligned = ahead is not null && behind is not null
+                @base = baseBranch,
+                baseRef = startRef,
+                branch = target,
+                worktree = worktreePath,
+                location = location == RunStartLocation.InPlace ? "in-place" : "worktree",
+                revision = baseRevision,
+                resumed = resume is not null,
+                index = indexLabel,
+                completed = completed.Select(task => new { id = task.Id, report = task.Report }),
+                completedWarning,
+                versions = new
+                {
+                    failing = settings.FailingVersion,
+                    head = headVersion,
+                    @base = baseVersion
+                },
+                serverAlignment = new
+                {
+                    remote = RunStartPlanner.Remote,
+                    host = HostOf(originUrl),
+                    remoteUrl = originUrl,
+                    head = alignmentRevision,
+                    ahead,
+                    behind,
+                    aligned = ahead is not null && behind is not null
                             ? ahead == 0 && behind == 0
                             : (bool?)null
-                    }
+                }
             };
 
             JsonNode document = JsonSerializer.SerializeToNode(facts, JsonOptions)!;

@@ -105,9 +105,17 @@ public sealed partial class RunDelivery
 
     private static readonly IReadOnlyDictionary<string, string> TypeWords = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["feat"] = "Feature", ["fix"] = "Bug fix", ["docs"] = "Documentation", ["refactor"] = "Refactor",
-        ["perf"] = "Performance", ["test"] = "Tests", ["build"] = "Build", ["ci"] = "Continuous integration",
-        ["chore"] = "Maintenance", ["revert"] = "Revert", ["style"] = "Formatting",
+        ["feat"] = "Feature",
+        ["fix"] = "Bug fix",
+        ["docs"] = "Documentation",
+        ["refactor"] = "Refactor",
+        ["perf"] = "Performance",
+        ["test"] = "Tests",
+        ["build"] = "Build",
+        ["ci"] = "Continuous integration",
+        ["chore"] = "Maintenance",
+        ["revert"] = "Revert",
+        ["style"] = "Formatting",
     };
 
     private readonly string _repoRoot;
