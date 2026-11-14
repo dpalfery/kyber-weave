@@ -141,6 +141,9 @@ public sealed class ConfigRegConfig
     /// </summary>
     public const string DefaultBaseBranch = "origin/HEAD";
 
+    /// <summary>Registry property for the rules folder's index.</summary>
+    public const string RulesIndexProperty = "rules-index";
+
     /// <summary>Suffix that turns a declared technology into its registry property name.</summary>
     public const string CodingStandardSuffix = "-coding-standard";
 
@@ -157,7 +160,7 @@ public sealed class ConfigRegConfig
         ("specs", SpecificationIndexProperty),
         ("todo", TodoIndexProperty),
         ("adr", "adr-index"),
-        ("rules", "rules-index"),
+        ("rules", RulesIndexProperty),
         ("reference", "reference-index")
     ];
 

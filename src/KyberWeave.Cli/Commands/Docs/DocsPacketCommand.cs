@@ -113,7 +113,10 @@ public sealed class DocsPacketCommand : Command<DocsPacketSettings>
             Console.Out.WriteLine();
         }
 
-        Console.Out.WriteLine(PacketHostFacts.Render(root, config, agent, entry.Id));
+        List<string> notes = [];
+        Console.Out.WriteLine(PacketHostFacts.Render(root, config, agent, entry.Id, notes));
+        foreach (string note in notes)
+            Console.Error.WriteLine("docs packet: " + note);
         return 0;
     }
 
