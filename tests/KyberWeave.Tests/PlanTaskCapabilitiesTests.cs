@@ -45,6 +45,14 @@ public sealed class PlanTaskCapabilitiesTests
     }
 
     [Fact]
+    public void TheCapabilitiesAreTheLabelsLineAndNotTheProseUnderIt()
+    {
+        (PlanTaskFileEntry? entry, _) = Build("Capabilities: React UI\nThe page sits under the orders tab.");
+
+        Assert.Equal("React UI", entry?.Capabilities);
+    }
+
+    [Fact]
     public void AnOlderPlansSkillsLineBecomesTheCapabilityTextWithoutARole()
     {
         (PlanTaskFileEntry? entry, _) = Build("- **Required skills:** `react-dev`, `test-dev`");

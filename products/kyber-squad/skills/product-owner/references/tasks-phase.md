@@ -37,7 +37,7 @@ Beside `tasks.md`, the tracked task file `<spec-folder>/tasks.json` is the speci
 
 Only two slots stay unfilled — `{worktree}` and `{prior_results}` — because the conductor fills them at dispatch from what no authoring phase can know.
 
-The conductor writes the file with `kyber-weave docs tasks <spec-folder>/tasks.md --write` before the finalization invocation; it derives every field, the digest and each prompt from `tasks.md`, so `product-owner` never writes, edits or computes `tasks.json`. Put what each prompt needs in the task itself: its `Command:` line (a backticked program and argument) and its `Acceptance criteria:` line, or the test contract row's runner and acceptance cells. Optional `Session:` and `Role:` lines set the worker session group and agent (default: the task id and the first required skill).
+The conductor writes the file with `kyber-weave docs tasks <spec-folder>/tasks.md --write` before the finalization invocation; it derives every field, the digest and each prompt from `tasks.md`, so `product-owner` never writes, edits or computes `tasks.json`. Put what each prompt needs in the task itself: its `Command:` line (a backticked program and argument) and its `Acceptance criteria:` line, or the test contract row's runner and acceptance cells. An optional `Session:` line sets the worker session group (default: the task id); add `Role: <agent>` only when the owner assigned the task to a named agent.
 
 Finalization runs in this order:
 

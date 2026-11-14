@@ -452,7 +452,7 @@ public static partial class PlanDocumentParser
     /// the spec grammar falls back to the body's backticked paths. Dependencies come
     /// from the first Depends-family label, tokens per grammar. Skills come from every
     /// Skills-family label; the plan heading's <c>(agent)</c> suffix is added by the caller.
-    /// Capabilities are the first Capabilities-family label's text, as prose on one line.
+    /// Capabilities are the rest of the first Capabilities-family label's line.
     /// </summary>
     private static (List<string> Files, List<string> DependsTokens, List<string> Skills, string? Capabilities) ParseTaskBody(string sectionText, bool isSpec)
     {
@@ -522,9 +522,10 @@ public static partial class PlanDocumentParser
         LabelMatch? capabilitiesLabel = labels.FirstOrDefault(label => label.Family == LabelFamily.Capabilities);
         if (capabilitiesLabel is not null)
         {
+            // One line: task prose often follows the label with no blank line, and it is not part of the capabilities.
+            int lineEnd = plain.IndexOf('\n', capabilitiesLabel.ValueStart);
             int end = RegionEnd(plain, capabilitiesLabel.ValueStart, Math.Min(
-                Math.Min(NextLabelStart(labels, capabilitiesLabel.Start), DoubleNewlineIndex(plain, capabilitiesLabel.ValueStart)),
-                SiblingBulletIndex(plain, capabilitiesLabel.ValueStart, LineIndent(plain, capabilitiesLabel.Start))));
+                NextLabelStart(labels, capabilitiesLabel.Start), lineEnd < 0 ? int.MaxValue : lineEnd));
             string text = WhitespaceRegex().Replace(plain[capabilitiesLabel.ValueStart..end].Replace("`", string.Empty, StringComparison.Ordinal), " ").Trim();
             capabilities = text.Length > 0 ? text : null;
         }
