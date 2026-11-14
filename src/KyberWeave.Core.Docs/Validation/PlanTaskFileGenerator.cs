@@ -366,7 +366,7 @@ public sealed partial class PlanTaskFileGenerator
     /// the whole cell when it starts with a program that runs tests. Prose in the cell, such as "manual check",
     /// is not a command.
     /// </summary>
-    private static string? CommandFromContract(PlanContractRow? row)
+    internal static string? CommandFromContract(PlanContractRow? row)
     {
         foreach (string? cell in new[] { row?.RunnerFilter, row?.TestProjectOrFile })
         {

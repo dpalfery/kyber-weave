@@ -1,6 +1,7 @@
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Validation;
@@ -102,11 +103,32 @@ public sealed class DocsPacketCommand : Command<DocsPacketSettings>
             }
         }
 
-        // The host facts are appended at print time, never written into the task file, so the digest is unaffected.
+        // The test command and host facts are appended at print time, never written into the task file, so the digest is unaffected.
+        string? agent = string.IsNullOrWhiteSpace(settings.Agent) ? entry.Role : settings.Agent.Trim();
         Console.Out.WriteLine(PlanTaskPacket.Fill(entry, root, prior));
         Console.Out.WriteLine();
-        Console.Out.WriteLine(PacketHostFacts.Render(root, config, string.IsNullOrWhiteSpace(settings.Agent) ? entry.Role : settings.Agent.Trim(), entry.Id));
+        if (PacketTestCommand.Render(root, config, agent, entry, ContractRow(root, plan, entry.Id), OperatingSystem.IsWindows()) is { } tests)
+        {
+            Console.Out.WriteLine(tests);
+            Console.Out.WriteLine();
+        }
+
+        Console.Out.WriteLine(PacketHostFacts.Render(root, config, agent, entry.Id));
         return 0;
+    }
+
+    private static PlanContractRow? ContractRow(string root, string plan, string? taskId)
+    {
+        try
+        {
+            string markdown = File.ReadAllText(Path.Combine(root, plan.Replace('/', Path.DirectorySeparatorChar)));
+            return PlanDocumentParser.Parse(markdown).ContractRows
+                .FirstOrDefault(row => string.Equals(row.TaskId, taskId, StringComparison.Ordinal));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     private static string? ChoosePlan(string root, KyberWeaveConfig config, DocsPacketSettings settings, string current, DiagnosticReport report)
