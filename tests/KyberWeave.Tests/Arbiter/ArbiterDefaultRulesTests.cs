@@ -159,11 +159,12 @@ public sealed class ArbiterDefaultRulesTests
     }
 
     [Fact]
-    public void Owner002_LogsTheModelsPickWithoutBlockingWhenTheTaskNamesNoAgent()
+    public void Owner002_IsShippedDisabledSoNoModelCallIsMadeWhenTheTaskNamesNoAgent()
     {
         // A plan task names capabilities, not an agent; the conductor's match is the decision (ADR 0080).
         ArbiterRule owner = ArbiterConfig.ProductDefaults.Rules.Single(r => r.Id == "KW-ARB-OWNER-002");
 
+        Assert.False(owner.Enabled);
         Assert.Equal("KW-ARB-OWNER-001=no-mapping", owner.Ask!.When);
         Assert.All(owner.Effects.Values, effect => Assert.Equal("allow", effect));
     }

@@ -155,12 +155,14 @@ rules:
 
   # A plan task names the abilities it needs, not an agent, and the conductor chooses the agent by matching them
   # against the agents' descriptions (ADR 0080). So a task with no named skills (no-mapping above, the normal case)
-  # has no recorded owner to hold the dispatch to: the model's pick is logged for monitoring and never blocks the
-  # conductor's. A host that wants the stop sets `effects: { other: escalate }`.
+  # has no recorded owner to hold the dispatch to, and the model's pick could only be logged. Shipped disabled, so
+  # no model call is made on a dispatch. A host that wants the pick logged sets `enabled: true`; one that also wants
+  # the stop adds `effects: { other: escalate }`.
   - id: KW-ARB-OWNER-002
     trigger: delegate
     question: Which specialist in the caller's implementation roster owns this task?
     answers: [target, other]
+    enabled: false
     ask:
       type: choice
       state: { task: plan.task.text, roster: roster.descriptions, target: delegation.target }
