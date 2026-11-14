@@ -1,5 +1,5 @@
 ---
-name: test-dev/unit-test-patterns
+name: testing/unit-test-patterns
 description: xUnit unit test patterns — NSubstitute mocking, FluentAssertions, naming conventions, arrange-act-assert.
 ---
 
@@ -110,7 +110,5 @@ Builders live next to the tests they serve, typically under a `Builders/` folder
 
 ## Run Command
 
-```powershell
-dotnet test --filter <TestClass>           # run specific class
-dotnet test --filter "Category=Unit"       # run by category
-```
+Run them with the one command in the `testing` skill. Never filter by category: that runs every
+unit test in the repository.

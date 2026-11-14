@@ -53,7 +53,7 @@ Deliver `IRepository<T>` implementations that satisfy the interfaces in the Cont
 1. Fetch **<data-access-layer-coding-standard>**, **<csharp-coding-standard>**, and **<sql-coding-standard>** before writing persistence code through `docs_get_coding_standard_for_technology` — name each technology, and the topic when you need one. Read a file only when the tool is missing.
 2. Identify the sub-task and read **only** the matching `dal-dev` skill reference. Do not pre-load every reference.
 3. Use Context7 for current `Microsoft.Data.SqlClient` and FluentMigrator docs — do not wait to be asked.
-4. Write the tests for the change. In test-first mode, write them first and run the task gate's failing run (`--red`) before implementing.
+4. Write the tests for the change with the `testing` skill, first in test-first mode.
 5. Implement the change. Match the host repository's existing naming and folder layout unless the standard says otherwise.
 6. **Completion gate — diagnostics.** This is blocking, and it is not satisfied by a green build.
 

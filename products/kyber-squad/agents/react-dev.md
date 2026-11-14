@@ -28,7 +28,7 @@ Your packet is your whole scope.
 2. Analyze UI/UX requirements and design specifications
 3. Structure components and folders as the standard lays them out
 4. Implement markup, styling, and interactivity
-5. Write the tests for the change. In test-first mode, write them first and run the task gate's failing run (`--red`) before implementing. Test across browsers and devices
+5. Write the tests for the change with the `testing` skill, first in test-first mode.
 6. Optimize assets and code splitting
 7. Document component APIs and usage
 8. **Completion gate — diagnostics and lint.** This is blocking, and a green lint summary does not satisfy it.

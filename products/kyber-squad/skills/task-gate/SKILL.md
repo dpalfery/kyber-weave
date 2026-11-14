@@ -11,7 +11,7 @@ metadata:
 
 The task gate is the exit check a developer agent runs on its own work before it reports a task
 done: the review gates declared for the agent in `.kyber-weave/kyber-weave.yml`, run by
-`kyber-weave review gates . --agent <self> --paths <files> --task <task-id>`. It is deterministic,
+`kyber-weave review gates . --agent <self> --task <task-id>`. It is deterministic,
 so the result is the gates' output and not the agent's opinion of its change. It covers one task and
 never inspects files the task did not change.
 
@@ -23,8 +23,10 @@ skill holds what a run does not print.
 
 Use the `kyber-weave` command on `PATH`. Inside this checkout, when it is not on `PATH`, use the
 source-run form the host's `AGENTS.md` declares — `dotnet run --project <the CLI project> -c Release --`.
-`<files>` is only what this task created or modified, one `--paths` per file; never another
-worker's files. Write the report to `.agent_scratchpad/<task-id>/task-gate.json`.
+With `--task` and no `--paths`, the task's files and the test classes its Test contract names come
+from the active plan, and the report goes to `.agent_scratchpad/<task-id>/task-gate.json`. When no
+active plan has the task, name the files this task created or modified, one `--paths` per file, and
+never another worker's files.
 
 A run with `--fix` applies each gate's fix command first. It never counts: only a run without
 `--fix` that reports every declared gate passing is a pass.
@@ -32,8 +34,8 @@ A run with `--fix` applies each gate's fix command first. It never counts: only 
 ## Failing run (test-first)
 
 In a test-first task, after writing the tests and before implementing, run the gate once with
-`--red` and `--out .agent_scratchpad/<task-id>/task-gate-red.json`, so the passing run does not
-overwrite it. It passes only when tests ran and failed, or when the build failed only on symbols
+`--red`; its report goes to `.agent_scratchpad/<task-id>/task-gate-red.json`, so the passing run does
+not overwrite it. It passes only when tests ran and failed, or when the build failed only on symbols
 missing from this task's own files; otherwise it prints `RED_REJECTED: <reason>`. Do not add a stub
 to make the tests compile. The two reports, failing run first, are the proof the Arbiter reads; the
 digest names only the passing one.

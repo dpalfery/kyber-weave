@@ -59,7 +59,7 @@ public sealed class FakeSquadRenderer : ISquadRenderer
         "security-review",
         "setup-dev-environment",
         "task-gate",
-        "test-dev"
+        "testing"
     ];
 
     private static readonly IReadOnlyList<string> DistinctBodyCollisionIdentities =
@@ -69,8 +69,7 @@ public sealed class FakeSquadRenderer : ISquadRenderer
         "github-devops",
         "maui-dev",
         "product-owner",
-        "python-dev",
-        "test-dev"
+        "python-dev"
     ];
 
     private readonly List<SquadRenderRequest> _renderRequests = [];

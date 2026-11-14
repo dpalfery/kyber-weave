@@ -61,7 +61,7 @@ public sealed class SquadStandardsToolContractTests
         "maui-dev",
         "python-dev",
         "rust-dev",
-        "test-dev",
+        "testing",
         "typescript-dev"
     ];
 
@@ -121,7 +121,7 @@ public sealed class SquadStandardsToolContractTests
     [InlineData("maui-dev")]
     [InlineData("python-dev")]
     [InlineData("rust-dev")]
-    [InlineData("test-dev")]
+    [InlineData("testing")]
     [InlineData("typescript-dev")]
     public void EveryDeveloperSkillReachesItsCodingStandardThroughTheTool(string skillName)
     {

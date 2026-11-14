@@ -27,6 +27,28 @@ to proceed on it, exactly as it does when no standard is declared.
 > `status` to `current`. Every choice here is a guess about a repository this template has
 > never seen — reversing one is the point of the standard being project-specific.
 
+## How tests work in this repository
+
+A worker calls for this standard once, before it opens a test file, so this section must answer
+what it would otherwise spend dozens of lookups finding. Replace each placeholder with this
+repository's answer, and delete a heading that does not apply.
+
+- **Test projects and the task command.** Where each language's tests live, the task gate that
+  runs them (`review.task-gates`), and how it picks classes (`review.test-map`, or the
+  `<Stem>Tests` convention). `<fill in>`
+- **Fixtures and collections.** The shared fixtures, collection or group attributes, and which
+  tests must not run in parallel, with why. `<fill in>`
+- **How integration tests get a database.** The engine, how a test obtains a connection, how the
+  schema is created or migrated, how each run's database is named, and how it is cleaned up.
+  `<fill in>`
+- **Seeded reference data.** The rows or fixture files every test may rely on, named by key, and
+  which of them no test may change. Anything not listed is not safe to rely on. `<fill in>`
+- **Builders, fakes and helpers.** Where test-data builders and fakes live, and one existing test
+  class per layer to copy from. `<fill in>`
+- **Naming and placement.** File, class and method names per layer. `<fill in>`
+- **What parallel runs must not share.** Ports, folders, files and databases a test must scope to
+  its own run. `<fill in>`
+
 ## Stack
 
 ### .NET (primary)
@@ -168,3 +190,7 @@ council raises and no test catches, so run it before you report.
 These are targeted runs, named by the class, module or path the change touches. Build once and
 reuse the build — `--no-build` or the compiled assembly — rather than rebuilding per iteration,
 and say which classes you ran and which you did not.
+
+Inside a Kyber-Squad task the worker runs none of these by hand: `kyber-weave review gates . --agent
+<agent> --task <task id>` runs the build, the task's tests and the format check as declared in
+`review.task-gates`, and prints the failures in short.

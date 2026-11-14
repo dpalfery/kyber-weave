@@ -15,7 +15,7 @@ names a command, run that one; the table below is the shape it usually takes.
 | Lint | `staticcheck ./...` or `golangci-lint run` — whichever the standard names | Exit 0 |
 | Build | `go build ./...` | Exit 0 |
 | Modules | `go mod tidy -diff` (Go 1.23+) or `go mod tidy` then `git diff --exit-code go.mod go.sum` | No diff |
-| Test | `go test -race -run '<TestName>' ./<package>` | Exit 0 with a non-zero test count — authored by `test-dev`; run the tests covering your change to prove you broke nothing, and never run the full test suite: the review council and CI run it |
+| Test | `go test -race -run '<TestName>' ./<package>` | Exit 0 with a non-zero test count — written by you with the change; run them with the one command in the `testing` skill, and never run the full test suite: the review council and CI run it |
 
 Fix the cause of a finding. A `//lint:ignore` or `//nolint` directive names the check and says
 why on the same line.

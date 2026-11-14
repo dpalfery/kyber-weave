@@ -26,7 +26,7 @@ CI run the full suite on the integrated head.
 `standard: draft` (or `standard: missing`) in your report, and continue. Never stop or ask because
 of it, and never ask a question when running autonomously.
 
-**Task gate (developers).** Test-first, after writing the tests: `kyber-weave review gates . --agent <you> --paths <file> --task <id> --red --out .agent_scratchpad/<id>/task-gate-red.json`. When done: the same without `--red`, to `task-gate.json`. Each run prints your next step; the passing run prints the digest to return.
+**Task gate (developers).** `kyber-weave review gates . --agent <you> --task <id>` runs your task's tests and gates and writes the evidence; your packet prints it filled in. Test-first: once with `--red` after writing the tests, then without. Each run prints your next step; the passing run, the digest to return.
 
 **Batch your reads.** Send independent reads in one round trip, not one read per question.
 

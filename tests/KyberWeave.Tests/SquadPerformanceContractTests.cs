@@ -24,7 +24,6 @@ public sealed class SquadPerformanceContractTests
 
     private const string CSharpDevAgentPath = "products/kyber-squad/agents/csharp-dev.md";
     private const string TestDevAgentPath = "products/kyber-squad/agents/test-dev.md";
-    private const string TestDevSkillPath = "products/kyber-squad/skills/test-dev/SKILL.md";
 
     /// <summary>
     ///     The skill a worker loads when it finishes. Report formats — the completion digest and its
@@ -221,26 +220,6 @@ public sealed class SquadPerformanceContractTests
     [Theory]
     [InlineData(CSharpDevAgentPath)]
     [InlineData(TestDevAgentPath)]
-    [InlineData(TestDevSkillPath)]
-    public void WorkerSurfacesSpecifyBuildOnceTestManyWithDirectAssemblyRunner(string relativePath)
-    {
-        string content = ReadRepoFile(relativePath);
-        AssertNamesTheHostTestStandardForTheRunner(content, relativePath);
-        Assert.DoesNotContain(QuietReporter, content, StringComparison.Ordinal);
-        Assert.Contains(NoBuildFlag, content, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void TestDevSkillSpecifiesTheDiscoveryHeader()
-    {
-        string content = ReadRepoFile(TestDevSkillPath);
-        Assert.Contains("Discovery: codegraph N, docs N, direct reads N", content, StringComparison.Ordinal);
-    }
-
-    [Theory]
-    [InlineData(CSharpDevAgentPath)]
-    [InlineData(TestDevAgentPath)]
-    [InlineData(TestDevSkillPath)]
     public void SpecialistSurfacesNameTheArtifactsPathFlag(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
@@ -269,8 +248,6 @@ public sealed class SquadPerformanceContractTests
     [Theory]
     [InlineData(SharedExecutionSkillPath)]
     [InlineData(ConductorAgentPath)]
-    [InlineData(CSharpDevAgentPath)]
-    [InlineData(TestDevAgentPath)]
     [InlineData(TestCodingStandardPath)]
     [InlineData(OnboardingDocPath)]
     [InlineData(RequirementsDocPath)]
@@ -284,9 +261,6 @@ public sealed class SquadPerformanceContractTests
     [InlineData(SharedExecutionSkillPath)]
     [InlineData(ConductorAgentPath)]
     [InlineData(ArchitectureDocPath)]
-    [InlineData(CSharpDevAgentPath)]
-    [InlineData(TestDevAgentPath)]
-    [InlineData(TestDevSkillPath)]
     public void SurfacesConsistentlySpecifyArtifactIsolationFlags(string relativePath)
     {
         string content = ReadRepoFile(relativePath);

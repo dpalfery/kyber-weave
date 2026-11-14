@@ -1,5 +1,5 @@
 ---
-name: test-dev/rust-go-test-patterns
+name: testing/rust-go-test-patterns
 description: Rust (cargo test, cargo nextest) and Go (go test) test patterns — placement, table-driven cases, fakes behind traits and interfaces, async and race detection.
 ---
 

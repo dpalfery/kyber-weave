@@ -1,6 +1,6 @@
 ---
 name: go-dev
-description: Use when writing Go — packages, CLIs, services, error wrapping, context propagation, goroutines and channels, modules, or cross-compiling. Do not use for CI/CD; test patterns are in the test-dev skill.
+description: Use when writing Go — packages, CLIs, services, error wrapping, context propagation, goroutines and channels, modules, or cross-compiling. Do not use for CI/CD; writing and running tests is the testing skill.
 license: MIT
 ---
 

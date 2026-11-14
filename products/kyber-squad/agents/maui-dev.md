@@ -43,7 +43,7 @@ Your packet is your whole scope.
 1. Fetch **<maui-coding-standard>** and **<csharp-coding-standard>** before writing any MAUI code through `docs_get_coding_standard_for_technology` — name each technology, and the topic when you need one. Read a file only when the tool is missing.
 2. Identify the sub-task and read **only** the matching `maui-dev` skill reference. Do not pre-load every reference.
 3. Use Context7 to resolve library ids and fetch current docs for CommunityToolkit.Maui, .NET MAUI, MSAL, or any other library you are configuring — do not wait to be asked.
-4. Write the tests for the change. In test-first mode, write them first and run the task gate's failing run (`--red`) before implementing.
+4. Write the tests for the change with the `testing` skill, first in test-first mode.
 5. Implement the change. Match the host repository's existing naming, folder layout, and DI style unless the standard says otherwise.
 6. Confirm the types you added are registered where the standard requires, and that ViewModels take interfaces rather than constructing services.
 7. **Completion gate — diagnostics.** This is blocking, and it is not satisfied by a green build.

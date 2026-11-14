@@ -153,7 +153,7 @@ public sealed class SquadCanonicalContentTests
         "security-review",
         "setup-dev-environment",
         "task-gate",
-        "test-dev",
+        "testing",
         "typescript-dev"
     ];
 
@@ -174,7 +174,6 @@ public sealed class SquadCanonicalContentTests
         "product-owner",
         "python-dev",
         "rust-dev",
-        "test-dev",
         "typescript-dev"
     ];
 
@@ -193,7 +192,6 @@ public sealed class SquadCanonicalContentTests
         "maui-dev",
         "python-dev",
         "rust-dev",
-        "test-dev",
         "typescript-dev"
     ];
 

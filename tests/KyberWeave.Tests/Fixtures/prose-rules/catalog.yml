@@ -392,7 +392,7 @@ rules:
       - products/kyber-squad/agents/test-dev.md
       - path: products/kyber-squad/skills/delivery-execution/SKILL.md
         anchor: "--artifacts-path"
-      - products/kyber-squad/skills/test-dev/SKILL.md
+      - products/kyber-squad/skills/testing/SKILL.md
       - path: docs/kyber-squad/architecture.md
         anchor: "--artifacts-path"
         section: Concurrency and scheduling model (worktree and artifact isolation)
@@ -414,7 +414,7 @@ rules:
       - products/kyber-squad/agents/csharp-dev.md
       - products/kyber-squad/agents/test-dev.md
       - products/kyber-squad/skills/delivery-execution/SKILL.md
-      - products/kyber-squad/skills/test-dev/SKILL.md
+      - products/kyber-squad/skills/testing/SKILL.md
       - docs/standards/test/README.md
     controls:
       - products/kyber-squad/agents/go-dev.md
@@ -434,14 +434,14 @@ rules:
       - products/kyber-squad/agents/csharp-dev.md
       - products/kyber-squad/agents/test-dev.md
       - products/kyber-squad/skills/delivery-execution/SKILL.md
-      - products/kyber-squad/skills/test-dev/SKILL.md
+      - products/kyber-squad/skills/testing/SKILL.md
     controls:
       - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/agents/conductor/references/autonomy.md
   - id: runner-dotnet-only
     statement: The direct test-assembly runner applies to .NET; other languages use their own way of targeting tests.
     stated-in:
-      - products/kyber-squad/skills/test-dev/SKILL.md
+      - products/kyber-squad/skills/testing/SKILL.md
     controls:
       - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/shared/worker-baseline.md
@@ -567,7 +567,7 @@ rules:
       absent-from:
         - products/kyber-squad/agents/conductor.md
         - products/kyber-squad/agents/csharp-dev.md
-        - products/kyber-squad/skills/test-dev/SKILL.md
+        - products/kyber-squad/skills/testing/SKILL.md
   - id: green-against-red
     statement: A developer worker writes the tests for its own change rather than leaving them to test-dev.
     stated-in:
@@ -591,7 +591,7 @@ rules:
     stated-in:
       - products/kyber-squad/agents/conductor.md
       - products/kyber-squad/skills/delivery-execution/SKILL.md
-      - products/kyber-squad/skills/test-dev/SKILL.md
+      - products/kyber-squad/skills/testing/SKILL.md
     controls:
       - products/kyber-squad/skills/task-gate/references/rework.md
       - products/kyber-squad/agents/conductor/references/autonomy.md
@@ -649,7 +649,7 @@ rules:
       - products/kyber-squad/skills/maui-dev/SKILL.md
       - products/kyber-squad/skills/python-dev/SKILL.md
       - products/kyber-squad/skills/rust-dev/SKILL.md
-      - products/kyber-squad/skills/test-dev/SKILL.md
+      - products/kyber-squad/skills/testing/SKILL.md
       - products/kyber-squad/skills/typescript-dev/SKILL.md
     controls:
       - products/kyber-squad/skills/task-gate/references/rework.md
@@ -664,7 +664,7 @@ rules:
         - products/kyber-squad/agents/python-dev.md
         - products/kyber-squad/agents/test-dev.md
         - products/kyber-squad/skills/go-dev/SKILL.md
-        - products/kyber-squad/skills/test-dev/SKILL.md
+        - products/kyber-squad/skills/testing/SKILL.md
   # ---------------------------------------------------------------- the review loop and the council
   - id: council-loop-until-approve
     statement: The review council re-reviews after every fix round until it returns APPROVE.

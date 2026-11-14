@@ -43,7 +43,7 @@ Your packet is your whole scope.
 1. Fetch **<pulumi-coding-standard>** and **<csharp-coding-standard>** before writing any infrastructure through `docs_get_coding_standard_for_technology` — name each technology, and the topic when you need one. Read a file only when the tool is missing.
 2. Construct every Azure resource name through the `azure-naming` skill. Do not improvise a name.
 3. Use Context7 to resolve library ids and fetch current docs for Pulumi, `azure-native`, and any helper package you configure — do not wait to be asked. Pin registry docs to the package version in use when behavior matters.
-4. Write the tests for the change. In test-first mode, write them first and run the task gate's failing run (`--red`) before implementing.
+4. Write the tests for the change with the `testing` skill, first in test-first mode.
 5. Implement the change. Match the host repository's existing project/stack layout unless the standard says otherwise.
 6. Run `pulumi preview` and keep the diff small, reviewable, and idempotent. Call out replacement risk, data-loss risk, and cross-stack impact before proposing apply.
 7. **Completion gate — diagnostics.** This is blocking, and it is not satisfied by a green build or a clean `pulumi preview`.

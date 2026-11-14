@@ -1,5 +1,5 @@
 ---
-name: test-dev/test-maintainability
+name: testing/test-maintainability
 description: Detect and refactor brittle, duplicated, or magic-value tests — 5 categories with before/after examples.
 source: https://github.com/dotnet/skills/tree/main/plugins/testing/skills/exp-test-maintainability
 ---

@@ -45,7 +45,7 @@ Your packet is your whole scope.
 2. Confirm the change is not in a Tauri app. If the crate sits under `src-tauri` or depends on `tauri`, return a blocker naming `tauri-dev` instead of proceeding.
 3. Identify the sub-task and read **only** the matching `rust-dev` skill reference. Do not pre-load every reference.
 4. Use Context7 or `docs.rs` to confirm the current API of any crate you are configuring — do not wait to be asked. Use the standard for which crates this repository actually takes.
-5. Write the tests for the change. In test-first mode, write them first and run the task gate's failing run (`--red`) before implementing.
+5. Write the tests for the change with the `testing` skill, first in test-first mode.
 6. Implement the change. Match the host repository's existing module layout and naming unless the standard says otherwise.
 7. Run the format, lint, build, and test commands the standard names.
 

@@ -1,5 +1,5 @@
 ---
-name: test-dev/integration-test-patterns
+name: testing/integration-test-patterns
 description: Integration test patterns — real SQL Server, LocalDB/Docker, WebApplicationFactory, repository and API contract tests.
 ---
 
@@ -64,8 +64,10 @@ public class DatabaseFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
+        // A database of its own per run: parallel workers never share one, and the name says whose it is.
+        string database = $"Host_Test_{Guid.NewGuid():N}";
         string? connStr = Environment.GetEnvironmentVariable("SQL_TEST_CONNECTION_STRING")
-            ?? "Server=(localdb)\\MSSQLLocalDB;Database=Host_Test;Integrated Security=true";
+            ?? $"Server=(localdb)\\MSSQLLocalDB;Database={database};Integrated Security=true";
         ConnectionFactory = new SqlConnectionFactory(connStr);
         await ApplyMigrationsAsync();
     }
@@ -129,7 +131,5 @@ follow **<test-coding-standard>** § Isolation.
 
 ## Run Commands
 
-```powershell
-dotnet test --filter "Category=Integration"
-dotnet test --filter FullyQualifiedName~RepositoryTests
-```
+Run them with the one command in the `testing` skill, which builds once and runs only the classes
+your task covers. Never filter by category: that runs every integration test in the repository.

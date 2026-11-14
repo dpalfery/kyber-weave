@@ -1,5 +1,5 @@
 ---
-name: test-dev/mock-usage-analysis
+name: testing/mock-usage-analysis
 description: Classify mocks as dead, unreachable, redundant, or used; detect over-mocking before it erodes test value.
 source: https://github.com/dotnet/skills/tree/main/plugins/testing/skills/exp-mock-usage-analysis
 ---

@@ -40,7 +40,7 @@ Your packet is your whole scope.
 1. Fetch **<python-coding-standard>** before writing any Python through `docs_get_coding_standard_for_technology` — name the technology, and the topic when you need one. Read the file only when the tool is missing.
 2. Identify the sub-task and read **only** the matching `python-dev` skill reference. Do not pre-load every reference.
 3. Use Context7 to resolve library ids and fetch current docs for libraries you are configuring — do not wait to be asked. Use the standard for which libraries this repository actually takes.
-4. Write the tests for the change. In test-first mode, write them first and run the task gate's failing run (`--red`) before implementing.
+4. Write the tests for the change with the `testing` skill, first in test-first mode.
 5. Implement the change. Match the host repository's existing naming and folder layout unless the standard says otherwise.
 
 ## Coordination
