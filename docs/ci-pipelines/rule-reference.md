@@ -60,6 +60,18 @@ Reported only when the `plan-index` or `todo-index` registry property names a do
 | `KW-DOC-CLOSEOUT-005` | Error | `--date` is not `yyyy-MM-dd` |
 | `KW-DOC-PLANREF-001` | Error | A plan or specification argument (to `docs closeout`, `docs tasks` or `arbiter plan`) matches more than one active file; the finding lists the candidates |
 
+### Plan finalize — `docs finalize` and `docs_finalize_approved_plan_and_write_task_file`
+
+| Id | Severity | Meaning |
+|---|---|---|
+| `KW-DOC-FINALIZE-001` | Error | The path is not an active plan file directly under the plans folder |
+| `KW-DOC-FINALIZE-002` | Error | The plan's body status is neither Draft nor Ready |
+| `KW-DOC-FINALIZE-003` | Error | No usable approval: missing, more than one line, over 300 characters, or an autonomous approval of a plan whose frontmatter is not `autonomy: autonomous` |
+| `KW-DOC-FINALIZE-004` | Error | The plan has no `## Decisions` table, or a decision is still `OPEN` or `RECOMMENDED` |
+| `KW-DOC-FINALIZE-005` | Error | The task file cannot be written from the plan, or the finalized plan, index or task file fails validation (every change is undone); also a Ready plan whose task file is not current |
+| `KW-DOC-FINALIZE-006` | Info / Warning | A step taken. Warning: `git add` could not stage the touched files |
+| `KW-DOC-FINALIZE-007` | Error | `--date` is not `yyyy-MM-dd`, or `--approval-mode` is not `autonomous` or `supervised` |
+
 A plan whose closeout evidence is incomplete is reported with `KW-DOC-LIFECYCLE-004` and nothing is moved. One run reports every missing condition (`C1`–`C9`) as its own finding, with every unmapped id named and an example row or line as the hint, together with any index problem.
 
 ### Plan task files — `docs validate` and the docs MCP validate tool

@@ -56,16 +56,18 @@ public sealed class McpToolNameContractTests
     ];
 
     /// <summary>
-    /// Arbiter tools added after the rename. They are new names, not renames, so they live apart from
-    /// <see cref="Renames"/>, but the arbiter server must declare them too and the length limits apply to them.
+    /// Tools added after the rename. They are new names, not renames, so they live apart from
+    /// <see cref="Renames"/>, but their server must declare them too and the length limits apply to them.
     /// </summary>
     private static readonly (string Server, string Name)[] AddedTools =
     [
         (ArbiterServer, "arbiter_select_relevant_document_sections"),
         (ArbiterServer, "arbiter_classify_bot_review_comment"),
+        (DocsServer, "docs_finalize_approved_plan_and_write_task_file"),
+        (DocsServer, "docs_archive_plan_after_closeout_is_complete"),
     ];
 
-    /// <summary>The docs server exposes exactly its eight renamed tools, and the arbiter server its three renamed and two added.</summary>
+    /// <summary>The docs server exposes exactly its eight renamed and two added tools, and the arbiter server its three renamed and two added.</summary>
     [Fact]
     public void TheDocsAndArbiterToolsDeclareExactlyTheRenamedNames()
     {
@@ -74,12 +76,15 @@ public sealed class McpToolNameContractTests
         string[] expectedArbiter = Renames
             .Where(rename => rename.Server == ArbiterServer)
             .Select(rename => rename.Renamed)
-            .Concat(AddedTools.Select(added => added.Name))
+            .Concat(AddedTools.Where(added => added.Server == ArbiterServer).Select(added => added.Name))
             .ToArray();
-
-        List<string> missing = Renames
+        string[] expectedDocs = Renames
             .Where(rename => rename.Server == DocsServer)
             .Select(rename => rename.Renamed)
+            .Concat(AddedTools.Where(added => added.Server == DocsServer).Select(added => added.Name))
+            .ToArray();
+
+        List<string> missing = expectedDocs
             .Concat(expectedArbiter)
             .Where(name => !declaredDocs.Contains(name, StringComparer.Ordinal)
                 && !declaredArbiter.Contains(name, StringComparer.Ordinal))
@@ -91,7 +96,7 @@ public sealed class McpToolNameContractTests
             + string.Join(", ", missing));
 
         Assert.Equal(
-            Renames.Where(rename => rename.Server == DocsServer).Select(rename => rename.Renamed).Order(StringComparer.Ordinal),
+            expectedDocs.Order(StringComparer.Ordinal),
             declaredDocs.Order(StringComparer.Ordinal));
         Assert.Equal(
             expectedArbiter.Order(StringComparer.Ordinal),

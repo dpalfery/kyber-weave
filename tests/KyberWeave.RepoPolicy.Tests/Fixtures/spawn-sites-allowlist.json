@@ -1382,6 +1382,18 @@
       "bound": "ProcessRunner timeout kills the child tree on expiry; 60 s; git argv only, in a temp repository."
     },
     {
+      "file": "tests/KyberWeave.Tests/McpPlanLifecycleToolsTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "ProcessRunner timeout kills the child tree on expiry; started by the Run below with a 60 s timeout; git argv only, in a temp repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/McpPlanLifecycleToolsTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout kills the child tree on expiry; 60 s; git argv only, in a temp repository."
+    },
+    {
       "file": "tests/KyberWeave.Tests/Arbiter/ConductorGuardTests.cs",
       "text": "ProcessStartInfo startInfo = new(\"git\")",
       "count": 1,
@@ -1454,16 +1466,16 @@
       "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temporary repository."
     },
     {
-      "file": "src/KyberWeave.Core.Docs/Closeout/PlanCloseout.cs",
+      "file": "src/KyberWeave.Core.Docs/Closeout/ActivePlanFiles.cs",
       "text": "ProcessStartInfo startInfo = new(\"git\")",
       "count": 1,
       "bound": "Builds only; started by the ProcessRunner.Run below with GitTimeout = 60 s."
     },
     {
-      "file": "src/KyberWeave.Core.Docs/Closeout/PlanCloseout.cs",
+      "file": "src/KyberWeave.Core.Docs/Closeout/ActivePlanFiles.cs",
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);",
       "count": 1,
-      "bound": "ProcessRunner.Run with GitTimeout = 60 s; the process tree is killed on expiry. git add argv only, for the paths the closeout touched."
+      "bound": "ProcessRunner.Run with GitTimeout = 60 s; the process tree is killed on expiry. git add argv only, for the paths the closeout or finalize touched."
     },
     {
       "file": "tests/KyberWeave.Tests/ReviewGatesCycleTests.cs",

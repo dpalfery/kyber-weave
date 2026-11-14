@@ -275,7 +275,7 @@ derive, since it declares no MCP capability.
 
 **An approval grant, not isolation.** Kilo's `permission` values are `ask`, `allow`, `deny`, or
 null, and `allow` means the call runs without the ask prompt. It hides nothing: only a `deny` whose
-pattern is `*` removes a tool from the model. The entry above is what keeps the eight `kw-docs`
+pattern is `*` removes a tool from the model. The entry above is what keeps the ten `kw-docs`
 tools callable from a subagent nobody is watching, because an ask that no one answers fails
 closed. It restricts nothing, and deleting it from a rendered file would not hide the tools — it
 would put the prompt back.
@@ -1146,7 +1146,7 @@ came from, which is what decides whether a code answer is about your branch.
 
 The server binds one root at startup, but agent runs work in linked worktrees created after it
 started, so an answer from the bound root can describe a different branch than the one being
-edited. Every tool therefore takes an optional `projectPath`, the same name CodeGraph's
+edited. Every tool therefore takes a `projectPath` (optional, except on the two plan lifecycle tools), the same name CodeGraph's
 `codegraph_explore` uses: the absolute path of a worktree of this repository. Omit it and the
 call is answered from the server's root, as before.
 
@@ -1166,8 +1166,8 @@ call is answered from the server's root, as before.
 - **The index is the worktree's own.** The CodeGraph joins and the freshness refresh use the
   `.codegraph/` of the named worktree, never the server root's.
 
-All eight are declared `ReadOnly` and `OpenWorld = false`, which the SDK maps to the
-protocol's `readOnlyHint` and `openWorldHint`. A client can act on an annotation; it cannot
+All ten are declared `OpenWorld = false`, and all but the two plan lifecycle tools are declared
+`ReadOnly`; the SDK maps those to the protocol's `openWorldHint` and `readOnlyHint`. A client can act on an annotation; it cannot
 act on a sentence claiming the same thing, which is why that claim is no longer prose.
 
 ### How the descriptions are written
@@ -1189,7 +1189,7 @@ logs` puts those nouns in permanently resident text held back only by a negation
 negation is the first thing to degrade when a model scans many tools at once. Read out of
 context it becomes a prohibition on reading tests. Only
 `docs_answer_question_from_repo_documentation` carries an exclusion, because it is the broadest of
-the eight; the narrower seven state their territory positively so no request falls between them.
+the ten; the narrower nine state their territory positively so no request falls between them.
 
 Where a constraint can live on a parameter it goes there instead — for example how
 `charBudget` caps **`docs_get_coding_standard_for_technology`** prose sits on that parameter,
@@ -1210,8 +1210,7 @@ builds from it. The tightest figures anyone reports are:
 These are the tightest figures any client reports, not a figure every vendor has verified — two of
 the three are not vendor documentation at all — so the names are chosen against the smallest of
 them rather than the one that happens to be written down. The current maxima sit inside them: the
-longest tool name is 46 characters (`docs_find_duplicates_conflicts_ambiguous_terms` and
-`dash_read_captured_run_session_or_turn_context`), the longest server-plus-tool pair is 55
+longest tool name is 47 characters (`docs_finalize_approved_plan_and_write_task_file`), the longest server-plus-tool pair is 55
 (`kw-arbiter` with `arbiter_check_configuration_and_key_readiness`), and the longest qualified name
 is 62 (`mcp__kw-arbiter__arbiter_check_configuration_and_key_readiness`). A test pins all three
 bounds (`McpToolNameContractTests`), so a name that would break a client breaks the build instead.
@@ -1500,6 +1499,37 @@ still reports the root, a count of `0`, and unavailable revision markers when Gi
 read. It is also the one tool that always answers: under the stop rule every other tool can
 return `STATUS: TOOL_FAILURE`, and this one cannot, so a failure can be diagnosed.
 
+### `docs_finalize_approved_plan_and_write_task_file(projectPath, planFile, approvalMode, approval)`
+
+Finalizes an approved Draft plan: records the approval in its `## Decisions` table (an open `AP` row
+is answered in place, otherwise a new `AP<n>` row is added), sets the frontmatter `status` to
+`current` and the body status line and the plan index row to Ready, and writes the task file with
+the same code as `kyber-weave docs tasks <plan> --write`. `kyber-weave docs finalize` is its CLI
+twin. `projectPath` is required (the run's worktree); `approvalMode` is `autonomous` or
+`supervised`; `approval` is one line, at most 300 characters, recorded as the provenance.
+
+It edits only the plan, its task file and the plan index, and refuses, changing nothing, with
+`KW-DOC-FINALIZE-001` (not a plan file under the plans folder), `-002` (not Draft), `-003` (no usable
+approval, or an autonomous approval of a plan whose frontmatter is not `autonomy: autonomous`), `-004`
+(no Decisions table, or a decision still `OPEN` or `RECOMMENDED`) or `-005` (the task file cannot be
+written from the plan, or the finalized files fail validation; it writes, validates, and restores
+the original bytes). A plan already Ready with a current task file reports `result: already-ready`.
+The response is the provenance line, `result: finalized | already-ready | refused`, one line per
+finding, and on success `TASK_FILE: <path>`. The packet self-containment check
+(`KW-DOC-TASKS-008` to `-011`) needs a model, so it is not run here; the architect runs
+`docs tasks --check` before `PLAN_READY`. See
+[ADR 0078](../adr/0078-the-conductor-finalizes-and-archives-plans-through-two-docs-tools.md).
+
+### `docs_archive_plan_after_closeout_is_complete(projectPath, planFile)`
+
+Archives a plan through the same step as `kyber-weave docs closeout <plan> --archive`: sets it
+Archived, moves it to the archive, removes its task file, takes its row out of the plan index, adds
+one to the archived plan inventory and stages the files. `projectPath` is required. When the
+closeout evidence is incomplete it refuses with exactly the findings `docs closeout` reports,
+changes nothing, and ends with a `next:` line sending those findings to `docs-dev`. On success it
+ends with a `next:` line to run `docs_validate_governed_document_schema` with `mergeReady` true and
+`docs_detect_drift_between_documents_and_code`.
+
 ## Reading a code join
 
 ```
@@ -1539,8 +1569,8 @@ with no shell is not served a stale index. The rules ([ADR 0061](../adr/0062-the
 - **One exception, deliberately.** `docs_get_source_repository_and_revision` always answers, so
   a failure can be diagnosed; and
   `docs_detect_drift_between_documents_and_code` still answers **with** the failure, because
-  its verdict is the CodeGraph-failure report the caller asked for. The other six tools return
-  the failure block.
+  its verdict is the CodeGraph-failure report the caller asked for. The two plan lifecycle tools read
+  no code join and never consult the index. The other six tools return the failure block.
 - **Nothing reaches stdout.** The refresh runs through the process runner, which captures both
   streams: stdout stays JSON-RPC.
 - **Only where the repository declares the server.** The refresh and the failure apply only

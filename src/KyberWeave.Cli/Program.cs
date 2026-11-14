@@ -128,6 +128,9 @@ app.Configure(config =>
             .WithDescription(DocsCloseoutCommand.Description)
             .WithExample("docs", "closeout", "docs/plans/2026-11-12-my-plan.md")
             .WithExample("docs", "closeout", "docs/plans/2026-11-12-my-plan.md", "--archive");
+        docs.AddCommand<DocsFinalizeCommand>("finalize")
+            .WithDescription(DocsFinalizeCommand.Description)
+            .WithExample("docs", "finalize", "docs/plans/2026-11-12-my-plan.md", "--approval-mode", "autonomous", "--approval", "AUTONOMOUS_APPROVAL: approve-and-execute");
 
         docs.AddCommand<DocsDriftCommand>("drift")
             .WithDescription("Resolve documented code references against the CodeGraph index (KW-DOC-DRIFT-*).")

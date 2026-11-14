@@ -1,5 +1,3 @@
-using System.ComponentModel;
-using System.Diagnostics;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Configuration;
@@ -7,7 +5,6 @@ using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Validation;
-using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review;
 
 namespace KyberWeave.Core.Docs.Closeout;
@@ -49,12 +46,11 @@ public sealed partial class PlanCloseout
 
     private const string PlansSegment = "plans";
     private const string InventoryColumns = "| Plan | Status | Date | Archive Date | Canonical Docs / Harvested ADRs | Goal |";
-    private static readonly string[] StageArguments = ["add", "-A", "--"];
-    private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(60);
 
     private readonly string _repoRoot;
     private readonly KyberWeaveConfig _config;
     private readonly Func<DocumentLoader> _loaderFactory;
+    private readonly ActivePlanFiles _files;
 
     /// <summary>Creates the closeout over a repository, its effective configuration and the loader the gate reads with.</summary>
     public PlanCloseout(string repoRoot, KyberWeaveConfig config, Func<DocumentLoader> loaderFactory)
@@ -65,6 +61,7 @@ public sealed partial class PlanCloseout
         _repoRoot = Path.GetFullPath(repoRoot);
         _config = config;
         _loaderFactory = loaderFactory;
+        _files = new ActivePlanFiles(_repoRoot, config);
     }
 
     /// <summary>Checks the plan's closeout evidence and, with <paramref name="archive"/>, archives it.</summary>
@@ -79,20 +76,20 @@ public sealed partial class PlanCloseout
         string plan = planPath.Replace('\\', '/');
         string name = Path.GetFileName(plan);
 
-        if (CheckActivePlan(plan) is { } notActive)
+        if (_files.CheckActivePlan(plan) is { } notActive)
         {
             report.Add(new Diagnostic(NotAnActivePlan, Severity.Error, notActive, plan, plan,
                 Hint: "Name a plan file directly under the plans folder, not its index and not an archived plan."));
             return new PlanCloseoutOutcome(report, false);
         }
 
-        string root = DocsRootOf(plan);
+        string root = _files.DocsRootOf(plan);
         string archiveFolder = Join(root, OntologyConfig.ArchiveSegment, PlansSegment);
         string target = Join(archiveFolder, name);
         string inventory = Join(archiveFolder, "README.md");
-        string planIndex = PlanIndexPath()!;
+        string planIndex = _files.PlanIndexPath()!;
 
-        if (File.Exists(Absolute(target)))
+        if (File.Exists(_files.Absolute(target)))
         {
             report.Add(new Diagnostic(ArchiveTargetExists, Severity.Error,
                 $"The archive already holds '{target}'.", plan, target,
@@ -102,15 +99,15 @@ public sealed partial class PlanCloseout
 
         // Every problem is collected before anything is reported: the caller is an agent that fixes what it is
         // told, so a refusal that names one gap per run costs a run per gap.
-        if (!File.Exists(Absolute(planIndex)))
+        if (!File.Exists(_files.Absolute(planIndex)))
         {
             report.Add(new Diagnostic(IndexNotEditable, Severity.Error, $"'{planIndex}' does not exist.", plan, planIndex,
                 Hint: $"Restore it with 'git checkout -- {planIndex}', then run the closeout again."));
         }
 
-        string archivedText = WithArchivedStatus(File.ReadAllText(Absolute(plan)), date);
+        string archivedText = WithArchivedStatus(File.ReadAllText(_files.Absolute(plan)), date);
         string taskFile = PlanTaskFileGenerator.TaskFilePathOf(plan);
-        bool hasTaskFile = File.Exists(Absolute(taskFile));
+        bool hasTaskFile = File.Exists(_files.Absolute(taskFile));
 
         // The archive gate reads the plan where it would be archived, so the copy goes there for the check and
         // is gone again before this method returns, whatever the outcome.
@@ -119,9 +116,12 @@ public sealed partial class PlanCloseout
         bool planRowRemoved = false;
         string inventoryAction;
         string row;
+        string archiveDirectory = Path.GetDirectoryName(_files.Absolute(target))!;
+        string? createdDirectory = FirstMissingDirectory(archiveDirectory);
+        Directory.CreateDirectory(archiveDirectory);
         try
         {
-            File.WriteAllText(Absolute(target), archivedText);
+            File.WriteAllText(_files.Absolute(target), archivedText);
             DocumentSet live = _loaderFactory().Load();
             report.AddRange(new ArchiveCloseoutValidator(_repoRoot, _config, _loaderFactory)
                 .Itemise(live, [new ChangedPath(target, ChangeKind.Added)]).Items);
@@ -134,11 +134,13 @@ public sealed partial class PlanCloseout
 
             row = InventoryRow(_loaderFactory().LoadArchivedDocument(target), name, archivedText, date);
             (newInventory, inventoryAction) = WithInventoryRow(inventory, planIndex, row, date);
-            (newPlanIndex, planRowRemoved) = RemovePlanRow(File.ReadAllText(Absolute(planIndex)), name);
+            (newPlanIndex, planRowRemoved) = RemovePlanRow(File.ReadAllText(_files.Absolute(planIndex)), name);
         }
         finally
         {
-            File.Delete(Absolute(target));
+            File.Delete(_files.Absolute(target));
+            if (createdDirectory is not null)
+                Directory.Delete(createdDirectory, recursive: true);
         }
 
         List<string> touched = [plan, target, inventory, planIndex];
@@ -154,72 +156,39 @@ public sealed partial class PlanCloseout
             return new PlanCloseoutOutcome(report, false);
         }
 
-        File.WriteAllText(Absolute(target), archivedText);
-        File.Delete(Absolute(plan));
+        Directory.CreateDirectory(archiveDirectory);
+        File.WriteAllText(_files.Absolute(target), archivedText);
+        File.Delete(_files.Absolute(plan));
         Say(report, plan, $"Moved {plan} to {target} with status archived.");
         if (hasTaskFile)
         {
-            File.Delete(Absolute(taskFile));
+            File.Delete(_files.Absolute(taskFile));
             Say(report, plan, $"Removed {taskFile}.");
         }
 
-        File.WriteAllText(Absolute(planIndex), newPlanIndex!);
+        File.WriteAllText(_files.Absolute(planIndex), newPlanIndex!);
         Say(report, plan, planRowRemoved ? $"Took its row out of {planIndex}." : $"{planIndex} had no row for it.");
-        File.WriteAllText(Absolute(inventory), newInventory);
+        File.WriteAllText(_files.Absolute(inventory), newInventory);
         Say(report, plan, $"Done: {inventoryAction} {inventory} with its row.");
 
-        Stage(touched, report, plan);
+        _files.Stage(touched, report, plan, Step);
         Say(report, plan, "Run 'docs validate . --merge-ready' and 'docs drift .' next.");
         return new PlanCloseoutOutcome(report, true);
+    }
+
+    /// <summary>The outermost directory on the way to <paramref name="directory"/> that does not exist yet, or null.</summary>
+    private static string? FirstMissingDirectory(string directory)
+    {
+        string? missing = null;
+        for (string? current = directory; current is not null && !Directory.Exists(current); current = Path.GetDirectoryName(current))
+            missing = current;
+        return missing;
     }
 
     private static void Say(DiagnosticReport report, string plan, string message) =>
         report.Add(new Diagnostic(Step, Severity.Info, message, plan, plan));
 
-    /// <summary>Why <paramref name="plan"/> is not an active plan, or null when it is.</summary>
-    private string? CheckActivePlan(string plan)
-    {
-        string? index = PlanIndexPath();
-        if (index is null)
-            return "The configuration registers no plan index, so no plan is active.";
-
-        string folder = Path.GetDirectoryName(index)?.Replace('\\', '/') ?? string.Empty;
-        if (!File.Exists(Absolute(plan)))
-            return $"'{plan}' does not exist.";
-
-        string name = Path.GetFileName(plan);
-        bool directlyInFolder = string.Equals(Path.GetDirectoryName(plan)?.Replace('\\', '/') ?? string.Empty, folder,
-            StringComparison.OrdinalIgnoreCase);
-        if (!directlyInFolder || !name.EndsWith(".md", StringComparison.OrdinalIgnoreCase)
-                              || string.Equals(plan, index, StringComparison.OrdinalIgnoreCase))
-            return $"'{plan}' is not a plan file directly under '{folder}'.";
-
-        return DocsRootOf(plan).Length == 0 && _config.Ontology.DocsRoots.All(root => root != ".")
-            ? $"'{plan}' is under no documentation root."
-            : null;
-    }
-
-    private string? PlanIndexPath() =>
-        _config.ConfigReg.Resolve(_config.Ontology)
-            .FirstOrDefault(entry => string.Equals(entry.Name, ConfigRegConfig.PlanIndexProperty, StringComparison.Ordinal))
-            ?.Path;
-
-    /// <summary>The documentation root a path sits under; empty for the repository root itself.</summary>
-    private string DocsRootOf(string relative)
-    {
-        foreach (string root in _config.Ontology.DocsRoots.OrderByDescending(root => root.Length))
-        {
-            if (root == "." || relative.StartsWith(root + "/", StringComparison.OrdinalIgnoreCase))
-                return root == "." ? string.Empty : root;
-        }
-
-        return string.Empty;
-    }
-
     private static string Join(params string[] parts) => string.Join('/', parts.Where(part => part.Length > 0));
-
-    private string Absolute(string relative) =>
-        Path.Combine(_repoRoot, relative.Replace('/', Path.DirectorySeparatorChar));
 
     /// <summary>The plan text with its frontmatter status and its body status line set to archived.</summary>
     private static string WithArchivedStatus(string text, DateOnly date)
@@ -264,9 +233,9 @@ public sealed partial class PlanCloseout
     private (string Text, string Action) WithInventoryRow(string inventory, string planIndex, string row, DateOnly date)
     {
         string table = $"{InventoryColumns}\n|---|---|---|---|---|---|\n{row}\n";
-        if (!File.Exists(Absolute(inventory)))
+        if (!File.Exists(_files.Absolute(inventory)))
         {
-            string owner = Owner().Match(File.ReadAllText(Absolute(planIndex))) is { Success: true } match
+            string owner = Owner().Match(File.ReadAllText(_files.Absolute(planIndex))) is { Success: true } match
                 ? match.Groups[1].Value
                 : "Maintainers";
             string stamp = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
@@ -276,7 +245,7 @@ public sealed partial class PlanCloseout
                     $"## Archived Plans\n\n{table}", "create");
         }
 
-        string text = File.ReadAllText(Absolute(inventory));
+        string text = File.ReadAllText(_files.Absolute(inventory));
         if (AddInventoryRow(text, row) is { } added)
             return (added, "add its row at the top of");
 
@@ -327,41 +296,6 @@ public sealed partial class PlanCloseout
         }
 
         return (string.Join(newline, lines), removed);
-    }
-
-    /// <summary>Stages the paths the closeout touched, so a commit that only takes tracked files cannot leave the new archive entry behind.</summary>
-    private void Stage(List<string> paths, DiagnosticReport report, string plan)
-    {
-        if (!Directory.Exists(Path.Combine(_repoRoot, ".git")) && !File.Exists(Path.Combine(_repoRoot, ".git")))
-            return;
-
-        ProcessStartInfo startInfo = new("git")
-        {
-            WorkingDirectory = _repoRoot,
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        };
-        foreach (string argument in StageArguments.Concat(paths))
-            startInfo.ArgumentList.Add(argument);
-
-        try
-        {
-            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);
-            if (result.ExitCode == 0)
-            {
-                Say(report, plan, "Staged the moved and edited files.");
-                return;
-            }
-
-            report.Add(new Diagnostic(Step, Severity.Warning, $"git add failed ({result.StandardError.Trim()}); stage the files before committing.", plan, plan));
-        }
-        catch (Exception ex) when (ex is Win32Exception or TimeoutException or InvalidOperationException)
-        {
-            report.Add(new Diagnostic(Step, Severity.Warning, $"git could not be run ({ex.Message}); stage the files before committing.", plan, plan));
-        }
     }
 
     [GeneratedRegex(@"^status:[^\r\n]*", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
