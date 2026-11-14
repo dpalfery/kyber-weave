@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -35,7 +36,9 @@ public sealed class RunStartBriefTests : IDisposable
         ProbeResult result = _probe.RunStart([.. Common, "--brief", "--path", "plan", "--autonomy", "supervised"]);
 
         Assert.True(result.ExitCode == 0, result.Output);
-        string output = result.StandardOutput;
+        // The header's command name is bold where the host reports colour support (CI does), so the styling
+        // codes are removed before the text is compared.
+        string output = Regex.Replace(result.StandardOutput, "\u001b\\[[0-9;]*m", string.Empty);
         Assert.Contains("run start ready", output, StringComparison.Ordinal);
         Assert.Contains("BRIEF conductor | facts: path=plan (given), autonomy=supervised (given)", output, StringComparison.Ordinal);
         Assert.Contains("=== plan-path.md ===", output, StringComparison.Ordinal);
