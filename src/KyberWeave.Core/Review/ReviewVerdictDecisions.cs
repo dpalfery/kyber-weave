@@ -70,6 +70,42 @@ public static partial class ReviewVerdictDecisions
     private const int MaxCitedLine = 1 << 20;
 
     /// <summary>
+    /// Groups finding indexes by normalized file, keeping at most <see cref="MaxFindingsPerFile"/> in a file and
+    /// <see cref="MaxFindingsPerStep"/> in all. A file gets a group only when a finding is kept in it, so memory follows
+    /// the capped total, not the number of distinct files an input names.
+    /// </summary>
+    /// <param name="findings">The findings, in the order the step prefers.</param>
+    /// <param name="leftOut">How many findings a cap left out.</param>
+    internal static Dictionary<string, List<int>> GroupByFile(IReadOnlyList<ReviewFinding> findings, out int leftOut)
+    {
+        Dictionary<string, List<int>> byFile = new(StringComparer.Ordinal);
+        int considered = 0;
+        leftOut = 0;
+        for (int index = 0; index < findings.Count; index++)
+        {
+            string file = Normalize(findings[index].File);
+            byFile.TryGetValue(file, out List<int>? group);
+            if ((group?.Count ?? 0) >= MaxFindingsPerFile || considered >= MaxFindingsPerStep)
+            {
+                leftOut++;
+                continue;
+            }
+
+            // A group exists only once a finding is kept in it, so memory follows the capped total, not the file count.
+            if (group is null)
+            {
+                group = [];
+                byFile[file] = group;
+            }
+
+            group.Add(index);
+            considered++;
+        }
+
+        return byFile;
+    }
+
+    /// <summary>
     /// The candidate pairs for the duplicate step: findings on the same file within the line window, the nearest and the
     /// most severe first, at most <see cref="MaxQuestionsPerStep"/>. The work is bounded, not only the result: findings
     /// are grouped by file and sorted by line so only neighbours inside the window are paired, a file contributes at
@@ -79,23 +115,7 @@ public static partial class ReviewVerdictDecisions
     /// <returns>The chosen pairs, best first; how many candidates there were; how many findings were left out of the comparison.</returns>
     internal static (List<(int A, int B)> Pairs, int CandidateCount, int LeftOut) NearbyPairs(IReadOnlyList<ReviewFinding> findings)
     {
-        Dictionary<string, List<int>> byFile = new(StringComparer.Ordinal);
-        int considered = 0;
-        int leftOut = 0;
-        for (int index = 0; index < findings.Count; index++)
-        {
-            List<int> group = byFile.TryGetValue(Normalize(findings[index].File), out List<int>? existing)
-                ? existing
-                : byFile[Normalize(findings[index].File)] = [];
-            if (group.Count >= MaxFindingsPerFile || considered >= MaxFindingsPerStep)
-            {
-                leftOut++;
-                continue;
-            }
-
-            group.Add(index);
-            considered++;
-        }
+        Dictionary<string, List<int>> byFile = GroupByFile(findings, out int leftOut);
 
         // A max-heap on the sort key, so the worst chosen pair is the one replaced when a better one turns up.
         PriorityQueue<(int A, int B), (long Distance, int Severity, int A, int B)> chosen = new(
@@ -503,7 +523,7 @@ public static partial class ReviewVerdictDecisions
             string text = string.Join('\n', window);
             return window.Length == 0
                 ? null
-                : text.Length <= MaxSurroundingsCharacters ? text : text[..MaxSurroundingsCharacters];
+                : text.Length <= MaxSurroundingsCharacters ? text : text[..ReviewSeatInput.CutIndex(text, MaxSurroundingsCharacters)];
         }
         catch (Exception ex) when (ReviewSeatInput.IsFileFailure(ex))
         {

@@ -104,7 +104,7 @@ public static class ReviewLensApplicability
 
         text.Append(CultureInfo.InvariantCulture, $"{changed.Count} files changed, {added} insertions(+), {removed} deletions(-)");
         string summary = text.ToString();
-        return summary.Length <= MaxSummaryChars ? summary : summary[..MaxSummaryChars] + "\n(cut)";
+        return summary.Length <= MaxSummaryChars ? summary : summary[..ReviewSeatInput.CutIndex(summary, MaxSummaryChars)] + "\n(cut)";
     }
 
     private static Dictionary<string, (int Added, int Removed)> CountLines(string patch)

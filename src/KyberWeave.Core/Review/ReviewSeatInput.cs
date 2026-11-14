@@ -56,7 +56,19 @@ internal static class ReviewSeatInput
         if (text.Length <= limit)
             return text;
 
-        int cut = char.IsHighSurrogate(text[limit - 1]) ? limit - 1 : limit;
-        return text[..cut] + "…";
+        return text[..CutIndex(text, limit)] + "…";
+    }
+
+    /// <summary>
+    /// Where to cut <paramref name="text"/> to keep at most <paramref name="limit"/> characters without splitting a
+    /// surrogate pair: one character earlier when the cut would leave a high surrogate at the end.
+    /// </summary>
+    /// <param name="text">The text being cut; longer than <paramref name="limit"/>.</param>
+    /// <param name="limit">The most characters kept; at least 1.</param>
+    public static int CutIndex(string text, int limit)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        return limit < text.Length && char.IsHighSurrogate(text[limit - 1]) ? limit - 1 : limit;
     }
 }

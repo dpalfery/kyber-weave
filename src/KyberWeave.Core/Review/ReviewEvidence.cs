@@ -264,7 +264,7 @@ public static class ReviewEvidence
     private static string Summary(GateResult gate)
     {
         string summary = (gate.NotApplicableReason ?? gate.Summary).ReplaceLineEndings(" ").Trim();
-        return summary.Length <= SummaryLength ? summary : summary[..SummaryLength] + "…";
+        return summary.Length <= SummaryLength ? summary : summary[..ReviewSeatInput.CutIndex(summary, SummaryLength)] + "…";
     }
 }
 

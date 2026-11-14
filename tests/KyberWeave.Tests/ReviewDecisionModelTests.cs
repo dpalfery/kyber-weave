@@ -396,6 +396,61 @@ public sealed class ReviewDecisionModelTests : IDisposable
     }
 
     [Fact]
+    public void AFileWhoseFindingsAreAllOverTheStepCapGetsNoGroup()
+    {
+        int distinct = ReviewVerdictDecisions.MaxFindingsPerStep + 50;
+        ReviewFinding[] findings = [.. Enumerable.Range(0, distinct).Select(index => Finding($"f{index}", ReviewSeverity.Minor, file: $"f{index}.cs"))];
+
+        Dictionary<string, List<int>> groups = ReviewVerdictDecisions.GroupByFile(findings, out int leftOut);
+
+        Assert.Equal(ReviewVerdictDecisions.MaxFindingsPerStep, groups.Count);
+        Assert.Equal(50, leftOut);
+        Assert.All(groups.Values, group => Assert.NotEmpty(group));
+        Assert.False(groups.ContainsKey($"f{distinct - 1}.cs"));
+    }
+
+    [Fact]
+    public void AFileOverItsOwnCapKeepsItsGroupAtTheCapAndNoOtherFileLosesOne()
+    {
+        ReviewFinding[] findings =
+        [
+            .. Enumerable.Range(0, ReviewVerdictDecisions.MaxFindingsPerFile + 3).Select(index => Finding($"a{index}", ReviewSeverity.Minor, file: "a.cs")),
+            Finding("b", ReviewSeverity.Minor, file: "b.cs"),
+        ];
+
+        Dictionary<string, List<int>> groups = ReviewVerdictDecisions.GroupByFile(findings, out int leftOut);
+
+        Assert.Equal(2, groups.Count);
+        Assert.Equal(ReviewVerdictDecisions.MaxFindingsPerFile, groups["a.cs"].Count);
+        Assert.Single(groups["b.cs"]);
+        Assert.Equal(3, leftOut);
+    }
+
+    [Fact]
+    public void TheSurroundingsCutNeverLeavesAHighSurrogateAtTheEnd()
+    {
+        // 32767 characters, then a surrogate pair whose first half would be the last character kept at the cap.
+        File.WriteAllText(Path.Combine(_temp.Path, "wide.txt"), new string('a', 32767) + "\U0001F600\U0001F600");
+
+        string? text = ReviewVerdictDecisions.Surroundings(_temp.Path, Finding("f", ReviewSeverity.Minor, line: 1, file: "wide.txt"));
+
+        Assert.NotNull(text);
+        Assert.Equal(32767, text.Length);
+        Assert.False(char.IsHighSurrogate(text[^1]));
+    }
+
+    [Theory]
+    [InlineData("ab\U0001F600cd", 3, 2)]
+    [InlineData("ab\U0001F600cd", 4, 4)]
+    [InlineData("\U0001F600\U0001F600", 1, 0)]
+    [InlineData("\U0001F600\U0001F600", 3, 2)]
+    [InlineData("abcdef", 3, 3)]
+    public void TheCutIndexBacksOffOneCharacterRatherThanSplitAPair(string text, int limit, int expected)
+    {
+        Assert.Equal(expected, ReviewSeatInput.CutIndex(text, limit));
+    }
+
+    [Fact]
     public void TwentyThousandFindingsOnOneFileAreBoundedInWorkAndReported()
     {
         ReviewFinding[] findings = [.. Enumerable.Range(0, 20_000).Select(index => Finding($"f{index}", ReviewSeverity.Minor, line: index % 40))];

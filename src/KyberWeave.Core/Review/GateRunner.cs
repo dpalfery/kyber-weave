@@ -480,7 +480,7 @@ public static class GateRunner
         // Each line is capped too: one runner line can be tens of kilobytes, and the summary is printed.
         return lines.Length == 0
             ? $"exit code {process.ExitCode}"
-            : string.Join(" | ", lines.TakeLast(3).Select(line => line.Length <= MaxSummaryLineLength ? line : line[..MaxSummaryLineLength] + "…"));
+            : string.Join(" | ", lines.TakeLast(3).Select(line => line.Length <= MaxSummaryLineLength ? line : line[..ReviewSeatInput.CutIndex(line, MaxSummaryLineLength)] + "…"));
     }
 }
 
