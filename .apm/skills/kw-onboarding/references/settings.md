@@ -36,6 +36,30 @@ exists; if selected, explain it, read its section in the product's configuration
 | `review.duplicates.minimum-lines` | `4` | Shortest duplicated block the duplicate-code check reports. | a whole number |
 | `review.gates`, `review.task-gates`, `review.test-map` *advanced* | from onboarding | The build, test and lint commands each change must pass. Owned by the `kyber-docs-onboarding-and-assessment` skill; `kyber-weave review catalogue` prints the shipped set for the declared technologies. | — |
 
+### What counts as critical, major, minor or nitpick here
+
+`fix-level` acts on severities, and a repository can set its own: the **Severity overrides**
+section of the review guidance file (**<review-guidance>** in the Config Reg, `REVIEW.md` by
+default). Each row names a class of finding and the severity it is graded at, up or down; a row
+outranks the shipped lens guidance and the general definitions, and the overridden severity is
+the one `fix-level` and strictness read. `kyber-weave docs validate` checks the rows. When the user
+wants one, add the section empty, with the format and one commented example:
+
+```markdown
+## Severity overrides
+
+Host grading that outranks the shipped lens guidance and the general severity definitions.
+Severity: critical, major, minor or nitpick. Applies to: lens or technology names, comma-separated;
+empty for every seat. A seat that applies a row writes `override: <Id>` on the finding.
+
+| Id | Finding class | Severity | Applies to | Why |
+|---|---|---|---|---|
+<!-- | SO-1 | Public API change without a documentation update | major | documentation-accuracy | Docs ship with the API | -->
+```
+
+Rows hold only what the user states; never invent one. A repository with no review guidance file
+gets a `REVIEW.md` holding just this section (the product ships no other template for it).
+
 ## Documentation and tools (config)
 
 | Setting | Default | What it does; when to change it |

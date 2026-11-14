@@ -73,6 +73,7 @@ Every finding is one block in this exact shape:
   evidence: <how you know — the path and line you read, or the standard you checked>
   failure_scenario: <concrete inputs or conditions, and the wrong behaviour that results>
   guidance: <optional: the REVIEW.md rule ids or sections applied, e.g. [R8, §1]>
+  override: <optional: the severity override row id applied, e.g. SO-3>
   suggestion: <the specific change that fixes it>
 ```
 
@@ -85,6 +86,8 @@ Every finding is one block in this exact shape:
 - **critical** — data loss, a security hole, corruption, or a break in behaviour that ships silently.
 - **major** — the change is wrong or will fail under conditions a reasonable user reaches.
 - **minor** — real but bounded: a narrow edge case, a misleading comment or document statement, a missing test for a stated behaviour, a maintainability problem. A purely stylistic point (formatting, wording preference, naming style) is a nitpick, not a minor finding: raise it, as `severity: nitpick`, only when the packet says the fix level is `nitpick`; otherwise do not report it. A file or type placed against the repository's documented structure (wrong project, layer or folder) is `major`.
+
+**Host severity overrides come first.** Your packet may list severity override rows from the host's review guidance. Check each finding against them: when a finding belongs to a row's class, grade it at the row's severity, up or down (to `critical` or to `nitpick` too), and write `override: <id>` on it. Precedence: a host override, then your lens file's severity guidance, then the definitions above.
 
 Severity describes **impact if it ships**, never how confident you are or how much effort the fix takes. Confidence is a separate field; use it. A finding you are 5/10 sure of but which would be critical is `severity: critical, confidence: 5` — say both, and let the reviewer decide.
 
@@ -121,7 +124,7 @@ The findings form closes the same way, after the YAML list. Each closing line st
 
 The correctness seat carries one more required output. For every changed code file, write "no input site" or one row per site where a value from outside the process is parsed, converted, or passed to a file or collection API. The table's columns and cell values are in the correctness lens file. Close a correctness seat with Input sites: N traced, M files with none, directly above the Discovery line. Write it even when nothing was traced (`Input sites: 0 traced, M files with none`); a correctness seat that reported findings or `NO FINDINGS` and wrote no readable `Input sites:` line draws `KW-REVIEW-047`; a `SKIPPED` correctness seat is exempt. The example above is the shape every other lens returns; a correctness seat adds its `Input sites:` line between the `NO FINDINGS:` line and `Discovery:`.
 
-**A declared outcome holds no finding key.** A seat file that declares `NO FINDINGS:` or `SKIPPED:` is refused (`KW-REVIEW-040`) if any seat-schema key followed by a colon — `id`, `lens`, `severity`, `confidence`, `file`, `line`, `claim`, `evidence`, `excerpt`, `failure_scenario` (or `failureScenario`), `suggestion` or `guidance` — appears anywhere else in the file, in any letter case: in a list, a flow mapping, a fence, after prose, or after a table's `|`. The reviewer cannot tell which of the two you meant, so the check fails closed. Prose, a table your lens file requires (such as the correctness seat's input-site table, before the outcome line), the closing lines and plain Markdown bullets with no such key are allowed. In practice: after declaring an outcome, do not write `severity:`, `file:` or any other finding key, even in an explanation. If you found something, return the findings form instead.
+**A declared outcome holds no finding key.** A seat file that declares `NO FINDINGS:` or `SKIPPED:` is refused (`KW-REVIEW-040`) if any seat-schema key followed by a colon — `id`, `lens`, `severity`, `confidence`, `file`, `line`, `claim`, `evidence`, `excerpt`, `failure_scenario` (or `failureScenario`), `suggestion`, `guidance` or `override` — appears anywhere else in the file, in any letter case: in a list, a flow mapping, a fence, after prose, or after a table's `|`. The reviewer cannot tell which of the two you meant, so the check fails closed. Prose, a table your lens file requires (such as the correctness seat's input-site table, before the outcome line), the closing lines and plain Markdown bullets with no such key are allowed. In practice: after declaring an outcome, do not write `severity:`, `file:` or any other finding key, even in an explanation. If you found something, return the findings form instead.
 
 The attestation line is the same on both forms. It shows the guidance was read and applied, not skipped, so a report with no attestation line is recorded as a coverage gap. `SKIPPED` returns no attestation line; its reason stands on its own. The `NO FINDINGS` sentence matters too: it is the difference between a lens that ran and a lens that gave up, and it is the only way the reviewer can tell them apart.
 

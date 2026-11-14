@@ -176,7 +176,11 @@ Run these before reading anything for meaning. Each produces candidate findings 
     text that reads like a template default rather than a fact of this repository.
 12. **Review guidance (category 7).** Whether **<review-guidance>** is declared in the Config Reg
     and the file exists.
-13. **Weight (category 8).** Bytes per always-loaded file, per `##` section, and the longest
+13. **Severity overrides (category 1).** Each row of the review guidance's "Severity overrides"
+    section, read against the rules and standards: a row that contradicts one (the standard says
+    "public APIs must be documented", a row grades a missing public API doc `nitpick`) is a
+    finding for the owner to resolve, never resolved by editing either side unasked.
+14. **Weight (category 8).** Bytes per always-loaded file, per `##` section, and the longest
     paragraphs (`awk '{ print length, FILENAME":"FNR }' <files> | sort -rn | head`). Mark sections
     that restate what the squad already carries: tool-usage guidance that the MCP servers' own
     instructions or the deployed skills give (for example a CodeGraph usage block when the

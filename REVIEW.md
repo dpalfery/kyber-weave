@@ -16,6 +16,8 @@ findings Kilo and CodeRabbit raised across about 100 pull requests from 30 Sep t
 - A `NO FINDINGS` reply names the sections it checked.
 - A seat given guidance that returns no attestation is recorded as a council-coverage gap; its
   findings are not dropped.
+- A finding that matches a [severity override](#severity-overrides) row takes that row's severity
+  and cites its id as `override: <id>`.
 - *(low evidence)* marks a rule that rests on one PR or a thin body of evidence.
 - **Never** cite `scripts/fast-loop.sh` as evidence; only the declared gate suite counts.
 
@@ -381,6 +383,20 @@ The sections named here are sections of this file. Only the technologies with a 
 Single tasks are not reviewed by an agent: the developer's deterministic `task-gate` covers the
 mechanical checks, and everything judgemental is council-owned.
 
+## Severity overrides
+
+How this repository grades a class of finding, up or down. A row outranks the shipped lens
+guidance and the general severity definitions (*Ground rules* 7): host override, then lens
+guidance, then the definitions. `review seats` gives each seat the rows for its lens and the
+changed files; a seat that applies one writes `override: <Id>` on the finding, and the verdict
+grades the finding at the row's severity and records it. Severity: `critical`, `major`, `minor` or
+`nitpick`. Applies to: lens or technology names, comma-separated; empty for every seat. Add a row
+only for an opinion the owner has stated.
+
+| Id | Finding class | Severity | Applies to | Why |
+|---|---|---|---|---|
+| SO-1 | File or type placed against the documented project, layer or folder structure | major | model-placement, csharp | The owner grades correct placement of files in the C# projects as a major maintainability issue. |
+
 ## Finding format
 
 ```text
@@ -390,6 +406,7 @@ CLASS     <section number and name>
 FAILS     <input or state> → <wrong behaviour>
 FIX       <exact change>; test: <what proves it>
 GUIDANCE  <section ids>
+OVERRIDE  <severity override id, when one applies>
 ```
 
 ## Maintaining this file

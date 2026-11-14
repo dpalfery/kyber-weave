@@ -226,6 +226,40 @@ rather than skipping guidance silently, and the portable checks in the skill sti
 derives from. A seat that finds nothing says so in its `NO FINDINGS` sentence and names the
 sections it checked.
 
+**Severity overrides.** A host grades a class of finding its own way in the `Severity overrides`
+section of `REVIEW.md`: a table of `Id`, `Finding class`, `Severity` (`critical`, `major`, `minor` or
+`nitpick`), `Applies to` (lens and technology names; empty for every seat) and `Why`. Precedence, as
+seats and the reviewer read it: host override, then the lens's shipped severity guidance, then the
+general definitions. An override changes the grade up or down. `SeverityOverrides`
+(`src/KyberWeave.Core/Review/SeverityOverrides.cs`) is the one reader; an absent file or section is
+no rows, and rows inside an HTML comment or a code fence are examples, not rows.
+
+- **Delivery.** `review seats` writes into each packet only that seat's rows: unscoped rows, rows
+  naming its lens, and rows naming a technology a changed file belongs to, by the globs in
+  backticks in the `Technology map`'s `Files` column (a bare `*.cs` matches at any depth). A row
+  naming a lens and a technology needs both. A technology with no glob there, or a change whose
+  files git could not list, counts as present: an override that silently never reaches a seat is
+  the worse error. This is the first code that reads the technology map; the lens map is still
+  applied by the seat.
+- **Citation.** A seat that applies a row grades the finding at the row's severity and writes
+  `override: <id>` on it, a seat-schema key under the `KW-REVIEW-040` check.
+- **Enforcement.** `review verdict` applies each cited row before the nitpick drop, so the
+  overridden severity is the one every later step reads: the nitpick drop below fix level
+  `nitpick`, the verdict rules, the `fix:`/`follow-up:` routing and the loop's fix counts. A
+  finding the seat graded differently takes the row's severity. Each application is a
+  `KW-REVIEW-057` line (`'<id>': severity set by host override SO-1 (minor → major; cited by the
+  seat, which graded it differently).`), and `findings.json` records `override`, `overrideSource`
+  (`seat` or `decision model`) and `seatSeverity` when it changed. A cited id that no row has is a
+  `KW-REVIEW-057` warning and the seat's severity stands. With a decision model, each finding that
+  cites no row is matched against the rows for its lens and file
+  ([the decision model in the review commands](#the-decision-model-in-the-review-commands)).
+- **Validation.** `docs validate` reports an unknown severity (`KW-REVIEW-058`), a duplicate id
+  (`KW-REVIEW-059`), a lens or technology that does not exist (`KW-REVIEW-060`) and an empty finding
+  class or a table without its `Finding class` and `Severity` columns (`KW-REVIEW-061`), all errors;
+  at review time a bad row is left out, never a failure. `KW-REVIEW-062` is an advisory warning for
+  a row that appears, by the wording of the shipped lens file, to lower a class that lens grades
+  `critical`; the host owns that call.
+
 **Coverage gap, not a verdict input.** When a seat was given guidance and returns no
 attestation, `code-reviewer` records a council-coverage gap in the report and keeps that seat's
 findings. The verdict engine reads no attestation and is unchanged. The attestation shows the
@@ -1193,7 +1227,7 @@ them on the seat files' own text (next section).
 ## The decision model in the review commands
 
 The review commands ask the Arbiter's decision model (Jev, [the decision model](../kyber-arbiter/jev-decision-model.md))
-four narrow questions, through the same client, rules and provider configuration the Arbiter uses
+six narrow questions, through the same client, rules and provider configuration the Arbiter uses
 ([ADR 0079](../adr/0079-the-reviewer-starts-its-own-seats-where-sub-agents-can-dispatch.md), decision 10).
 It is optional: with `arbiter.provider.kind: none`, `--no-decision-model`, no key, or an unreachable
 model, nothing is asked and both commands print exactly what they printed before. A configured model
@@ -1206,7 +1240,8 @@ of that command run. None of it needs the Arbiter's hooks or `arbiter.enabled`.
 | Duplicates | `review verdict` and `--candidates` | `KW-ARB-DUP-001` (≥ 0.9) | Findings on one file within 20 lines that name one defect are merged; the highest severity, then confidence, then evidence is kept and the merged ids are listed. |
 | Nitpicks | `review verdict` | `KW-ARB-NITPICK-001` (≥ 0.85) | A `minor` finding is dropped from the counted set and listed under "Dropped as nitpick". `major` and `critical` are never asked. |
 | Claim check | `review verdict` and `--candidates` | `KW-ARB-CLAIM-001` (≥ 0.9) | Before a refuter: the excerpt must be at the cited lines; the model reads the claim, the quote, the cited lines and the lines the evidence cites, all from the tree. `supports` → no refuter; `contradicts` or unsure → refuter as before. |
-| Severity | `review verdict` | `KW-ARB-SEVERITY-001` (≥ 0.8) | Advisory note only; the verdict keeps the seat's severity. |
+| Severity | `review verdict` | `KW-ARB-SEVERITY-001` (≥ 0.8) | Advisory note only; the verdict keeps the seat's severity. A finding a host override graded is not asked. |
+| Severity override | `review verdict` and `--candidates`, before the nitpick drop | `KW-ARB-OVERRIDE-001` (≥ 0.85) | For a finding that cites no override, one question per `REVIEW.md` severity-override row that applies to its lens and file: does it belong to the row's class? A confident `belongs` grades it at the row's severity (`KW-REVIEW-057`, `matched by decision model, confidence x`); the most confident row wins, a tie goes to the row first in the table. Findings a host override graded are exempt from the nitpick filter. |
 
 Every question is one decision-log entry under `artifacts/arbiter`, and every effect is a
 `KW-REVIEW-055` line plus one summary line. Each question goes in its own request, four at a time: in

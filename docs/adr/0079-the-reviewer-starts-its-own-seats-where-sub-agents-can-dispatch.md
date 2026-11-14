@@ -23,6 +23,7 @@ code-refs:
   - NotSeatedRecord
   - ReviewVerdictCommand
   - ReviewPolicy
+  - SeverityOverrides
 ---
 
 # ADR 0079: The reviewer starts its own seats where sub-agents can dispatch
@@ -159,7 +160,8 @@ apply, which the changed-file list already showed.
     confident duplicates (`KW-ARB-DUP-001`), drops confident minor nitpicks (`KW-ARB-NITPICK-001`; never
     major or critical), skips the refuter for a candidate whose cited code confidently supports its claim
     (`KW-ARB-CLAIM-001`; a confident "contradicts" still goes to a refuter), and notes a severity that
-    looks out of line with its impact (`KW-ARB-SEVERITY-001`, advisory). Every change is printed with its
+    looks out of line with its impact (`KW-ARB-SEVERITY-001`, advisory), and matches a finding to a host
+    severity override (`KW-ARB-OVERRIDE-001`, decision 15). Every change is printed with its
     confidence. The model is optional: provider `none`, no key, `--no-decision-model`, a fault or an
     unsure answer leaves the review exactly as it was, the first fault stops further calls, and nothing
     depends on the Arbiter's hooks or `arbiter.enabled`. The hook side of the four rules answers from
@@ -210,6 +212,23 @@ apply, which the changed-file list already showed.
     external reviewer that raises one is tuned, not appeased. A naming issue that causes a defect or
     breaks a documented public contract is graded by its impact.
 
+15. **The host grades severity last.** The owner asked whether a repository can set its own view of
+    what is critical, major, minor or nitpick; prose in `REVIEW.md` only hoped a seat applied it, and a
+    shipped lens file is overwritten on update. Severity now decides what the fix round takes
+    (decision 12), so the host gets a structured `Severity overrides` table in its review guidance
+    (the `<review-guidance>` file, not a second one): finding class, severity, optional lens and
+    technology scope, reason and a citable id. Precedence is host override, then the shipped lens
+    guidance, then the general definitions; a row moves a grade up or down, `nitpick` and `critical`
+    included. `review seats` gives each seat only its rows, a seat cites the row it applied
+    (`override:`), and `review verdict` applies the row's severity before anything else reads it
+    (`KW-REVIEW-057`), so the verdict rules, the fix-level routing, the PR sections and the loop's
+    counts all see the host's grade, and `findings.json` records which row applied. With a decision
+    model, an uncited finding is matched to its rows (`KW-ARB-OVERRIDE-001`); without one, only cited
+    rows apply. A grade the host set is not put to the nitpick filter or the severity note. `docs
+    validate` checks the rows (`KW-REVIEW-058` to `-061`, and the advisory `-062`). No "never report"
+    value: suppression already does that. This repository's first row is decision 13's placement rule,
+    stated as the owner's own.
+
 The Arbiter classification ADR 0077 added stays: on the `review-council` path the conductor or
 `bug-crusher` starts the seats, and on Factory, whose hook names no caller, the `LENS:` or `REFUTE:`
 header infers `code-reviewer`.
@@ -234,6 +253,9 @@ header infers `code-reviewer`.
   cited lines and the lines the evidence cites; a claim about something no line shows (a folder that
   holds no file) stays with the refuter only because the model is then unsure. The nitpick and
   duplicate steps are enforced by default; `shadow: true` on either rule returns it to logging only.
+- **An override is matched by wording.** A seat or the decision model decides whether a finding
+  belongs to a row's class; a vague class matches too much or too little, and the "lowers a shipped
+  critical" check (`KW-REVIEW-062`) is a word-overlap advisory, not proof.
 - **Where nesting is off by default, the operator must turn it on.** OpenCode and Kilo stay on the
   skill path until the operator sets `subagent_depth`, and the render cannot see that setting. VS Code
   Copilot without its setting falls back to the reviewer applying the lenses itself.

@@ -104,7 +104,7 @@ Findings arrive from lenses that cannot see each other, so you apply the checks 
 
 - **Drop anything missing `excerpt`, `evidence`, or `failure_scenario`.** No exceptions and no charitable reconstruction. A finding you have to complete on the reporter's behalf is one you are inventing.
 - **Leave confidence to the engine.** The verdict engine drops findings below the effective min-confidence; you never drop a finding for confidence yourself.
-- **Never re-grade.** You never change a finding's severity: you keep it, or drop it with a reason through `--drop <id>=<reason>`.
+- **Never re-grade.** You never change a finding's severity: you keep it, or drop it with a reason through `--drop <id>=<reason>`. The host's severity overrides (REVIEW.md) are applied by the verdict (`KW-REVIEW-057`); report its `severity set by host override` lines as printed.
 - **Drop what the guidance excludes:** findings that fail its ground rules or fall under its *What not to flag*, nitpicks included (`--drop <id>=nitpick: <why>`; they are listed in the report, never fixed); a documented-rule breach in untouched code is routed as pre-existing debt instead (Review loop).
 - **Route pre-existing debt** as the Review loop says; a finding about code the change touched or extends stays.
 - **Verify the quote.** Open the file and confirm the `excerpt` is really there, at that line, saying that. A finding quoting code that does not exist invalidates everything else from that lens in this run, and you say so.

@@ -102,7 +102,12 @@ Load [references/settings.md](references/settings.md) now.
    answer.
 4. For each selected item only: show its options with the recommended default first, ask, apply
    it the way the reference says, and show the before and after.
-5. After any change to the configuration file, run `kyber-weave docs validate .` and fix any
+5. With `review.policy.fix-level`, say in one line that what counts as critical, major, minor or
+   nitpick in this repository can be set in the review guidance's "Severity overrides" section
+   ([settings.md](references/settings.md#what-counts-as-critical-major-minor-or-nitpick-here)), and
+   offer to add the empty section (to `REVIEW.md`, created with only that section when the
+   repository has none). Add it only on a yes.
+6. After any change to the configuration file, run `kyber-weave docs validate .` and fix any
    finding about the configuration or the generated settings block. Report other findings
    without fixing them; documentation is the later docs-onboarding step.
 
