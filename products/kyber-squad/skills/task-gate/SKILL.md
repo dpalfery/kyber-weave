@@ -42,8 +42,9 @@ digest names only the passing one.
 
 ## Fix pass for .NET work
 
-When the task changed C# files, the mechanical findings are erased by `dotnet format` and
-`dotnet format analyzers`, scoped with `--include` to this task's files.
+When the task changed C# files, run the gate with `--fix`: it applies the fix form of each format gate
+the host declares, scoped to this task's files, and erases the mechanical findings those gates report.
+Run no format command a declared gate does not cover.
 
 ## Loop and the 3-cycle cap
 
