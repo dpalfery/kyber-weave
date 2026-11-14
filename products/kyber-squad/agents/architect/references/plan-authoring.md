@@ -14,7 +14,7 @@ Open only active Draft, Ready, In progress, or Blocked plans. Draft supports pla
 
 ## Status vocabulary
 
-Frontmatter `status` is `draft` while the plan is Draft and `current` from Ready on; `docs validate` names the closed set when a value is outside it. The bold body status line and the index row carry Draft, Ready and later states.
+Frontmatter `status` is `draft` while the plan is Draft and `current` from Ready on; `docs validate` names the closed set when a value is outside it. The bold body status line and the index row carry Draft, Ready and later states. The plan index holds only the plan's table row: write no sentence that restates a plan's status (such as "One active plan: X (Draft)") and never set the index's own frontmatter `status` from a plan's lifecycle. The finalize and archive tools edit the row and nothing else, so any other restatement goes stale and fails `KW-DOC-LIFECYCLE-006`.
 
 ## Required plan contract
 

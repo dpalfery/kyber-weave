@@ -76,6 +76,7 @@ Needs no code index. Exits non-zero on any error.
 | `KW-DOC-LIFECYCLE-002` | A `todo` document sits in the todo folder but the todo index does not reach it |
 | `KW-DOC-LIFECYCLE-003` | A plan or specification still in its active folder — raised only by `docs validate --merge-ready` |
 | `KW-DOC-LIFECYCLE-004` | An archived entry the change touches without closeout evidence (C0–C9) — raised only by `docs validate --merge-ready` |
+| `KW-DOC-LIFECYCLE-006` | The plan index lists an open plan whose file is gone, or restates a plan's status in a sentence outside its table |
 
 The two `KW-CONFIG-REG` rules fire only once a repository has adopted the registry — its
 `AGENTS.md` carries the generated block, or it declared `config-reg` entries. A corpus that

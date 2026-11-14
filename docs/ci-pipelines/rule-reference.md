@@ -48,6 +48,7 @@ Reported only when the `plan-index` or `todo-index` registry property names a do
 | `KW-DOC-LIFECYCLE-003` | Error | A plan or specification still in its active folder — raised only by `docs validate --merge-ready` |
 | `KW-DOC-LIFECYCLE-004` | Error | An archived entry the change touches without closeout evidence (`C0`–`C9`) — raised only by `docs validate --merge-ready` |
 | `KW-DOC-LIFECYCLE-005` | Error | A task file (`<plan>.tasks.json` beside a plan, `tasks.json` in a specification folder) is left behind, under the active folders or under the archive — raised only by `docs validate --merge-ready` |
+| `KW-DOC-LIFECYCLE-006` | Error | The plan index claims an open plan that does not exist: a table row with a Draft, Ready, In progress or Blocked status whose plan file is gone, or a sentence outside the table that restates a plan's status, such as `` `Plan` (Draft) `` |
 
 ### Plan closeout — `docs closeout`
 
