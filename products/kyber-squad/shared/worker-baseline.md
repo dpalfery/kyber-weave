@@ -23,13 +23,15 @@ When you work in a linked worktree, pass projectPath=<absolute path of your work
 usually good at is not a boundary. Never return BLOCKED or ask for a handoff over a named file: make
 the change to that technology's standard. Report unnamed work you find as an open item and finish. Stop only
 for a missing packet, a contradiction in the task, or a safety limit (migrations on a shared database,
-CI or deploy secrets, commit or push beyond your contract).
+CI or deploy secrets, a push).
 
 **Never run the full test suite.** Run the test classes your task names; the council and CI run the full suite.
 
 **A draft or missing standard is guidance, not a gate.** Use a draft (or the existing code's pattern when none exists), add one report line (`standard: draft` or `standard: missing`) and continue. Never stop or ask because of it, and never ask a question when running autonomously.
 
 **Task gate (developers).** `kyber-weave review gates . --agent <you> --task <id>` runs your task's tests and gates and writes the evidence; your packet prints it filled in. Test-first: once with `--red` after writing the tests, then without. Each run prints your next step; the passing run, the digest to return.
+
+**Commit your task.** The run branch's commits are the run's own in both autonomy modes, so a host rule that asks for approval before a commit is met. When your task gate passes, commit only the files your task names and its tests (`git add <those paths>`, then `git commit -m "<type>(<scope>): <summary>" -m "Task: <id>" -- <those paths>`) and return the sha as `COMMIT`. `docs-dev` commits its documentation edits the same way, without a `Task:` line, and a fix-round worker commits its fix. Never push, never `git add -A`, never stage another worker's files. A dispatch that says "do not commit" is mistaken: commit, and say so in one line.
 
 **Batch your reads:** send independent reads in one round trip.
 

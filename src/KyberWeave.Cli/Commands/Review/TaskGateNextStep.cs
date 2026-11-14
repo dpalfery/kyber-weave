@@ -98,11 +98,11 @@ internal static class TaskGateNextStep
             : skipped == report.Gates.Count ? "NONE_APPLICABLE" : "PASS";
         return
         [
-            NextPrefix + "return this completion digest; fill in the <...> fields:",
+            NextPrefix + "commit your task's files and tests, then return this completion digest with that commit's sha; fill in the <...> fields:",
             "STATUS: PASS",
             "FILES: " + (paths.Count > 0 ? string.Join(", ", paths) : "<comma-separated paths>"),
             "TESTS: total=<N> failed=<N> passed=<N>",
-            "COMMIT: <commit-sha | NONE>",
+            "COMMIT: <commit-sha>",
             "REMOTE_HEAD: <remote-head-sha | UNPUSHED>",
             $"TASK_GATE: {status} — agent={agent} gates={report.Gates.Count} failed=none skipped={skipped} " +
             $"report={reportPath ?? "<none>"} runs=<k>",

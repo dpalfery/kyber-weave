@@ -1450,7 +1450,7 @@ Workers report dispatch completion using an unambiguous 6-field schema:
 STATUS: PASS | FAIL | ESCALATION
 FILES: <comma-separated-paths>
 TESTS: total=N failed=N passed=N
-COMMIT: <commit-sha | NONE>
+COMMIT: <commit-sha>
 REMOTE_HEAD: <remote-head-sha | UNPUSHED>
 TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE — agent=… gates=… failed=… skipped=… report=… runs=…
 ```

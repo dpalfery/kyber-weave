@@ -66,7 +66,7 @@ public sealed class SquadPerformanceContractTests
         @"TESTS:\s*total=(?:\d+|N|<[^>\r\n]+>)\s+failed=(?:\d+|N|<[^>\r\n]+>)\s+passed=(?:\d+|N|<[^>\r\n]+>)";
 
     private const string ContiguousSixFieldDigestRegex =
-        @"STATUS:[^\r\n]*\r?\n[ \t]*FILES:[^\r\n]*\r?\n[ \t]*TESTS:\s*total=(?:\d+|N|<[^>\r\n]+>)\s+failed=(?:\d+|N|<[^>\r\n]+>)\s+passed=(?:\d+|N|<[^>\r\n]+>)[^\r\n]*\r?\n[ \t]*COMMIT:\s*<commit-sha\s*\|\s*NONE>[^\r\n]*\r?\n[ \t]*REMOTE_HEAD:\s*<remote-head-sha\s*\|\s*UNPUSHED>[^\r\n]*\r?\n[ \t]*TASK_GATE:";
+        @"STATUS:[^\r\n]*\r?\n[ \t]*FILES:[^\r\n]*\r?\n[ \t]*TESTS:\s*total=(?:\d+|N|<[^>\r\n]+>)\s+failed=(?:\d+|N|<[^>\r\n]+>)\s+passed=(?:\d+|N|<[^>\r\n]+>)[^\r\n]*\r?\n[ \t]*COMMIT:\s*<commit-sha>[^\r\n]*\r?\n[ \t]*REMOTE_HEAD:\s*<remote-head-sha\s*\|\s*UNPUSHED>[^\r\n]*\r?\n[ \t]*TASK_GATE:";
 
     private static readonly string[] RequiredDigestFields =
     [
@@ -136,7 +136,7 @@ public sealed class SquadPerformanceContractTests
         string content = ReadRepoFile(relativePath);
         foreach (string field in RequiredDigestFields) Assert.Contains(field, content, StringComparison.Ordinal);
 
-        Assert.Contains("COMMIT: <commit-sha | NONE>", content, StringComparison.Ordinal);
+        Assert.Contains("COMMIT: <commit-sha>", content, StringComparison.Ordinal);
         Assert.Contains("REMOTE_HEAD: <remote-head-sha | UNPUSHED>", content, StringComparison.Ordinal);
         Assert.Matches(DigestTestCountersRegex, content);
         Assert.Matches(ContiguousSixFieldDigestRegex, content);
@@ -211,7 +211,7 @@ public sealed class SquadPerformanceContractTests
         string content = ReadRepoFile(TaskGateSkillPath);
         foreach (string field in RequiredDigestFields) Assert.Contains(field, content, StringComparison.Ordinal);
 
-        Assert.Contains("COMMIT: <commit-sha | NONE>", content, StringComparison.Ordinal);
+        Assert.Contains("COMMIT: <commit-sha>", content, StringComparison.Ordinal);
         Assert.Contains("REMOTE_HEAD: <remote-head-sha | UNPUSHED>", content, StringComparison.Ordinal);
         Assert.Matches(DigestTestCountersRegex, content);
         Assert.Matches(ContiguousSixFieldDigestRegex, content);

@@ -35,6 +35,16 @@ public sealed class PacketHostFactsTests : IDisposable
     }
 
     [Fact]
+    public void TheSectionTellsTheWorkerToCommitItsTaskWithTheTaskIdAndNeverToPush()
+    {
+        string facts = PacketHostFacts.Render(_root, Config(), "csharp-dev", "T4");
+
+        Assert.Contains("-m \"Task: T4\"", facts, StringComparison.Ordinal);
+        Assert.Contains("return the sha as COMMIT", facts, StringComparison.Ordinal);
+        Assert.Contains("Never push", facts, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TheRolesDeclaredTaskGatesAreListedWithTheirCommands()
     {
         KyberWeaveConfig config = Config("""

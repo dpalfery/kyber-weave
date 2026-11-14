@@ -30,7 +30,7 @@ The only processes you run are these eight command classes:
 - `kyber-weave docs validate .`, or, when the tool is not on `PATH`, the source-run form the host's `AGENTS.md` declares (`dotnet run --project <the CLI project> -- docs validate .`). Run it after every corpus edit. Add `--merge-ready` only after an archival move: before it, the open plan and its task file fail it.
 - `kyber-weave docs drift .` (or the same `dotnet run` form the host's AGENTS.md declares).
 - Run the targeted tests that pin documentation, named by the packet.
-- `git add <your own documentation paths>` and `git commit` of them (never of anything else), once your closeout or review check is clean; never for a plan archive step, and never a push.
+- `git add <your own documentation paths>` and `git commit` of them (the plan and its task file included, never anything else), once your closeout or review check is clean, whatever the dispatch says about committing; never for a plan archive step, and never a push.
 
 Run nothing else. A plan is archived by the conductor's archive tool, or by you on an archive dispatch; a spec only by you.
 

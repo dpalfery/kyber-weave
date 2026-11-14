@@ -49,6 +49,8 @@ public static partial class PacketHostFacts
         text.AppendLine("Assembled from this repository's configuration and root AGENTS.md. Open AGENTS.md only for something this section does not answer.");
         text.AppendLine();
         text.AppendLine(CultureInfo.InvariantCulture, $"- Scratchpad for this task: `{ScratchpadRoot}/{taskId ?? "<task-id>"}/`");
+        text.AppendLine(CultureInfo.InvariantCulture,
+            $"- Commit: when your task gate passes, run `git add <the task's files and its tests>` then `git commit -m \"<type>(<scope>): <summary>\" -m \"Task: {taskId ?? "<task-id>"}\" -- <the same paths>`, and return the sha as COMMIT. Commits on this run's branch are approved, so a host rule below that asks for approval first is met. Never push.");
         foreach (ConfigRegEntry entry in config.ConfigReg.Resolve(config.Ontology))
         {
             if (entry.Kind == ConfigRegEntryKind.Path)

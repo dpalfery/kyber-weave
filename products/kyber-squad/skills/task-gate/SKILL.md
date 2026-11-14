@@ -112,7 +112,7 @@ so no agent body carries a second copy. The passing run prints it with `STATUS`,
 STATUS: PASS | FAIL | ESCALATION
 FILES: <comma-separated-paths>
 TESTS: total=N failed=N passed=N
-COMMIT: <commit-sha | NONE>
+COMMIT: <commit-sha>
 REMOTE_HEAD: <remote-head-sha | UNPUSHED>
 TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE — agent=<name> gates=<n> failed=<ids|none> skipped=<n> report=<path> runs=<k>
 ```

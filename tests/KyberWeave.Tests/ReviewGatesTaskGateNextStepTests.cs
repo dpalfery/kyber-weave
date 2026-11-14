@@ -27,7 +27,7 @@ public sealed class ReviewGatesTaskGateNextStepTests
                 "STATUS: PASS",
                 "FILES: src/A.cs, tests/ATests.cs",
                 "TESTS: total=<N> failed=<N> passed=<N>",
-                "COMMIT: <commit-sha | NONE>",
+                "COMMIT: <commit-sha>",
                 "REMOTE_HEAD: <remote-head-sha | UNPUSHED>",
                 "TASK_GATE: PASS — agent=csharp-dev gates=2 failed=none skipped=1 report=.agent_scratchpad/T1/task-gate.json runs=<k>",
             ],

@@ -30,11 +30,14 @@ The conductor dispatches by task id. It does not open the plan or the task file 
 
 ## Task commits and resumption
 
-A finished task commits on the feature branch with a `Task: <id>` line, so a resumed run can tell which tasks completed and where the work stopped. The worker's report goes in the commit message body — its completion digest and the message that explains it — and the `Task:` line sits in the trailer area beneath, which is what `kyber-weave run start --resume` reads back.
+Every worker commits its own work on the run branch, and the conductor never dispatches anyone to commit. The worker baseline holds the how; the rule the conductor holds to is:
 
-The `docs-dev` harvest commits its own documentation edits the same way once its closeout check is clean, without a `Task:` line since it has no task id, so nothing waits uncommitted for a separate commit or a read-only git check before the review.
+- A developer commits its task's files and tests when its task gate passes, with a `Task: <id>` line in the trailer beneath the report in the commit message body, which is what `kyber-weave run start --resume` reads back.
+- `docs-dev` commits its documentation edits, the plan and its task file included, once its closeout check is clean, with no `Task:` line.
+- A fix-round worker commits its fix the same way, so the review reads committed work.
+- A completion digest whose `COMMIT` is `NONE` or missing is rejected back to the same session: "commit your task's files and return the sha". Never write "do not commit" into a dispatch.
 
-Commit per task, and push after each integrated task. A run that stops early then leaves a record of everything it finished, where a run that committed once at the end leaves nothing to resume from.
+A run that stops early then leaves a record of everything it finished. Pushing is not a worker step: the deliver tool pushes.
 
 ## Task session continuity
 
@@ -93,16 +96,16 @@ Workers precede the six-field completion digest block with the `Discovery: codeg
 STATUS: PASS | FAIL | ESCALATION
 FILES: <comma-separated-paths>
 TESTS: total=N failed=N passed=N
-COMMIT: <commit-sha | NONE>
+COMMIT: <commit-sha>
 REMOTE_HEAD: <remote-head-sha | UNPUSHED>
 TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE — agent=… gates=… failed=… skipped=… report=… runs=…
 ```
 
-Worktree workers committing locally report their `<commit-sha>`, while uncommitted/unpushed task runs report `NONE` and `UNPUSHED`.
+`COMMIT` is the sha of the commit the worker made. `REMOTE_HEAD` is `UNPUSHED`, because workers never push.
 
 Lines that are not one of the six digest fields are never counted or rejected as a seventh field. They are exactly these shapes: the Discovery: codegraph N, docs N, direct reads N header; COVERAGE_GAPS: followed by free text; Input sites: N traced, M files with none (or Input sites: none); Defect class: followed by one sentence and the inputs it covers; and Artifact: or Baseline: followed by one repository-relative or absolute path. A `report=<path>` inside the `TASK_GATE:` line is part of that field, not a separate line.
 
-- **Missing line or `FAIL`:** reject the digest, except a valid escalation under the circuit-breaker section below. Create a self-contained rework item for the original worker session (use the replacement policy above only when needed) naming the failed gate ids and the report path. The rework counts in the per-cluster tally below, keyed `task-gate/<gate-id>` for each failed gate, or `task-gate/missing` when the line is absent. After 3 rework dispatches for a key, the circuit-breaker trips on it. During the phased rollout only `csharp-dev` and `test-dev` must return the full six-field block; every other developer worker may return its standard completion, meaning the completion report its own agent body specifies, plus a `TASK_GATE:` line; the conductor's requirement for that line overrides the agent body, so a standard completion without it is rejected as `task-gate/missing`, and the `FILES`, `TESTS`, `COMMIT` and `REMOTE_HEAD` fields are not required of it. The missing-or-`FAIL` `TASK_GATE` rejection and its `task-gate/<gate-id>` / `task-gate/missing` tally apply to every developer worker.
+- **Missing line or `FAIL`:** reject the digest, except a valid escalation under the circuit-breaker section below. Create a self-contained rework item for the original worker session (use the replacement policy above only when needed) naming the failed gate ids and the report path. The rework counts in the per-cluster tally below, keyed `task-gate/<gate-id>` for each failed gate, or `task-gate/missing` when the line is absent. After 3 rework dispatches for a key, the circuit-breaker trips on it. During the phased rollout only `csharp-dev` and `test-dev` must return the full six-field block; every other developer worker may return its standard completion, meaning the completion report its own agent body specifies, plus a `TASK_GATE:` line; the conductor's requirement for that line overrides the agent body, so a standard completion without it is rejected as `task-gate/missing`, and the `FILES`, `TESTS` and `REMOTE_HEAD` fields are not required of it, though its report still names its commit sha. The missing-or-`FAIL` `TASK_GATE` rejection and its `task-gate/<gate-id>` / `task-gate/missing` tally apply to every developer worker.
 - **`PASS`:** the task's gate is complete. It does not authorize merge.
 - **`NONE_DECLARED`:** valid; the repository declares no gates for that agent.
 - **`NONE_APPLICABLE`:** valid; gates are declared for that agent, but every one was skipped for this host or change, so none ran. Accept it as `NONE_DECLARED` is accepted. It is not a pass, and it never reads as `PASS`.
@@ -188,7 +191,7 @@ Unless you hold `arbiter_evaluate_agent_dispatch_or_return` (see Arbiter fallbac
 
 ## Worker packets
 
-A packet to an implementation specialist is its whole context. State in the packet that the worker does not open plan, spec, or todo files and performs only the work the packet describes.
+A packet to an implementation specialist is its whole context. State in the packet that the worker does not open plan, spec, or todo files and performs only the work the packet describes. Never write "do not commit" into a dispatch and never dispatch anyone only to commit: the worker commits its own task (Task commits), and the review and the deliver tool read committed work.
 
 ## Escalations
 
