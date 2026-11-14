@@ -216,6 +216,13 @@ public sealed partial class PlanFinalize
             return Refused();
         }
 
+        foreach (string written in new[] { plan, planIndex }.OfType<string>().Where(file => IsLink(_files.Absolute(file))))
+        {
+            report.Add(new Diagnostic(PlanNeedsArchitect, Severity.Error,
+                $"'{written}' is a symbolic link, which this step does not write through. Nothing was changed.", plan, written, Hint: ArchitectHint));
+            return Refused();
+        }
+
         try
         {
             File.WriteAllText(_files.Absolute(plan), newPlan);
@@ -589,7 +596,7 @@ public sealed partial class PlanFinalize
             Hint: string.Join(' ', advice)));
     }
 
-    private static bool IsLink(string path)
+    internal static bool IsLink(string path)
     {
         try
         {
@@ -601,10 +608,15 @@ public sealed partial class PlanFinalize
         }
     }
 
+    // A link is the owner's: writing through it would rewrite whatever it points at, so a restore treats it as one more
+    // file it cannot undo, exactly as the generator refuses to write through one.
     private static bool TryWrite(string path, string text)
     {
         try
         {
+            if (IsLink(path))
+                return false;
+
             File.WriteAllText(path, text);
             return true;
         }

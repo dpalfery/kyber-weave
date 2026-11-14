@@ -222,6 +222,14 @@ public sealed partial class PlanCloseout
             return new PlanCloseoutOutcome(report, false);
         }
 
+        foreach (string linked in new[] { planIndex, inventory }.Where(file => PlanFinalize.IsLink(_files.Absolute(file))))
+        {
+            report.Add(new Diagnostic(IndexNotEditable, Severity.Error,
+                $"'{linked}' is a symbolic link, which this step does not write through. Nothing was moved.", plan, linked,
+                Hint: "Make it a regular file, then run the closeout again."));
+            return new PlanCloseoutOutcome(report, false);
+        }
+
         Directory.CreateDirectory(archiveDirectory);
         BeforeWriteTarget?.Invoke(_files.Absolute(target));
         if (!TryWriteNew(_files.Absolute(target), archivedText))

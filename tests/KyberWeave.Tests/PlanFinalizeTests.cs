@@ -538,6 +538,30 @@ public sealed class PlanFinalizeTests
     }
 
     [Fact]
+    public void RestoreNeverWritesThroughALinkAtATaskFilePlanOrIndexPath()
+    {
+        using DocFixture fixture = Repository();
+        string outside = Path.Combine(fixture.Root, "outside.json");
+        File.WriteAllText(outside, "owner's bytes");
+        string taskFile = Absolute(fixture, PlanTaskFileProbe.TaskFilePath);
+        try
+        {
+            File.CreateSymbolicLink(taskFile, outside);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            Assert.Skip("Symbolic-link creation is not available here; the link guard was not run.");
+        }
+
+        List<string> notUndone = Finalizer(fixture).Restore(
+            PlanTaskFileProbe.PlanPath, Read(fixture, PlanTaskFileProbe.PlanPath), planIndex: null, indexText: null,
+            PlanTaskFileProbe.TaskFilePath, taskFileBefore: "{\"before\":true}");
+
+        Assert.Equal([PlanTaskFileProbe.TaskFilePath], notUndone);
+        Assert.Equal("owner's bytes", File.ReadAllText(outside));
+    }
+
+    [Fact]
     public void TheReadyQueueIsListedFromAReadableTaskFileAndSaysNothingExtra()
     {
         using DocFixture fixture = Repository();
