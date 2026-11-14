@@ -69,6 +69,10 @@ Governing rule: [honest unobservability](docs/rules/honest-unobservability.md).
   and API responses, including error responses with no data. (#439, #425)
 - **R3** Parsers reject invalid input. Decode strictly (`fatal: true`). Forward only allowlisted
   keys. Never invent identity (for example, a fabricated `sessionId`). (#433, #425)
+- Seat-written and tool-written text (a seat file's `file`, `line`, `evidence`, `Budget reached` line;
+  `gh` or `git` JSON) is untrusted input to the review commands: parse numbers with `TryParse` and a
+  range, canonicalise paths inside the error handling, check JSON shape before `GetProperty`, and cap
+  per-run work (model questions, file reads) with a named constant. (#609)
 - A flat fallback must not override a more specific field that is present (precedence order
   stated and tested).
 - **R4** In .NET, a deserialised value (`as T`, `JsonSerializer` result) must be null-checked and
