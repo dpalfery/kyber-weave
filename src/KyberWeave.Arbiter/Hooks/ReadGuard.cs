@@ -191,7 +191,7 @@ public static partial class ReadGuard
         return ReadGuardResult.Allow;
     }
 
-    // `kyber-weave docs packet <task> [--plan <plan>] [--prior-results <file>]` and nothing else on the line: no
+    // `kyber-weave docs packet <task> [--agent <name>] [--plan <plan>] [--prior-results <file>]` and nothing else on the line: no
     // separator, redirect, substitution or second command, so the exemption cannot carry a read of a plan.
     [GeneratedRegex(@"^\s*(?:\S*/)?kyber-weave\s+docs\s+packet(?:\s+[^\s;&|<>`$()\\]+)*\s*$", RegexOptions.CultureInvariant)]
     private static partial Regex PacketCommandRegex();

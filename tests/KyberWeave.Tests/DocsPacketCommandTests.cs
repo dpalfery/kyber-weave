@@ -192,7 +192,7 @@ public sealed class DocsPacketCommandTests
         Assert.True(execution.Result == 0, execution.Output);
         string[] lines = execution.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         Assert.Equal(2, lines.Length);
-        Assert.StartsWith("T1  role=", lines[0], StringComparison.Ordinal);
+        Assert.StartsWith("T1  needs=", lines[0], StringComparison.Ordinal);
         Assert.Contains("depends-on=", lines[1], StringComparison.Ordinal);
         Assert.Contains("files=", lines[1], StringComparison.Ordinal);
     }

@@ -10,7 +10,7 @@ The conductor supplies `DEVELOPMENT_MODE`. If omitted, record `test-first`. Reco
 
 ## Work
 
-Produce a numbered checkbox task list with at most two hierarchy levels. Group tasks under `###` headings, and use checkbox items only for dispatchable tasks, because every checkbox item needs its own task-file entry. Every task includes a concrete objective, exact files or components, acceptance criteria, dependencies, required skills, and requirement ids. Tasks must be executable by a cold worker without design decisions.
+Produce a numbered checkbox task list with at most two hierarchy levels. Group tasks under `###` headings, and use checkbox items only for dispatchable tasks, because every checkbox item needs its own task-file entry. Every task includes a concrete objective, exact files or components, acceptance criteria, dependencies, a `Capabilities:` line naming in plain words the abilities the work needs (never an agent or skill name), and requirement ids. Tasks must be executable by a cold worker without design decisions.
 
 Persist:
 

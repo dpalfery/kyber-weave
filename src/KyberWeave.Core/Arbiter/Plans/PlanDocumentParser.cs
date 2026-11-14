@@ -30,7 +30,8 @@ namespace KyberWeave.Core.Arbiter.Plans;
 /// variants in <c>docs/archive/plans/</c> also parse: the Files family covers <c>Files /
 /// symbols</c>, <c>Files/symbols owned</c> and <c>Files owned</c>; the Depends family
 /// covers <c>Depends on</c>, <c>Depends-on</c> and the archived <c>Dependencies</c>;
-/// the Skills family covers <c>Required skills</c> and <c>Required skill</c>. Bold is
+/// the Skills family covers <c>Required skills</c> and <c>Required skill</c>; the Capabilities
+/// family covers <c>Capabilities</c> and <c>Required capabilities</c>. Bold is
 /// optional, the colon may sit inside or outside the bold, and a leading <c>- </c> is
 /// optional — every one of those shapes occurs in the archive.
 /// </para>
@@ -85,6 +86,9 @@ public static partial class PlanDocumentParser
 
     [GeneratedRegex(@"\b(?:required[ \t]+skills?|skills)\b[ \t]*:", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex SkillsLabelRegex();
+
+    [GeneratedRegex(@"\b(?:required[ \t]+)?capabilit(?:y|ies)\b[ \t]*:", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex CapabilitiesLabelRegex();
 
     [GeneratedRegex(@"`([^`\n]+)`", RegexOptions.CultureInvariant)]
     private static partial Regex BacktickSpanRegex();
@@ -291,7 +295,10 @@ public static partial class PlanDocumentParser
                     Hint: "Declare the task's file scope under a Files/scope label, or as backticked paths in the task body; its file-scope checks are skipped."));
             }
 
-            tasks.Add(new PlanTask(build.Id, build.Title, build.Text, build.Files, dependsOn, build.Skills, build.Checked));
+            tasks.Add(new PlanTask(build.Id, build.Title, build.Text, build.Files, dependsOn, build.Skills, build.Checked)
+            {
+                Capabilities = build.Capabilities,
+            });
         }
 
         List<string> outOfScope = [];
@@ -383,12 +390,13 @@ public static partial class PlanDocumentParser
             string title = match.Groups["title"].Value.Trim();
             int end = Math.Max(Math.Min(SectionEnd(headings, heading, tasksEnd), tasksEnd), heading.BodyStart);
             string sectionText = text[heading.BodyStart..end].Trim();
-            (List<string> files, List<string> dependsTokens, List<string> labelSkills) = ParseTaskBody(sectionText, isSpec: false);
+            (List<string> files, List<string> dependsTokens, List<string> labelSkills, string? capabilities) = ParseTaskBody(sectionText, isSpec: false);
 
             TaskBuild build = new(id, title, sectionText, false, heading.Start)
             {
                 Files = files,
                 DependsTokens = dependsTokens,
+                Capabilities = capabilities,
             };
             build.Skills.EnsureCapacity(build.Skills.Count + labelSkills.Count);
             foreach (string skill in HeadingSkills(heading.Text).Concat(labelSkills))
@@ -420,7 +428,7 @@ public static partial class PlanDocumentParser
                 }
 
                 string bodyText = string.Join("\n", bodyLines).Trim();
-                (List<string> files, List<string> dependsTokens, List<string> skills) = ParseTaskBody(bodyText, isSpec: true);
+                (List<string> files, List<string> dependsTokens, List<string> skills, string? capabilities) = ParseTaskBody(bodyText, isSpec: true);
                 builds.Add(new TaskBuild(
                     match.Groups["id"].Value,
                     match.Groups["title"].Value.Trim(),
@@ -431,6 +439,7 @@ public static partial class PlanDocumentParser
                     Files = files,
                     DependsTokens = dependsTokens,
                     Skills = skills,
+                    Capabilities = capabilities,
                 });
             }
 
@@ -443,8 +452,9 @@ public static partial class PlanDocumentParser
     /// the spec grammar falls back to the body's backticked paths. Dependencies come
     /// from the first Depends-family label, tokens per grammar. Skills come from every
     /// Skills-family label; the plan heading's <c>(agent)</c> suffix is added by the caller.
+    /// Capabilities are the first Capabilities-family label's text, as prose on one line.
     /// </summary>
-    private static (List<string> Files, List<string> DependsTokens, List<string> Skills) ParseTaskBody(string sectionText, bool isSpec)
+    private static (List<string> Files, List<string> DependsTokens, List<string> Skills, string? Capabilities) ParseTaskBody(string sectionText, bool isSpec)
     {
         (string plain, List<int> boldStarts) = StripEmphasis(sectionText);
         List<LabelMatch> labels = CollectLabels(plain);
@@ -508,7 +518,18 @@ public static partial class PlanDocumentParser
             }
         }
 
-        return (files, dependsTokens, skills);
+        string? capabilities = null;
+        LabelMatch? capabilitiesLabel = labels.FirstOrDefault(label => label.Family == LabelFamily.Capabilities);
+        if (capabilitiesLabel is not null)
+        {
+            int end = RegionEnd(plain, capabilitiesLabel.ValueStart, Math.Min(
+                Math.Min(NextLabelStart(labels, capabilitiesLabel.Start), DoubleNewlineIndex(plain, capabilitiesLabel.ValueStart)),
+                SiblingBulletIndex(plain, capabilitiesLabel.ValueStart, LineIndent(plain, capabilitiesLabel.Start))));
+            string text = WhitespaceRegex().Replace(plain[capabilitiesLabel.ValueStart..end].Replace("`", string.Empty, StringComparison.Ordinal), " ").Trim();
+            capabilities = text.Length > 0 ? text : null;
+        }
+
+        return (files, dependsTokens, skills, capabilities);
     }
 
     /// <summary>
@@ -595,6 +616,7 @@ public static partial class PlanDocumentParser
         CollectLabelsOf(plain, FilesLabelRegex(), LabelFamily.Files, labels);
         CollectLabelsOf(plain, DependsLabelRegex(), LabelFamily.Depends, labels);
         CollectLabelsOf(plain, SkillsLabelRegex(), LabelFamily.Skills, labels);
+        CollectLabelsOf(plain, CapabilitiesLabelRegex(), LabelFamily.Capabilities, labels);
         return [.. labels.OrderBy(label => label.Start)];
     }
 
@@ -607,7 +629,8 @@ public static partial class PlanDocumentParser
     }
 
     private static bool ContainsLabel(string line) =>
-        FilesLabelRegex().IsMatch(line) || DependsLabelRegex().IsMatch(line) || SkillsLabelRegex().IsMatch(line);
+        FilesLabelRegex().IsMatch(line) || DependsLabelRegex().IsMatch(line) || SkillsLabelRegex().IsMatch(line)
+        || CapabilitiesLabelRegex().IsMatch(line);
 
     /// <summary>
     /// True when a bullet line at <paramref name="indent"/> or shallower opens with a bold label:
@@ -917,7 +940,8 @@ public static partial class PlanDocumentParser
     {
         Files,
         Depends,
-        Skills
+        Skills,
+        Capabilities
     }
 
     private sealed record TaskBuild(string Id, string Title, string Text, bool Checked, int Position)
@@ -927,6 +951,8 @@ public static partial class PlanDocumentParser
         public List<string> DependsTokens { get; init; } = [];
 
         public List<string> Skills { get; init; } = [];
+
+        public string? Capabilities { get; init; }
     }
 }
 

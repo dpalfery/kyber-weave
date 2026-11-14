@@ -13,6 +13,6 @@ Each implementation task is one unit of behaviour owned by one specialist, who w
 - GREEN acceptance uses the same tests and shows them passing without weakening an assertion.
 - Mark a genuinely no-test task explicitly and name the read-only or manual verification that replaces it. Silence is invalid.
 
-Never split one behaviour into a test task and an implementation task, and never add a stub task so another task's tests compile. Assign `test-dev` only a task whose deliverable is tests.
+Never split one behaviour into a test task and an implementation task, and never add a stub task so another task's tests compile. A task whose capabilities are only test authoring is a task whose deliverable is tests alone.
 
 Changing an approved Test contract, including weakening an assertion to reach green, is a scope change. Return the plan to Draft and require the conductor to relay reapproval before implementation resumes.

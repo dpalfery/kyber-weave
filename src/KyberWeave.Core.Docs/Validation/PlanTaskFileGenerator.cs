@@ -43,7 +43,7 @@ public sealed record PlanTaskFileOutcome(
 /// </summary>
 /// <remarks>
 /// <para>
-/// The task file restates the plan for the conductor: the file scope, dependencies and skills come
+/// The task file restates the plan for the conductor: the file scope, dependencies and capabilities come
 /// from <see cref="PlanDocumentParser"/>, the digest is <see cref="PlanDocumentParser.ExecutionDigest"/>,
 /// and each prompt is the plan task's own text plus the one command and the acceptance criteria the
 /// validator requires, taken from the task or from its row of the test contract. Nothing in the file
@@ -228,16 +228,19 @@ public sealed partial class PlanTaskFileGenerator
         string[] lines = body.Split('\n');
         bool gap = false;
 
-        string? role = LabelValue(lines, "role", "agent", "specialist") ?? (task.Skills.Count > 0 ? task.Skills[0] : null);
-        if (role is null)
+        // The plan says what the task needs; the conductor picks the agent. An explicit role label is the owner's override.
+        string? role = LabelValue(lines, "role", "agent", "specialist");
+        string? capabilities = task.Capabilities ?? (task.Skills.Count > 0 ? string.Join(", ", task.Skills) : null);
+        if (role is null && capabilities is null)
         {
             report.Add(new Diagnostic(
                 PlanTaskFileValidator.IncompletePrompt,
                 Severity.Error,
-                $"Task '{task.Id}' names no agent or skill, so the task file cannot say who runs it.",
+                $"Task '{task.Id}' says nothing about the abilities its work needs, so the conductor cannot choose an agent for it.",
                 task.Id,
                 artifactPath,
-                Hint: $"Under task '{task.Id}' in the plan add a line such as 'Required skills: `csharp-dev`', " +
+                Hint: $"Under task '{task.Id}' in the plan add a line such as " +
+                "'Capabilities: C# ASP.NET API controllers and services, with xUnit tests', " +
                 $"then run {TaskFileCommand.Write(artifactPath)} again."));
             gap = true;
         }
@@ -321,6 +324,7 @@ public sealed partial class PlanTaskFileGenerator
             : new PlanTaskFileEntry(
                 task.Id,
                 role,
+                capabilities,
                 [.. task.DependsOn],
                 [.. keptFiles],
                 session,
@@ -653,6 +657,7 @@ public sealed partial class PlanTaskFileGenerator
             foreach ((string field, bool same) in new (string, bool)[]
                      {
                          ("role", got.Role == want.Role),
+                         ("capabilities", got.Capabilities == want.Capabilities),
                          ("session", got.Session == want.Session),
                          ("files", (got.Files ?? []).SequenceEqual(want.Files ?? [])),
                          ("depends-on", (got.DependsOn ?? []).SequenceEqual(want.DependsOn ?? [])),

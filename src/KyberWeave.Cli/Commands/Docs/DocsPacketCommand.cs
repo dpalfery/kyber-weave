@@ -105,7 +105,7 @@ public sealed class DocsPacketCommand : Command<DocsPacketSettings>
         // The host facts are appended at print time, never written into the task file, so the digest is unaffected.
         Console.Out.WriteLine(PlanTaskPacket.Fill(entry, root, prior));
         Console.Out.WriteLine();
-        Console.Out.WriteLine(PacketHostFacts.Render(root, config, entry.Role, entry.Id));
+        Console.Out.WriteLine(PacketHostFacts.Render(root, config, string.IsNullOrWhiteSpace(settings.Agent) ? entry.Role : settings.Agent.Trim(), entry.Id));
         return 0;
     }
 

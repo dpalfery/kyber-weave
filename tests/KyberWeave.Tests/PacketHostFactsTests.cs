@@ -54,6 +54,14 @@ public sealed class PacketHostFactsTests : IDisposable
     }
 
     [Fact]
+    public void WithNoAgentKnownTheSectionSaysHowToListTheWorkersOwnGates()
+    {
+        string facts = PacketHostFacts.Render(_root, Config(), null, "T1");
+
+        Assert.Contains("--agent <your agent name>", facts, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AShortRuleSectionIsCopiedVerbatimAndAHeadingInsideACodeFenceDoesNotEndIt()
     {
         Agents("# Repo\n\n## Non-negotiables\n\n- Never push to main.\n  Ask first.\n\n```bash\n# not a heading\n```\n\n- Keep ids.\n\n## Other\n\ntext\n");

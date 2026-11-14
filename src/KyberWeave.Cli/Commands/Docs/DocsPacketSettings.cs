@@ -21,6 +21,11 @@ public sealed class DocsPacketSettings : CommandSettings
     [Description("A file with the results earlier tasks reported. Without it the packet's results section says none were supplied.")]
     public string? PriorResults { get; set; }
 
+    /// <summary>The worker's own agent name, so the Host facts list that agent's task gates.</summary>
+    [CommandOption("--agent <NAME>")]
+    [Description("Your own agent name, for example csharp-dev. The Host facts then list your task gates. Defaults to the agent the plan assigned the task to, when it assigned one.")]
+    public string? Agent { get; set; }
+
     /// <summary>The configuration file; defaults to the repository's own.</summary>
     [CommandOption("-c|--config <PATH>")]
     [Description("Path to kyber-weave.yml. Defaults to the repository's own.")]

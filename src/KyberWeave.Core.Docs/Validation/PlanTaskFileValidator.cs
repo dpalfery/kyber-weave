@@ -540,7 +540,7 @@ public sealed partial class PlanTaskFileValidator
                 "dispatch it.",
                 task.Id,
                 taskFile,
-                Hint: $"Run {fix}: it adds an entry for '{task.Id}' with its role, files, dependencies and prompt."));
+                Hint: $"Run {fix}: it adds an entry for '{task.Id}' with its capabilities, files, dependencies and prompt."));
         }
 
         foreach (string id in declared.Keys.Where(id => !byId.ContainsKey(id)))

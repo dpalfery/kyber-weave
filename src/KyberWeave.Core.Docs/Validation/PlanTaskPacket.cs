@@ -113,7 +113,10 @@ public static partial class PlanTaskPacket
             .Replace(PriorResultsSlot, prior, StringComparison.Ordinal);
     }
 
-    /// <summary>One line for a task: id, role, what it depends on, its session and how many files it scopes.</summary>
+    /// <summary>
+    /// One line for a task: id, the abilities it needs, the agent the plan assigned when it assigned one, what it
+    /// depends on, its session and how many files it scopes.
+    /// </summary>
     /// <param name="entry">The task.</param>
     public static string ListLine(PlanTaskFileEntry entry)
     {
@@ -122,12 +125,13 @@ public static partial class PlanTaskPacket
         string depends = entry.DependsOn is { Count: > 0 } ? string.Join(',', entry.DependsOn) : "none";
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"{entry.Id}  role={entry.Role}  depends-on={depends}  session={entry.Session ?? "-"}  files={entry.Files?.Count ?? 0}");
+            $"{entry.Id}  needs={NeedsOf(entry)}{RoleOf(entry, "  ")}  depends-on={depends}  session={entry.Session ?? "-"}  files={entry.Files?.Count ?? 0}");
     }
 
     /// <summary>
-    /// The queue a conductor dispatches from: one line per task (id, title, role, what it waits on, session), then the
-    /// tasks with no dependency, which may run in parallel.
+    /// The queue a conductor dispatches from: one line per task (id, title, the abilities it needs, the agent the plan
+    /// assigned when it assigned one, what it waits on, session), then the tasks with no dependency, which may run in
+    /// parallel. The conductor chooses each task's agent from the abilities, since it never opens the plan.
     /// </summary>
     /// <param name="tasks">The task file's tasks.</param>
     public static string ReadyQueue(IReadOnlyList<PlanTaskFileEntry> tasks)
@@ -138,7 +142,7 @@ public static partial class PlanTaskPacket
         foreach (PlanTaskFileEntry task in tasks)
         {
             string depends = task.DependsOn is { Count: > 0 } ? string.Join(',', task.DependsOn) : "none";
-            queue.Append(CultureInfo.InvariantCulture, $"{task.Id}: {TitleOf(task)} | role={task.Role} | after={depends}");
+            queue.Append(CultureInfo.InvariantCulture, $"{task.Id}: {TitleOf(task)} | needs: {NeedsOf(task)}{RoleOf(task, " | ")} | after={depends}");
             if (task.Session is not null)
                 queue.Append(CultureInfo.InvariantCulture, $" | session={task.Session}");
             queue.Append('\n');
@@ -150,6 +154,12 @@ public static partial class PlanTaskPacket
             : $"ready now: {string.Join(", ", ready)}");
         return queue.ToString();
     }
+
+    private static string NeedsOf(PlanTaskFileEntry task) =>
+        string.IsNullOrWhiteSpace(task.Capabilities) ? "-" : task.Capabilities;
+
+    private static string RoleOf(PlanTaskFileEntry task, string separator) =>
+        task.Role is null ? string.Empty : $"{separator}role={task.Role}";
 
     private static string TitleOf(PlanTaskFileEntry task)
     {

@@ -1,4 +1,5 @@
 using KyberWeave.Core.Arbiter;
+using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Diagnostics;
@@ -155,6 +156,35 @@ public sealed class ArbiterDefaultRulesTests
         ArbiterRule owner = ArbiterConfig.ProductDefaults.Rules.Single(r => r.Id == "KW-ARB-OWNER-001");
         // The one step-0 owner answer is the target named among the task's skills; test-dev is not owner of every test-first task.
         Assert.Single(owner.Decide!, clause => clause.Answer == "owner");
+    }
+
+    [Fact]
+    public void Owner002_LogsTheModelsPickWithoutBlockingWhenTheTaskNamesNoAgent()
+    {
+        // A plan task names capabilities, not an agent; the conductor's match is the decision (ADR 0080).
+        ArbiterRule owner = ArbiterConfig.ProductDefaults.Rules.Single(r => r.Id == "KW-ARB-OWNER-002");
+
+        Assert.Equal("KW-ARB-OWNER-001=no-mapping", owner.Ask!.When);
+        Assert.All(owner.Effects.Values, effect => Assert.Equal("allow", effect));
+    }
+
+    [Fact]
+    public void Owner001_AnswersNoMappingAndAllowsForATaskThatNamesOnlyCapabilities()
+    {
+        PlanDocument plan = PlanDocumentParser.Parse("""
+            ## Tasks
+
+            ### T1: Add the orders page
+
+            - **Files:** `web/src/Orders.tsx`
+            - **Capabilities:** React and TypeScript UI with Playwright tests
+            """);
+        ArbiterRule owner = ArbiterConfig.ProductDefaults.Rules.Single(r => r.Id == "KW-ARB-OWNER-001");
+
+        PlanTask task = Assert.Single(plan.Tasks);
+        Assert.Empty(task.Skills);
+        Assert.Equal("React and TypeScript UI with Playwright tests", task.Capabilities);
+        Assert.Equal("allow", owner.Effects["no-mapping"]);
     }
 
     [Fact]

@@ -37,10 +37,14 @@ Closeout explicitly distinguishes between two waiver categories:
 A plan delivered by a conductor may carry a tracked task file, `docs/plans/<plan>.tasks.json`,
 written at finalization (by the conductor's `docs_finalize_approved_plan_and_write_task_file` tool, or
 `kyber-weave docs finalize`) and committed with the plan at once. Each task carries its
-id, role, dependencies, file scope, a `session` group and the full prompt, and each prompt carries
+id, the capabilities it needs, dependencies, file scope, a `session` group and the full prompt (plus a
+`role` only when the plan assigns an agent explicitly), and each prompt carries
 files as path plus symbol, full test class names, exact commands, acceptance criteria and the
-standards to fetch. The conductor validates the file and dispatches by task id; each worker
-fetches its prompt unchanged with `kyber-weave docs packet <task id>`, which fills only
+standards to fetch. A plan task names capabilities in plain words, never an agent or skill; the
+conductor picks the agent whose description fits them
+([ADR 0080](../adr/0080-plan-tasks-name-capabilities-and-the-conductor-chooses-the-agent.md)). The
+conductor validates the file and dispatches by task id; each worker
+fetches its prompt unchanged with `kyber-weave docs packet <task id> --agent <its name>`, which fills only
 `{worktree}` and `{prior_results}`. **The plan stays authoritative**: it is what the owner
 approves, it holds the `## Decisions` table, and the Arbiter reads task ids, files, dependencies,
 skills, task text, test rows and out-of-scope items from it. The file's execution digest covers

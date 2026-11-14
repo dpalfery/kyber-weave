@@ -84,7 +84,7 @@ public sealed class McpPlanLifecycleToolsTests
         Assert.DoesNotContain("Commit the plan", response, StringComparison.Ordinal);
         Assert.Contains("ready queue", response, StringComparison.Ordinal);
         Assert.Contains("T1: ", response, StringComparison.Ordinal);
-        Assert.Contains("| role=", response, StringComparison.Ordinal);
+        Assert.Contains("| needs: ", response, StringComparison.Ordinal);
         Assert.Contains("dispatch the first ready tasks now", response, StringComparison.Ordinal);
         string committed = Git(fixture.Root, "show", "--name-only", "--format=%s", "HEAD");
         Assert.StartsWith("docs(plan): finalize ", committed, StringComparison.Ordinal);

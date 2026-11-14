@@ -1606,8 +1606,8 @@ and retained sessions stay available until task gates and run-level findings set
 
 **The architect declares the session group, not the conductor.** Each task in a plan's task file
 carries a `session` group, and tasks sharing one continue a single worker session where the harness
-allows it; the conductor does not invent one at dispatch. A follow-up fix and a later same-role task
-on one change share a group: changing one assertion took a fresh worker 11 minutes, because the
+allows it; the conductor does not invent one at dispatch. A follow-up fix and a later task needing the same
+abilities on one change share a group: changing one assertion took a fresh worker 11 minutes, because the
 fresh worker re-derived context the previous one already had.
 
 Continuation is a harness capability, not a guarantee made by a renderer or model.
@@ -1753,8 +1753,14 @@ what makes resuming a run somewhere else possible at all.
   because an earlier task on the same file moves them. The measured run's prompts carried none of
   this — the authoring contract asked for "exact files or symbols" and no commands — so a worker
   could not name the class that proved its change and reported a green suite it never ran.
+- **The conductor chooses the agent.** A plan task names the capabilities its work needs in plain
+  words, never an agent or a skill, so a new agent needs no change to the architect. The finalize
+  tool's ready queue shows each task's capabilities, and the conductor dispatches the agent whose
+  description fits them; a `Role:` line in the plan is the owner's override. The worker loads the
+  skills its own agent file names
+  ([ADR 0080](../adr/0080-plan-tasks-name-capabilities-and-the-conductor-chooses-the-agent.md)).
 - **The machine delivers the packet.** The conductor dispatches by task id; the worker runs
-  `kyber-weave docs packet <task id>`, which resolves the one Ready plan, checks the task file against
+  `kyber-weave docs packet <task id> --agent <its name>`, which resolves the one Ready plan, checks the task file against
   its execution digest (a stale file is refused with the fix), and prints only that task's packet with
   `{worktree}` filled in. `--prior-results <file>` fills `{prior_results}` with earlier worker reports as
   they were written; without it that section says none were supplied. No plan can know either slot:

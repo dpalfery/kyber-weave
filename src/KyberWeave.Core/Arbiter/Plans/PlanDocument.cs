@@ -54,8 +54,14 @@ public sealed record PlanTask(
     /// <summary>The dependency task ids, resolved against this document's tasks.</summary>
     public IReadOnlyList<string> DependsOn { get; init; } = DependsOn ?? [];
 
-    /// <summary>The skill names the task names or requires.</summary>
+    /// <summary>The skill names the task names or requires: the legacy routing label, kept so older plans parse.</summary>
     public IReadOnlyList<string> Skills { get; init; } = Skills ?? [];
+
+    /// <summary>
+    /// The abilities the task needs, in plain words, from its Capabilities label; null when it has none. The
+    /// conductor matches this text against the descriptions of the agents it can dispatch.
+    /// </summary>
+    public string? Capabilities { get; init; }
 }
 
 /// <summary>

@@ -35,7 +35,7 @@ public static partial class PacketHostFacts
     /// <summary>Builds the section for one task.</summary>
     /// <param name="repoRoot">The repository root, where the host <c>AGENTS.md</c> is read.</param>
     /// <param name="config">The effective configuration.</param>
-    /// <param name="role">The agent the task dispatches to, or null.</param>
+    /// <param name="role">The agent working the task: the worker's own name, else the one the plan assigned; null when neither is known.</param>
     /// <param name="taskId">The task id, for the scratchpad path.</param>
     /// <returns>The section, starting with <see cref="Heading" />.</returns>
     public static string Render(string repoRoot, KyberWeaveConfig config, string? role, string? taskId)
@@ -63,7 +63,10 @@ public static partial class PacketHostFacts
     private static void AppendGates(StringBuilder text, KyberWeaveConfig config, string? role)
     {
         if (role is null)
+        {
+            text.AppendLine("- Task gates: `review.task-gates` lists them per agent; print this packet again with `--agent <your agent name>` to see yours.");
             return;
+        }
 
         if (!config.Review.TaskGates.TryGetValue(role, out IReadOnlyList<ReviewTaskGate>? gates) || gates.Count == 0)
         {

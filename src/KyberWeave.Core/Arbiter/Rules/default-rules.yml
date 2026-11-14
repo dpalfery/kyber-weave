@@ -132,7 +132,8 @@ rules:
     trigger: delegate
     question: Does the task name the dispatch target as the specialist to do it?
     answers: [no-task, owner, not-owner, no-mapping]
-    # The skills a task names are read from plan prose, so a target missing from that list is
+    # The skills a task names are read from plan prose (an older plan's Skills line; a current plan
+    # names capabilities instead and answers no-mapping), so a target missing from that list is
     # asked about (a different spelling of the same specialist is common) rather than blocked.
     decide:
       - when: { fact: plan.task, exists: false }
@@ -152,6 +153,10 @@ rules:
     # The file-kind map below refines no-mapping at runtime, first match wins.
     effects: { no-task: allow, owner: allow, not-owner: escalate, no-mapping: allow }
 
+  # A plan task names the abilities it needs, not an agent, and the conductor chooses the agent by matching them
+  # against the agents' descriptions (ADR 0080). So a task with no named skills (no-mapping above, the normal case)
+  # has no recorded owner to hold the dispatch to: the model's pick is logged for monitoring and never blocks the
+  # conductor's. A host that wants the stop sets `effects: { other: escalate }`.
   - id: KW-ARB-OWNER-002
     trigger: delegate
     question: Which specialist in the caller's implementation roster owns this task?
@@ -165,7 +170,7 @@ rules:
       confidence-at-least: 0.8
       tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
       when: KW-ARB-OWNER-001=no-mapping
-    effects: { target: allow, other: escalate }
+    effects: { target: allow, other: allow }
 
   # The roster is the catalog's delegates-to list, so it judges only a caller the catalog names with one.
   # An unidentified caller, a helper agent outside the Squad, and a Squad agent that delegates to no one

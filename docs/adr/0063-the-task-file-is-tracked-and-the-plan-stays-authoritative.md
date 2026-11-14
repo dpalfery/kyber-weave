@@ -44,6 +44,8 @@ The architect saves `docs/plans/<plan>.tasks.json` at finalization, committed wi
 once. It carries a schema version, the plan path, an execution digest, and per task an id, role,
 dependencies, file scope, session group and the full prompt. Each prompt carries files as path plus
 symbol, full test class names, exact commands, acceptance criteria and the standards to fetch.
+([ADR 0080](0080-plan-tasks-name-capabilities-and-the-conductor-chooses-the-agent.md) replaced the
+derived role with the task's capabilities; a role is written only when the plan assigns one.)
 
 The conductor dispatches by task id and never pastes or retypes a prompt. The worker's first
 action is `kyber-weave docs packet <task id>`, which checks the file against its plan, prints that

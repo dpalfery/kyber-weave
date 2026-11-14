@@ -8,7 +8,7 @@ namespace KyberWeave.Core.Docs.Validation;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The file duplicates the plan on purpose: each task's id, role, dependencies and file scope
+/// The file duplicates the plan on purpose: each task's id, capabilities, dependencies and file scope
 /// are restated so the conductor can dispatch without reading the plan, and the plan stays the
 /// authority the file is checked against. The duplication is what
 /// <see cref="PlanTaskFileValidator" /> checks, because a file that has drifted hands a worker
@@ -45,7 +45,14 @@ public sealed record PlanTaskFile(
 /// prompt it pastes unchanged.
 /// </summary>
 /// <param name="Id">The task id, matching the plan's.</param>
-/// <param name="Role">The agent the task dispatches to.</param>
+/// <param name="Role">
+/// The agent the plan explicitly assigned the task to with a <c>Role</c>, <c>Agent</c> or <c>Specialist</c> label;
+/// null when it named none, which is the normal case: the conductor then picks the agent from <paramref name="Capabilities"/>.
+/// </param>
+/// <param name="Capabilities">
+/// The abilities the task needs, in plain words, from the plan task's <c>Capabilities</c> line (or, for an older plan,
+/// its <c>Skills</c> names); null when the plan gave neither.
+/// </param>
 /// <param name="DependsOn">The task ids that must finish first, matching the plan's; null when none.</param>
 /// <param name="Files">The task's file scope, matching the plan's; null when none.</param>
 /// <param name="Session">
@@ -56,6 +63,7 @@ public sealed record PlanTaskFile(
 public sealed record PlanTaskFileEntry(
     [property: JsonPropertyName("id")] string? Id = null,
     [property: JsonPropertyName("role")] string? Role = null,
+    [property: JsonPropertyName("capabilities")] string? Capabilities = null,
     [property: JsonPropertyName("depends-on")] IReadOnlyList<string>? DependsOn = null,
     [property: JsonPropertyName("files")] IReadOnlyList<string>? Files = null,
     [property: JsonPropertyName("session")] string? Session = null,

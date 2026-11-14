@@ -26,11 +26,11 @@ Every plan contains:
 - the declared scale (`documentation-impact` plus `impact-components`) and a `Design harvest` table keyed by Target component and Target doc type (one row per durable design, contract, interface, behaviour, or operations section; a `no-design-change` scale carries `Documentation waiver: <reason>` instead of rows);
 - investigation findings;
 - the mode-specific Test contract or verification contract;
-- dispatchable tasks with objective, acceptance criteria, dependencies, required skills, and its `session` group, naming every file it touches by path plus symbol, the full test class names its runner must match, and exact commands (the rules are below);
+- dispatchable tasks with objective, acceptance criteria, dependencies, capabilities, and its `session` group, naming every file it touches by path plus symbol, the full test class names its runner must match, and exact commands (the rules are below);
 - a dependency graph;
 - risks, out-of-scope boundaries, verification gates, review, and `docs-dev` closeout.
 
-Name required skills, not owning agents. The conductor maps skills to the live specialist inventory. Declare a dependency only when a task consumes another task's concrete output or their file scopes cannot safely overlap. Component labels and table order do not create scheduling barriers. Maximize parallel execution and err on the side of risk: prefer optimistic file scopes and add a dependency only for a real consumed output or a certain file overlap. Size each task for efficient execution by a single worker; do not split work further just to add parallelism. Four small file edits belong to one worker; changes of substantial size across independent projects belong to separate workers. DAL, React, C#, and DevOps tasks can run at the same time. When C# changes span multiple projects, split them across `csharp-dev` workers only if each project's change is large enough and decoupled enough to justify it. Respect `review.max-concurrent-workers` (default 4, host-configurable in `.kyber-weave/kyber-weave.yml`); the harness runs ready tasks up to that cap. (Q4 reversal, issue #386: this supersedes the 2026-10-14 "no max concurrency" directive.) Each developer task ends with the worker's own `task-gate` run, and a failing gate goes straight back to the same worker; no agent reviews a single task.
+Each task carries a `Capabilities:` line: the abilities its work needs, in plain words (for example "React and TypeScript UI with Playwright tests" or "documentation"). Never name an agent or a skill for it: the conductor picks the agent whose description fits. Declare a dependency only when a task consumes another task's concrete output or their file scopes cannot safely overlap. Component labels and table order do not create scheduling barriers. Maximize parallel execution and err on the side of risk: prefer optimistic file scopes and add a dependency only for a real consumed output or a certain file overlap. Size each task for efficient execution by a single worker; do not split work further just to add parallelism. Four small file edits belong to one worker; changes of substantial size across independent projects belong to separate workers. Tasks needing different abilities can run at the same time. Split changes across several projects into separate tasks only if each project's change is large enough and decoupled enough to justify it. Respect `review.max-concurrent-workers` (default 4, host-configurable in `.kyber-weave/kyber-weave.yml`); the harness runs ready tasks up to that cap. (Q4 reversal, issue #386: this supersedes the 2026-10-14 "no max concurrency" directive.) Each developer task ends with the worker's own `task-gate` run, and a failing gate goes straight back to the same worker; no agent reviews a single task.
 
 A plan never carries the review command. The end-of-run council derives it from the `code-review` skill — measured against the change with `--base`, and admitted to the full-suite gates with `--council` — so a command copied into a plan, an index row or a task packet goes stale the moment the gate list or one of its flags moves, and the reviewer then runs something nobody validated. Say who reviews and which skill governs it; leave the argv to the reviewer.
 
@@ -46,7 +46,7 @@ plan carries what the prompt needs:
   zero tests and exits success.
 - **The exact commands** the task runs, complete enough to paste into a shell.
 
-A task may also carry `Session: <group>` (default: the task id) and `Role: <agent>` (default: its first required skill).
+A task may also carry `Session: <group>` (default: the task id). Add `Role: <agent>` only when the owner assigned the task to a named agent.
 
 ## Session groups
 
@@ -54,7 +54,7 @@ Every task declares a `session` group, and the group is the unit of worker conti
 group run in one worker session, so the worker that made a change makes the follow-on fix to it
 rather than paying again to rebuild context it already had.
 
-A session group may continue follow-on fixes and later same-role tasks on the same change.
+A session group may continue follow-on fixes and later tasks needing the same abilities on the same change.
 
 ## Decisions
 
@@ -132,8 +132,8 @@ At finalization the architect saves the task file beside the plan, `<plan>.tasks
 directory named by **<plan-index>**, returns its path, and the finalize tool commits it with the plan.
 
 It carries a schema version, the plan's path, the execution digest, and one entry per task: id,
-role, dependencies, file scope, `session` group and the full prompt. The command writes all of it. The execution digest covers the
-parsed tasks, file scopes, dependencies, skills, test rows and mode, so flipping a task's status or
+capabilities, dependencies, file scope, `session` group and the full prompt. The command writes all of it. The execution digest covers the
+parsed tasks, file scopes, dependencies, test rows and mode, so flipping a task's status or
 editing a decisions row leaves it valid while editing a task makes it stale.
 
 Two slots stay unfilled — `{worktree}` and `{prior_results}` — because no plan can know the worktree
@@ -143,7 +143,7 @@ is written.
 Finalization runs in this order:
 
 1. Make every plan edit first: the approval rows, the bold body status line, the frontmatter status (`current`) and the index row.
-2. Run `kyber-weave docs tasks <plan file> --write` in the checkout that holds the plan. It derives the whole file from the plan: file scopes, dependencies, skills, the execution digest, and each prompt from the task's own text plus its command and acceptance criteria. When it refuses — a task lacks a command, acceptance criteria or a skill, or a `Depends on` token names no task — it names the task and what to add or correct in the plan; fix the plan and run it again. Run `kyber-weave docs tasks <plan file> --check` before `PLAN_READY` and fix every `KW-DOC-TASKS-008` to `-011` warning it prints: each names a task whose packet cannot be understood without the plan, or a worker who cannot open the plan.
+2. Run `kyber-weave docs tasks <plan file> --write` in the checkout that holds the plan. It derives the whole file from the plan: file scopes, dependencies, capabilities, the execution digest, and each prompt from the task's own text plus its command and acceptance criteria. When it refuses — a task lacks a command, acceptance criteria or capabilities, or a `Depends on` token names no task — it names the task and what to add or correct in the plan; fix the plan and run it again. Run `kyber-weave docs tasks <plan file> --check` before `PLAN_READY` and fix every `KW-DOC-TASKS-008` to `-011` warning it prints: each names a task whose packet cannot be understood without the plan, or a worker who cannot open the plan.
 3. Run both documentation checks. Any `KW-DOC-TASKS-*` finding is fixed by changing the plan and repeating step 2, never by editing the file.
 
 Never write, edit or compute the task file or its digest by hand, with a script, or through a sibling such as a `.new` or `.tmp` copy. An edit to a task, a test contract row, an out-of-scope path or the development mode after step 2 means repeating step 2; a status or Decisions edit does not. `kyber-weave docs tasks <plan file> --check` exits 1 and says what differs without writing.
