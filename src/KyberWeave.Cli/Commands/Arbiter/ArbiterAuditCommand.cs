@@ -236,7 +236,7 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
         AnsiConsole.MarkupLine(
             $"[grey]{evaluations} decision-model evaluation(s) over {implementationDispatches} dispatch(es) to implementation agents.[/]");
 
-        if (evaluations > 0 || implementationDispatches == 0 || !ModelConfigured(config))
+        if (evaluations > 0 || implementationDispatches == 0 || !ModelConfigured(config, report, ref reported))
             return;
 
         reported++;
@@ -250,16 +250,26 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
                   "investigate runs only the machine-fact rules. See ADR 0082."));
     }
 
-    private static bool ModelConfigured(KyberWeaveConfig config)
+    internal static bool ModelConfigured(KyberWeaveConfig config, DiagnosticReport report, ref int reported)
     {
+        string home = ArbiterCommandComposition.HomeDirectory();
         try
         {
-            return ArbiterUserSettings.ApplyTo(config.Arbiter.Provider, ArbiterCommandComposition.HomeDirectory()).Kind
+            return ArbiterUserSettings.ApplyTo(config.Arbiter.Provider, home).Kind
                    != ArbiterProviderKind.None;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
                                               or YamlDotNet.Core.YamlException)
         {
+            reported++;
+            report.Add(new Diagnostic(
+                NoModelEvaluations,
+                Severity.Warning,
+                $"The user settings file '{ArbiterUserSettings.GetPath(home)}' could not be read " +
+                $"({exception.GetType().Name}: {exception.Message}), so its provider override was ignored and the " +
+                "repository's provider decided whether a decision model is configured.",
+                "arbiter",
+                Hint: "Fix or remove the user settings file, then run the audit again."));
             return config.Arbiter.Provider.Kind != ArbiterProviderKind.None;
         }
     }

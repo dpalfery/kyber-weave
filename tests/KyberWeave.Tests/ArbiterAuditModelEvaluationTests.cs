@@ -1,5 +1,8 @@
 using KyberWeave.Cli.Commands.Arbiter;
+using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Diagnostics;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -57,6 +60,46 @@ public sealed class ArbiterAuditModelEvaluationTests : IDisposable
         string output = Audit(provider: "systemone", step: 1, trigger: "delegate.model");
 
         Assert.Contains(ArbiterAuditCommand.NoModelEvaluations, output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ACorruptUserSettingsFile_IsReportedAndTheRepositoryProviderDecides()
+    {
+        WriteUserSettings("provider: [unclosed\n");
+        DiagnosticReport report = new();
+        int reported = 0;
+
+        bool configured = ArbiterAuditCommand.ModelConfigured(KyberWeaveConfig.ProductDefaults, report, ref reported);
+
+        Assert.False(configured);
+        Assert.Equal(1, reported);
+        Diagnostic warning = Assert.Single(report.Items);
+        Assert.Equal(Severity.Warning, warning.Severity);
+        Assert.Equal(ArbiterAuditCommand.NoModelEvaluations, warning.Code);
+        Assert.Contains("arbiter.yml", warning.Message, StringComparison.Ordinal);
+        Assert.Contains("YamlException", warning.Message, StringComparison.Ordinal);
+        Assert.Contains("provider override was ignored", warning.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AReadableUserSettingsFile_IsNotReported()
+    {
+        WriteUserSettings("provider:\n  kind: systemone\n");
+        DiagnosticReport report = new();
+        int reported = 0;
+
+        bool configured = ArbiterAuditCommand.ModelConfigured(KyberWeaveConfig.ProductDefaults, report, ref reported);
+
+        Assert.True(configured);
+        Assert.Equal(0, reported);
+        Assert.Empty(report.Items);
+    }
+
+    private static void WriteUserSettings(string yaml)
+    {
+        string settingsPath = ArbiterUserSettings.GetPath(ArbiterCommandComposition.HomeDirectory());
+        Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
+        File.WriteAllText(settingsPath, yaml);
     }
 
     private string Audit(string provider, int step, string trigger = "delegate")

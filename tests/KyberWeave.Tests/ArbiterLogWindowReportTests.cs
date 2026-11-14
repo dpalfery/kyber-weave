@@ -132,6 +132,8 @@ public sealed class ArbiterLogWindowReportTests : IDisposable
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() => new ArbiterAuditCommand().Execute(
             null!, new ArbiterSettings { Path = Root }));
 
+        // The audit ran to its summary, so the absence below is "the log fit the window", not "the command printed nothing".
+        Assert.Contains("1 ledger event(s)", run.Output, StringComparison.Ordinal);
         Assert.DoesNotContain(ArbiterAuditCommand.LogWindowTruncated, run.Output, StringComparison.Ordinal);
     }
 
