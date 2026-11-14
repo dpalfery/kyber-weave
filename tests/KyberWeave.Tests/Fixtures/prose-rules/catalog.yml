@@ -1794,7 +1794,7 @@ rules:
       - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/skills/task-gate/references/rework.md
   - id: plan-closeout-by-command
-    statement: Plan closeout archives the plan by running the kyber-weave docs closeout command, which sets the status, moves the plan, removes its task file and updates both indexes, rather than doing those steps by hand.
+    statement: docs-dev checks a plan closeout by running the kyber-weave docs closeout command, which names every closeout item still missing, and a plan is archived only by that command's archive mode, never by moving or editing the files by hand.
     stated-in:
       - path: products/kyber-squad/agents/docs-dev.md
         section: Plan closeout
