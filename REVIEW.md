@@ -31,11 +31,11 @@ findings Kilo and CodeRabbit raised across about 100 pull requests from 30 Sep t
 5. **Don't ask for scope creep.** Unrelated refactors, renames, and new features are
    out of bounds for a review. Equally, flag unrelated edits *in* the diff (see
    [Scope discipline](#scope-discipline)).
-6. **Style and wording nits are minor** and never block. Comment typos, capitalisation, and
-   alignment belong in a single batched note, not one comment each.
+6. **Style and wording nits are nitpicks**: not reported, never fixed (see *What not to flag*).
+   A comment or document statement that is wrong or misleading is a real minor finding.
 7. **Severity follows consequence**: data loss, wrong figures shown to the user, silent failure,
    or a crash path → critical when it ships silently or corrupts data, otherwise major. Wrong only
-   in an edge case with a visible failure → minor. Cosmetic → minor, and never blocks.
+   in an edge case with a visible failure → minor. Cosmetic only → a nitpick, not reported.
 
 ## Recurring defect classes
 
@@ -317,8 +317,10 @@ Governing standards: [`docs/standards/csharp`](docs/standards/csharp/README.md) 
 
 - Anything `dotnet format`, the compiler and analyzers, `tsc`, ESLint, `clippy`, or `docs validate` already
   enforces.
-- Joke-grade or stylistic prose in comments, naming taste, or "I would have written this
-  differently" with no failure scenario.
+- Nitpicks. A nitpick is a purely stylistic point with no effect on how the application operates:
+  formatting, wording preference, naming style, "I would have written this differently". Nitpicks are
+  not raised and never fixed, unless `review.policy.fix-level` is `nitpick`. A naming issue that causes a defect or breaks a documented public contract is graded
+  by its impact instead.
 - Suggestions to add features, abstractions, or configurability the task did not ask for.
 - Pre-existing issues the change does not touch. A breach of a documented rule is the exception: it is
   reported as pre-existing debt, blocks nothing, and becomes a todo.

@@ -435,7 +435,7 @@ public static partial class SeatOutputParser
                 string.Equals(name, severityText, StringComparison.OrdinalIgnoreCase)) is not { } severityName
             || !Enum.TryParse(severityName, out ReviewSeverity severity))
         {
-            throw new SeatOutputException($"{where} has severity '{Clip(severityText)}'; use critical, major or minor.");
+            throw new SeatOutputException($"{where} has severity '{Clip(severityText)}'; use critical, major, minor or nitpick.");
         }
 
         int confidence = RequiredNumber(item, "confidence", where);

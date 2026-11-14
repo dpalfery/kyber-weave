@@ -507,7 +507,7 @@ review:
     strictness: balanced   # lenient | balanced | strict
     # major-count-blocks: 3               # optional; overrides the strictness preset
     # min-confidence: 7                    # optional; overrides the strictness preset
-    minor-findings: follow-up              # follow-up (default) | fix
+    fix-level: minor                       # critical | major | minor (default) | nitpick
     suppressions:
       - id: correctness/generated-nullable
         reason: Regenerated client, tracked separately.
@@ -522,11 +522,7 @@ strictness to every lens so a strict host receives lower-confidence findings rat
 them withheld at the source. Minor findings never block at any level, which keeps the
 autonomous-gate rule that only critical and major findings gate a change.
 
-**Minor findings.** `policy.minor-findings` decides what a fix round does with them. `follow-up`
-(the default) leaves them out of the fix round: the pull request lists them under pending human
-review and the conductor files them as todos with the run's other follow-up work. `fix` sends
-them to the same fix round as the majors. Either way they never block and never start a cycle by
-themselves.
+**Fix level.** `policy.fix-level` decides what a fix round takes; each level includes the ones before it: `critical` (failed blocking gates and critical findings: data loss, a security hole, corruption, behaviour that breaks silently), `major` (also major findings: the change is wrong or fails under conditions a normal user reaches, or a file or type sits against the documented structure), `minor` (also minor findings: real but bounded, such as a narrow edge case, a misleading comment or document statement, a missing test for a stated behaviour; the default) and `nitpick` (also nitpicks: purely stylistic points with no effect on how the application operates). The default is `minor`: quality first, speed second, so the loop runs until nothing at or above the level is left. Findings below the level are not fixed: the pull request lists them under pending human review and the conductor files them as todos with the run's other follow-up work; a nitpick below the level is dropped and listed in the verdict report only. At `nitpick` the seats are told to raise nitpicks (`severity: nitpick`) and the decision model's nitpick step does not drop them. The fix level decides what is fixed, never what blocks: `strictness`, `major-count-blocks` and `min-confidence` decide that. The retired `minor-findings` key (never released) still reads: `follow-up` as `major`, `fix` as `minor`.
 
 `run` is **argv, not a command line**, because `ProcessRunner` refuses a shell and refuses a
 concatenated argument string. A host cannot express a pipeline or a redirect here — and neither
@@ -1044,14 +1040,16 @@ rather than performing it.
 | `full` | Forces a complete council re-scan | Selected by a person: a disputed verdict, or a stale prior review |
 
 **The review loop.** The verdict prints what the fix round takes, one `fix:` line each (every
-failed blocking gate and every critical and major finding, and the minor ones too when
-`review.policy.minor-findings` is `fix`), what becomes follow-up work (`follow-up:`: minor
-findings under the default `follow-up`, and findings dropped as `pre-existing debt`), and a
+failed blocking gate and every finding at or above `review.policy.fix-level`), what becomes follow-up work (`follow-up:`: findings
+below the fix level, and findings dropped as `pre-existing debt`), and a
 closing `fix round:` line (`KW-REVIEW-056`). Each `fix:` line goes to the worker that owns its
-scope, after `REQUEST_CHANGES` and after an `APPROVE` alike; an `APPROVE` gets one fix round, and
-when the cycle after it approves too, what is still open is printed as `open:` and goes to human
-review. The council re-reviews until the verdict prints `fix round: none`. Minor findings never
-start a cycle by themselves. Every cycle
+scope, one dispatch per worker, after `REQUEST_CHANGES` and after an `APPROVE` alike. The council
+re-reviews until the verdict prints `fix round: none`: `review clean: proceed to archive` when
+nothing is left, or, when a cap stopped the loop, with the findings still to fix printed as
+`open:` and sent to human review. The verdict computes the caps from the cycle folders: 5 cycles, or
+3 cycles in a row in which the count of findings to fix (the `fix:` lines) does not fall, so a loop
+that only ever finds minors still trips it. Three fix rounds are reachable without either cap.
+Every cycle
 after the first is a `verifier` cycle, a fact the council's own gate run (`review gates --council`) and the read-only `kyber-weave review cycle . --task <task-id>` query both read from the finished cycle folders (those holding the verdict's `findings.json`) rather than from how a dispatch is worded: it reviews the fix delta `git diff <prior head>...<head>`,
 and `review seats` seats only the lenses that raised the findings the fix round took, plus
 `correctness` and `test-adequacy` when the fix changed anything but Markdown; only a fix delta
@@ -1064,7 +1062,8 @@ traces each through the fix. A fix that refuses only the input the finding named
 finding open.
 
 The loop has a hard stop: 5 review cycles, or 3 cycles in a row in which the count of
-surviving critical and major findings does not fall. The findings still open are then listed in
+findings to fix (the `fix:` lines, whatever the fix level makes fixable) does not fall; `review verdict` applies it and prints
+the rest as `open:`. The findings still open are then listed in
 the pull request as pending human review, and delivery continues — a loop that is not
 converging is not going to, and the usual cause needs a person. A finding whose rework tripped
 the circuit-breaker stays open and counts toward the stop. The loop runs on the open pull

@@ -63,7 +63,7 @@ Every finding is one block in this exact shape:
 ```yaml
 - id: <lens-name>/<short-slug>
   lens: <lens-name>
-  severity: critical | major | minor
+  severity: critical | major | minor | nitpick (nitpick only at fix level nitpick)
   confidence: <1-10>
   file: <repository-relative path>
   line: <line number in the file>
@@ -84,7 +84,7 @@ Every finding is one block in this exact shape:
 
 - **critical** — data loss, a security hole, corruption, or a break in behaviour that ships silently.
 - **major** — the change is wrong or will fail under conditions a reasonable user reaches.
-- **minor** — real but bounded: clarity, a missed naming or style convention, a narrow edge case. A file or type placed against the repository's documented structure (wrong project, layer or folder) is `major`.
+- **minor** — real but bounded: a narrow edge case, a misleading comment or document statement, a missing test for a stated behaviour, a maintainability problem. A purely stylistic point (formatting, wording preference, naming style) is a nitpick, not a minor finding: raise it, as `severity: nitpick`, only when the packet says the fix level is `nitpick`; otherwise do not report it. A file or type placed against the repository's documented structure (wrong project, layer or folder) is `major`.
 
 Severity describes **impact if it ships**, never how confident you are or how much effort the fix takes. Confidence is a separate field; use it. A finding you are 5/10 sure of but which would be critical is `severity: critical, confidence: 5` — say both, and let the reviewer decide.
 

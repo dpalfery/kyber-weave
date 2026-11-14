@@ -8,7 +8,10 @@ namespace KyberWeave.Core.Review;
 /// </remarks>
 public enum ReviewSeverity
 {
-    /// <summary>Bounded: clarity, convention, or a narrow edge case.</summary>
+    /// <summary>A purely stylistic point with no effect on how the application operates; raised only at fix level <c>nitpick</c>.</summary>
+    Nitpick,
+
+    /// <summary>Real but bounded: a narrow edge case, a misleading comment or document statement, a missing test for a stated behaviour.</summary>
     Minor,
 
     /// <summary>Wrong, or failing under conditions a real user reaches.</summary>

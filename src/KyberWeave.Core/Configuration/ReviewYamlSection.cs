@@ -106,6 +106,9 @@ internal sealed class ReviewPolicyYaml
 
     public string? Strictness { get; init; }
 
+    public string? FixLevel { get; init; }
+
+    /// <summary>The key <c>fix-level</c> replaced: <c>follow-up</c> reads as <c>major</c>, <c>fix</c> as <c>minor</c>.</summary>
     public string? MinorFindings { get; init; }
 
     public List<ReviewSuppressionYaml>? Suppressions { get; init; }

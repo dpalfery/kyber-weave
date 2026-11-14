@@ -667,7 +667,7 @@ rules:
         - products/kyber-squad/skills/testing/SKILL.md
   # ---------------------------------------------------------------- the review loop and the council
   - id: council-loop-until-approve
-    statement: The review council re-reviews after every fix round until the verdict says no fix round is left (fix round none), or the loop reaches its hard stop.
+    statement: The review council re-reviews after every fix round until the verdict says nothing is left to fix (fix round none, review clean), or the loop reaches its hard stop.
     stated-in:
       - products/kyber-squad/agents/code-reviewer.md
       - products/kyber-squad/agents/conductor.md
@@ -723,7 +723,7 @@ rules:
       - products/kyber-squad/shared/worker-baseline.md
       - products/kyber-squad/skills/task-gate/references/rework.md
   - id: review-loop-bounds
-    statement: The review loop stops after 5 review cycles, or after 3 cycles in a row in which the count of surviving critical and major findings does not fall.
+    statement: The review loop stops after 5 review cycles, or after 3 cycles in a row in which the count of findings to fix does not fall.
     stated-in:
       - products/kyber-squad/skills/delivery-execution/SKILL.md
       - products/kyber-squad/agents/conductor/references/autonomy.md
@@ -755,8 +755,8 @@ rules:
     controls:
       - products/kyber-squad/skills/task-gate/references/rework.md
       - products/kyber-squad/agents/conductor/references/autonomy.md
-  - id: minor-findings-never-loop
-    statement: Minor and Info findings never start a review cycle by themselves; they join a fix round only when review.policy.minor-findings is fix.
+  - id: fix-level-decides-what-is-fixed
+    statement: A fix round takes every finding at or above review.policy.fix-level (critical, major, minor by default, or nitpick), so the review loop runs until none is left; findings below the level are follow-up work.
     stated-in:
       - products/kyber-squad/skills/delivery-execution/SKILL.md
     controls:

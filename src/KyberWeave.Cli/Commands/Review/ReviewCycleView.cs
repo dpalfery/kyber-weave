@@ -115,8 +115,8 @@ internal static class ReviewCycleView
     }
 
     /// <summary>
-    ///     The prior cycle's findings the fix round took, which this cycle re-checks: every critical and major one, and the
-    ///     minor ones too when <c>review.policy.minor-findings</c> is <c>fix</c>.
+    ///     The prior cycle's findings the fix round took, which this cycle re-checks: every finding at or above
+    ///     <c>review.policy.fix-level</c>.
     /// </summary>
     /// <returns>False, with a finding added to <paramref name="report"/>, when the findings cannot be read.</returns>
     public static bool TryReadRecheck(
@@ -202,6 +202,7 @@ internal static class ReviewCycleView
     {
         ReviewSeverity.Critical => "critical",
         ReviewSeverity.Major => "major",
+        ReviewSeverity.Nitpick => "nitpick",
         _ => "minor"
     };
 }

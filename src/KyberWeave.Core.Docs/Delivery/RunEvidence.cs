@@ -142,6 +142,7 @@ public static partial class RunEvidence
             {
                 ReviewSeverity.Critical => "critical",
                 ReviewSeverity.Major => "major",
+                ReviewSeverity.Nitpick => "nitpick",
                 _ => "minor"
             }}")];
         string joined = parts.Length == 1 ? parts[0] : string.Join(", ", parts[..^1]) + " and " + parts[^1];

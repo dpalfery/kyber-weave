@@ -7,7 +7,7 @@ Read this in every review cycle after the first, which the council's gate run pr
 - **Seats.** `review seats` seats only the lenses that raised the findings the fix round took (its `recheck:` lines), plus `correctness` and `test-adequacy` when the fix changed anything but Markdown, and prints `verifier: seated <lenses>`. Every other lens is carried from the prior cycle by the verdict. Send exactly the blocks it printed. Only a fix delta of more than 300 changed lines (the quick-review threshold) makes the command seat every lens the delta's own files call for; nothing else widens the cycle.
 - **Diff.** `evidence.md` names the fix delta, the prior cycle's head to the files on disk, as the diff; the changed-file list stays the whole change's.
 - **Gates.** The `run:` line runs only the `rerun:` gates, those whose inputs the fix touched, and carries the rest into `gates.json`; `--full` runs every gate instead.
-- **Verdict.** `review verdict` takes the prior cycle as `--prior`, carries the lenses it did not re-seat, and carries each prior finding the fix round did not take (a minor one, by default), so the last cycle still lists it.
+- **Verdict.** `review verdict` takes the prior cycle as `--prior`, carries the lenses it did not re-seat, and carries each prior finding the fix round did not take (one below `review.policy.fix-level`), so the last cycle still lists it.
 
 ## The rules
 
@@ -17,4 +17,4 @@ Read this in every review cycle after the first, which the council's gate run pr
 
 **The refutation pass** sends only the candidates no earlier cycle refuted.
 
-**The loop ends** when the verdict prints `fix round: none`. After an APPROVE whose fix round took majors (or minors, under `review.policy.minor-findings: fix`), this cycle's verdict ends the loop unless it is `REQUEST_CHANGES`; a finding it leaves open is listed for human review. The `delivery-execution` skill owns the hard stop (5 cycles, or 3 in a row with no drop in critical plus major).
+**The loop ends** when the verdict prints `fix round: none`. Anything this cycle's verdict still prints as `fix:` goes to another fix round and another verifier cycle, an APPROVE included; `review clean: proceed to archive` ends it. The verdict itself applies the hard stop (5 cycles, or 3 in a row with no drop in the findings to fix) and prints what is left as `open:` for human review.

@@ -29,7 +29,7 @@ public static class ReviewConfigLoader
 
     /// <summary>Keys the typed reader maps on <c>review.policy</c>. Any other key is ignored and reported.</summary>
     private static readonly string[] PolicyKeys =
-        ["major-count-blocks", "min-confidence", "minor-findings", "strictness", "suppressions"];
+        ["fix-level", "major-count-blocks", "min-confidence", "minor-findings", "strictness", "suppressions"];
 
     /// <summary>Merges the parsed <c>review:</c> section over the defaults.</summary>
     /// <param name="defaults">The configuration a host gets when a key is absent.</param>
@@ -827,18 +827,30 @@ public static class ReviewConfigLoader
             Strictness = strictness,
             MajorCountBlocks = majorBlocks,
             MinConfidence = minConfidence,
-            MinorFindings = policy.MinorFindings is null ? defaults.MinorFindings : ParseMinorFindings(policy.MinorFindings),
+            FixLevel = policy.FixLevel is not null
+                ? ParseFixLevel(policy.FixLevel)
+                : policy.MinorFindings is null ? defaults.FixLevel : ParseLegacyMinorFindings(policy.MinorFindings),
             Suppressions = policy.Suppressions is null
                 ? defaults.Suppressions
                 : ParseSuppressions(policy.Suppressions)
         };
     }
 
-    private static ReviewMinorFindings ParseMinorFindings(string value) => value.Trim() switch
+    private static ReviewFixLevel ParseFixLevel(string value) => value.Trim() switch
     {
-        "follow-up" => ReviewMinorFindings.FollowUp,
-        "fix" => ReviewMinorFindings.Fix,
-        _ => throw new YamlException($"review.policy.minor-findings '{value}' is not recognised; use follow-up or fix.")
+        "critical" => ReviewFixLevel.Critical,
+        "major" => ReviewFixLevel.Major,
+        "minor" => ReviewFixLevel.Minor,
+        "nitpick" => ReviewFixLevel.Nitpick,
+        _ => throw new YamlException($"review.policy.fix-level '{value}' is not recognised; use critical, major, minor or nitpick.")
+    };
+
+    /// <summary>The key before <c>fix-level</c>, which never shipped: <c>follow-up</c> stood for <c>major</c>, <c>fix</c> for <c>minor</c>.</summary>
+    private static ReviewFixLevel ParseLegacyMinorFindings(string value) => value.Trim() switch
+    {
+        "follow-up" => ReviewFixLevel.Major,
+        "fix" => ReviewFixLevel.Minor,
+        _ => throw new YamlException($"review.policy.minor-findings '{value}' is not recognised; it is replaced by review.policy.fix-level (critical, major, minor or nitpick).")
     };
 
     private static ReviewStrictness ParseStrictness(string value) =>

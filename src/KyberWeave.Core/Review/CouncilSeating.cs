@@ -188,6 +188,9 @@ public static class CouncilSeating
             text.AppendLine("- Index: unavailable for this tree, so read files directly and record `Index fallback: projectPath: not-indexed`.");
         text.AppendLine(CultureInfo.InvariantCulture,
             $"- Strictness: {context.Strictness} (min-confidence {context.MinConfidence.ToString(CultureInfo.InvariantCulture)})");
+        text.AppendLine(string.Equals(context.FixLevel, "nitpick", StringComparison.Ordinal)
+            ? "- Fix level: nitpick. Raise nitpicks too, as `severity: nitpick`: purely stylistic points with no effect on how the application operates (formatting, wording preference, naming style)."
+            : $"- Fix level: {context.FixLevel}. Do not raise nitpicks (purely stylistic points with no effect on how the application operates); report only findings of that severity or higher.");
         text.AppendLine(context.GuidancePath is null
             ? "- Review guidance: none declared, or the file is missing. Say so in your output."
             : $"- Review guidance: {context.GuidancePath}. Apply its ground rules and what-not-to-flag, and the sections its lens and technology maps name for your lens and the changed files.");
@@ -253,6 +256,7 @@ public sealed record CouncilSeatPlan(
 /// <param name="IndexReady">Whether the tree's CodeGraph index is ready.</param>
 /// <param name="Strictness">The effective strictness preset name.</param>
 /// <param name="MinConfidence">The effective min-confidence.</param>
+/// <param name="FixLevel">The effective <c>review.policy.fix-level</c> name.</param>
 /// <param name="GuidancePath">The review guidance file, or null when none is declared or it is missing.</param>
 /// <param name="DuplicatesPath">The duplicates report the gate run writes.</param>
 public sealed record CouncilSeatContext(
@@ -261,5 +265,6 @@ public sealed record CouncilSeatContext(
     bool IndexReady,
     string Strictness,
     int MinConfidence,
+    string FixLevel,
     string? GuidancePath,
     string? DuplicatesPath);

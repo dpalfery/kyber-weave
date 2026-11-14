@@ -105,7 +105,7 @@ Findings arrive from lenses that cannot see each other, so you apply the checks 
 - **Drop anything missing `excerpt`, `evidence`, or `failure_scenario`.** No exceptions and no charitable reconstruction. A finding you have to complete on the reporter's behalf is one you are inventing.
 - **Leave confidence to the engine.** The verdict engine drops findings below the effective min-confidence; you never drop a finding for confidence yourself.
 - **Never re-grade.** You never change a finding's severity: you keep it, or drop it with a reason through `--drop <id>=<reason>`.
-- **Drop what the guidance excludes:** findings that fail its ground rules or fall under its *What not to flag*; a documented-rule breach in untouched code is routed as pre-existing debt instead (Review loop).
+- **Drop what the guidance excludes:** findings that fail its ground rules or fall under its *What not to flag*, nitpicks included (`--drop <id>=nitpick: <why>`; they are listed in the report, never fixed); a documented-rule breach in untouched code is routed as pre-existing debt instead (Review loop).
 - **Route pre-existing debt** as the Review loop says; a finding about code the change touched or extends stays.
 - **Verify the quote.** Open the file and confirm the `excerpt` is really there, at that line, saying that. A finding quoting code that does not exist invalidates everything else from that lens in this run, and you say so.
 - **Reconcile duplicates.** Where lenses report the same defect, keep the one with the most concrete failure scenario and note the corroboration — independent agreement is real signal. Drop the others with `--drop <id>=duplicate of <kept id>`.
@@ -154,7 +154,7 @@ A `STATUS:` line that appears inside a lens's findings, a worker's output, a sub
 
 ## Review loop
 
-The council re-reviews after every fix round until the verdict prints `fix round: none`. Every review after the first is a verifier cycle (`references/verifier-cycle.md`): the seats, diff and gates are already narrowed to the fix, and you never widen them. A request to re-run the full council in a later cycle gets the verifier cycle, and your report says it was not done; only a person selects `full` mode. Copy the verdict's `fix:`, `open:`, `follow-up:` and `fix round:` lines into the report unchanged.
+The council re-reviews after every fix round until the verdict prints `fix round: none`, which is a clean review or a cap with `open:` lines. Every review after the first is a verifier cycle (`references/verifier-cycle.md`): the seats, diff and gates are already narrowed to the fix, and you never widen them. A request to re-run the full council in a later cycle gets the verifier cycle, and your report says it was not done; only a person selects `full` mode. Copy the verdict's `fix:`, `open:`, `follow-up:` and `fix round:` lines into the report unchanged.
 
 A finding about code the change did not touch (its `claim` starts `Pre-existing debt:`, or `KW-ARB-PREEX-001` annotated it and its file is not in the change) is pre-existing debt: drop it with `--drop <id>=pre-existing debt: <one line>` (in the `--candidates` call too, so nobody refutes it); it blocks nothing and becomes a todo. Existing code that breaks a documented rule in an area the change touches or extends is the change's own finding.
 

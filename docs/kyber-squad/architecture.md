@@ -1972,12 +1972,12 @@ description and does not gate readiness. Review that follows is ordinary post-re
 not a conductor gate. The conductor never merges. Unresolved circuit-breakers are listed as pending human review, not held back
 ([ADR 0045](../adr/0045-conductor-operator-channel-opt-in.md)).
 
-The end-of-run council is a loop, not a single pass. After `REQUEST_CHANGES`, every critical and
-major finding and every failed blocking gate goes to the worker that owns its scope (after an
-`APPROVE` too, for one round), and the council re-reviews until the verdict prints `fix round:
+The end-of-run council is a loop, not a single pass. After `REQUEST_CHANGES` or an `APPROVE` that
+leaves anything to fix, every finding at or above `review.policy.fix-level` (default `minor`) and every failed blocking gate goes to the worker that owns
+its scope, one dispatch per worker, and the council re-reviews until the verdict prints `fix round:
 none`; every cycle after the first is a verifier cycle over
-the fix delta. The hard stop is 5 cycles, or 3 cycles in a row in which the count of surviving
-critical and major findings does not fall: the findings still open are then listed in the pull
+the fix delta. The hard stop, computed by `review verdict`, is 5 cycles, or 3 cycles in a row in which the count of
+findings to fix does not fall: the findings still open are then listed in the pull
 request as pending human review, and delivery continues. Each cycle keeps its seat files,
 `gates.json`, the `findings.json` the verdict command writes, and `cycle.json` (the branch, base and head it reviewed) in
 `.agent_scratchpad/<task-id>/review/cycle-<n>/` until the run ends, and the conductor passes the

@@ -235,7 +235,7 @@ public sealed class ReviewGatesCycleTests : IDisposable
                 FindingsReport.CurrentSchema,
                 [
                     new ReviewFinding("model-placement/dto-in-domain", "model-placement", ReviewSeverity.Major, 9, "src/Domain/JobStatusSummaryDto.cs", 1),
-                    new ReviewFinding("prior-art/name", "prior-art", ReviewSeverity.Minor, 9, "src/Domain/JobStatusSummaryDto.cs", 1)
+                    new ReviewFinding("prior-art/name", "prior-art", ReviewSeverity.Nitpick, 9, "src/Domain/JobStatusSummaryDto.cs", 1)
                 ],
                 [],
                 0)));

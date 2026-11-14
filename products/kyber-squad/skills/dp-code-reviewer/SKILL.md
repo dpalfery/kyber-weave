@@ -71,25 +71,25 @@ disputed. The review loop never switches to it on its own.
 
 ## The re-review loop
 
-The council re-reviews after every fix round until the verdict prints `fix round: none`. Critical and major findings and failed
-blocking gates start a fix round, after an APPROVE too (one round); minor findings start
-none, and join a round only under `review.policy.minor-findings: fix`.
+The council re-reviews after every fix round until the verdict prints `fix round: none`. Failed blocking gates and
+findings at or above `review.policy.fix-level` (default `minor`) go to a fix round, after an APPROVE too, and a verifier cycle checks each round;
+findings below the level are follow-up work.
 
 1. **Review** — `code-review` in the current mode.
 2. **Verdict**:
    - `fix round: none` → done. Report it and stop.
    - Otherwise (`REQUEST_CHANGES`, or an `APPROVE` that still prints `fix:` lines) → continue.
-3. **Route** each `fix:` line the verdict printed (critical and major findings, failed blocking gates, and minor findings only under `review.policy.minor-findings: fix`) back to the agent that wrote the code — not to a general worker.
-   Send the findings verbatim: the excerpt, the evidence, the failure scenario, and the
+3. **Route** the `fix:` lines the verdict printed back to the agents that wrote the code, not to a general worker: one dispatch per owning
+   agent carrying all of its lines, in parallel when their files do not overlap. Send the findings verbatim: the excerpt, the evidence, the failure scenario, and the
    suggestion. A paraphrased finding loses the specificity that makes it actionable.
 4. **Wait** for the fix. Do not fix anything here; this skill orchestrates, it does not edit.
 5. **Re-review** in `verifier` mode. Return to step 2.
 
 ### Termination
 
-- `fix round: none` — done. An `APPROVE` gets one fix round; the verdict after it ends the loop unless it is `REQUEST_CHANGES`.
-- **Hard stop.** The loop stops after 5 review cycles, or after 3 cycles in a row in which
-  the count of surviving critical and major findings does not fall; the findings still open
+- `fix round: none` — done: `review clean: proceed to archive`, or a cap stopped the loop. An `APPROVE` with `fix:` lines still gets a fix round.
+- **Hard stop.** The verdict stops the loop after 5 review cycles, or after 3 cycles in a row in which
+  the count of findings to fix (its `fix:` lines, whatever the fix level makes fixable) does not fall; the findings still open
   are then listed in the pull request as pending human review, and delivery continues. A
   loop that is not converging is not going to, and the usual cause is a finding the
   implementing agent does not understand or does not accept. That needs a person, not

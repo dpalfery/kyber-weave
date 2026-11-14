@@ -377,6 +377,7 @@ public static partial class ReviewVerdictDecisions
     {
         ReviewSeverity.Critical => "critical",
         ReviewSeverity.Major => "major",
+        ReviewSeverity.Nitpick => "nitpick",
         _ => "minor",
     };
 

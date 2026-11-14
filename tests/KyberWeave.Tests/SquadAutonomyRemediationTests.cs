@@ -33,13 +33,12 @@ public sealed class SquadAutonomyRemediationTests
     }
 
     /// <summary>
-    /// The execution contract names the Minor/Info severity band; the rule that it never starts
-    /// another loop cycle is graded from the catalog (<c>minor-findings-never-loop</c>).
+    /// The execution contract names the setting that decides what a fix round takes; the rule is graded from the catalog (<c>fix-level-decides-what-is-fixed</c>).
     /// </summary>
     [Fact]
-    public void ExecutionContractNamesTheMinorInfoBand()
+    public void ExecutionContractNamesTheFixLevelSetting()
     {
-        Assert.Contains("Minor/Info", ExecutionAndReview(), StringComparison.Ordinal);
+        Assert.Contains("review.policy.fix-level", ExecutionAndReview(), StringComparison.Ordinal);
     }
 
     /// <summary>

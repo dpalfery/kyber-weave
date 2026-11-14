@@ -69,9 +69,9 @@ public sealed class ReviewCycleTests : IDisposable
     }
 
     [Fact]
-    public void AFinishedCycleMakesTheNextOneAVerifierCycleThatRechecksTheMajorFindingsAndRerunsTouchedGates()
+    public void AFinishedCycleMakesTheNextOneAVerifierCycleThatRechecksTheFindingsAtOrAboveTheFixLevelAndRerunsTouchedGates()
     {
-        FinishCycle(1, [Gate("build"), Gate("docs"), Gate("always")], [Finding("a/major", ReviewSeverity.Major), Finding("a/minor", ReviewSeverity.Minor)]);
+        FinishCycle(1, [Gate("build"), Gate("docs"), Gate("always")], [Finding("a/major", ReviewSeverity.Major), Finding("a/minor", ReviewSeverity.Minor), Finding("a/nitpick", ReviewSeverity.Nitpick)]);
         Write("src/a.cs", "// fixed\n");
         Commit("fix");
 
@@ -83,7 +83,8 @@ public sealed class ReviewCycleTests : IDisposable
         Assert.Contains($"folder: {CycleFolder(2)}", output, StringComparison.Ordinal);
         Assert.Contains($"findings: {Path.Combine(CycleFolder(1), "findings.json")}", output, StringComparison.Ordinal);
         Assert.Contains("recheck: a/major (major) src/a.cs:1", output, StringComparison.Ordinal);
-        Assert.DoesNotContain("a/minor", output, StringComparison.Ordinal);
+        Assert.Contains("recheck: a/minor (minor) src/a.cs:1", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("a/nitpick", output, StringComparison.Ordinal);
         Assert.Contains("rerun: build (src/a.cs changed since cycle 1)", output, StringComparison.Ordinal);
         Assert.Contains("rerun: always", output, StringComparison.Ordinal);
         Assert.Contains("carry: docs (no input changed since cycle 1)", output, StringComparison.Ordinal);

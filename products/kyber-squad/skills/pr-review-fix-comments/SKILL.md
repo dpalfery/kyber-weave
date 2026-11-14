@@ -239,7 +239,7 @@ Which option would you like?
 - In this skill, a comment verified as real is one the session checked against the cited code and found true, and that is not a nitpick or already fixed; the session writes the test and the fix itself. A fix for a review finding verified as real ships with a test that fails without the fix, bot review rounds included; a finding classified as a nitpick needs no test.
 
 ### 3.5 Code Review
-- use the code-review.md command workflow to do a code review loop until the code-reviewer agent is satisfied, bounded as the `dp-code-reviewer` skill bounds it: at most 5 cycles, and stop after 3 cycles in a row in which the surviving critical and major findings do not fall; list what is still open and continue
+- use the code-review.md command workflow to do a code review loop until the code-reviewer agent is satisfied, bounded as the `dp-code-reviewer` skill bounds it: at most 5 cycles, and stop after 3 cycles in a row in which the findings to fix do not fall; list what is still open and continue
 - once code review passes Show the diff
 - **Get user approval before committing**
 - Treat code review as a hard gate, not a suggestion. The workflow is blocked at this phase until the reviewer passes or all review findings are fixed and re-reviewed.

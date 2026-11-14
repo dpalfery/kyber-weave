@@ -99,11 +99,13 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
             return Fail(report, settings);
 
         findings = CheckCitedLines(root, findings, report, dropped);
+        findings = DropNitpicksBelowTheFixLevel(findings, config.Review.Policy, report, dropped);
 
         ReviewDecisionModel model = ReviewDecisionModelFactory.Create(
             root, config, settings.NoDecisionModel, DecisionCachePath(settings));
         List<string> modelEffects = [];
-        findings = ApplyDecisionModel(model, findings, settings.Candidates, report, dropped, modelEffects, cancellationToken);
+        findings = ApplyDecisionModel(
+            model, findings, settings.Candidates, config.Review.Policy.FixLevel == ReviewFixLevel.Nitpick, report, dropped, modelEffects, cancellationToken);
 
         ReviewOutcome outcome = VerdictEngine.Evaluate(
             findings,
@@ -137,7 +139,7 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
             $"{outcome.Accepted.Count} finding(s) accepted, {outcome.Dropped.Count} dropped.",
             Subject));
 
-        ReportFixRound(outcome, gateResults, config.Review.Policy, PriorApproved(settings, config), report);
+        ReportFixRound(outcome, gateResults, config.Review.Policy, PriorFixCounts(root, settings, config), report);
 
         report.AddMetric("verdict", outcome.Verdict.ToString());
         report.AddMetric("risk", outcome.Risk.ToString());
@@ -160,43 +162,49 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
 
     /// <summary>
     /// Says what the fix round takes and what becomes follow-up work, one line each, so the conductor dispatches from
-    /// the lines and never decides the scope itself. <c>fix:</c> lines are every critical and major finding and every
-    /// failed blocking gate, and the minor findings too when <c>review.policy.minor-findings</c> is <c>fix</c>; an
-    /// APPROVE with any <c>fix:</c> line still gets one fix round. <c>follow-up:</c> lines are the minor findings the
-    /// policy leaves open and each finding dropped as pre-existing debt.
+    /// the lines and never decides the scope itself. <c>fix:</c> lines are every failed blocking gate and every
+    /// finding at or above <c>review.policy.fix-level</c>. Any <c>fix:</c> line gets a fix round and then a
+    /// verifier cycle, an APPROVE included, until a cycle prints none or a cap in <see cref="ReviewLoop"/> stops the
+    /// loop; the findings still to fix are then <c>open:</c> lines for human review. <c>follow-up:</c> lines are the
+    /// findings below the level and each finding dropped as pre-existing debt.
     /// </summary>
     private static void ReportFixRound(
-        ReviewOutcome outcome, IReadOnlyList<GateResult> gates, ReviewPolicy policy, bool priorApproved, DiagnosticReport report)
+        ReviewOutcome outcome, IReadOnlyList<GateResult> gates, ReviewPolicy policy, List<int> priorCounts, DiagnosticReport report)
     {
-        List<string> fix = [.. gates
-            .Where(gate => gate.Blocking && !gate.Passed && gate.NotApplicableReason is null && !VerdictEngine.IsStoppedForTime(gate))
-            .Select(gate => $"gate {gate.Id}")];
+        List<string> fix = [.. FailedGates(gates).Select(gate => $"gate {gate.Id}")];
         fix.AddRange(outcome.Accepted.Where(policy.FixRoundTakes).Select(Line));
         List<string> followUp = [.. outcome.Accepted.Where(finding => !policy.FixRoundTakes(finding)).Select(Line)];
         followUp.AddRange(outcome.Dropped
             .Where(drop => drop.Reason.StartsWith(PreExistingDebt, StringComparison.OrdinalIgnoreCase))
             .Select(drop => $"{Line(drop.Finding)} ({PreExistingDebt})"));
 
-        // An approval gets one fix round: when the prior cycle approved too, what is still open goes to human review.
-        bool roundDone = priorApproved && outcome.Verdict == ReviewVerdict.Approve;
+        string level = policy.FixLevelName;
+        ReviewLoopState state = ReviewLoop.Decide([.. priorCounts, fix.Count]);
+        bool stopped = state is ReviewLoopState.CycleCap or ReviewLoopState.NoProgress;
         foreach (string line in fix)
-            report.Add(new Diagnostic(FixRoundCode, Severity.Info, $"{(roundDone ? "open" : "fix")}: {line}", Subject));
+            report.Add(new Diagnostic(FixRoundCode, Severity.Info, $"{(stopped ? "open" : "fix")}: {line}", Subject));
         foreach (string line in followUp)
             report.Add(new Diagnostic(FixRoundCode, Severity.Info, $"follow-up: {line}", Subject));
         report.Add(new Diagnostic(
             FixRoundCode,
             Severity.Info,
-            fix.Count == 0 || roundDone
-                ? roundDone && fix.Count > 0
-                    ? "fix round: none; the one fix round after an approval is done, so each open: line goes to human review."
-                    : "fix round: none; the review loop ends here."
-                : $"fix round: {fix.Count} item(s); send each fix: line to the worker that owns it, then review again with the fixed verifier request.",
+            state switch
+            {
+                ReviewLoopState.Clean when outcome.Verdict == ReviewVerdict.Approve => $"fix round: none (fix level {level}); review clean: proceed to archive.",
+                ReviewLoopState.Clean => $"fix round: none (fix level {level}); nothing is at or above that level, so each follow-up: line goes to human review.",
+                ReviewLoopState.CycleCap =>
+                    $"fix round: none (fix level {level}); the loop stopped at its {ReviewLoop.MaxCycles.ToString(System.Globalization.CultureInfo.InvariantCulture)}-cycle cap, so each open: line goes to human review.",
+                ReviewLoopState.NoProgress =>
+                    $"fix round: none (fix level {level}); the loop stopped because {ReviewLoop.NoProgressCycles.ToString(System.Globalization.CultureInfo.InvariantCulture)} cycles in a row did not lower the findings to fix, so each open: line goes to human review.",
+                _ => $"fix round: {fix.Count} item(s) at fix level {level}; fix these, then run a verifier cycle."
+            },
             Subject));
 
         static string SeverityWord(ReviewSeverity severity) => severity switch
         {
             ReviewSeverity.Critical => "critical",
             ReviewSeverity.Major => "major",
+            ReviewSeverity.Nitpick => "nitpick",
             _ => "minor"
         };
 
@@ -204,25 +212,48 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
             $"{finding.Id} ({SeverityWord(finding.Severity)}) {finding.File}:{finding.Line.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
     }
 
-    /// <summary>Whether the prior cycle, recomputed from its own findings and gates, approved; false when there is none.</summary>
-    private static bool PriorApproved(ReviewVerdictSettings settings, KyberWeaveConfig config)
-    {
-        if (settings.Prior is null)
-            return false;
+    /// <summary>The blocking gates that failed and are not just stopped for time or not applicable.</summary>
+    private static IEnumerable<GateResult> FailedGates(IReadOnlyList<GateResult> gates) => gates
+        .Where(gate => gate.Blocking && !gate.Passed && gate.NotApplicableReason is null && !VerdictEngine.IsStoppedForTime(gate));
 
+    /// <summary>
+    /// The count of findings to fix after each earlier cycle of this change, oldest first, each recomputed from the
+    /// cycle's own findings and gates; empty without <c>--prior</c>. A cycle that cannot be read is left out.
+    /// </summary>
+    private static List<int> PriorFixCounts(string root, ReviewVerdictSettings settings, KyberWeaveConfig config)
+    {
+        List<int> counts = [];
+        if (settings.Prior is null)
+            return counts;
+
+        IReadOnlyList<ReviewCycleRecord> history;
         try
         {
-            FindingsReport prior = ReviewJson.ReadFindings(File.ReadAllText(Path.Combine(settings.Prior, PriorFindingsFile)));
-            IReadOnlyList<ReviewCycleRecord> history = ReviewCycles.ReadThrough(settings.Prior);
-            IReadOnlyList<GateResult> gates = history.Count == 0 ? [] : history[^1].Gates?.Gates ?? [];
-            return VerdictEngine.Evaluate(prior.Findings, gates, config.Review, DateOnly.FromDateTime(DateTime.UtcNow)).Verdict
-                   == ReviewVerdict.Approve;
+            history = ReviewWorkTree.Prior(
+                ReviewWorkTree.Of(root), settings.BaseRef, ReviewCycles.ReadThrough(settings.Prior), CurrentCycleFolder(settings)).Valid;
         }
-        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException or ArgumentException
-                                       or NotSupportedException or InvalidOperationException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
         {
-            return false;
+            return counts;
         }
+
+        foreach (ReviewCycleRecord cycle in history)
+        {
+            try
+            {
+                FindingsReport prior = ReviewJson.ReadFindings(File.ReadAllText(cycle.FindingsPath));
+                IReadOnlyList<GateResult> gates = cycle.Gates?.Gates ?? [];
+                ReviewOutcome outcome = VerdictEngine.Evaluate(prior.Findings, gates, config.Review, DateOnly.FromDateTime(DateTime.UtcNow));
+                counts.Add(FailedGates(gates).Count() + outcome.Accepted.Count(config.Review.Policy.FixRoundTakes));
+            }
+            catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException or ArgumentException
+                                           or NotSupportedException or InvalidOperationException)
+            {
+                // A cycle that cannot be read adds no count: the loop then counts fewer cycles, never more.
+            }
+        }
+
+        return counts;
     }
 
     /// <summary>
@@ -939,6 +970,39 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
         settings.Seats is null ? null : Path.Combine(Path.GetDirectoryName(Path.GetFullPath(settings.Seats).TrimEnd(Path.DirectorySeparatorChar))!, "decision-model.json");
 
     /// <summary>
+    /// Drops each finding a lens raised as a nitpick when the fix level is below <c>nitpick</c>, with a reported
+    /// reason: a nitpick is never fixed unless the level asks for it, and the report is the only place it is listed.
+    /// </summary>
+    private static List<ReviewFinding> DropNitpicksBelowTheFixLevel(
+        List<ReviewFinding> findings, ReviewPolicy policy, DiagnosticReport report, List<DroppedFinding> dropped)
+    {
+        if (policy.FixLevel == ReviewFixLevel.Nitpick)
+            return findings;
+
+        List<ReviewFinding> kept = [];
+        foreach (ReviewFinding finding in findings)
+        {
+            if (finding.Severity != ReviewSeverity.Nitpick)
+            {
+                kept.Add(finding);
+                continue;
+            }
+
+            dropped.Add(new DroppedFinding(
+                finding, ReviewVerdictDecisions.Code, $"nitpick: below the fix level ({policy.FixLevelName})"));
+            report.Add(new Diagnostic(
+                ReviewVerdictDecisions.Code,
+                Severity.Info,
+                $"Dropped as nitpick (fix level {policy.FixLevelName}): '{finding.Id}'",
+                finding.Lens,
+                finding.File,
+                StartLine: finding.Line));
+        }
+
+        return kept;
+    }
+
+    /// <summary>
     /// Merges the findings the decision model confidently calls one defect, then, for a verdict run, drops the minor
     /// findings it confidently calls nitpicks. Each change is reported and kept in the dropped list with its reason, so
     /// nothing leaves the verdict silently. With no model configured nothing is asked and nothing changes.
@@ -947,6 +1011,7 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
         ReviewDecisionModel model,
         List<ReviewFinding> findings,
         bool candidatesOnly,
+        bool keepNitpicks,
         DiagnosticReport report,
         List<DroppedFinding> dropped,
         List<string> effects,
@@ -999,7 +1064,7 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
         int mergedCount = merged.Sum(group => group.Merged.Count);
         if (mergedCount > 0)
             effects.Add($"{mergedCount} duplicate(s) merged");
-        if (candidatesOnly)
+        if (candidatesOnly || keepNitpicks)
             return kept;
 
         (List<ReviewFinding> substantive, List<(ReviewFinding Finding, double? Confidence)> nitpicks) =

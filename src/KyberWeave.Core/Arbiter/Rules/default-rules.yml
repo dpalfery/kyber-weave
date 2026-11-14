@@ -576,8 +576,8 @@ rules:
       type: choice
       state: { claim: finding.excerpt }
       criteria:
-        substantive: The finding names a defect that changes behaviour, correctness or safety.
-        nitpick: The finding is about style, naming or preference and changes no behaviour.
+        substantive: The finding names a defect that changes behaviour, correctness or safety, or a real problem with tests, documentation accuracy or maintainability.
+        nitpick: The finding is a purely stylistic point with no effect on how the application operates - formatting, wording preference or naming style. A naming issue that causes a defect or breaks a documented public contract is not one.
         unsure: The finding cannot be classed as either from the text given.
       confidence-at-least: 0.85
       tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
@@ -790,7 +790,7 @@ rules:
       type: choice
       state: { severity: finding.severity, claim: finding.claim, failure-scenario: finding.failure-scenario }
       criteria:
-        too-high: "The stated impact is lower than the severity says. critical means data loss, a security hole, corruption or a silent break in behaviour; major means the change is wrong or fails under conditions a reasonable user reaches; minor means real but bounded: clarity, a missed naming or style convention, a narrow edge case. A file placed against the repository's documented structure is major."
+        too-high: "The stated impact is lower than the severity says. critical means data loss, a security hole, corruption or a silent break in behaviour; major means the change is wrong or fails under conditions a reasonable user reaches; minor means real but bounded: a narrow edge case, a misleading comment or document statement, a missing test for a stated behaviour, a maintainability problem; a purely stylistic point is a nitpick, not a minor finding. A file placed against the repository's documented structure is major."
         about-right: "The stated impact matches the severity, as critical, major and minor are defined above."
         too-low: "The stated impact is higher than the severity says, as critical, major and minor are defined above."
       confidence-at-least: 0.8

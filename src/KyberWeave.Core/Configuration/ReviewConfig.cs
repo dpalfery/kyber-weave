@@ -168,14 +168,24 @@ public enum ReviewStrictness
     Strict
 }
 
-/// <summary>What happens to the minor findings an approved review leaves open.</summary>
-public enum ReviewMinorFindings
+/// <summary>
+/// How much of what a review finds is fixed in the run (<c>review.policy.fix-level</c>). Each level includes the ones
+/// before it. It decides what is fixed, never what blocks: strictness, <c>major-count-blocks</c> and
+/// <c>min-confidence</c> decide that.
+/// </summary>
+public enum ReviewFixLevel
 {
-    /// <summary>The product default: not fixed in this run; listed in the pull request and filed as follow-up work.</summary>
-    FollowUp,
+    /// <summary>Failed blocking gates and critical findings: data loss, a security hole, corruption, a silent break in behaviour.</summary>
+    Critical,
 
-    /// <summary>Fixed in the same fix round as the major findings.</summary>
-    Fix
+    /// <summary>Also major findings: the change is wrong or fails under conditions a normal user reaches; a file or type placed against the documented structure.</summary>
+    Major,
+
+    /// <summary>The product default. Also minor findings: real but bounded, such as a narrow edge case, a misleading comment or document statement, a missing test for a stated behaviour.</summary>
+    Minor,
+
+    /// <summary>Also nitpicks: purely stylistic points with no effect on how the application operates (formatting, wording preference, naming style).</summary>
+    Nitpick
 }
 
 /// <summary>The rules the verdict engine may not decide for itself.</summary>
@@ -193,18 +203,30 @@ public sealed class ReviewPolicy
     /// <summary>Active finding suppressions.</summary>
     public IReadOnlyList<ReviewSuppression> Suppressions { get; init; } = [];
 
-    /// <summary>Whether a fix round also takes the minor findings (<c>review.policy.minor-findings</c>).</summary>
-    public ReviewMinorFindings MinorFindings { get; init; } = ReviewMinorFindings.FollowUp;
+    /// <summary>The lowest severity a fix round takes (<c>review.policy.fix-level</c>).</summary>
+    public ReviewFixLevel FixLevel { get; init; } = ReviewFixLevel.Minor;
 
-    /// <summary>
-    /// Whether a fix round takes <paramref name="finding"/>: every critical and major finding, and a minor one only
-    /// when <see cref="MinorFindings"/> is <see cref="ReviewMinorFindings.Fix"/>.
-    /// </summary>
+    /// <summary>Whether a fix round takes <paramref name="finding"/>: its severity is at or above <see cref="FixLevel"/>.</summary>
     public bool FixRoundTakes(ReviewFinding finding)
     {
         ArgumentNullException.ThrowIfNull(finding);
-        return finding.Severity >= ReviewSeverity.Major || MinorFindings == ReviewMinorFindings.Fix;
+        return finding.Severity >= FixLevel switch
+        {
+            ReviewFixLevel.Critical => ReviewSeverity.Critical,
+            ReviewFixLevel.Major => ReviewSeverity.Major,
+            ReviewFixLevel.Minor => ReviewSeverity.Minor,
+            _ => ReviewSeverity.Nitpick
+        };
     }
+
+    /// <summary>The level's name as the configuration spells it.</summary>
+    public string FixLevelName => FixLevel switch
+    {
+        ReviewFixLevel.Critical => "critical",
+        ReviewFixLevel.Major => "major",
+        ReviewFixLevel.Minor => "minor",
+        _ => "nitpick"
+    };
 
     /// <summary>Product defaults for a host that declares no policy.</summary>
     public static ReviewPolicy ProductDefaults { get; } = new();

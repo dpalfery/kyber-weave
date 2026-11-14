@@ -103,6 +103,7 @@ public sealed class ReviewSeatsCommand : Command<ReviewSeatsSettings>
                 indexReady,
                 StrictnessName(config.Review.Policy.Strictness),
                 config.Review.Policy.MinConfidence,
+                config.Review.Policy.FixLevelName,
                 GuidancePath(root, config),
                 Path.Combine(folder, "duplicates.json")));
             NotSeatedRecord.Replace(folder, ReviewLensCatalogue.Names, seats.NotSeated);

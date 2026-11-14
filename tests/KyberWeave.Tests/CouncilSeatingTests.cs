@@ -143,7 +143,7 @@ public sealed class CouncilSeatingTests
     [Fact]
     public void APacketCarriesTheCharterTheEvidenceAndTheGuidanceSoTheSeatOpensNothingElseToStart()
     {
-        CouncilSeatContext context = new("/repo", "/repo/.agent_scratchpad/t/review/cycle-1/evidence.md", false, "strict", 5, "/repo/REVIEW.md", "/repo/dup.json");
+        CouncilSeatContext context = new("/repo", "/repo/.agent_scratchpad/t/review/cycle-1/evidence.md", false, "strict", 5, "minor", "/repo/REVIEW.md", "/repo/dup.json");
 
         string packet = CouncilSeating.Packet(context, "correctness");
 
@@ -151,6 +151,8 @@ public sealed class CouncilSeatingTests
         Assert.Contains("- projectPath: /repo", packet, StringComparison.Ordinal);
         Assert.Contains("Index fallback: projectPath: not-indexed", packet, StringComparison.Ordinal);
         Assert.Contains("- Strictness: strict (min-confidence 5)", packet, StringComparison.Ordinal);
+        Assert.Contains("- Fix level: minor. Do not raise nitpicks", packet, StringComparison.Ordinal);
+        Assert.Contains("- Fix level: nitpick. Raise nitpicks too", CouncilSeating.Packet(context with { FixLevel = "nitpick" }, "correctness"), StringComparison.Ordinal);
         Assert.Contains("- Review guidance: /repo/REVIEW.md.", packet, StringComparison.Ordinal);
         Assert.Contains("# Lens: correctness", packet, StringComparison.Ordinal);
         Assert.DoesNotContain("Duplicates report", packet, StringComparison.Ordinal);
