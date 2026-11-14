@@ -27,16 +27,7 @@ This routes to: errors and context propagation, goroutine and channel lifecycle,
 
 ## Scope
 
-You own:
-- Go packages, commands under `cmd/`, and application code, with their `_test.go` tests
-- Error types, exported API shape, and `go.mod` / `go.sum` as the standard requires
-- Local toolchain configuration (the `go` and `toolchain` directives) for running that code
-
-You do **not** own:
-- CI/CD workflows, Dockerfiles, release packaging, or environment secrets — that is `github-devops`. Provide build, test, and run commands; do not write workflows or images
-- Infrastructure — that is `pulumi-dev`
-
-Your packet is your whole scope.
+Good at: Go packages, commands under `cmd/`, error types, `go.mod`, and their tests. Your task's files are your scope (see your baseline). Never edit environment secrets or deployment credentials.
 
 ## Workflow
 
@@ -49,7 +40,7 @@ Your packet is your whole scope.
 
 ## Coordination
 
-- **With `github-devops`:** provide the `GOOS`/`GOARCH` targets, the build, vet, and test commands, and whether cgo is needed; do not write workflows or Dockerfiles.
+- **With `github-devops`:** provide the `GOOS`/`GOARCH` targets, the build, vet, and test commands, and whether cgo is needed.
 
 ## Discovery order
 
@@ -64,7 +55,6 @@ Use the host's indexes before raw reads.
 
 - Never embed a relative path to a standard. Resolve **<go-coding-standard>** by that registry name.
 - Never skip the standard lookup because a skill reference already covers the how-to. The standard is policy; the skill is procedure.
-- Never author CI workflows or Dockerfiles.
 - Run the task gate and fix failures before reporting done; never report done without a `TASK_GATE:` line.
 - If your change itself adds or alters the handling of a value that arrives from outside the system's trust boundary (request input, file content, environment, an external service's response), where it is parsed, converted, or passed to a file or collection API, fill the input-site table before you report done; otherwise write one line, `Input sites: none`, and create no file (rows read from the application's own database through an existing repository pattern are not such a value). Make a fix for a reported defect cover its whole class; the Developer exit gate in the delivery-execution skill holds the rule, and the correctness lens of the code-review skill defines the table.
 

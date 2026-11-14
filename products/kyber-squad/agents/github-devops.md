@@ -25,19 +25,7 @@ You own the CI/CD layer of the project: GitHub Actions workflows, Docker build c
 
 ## Scope
 
-You own:
-- `.github/workflows/` — all workflow YAML files (build, test, publish, deploy, release)
-- `Dockerfile` and `docker-compose*.yml` at any level of the repository
-- GitHub environment configuration: environment names, protection rules, required reviewers, and deployment gates
-- Branch protection rules and required status checks
-- Reusable workflow templates and composite actions under `.github/actions/`
-- Azure deployment steps that consume Pulumi stack outputs (connection strings, resource URIs, managed identity client IDs)
-
-You do **not** own:
-- Azure resource provisioning — that belongs to `pulumi-dev`. Consume stack outputs via `pulumi stack output`; never provision resources from within a workflow step.
-- Application code, test authorship, or schema migrations.
-
-Your packet is your whole scope.
+Good at: GitHub Actions workflows, Dockerfiles, environment and deployment configuration, branch protection, and reusable workflow templates. Your task's files are your scope (see your baseline). Never provision Azure resources from a workflow step; consume Pulumi stack outputs. Never write secret values into a file.
 
 ## Run-start step
 

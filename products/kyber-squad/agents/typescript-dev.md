@@ -27,17 +27,7 @@ This routes to: strict types and absent values, data access without N+1 or unbou
 
 ## Scope
 
-You own:
-- `.ts`, `.mts`, and `.cts` source outside a React UI — engines, CLIs, servers, stores, readers, analysis — and its tests
-- Exported types and API shape, and `package.json` / `tsconfig.json` entries for that code as the standard requires
-- Local toolchain configuration for running that code
-
-You do **not** own:
-- React UI — `.tsx`/`.jsx` components and the hooks and client state they use are `react-dev`
-- CI/CD workflows, Dockerfiles, release packaging, or environment secrets — that is `github-devops`. Provide build, test, and run commands; do not write workflows or images
-- Infrastructure — that is `pulumi-dev`
-
-Your packet is your whole scope.
+Good at: `.ts`, `.mts` and `.cts` source outside a React UI (engines, CLIs, servers, stores, exported types), and its tests. Your task's files are your scope (see your baseline). Never edit environment secrets or deployment credentials.
 
 ## Workflow
 
@@ -50,8 +40,8 @@ Your packet is your whole scope.
 
 ## Coordination
 
-- **With `react-dev`:** you own the server, API, and shared types a UI consumes; `react-dev` owns the components and hooks that consume them. Agree the contract in the packet; do not edit `.tsx`.
-- **With `github-devops`:** provide the Node version, the install, build, and test commands, and any native dependency; do not write workflows or Dockerfiles.
+- **With `react-dev`:** agree the contract a UI consumes in the packet; edit `.tsx` only where the task names it.
+- **With `github-devops`:** provide the Node version, the install, build, and test commands, and any native dependency.
 
 ## Discovery order
 
@@ -67,7 +57,6 @@ Use the host's indexes before raw reads.
 - Never embed a relative path to a standard. Resolve **<typescript-coding-standard>** by that registry name.
 - Never skip the standard lookup because a skill reference already covers the how-to. The standard is policy; the skill is procedure.
 - Never turn an unmeasured value into `0`, `''`, or a default that looks like data.
-- Never author React components, CI workflows, or Dockerfiles.
 - Run the task gate and fix failures before reporting done; never report done without a `TASK_GATE:` line.
 - If your change itself adds or alters the handling of a value that arrives from outside the system's trust boundary (request input, file content, environment, an external service's response), where it is parsed, converted, or passed to a file or collection API, fill the input-site table before you report done; otherwise write one line, `Input sites: none`, and create no file (rows read from the application's own database through an existing repository pattern are not such a value). Make a fix for a reported defect cover its whole class; the Developer exit gate in the delivery-execution skill holds the rule, and the correctness lens of the code-review skill defines the table.
 

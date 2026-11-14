@@ -85,8 +85,11 @@ Other workers run their tests at the same time as yours, against the same databa
 - **Make it unique.** Give every record a per-test prefix or a generated id, never a fixed id another
   test might claim.
 - **Clean up.** Remove what the test created, or run it inside a transaction that is rolled back.
-- **Scope anything shared to your task:** a database name, port, temporary directory or fixture
-  file gets your task id or a generated name.
+- **Scope what you create, not what the standard provides.** A port, temporary directory or fixture
+  file you create gets your task id or a generated name. How tests get a database is whatever the
+  test standard says: where it prescribes a shared development database with per-test unique ids and
+  cleanup, use it. Never run a migration or rewrite a connection string against a shared database; if
+  the task needs that, report it, and still run the task's tests.
 - **No order dependence** and no shared mutable static state between tests.
 
 ## What the test-adequacy review checks

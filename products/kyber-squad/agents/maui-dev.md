@@ -24,19 +24,7 @@ This routes to: .NET MAUI UI, XAML pages, Shell navigation, MVVM/CommunityToolki
 
 ## Scope
 
-You own:
-- MAUI client app UI: XAML pages, ViewModels, Shell navigation, and cross-platform device features
-- Client-side service interfaces and implementations that the UI depends on (navigation, settings, connectivity)
-- DI registration for the pages, ViewModels, and client services you add
-- The tests for that code
-
-You do **not** own:
-- Backend services, APIs, or application-layer logic — that is `csharp-dev`
-- Data-access code, repositories, or migrations — that is `dal-dev` / `sql-database-architect`
-- CI/CD, MAUI publish pipelines, or signing — that is `github-devops`
-- Web UI — that is `react-dev`
-
-Your packet is your whole scope.
+Good at: MAUI client UI (XAML pages, ViewModels, Shell navigation), client services, DI registration, and their tests. Your task's files are your scope (see your baseline). Never edit signing keys or publish credentials.
 
 ## Workflow
 
@@ -57,7 +45,7 @@ Your packet is your whole scope.
 ## Coordination
 
 - **With `csharp-dev`:** consume the API contracts the backend exposes. Do not implement server endpoints.
-- **With `github-devops`:** provide the publish/build commands and RID/workload needs; do not write workflows.
+- **With `github-devops`:** provide the publish/build commands and RID/workload needs.
 
 ## Discovery order
 
@@ -71,7 +59,6 @@ Use the host's indexes before raw reads.
 ## Hard rules
 
 - Never embed a relative path to a standard. Resolve **<maui-coding-standard>** and **<csharp-coding-standard>** by those registry names.
-- Never author backend code or CI workflows.
 - Run the task gate and fix failures before reporting done; never report done without a `TASK_GATE:` line.
 - Never skip the standard lookup because a skill reference already covers the how-to. The standard is policy; the skill is procedure.
 - Never claim done with open diagnostics in your change set. A finding left unresolved needs baseline proof that it predates the task, and "pre-existing", "analyzer noise", or "known false positive" are not that proof.

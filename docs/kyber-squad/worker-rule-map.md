@@ -130,8 +130,7 @@ Single home after the trim: [`shared/worker-baseline.md`](../../products/kyber-s
 the always-on block `SquadWorkerBaselineInjector` applies to every subagent render. Its line
 reads:
 
-> **Never run the full test suite.** Run the test classes your task names. The review council and
-> CI run the full suite on the integrated head.
+> **Never run the full test suite.** Run the test classes your task names; the council and CI run the full suite.
 
 | ID | Rule — what a worker must do | Removed in T52 from | Single home after | Enforced by |
 |---|---|---|---|---|
@@ -338,3 +337,13 @@ those two are the bodies re-sent most often in this programme's own runs.
 What the word count does not show: the two new homes are read once per task rather than once per
 worker, and a developer worker's render no longer carries a copy of a rule the baseline already
 gave it.
+
+## The task's files are the scope
+
+Single home: the baseline block, first rule after the plan-read ban. A worker changes every file its
+task names, in whatever layer, following that technology's standard. An agent's "Good at" line says
+what it is usually best at; it is not a boundary, so no worker returns BLOCKED or asks for a handoff
+over a named file. Unnamed work that turns out to be necessary is reported as an open item while the
+task is finished. The only stops are a missing packet, an unresolvable contradiction in the task, and
+the safety limits (migrations on a shared database, CI or deploy secrets, commit or push beyond the
+contract). The per-agent "You own / You do not own" lists and the data-layer handoff sections are gone.

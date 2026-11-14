@@ -64,7 +64,7 @@ public class DatabaseFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        // A database of its own per run: parallel workers never share one, and the name says whose it is.
+        // An example only: the test standard decides how a run gets its database; a shared one needs per-test unique ids and cleanup.
         string database = $"Host_Test_{Guid.NewGuid():N}";
         string? connStr = Environment.GetEnvironmentVariable("SQL_TEST_CONNECTION_STRING")
             ?? $"Server=(localdb)\\MSSQLLocalDB;Database={database};Integrated Security=true";

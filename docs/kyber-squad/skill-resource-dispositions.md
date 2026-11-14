@@ -222,7 +222,7 @@ in the three policy-bearing maui-dev references. One hundred sixteen rows: 20 `m
 | `skills/dal-dev/references/migration-scripts.md` | 60 | `for audit timestamp columns, not hardcoded values` | retained | — | | Technique: FluentMigrator convention for audit-timestamp defaults, not a host-reversible policy (D2). |
 | `skills/dal-dev/references/migration-scripts.md` | 62 | `Schema-qualify all table references` | duplicate | sql § T-SQL authoring | `Schema-qualify every object reference` | — |
 | `skills/dal-dev/references/migration-scripts.md` | 63 | `verify with the SQL database project dacpac that schema state matches expectations` | retained | — | | Procedure: post-migration verification step, not a host-reversible policy (D2). |
-| `skills/dal-dev/references/migration-scripts.md` | 71 | `Stop — do not apply the migration` | retained | — | | Procedure: the conflict-resolution escalation sequence, not a host-reversible policy (D2). |
+| `skills/dal-dev/references/migration-scripts.md` | 71 | `Do not apply the migration` | retained | — | | Procedure: the conflict-resolution sequence (report the divergence, do not apply), not a host-reversible policy (D2). |
 | `skills/csharp-dev/references/aspnetcore-webapi.md` | 11 | `for request/response DTOs. The compiler generates` | duplicate | csharp § Types | `Request and response DTOs are` | — |
 | `skills/csharp-dev/references/aspnetcore-webapi.md` | 33 | `produces strongly-typed return values that are reflected in the OpenAPI schema` | duplicate | csharp § Stack | `TypedResults` | — |
 | `skills/csharp-dev/references/aspnetcore-webapi.md` | 54 | `Reject invalid input with structured` | duplicate | csharp § Errors | `not a bare string` | — |

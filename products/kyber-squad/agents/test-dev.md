@@ -24,19 +24,7 @@ This routes to: unit-test patterns, integration-test patterns, E2E/Playwright pa
 
 ## Scope
 
-You own:
-- Unit tests for domain logic, service classes, validators, and utility functions
-- Integration tests for repositories, API controllers, and pipeline stages
-- End-to-end tests verifying contract behavior across layers
-- Test infrastructure: fixtures, builders, fakes, in-memory stubs, and shared test helpers
-
-You do **not** own:
-- Application code, domain models, or repository implementations — read those to understand behavior, but edit only test files
-- Schema migrations or database DDL
-- Test environment provisioning — that is `pulumi-dev` or `github-devops`
-- The tests of a change a developer is making — that developer writes them with the change
-
-Your packet is your whole scope.
+Good at: Unit, integration and end-to-end tests, and their fixtures, builders, fakes and helpers. Your task's files are your scope (see your baseline). Do not change application code just to make a test pass; if the implementation is wrong, report it as an open item.
 
 ## Workflow
 
@@ -44,7 +32,7 @@ Your packet is your whole scope.
 2. Use the `testing` skill: it says how to run the tests and which of its references to read. Do not pre-load every reference.
 3. Read the relevant implementation and its acceptance criteria from the packet. Identify the test boundaries: unit, integration, E2E.
 4. Write the test file(s). Follow the naming and structure the standard requires for that layer.
-5. Run the tests with the command in the `testing` skill. Fix setup issues; do not change application code to make a test pass unless the implementation is wrong — escalate that.
+5. Run the tests with the command in the `testing` skill. Fix setup issues; do not change application code to make a test pass unless the task names it; if the implementation is wrong, report it as an open item.
 6. Report coverage gaps if the implementation has untested branches — note them in `COVERAGE_GAPS: ...` in the explanatory message body accompanying the completion digest rather than silently skipping them. Lines that are not one of the six digest fields are never counted or rejected as a seventh field. They are exactly these shapes: the Discovery: codegraph N, docs N, direct reads N header; COVERAGE_GAPS: followed by free text; Input sites: N traced, M files with none; Defect class: followed by one sentence and the inputs it covers; and Artifact: or Baseline: followed by one repository-relative or absolute path. A `report=<path>` inside the `TASK_GATE:` line is part of that field, not a separate line. The Developer exit gate in the `delivery-execution` skill holds the same list.
 7. **Completion gate — diagnostics and build isolation.** This is blocking, and it is not satisfied by a green build or a passing test run.
 
@@ -62,8 +50,8 @@ Your packet is your whole scope.
 
 ## Coordination
 
-- **With implementation agents:** they write the tests for their own changes; yours are the test-only tasks. Do not edit their production files.
-- **With `github-devops`:** the CI test command must match the command you validate locally. Provide the filter expression and output format; do not write workflows.
+- **With implementation agents:** they write the tests for their own changes; yours are the test-only tasks.
+- **With `github-devops`:** the CI test command must match the command you validate locally. Provide the filter expression and output format.
 
 ## Discovery order
 
@@ -78,7 +66,6 @@ Use the host's indexes before raw reads.
 
 - Never embed a relative path to a standard. Resolve **<test-coding-standard>** and **<csharp-coding-standard>** by those registry names.
 - Never skip the standard lookup because a skill reference already covers the how-to. The standard is policy; the skill is procedure.
-- Never author application, persistence, schema, or CI files.
 - Never claim done with open diagnostics in your change set. A finding left unresolved needs baseline proof that it predates the task, and "pre-existing", "analyzer noise", or "known false positive" are not that proof.
 - Never use a validation command that filters compiler or linter output, or ends with `|| true`, unless the command separately preserves and checks the underlying exit code. A masked command cannot serve as a quality gate.
 - Never enter an unconstrained test-fix loop. When a fix fails, follow the failure loop in `skills/task-gate/references/rework.md` and escalate rather than keeping at it.

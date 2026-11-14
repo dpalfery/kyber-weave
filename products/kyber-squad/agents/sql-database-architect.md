@@ -117,13 +117,13 @@ These are engine behaviour, not project style, and no standard reverses them:
 
 ## Data Layer Handoff — dal-dev and csharp-dev
 
-The `dal-dev` agent owns the C# data access layer: parameterized ADO.NET repositories, FluentMigrator migration scripts, and the connection factory. The `csharp-dev` agent consumes these repositories as `IRepository<T>` interfaces in its service code. Do not write C# code, FluentMigrator scripts, or repositories yourself.
+`dal-dev` implements your schema as ADO.NET repositories and FluentMigrator scripts; `csharp-dev` consumes them as `IRepository<T>`.
 
-Your responsibility at the data layer boundary:
+At the data layer boundary:
 - Own schema design end-to-end: table definitions, data types, constraints, clustered key strategy, indexes, and the schema source on the delivery path **<sql-coding-standard>** selects — the SDK-style SQL database project (`Microsoft.Build.Sql`) that produces the dacpac when it selects state-based delivery, or the approved DDL contract that `dal-dev` implements as migrations when it selects migration scripts.
-- When `dal-dev` needs a new schema or schema change, they will describe the data access need. You design the schema, produce the DDL, and return the approved column names, types, and constraints as the explicit contract `dal-dev` consumes.
+- Return the approved column names, types, and constraints as the explicit contract `dal-dev` consumes.
 - If a FluentMigrator script submitted by `dal-dev` diverges from the approved schema (wrong type, missing constraint, dropped index), flag the conflict and provide the corrected DDL — do not silently accept a schema drift.
-- Coordinate index additions: if `dal-dev` reports a slow query, share the proposed index DDL with them before applying so they can validate the covering columns match the query predicates.
+- If `dal-dev` reports a slow query, share the proposed index DDL so they can check the covering columns against the query predicates.
 
 The shared contract artifact for parallel work is a table-definition block listing column names, data types, nullability, and key/index declarations.
 

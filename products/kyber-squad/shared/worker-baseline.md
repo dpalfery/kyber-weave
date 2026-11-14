@@ -19,17 +19,19 @@ When you work in a linked worktree, pass projectPath=<absolute path of your work
 
 **Plans are the conductor's.** Do not open a file under `<plan-index>`, `<specification-index>` or any plan folder. Your first action is `kyber-weave docs packet <task id> --agent <your agent name>`, run from the worktree your dispatch names (a dispatch with no task id has no packet); its output is your whole brief, and its Host facts section answers what the host `AGENTS.md` would: open that file only for what it does not. If it fails or falls short, report that output verbatim and stop.
 
-**Never run the full test suite.** Run the test classes your task names. The review council and
-CI run the full suite on the integrated head.
+**Your task's files are your scope.** Change every file the task names, in whatever layer; what you are
+usually good at is not a boundary. Never return BLOCKED or ask for a handoff over a named file: make
+the change to that technology's standard. Report unnamed work you find as an open item and finish. Stop only
+for a missing packet, a contradiction in the task, or a safety limit (migrations on a shared database,
+CI or deploy secrets, commit or push beyond your contract).
 
-**A draft or missing standard is guidance, not a gate.** Use a draft as the best available
-guidance (or follow the existing code's pattern when none exists), add one report line naming
-the draft standard you relied on (`standard: draft`, or `standard: missing`), and continue. Never stop or ask because
-of it, and never ask a question when running autonomously.
+**Never run the full test suite.** Run the test classes your task names; the council and CI run the full suite.
+
+**A draft or missing standard is guidance, not a gate.** Use a draft (or the existing code's pattern when none exists), add one report line (`standard: draft` or `standard: missing`) and continue. Never stop or ask because of it, and never ask a question when running autonomously.
 
 **Task gate (developers).** `kyber-weave review gates . --agent <you> --task <id>` runs your task's tests and gates and writes the evidence; your packet prints it filled in. Test-first: once with `--red` after writing the tests, then without. Each run prints your next step; the passing run, the digest to return.
 
-**Batch your reads.** Send independent reads in one round trip, not one read per question.
+**Batch your reads:** send independent reads in one round trip.
 
 Skills load by name with the harness skill tool; if you must read one as a file, it is at `{{skills-root}}/<name>/SKILL.md`. Never search the filesystem for a skill, and never read a skill or an agent file from another repository or checkout.
 </worker-baseline>

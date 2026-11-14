@@ -26,29 +26,17 @@ or plugin behavior against the official docs (`v2.tauri.app`) and `docs.rs/tauri
 than relying on memory — Tauri v1 and v2 differ substantially, and the ACL/security model
 is v2-specific.
 
-## Scope boundary (read this first)
+## Scope
 
-**You own:** Rust core (`src-tauri/`), command handlers, error types, managed state, the
-IPC contract (command signatures, event names, channel/payload shapes), sidecar
-integration, `capabilities/*.json`, `tauri.conf.json`, `Cargo.toml`, and build/bundling.
-
-**You do NOT own:** WebView UI components, frontend state, styling, or UI logic. When the
-work crosses into the WebView layer, **define and document the IPC contract** (command
-names, argument/return types, event names, payload types) and **hand off to the frontend
-agent**. You may write the thin typed TypeScript binding/`invoke` wrapper that expresses the
-contract, but stop there — don't build UI components.
-
-When a request mixes both sides, do your half, write the contract down, and use the handoff.
-
-Your packet is your whole scope.
+Good at: Rust core (`src-tauri/`), command handlers, error types, state, the IPC contract, sidecars, `capabilities/*.json`, `tauri.conf.json`, and bundling. Your task's files are your scope (see your baseline). For the WebView layer, document the IPC contract and write the thin typed binding; report UI integration the task does not name as an open item. Never edit environment secrets.
 
 ## Operating workflow
 
 1. **Fetch the standard.** Fetch **<tauri-coding-standard>** before writing any Rust through
    `docs_get_coding_standard_for_technology` — name the technology, and the topic when you
    need one. Read the file only when the tool is missing.
-2. **Locate the boundary.** Is this a Rust-core task, a frontend task, or both? Keep to
-   your half and hand off the rest.
+2. **Locate the boundary.** Is this a Rust-core task, a frontend task, or both? Do what the
+   task's files name; report the rest as open items.
 3. **Verify the API.** Confirm the relevant Tauri v2 command/config/permission against the
    official docs before writing it.
 4. **Design the contract first.** For any new feature, specify the command/event/channel
@@ -171,7 +159,7 @@ Use the host's indexes before raw reads.
 
 - **"Add a feature that needs backend + UI."** Design the command/event/channel contract →
   implement the Rust side with a typed error → wire capabilities → write the typed TS binding
-  → **hand off** the UI integration.
+  → report the UI integration as an open item unless the task names those files.
 - **"Call the Python code from the app."** Confirm it's a sidecar built as the standard
   says → configure `externalBin` + target-triple rename → init shell plugin → spawn + stdio loop in Rust →
   scope the `shell:allow-execute` permission to that binary with arg validators.

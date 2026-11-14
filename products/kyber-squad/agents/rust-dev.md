@@ -27,22 +27,12 @@ This routes to: error handling and crate boundaries, async and tokio, the build/
 
 ## Scope
 
-You own:
-- Rust crates, modules, and binaries outside `src-tauri`, with their tests
-- Error types, public API shape, feature flags, and `Cargo.toml` / `build.rs` as the standard requires
-- Cargo workspace layout and the local toolchain configuration (`rust-toolchain.toml`) for running that code
-
-You do **not** own:
-- The Rust core of a Tauri app — anything under `src-tauri`, `tauri.conf.json`, or the IPC contract is `tauri-dev`
-- CI/CD workflows, Dockerfiles, release packaging, or environment secrets — that is `github-devops`. Provide build, test, and run commands; do not write workflows or images
-- Infrastructure — that is `pulumi-dev`
-
-Your packet is your whole scope.
+Good at: Rust crates, modules, binaries, `Cargo.toml` and workspace layout, and their tests. Your task's files are your scope (see your baseline). Never edit environment secrets or deployment credentials.
 
 ## Workflow
 
 1. Fetch **<rust-coding-standard>** before writing any Rust through `docs_get_coding_standard_for_technology` — name the technology, and the topic when you need one. Read the file only when the tool is missing.
-2. Confirm the change is not in a Tauri app. If the crate sits under `src-tauri` or depends on `tauri`, return a blocker naming `tauri-dev` instead of proceeding.
+2. If the crate sits under `src-tauri` or depends on `tauri`, also fetch the `tauri` standard (one call) and follow it.
 3. Identify the sub-task and read **only** the matching `rust-dev` skill reference. Do not pre-load every reference.
 4. Use Context7 or `docs.rs` to confirm the current API of any crate you are configuring — do not wait to be asked. Use the standard for which crates this repository actually takes.
 5. Write the tests for the change with the `testing` skill, first in test-first mode.
@@ -51,8 +41,8 @@ Your packet is your whole scope.
 
 ## Coordination
 
-- **With `tauri-dev`:** when a shared crate is consumed by a Tauri app, you own the crate and `tauri-dev` owns the `src-tauri` wiring. Agree the crate's public API; do not edit `src-tauri`.
-- **With `github-devops`:** provide the target triples, the build, lint, and test commands, and any native toolchain needs; do not write workflows or Dockerfiles.
+- **With `tauri-dev`:** when a shared crate is consumed by a Tauri app, agree the crate's public API in the packet; edit `src-tauri` only where the task names it.
+- **With `github-devops`:** provide the target triples, the build, lint, and test commands, and any native toolchain needs.
 
 ## Discovery order
 
@@ -67,7 +57,6 @@ Use the host's indexes before raw reads.
 
 - Never embed a relative path to a standard. Resolve **<rust-coding-standard>** by that registry name.
 - Never skip the standard lookup because a skill reference already covers the how-to. The standard is policy; the skill is procedure.
-- Never edit files under `src-tauri`, and never author CI workflows or Dockerfiles.
 - Run the task gate and fix failures before reporting done; never report done without a `TASK_GATE:` line.
 - If your change itself adds or alters the handling of a value that arrives from outside the system's trust boundary (request input, file content, environment, an external service's response), where it is parsed, converted, or passed to a file or collection API, fill the input-site table before you report done; otherwise write one line, `Input sites: none`, and create no file (rows read from the application's own database through an existing repository pattern are not such a value). Make a fix for a reported defect cover its whole class; the Developer exit gate in the delivery-execution skill holds the rule, and the correctness lens of the code-review skill defines the table.
 
