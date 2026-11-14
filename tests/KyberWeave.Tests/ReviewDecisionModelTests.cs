@@ -260,6 +260,21 @@ public sealed class ReviewDecisionModelTests : IDisposable
         Assert.Contains("other.md:2: status: archived", provider.LastStateText, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("see a.cs:9999999999")]
+    [InlineData("see a.cs:1-99999999999")]
+    [InlineData("a.cs lines 4 and 99999999999")]
+    public async Task AnEvidenceCitationThatIsNotAnIntegerIsIgnoredNotFatal(string evidence)
+    {
+        string root = Repository();
+        FakeProvider provider = new() { Choice = "supports", Confidence = 0.95 };
+
+        ClaimCheck check = Assert.Single(await ReviewVerdictDecisions.CheckClaimsAsync(
+            Model(provider), root, [Finding("a", ReviewSeverity.Major) with { Evidence = evidence }]));
+
+        Assert.False(check.NeedsRefuter);
+    }
+
     // ---------------------------------------------------------------- severity note (review verdict)
 
     [Theory]

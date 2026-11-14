@@ -45,6 +45,9 @@ public static partial class ReviewVerdictDecisions
     private const int MaxSurroundingsFileBytes = 1 << 20;
     private const int MaxEvidenceLines = 12;
 
+    /// <summary>The largest line number a citation may name; a source file is capped at one megabyte.</summary>
+    private const int MaxCitedLine = 1 << 20;
+
     /// <summary>
     /// Asks, for each pair of findings on the same file within 20 lines, whether they name the same defect, and folds
     /// every confident pair into one finding. A rule in shadow logs its answers and merges nothing.
@@ -420,17 +423,24 @@ public static partial class ReviewVerdictDecisions
 
     private static IEnumerable<int> CitedNumbers(System.Text.RegularExpressions.Match match)
     {
-        if (match.Groups["from"].Success)
+        // The numbers come from seat-written text: one that does not parse as a plausible line number is ignored.
+        if (match.Groups["from"].Success && TryLineNumber(match.Groups["from"].Value, out int from))
         {
-            int from = int.Parse(match.Groups["from"].Value, System.Globalization.CultureInfo.InvariantCulture);
-            int to = match.Groups["to"].Success ? int.Parse(match.Groups["to"].Value, System.Globalization.CultureInfo.InvariantCulture) : from;
+            int to = match.Groups["to"].Success && TryLineNumber(match.Groups["to"].Value, out int parsedTo) ? parsedTo : from;
             for (int number = from; number <= Math.Min(to, from + 5); number++)
                 yield return number;
         }
 
         foreach (System.Text.RegularExpressions.Capture capture in match.Groups["n"].Captures)
-            yield return int.Parse(capture.Value, System.Globalization.CultureInfo.InvariantCulture);
+        {
+            if (TryLineNumber(capture.Value, out int number))
+                yield return number;
+        }
     }
+
+    private static bool TryLineNumber(string text, out int number) =>
+        int.TryParse(text, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out number)
+        && number is >= 1 and <= MaxCitedLine;
 
     private static string? Resolve(string repositoryRoot, string file)
     {
