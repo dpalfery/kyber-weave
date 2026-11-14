@@ -46,6 +46,26 @@ public sealed class TaskTestDigestTests
     }
 
     [Fact]
+    public void TheTestingPlatformsAssemblyLineUnderAFailedTestIsSkippedForItsAssertion()
+    {
+        string output = string.Join('\n',
+            "failed Acme.Tests.OrdersTests.Total_IsTheSum (0ms)",
+            "  from /repo/artifacts/bin/Acme.Tests/release/Acme.Tests.dll (net10.0|arm64)",
+            "  Assert.Equal() Failure: Collections differ at index 0",
+            "    at Acme.Tests.OrdersTests.Total_IsTheSum() in /repo/tests/OrdersTests.cs:51",
+            "Test run summary: Failed!",
+            "  total: 5",
+            "  failed: 1",
+            "  succeeded: 4");
+
+        IReadOnlyList<string> lines = TaskTestDigest.Lines("tests", passed: false, output, null);
+
+        Assert.Equal(
+            ["tests: FAIL — tests: total=5 failed=1 passed=4", "  Acme.Tests.OrdersTests.Total_IsTheSum — Assert.Equal() Failure: Collections differ at index 0"],
+            lines);
+    }
+
+    [Fact]
     public void APassingRunIsOneLineWithItsTotals()
     {
         IReadOnlyList<string> lines = TaskTestDigest.Lines(

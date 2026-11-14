@@ -782,7 +782,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
                 IReadOnlyList<ReviewTaskGateView> views =
                 [
                     .. agentGates.Select(gate => new ReviewTaskGateView(
-                        gate.Id, !gate.Run.Any(arg => arg.Contains("{changed}", StringComparison.Ordinal)))),
+                        gate.Id, !gate.Run.Any(arg => arg.Contains("{changed}", StringComparison.Ordinal) || arg.Contains("{tests}", StringComparison.Ordinal)))),
                 ];
                 WriteLines(TaskGateNextStep.AfterRun(finalReport, views, settings.Fix, agent, changed, settings.Out));
             }

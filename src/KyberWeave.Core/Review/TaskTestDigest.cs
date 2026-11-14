@@ -105,8 +105,10 @@ public static class TaskTestDigest
         return end < 0 ? line : line[(end + 1)..].Trim();
     }
 
+    // Microsoft.Testing.Platform prints "from <assembly> (<framework>)" under a failed test's name, before its error.
     private static bool IsLabel(string line) =>
-        line is "Error Message:" or "Stack Trace:" or "Standard Output Messages:" or "Output:";
+        line is "Error Message:" or "Stack Trace:" or "Standard Output Messages:" or "Output:"
+        || (line.StartsWith("from ", StringComparison.Ordinal) && line.EndsWith(')'));
 
     private static void AddRemainder(List<string> lines, int count)
     {
