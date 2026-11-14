@@ -227,7 +227,17 @@ public sealed partial class RunDelivery
         if (plan is not null)
             AfterPlanFound?.Invoke(_files.Absolute(plan));
 
-        string? planText = plan is null ? null : PresentFile.ReadIfPresent(_files.Absolute(plan));
+        string? planText = null;
+        try
+        {
+            planText = plan is null ? null : PresentFile.ReadIfPresent(_files.Absolute(plan));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return Refused(PlanNotDeliverable, $"The plan '{plan}' could not be read: {exception.Message}. Nothing was changed.",
+                "Make the archived plan a readable file, then call this again.");
+        }
+
         if (plan is not null && planText is null)
             return Refused(PlanNotDeliverable, $"The plan '{plan}' is no longer there. Nothing was changed.");
 
@@ -654,9 +664,25 @@ public sealed partial class RunDelivery
             .StandardOutput.Split('\0', StringSplitOptions.RemoveEmptyEntries)
             .Where(path => IsPlanFile(path, todoFolder))
             .Order(StringComparer.Ordinal)
-            .Select(path => (Path: path, Text: PresentFile.ReadIfPresent(_files.Absolute(path))))
+            .Select(path => (Path: path, Text: ReadTodo(path)))
             .Where(todo => todo.Text is not null)
             .Select(todo => $"{RunEvidence.DocumentTitle(todo.Text!) ?? Path.GetFileNameWithoutExtension(todo.Path)} (`{todo.Path}`)")];
+    }
+
+    /// <summary>
+    /// A todo's text, or null when it is gone. One that is there but unreadable is still follow-up work the run filed, so
+    /// it is listed by its file name (empty text) rather than failing the delivery or being left out.
+    /// </summary>
+    private string? ReadTodo(string path)
+    {
+        try
+        {
+            return PresentFile.ReadIfPresent(_files.Absolute(path));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return string.Empty;
+        }
     }
 
     /// <summary>Commits the todo folder, which the follow-up filing wrote after the review and nobody committed.</summary>

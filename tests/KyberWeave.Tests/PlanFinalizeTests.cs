@@ -364,6 +364,28 @@ public sealed class PlanFinalizeTests
         Assert.False(Exists(fixture, PlanTaskFileProbe.TaskFilePath));
     }
 
+    /// <summary>A folder in the plan's place passes the active check, then throws on read: a finding, not a crash.</summary>
+    [Fact]
+    public void APlanThatCannotBeReadAfterTheActiveCheckIsAFindingNotACrash()
+    {
+        using DocFixture fixture = Repository();
+        string index = Read(fixture, PlanTaskFileProbe.PlanIndexPath);
+
+        PlanFinalizeOutcome outcome = Finalizer(fixture, path =>
+            {
+                File.Delete(path);
+                Directory.CreateDirectory(path);
+            })
+            .Run(PlanTaskFileProbe.PlanPath, PlanApprovalMode.Autonomous, Approval, DateOnly.Parse(Date, CultureInfo.InvariantCulture));
+
+        Assert.False(outcome.Finalized);
+        Diagnostic refusal = Assert.Single(outcome.Report.Items, item => item.Severity == Severity.Error);
+        Assert.Equal(PlanFinalize.NotAnActivePlan, refusal.Code);
+        Assert.Contains("could not be read", refusal.Message, StringComparison.Ordinal);
+        Assert.Equal(index, Read(fixture, PlanTaskFileProbe.PlanIndexPath));
+        Assert.False(Exists(fixture, PlanTaskFileProbe.TaskFilePath));
+    }
+
     [Fact]
     public void RestoringAfterTheTaskFileFolderVanishedDeletesNothingAndDoesNotThrow()
     {

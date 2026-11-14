@@ -445,6 +445,73 @@ public sealed class RunDeliveryTests : IDisposable
         Assert.Contains("is no longer there", Findings(outcome), StringComparison.Ordinal);
     }
 
+    /// <summary>A plan that is there but cannot be read (a folder in its place) is the same refusal, with its reason.</summary>
+    [Fact]
+    public void RefusesAPlanThatCannotBeReadAndSaysWhy()
+    {
+        GitRunRepository(archivePending: false);
+        ScriptedGh gh = new();
+
+        DeliveryOutcome outcome = Deliver(gh, new DeliveryRequest("S."), afterPlanFound: path =>
+        {
+            File.Delete(path);
+            Directory.CreateDirectory(path);
+        });
+
+        AssertRefusedBeforeAnythingLeaves(outcome, gh, RunDelivery.PlanNotDeliverable);
+        Assert.Contains("could not be read", Findings(outcome), StringComparison.Ordinal);
+    }
+
+    /// <summary>A todo that is there but cannot be read is still listed, by its file name; the delivery goes on.</summary>
+    [Fact]
+    public void ATodoThatCannotBeReadIsListedByFileNameAndDoesNotFailTheDelivery()
+    {
+        GitRunRepository(archivePending: false);
+        const string Unreadable = "docs/todo/unreadable-follow-up.md";
+        Write("docs/todo/README.md", "# Todos\n");
+        Write(Unreadable, "---\nid: todo/unreadable-follow-up\ntitle: Cannot read this\ndoc-type: todo\n---\n\n# X\n");
+        int listings = 0;
+        ScriptedGh gh = new()
+        {
+            AfterGit = arguments =>
+            {
+                if (arguments.Contains("--diff-filter=A") && ++listings == 2)
+                {
+                    string path = Path.Combine(_work, "docs", "todo", "unreadable-follow-up.md");
+                    File.Delete(path);
+                    Directory.CreateDirectory(path);
+                }
+            }
+        };
+
+        DeliveryOutcome outcome = Deliver(gh, new DeliveryRequest("S."));
+
+        Assert.True(outcome.Delivered, Findings(outcome));
+        Assert.Contains($"unreadable-follow-up (`{Unreadable}`)", gh.Bodies.Single(), StringComparison.Ordinal);
+    }
+
+    /// <summary>A host template that cannot be read falls back to the standard description rather than throwing.</summary>
+    [Fact]
+    public void AHostTemplateThatCannotBeReadIsNotUsedAndDoesNotThrow()
+    {
+        if (OperatingSystem.IsWindows() || Environment.UserName == "root")
+            return;
+
+        string repo = Path.Combine(_root, "template-repo");
+        Directory.CreateDirectory(repo);
+        string template = Path.Combine(repo, "pull_request_template.md");
+        File.WriteAllText(template, "## Summary\n");
+        File.SetUnixFileMode(template, UnixFileMode.None);
+        try
+        {
+            Assert.Null(PullRequestDescription.ReadHostTemplate(repo));
+        }
+        finally
+        {
+            File.SetUnixFileMode(template, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+    }
+
     /// <summary>
     /// A todo the branch added is listed by git and read a moment later. One that is gone by then is left out of the
     /// follow-up list, and the delivery goes on with the todos that are still there.

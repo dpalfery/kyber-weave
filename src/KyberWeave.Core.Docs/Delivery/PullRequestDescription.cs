@@ -81,8 +81,18 @@ public static partial class PullRequestDescription
 
             string? match = Directory.EnumerateFiles(folder)
                 .FirstOrDefault(file => string.Equals(Path.GetFileName(file), Path.GetFileName(location), StringComparison.OrdinalIgnoreCase));
-            if (match is not null)
+            if (match is null)
+                continue;
+
+            try
+            {
                 return File.ReadAllText(match);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // A template that cannot be read is not worth failing the delivery for: the standard format is used instead.
+                return null;
+            }
         }
 
         return null;

@@ -124,7 +124,19 @@ public sealed partial class PlanFinalize
         }
 
         AfterActivePlanCheck?.Invoke(_files.Absolute(plan));
-        if (PresentFile.ReadIfPresent(_files.Absolute(plan)) is not { } planText)
+        string? planRead;
+        try
+        {
+            planRead = PresentFile.ReadIfPresent(_files.Absolute(plan));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            report.Add(new Diagnostic(NotAnActivePlan, Severity.Error, $"'{plan}' could not be read: {exception.Message}", plan, plan,
+                Hint: "Make the plan a readable file, then run the finalize again."));
+            return Refused();
+        }
+
+        if (planRead is not { } planText)
         {
             report.Add(new Diagnostic(NotAnActivePlan, Severity.Error, $"'{plan}' does not exist.", plan, plan,
                 Hint: "Name a plan file directly under the plans folder, not its index and not an archived plan."));
