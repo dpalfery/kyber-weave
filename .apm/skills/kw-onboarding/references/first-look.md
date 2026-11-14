@@ -52,8 +52,17 @@ an agent's shell `PATH` while its folder holds recent files is still likely in u
 case: `skills/test-dev/` (the test-writing skill became `testing`). The `test-dev` *agent* is still
 current; only the skill folder is a leftover. Note it for the step-8 cleanup, asked with this
 context: the harness still loads the old skill, which can give agents outdated testing steps;
-options are move it to the trash (`mv <folder> ~/.Trash/` on macOS, or the desktop's trash
-elsewhere) or leave it; undo by moving it back; recommend moving it.
+options are move it out of the skills folder or leave it; recommend moving it. Per platform:
+
+- macOS: `mv <folder> ~/.Trash/`; restore with Finder's Put Back, or move it back.
+- Linux: `gio trash <folder>` when `command -v gio` finds it; restore from the file manager's
+  Trash. Otherwise (a bare `mv` into the trash loses its restore data) move it to
+  `~/.kyber-weave/removed-skills/<date>/` and tell the user that path.
+- Windows: no confirmed recycle-bin command, so in PowerShell
+  `Move-Item <folder> "$HOME\.kyber-weave\removed-skills\<date>\"` and tell the user that path.
+
+Where it went to a backup folder, undo by moving it back from there. In every case check the
+folder is gone from the skills directory afterwards, and give the restore step.
 
 ## The summary to show
 
