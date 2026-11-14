@@ -1340,7 +1340,7 @@ self-contained recovery brief with previous findings, decisions, and failed appr
 The conductor records session handles and replacement reasons on the execution artifact.
 
 Deployed `conductor`, `csharp-dev`, `test-dev`, and `github-devops` agents stop
-unbounded test-fix loops: 3 incremental fixes per implementation or rework dispatch, 2 conductor
+unbounded test-fix loops: 3 incremental fixes per implementation or rework dispatch, 3 conductor
 rework dispatches per failure cluster per run, A→B→A oscillation detection, and
 escalation through `STATUS: ESCALATION` / `ESCALATION: circuit-breaker`. Caps,
 cluster identity, JEV checkpoints, and the closed trigger set are in

@@ -1555,7 +1555,7 @@ product claim is here.
 flowchart TD
     Cluster["Failure cluster\n(first-observed test ID)"]
     Worker["Implementation or rework dispatch\n3 incremental fixes"]
-    Conductor["Conductor run\n2 rework dispatches"]
+    Conductor["Conductor run\n3 rework dispatches"]
     JEV["JEV tripwire or cap"]
     Escalation["STATUS: ESCALATION"]
     Finding["ESCALATION: circuit-breaker"]
@@ -1621,10 +1621,10 @@ preserving a cache entry.
 | Level | Cap | Scope |
 |---|---|---|
 | Worker inner loop | 3 incremental test-fix-verify attempts | Same failing fixture or cluster, one implementation or rework dispatch |
-| Conductor rework | 2 rework dispatches | Same cluster, entire delivery run |
+| Conductor rework | 3 rework dispatches | Same cluster, entire delivery run |
 
-A third unresolved worker attempt, or a third conductor dispatch of the same cluster,
-trips `CIRCUIT_BREAKER_TRIGGER: ITERATION_CAP_EXCEEDED`.
+A worker still not green after its third attempt, or a conductor dispatch of a cluster whose
+tally is already 3, trips `CIRCUIT_BREAKER_TRIGGER: ITERATION_CAP_EXCEEDED`.
 
 ### Oscillation (Q2)
 

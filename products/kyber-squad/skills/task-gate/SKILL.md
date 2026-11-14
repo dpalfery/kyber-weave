@@ -1,6 +1,6 @@
 ---
 name: task-gate
-description: "The occasional parts of a developer task's exit gate: the 2-cycle cap and its escalation, the whole-project gate caveat, .NET build isolation, and the status words and completion digest format. The two commands themselves are in the worker baseline, and each run prints its own next step and, when it passes, the filled digest. Use when a task gate keeps failing, an escalation is due, or a TASK_GATE status word needs explaining. Do not use when the request reviews a whole branch or pull request rather than one task's exit gate."
+description: "The occasional parts of a developer task's exit gate: the 3-cycle cap and its escalation, the whole-project gate caveat, .NET build isolation, and the status words and completion digest format. The two commands themselves are in the worker baseline, and each run prints its own next step and, when it passes, the filled digest. Use when a task gate keeps failing, an escalation is due, or a TASK_GATE status word needs explaining. Do not use when the request reviews a whole branch or pull request rather than one task's exit gate."
 license: MIT
 metadata:
   author: dpalfery
@@ -45,11 +45,11 @@ digest names only the passing one.
 When the task changed C# files, the mechanical findings are erased by `dotnet format` and
 `dotnet format analyzers`, scoped with `--include` to this task's files.
 
-## Loop and the 2-cycle cap
+## Loop and the 3-cycle cap
 
 A cycle is one `--fix` run followed by one verification run. When a gate fails, make the fix its
-output calls for and run one cycle. The loop has a 2-cycle cap: after two cycles, stop even when a
-gate still fails, return the escalation below, and do not run a third.
+output calls for and run one cycle. The loop has a 3-cycle cap: after three cycles, stop even when a
+gate still fails, return the escalation below, and do not run a fourth.
 
 A gate that cannot run for a reason outside the task is not a failure to fix. Report it as skipped
 with its reason, and do not claim a pass for it.
@@ -70,7 +70,7 @@ process starts.
 
 ## Escalation
 
-When the 2-cycle cap is reached and the gate still fails, return this instead of a pass:
+When the 3-cycle cap is reached and the gate still fails, return this instead of a pass:
 
 ```text
 STATUS: ESCALATION
@@ -78,7 +78,7 @@ CIRCUIT_BREAKER_TRIGGER: <ITERATION_CAP_EXCEEDED | THRASH_OSCILLATION_DETECTED |
 FAILURE_CLUSTER: task-gate/<gate-id>
 ```
 
-The trigger set is closed; this gate raises `ITERATION_CAP_EXCEEDED` when the 2-cycle cap is spent.
+The trigger set is closed; this gate raises `ITERATION_CAP_EXCEEDED` when the 3-cycle cap is spent.
 Use `task-gate/<gate-id>` with the id of the gate that stayed red. The full failure loop — the
 iteration cap, the JEV checkpoints and the payload each trigger carries — is in
 [references/rework.md](references/rework.md).

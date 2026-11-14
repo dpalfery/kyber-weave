@@ -181,7 +181,7 @@ rules:
       - products/kyber-squad/shared/worker-baseline.md
       - products/kyber-squad/skills/code-review/references/lenses/performance.md
   - id: B6
-    statement: The conductor allows at most 2 rework dispatches per failure cluster before its circuit breaker trips.
+    statement: The conductor allows at most 3 rework dispatches per failure cluster before its circuit breaker trips.
     stated-in:
       - path: products/kyber-squad/skills/delivery-execution/SKILL.md
         section: Iteration circuit-breaker and loop detection

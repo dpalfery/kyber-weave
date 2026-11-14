@@ -67,7 +67,7 @@ flowchart TD
     Worker --> Gate
     Gate -->|"TASK_GATE: PASS · NONE_DECLARED · NONE_APPLICABLE"| TaskDone["task done to standard"]
     Gate -->|"FAIL or line missing · reject to the same worker"| Worker
-    Gate -->|"2 reworks per task-gate key · circuit-breaker"| Findings["per-objective findings collection"]
+    Gate -->|"3 reworks per task-gate key · circuit-breaker"| Findings["per-objective findings collection"]
     TaskDone --> Join["run join<br/>every task has cleared its gate<br/>findings collection drained"]
     Findings --> Drain["collection drain"]
     Drain -->|"residual findings"| Architect["architect — solution and plan"]
@@ -1021,7 +1021,7 @@ entire point of the split.
 task with the `task-gate` skill: it runs the `review.task-gates` entry for that agent (formatting,
 analyzer fixes, build and tests), fixes what a machine
 can fix, and verifies. The worker reports a `TASK_GATE:` line in its digest. The conductor rejects
-a missing or `FAIL` line back to the same worker; after two reworks for the same
+a missing or `FAIL` line back to the same worker; after three reworks for the same
 `task-gate/<gate-id>` key the circuit-breaker trips and the failure enters the conductor's
 per-objective findings collection, which `architect` plans against before the end-of-run review
 runs. See [ADR 0005](../adr/0005-task-level-fast-review.md).

@@ -526,7 +526,7 @@ failing test with the first line of its error (or each compile error), at most 1
 200 characters, and the path of its full output under `.agent_scratchpad/<task>/logs/`. A test gate
 that exits 0 having run no test prints `NO TESTS RAN`, never a pass. In human output it ends with a
 `next:` line naming the worker's next step: after `--red`, the passing-run command; after a
-`--fix` run, the verification run; after a failure, the 2-cycle cap and the escalation lines with
+`--fix` run, the verification run; after a failure, the 3-cycle cap and the escalation lines with
 the failing gate's id; after a passing verification run, the completion digest with `STATUS`,
 `FILES` and the `TASK_GATE:` line filled in and `TESTS`, `COMMIT`, `REMOTE_HEAD` and `runs` left
 as placeholders:

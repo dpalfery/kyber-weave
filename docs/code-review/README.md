@@ -57,7 +57,7 @@ apply the fix, and another pass to confirm it — to arrive at an edit `dotnet f
 made for free. So the machine layer runs first, as the developer's exit gate, and a mechanical
 finding in the council's review is evidence the gate did not run, and *that* is the finding.
 
-The same logic caps the passes. The gate gets two rework cycles per key. The council
+The same logic caps the passes. The gate gets three rework cycles per key. The council
 re-reviews after every fix round until it approves, each later cycle a cheap verifier re-check
 of the fix delta, and stops after 5 cycles or 3 in a row without the critical and major count
 falling; what is still open goes in the pull request for a person. A defect surviving that many
@@ -95,7 +95,7 @@ individual task, and paying the council's price to ask it was the problem this s
 verifies, before the change leaves the worker: predefined type keywords, `var` where the standard
 forbids it, redundant qualifiers, unused usings, formatting, and the declared build and tests. It
 reports a `TASK_GATE:` line; the conductor rejects a missing or failing line back to the same
-worker, and two reworks for the same gate key trip the circuit-breaker into the conductor's
+worker, and three reworks for the same gate key trip the circuit-breaker into the conductor's
 findings collection, which `architect` plans against before the run ends. A mechanical defect that
 reaches the council means the gate did not run.
 

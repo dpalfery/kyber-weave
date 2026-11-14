@@ -144,7 +144,7 @@ beside `SKILL.md`.
 
 `task-gate` is the deterministic exit check every developer agent runs before it reports a
 task done. It runs the `kyber-weave review gates` command scoped to the task's own changed
-files, applies the fixes within a 2-cycle cap, and reports one `TASK_GATE:` digest line.
+files, applies the fixes within a 3-cycle cap, and reports one `TASK_GATE:` digest line.
 
 `delivery-execution` is the worker execution contract: how work is dispatched, verified and
 reported. Both entry points load it — `conductor` for plan- and spec-backed work, and the
