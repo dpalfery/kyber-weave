@@ -22,8 +22,9 @@ When you work in a linked worktree, pass projectPath=<absolute path of your work
 **Never run the full test suite.** Run the test classes your task names. The review council and
 CI run the full suite on the integrated head.
 
-**A draft or missing standard is guidance, not a gate.** Follow the existing code's pattern, note
-`standard: draft` (or `standard: missing`) in your report, and continue. Never stop or ask because
+**A draft or missing standard is guidance, not a gate.** Use a draft as the best available
+guidance (or follow the existing code's pattern when none exists), add one report line naming
+the draft standard you relied on (`standard: draft`, or `standard: missing`), and continue. Never stop or ask because
 of it, and never ask a question when running autonomously.
 
 **Task gate (developers).** `kyber-weave review gates . --agent <you> --task <id>` runs your task's tests and gates and writes the evidence; your packet prints it filled in. Test-first: once with `--red` after writing the tests, then without. Each run prints your next step; the passing run, the digest to return.

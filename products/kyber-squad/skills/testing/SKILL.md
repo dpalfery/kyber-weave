@@ -18,8 +18,9 @@ which seeded reference rows are safe to rely on, naming, and anything parallel r
 share. Read existing tests only for what that answer leaves open, and start from the test class
 your task's Test contract names. Language-level rules come from your language's standard
 (`csharp`, `typescript`, and so on). When the tool is missing, read the file declared as
-**<test-coding-standard>** in the root `AGENTS.md`. A draft or missing standard is guidance:
-follow the existing tests' pattern and note `standard: draft` (or `missing`) in your report.
+**<test-coding-standard>** in the root `AGENTS.md`. A draft or missing standard is guidance,
+never a stop: use a draft as the best available guidance, otherwise follow the existing tests'
+pattern, and name the draft standard you relied on (`standard: draft`, or `missing`) in your report.
 
 ## Run your tests: one command
 

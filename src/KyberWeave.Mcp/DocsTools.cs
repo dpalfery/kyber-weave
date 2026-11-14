@@ -1138,7 +1138,7 @@ public sealed partial class DocsTools
         if (doc.Status is not DocStatus.Current)
         {
             sb.Append("Warning: this standard's status is ").Append(StatusName(doc.Status))
-              .AppendLine(", so it is not settled guidance for the stack yet — confirm it before following it.");
+              .AppendLine(", so it is not settled guidance for the stack yet — use it as the best available guidance and name it in your report.");
         }
 
         AppendIdentity(sb, hit, withheld);

@@ -19,8 +19,8 @@ Those three must not disagree. Where they would, this document yields to them.
 
 When this standard is in `status: current`, it is the rule for this technology in this
 repository. Portable agents ship no built-in default to fall back on. While it is in
-`status: draft` it is a proposal: an agent that resolves it says so and asks a human whether
-to proceed on it, exactly as it does when no standard is declared.
+`status: draft` it is a proposal, but a worker never stops for it: it uses the draft as the
+best available guidance and names the draft standard it relied on in one line of its report.
 
 > Template. Set `owner` to a row in `catalog.md`, replace `<Solution>` with the host's
 > root namespace, review the decisions below, and promote `status` to `current`.

@@ -24,8 +24,9 @@ does not deploy them, and nothing reads one until a host adopts it — all fourt
 
 Until step 3 is done the agents have nothing to follow. They ship no built-in standard: an
 agent that finds `<react-coding-standard>` undeclared, or pointing at a `status: draft`
-document, says so and asks a human whether to proceed. The code-review checklists report the
-same gap rather than substituting rules of their own.
+document, never stops: it follows the existing code's pattern or uses the draft as the best
+available guidance, and names the gap or the draft in one line of its report. The code-review
+checklists report the same gap rather than substituting rules of their own.
 
 ## What these are
 

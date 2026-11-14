@@ -65,8 +65,8 @@ Verify each item, and fix or report anything that fails before creating the pull
 - [ ] **The host's declared gates pass.** Run the commands the root `AGENTS.md` lists, and the
   build, test, lint, and format commands the declared **<technology>-coding-standard** names for
   each technology the change touches (for example **<csharp-coding-standard>**). When a standard
-  is undeclared or still a draft, say so and ask whether to proceed; do not substitute commands
-  of your own.
+  is undeclared or still a draft, say so in the description and use the draft's commands, or
+  none if undeclared; do not substitute commands of your own.
 - [ ] **Scoped instructions are followed.** Read the nearest `AGENTS.md` to every changed file
   and confirm the change complies.
 - [ ] **Architecture rules hold.** Check the change against the rules declared under
