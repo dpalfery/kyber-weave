@@ -47,8 +47,11 @@ servers answer, installs the squad and the Arbiter hooks for the harnesses you p
 setting with its default so you choose which to change, checks the Arbiter's decision-model
 key, and checks the repository's own rules and instructions for conflicts, stale names and
 statements that belong in a [coding standard](../documentation-ontology.md#rules-and-standards)
-rather than a rule. It asks before every change outside the repository and is safe to run again. The commands
-below are what it runs.
+rather than a rule. It looks before it asks: it first shows what it found on the machine and in
+the repository, and every question then says what the choice is, why it matters, what each answer
+does, how to undo it, and what it recommends. It never removes the squad from a harness you did not
+ask to remove. It asks before every change outside the repository and is safe to run again. The
+commands below are what it runs.
 
 ---
 

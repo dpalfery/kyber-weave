@@ -12,6 +12,42 @@
 - **`codegraph`**: the CodeGraph MCP server (`codegraph serve --mcp`). It gives agents the
   `codegraph_explore` tool over the index.
 
+An **MCP server** is a small local program a harness starts so its agents can call extra tools;
+these two give agents code search and documentation answers.
+
+## The questions, with their context
+
+Ask each only where first-look found a gap.
+
+**Build the code index?**
+- *Why*: without it agents search code by text, which takes many more steps and misses callers;
+  the docs drift check cannot run.
+- *Options*: build it now (`kyber-weave doctor --provision .`), or skip (agents still work, slower).
+- *Cost and undo*: one to a few minutes, longer on a large repository; writes only `.codegraph/`
+  in the repository, and doctor puts back any tracked file indexing rewrites; undo by deleting
+  `.codegraph/`. Nothing leaves the machine.
+- *Recommend*: build it. A "no" stands for the rest of the run.
+
+**Declare the `codegraph` server for this repository?**
+- *What*: adds `codegraph` to the list of servers this repository's agents rely on, in
+  `.kyber-weave/kyber-weave.yml`.
+- *Why and options*: see "Declaring the servers" below for what changes with and without it.
+- *Cost and undo*: one repository file; undo by deleting the entry.
+- *Recommend*: declare it when the user said yes to the index; otherwise leave it out.
+
+**Wire the servers into each harness?**
+- *What*: each harness reads its own list of MCP servers; declaring a server does not add it there.
+- *Why*: an unwired harness's agents have neither tool, so they search by text and guess at docs.
+- *Options*: per harness, wire it (the table below says how), or leave it.
+- *Cost and undo*: `mcp-wire` writes repository files only (preview without `--target`, or with
+  `--dry-run`); a manual entry may be a file in the home directory (ask). Undo by removing the entry.
+- *Found*: which chosen harnesses already list each server.
+- *Recommend*: wire every harness the user has.
+
+**Let CodeGraph register itself (`codegraph install`)?** Only when a harness has no slug and the
+user prefers it to a manual entry. It is a third-party tool writing harness settings in the home
+directory: show `codegraph install --help` and say exactly which files it names before asking.
+
 ## Index commands
 
 | Command | Does | Ask first? |
@@ -70,10 +106,6 @@ Everything else is a manual entry the user places; show them the entry and the f
 | Pi | `.mcp.json` in the `pi-mcp-adapter` schema, or `~/.config/mcp/mcp.json` | manual |
 | Copilot CLI | `$COPILOT_HOME/mcp-config.json` (default `~/.copilot/`), `mcpServers` | manual (user file: ask) |
 | Warp | Warp's own MCP settings | manual |
-
-For the `codegraph` server only, CodeGraph's own `codegraph install` can register it in several
-harnesses' user-level settings. It is a third-party tool writing outside the repository: show
-`codegraph install --help` and ask before running it.
 
 Clients started from a desktop icon may not see `~/.local/bin` on `PATH`; if a server will not
 start there, use the absolute path of the binary in the entry.

@@ -229,11 +229,30 @@ recommended moves.
 
 ## Phase E — Selection
 
-Ask which findings to act on, the way the settings step asks: the harness's structured
+Before the question, tell the user in a few lines:
+
+- *What*: the numbered findings above are places where agents get contradictory, stale or
+  misplaced instructions in this repository.
+- *Why*: a strict agent obeys the first instruction it reads, so each finding costs time or a
+  wrong turn on every run (each finding's "Cost" line says how).
+- *What selecting does*: nothing is applied yet. For each selected finding you show the exact
+  change as a diff and apply it only after a yes. A code-structure finding (category 2) is never
+  fixed by refactoring here: it becomes a todo, or a plan through the conductor, for a separate
+  run. Not selecting a finding leaves the files as they are.
+- *Cost and undo*: edits stay in repository files, visible in `git status`, and can be reverted
+  before committing.
+- *Recommend*: the findings marked recommended (name their numbers), and say which ones the user
+  can safely leave.
+
+Then ask which findings to act on, the way the settings step asks: the harness's structured
 multi-select question tool where it has one (one question per category, split a long category
 across questions, recommended choices first), otherwise the numbered list and an answer such as
 `2, 5, 7` or `none`. For each selected finding with more than one option, ask which option, with
-the recommended one first.
+the recommended one first and one line on what each option changes.
+
+Write findings in plain words: name the file and quote the text, explain any product term (the
+Config Reg is the generated paths block in the root `AGENTS.md`; a standard is a per-technology
+coding guide), and drop rule ids unless the user needs one to look something up.
 
 ## Phase F — Apply the selected findings
 

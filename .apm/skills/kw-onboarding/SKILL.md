@@ -4,147 +4,115 @@ description: "Guided first-time setup of Kyber-Weave and Kyber-Squad on a machin
 license: MIT
 metadata:
   author: dpalfery
-  version: 0.1.0
+  version: 0.2.0
 ---
 
 # Set up Kyber-Weave with the user
 
-A walkthrough you run **with** the user, one step at a time. Each step first detects what is
-already done and skips it, so the whole skill is safe to run again. Keep a short ledger as you
-go: what was already in place, what you changed, what the user declined.
+A walkthrough you run **with** the user, one question at a time. Assume the user has read no
+Kyber-Weave documentation. Each step first detects what is already done and skips it, so the
+skill is safe to run again. Keep a short ledger: already in place, changed now, declined.
+
+## The rule for every question
+
+**Never ask a question without its context.** Before every question, about any setting, fix,
+install or finding, tell the user in plain words, in a short paragraph or 4 to 6 short lines:
+
+1. **What it is**: one sentence defining the thing, with no undefined product term.
+2. **Why it matters**: what the choice changes in the user's day-to-day work.
+3. **What each option does**: the concrete effect of each answer, including choosing nothing.
+4. **Cost and undo**: time, files written outside the repository, any risk, and how to change
+   it later (the exact command, or "re-run this skill").
+5. **What I found**: what is already on this machine or in this repository that bears on the
+   answer. Detect first, ask second: never ask the user to recall what a command can show.
+6. **What I recommend and why**: one default, chosen from what you found, that the user can
+   accept with one word; say who should pick something else.
+
+Then ask **one** question, phrased so "yes" or "the recommended one" is a complete answer. Use
+the harness's structured question tool where it exists (for example `AskUserQuestion` in Claude
+Code, `askQuestions` in VS Code Copilot), otherwise a numbered list answered with numbers or
+`none`. Recommended option first. Never a bare list of product names, never two things in one
+question, never more than about five options at once (split into groups). If the product does
+not document an option well enough to explain it this way, say so and skip the question.
+
+Each reference holds the context for the questions of its step, next to the setting it
+describes. Define these at first use, or avoid them: harness, squad, Arbiter, decision model,
+gate, MCP server, code index, fix level, severity override, run, worktree. Quote a rule id only
+when the user needs it to look something up.
 
 ## Ground rules
 
-- **ALWAYS ask before every change outside this repository**: a global install, a harness hook, the
-  user's shell profile, the OS credential store, anything under the home directory. Inside the
-  repository, still say what you will write before you write it.
-- **NEVER print, store, or echo a secret.** Keys go to the CLI's own prompt, `--key-stdin`, or an
+- **Ask before every change outside this repository**: a global install, a harness hook, a shell
+  profile, the OS credential store, anything under the home directory. Inside the repository,
+  say what you will write before you write it.
+- **Never print, store, or echo a secret.** Keys go to the CLI's own prompt, `--key-stdin`, or an
   environment variable the user sets themselves.
-- **Indexing is the user's decision.** Explain what CodeGraph indexing does and ask; a "no" stands
-  for the rest of the run.
+- **Indexing is the user's decision**; a "no" stands for the rest of the run.
 - **The CLI is the authority.** Use only verbs and flags that `kyber-weave <verb> --help` shows.
-  If a step needs something the CLI does not offer, say so instead of inventing it.
-- **Plain words.** Explain each check, setting, or term in one sentence. Do not quote rule ids
-  unless the user needs one to look something up.
+- **Never drop a harness by accident.** Every `--target` list you pass is the union of what is
+  already installed and what the user chose ([harnesses.md](references/harnesses.md#never-drop-a-harness)).
 
-**How to ask.** Use the harness's structured question tool when it has one (for example
-`AskUserQuestion` with multi-select in Claude Code, `askQuestions` in VS Code Copilot). Question
-tools cap the number of options, so ask per group and split a long group across several
-questions. Without such a tool, print a numbered list and let the user answer with numbers
-(`2, 5, 7`) or `none`. Always put the recommended choice first.
+## Step 0 — Say what will happen, then look first
 
-## Step 0 — Preconditions
+1. Tell the user, in three or four lines: what onboarding does (checks this machine, connects
+   the code-search and docs tools, installs Kyber-Weave's agents into the AI coding tools they
+   choose, reviews settings, checks the repository's rules for conflicts); that it takes about
+   15 to 30 minutes; that nothing outside this repository changes without their yes; and that
+   they can stop at any point and resume by asking again.
+2. Run the read-only detection in [references/first-look.md](references/first-look.md) and show
+   its short "here is what I found" summary before the first question. Every later question
+   refers back to it.
+3. Missing `kyber-weave`: stop and point at the install one-liner in the `kyber-weave-cli` skill.
+   An old version, or no `.kyber-weave/kyber-weave.yml`: ask using the context in first-look.md.
 
-1. `kyber-weave --version`. Missing: stop and point the user at the install one-liner in the
-   `kyber-weave-cli` skill. An old version: offer `kyber-weave update` (machine-wide, so ask).
-2. Confirm the current directory is inside a git repository that is not the home directory.
-3. Look for `.kyber-weave/kyber-weave.yml` at the repository root. Missing: explain that it is the
-   repository's Kyber-Weave configuration, and offer `kyber-weave docs init .` (add `--no-skill`
-   when the squad is already deployed, because the squad ships the same skills). Do not answer the
-   documentation-onboarding question here; that belongs to the later step.
+## Step 1 — Fix what the machine check found
 
-## Step 1 — Check the machine
-
-Run `kyber-weave doctor --check .` (read-only; it never indexes or installs). For every line that
-is not a plain pass, explain it in one sentence using [references/doctor-checks.md](references/doctor-checks.md),
-offer the fix it prints, and apply it only with the user's yes. Exit `3` means CodeGraph is not
-installed: the user installs it themselves; you give no install command.
+For every doctor line that is not a plain pass, give the context in
+[references/doctor-checks.md](references/doctor-checks.md) and ask about its fix, one at a time.
+Exit `3` means CodeGraph is not installed: the user installs it themselves.
 
 ## Step 2 — Code index and docs tools
 
-Load [references/mcp-and-index.md](references/mcp-and-index.md) now.
-
-1. **Index.** If the repository has no `.codegraph/`, explain what an index is for and ask before
-   running `kyber-weave doctor --provision .`. If it exists, the step-1 result already says
-   whether it is healthy.
-2. **Declared servers.** Read `mcp.required-servers` in the configuration. `kw-docs` should be
-   there; offer to add `codegraph` only after explaining what declaring it changes.
-3. **Wiring per harness.** For each harness the user uses (ask now if step 3 has not), check its
-   MCP configuration holds `kw-docs` and `codegraph`. Wire gaps with
-   `kyber-weave docs mcp-wire . --target <slug>` where the reference lists a slug, otherwise show
-   the manual entry and let the user place it.
-4. **Prove they answer.** In this session, call the docs server's
-   `docs_get_source_repository_and_revision` and one `codegraph_explore` query. Report each as
-   answering, not wired, or failing.
+Load [references/mcp-and-index.md](references/mcp-and-index.md). Ask, in order and only where
+detection shows a gap: build the code index; declare the `codegraph` server; wire the two servers
+into each harness the user has (from the step-0 findings); then prove each answers.
 
 ## Step 3 — Harnesses
 
-Load [references/harnesses.md](references/harnesses.md) now.
-
-1. Get the supported list from the product: the `--target` line of
-   `kyber-weave squad install --help`, or the renderer line of `kyber-weave squad doctor --global`.
-2. Detect what is in place: `kyber-weave squad status --global` and `kyber-weave squad status .`
-   (each deployed file names its harness in parentheses) and `kyber-weave arbiter status`.
-3. Ask which harnesses the user wants (multi-select), marking the ones already deployed.
-4. Ask global (recommended: every repository) or this project only, then deploy. An explicit
-   `--target` list on `squad update` replaces the deployed set, so never update one harness alone:
-   - Only refreshing what is deployed: `kyber-weave squad update` (`--global` for global), no `--target`.
-   - Adding a harness globally: `kyber-weave squad install --global --target <new>`; the others stay.
-   - Adding a harness to a project that has others: `kyber-weave squad update . --target <every deployed token>,<new>`.
-   - Nothing deployed in the project yet: `kyber-weave squad install . --target <tokens>`.
-5. For each chosen harness, `kyber-weave arbiter install --target <token>`
-   (add `--project` for project scope). It keeps the provider already configured; pass `--provider`
-   only to change it.
-6. Show the harness's row from the reference: its trust step and any setting it needs. Offer to
-   apply a setting only where the reference says how, and never edit a shell profile or harness
-   settings file without a yes.
+Load [references/harnesses.md](references/harnesses.md). Three questions, each with its context:
+which harnesses (recommend the detected ones), every repository or this one only, and the
+Arbiter hooks. Removing a harness is never part of these; it is its own question, only when the
+user asks. Then show each chosen harness's one-time trust step and needed setting.
 
 ## Step 4 — Settings
 
-Load [references/settings.md](references/settings.md) now.
-
-1. Read the current value of every setting in the reference (configuration file, `kyber-weave
-   arbiter status`, `kyberdash dash settings show` when KyberDash is installed). Leave out
-   settings whose product is not installed, and say so.
-2. Show **one** list, grouped as the reference groups it: name, current value (or default), one
-   sentence on what it does and when you would change it.
-3. Ask which items the user wants to change: one multi-select per group, plus a "change nothing"
-   answer.
-4. For each selected item only: show its options with the recommended default first, ask, apply
-   it the way the reference says, and show the before and after.
-5. With `review.policy.fix-level`, say in one line that what counts as critical, major, minor or
-   nitpick in this repository can be set in the review guidance's "Severity overrides" section
-   ([settings.md](references/settings.md#what-counts-as-critical-major-minor-or-nitpick-here)), and
-   offer to add the empty section (to `REVIEW.md`, created with only that section when the
-   repository has none). Add it only on a yes.
-6. After any change to the configuration file, run `kyber-weave docs validate .` and fix any
-   finding about the configuration or the generated settings block. Report other findings
-   without fixing them; documentation is the later docs-onboarding step.
+Load [references/settings.md](references/settings.md). Show the common settings group by group,
+at most five at a time, each with its current value and its context line; ask which to change,
+with "change nothing" recommended unless detection found a reason. Advanced settings stay hidden
+unless the user asks to see them. Apply and validate the way the reference says.
 
 ## Step 5 — Models
 
-1. Explain tiers in one line: each agent names a tier (a model profile) such as `fast` or
-   `reviewer`, and each harness maps a tier to a concrete model.
-2. Run `kyber-weave squad preset list`. For each chosen harness show which preset it uses; with a
-   preset, `kyber-weave squad preset show <name> --target <token>` prints tier to model. Without
-   one the harness uses the bundled models: read that harness's column from
-   `~/.kyber-weave/squad/profiles/<version>.yml`, where `<version>` is the one
-   `kyber-weave --version` prints (without any `+build` suffix). If the file is missing,
-   `kyber-weave squad update` writes it.
-3. Ask which harnesses' models the user wants to change (multi-select). For those, hand over to
-   the `kyber-weave-model-profile` skill, which builds and applies a preset.
+Load [references/models.md](references/models.md); show which models each chosen harness uses
+and ask whether to change any.
 
 ## Step 6 — Decision-model key
 
-`kyber-weave arbiter status` says whether a key resolves, never its value. Load
-[references/settings.md § Decision-model key](references/settings.md#decision-model-key), explain
-what the key is for and what happens without it, and if the user wants one, have them run
-`kyber-weave arbiter setup` (masked prompt) or `arbiter install ... --key-stdin`. Never ask the
-user to paste the key into the chat.
+Load [references/settings.md § Decision-model key](references/settings.md#decision-model-key) and
+ask with its context. Never ask the user to paste the key into the chat.
 
 ## Step 7 — Check the repository's rules for conflicts
 
 Load [references/rules-and-structure-conflicts.md](references/rules-and-structure-conflicts.md) and
-run it: inventory every instruction source, run the mechanical checks, then the judgement pass,
-present one findings list, and apply only the findings the user selects. Asked on its own ("assess
-this repository's rules for conflicts", "audit AGENTS.md"), run Step 0 and then only this step.
+run it. Asked on its own ("audit AGENTS.md", "find conflicting rules"), run step 0's detection
+and then only this step.
 
 ## Step 8 — Finish
 
-1. Re-run `kyber-weave doctor --check .` and `kyber-weave arbiter status`.
-2. Summarise in three short lists: already in place, installed or changed now, declined or left
-   for later (each with the command that would do it).
-3. Next steps: run the `kyber-docs-onboarding-and-assessment` skill to onboard this repository's
-   documentation, gates and coding standards (it records the onboarding answer runs need), then
-   start work through the conductor (`/conductor` or the harness's equivalent entry point).
-4. Remind the user to restart any harness whose agents, hooks, or MCP configuration changed.
+1. Offer the cleanups first-look.md found (for example a retired skill folder left by an update).
+2. Re-run `kyber-weave doctor --check .` and `kyber-weave arbiter status`.
+3. Summarise in plain words, in three short lists: already in place, changed now, declined or left
+   for later (each with what it would do and the command). No rule ids.
+4. Next: the `kyber-docs-onboarding-and-assessment` skill onboards the repository's documentation
+   and records the onboarding answer that runs need; then start work through the conductor.
+5. Name each harness to restart because its agents, hooks or MCP configuration changed.

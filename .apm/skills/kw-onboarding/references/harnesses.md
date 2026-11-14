@@ -1,40 +1,117 @@
 # Harnesses
 
-The list of supported harnesses comes from the product, not from this file: the `--target` line
-of `kyber-weave squad install --help`, or the "Renderers available" line of
-`kyber-weave squad doctor --global`. This table only adds what each harness needs beyond the
-install. A harness the CLI lists but this table does not: install it and say no extra steps are
-known.
+A **harness** is the AI coding tool the user runs agents in, such as Claude Code or GitHub
+Copilot. The **squad** is Kyber-Weave's set of agents and skills (planner, developers, reviewers,
+and the procedures they follow). Installing the squad for a harness copies those files into that
+tool's home folder (or into this repository, for a project install). Nothing changes in a harness
+the user does not choose.
 
-## Install commands
+The supported list comes from the product: the `--target` line of
+`kyber-weave squad install --help`. A harness the CLI lists but this file does not: install it
+and say no extra steps are known.
 
-| Goal | Command |
-|---|---|
-| What is deployed | `kyber-weave squad status --global`, `kyber-weave squad status .` |
-| Deploy for every repository (recommended) | `kyber-weave squad install --global --target <token>` |
-| Deploy into this repository only | `kyber-weave squad install . --target <token>` |
-| Already deployed: refresh | `kyber-weave squad update [--global]` with no `--target` (an explicit list replaces the deployed set, so name every target to keep when you do pass one) |
-| What gates each harness, and the current provider | `kyber-weave arbiter status` |
-| Arbiter hooks, every repository | `kyber-weave arbiter install --target <token>` (one target per run) |
-| Arbiter hooks, this repository only | `kyber-weave arbiter install --project --target <token>` |
+## Never drop a harness
 
-`squad install` and `arbiter install` print the root they will write and ask to confirm; add
-`--dry-run` first when the user wants a preview. Adding a harness to an existing global install
-keeps the others. `arbiter install` without
-`--provider` keeps the configured provider and prints which one is in effect. The Arbiter is the decision gate that checks each agent dispatch against the
-plan; `arbiter install` turns it on and installs the harness hook that calls it.
+`kyber-weave squad update --target <list>` treats the list as the **complete** set: it removes
+the squad from every installed harness not named. Installing for Claude Code alone this way
+removes an existing Copilot install. So:
+
+- Every `--target` list you pass, on `install` or `update`, at global or project scope, is the
+  **union** of the harnesses already installed at that scope (from first-look) and the ones the
+  user chose now.
+- Say so to the user in one line before running it: "Copilot is already installed, so I am
+  passing `copilot,claude` to keep it."
+- Only refreshing what is installed: `kyber-weave squad update [--global]` with no `--target`.
+- Removing a harness is a separate question, asked only when the user brings it up, with its own
+  context (below). Never remove one as a side effect.
+
+## Question 1: which harnesses
+
+Context to give (the worked example below shows the full wording):
+
+- *What*: a harness, defined as above, and what installing does.
+- *Why*: the squad's agents only exist in the tools it is installed for; anywhere else the user
+  gets the tool's plain behaviour.
+- *Options*: each harness found on the machine, named with a few words so the user recognises it;
+  the less common ones grouped as "other supported tools" and shown only on request. Choosing
+  nothing installs nothing.
+- *Cost and undo*: about a minute; writes the harness's home folder (global) or this repository
+  (project); undo by re-running this skill, or `kyber-weave squad uninstall [--global]` for all.
+- *Found*: which tools are on the machine and which already have the squad, with its version.
+- *Recommend*: the tools found on the machine, plus every one that already has the squad.
+
+### Worked example
+
+> **Which AI coding tools should get Kyber-Weave's agents?**
+>
+> A *harness* is the AI coding tool you run agents in. Kyber-Weave installs its agents and skills
+> (planner, developers, reviewers) into each one you pick, by copying files into that tool's own
+> folder in your home directory. Tools you don't pick are not touched, and their agents keep
+> working as they do today.
+>
+> On this machine I found **Claude Code** (`~/.claude`) and **GitHub Copilot** (`~/.copilot`;
+> this covers both the Copilot CLI and Copilot in VS Code). Copilot already has Kyber-Weave
+> 1.4.0; Claude Code has none.
+>
+> I recommend **both**. Copilot stays installed either way: I always pass every installed tool
+> along with the new ones, because naming only one would remove the others. It takes about a
+> minute, and you can add or remove a tool later by running this setup again. Pick fewer if a
+> tool is one you no longer use. Other supported tools (Codex, Cursor, OpenCode, Kilo and seven
+> more) are available if you want them listed.
+>
+> 1. Claude Code and GitHub Copilot (recommended)
+> 2. GitHub Copilot only (keep as is)
+> 3. Show me the other supported tools
+
+## Question 2: every repository or this one
+
+- *What*: a global install puts the squad in each harness's home folder, so every repository on
+  this machine gets it; a project install puts it inside this repository only.
+- *Why*: global means one install to keep up to date; project means the repository carries its
+  own copy, which teammates get when they pull.
+- *Options*: global (`kyber-weave squad install --global --target <union>`), or project
+  (`kyber-weave squad install . --target <union>`; when the project already has the squad,
+  `kyber-weave squad update . --target <union>`).
+- *Cost and undo*: global writes under the home directory; project writes repository files that
+  show in `git status`. `--dry-run` previews either. In an agent's shell the CLI does not prompt
+  for confirmation, so the user's yes here is the only one.
+- *Found*: whether a global or project install already exists.
+- *Recommend*: global, unless the team wants the agents committed to the repository.
+
+## Question 3: the decision gate (Arbiter hooks)
+
+- *What*: the **Arbiter** is Kyber-Weave's decision gate. A small hook in the harness asks it,
+  before each agent is started, whether that step matches the approved plan, and blocks it if not.
+- *Why*: without it, an agent can start work the plan never approved; with it, runs stay on plan.
+- *Options*: turn it on for each chosen harness (`kyber-weave arbiter install --target <one>`,
+  one harness per run; `--project` for this repository only), or leave it off.
+- *Cost and undo*: adds a hook entry to the harness's settings in its home folder (or this
+  repository with `--project`), seconds per harness; it keeps the decision model already set up
+  (pass `--provider` only to change it). Undo with `kyber-weave arbiter uninstall --target <one>`.
+- *Found*: the per-harness lines of `kyber-weave arbiter status` (on, off, or on for a harness
+  with no squad).
+- *Recommend*: on for every harness that gets the squad.
+
+## Removing a harness (only when the user asks)
+
+- *What it does*: deletes the squad's files from that harness; its other agents and settings stay.
+- *How*: `kyber-weave squad update [--global] --target <the harnesses to keep>`, after
+  `--dry-run`; and `kyber-weave arbiter uninstall --target <removed>` for its hook. With nothing
+  left to keep, `kyber-weave squad uninstall [--global]`.
+- *Undo*: install it again; local edits to the squad's files in that harness are lost.
 
 ## Per harness
 
-"Trust step" is what the user must do once in the harness, or the hooks never run. "Needs" is a
-setting the squad cannot write for them; offer to help, and change a user or harness settings
-file only with a yes.
+After the install, give each chosen harness's "Trust step" (what the user must do once in the
+tool, or the hooks never run) and "Needs" (a setting the squad cannot write for them). For each
+"Needs" item, say what goes wrong without it, and change a user or harness settings file only
+with a yes.
 
-| Harness (token) | Trust step | Needs |
+| Harness (install name) | Trust step | Needs |
 |---|---|---|
 | Claude Code (`claude`) | Accept the workspace trust dialog; approve project MCP servers in `/mcp` on first run. Headless `claude -p` runs no project hooks. | Nothing else; nested sub-agents work by default. |
 | Copilot CLI (`copilot`) | None documented. | `COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES=32000` in the shell Copilot CLI starts from (PowerShell: `$env:COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES = "32000"`), then a new session. Without it, large code-index answers are saved to files and agents stop using the index. Show the line; add it to the user's shell profile only if they ask you to. |
-| VS Code Copilot (`copilot`) | Open the folder as a trusted workspace and keep `chat.useHooks` on. | User setting `chat.subagents.allowInvocationsFromSubagents: true`, so the reviewer can start its own sub-reviewers. Without it the reviewer applies every review lens itself. |
+| VS Code Copilot (`copilot`) | Open the folder as a trusted workspace and keep `chat.useHooks` on. | User setting `chat.subagents.allowInvocationsFromSubagents: true`, so the reviewer can start its own sub-reviewers. Without it the reviewer applies every review lens itself, which is slower. |
 | Cursor (`cursor`) | None documented. | Sub-agents inherit the session's MCP servers; wiring `.cursor/mcp.json` is enough. |
 | OpenCode (`opencode`) | None documented. | `subagent_depth` of 2 or more in the OpenCode config (default 1), so the reviewer can start sub-reviewers. A global install also offers the KyberDash capture plugin (`--no-capture-plugin` skips it). |
 | Kilo (`kilo`) | None documented. | `subagent_depth` of 2 or more in the Kilo config (default 1). MCP servers go in `kilo.jsonc` under `mcp`. |
