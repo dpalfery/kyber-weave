@@ -81,13 +81,29 @@ public sealed class ArbiterRunStore
     private readonly string _storesDirectory;
     private readonly ArbiterStoreOptions _options;
     private readonly Func<DateTimeOffset> _clock;
+    private readonly Func<DirectoryInfo, DateTime> _newestItemTime;
 
     /// <summary>Creates a store rooted at <c>&lt;arbiter-dir&gt;/stores</c>.</summary>
     /// <param name="arbiterDirectory">The Arbiter directory the stores sit under.</param>
     /// <param name="options">The size and retention limits; the shipped defaults when null.</param>
     /// <param name="clock">The clock retention is measured against; the system clock when null.</param>
     public ArbiterRunStore(string arbiterDirectory, ArbiterStoreOptions? options = null, Func<DateTimeOffset>? clock = null)
+        : this(arbiterDirectory, options, clock, null)
     {
+    }
+
+    /// <summary>Creates a store whose sweep reads a sibling directory's age through <paramref name="newestItemTime"/>.</summary>
+    /// <param name="arbiterDirectory">The Arbiter directory the stores sit under.</param>
+    /// <param name="options">The size and retention limits; the shipped defaults when null.</param>
+    /// <param name="clock">The clock retention is measured against; the system clock when null.</param>
+    /// <param name="newestItemTime">Reads when a sibling directory was last written; the file system when null. Lets a test make that read fail.</param>
+    internal ArbiterRunStore(
+        string arbiterDirectory,
+        ArbiterStoreOptions? options,
+        Func<DateTimeOffset>? clock,
+        Func<DirectoryInfo, DateTime>? newestItemTime)
+    {
+        _newestItemTime = newestItemTime ?? NewestItemTimeUtc;
         ArgumentNullException.ThrowIfNull(arbiterDirectory);
         _storesDirectory = Path.Combine(arbiterDirectory, StoresDirectoryName);
         _options = options ?? new ArbiterStoreOptions();
@@ -266,32 +282,39 @@ public sealed class ArbiterRunStore
         string keep = Path.GetFullPath(keepDirectory);
         DirectoryInfo root = new(_storesDirectory);
         EnumerationOptions options = new() { RecurseSubdirectories = false, AttributesToSkip = 0 };
-        foreach (FileSystemInfo entry in root.EnumerateFileSystemInfos("*", options))
+        try
         {
-            if (entry.LinkTarget is not null
-                || entry is not DirectoryInfo directory
-                || string.Equals(Path.GetFullPath(directory.FullName), keep, StringComparison.Ordinal))
+            foreach (FileSystemInfo entry in root.EnumerateFileSystemInfos("*", options))
             {
-                continue;
+                SweepEntry(entry, keep, now, retain);
             }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // The sweep is best effort: an unreadable stores directory is left for a later append, and the item
+            // being appended is still stored.
+        }
+    }
 
-            if (now - NewestItemTimeUtc(directory) <= retain)
-            {
-                continue;
-            }
+    private void SweepEntry(FileSystemInfo entry, string keep, DateTimeOffset now, TimeSpan retain)
+    {
+        if (entry.LinkTarget is not null
+            || entry is not DirectoryInfo directory
+            || string.Equals(Path.GetFullPath(directory.FullName), keep, StringComparison.Ordinal))
+        {
+            return;
+        }
 
-            try
+        try
+        {
+            if (now - _newestItemTime(directory) > retain)
             {
                 directory.Delete(recursive: true);
             }
-            catch (IOException)
-            {
-                // Left for a later append; see the type remarks.
-            }
-            catch (UnauthorizedAccessException)
-            {
-                // Left for a later append; see the type remarks.
-            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // One unreadable or undeletable sibling is left for a later append; see the type remarks.
         }
     }
 

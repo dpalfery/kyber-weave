@@ -417,6 +417,27 @@ public sealed class ArbiterRunStoreTests : IDisposable
         Assert.Empty(store.ReadFindings("RUN-X"));
     }
 
+    /// <summary>
+    /// The retention sweep is best effort: one sibling store directory whose age cannot be read, as when another
+    /// process sweeps it away between the listing and the read, must not make the append report unavailable.
+    /// </summary>
+    [Fact]
+    public async Task ASiblingStoreDirectoryThatCannotBeReadDoesNotMakeTheAppendUnavailable()
+    {
+        string sibling = Path.Combine(ArbiterDirectory, "stores", "returns-vanishing");
+        Directory.CreateDirectory(sibling);
+        ArbiterRunStore store = new(
+            ArbiterDirectory,
+            null,
+            () => Now,
+            directory => throw new DirectoryNotFoundException($"'{directory.Name}' was removed during the sweep."));
+
+        ArbiterStoreStatus status = await store.AppendFindingAsync("RUN-OK", "still stored");
+
+        Assert.Equal(ArbiterStoreStatus.Stored, status);
+        Assert.Equal(["still stored"], store.ReadFindings("RUN-OK"));
+    }
+
     // ---- No secrets in the decision log or the ledger (acceptance: sentinel) ----
 
     /// <summary>
