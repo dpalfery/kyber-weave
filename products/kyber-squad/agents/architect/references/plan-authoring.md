@@ -114,6 +114,8 @@ The conductor presents **approve and execute**, stating the declared scale and c
 
 ## Finalization
 
+The conductor normally finalizes with `docs_finalize_approved_plan_and_write_task_file` (the CLI twin is `kyber-weave docs finalize`), which records the approval, sets the plan and index to Ready and writes the task file, and refuses, changing nothing, on an open decision or a plan the task file cannot be written from. Its refusal comes back to you as a Draft revision. You finalize only on a `FINALIZE` invocation, the conductor's fallback.
+
 On a `FINALIZE` invocation carrying explicit approval, record that approval in the decision rows, preserve the permanent `## Decisions` section intact (do NOT delete it), set the plan and index to Ready, save the task file beside the plan and return its path, rerun both documentation checks, and return:
 
 ```text
@@ -142,7 +144,7 @@ is written.
 Finalization runs in this order:
 
 1. Make every plan edit first: the approval rows, the bold body status line, the frontmatter status (`current`) and the index row.
-2. Run `kyber-weave docs tasks <plan file> --write` in the checkout that holds the plan. It derives the whole file from the plan: file scopes, dependencies, skills, the execution digest, and each prompt from the task's own text plus its command and acceptance criteria. When it refuses — a task lacks a command, acceptance criteria or a skill, or a `Depends on` token names no task — it names the task and what to add or correct in the plan; fix the plan and run it again. Run `kyber-weave docs tasks <plan file> --check` before `FINALIZE` and fix every `KW-DOC-TASKS-008` to `-011` warning it prints: each names a task whose packet cannot be understood without the plan, or a worker who cannot open the plan.
+2. Run `kyber-weave docs tasks <plan file> --write` in the checkout that holds the plan. It derives the whole file from the plan: file scopes, dependencies, skills, the execution digest, and each prompt from the task's own text plus its command and acceptance criteria. When it refuses — a task lacks a command, acceptance criteria or a skill, or a `Depends on` token names no task — it names the task and what to add or correct in the plan; fix the plan and run it again. Run `kyber-weave docs tasks <plan file> --check` before `PLAN_READY` and fix every `KW-DOC-TASKS-008` to `-011` warning it prints: each names a task whose packet cannot be understood without the plan, or a worker who cannot open the plan.
 3. Run both documentation checks. Any `KW-DOC-TASKS-*` finding is fixed by changing the plan and repeating step 2, never by editing the file.
 
 Never write, edit or compute the task file or its digest by hand, with a script, or through a sibling such as a `.new` or `.tmp` copy. An edit to a task, a test contract row, an out-of-scope path or the development mode after step 2 means repeating step 2; a status or Decisions edit does not. `kyber-weave docs tasks <plan file> --check` exits 1 and says what differs without writing.

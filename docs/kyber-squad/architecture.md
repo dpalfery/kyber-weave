@@ -1774,7 +1774,7 @@ what makes resuming a run somewhere else possible at all.
   title, text, files, dependencies, skills), the test contract rows, the out-of-scope paths and the
   development mode. A status flip or an edit to a Decisions row is therefore not stale; any task
   edit is. Stale means the conductor refuses the file until the architect regenerates it. The
-  architect runs `kyber-weave docs tasks <plan> --write` after its last plan edit: the command derives every field, the digest (SHA-256 over the parsed document, `PlanDocumentParser.ExecutionDigest`) and each prompt from the plan, writes the file in place, leaves it untouched when already current, and returns `PLAN_FINALIZED` only with no `KW-DOC-TASKS-*` finding. A prompt is the plan task's own text plus a `Command:` and an `Acceptance criteria:` line taken from the task or its test contract row, the `{worktree}` slot and the `{prior_results}` slot. When the plan lacks one, the command writes nothing and names the task and the line to add (`-004`). `--check` exits 1 and names each difference without writing. A shell-less architect has the conductor run the command. A specification's digest is over its `tasks.md`: the conductor runs the same command on it before finalization. The parser ends a Depends value at the next bullet at the same or a shallower indent (deeper sub-bullets stay in the value), and ends a Files bullet list at the next bold-labelled bullet, so a spec item's `_Requirements:_` line and `**Acceptance:**` bullet are not taken as dependencies or files.
+  architect runs `kyber-weave docs tasks <plan> --write` after its last plan edit: the command derives every field, the digest (SHA-256 over the parsed document, `PlanDocumentParser.ExecutionDigest`) and each prompt from the plan, writes the file in place, and leaves it untouched when already current. Finalization runs the same generator: the conductor's `docs_finalize_approved_plan_and_write_task_file` tool (CLI twin `docs finalize`, [ADR 0078](../adr/0078-the-conductor-finalizes-and-archives-plans-through-two-docs-tools.md)) records the approval, sets the plan Ready and writes the file, and refuses, undoing every change, on any `KW-DOC-TASKS-*` error; the architect's `FINALIZE` path is the fallback. A prompt is the plan task's own text plus a `Command:` and an `Acceptance criteria:` line taken from the task or its test contract row, the `{worktree}` slot and the `{prior_results}` slot. When the plan lacks one, the command writes nothing and names the task and the line to add (`-004`). `--check` exits 1 and names each difference without writing. A shell-less architect has the conductor run the command. A specification's digest is over its `tasks.md`: the conductor runs the same command on it before finalization. The parser ends a Depends value at the next bullet at the same or a shallower indent (deeper sub-bullets stay in the value), and ends a Files bullet list at the next bold-labelled bullet, so a spec item's `_Requirements:_` line and `**Acceptance:**` bullet are not taken as dependencies or files.
 - **Each finished task commits with a `Task:` line.** The worker commits on the feature branch with
   `Task: <id>` and its report in the commit body, and the branch is pushed after each integrated
   task, so `run start --resume` can read the completed tasks and their results from the commits
@@ -1786,12 +1786,12 @@ what makes resuming a run somewhere else possible at all.
 
 ```mermaid
 flowchart TD
-    Architect["architect at finalization\nwrites plan + tasks.json"]
+    Architect["conductor finalize tool\nsets plan Ready + writes tasks.json"]
     Validate["conductor validates the file\nthrough the docs tools"]
     Paste["conductor dispatches by task id\nworker runs docs packet"]
     Worker["worker dispatches, commits\nTask: id + report"]
     Resume["run start --resume\nreads the Task: lines"]
-    Archive["docs-dev archives the plan\nand removes the file with git rm"]
+    Archive["docs-dev harvests, then the conductor's\narchive tool archives the plan\nand removes the file"]
 
     Architect --> Validate
     Validate --> Paste

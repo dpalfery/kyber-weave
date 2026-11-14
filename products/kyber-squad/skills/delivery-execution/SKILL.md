@@ -150,10 +150,14 @@ Each cycle writes to `.agent_scratchpad/<task-id>/review/cycle-<n>/`: the `seats
 
 ## Closeout
 
-After approval, assign `docs-dev` the closeout named by the execution artifact:
+After approval, close out the execution artifact. A plan closes in two steps, in this order:
 
-- Plan-backed work migrates durable facts, synchronizes the plan index, and archives the plan. The archive is not a plan task: send that dispatch with `PLAN_FILE:` and no `TASK:`, and no task id in the text; docs-dev runs `kyber-weave docs closeout <PLAN_FILE> --archive` and needs no packet. Never invent a task id for it.
-- Spec-backed work verifies requirements, migrates durable facts, synchronizes the specification index, and archives the specification.
+1. **Harvest: one `docs-dev` dispatch.** It harvests the plan's decisions and Design harvest into canonical documentation and fills the plan's Closeout mapping, then checks its work with `kyber-weave docs closeout <PLAN_FILE>`, which names anything still missing. It does not archive. The harvest is not a plan task: send it with `PLAN_FILE:` and no `TASK:`, and no task id in the text; docs-dev needs no packet. Never invent a task id for it.
+2. **Archive: your tool.** When docs-dev returns `CLOSEOUT_COMPLETE`, call `docs_archive_plan_after_closeout_is_complete` with the run's worktree as `projectPath` and the `PLAN_FILE`. On `result: refused`, send its findings unchanged to `docs-dev` as another harvest dispatch, then call the tool again. Those findings go to `docs-dev` only: never to another role, and never move, delete or edit plan files by hand. On `result: archived`, call `docs_validate_governed_document_schema` with `mergeReady: true` and `docs_detect_drift_between_documents_and_code` with the same `projectPath`; a finding goes to `docs-dev`.
+
+Merge-ready validation fails on an open plan (`KW-DOC-LIFECYCLE-003`) and on its task file (`-005`) until the archive runs, so nothing runs it before step 2. Call the archive and finalize tools only while no worker is dispatched: the Arbiter attributes changed files to the dispatches in flight. Only when you do not hold the archive tool, make the harvest dispatch's first body line `ARCHIVE: true`, and docs-dev archives with `kyber-weave docs closeout <PLAN_FILE> --archive` itself.
+
+Spec-backed work: one `docs-dev` dispatch verifies requirements, migrates durable facts, synchronizes the specification index, and archives the specification.
 
 ### Documentation-impact review
 
@@ -170,7 +174,7 @@ Only a successful closeout completes the objective. Record Q2 CLOSEOUT_COMPLETE 
 
 ## Arbiter routing headers
 
-Unless you hold `arbiter_evaluate_agent_dispatch_or_return` (see Arbiter fallback), every dispatch starts with `KYBER-ARBITER: true`. Dispatches that execute or audit a task — implementation specialist invocations, `review-triage` audits, the `code-reviewer` end-of-run review dispatch, and the `docs-dev` closeout — also carry `PLAN_FILE:` and `TASK:`.
+Unless you hold `arbiter_evaluate_agent_dispatch_or_return` (see Arbiter fallback), every dispatch starts with `KYBER-ARBITER: true`. Dispatches that execute or audit a task — implementation specialist invocations, `review-triage` audits, and the `code-reviewer` end-of-run review dispatch — also carry `PLAN_FILE:` and `TASK:`; the `docs-dev` harvest carries `PLAN_FILE:` only.
 
 `PLAN_FILE:` is always the repository-relative path with `/` separators, never the absolute path of a checkout or worktree, even when the run works in a worktree. Sent any other way, the Arbiter cannot read it as a header and falls back to the file on disk or its decision model, which is slower and less certain.
 

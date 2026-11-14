@@ -424,13 +424,14 @@ public sealed class SquadDocsHarvestContractTests
         string[] allowedCommands =
         [
             "dotnet run",
-            "dotnet run --project <the CLI project> -- docs validate . --merge-ready",
+            "dotnet run --project <the CLI project> -- docs validate .",
             "git mv",
             "git rm",
+            "kyber-weave docs closeout <plan>",
             "kyber-weave docs closeout <plan> --archive",
             "kyber-weave docs drift .",
             "kyber-weave docs packet <task id>",
-            "kyber-weave docs validate . --merge-ready",
+            "kyber-weave docs validate .",
         ];
 
         Assert.Equal(
