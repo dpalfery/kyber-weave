@@ -1499,7 +1499,7 @@ a direct read only for what an index does not cover, with that file and the reas
 report; tools are called directly, tool search only when the harness lists them as deferred, a failed
 call falls back to the shell form and then direct reads, and a tool is called unavailable only with
 the quoted error text of a call that was made); the plan-read ban (`<plan-index>` and `<specification-index>` are the conductor's, and an
-insufficient packet returns a blocker); the scope rule (the task's named files are the scope in any layer, a worker never returns BLOCKED or asks for a handoff over one, and unnamed work or any issue outside its task is reported as an `Open item:` line, never fixed, ADR 0080 and ADR 0082); the full-suite ban (run the classes the task names, because the
+insufficient packet returns a blocker); the scope rule (the task's named files are the scope in any layer, a worker never returns BLOCKED or asks for a handoff over one, and unnamed work or any issue outside its task is reported as an `Open item:` line, never fixed, ADR 0080 and ADR 0082); the documented-rule line (a documented rule wins over nearby code that contradicts it, and the conflict is an open item); the full-suite ban (run the classes the task names, because the
 review council and CI run the full suite on the integrated head); the batched-reads line; and the
 skills-location line, which names the directory this render's skills were installed to
 (`{{skills-root}}` in the source, answered per harness and scope in the render pipeline: repository-relative

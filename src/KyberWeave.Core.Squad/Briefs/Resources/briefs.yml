@@ -68,6 +68,7 @@ agents:
         Start or resume: path=plan
         Status vocabulary: always
         Required plan contract: path=plan
+        Documented rules over existing code: path=plan
         Task granularity: path=plan
         Session groups: path=plan
         Decisions: always

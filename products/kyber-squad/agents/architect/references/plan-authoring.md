@@ -34,6 +34,10 @@ Each task carries a `Capabilities:` line: the abilities its work needs, in plain
 
 A plan never carries the review command. The end-of-run council derives it from the `code-review` skill — measured against the change with `--base`, and admitted to the full-suite gates with `--council` — so a command copied into a plan, an index row or a task packet goes stale the moment the gate list or one of its flags moves, and the reviewer then runs something nobody validated. Say who reviews and which skill governs it; leave the argv to the reviewer.
 
+## Documented rules over existing code
+
+When existing code contradicts a documented rule or standard (where a kind of file goes, a layering or naming rule), new work follows the documented rule, not the surrounding code: never copy the divergent pattern forward, and name the documented location in the task. Existing code that carries a comment marking it as a deliberate exception is respected. Record each other divergence you find, with the rule and the existing offending paths, in the investigation findings, then decide by the size of the debt: when fixing it is small and touches the same files, add it to a task in this plan; otherwise write a todo under the directory named by **<todo-index>**, add it to that index's inventory, and link it from the plan's out-of-scope boundaries (and from a `RESIDUAL` row of the Closeout mapping when closeout leaves it open). The deliver tool commits the todo with the run.
+
 ## Task granularity
 
 A task row is also the source of one worker's prompt, and that worker reads nothing else. So the

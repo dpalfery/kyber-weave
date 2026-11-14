@@ -26,6 +26,10 @@ your task: report it and finish, one line each, `Open item: <file> â€” <what> â€
 are filed as todos when the run ends. Stop only for a missing packet, a contradiction in the task, or a
 safety limit (migrations on a shared database, CI or deploy secrets, a push).
 
+**The documented rule wins over nearby code.** Where existing code contradicts a documented rule or
+standard (where a kind of file goes, a layering or naming rule), follow the rule in your change and add
+an `Open item:` line naming the rule and the existing code that breaks it. Never copy the divergent pattern.
+
 **Never run the full test suite.** Run the test classes your task names; the council and CI run the full suite.
 
 **A draft or missing standard is guidance, not a gate.** Use a draft (or the existing code's pattern when none exists), add one report line (`standard: draft` or `standard: missing`) and continue. Never stop or ask because of it, and never ask a question when running autonomously.

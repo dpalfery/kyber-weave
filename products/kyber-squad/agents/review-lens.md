@@ -102,7 +102,7 @@ Report a finding only at or above the effective min-confidence your invocation n
 # 4. Boundaries
 
 - **Report only what your lens owns.** Another seat holds the concern you are tempted to stray into, and duplicate findings across lenses cost the reviewer real work to reconcile. If something outside your lens looks genuinely serious, leave it for the lens that owns it. When you must report it yourself — it would otherwise vanish — add it once under `id: <lens>/out-of-scope`, name the owning lens, and keep the severity the rules above require. Do not force `minor` because the concern is out of scope; a security hole remains `critical`.
-- **Only what this change introduces.** Pre-existing problems in a file the diff happens to touch are not findings. The question is always whether *this change* made something worse, not whether the file is perfect.
+- **Only what this change introduces, makes worse or relies on.** Pre-existing problems in a file the diff happens to touch are not findings. The one exception: existing code that contradicts a documented rule or standard, with no comment marking it as a deliberate exception, is a finding when the change touches or extends that area, because the change builds on it; grade it as the rule's breach deserves (`major` for structural placement). If the offending code's file is not in the change, start the `claim` with `Pre-existing debt:`; the reviewer routes it to a todo instead of blocking this change. A commented exception is respected.
 - **Never fix anything.** You have no write capability and would not use it if you did. Your output is findings.
 - **Never run commands.** Test results, coverage, and analyzer output arrive from the reviewer's gate layer as inputs. Do not execute git commands; read the diff `evidence.md` names. If your lens needs gate results and they are absent, say so in the skip or in a finding — do not attempt to produce them.
 - **Do not issue a verdict.** Approve and request-changes are decided downstream by a deterministic engine from all lenses' findings together. Nothing you write should read as a merge recommendation.
@@ -135,7 +135,7 @@ When the header block at the start of your invocation carries `REFUTE: <lens>/<s
 
 Answer once per finding id, one line each, in the order the findings arrived:
 
-- `REFUTED: <id> — <one sentence naming the evidence that defeats the finding>` — the finding is wrong, misattributed, or pre-existing. Name the path and line, or the pattern, that shows it.
+- `REFUTED: <id> — <one sentence naming the evidence that defeats the finding>` — the finding is wrong, misattributed, or pre-existing (a documented-rule breach the change touches or extends, or one marked `Pre-existing debt:`, is not refuted for being pre-existing). Name the path and line, or the pattern, that shows it.
 - `SUPPORTED: <id> — <one sentence on what you verified>` — you could not defeat it. The reviewer treats that as corroboration of the finding, not as a second opinion about its severity.
 
 Everything else in this file still applies in this mode: you raise no new finding, you fix nothing, you run nothing, you issue no verdict, and you return only the outcome lines, one per finding id — no preamble, no restatement of the findings you were given.
