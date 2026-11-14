@@ -175,6 +175,77 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
             "arbiter:\n  dispatch-budget:\n    call-minutes: 0\n"));
     }
 
+    [Fact]
+    public void SeatBudget_DeniesAReadPastTheSeatLimitWithThePartialResultInstruction()
+    {
+        ArbiterDispatchBudgetConfig seatBudget = new(Minutes: 3, ToolCalls: 2, CallMinutes: 2);
+
+        Assert.Empty(SeatGuard(Copilot("review-lens", "seat-1"), Start, seatBudget));
+        Assert.Empty(SeatGuard(Copilot("review-lens", "seat-1"), Start, seatBudget));
+
+        string answer = SeatGuard(Copilot("review-lens", "seat-1"), Start, seatBudget);
+
+        using JsonDocument document = JsonDocument.Parse(answer);
+        string reason = document.RootElement.GetProperty("permissionDecisionReason").GetString()!;
+        Assert.StartsWith(WorkerGuard.BudgetRuleId, reason, StringComparison.Ordinal);
+        Assert.Contains(WorkerGuard.SeatBudgetLine, reason, StringComparison.Ordinal);
+        Assert.DoesNotContain(WorkerGuard.BudgetExceededStatus, reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SeatBudget_StillAllowsTheSeatFileWriteAfterTheLimit()
+    {
+        ArbiterDispatchBudgetConfig seatBudget = new(Minutes: 3, ToolCalls: 1, CallMinutes: 2);
+
+        Assert.Empty(SeatGuard(Copilot("review-lens", "seat-2"), Start, seatBudget));
+        Assert.NotEmpty(SeatGuard(Copilot("review-lens", "seat-2"), Start.AddMinutes(4), seatBudget));
+
+        string write = JsonSerializer.Serialize(new
+        {
+            cwd = _home.Path,
+            agentId = "seat-2",
+            parentAgentId = "root",
+            agentType = "review-lens",
+            toolName = "create",
+            toolArgs = JsonSerializer.Serialize(new { path = Path.Combine(_home.Path, "seats", "correctness.md") }),
+        });
+        Assert.Empty(SeatGuard(write, Start.AddMinutes(4), seatBudget));
+    }
+
+    [Fact]
+    public void SeatBudget_UsesTheSeatLimitNotTheDeveloperLimit()
+    {
+        ArbiterDispatchBudgetConfig seatBudget = new(Minutes: 3, ToolCalls: 30, CallMinutes: 2);
+
+        Assert.Empty(SeatGuard(Copilot("review-triage", "seat-3"), Start, seatBudget));
+        Assert.NotEmpty(SeatGuard(Copilot("review-triage", "seat-3"), Start.AddMinutes(4), seatBudget));
+        Assert.Empty(SeatGuard(Copilot("dal-dev", "dev-3"), Start, seatBudget));
+        Assert.Empty(SeatGuard(Copilot("dal-dev", "dev-3"), Start.AddMinutes(4), seatBudget));
+    }
+
+    [Fact]
+    public void Config_ReadsTheSeatBudgetAndRefusesANonPositiveLimit()
+    {
+        Assert.Equal(new ArbiterDispatchBudgetConfig(3, 30, 2), ArbiterConfig.ProductDefaults.SeatBudget);
+
+        ArbiterConfig merged = ArbiterConfigLoader.LoadUserConfig(
+            "arbiter:\n  seat-budget:\n    minutes: 4\n    tool-calls: 40\n");
+        Assert.Equal(new ArbiterDispatchBudgetConfig(4, 40, 2), merged.SeatBudget);
+        Assert.Equal(ArbiterConfig.ProductDefaults.DispatchBudget, merged.DispatchBudget);
+
+        YamlException refused = Assert.ThrowsAny<YamlException>(() => ArbiterConfigLoader.LoadUserConfig(
+            "arbiter:\n  seat-budget:\n    minutes: 0\n"));
+        Assert.Contains("arbiter.seat-budget", refused.Message, StringComparison.Ordinal);
+    }
+
+    private string SeatGuard(string json, DateTimeOffset now, ArbiterDispatchBudgetConfig seatBudget)
+    {
+        using StringWriter stdout = new();
+        WorkerGuard.Run(
+            "copilot-cli", json, stdout, TextWriter.Null, _home.Path, () => now, _ => ArbiterDispatchBudgetConfig.Defaults, _ => seatBudget);
+        return stdout.ToString();
+    }
+
     private string Guard(string harness, string json, DateTimeOffset now, ArbiterDispatchBudgetConfig? budget)
     {
         using StringWriter stdout = new();

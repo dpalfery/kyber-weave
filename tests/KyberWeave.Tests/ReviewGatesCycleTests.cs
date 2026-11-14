@@ -80,6 +80,82 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
+    public void ReviewSeatsWritesTheEvidencePacketsAndBlocksBeforeAnyGateRuns()
+    {
+        string baseCommit = Git("rev-parse", "HEAD").Trim();
+        Write("src/a.cs", "// changed\n");
+        Commit("work");
+
+        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() => CreateApp().Run(
+            ["review", "seats", _repo, "--task", Task, "--base", baseCommit]));
+
+        Assert.Equal(0, run.Result);
+        string output = run.Output;
+        Assert.StartsWith("cycle: 1 mode: full", output, StringComparison.Ordinal);
+        Assert.Contains($"run: kyber-weave review gates {_repo} --council --out {GatesPath(1)} --base {baseCommit} --deadline", output, StringComparison.Ordinal);
+        Assert.False(File.Exists(GatesPath(1)));
+
+        string evidence = File.ReadAllText(Path.Combine(CycleFolder(1), ReviewEvidence.FileName));
+        Assert.Contains("running: the council's gate run rewrites this file", evidence, StringComparison.Ordinal);
+        Assert.Contains("- modified src/a.cs (diff lines 1-", evidence, StringComparison.Ordinal);
+
+        // A C# change with no manifest, workflow or test file rules out the three pattern lenses.
+        Assert.Contains("not-seated: --not-seated \"dependency-supply-chain=", output, StringComparison.Ordinal);
+        Assert.Contains("not-seated: --not-seated \"infra-workflow=", output, StringComparison.Ordinal);
+        Assert.Contains("not-seated: --not-seated \"test-infrastructure=", output, StringComparison.Ordinal);
+
+        string now = output[output.IndexOf("now:", StringComparison.Ordinal)..output.IndexOf("after-gates:", StringComparison.Ordinal)];
+        string later = output[output.IndexOf("after-gates:", StringComparison.Ordinal)..];
+        Assert.Contains("--- seat correctness agent=review-lens ---", now, StringComparison.Ordinal);
+        Assert.DoesNotContain("test-adequacy", now, StringComparison.Ordinal);
+        Assert.Contains("--- seat test-adequacy agent=review-lens ---", later, StringComparison.Ordinal);
+        Assert.Contains("--- seat static-analysis-triage agent=review-triage ---", later, StringComparison.Ordinal);
+        Assert.Contains($"LENS: correctness\nREVIEW_RUN: {Task}-cycle-1\n\nPacket: {Path.Combine(CycleFolder(1), "packets", "correctness.md")}\n--- end ---", output.ReplaceLineEndings("\n"), StringComparison.Ordinal);
+        Assert.DoesNotContain("Seat file:", output, StringComparison.Ordinal);
+
+        string packet = File.ReadAllText(Path.Combine(CycleFolder(1), "packets", "correctness.md"));
+        Assert.Contains($"- Evidence: {Path.Combine(CycleFolder(1), ReviewEvidence.FileName)}", packet, StringComparison.Ordinal);
+        Assert.Contains($"- projectPath: {_repo}", packet, StringComparison.Ordinal);
+        Assert.Contains("# Lens: correctness", packet, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(CycleFolder(1), "packets", "infra-workflow.md")));
+    }
+
+    [Fact]
+    public void ReviewSeatsInHandBackModeNamesEachSeatFile()
+    {
+        string baseCommit = Git("rev-parse", "HEAD").Trim();
+        Write("src/a.cs", "// changed\n");
+        Commit("work");
+
+        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() => CreateApp().Run(
+            ["review", "seats", _repo, "--task", Task, "--base", baseCommit, "--hand-back"]));
+
+        Assert.Equal(0, run.Result);
+        Assert.Contains($"Seat file: {Path.Combine(CycleFolder(1), "seats", "correctness.md")}", run.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheCouncilGateRunPrintsTheGateProvenSkipsAndRewritesTheEvidence()
+    {
+        string baseCommit = Git("rev-parse", "HEAD").Trim();
+        Write("src/a.cs", "// changed\n");
+        Commit("work");
+        ProcessConsoleCapture.Run(() => CreateApp().Run(["review", "seats", _repo, "--task", Task, "--base", baseCommit]));
+
+        (int exit, string output) = Gates(1, "--base", baseCommit);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("not-seated: --not-seated \"static-analysis-triage=gates build, always passed\"", output, StringComparison.Ordinal);
+        Assert.Contains("after-gates: send ", output, StringComparison.Ordinal);
+        Assert.Contains("test-adequacy", output[output.IndexOf("after-gates: send ", StringComparison.Ordinal)..], StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Combine(CycleFolder(1), "duplicates.json")));
+        string evidence = File.ReadAllText(Path.Combine(CycleFolder(1), ReviewEvidence.FileName));
+        Assert.Contains("- build: passed", evidence, StringComparison.Ordinal);
+        Assert.Contains("Coverage: none collected. Floor (review.coverage): none declared.", evidence, StringComparison.Ordinal);
+        Assert.DoesNotContain("running: the council's gate run", evidence, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AVerifierCyclesEvidenceDiffIsTheFixDeltaFromThePriorHead()
     {
         string baseCommit = Git("rev-parse", "HEAD").Trim();
@@ -601,6 +677,7 @@ public sealed class ReviewGatesCycleTests : IDisposable
                 review.AddCommand<ReviewGatesCommand>("gates");
                 review.AddCommand<ReviewVerdictCommand>("verdict");
                 review.AddCommand<ReviewCycleCommand>("cycle");
+                review.AddCommand<ReviewSeatsCommand>("seats");
             });
         });
         return app;

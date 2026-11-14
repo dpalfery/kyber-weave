@@ -1104,4 +1104,43 @@ public sealed class SeatOutputParserTests
         lines.Add(fence);
         return string.Join('\n', lines) + "\n";
     }
+    [Fact]
+    public void ABudgetLineIsAClosingLineNotPartOfTheFindings()
+    {
+        const string text = """
+            - id: correctness/off-by-one
+              lens: correctness
+              severity: major
+              confidence: 8
+              file: src/A.cs
+              line: 12
+              excerpt: |
+                for (int i = 0; i <= n; i++)
+              claim: The loop reads one past the end.
+              evidence: src/A.cs:12
+              failure_scenario: n = 3 reads items[3] and throws.
+              suggestion: Use i < n.
+            Budget reached, not examined: src/B.cs, src/C.cs
+            Discovery: codegraph 2, docs 0, direct reads 1
+            REVIEW.md sections checked: [R2]
+            """;
+
+        SeatOutput seat = SeatOutputParser.Parse("correctness", text);
+
+        Assert.Equal(SeatOutputKind.Findings, seat.Kind);
+        Assert.Single(seat.Findings);
+        Assert.Equal("src/B.cs, src/C.cs", seat.BudgetNote);
+    }
+
+    [Fact]
+    public void ABudgetLineIsAllowedAfterNoFindings()
+    {
+        SeatOutput seat = SeatOutputParser.Parse(
+            "performance",
+            "NO FINDINGS: the two loops it reached are bounded.\nBudget reached, not examined: src/Hot.cs\n" +
+            "Discovery: codegraph 1, docs 0, direct reads 0\nREVIEW.md sections checked: [§4]\n");
+
+        Assert.Equal(SeatOutputKind.NoFindings, seat.Kind);
+        Assert.Equal("src/Hot.cs", seat.BudgetNote);
+    }
 }

@@ -4,9 +4,9 @@ Read this in a review's first cycle, which the council's gate run prints as `cyc
 
 ## Council fan-out
 
-**Council.** The seats start after the gate run, from the `evidence.md` the council's run wrote into the cycle folder: the diff, the changed files and every gate's result. Every seat's packet names that file, so read-only seats inspect the change via `view_file` without running git or a gate. A review outside the council writes no `evidence.md`; its packets name the diff and the gate report instead.
-Invoke one seat per applicable lens, all in flight at once, each named with its
-lens file, the evidence, and its assigned review-guidance sections. Every lens declares an
+**Council.** The seats start from `review seats`, before the gates finish: it writes the cycle's `evidence.md` (the diff, the changed files with each one's diff line range) and one packet per seat holding its lens charter, so read-only seats inspect the change via `view_file` without running git or a gate. The gate run then rewrites `evidence.md` with every gate's result. A review outside the council writes no `evidence.md`; its packets name the diff and the gate report instead.
+Invoke one seat per applicable lens: the `now:` seats in one batch with the gate run, the
+`after-gates:` seats when it finishes. Each packet names the evidence and the review-guidance file. Every lens declares an
 applicability predicate and returns `SKIPPED` with a reason when the diff holds nothing it
 owns — auto-skipping is what makes seventeen lenses affordable. Every seat given guidance sections
 ends its output with one attestation line, `REVIEW.md sections checked: [<ids>]`, on both its
@@ -14,7 +14,7 @@ findings form and its `NO FINDINGS` form (a `review-triage` seat lists `Ground r
 findings or `NO FINDINGS` seat without that line has not shown it applied the guidance; the
 report records that as a coverage gap under Council coverage. `SKIPPED` seats return no
 attestation, and a missing attestation is never a verdict input. The reviewer dispatches every seat
-itself, all in one parallel batch, whoever dispatched it, and never opens a lens charter: each seat reads its own. Where sub-agents cannot dispatch, the `review-council` skill starts the seats from the main session instead. A reviewer applies a lens itself only after one dispatch attempt returned a tool-not-found or permission-denied error, which it quotes in its report; a claim of unavailability with no quoted failed call is not allowed. Then it applies the lenses one at a time, with the same guidance sections and the same attestation line.
+itself, whoever dispatched it, and never opens a lens charter: each packet carries its own. Where sub-agents cannot dispatch, the `review-council` skill starts the seats from the main session instead. A reviewer applies a lens itself only after one dispatch attempt returned a tool-not-found or permission-denied error, which it quotes in its report; a claim of unavailability with no quoted failed call is not allowed. Then it applies the lenses one at a time, with the same guidance sections and the same attestation line.
 
 ## The lens catalogue
 
@@ -56,14 +56,25 @@ duplicates report. When the host has declared a `review.coverage` floor and the 
 carries no coverage evidence, `test-adequacy` treats that absence as a finding — not a skip,
 and not "we did not look".
 
-**No seat for what a gate already proves.** A lens whose whole output would restate a recorded
-gate result is not seated; the report cites the gate instead, through `--not-seated`:
+**Who waits for the gates.** `test-adequacy` (coverage), `static-analysis-triage` (analyzer output)
+and `duplicate-implementation` (the duplicates report) start when the gate run finishes. Every other
+lens reads only the diff and the changed files, and starts at once.
 
-- `static-analysis-triage` when every build, lint, format and type-check gate in `evidence.md`
-  passed: `--not-seated static-analysis-triage=gates <ids> passed`. It is seated when one of
-  them failed or did not run.
+**No seat for what a gate already proves.** A lens whose whole output would restate a recorded
+gate result is not seated; the gate run prints the reason for `--not-seated`:
+
+- `static-analysis-triage` when every gate that ran passed: `gates <ids> passed`. It is seated
+  when one failed or did not run.
 - `duplicate-implementation` when the duplicates report names no file in the changed-file list:
-  `--not-seated duplicate-implementation=no duplicate cluster names a changed file`.
+  `no duplicate cluster names a changed file`.
+
+**No seat for a file pattern the lens rules out.** Where a lens's Applicability names the kinds of
+file it needs, `review seats` checks the changed-file list and prints `not-seated:` when none
+matches: `dependency-supply-chain` (a manifest, lock file, container image or build input),
+`infra-workflow` (infrastructure, workflows, migrations, cloud resource configuration),
+`test-infrastructure` (a test project or test directory), and `correctness` and `test-adequacy` on
+a documentation-only change. The patterns are wide on purpose; every other applicability question
+stays with the seat. The size or risk of the change never shrinks the council.
 
 `test-adequacy` is always seated when the change has code or tests: whether the tests would
 catch the change breaking is a judgement no gate makes.

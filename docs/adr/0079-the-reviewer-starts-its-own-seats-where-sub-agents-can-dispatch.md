@@ -14,6 +14,9 @@ code-refs:
   - SquadSubagentDispatch
   - KiloRenderer
   - TriggerClassifier
+  - CouncilSeating
+  - ReviewSeatsCommand
+  - WorkerGuard
 ---
 
 # ADR 0079: The reviewer starts its own seats where sub-agents can dispatch
@@ -23,7 +26,8 @@ code-refs:
 Accepted, 2026-11-13. Decided by the owner. Replaces decision 1 of
 [ADR 0077](0077-the-dispatching-session-seats-the-council-from-the-gate-runs-evidence.md); its
 decisions 2 to 4 (the evidence the gate run writes, no seat for what a gate proves, and the Arbiter
-classifying a seat the conductor starts) stand.
+classifying a seat the conductor starts) stand. Amended 2026-11-13: decisions 6 to 9 make the seats
+start while the gates run, after a replay showed the fanned-out review taking 16.7 minutes.
 
 ## Context
 
@@ -52,13 +56,21 @@ sub-agent cannot start sub-agents. That was wrong. Checked on 2026-11-13:
 So the handback was a round trip that most harnesses never needed. Each review cost at least two
 reviewer dispatches, and every lens finding passed through the conductor's context twice.
 
+A replay of the review step on Copilot CLI (a 22-file change, reviewer and seats on Gemini 3.8 Flash)
+found two real major findings the single-agent review had missed, but took 16.7 minutes against 6.9.
+The reviewer spent 4.3 minutes before the first seat: about two on the gates and two writing fifteen
+packets by hand, reading lens files and calling `--help`. The seat batch lasted as long as its
+slowest seat (252 seconds, which read the whole diff in chunks and re-ran the documentation gates
+through MCP tools); one seat that returned nothing was re-sent alone for 3.9 minutes more; and the
+refutation ran after everything else. Three seats spent 27 to 87 seconds deciding a lens did not
+apply, which the changed-file list already showed.
+
 ## Decision
 
 1. **One review dispatch where sub-agents can dispatch.** The conductor (or `bug-crusher`)
-   dispatches `code-reviewer` once. The reviewer runs the council gates, which write the evidence,
-   then starts every `review-lens` and `review-triage` seat itself in one parallel batch, each given
-   its packet and the evidence path, then adjudicates and computes the verdict with the verdict
-   engine. A reviewer that holds a tool to start agents never applies a lens itself. Only one with
+   dispatches `code-reviewer` once. The reviewer prepares the seats with `review seats`, starts them
+   while the council gates run (decision 6), then adjudicates and computes the verdict with the
+   verdict engine. A reviewer that holds a tool to start agents never applies a lens itself. Only one with
    no such tool applies the lenses itself, and its report says so.
 2. **The `review-council` skill where they cannot.** The session a human started loads it in place
    of the one dispatch. The skill dispatches `code-reviewer` in hand-back mode (first body line
@@ -90,6 +102,35 @@ reviewer dispatches, and every lens finding passed through the conductor's conte
 5. **The reviewer reads the evidence.** It does not run tests, builds, deploy scripts, Playwright or
    any other end-to-end suite the gates already ran.
 
+6. **Seats start while the gates run.** `kyber-weave review seats` syncs the tree's index, opens the
+   cycle folder, writes the diff and the change half of `evidence.md` (each changed file with its
+   diff line range), writes every packet with the lens charter inside, and prints each seat's
+   dispatch block, in seconds. The reviewer sends the gate command and every seat that needs only
+   the diff in one parallel batch, or starts the gates in the background where a shell call would
+   hold up the batch. The gate run rewrites `evidence.md` with every result and the coverage, writes
+   `duplicates.json`, and prints the gate-proven skips of ADR 0077. `test-adequacy`,
+   `static-analysis-triage` and `duplicate-implementation` read a gate's output, so they start
+   when the gates finish. Nothing else runs before the first batch: `review seats` replaces
+   `doctor --ensure` and `review cycle`, and the reviewer has the exact command lines.
+7. **No seat for a lens a catalogue file pattern rules out.** Where a lens's Applicability names the
+   kinds of file it needs (`dependency-supply-chain`, `infra-workflow`, `test-infrastructure`, and
+   `correctness` and `test-adequacy` on a documentation-only change), `review seats` checks the
+   changed-file list against wide patterns and records the lens with `--not-seated` when nothing
+   matches. Every other applicability question stays with the seat. The council is never scaled to
+   the size or risk of the change.
+8. **Each seat has a budget.** A `review-seat` dispatch has `arbiter.seat-budget` (3 minutes or 30
+   tool calls, 2 minutes for one call), enforced by the worker guard as `KW-ARB-BUDGET-001`. Past it
+   every read is denied with the instruction to return what the seat has, closing with
+   `Budget reached, not examined: …`; the seat-file write is still allowed. The verdict command
+   reports that line as a coverage gap (`KW-REVIEW-054`). Seats read only the diff lines their lens
+   needs and do not re-run the documentation gate tools.
+9. **Follow-up work goes out together and early.** A seat that returns nothing is sent once more in
+   the next batch, never alone; after two empty replies it is recorded as not seated with "no
+   result", except `correctness` and `test-adequacy`, without which the verdict is not computed.
+   `review verdict --candidates` lists refutation candidates from the seats saved so far, and each
+   candidate is refuted in its own spawn, all in one parallel batch with the after-gates seats and
+   retries. The verdict command then runs once.
+
 The Arbiter classification ADR 0077 added stays: on the `review-council` path the conductor or
 `bug-crusher` starts the seats, and on Factory, whose hook names no caller, the `LENS:` or `REFUTE:`
 header infers `code-reviewer`.
@@ -104,6 +145,12 @@ header infers `code-reviewer`.
   seat that replies with a path gives them nothing to annotate. The reviewer's own quote check and
   the verdict command's cited-line check (`KW-REVIEW-043`) still run over the seat files. On the
   nesting path seats still reply to the reviewer, and nothing changes.
+- **A budget can cut a seat short.** A seat stopped at 3 minutes reports what it did not examine
+  rather than everything it would have found. The line makes the gap visible; it does not close it.
+- **The file patterns can be wrong in one direction.** They are wide so that a lens is seated when in
+  doubt; an infrastructure change in a folder no pattern names would leave `infra-workflow` unseated.
+- **The budget is enforced only where the worker guard runs** (Copilot CLI and Claude Code with the
+  Arbiter on). Elsewhere it is the seat's own instruction.
 - **Where nesting is off by default, the operator must turn it on.** OpenCode and Kilo stay on the
   skill path until the operator sets `subagent_depth`, and the render cannot see that setting. VS Code
   Copilot without its setting falls back to the reviewer applying the lenses itself.

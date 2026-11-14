@@ -488,6 +488,8 @@ through the main session.
 
 Read-only council seats (`review-lens` and `review-triage`) have `process.execute: deny` and cannot execute `git diff`. Rather than granting git execution permissions across seventeen seats, the council's gate run (`ReviewEvidence`) writes `review-diff.patch`, the diff from the merge base to the files on disk, and `evidence.md` into the cycle folder, and prints `evidence: <path>`. Untracked files are not in the patch; `evidence.md` lists them as untracked, and a seat reads them whole. Each seat's packet names `evidence.md`, and seats read it and the diff via `view_file` (`filesystem.read: allow`) without executing git commands or mutating files. The files stay with the cycle folder until the run ends. This preserves the strict capability lattice, prevents `index.lock` contention, and avoids redundant diff subprocess invocations across parallel seats.
 
+The evidence is written twice. `review seats` (`ReviewSeatsCommand`, seating in `CouncilSeating`) writes the diff and `evidence.md` with the gates marked as running, each changed file with its diff line range, and one packet per seat with the lens charter inside, so most seats start while the gates run ([ADR 0079](../adr/0079-the-reviewer-starts-its-own-seats-where-sub-agents-can-dispatch.md), decisions 6 to 9). The council's gate run then replaces `evidence.md` in one rename with every gate's result, the coverage and the `review.coverage` floor, and writes `duplicates.json`. `test-adequacy`, `static-analysis-triage` and `duplicate-implementation` read a gate's output, so they are seated after the gate run, which prints the gate-proven skips.
+
 ## Configuration
 
 Everything host-specific is one section of `.kyber-weave/kyber-weave.yml`:

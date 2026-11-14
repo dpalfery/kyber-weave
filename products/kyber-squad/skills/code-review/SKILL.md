@@ -54,8 +54,8 @@ canonical checkout on purpose, so an MCP answer describes that checkout unless i
 `branch=` is the branch under review; treat it as evidence about another tree when it is not. A
 review run in a worktree that reads the canonical checkout's index reviews code nobody changed.
 
-**Index that tree first.** `kyber-weave doctor --ensure .` runs in the tree under review before any
-seat or gate starts. It creates the index when the tree has none and syncs it to the change
+**Index that tree first.** `kyber-weave review seats` (the council) or `kyber-weave doctor --ensure .`
+(anyone else) runs in the tree under review before any seat or gate starts. It creates the index when the tree has none and syncs it to the change
 otherwise, so no seat reads an index older than the diff. A failure does not stop the review,
 which is a read-only run: it is recorded under Council coverage with the doctor's `fix:` line, and
 every seat is told the index is unavailable. The gate runner repeats the check and reports it as
@@ -64,30 +64,31 @@ every seat is told the index is unavailable. The gate runner repeats the check a
 **Load the review guidance.** Read the host's review guidance declared as
 **<review-guidance>** in the root `AGENTS.md` registry (`REVIEW.md`) before any lens runs. Its
 ground rules and the sections that match the changed technologies are the host's own standard
-for this change. Each seat receives its assigned sections and the ground rules in its
-invocation, and every seat must apply them. The same guidance binds the pre-push self-review
+for this change. Each seat's packet names the file, and every seat applies the ground rules and the
+sections the file's lens and technology maps give it. The same guidance binds the pre-push self-review
 gate, the refutation pass in step 3, and any in-process council fallback in step 2: none of
 them reviews against a generic standard instead. If the file is missing or no path is
 declared, the report says so in one line rather than reviewing without notice.
 
-### 2. Run the gates, then seat the council
+### 2. Seat the council while the gates run
 
-The gates run first. Their run writes the evidence every seat starts from, and its results decide which lenses are not seated at all.
+`review seats` writes the diff, the change half of the evidence and every packet in seconds, so most seats start at once and the gates run beside them. The three lenses that read a gate's output (`test-adequacy`, `static-analysis-triage`, `duplicate-implementation`) start when the gates finish, and the gate run decides whether the last two are needed at all.
 
-**Gates.** Two commands, and they are the only things this skill executes. This section is the only place the review command is written down: the reviewer derives its command from here, and no plan, index entry or task packet restates it, because a copy goes stale the moment the gate list or one of its flags moves.
+**Gates.** These commands are the only things this skill executes. This section is the only place the review command is written down: the reviewer derives its command from here, and no plan, index entry or task packet restates it, because a copy goes stale the moment the gate list or one of its flags moves.
 
 ```bash
+kyber-weave review seats . --base <ref> [--hand-back]
 kyber-weave review gates . --base <ref> --out artifacts/gates.json
 kyber-weave review gates . --base <ref> --council --deadline --out <cycle>/gates.json
 kyber-weave review gates . --base <ref> --gate <gate-id> --out artifacts/gates.json --council
 kyber-weave review duplicates . --out artifacts/duplicates.json
 ```
 
-The end-of-run council (`code-reviewer`) runs the second form in every review cycle, writing straight into the cycle folder: `--council` admits the full-suite gates, and only the council and CI may pass it. It also reads the cycle folders: in the first cycle it runs every gate, and in a later (verifier) cycle it prints `cycle: <n> mode: verifier`, the `recheck:` findings and the `rerun:`/`carry:` gates at the top of its output, runs only the `rerun:` gates, and writes the `carry:` gates' earlier passing results into the report as carried, so no separate command has to be asked for the cycle. `review cycle` ends with a `run:` line, the one command that runs every gate the cycle needs into the cycle folder; use it rather than running gates one at a time. `--full` runs every gate instead. Anyone else running this procedure, including the pre-push self-review gate, uses the first form and never adds either flag.
+The end-of-run council (`code-reviewer`) runs `review seats` first: it indexes the tree, opens the cycle folder, writes `evidence.md` with each changed file's diff line range, writes one packet per seat with its lens charter inside, and prints the dispatch blocks (`now:` and `after-gates:`), the `not-seated:` lenses a catalogue file pattern rules out, and the `run:` line. It then runs the `--council --deadline` form, its `run:` line, in every review cycle, writing straight into the cycle folder: `--council` admits the full-suite gates, and only the council and CI may pass it. It also reads the cycle folders: in the first cycle it runs every gate, and in a later (verifier) cycle it prints `cycle: <n> mode: verifier`, the `recheck:` findings and the `rerun:`/`carry:` gates at the top of its output, runs only the `rerun:` gates, and writes the `carry:` gates' earlier passing results into the report as carried, so no separate command has to be asked for the cycle. `review seats` and `review cycle` end with a `run:` line, the one command that runs every gate the cycle needs into the cycle folder; use it rather than running gates one at a time. `--full` runs every gate instead. Anyone else running this procedure, including the pre-push self-review gate, uses the plain `--out artifacts/gates.json` form, runs no `review seats`, and never adds either flag.
 
 `--deadline` stops the council waiting for its gates at `review.council-deadline-seconds` (default 600): at the deadline every gate still running is cut (a `concurrent` gate declared earlier included) and every gate not yet started is not started, and all of them are reported as not run (`KW-REVIEW-039`), and the council goes on to a verdict with the evidence it has. A gate that times out, or that the council deadline stops, is NOT RUN: it is listed as unverified, and it is never a blocking failure. That holds for the council's verdict and for a `--deadline` run's exit code. Without `--deadline` nothing changes for CI, task gates, the pre-push gate or a `--gate` re-check: there is no run deadline, and a blocking gate stopped by its own `timeout-seconds` fails `review gates` (`KW-REVIEW-022`). `--deadline` is refused with `--gate` and with `--agent`.
 
-The third form is the single-gate re-check. After fixing one failed gate, `--gate <gate-id>` re-runs only that gate, so confirming one fix does not pay for the whole declared suite again. The id is one the host declares under `review.gates`; an id that names no declared gate is refused before any gate starts, rather than reported as a suite that ran and passed.
+The `--gate` form is the single-gate re-check. After fixing one failed gate, `--gate <gate-id>` re-runs only that gate, so confirming one fix does not pay for the whole declared suite again. The id is one the host declares under `review.gates`; an id that names no declared gate is refused before any gate starts, rather than reported as a suite that ran and passed.
 
 A review-fix round (fixing findings already raised, by a bot or the council) uses this form: re-check only the prior findings and re-run only the gates whose inputs the fix touched, each with `--gate <gate-id>`. It never re-runs the full council or the full test suite; CI is the full re-check. This does not weaken the first full review of a change, which runs every gate.
 
@@ -102,7 +103,7 @@ started from. The gate runner measures the paths that changed since it, and the 
 records the base, which the council's routing headers reuse. Without it every gate runs
 unfiltered and the report says so.
 
-The second is separate because it is not host-declared work: it reads the repository's
+`review duplicates` is separate because it is not host-declared work (the council's gate run also writes its report, `duplicates.json`, into the cycle folder): it reads the repository's
 CodeGraph index and clusters symbols whose bodies are identical, which nothing in a normal
 gate suite does. Where the repository has no `.codegraph/` index it says so and finds
 nothing — indexing is the owner's decision, and the report must not read as though the check
@@ -120,7 +121,7 @@ If the host has declared no gates, the command says so. Record that: a review wi
 executed evidence is a weaker review, and the report must not read as though everything
 passed.
 
-**Council.** In a first full review, seat the council as [references/first-review.md](references/first-review.md) says: one seat per applicable lens, all at once, each with its lens file, the review scope and its review-guidance sections, ending with the attestation line `REVIEW.md sections checked: [<ids>]`. A verifier cycle re-seats only the lenses [references/verifier-cycle.md](references/verifier-cycle.md) names. Either way, every seat starts from the cycle's `evidence.md`, which the council's gate run writes beside `gates.json` with the diff (`review-diff.patch`), the changed files and every gate's result, and prints as `evidence: <path>`; no seat re-runs a gate or rediscovers the change. The reviewer starts every seat itself, in one parallel batch; only where sub-agents cannot dispatch does the `review-council` skill start them for it, from the main session. And:
+**Council.** In a first full review, seat the council as [references/first-review.md](references/first-review.md) says: the `now:` blocks in one parallel batch with the `run:` line, then the `after-gates:` blocks the gate run still lists, each seat ending with the attestation line `REVIEW.md sections checked: [<ids>]`. A verifier cycle re-seats only the lenses [references/verifier-cycle.md](references/verifier-cycle.md) names. Every seat starts from the cycle's `evidence.md`; the gate run rewrites it with every gate's result and the coverage, and no seat re-runs a gate or rediscovers the change. A seat that returns nothing is sent once more in the next batch; a seat has about 3 minutes or 30 tool calls (`arbiter.seat-budget`) and one stopped by it closes with `Budget reached, not examined: …` (`KW-REVIEW-054`). The reviewer starts every seat itself; only where sub-agents cannot dispatch does the `review-council` skill start them for it, from the main session. And:
 
 Seat one lens per spawn. Save each seat's output unchanged as `<lens>.md` in the cycle's `seats` folder before you adjudicate. The verdict command matches a seat file to a lens by its name alone, so a file named for two lenses at once (`prior-art-performance.md`) keeps its findings but covers no lens and draws a `KW-REVIEW-041` warning; one spawn per lens and one file per lens avoids it. When one lens is split by file across two or more spawns, save their outputs unchanged, one after another, as that lens's one `<lens>.md`; the verdict command sums the repeated `Input sites:` and `Discovery:` lines per counter, and one malformed repeated line makes that count unreadable (`KW-REVIEW-044` or `KW-REVIEW-047`). `Index fallback:` lines are not summed: a repeated identical line is fine, but two different ones draw `KW-REVIEW-044` and only the first is kept. When the parts fell back in different modes, merge them into one line naming each mode, separated by a semicolon (`Index fallback: projectPath: error; projectPath: not-indexed`), so no evidence is discarded. A finding you raise yourself, such as a claim with no gate behind it, goes in `reviewer.md` in the same folder.
 
@@ -128,15 +129,16 @@ Every finding cites a file and a `line`, and `line` is the line number in the fi
 
 ### 3. Confirm before believing
 
-Run the verdict command in step 5 once the seats are saved: it lists the accepted `major`
-and `critical` findings as refutation candidates. Refute in one batched review-lens spawn, and only the findings the verdict command lists as refutation candidates (KW-REVIEW-046).
-All candidates go in that one spawn, and it tries to **refute** each one:
+As soon as seats with findings are saved, `review verdict … --candidates` lists the accepted `major`
+and `critical` findings as refutation candidates (KW-REVIEW-046) from the seats saved so far, without
+refusing the lenses still running. Refute only those, each in its own review-lens spawn, all the
+refutations due in one parallel batch, sent with any after-gates seats and retries due at the same
+time. Each spawn tries to **refute** its finding:
 
 - Unless you hold `arbiter_evaluate_agent_dispatch_or_return` (see Arbiter fallback), open the
   invocation with the routing header block — `KYBER-ARBITER: true`, then `REFUTE: <lens>/<slug>`
-  naming the **first** candidate's id only. Write one `REFUTE:` header, never one per candidate:
-  a repeated header leaves the Arbiter without the fact it reads.
-- After the header block, give every candidate's YAML unchanged, one after another.
+  naming that finding's id.
+- After the header block, give the finding's YAML unchanged.
 - Every lens and refutation invocation of one review also carries `REVIEW_RUN: <id>` in that
   header block, the same id on every seat, so the Arbiter keys the review's findings by it.
 - Say so explicitly in the invocation: the confirming instance argues each finding is wrong and
@@ -145,8 +147,8 @@ All candidates go in that one spawn, and it tries to **refute** each one:
   finding's `guidance:` rule id against them: a finding that misapplies the rule it names is
   refuted.
 
-Drop each refuted finding with `--drop <id>=refuted: <reason>` and run the verdict command again;
-that second run's verdict is the one reported. A verifier cycle sends only the candidates no
+Drop each refuted finding with `--drop <id>=refuted: <reason>`. Once every seat and refutation is
+in, run the verdict command once; that run's verdict is the one reported. A verifier cycle sends only the candidates no
 earlier cycle refuted.
 
 This is the adversarial pass the `security-review` skill already applies to vulnerability

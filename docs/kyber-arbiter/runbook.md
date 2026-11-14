@@ -363,8 +363,11 @@ files under `~/.kyber-weave/arbiter/budgets/` (swept after two days). A harness 
 for a rework under the same id, so a window ends when the subagent has been idle longer than the budget's
 minutes, or for a minute after it was stopped; the resumed dispatch starts a fresh one. Past `arbiter.dispatch-budget`
 (default 15 minutes or 150 tool calls) it denies every further call and tells the worker to return
-`STATUS: BUDGET_EXCEEDED` with what is done and what is not. Reviewers, planners and `github-devops` are not
-budgeted, because a full test run or a CI wait is long by design.
+`STATUS: BUDGET_EXCEEDED` with what is done and what is not. A review council seat (`review-lens` or
+`review-triage`, the `review-seat` profile) has its own `arbiter.seat-budget` (default 3 minutes or 30 tool
+calls, 2 minutes for one call): past it every read is denied with the instruction to return the findings it has
+and a `Budget reached, not examined: …` line, and the write of its seat file is still allowed. Reviewers,
+planners and `github-devops` are not budgeted, because a full test run or a CI wait is long by design.
 
 A single hung call is caught sooner. The guard sees only the start of each call, so when the gap since the
 dispatch's previous call is past `dispatch-budget.call-minutes` (default 5; the gap includes the model's own

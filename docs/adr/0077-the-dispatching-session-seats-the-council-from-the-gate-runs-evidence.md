@@ -77,9 +77,8 @@ Three things allowed that:
 
 ## What is given up
 
-The gates no longer run beside the seats. Every seat now starts after the gate run, so a slow gate
-delays the lenses that do not read it. The lenses that do read a gate, `test-adequacy` above all,
-already waited for it, so the critical path is the gate run plus the slowest seat either way.
+ADR 0079 decision 6 has since started most seats while the gates run, so only the lenses that read a
+gate's output wait for it.
 
 On a host that does not treat warnings as errors, a passing build can still print warnings. With
 the analyzer gates passed, no seat triages those warnings or the suppressions the change added; a host
