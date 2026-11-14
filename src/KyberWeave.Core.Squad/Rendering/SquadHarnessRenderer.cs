@@ -34,6 +34,12 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
     /// </summary>
     private const string HarnessPlaceholder = "{{harness}}";
 
+    /// <summary>
+    /// Where canonical text needs to know whether a dispatched agent on this harness can dispatch agents
+    /// of its own, answered <c>yes</c> or <c>no</c> from <see cref="SquadTargetCatalog.GetSubagentDispatch"/>.
+    /// </summary>
+    private const string SubagentDispatchPlaceholder = "{{subagents-dispatch}}";
+
     private protected SquadHarnessRenderer(SquadHarnessSpec spec)
     {
         ArgumentNullException.ThrowIfNull(spec);
@@ -99,7 +105,7 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
                 : request with { GlobalRoots = new MemoizedGlobalRoots(request.GlobalRoots) };
 
             SquadSource renderSource = SquadWorkerBaselineInjector.Apply(
-                SubstituteHarnessToken(source, Spec.Token),
+                SubstituteHarnessToken(source, Spec.Token, SubagentDispatchAnswer(Spec.Target)),
                 SquadWorkerBaselineInjector.BindSkillsRoot(
                     SquadWorkerBaselineInjector.ReadBlock(request.SourceDirectory),
                     ResolveSkillsRoot(Spec, request)));
@@ -219,8 +225,9 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
     }
 
     /// <summary>
-    /// Replaces the canonical <see cref="HarnessPlaceholder"/> with <paramref name="token"/>, over
-    /// every piece of canonical text a render can emit.
+    /// Replaces the canonical <see cref="HarnessPlaceholder"/> with <paramref name="token"/>, and
+    /// <see cref="SubagentDispatchPlaceholder"/> with <paramref name="subagentDispatch"/>, over every piece
+    /// of canonical text a render can emit.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -241,30 +248,35 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
     /// adopted the placeholder renders byte for byte as it did before.
     /// </para>
     /// </remarks>
-    private static SquadSource SubstituteHarnessToken(SquadSource source, string token)
+    private static SquadSource SubstituteHarnessToken(SquadSource source, string token, string subagentDispatch)
     {
-        static string ReplaceText(string text, string replacement) =>
-            text.Replace(HarnessPlaceholder, replacement, StringComparison.Ordinal);
+        string ReplaceText(string text) =>
+            text.Replace(HarnessPlaceholder, token, StringComparison.Ordinal)
+                .Replace(SubagentDispatchPlaceholder, subagentDispatch, StringComparison.Ordinal);
 
-        static IReadOnlyList<SquadResource> ReplaceResources(IReadOnlyList<SquadResource> resources, string replacement) =>
-            [.. resources.Select(resource => resource with { Content = ReplaceText(resource.Content, replacement) })];
+        IReadOnlyList<SquadResource> ReplaceResources(IReadOnlyList<SquadResource> resources) =>
+            [.. resources.Select(resource => resource with { Content = ReplaceText(resource.Content) })];
 
         return source with
         {
             Agents = [.. source.Agents.Select(agent => agent with
             {
-                Description = ReplaceText(agent.Description, token),
-                InstructionBody = ReplaceText(agent.InstructionBody, token),
-                Resources = ReplaceResources(agent.Resources, token)
+                Description = ReplaceText(agent.Description),
+                InstructionBody = ReplaceText(agent.InstructionBody),
+                Resources = ReplaceResources(agent.Resources)
             })],
             Skills = [.. source.Skills.Select(skill => skill with
             {
-                Description = ReplaceText(skill.Description, token),
-                InstructionBody = ReplaceText(skill.InstructionBody, token),
-                Resources = ReplaceResources(skill.Resources, token)
+                Description = ReplaceText(skill.Description),
+                InstructionBody = ReplaceText(skill.InstructionBody),
+                Resources = ReplaceResources(skill.Resources)
             })]
         };
     }
+
+    /// <summary>The <see cref="SubagentDispatchPlaceholder"/> answer for <paramref name="target"/>.</summary>
+    private static string SubagentDispatchAnswer(SquadTarget target) =>
+        SquadTargetCatalog.GetSubagentDispatch(target) == SquadSubagentDispatch.Nested ? "yes" : "no";
 
     /// <summary>Renders the loaded source; the default is the native agent-then-skill shape.</summary>
     private protected virtual SquadRenderResult Render(SquadHarnessRenderContext context)

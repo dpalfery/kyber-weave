@@ -34,6 +34,22 @@ public enum SquadAgentProjection
     RoleSkillFallback
 }
 
+/// <summary>Whether a dispatched agent on a harness can itself dispatch agents.</summary>
+public enum SquadSubagentDispatch
+{
+    /// <summary>
+    /// A sub-agent can start sub-agents as rendered, so one <c>code-reviewer</c> dispatch runs the whole
+    /// review council.
+    /// </summary>
+    Nested,
+
+    /// <summary>
+    /// Only the session a human started can dispatch, or nesting is unverified or off by default, so that
+    /// session seats the review council itself through the <c>review-council</c> skill.
+    /// </summary>
+    TopLevelOnly
+}
+
 /// <summary>Canonical target tokens, aliases, and parsing for Kyber-Squad.</summary>
 public static class SquadTargetCatalog
 {
@@ -110,6 +126,31 @@ public static class SquadTargetCatalog
             SquadTarget.Pi or SquadTarget.ZCode or SquadTarget.Devin or SquadTarget.CommandCode =>
             SquadAgentProjection.Native,
         SquadTarget.Warp => SquadAgentProjection.RoleSkillFallback,
+        _ => throw new ArgumentOutOfRangeException(nameof(target), target, "Unknown Squad target.")
+    };
+
+    /// <summary>
+    /// Returns whether a dispatched agent on <paramref name="target"/> can dispatch agents of its own, as
+    /// rendered (ADR 0079). A harness is <see cref="SquadSubagentDispatch.Nested"/> only where that was
+    /// verified and needs no operator setting Squad does not write; every other harness takes the safe path.
+    /// </summary>
+    /// <remarks>
+    /// Claude nests by default (three layers) when the agent lists <c>Agent</c>; Cursor lets a direct
+    /// sub-agent launch one more layer; Copilot CLI nested a <c>review-lens</c> under a dispatched
+    /// <c>code-reviewer</c> live, and VS Code needs <c>chat.subagents.allowInvocationsFromSubagents</c>; Pi
+    /// nests to depth 2 when the middle agent lists <c>allowed_subagents</c>, which its renderer emits from
+    /// <c>delegates-to</c>. OpenCode and Kilo refuse a nested task unless the operator raises
+    /// <c>subagent_depth</c> above its default of 1, Factory gives a droid no <c>Task</c> tool, Devin withholds
+    /// nested delegation (ADR 0025), and Codex, Antigravity, Warp, ZCode and Command Code are unverified.
+    /// </remarks>
+    public static SquadSubagentDispatch GetSubagentDispatch(SquadTarget target) => target switch
+    {
+        SquadTarget.Claude or SquadTarget.Copilot or SquadTarget.Cursor or SquadTarget.Pi =>
+            SquadSubagentDispatch.Nested,
+        SquadTarget.Codex or SquadTarget.OpenCode or SquadTarget.Kilo or SquadTarget.Antigravity or
+            SquadTarget.Warp or SquadTarget.Factory or SquadTarget.ZCode or SquadTarget.Devin or
+            SquadTarget.CommandCode =>
+            SquadSubagentDispatch.TopLevelOnly,
         _ => throw new ArgumentOutOfRangeException(nameof(target), target, "Unknown Squad target.")
     };
 

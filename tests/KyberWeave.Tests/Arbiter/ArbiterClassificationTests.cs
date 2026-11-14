@@ -372,6 +372,26 @@ public sealed class ArbiterClassificationTests
         Assert.Equal(trigger, seat.Trigger);
     }
 
+    /// <summary>
+    /// On Factory the review-council skill seats the council from the main session, whose hook names no
+    /// caller: a marked seat dispatch is still the reviewer's lens or refutation spawn.
+    /// </summary>
+    [Theory]
+    [InlineData("review-lens", "LENS: security", "lens.spawn")]
+    [InlineData("review-triage", "LENS: dependency-supply-chain", "lens.spawn")]
+    [InlineData("review-lens", "REFUTE: security/key-in-argv", "refute.spawn")]
+    public void Classification_ASeatTheMainSessionStartsOnFactoryIsTheReviewersSpawn(
+        string target, string header, string trigger)
+    {
+        string prompt = Marked("Packet: /tmp/cycle-1/packets/seat.md", header);
+        TriggerClassification seat = TriggerClassifier.ClassifySingle(
+            Dispatch(prompt, target: target, harness: "factory"),
+            target,
+            prompt);
+
+        Assert.Equal(trigger, seat.Trigger);
+    }
+
     [Fact]
     public void Classification_CodeReviewerRefuteIsRefuteSpawn()
     {

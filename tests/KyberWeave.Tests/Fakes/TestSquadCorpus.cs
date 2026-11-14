@@ -37,7 +37,8 @@ public static class TestSquadCorpus
 
     /// <summary>
     /// The canonical text as a render for <paramref name="target"/> must emit it: the corpus's
-    /// <c>{{harness}}</c> placeholder replaced with that target's own token.
+    /// <c>{{harness}}</c> placeholder replaced with that target's own token, and its
+    /// <c>{{subagents-dispatch}}</c> placeholder with <c>yes</c> or <c>no</c>.
     /// </summary>
     /// <remarks>
     /// The renderer answers the placeholder once, in the shared pipeline, so a contract test that
@@ -52,7 +53,12 @@ public static class TestSquadCorpus
     public static string ExpectedRenderText(SquadTarget target, string canonicalText)
     {
         ArgumentNullException.ThrowIfNull(canonicalText);
-        return canonicalText.Replace("{{harness}}", SquadTargetCatalog.GetToken(target), StringComparison.Ordinal);
+        string subagentDispatch = SquadTargetCatalog.GetSubagentDispatch(target) == SquadSubagentDispatch.Nested
+            ? "yes"
+            : "no";
+        return canonicalText
+            .Replace("{{harness}}", SquadTargetCatalog.GetToken(target), StringComparison.Ordinal)
+            .Replace("{{subagents-dispatch}}", subagentDispatch, StringComparison.Ordinal);
     }
 
     /// <summary>
