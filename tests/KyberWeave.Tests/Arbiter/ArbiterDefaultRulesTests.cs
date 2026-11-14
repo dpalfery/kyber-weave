@@ -11,7 +11,7 @@ namespace KyberWeave.Tests.Arbiter;
 /// <summary>
 /// Contract for task 1.2 (shipped rules): the shipped rules in the embedded
 /// <c>default-rules.yml</c> equal the catalogue, validate with zero errors, and carry
-/// the <c>OWNER-001</c> map, the <c>LENS-001</c> path table and the tuned thresholds.
+/// the test-file patterns, the <c>LENS-001</c> path table and the tuned thresholds.
 /// Also covers <c>KW-ARB-CONFIG-002/-003/-004/-006/-007/-008</c>.
 /// RED: the embedded rules resource and <c>RuleValidator</c> do not exist yet.
 /// </summary>
@@ -189,52 +189,32 @@ public sealed class ArbiterDefaultRulesTests
     }
 
     [Fact]
-    public void Owner001_MapMatchesTheSpecTableInOrder()
+    public void TestFilePatterns_AreTheShippedDefaults()
     {
-        IReadOnlyList<ArbiterFileKindMapEntry> map = ArbiterConfig.ProductDefaults.OwnerFileKindMap;
-
-        (string[] Patterns, string Owner)[] expected =
-        [
-            (["**/*.tsx", "**/*.jsx"], "react-dev"),
-            (["**/src-tauri/**", "**/*.rs"], "tauri-dev"),
-            (["**/*.py", "**/pyproject.toml", "**/requirements*.txt"], "python-dev"),
-            ([".github/workflows/**", "**/Dockerfile"], "github-devops"),
-            (["**/*.sql", "**/*.sqlproj"], "sql-database-architect"),
-            (["**/Migrations/**", "**/*Repository.cs"], "dal-dev"),
-            (["**/*.xaml"], "maui-dev"),
-            (["**/Pulumi.yaml", "**/Pulumi.*.yaml"], "pulumi-dev"),
-            (["tests/**", "**/*.test.*", "**/*.spec.*", "**/*Tests.cs"], ArbiterFileKindMapEntry.TaskOwner),
-            (["**/*.md"], "docs-dev"),
-            (["**/*.cs"], "csharp-dev"),
-        ];
-
-        Assert.Equal(expected.Length, map.Count);
-        for (int i = 0; i < expected.Length; i++)
-        {
-            Assert.Equal(expected[i].Patterns, map[i].Patterns);
-            Assert.Equal(expected[i].Owner, map[i].Owner);
-        }
+        Assert.Equal(
+            ["tests/**", "**/*.test.*", "**/*.spec.*", "**/*Tests.cs"],
+            ArbiterConfig.ProductDefaults.TestFilePatterns);
     }
 
     [Fact]
-    public void Owner001_MapIsFirstMatchWins()
+    public void TestFilePatterns_MatchTestPathsAndNotSource()
     {
-        // tests/foo.md matches both tests/** (the task's owner) and **/*.md (docs-dev):
-        // the earlier row wins, which is what "first match wins" means.
-        string owner = FirstMapOwner("tests/foo.md");
+        IReadOnlyList<string> patterns = ArbiterConfig.ProductDefaults.TestFilePatterns;
 
-        Assert.Equal(ArbiterFileKindMapEntry.TaskOwner, owner);
-        Assert.Equal("react-dev", FirstMapOwner("src/ui/App.tsx"));
-        Assert.Equal("csharp-dev", FirstMapOwner("src/Impl.cs"));
+        Assert.True(IsTestPath(patterns, "tests/foo.md"));
+        Assert.True(IsTestPath(patterns, "src/ui/App.test.tsx"));
+        Assert.True(IsTestPath(patterns, "src/OrderTests.cs"));
+        Assert.False(IsTestPath(patterns, "src/ui/App.tsx"));
+        Assert.False(IsTestPath(patterns, "src/Impl.cs"));
     }
 
     [Fact]
-    public void Owner001_DecidesSkillsLabelBeforeFileKinds()
+    public void Owner001_DecidesTheSkillsLabelThenAnswersNoMapping()
     {
         ArbiterRule owner = ArbiterConfig.ProductDefaults.Rules.Single(r => r.Id == "KW-ARB-OWNER-001");
 
         Assert.NotNull(owner.Decide);
-        // The no-task guard leads, then the Skills-label owner clause; the file-kind fallback answers no-mapping last.
+        // The no-task guard leads, then the Skills-label owner clause; a task with no Skills line answers no-mapping last.
         // not-owner reads plan prose, so only the model question answers it (ADR 0072).
         Assert.Equal("no-task", owner.Decide[0].Answer);
         Assert.Equal("owner", owner.Decide[1].Answer);
@@ -482,16 +462,8 @@ public sealed class ArbiterDefaultRulesTests
         AssertNoUntunedWarning("KW-ARB-LENS-001");
     }
 
-    private static string FirstMapOwner(string path)
-    {
-        foreach (ArbiterFileKindMapEntry entry in ArbiterConfig.ProductDefaults.OwnerFileKindMap)
-        {
-            if (entry.Patterns.Any(pattern => PathGlob.IsMatch(pattern, path)))
-                return entry.Owner;
-        }
-
-        return "no-mapping";
-    }
+    private static bool IsTestPath(IReadOnlyList<string> patterns, string path) =>
+        patterns.Any(pattern => PathGlob.IsMatch(pattern, path));
 
     private static ArbiterRule Shipped(string id) =>
         ArbiterConfig.ProductDefaults.Rules.Single(rule => rule.Id == id);

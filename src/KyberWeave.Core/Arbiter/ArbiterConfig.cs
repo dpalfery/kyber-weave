@@ -29,21 +29,6 @@ public sealed record ArbiterProviderConfig(
 }
 
 /// <summary>
-/// One <c>OWNER-001</c> file-kind row: the first row whose patterns cover a path
-/// owns it. Data, not code, so a host reading the rule sees the whole map.
-/// </summary>
-/// <param name="Patterns">Glob patterns for this owner, in match order.</param>
-/// <param name="Owner">
-///     The Squad agent owning matching files, or <see cref="TaskOwner"/> for test files, which belong to whichever
-///     specialist owns the task.
-/// </param>
-public sealed record ArbiterFileKindMapEntry(IReadOnlyList<string> Patterns, string Owner)
-{
-    /// <summary>The owner a test-file row names: the task's own specialist, not a dedicated test agent.</summary>
-    public const string TaskOwner = "task-owner";
-}
-
-/// <summary>
 /// One <c>LENS-001</c> step-0 row: when every changed path matches one of
 /// <see cref="NotApplicableWhenAllMatch"/>, the lens does not apply. Only path
 /// conditions the lens's own Applicability section states may appear here;
@@ -130,8 +115,8 @@ public sealed record ArbiterConfig
     /// <summary>Effective rules: shipped rules with host overrides applied, then host rules.</summary>
     public IReadOnlyList<ArbiterRule> Rules { get; init; } = [];
 
-    /// <summary>The <c>OWNER-001</c> file-kind map, first match wins.</summary>
-    public IReadOnlyList<ArbiterFileKindMapEntry> OwnerFileKindMap { get; init; } = [];
+    /// <summary>The glob patterns that mark a path as a test file.</summary>
+    public IReadOnlyList<string> TestFilePatterns { get; init; } = [];
 
     /// <summary>The <c>LENS-001</c> step-0 per-lens path table.</summary>
     public IReadOnlyList<ArbiterLensPathEntry> LensPaths { get; init; } = [];

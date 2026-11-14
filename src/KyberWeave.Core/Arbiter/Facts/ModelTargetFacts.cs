@@ -2,9 +2,9 @@ using KyberWeave.Core.Review;
 
 namespace KyberWeave.Core.Arbiter.Facts;
 
-/// <summary>One file a task touches, tagged with its extension and whether the owner map counts it as a test.</summary>
+/// <summary>One file a task touches, tagged with its extension and whether it matches the test-file patterns.</summary>
 /// <param name="Extension">The file extension, including its dot (<c>.cs</c>), or empty when the file has none.</param>
-/// <param name="Kind"><c>test</c> when the test owner's patterns match the path, otherwise <c>source</c>.</param>
+/// <param name="Kind"><c>test</c> when a test-file pattern matches the path, otherwise <c>source</c>.</param>
 public sealed record ArbiterFileKind(string Extension, string Kind);
 
 /// <summary>The most recent earlier attempt at the same plan task, as the ledger and decision log record it.</summary>
@@ -19,9 +19,8 @@ public sealed record ArbiterPriorAttempt(string Result, string? Profile, string?
 /// trigger declared it, so the other triggers' bags keep their shape.
 /// </summary>
 /// <remarks>
-/// The owner map is read from the shipped defaults rather than the host configuration: the test owner's
-/// patterns are the one definition of "test file" the Arbiter uses, and a host may not redefine it per
-/// trigger. A prior attempt is the latest earlier pass or fail for the same plan and task. Its profile is
+/// The test-file patterns are read from the shipped defaults rather than the host configuration: they are
+/// the one definition of "test file" the Arbiter uses, and a host may not redefine it per trigger. A prior attempt is the latest earlier pass or fail for the same plan and task. Its profile is
 /// the decision's delivered model block when there is one, because that is what the harness ran, and the
 /// ledger's pre event otherwise.
 /// </remarks>
@@ -34,10 +33,7 @@ internal static class ModelTargetFacts
     private const string LadderNext = "model-targeting.ladder.next";
     private const string BudgetExceeded = "BUDGET_EXCEEDED";
 
-    private static readonly IReadOnlyList<string> TestPatterns = ArbiterConfig.ProductDefaults.OwnerFileKindMap
-        .Where(entry => string.Equals(entry.Owner, ArbiterFileKindMapEntry.TaskOwner, StringComparison.Ordinal))
-        .SelectMany(entry => entry.Patterns)
-        .ToList();
+    private static readonly IReadOnlyList<string> TestPatterns = ArbiterConfig.ProductDefaults.TestFilePatterns;
 
     /// <summary>Fills the model-targeting facts the bag declares.</summary>
     /// <param name="facts">The bag, carrying <c>plan.task.files</c> and the delegation facts.</param>

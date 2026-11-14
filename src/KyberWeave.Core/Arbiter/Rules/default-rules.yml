@@ -135,6 +135,7 @@ rules:
     # The skills a task names are read from plan prose (an older plan's Skills line; a current plan
     # names capabilities instead and answers no-mapping), so a target missing from that list is
     # asked about (a different spelling of the same specialist is common) rather than blocked.
+    # Kept for plans that still carry a Skills line (ADR 0080).
     decide:
       - when: { fact: plan.task, exists: false }
         answer: no-task
@@ -150,7 +151,6 @@ rules:
         not-owner: The task names only other specialists, and none of them is the target.
       confidence-at-least: 0.8
       tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
-    # The file-kind map below refines no-mapping at runtime, first match wins.
     effects: { no-task: allow, owner: allow, not-owner: escalate, no-mapping: allow }
 
   # A plan task names the abilities it needs, not an agent, and the conductor chooses the agent by matching them
@@ -733,33 +733,9 @@ rules:
         answer: no-failing-run
     effects: { no-task: allow, not-required: allow, failing-run-first: allow, no-failing-run: allow }
 
-# The OWNER-001 file-kind map, evaluated first match wins. The order is the
-# decision: specific owners precede the documentation and C# catch-alls. Test
-# files belong to the task's own owner (one worker writes a test-first task's
-# tests and code, ADR 0076), so their row names task-owner, not test-dev.
-owner-file-kind-map:
-  - patterns: ["**/*.tsx", "**/*.jsx"]
-    owner: react-dev
-  - patterns: ["**/src-tauri/**", "**/*.rs"]
-    owner: tauri-dev
-  - patterns: ["**/*.py", "**/pyproject.toml", "**/requirements*.txt"]
-    owner: python-dev
-  - patterns: [".github/workflows/**", "**/Dockerfile"]
-    owner: github-devops
-  - patterns: ["**/*.sql", "**/*.sqlproj"]
-    owner: sql-database-architect
-  - patterns: ["**/Migrations/**", "**/*Repository.cs"]
-    owner: dal-dev
-  - patterns: ["**/*.xaml"]
-    owner: maui-dev
-  - patterns: ["**/Pulumi.yaml", "**/Pulumi.*.yaml"]
-    owner: pulumi-dev
-  - patterns: ["tests/**", "**/*.test.*", "**/*.spec.*", "**/*Tests.cs"]
-    owner: task-owner
-  - patterns: ["**/*.md"]
-    owner: docs-dev
-  - patterns: ["**/*.cs"]
-    owner: csharp-dev
+# The paths that count as test files. The model-targeting rules read them through the
+# plan.task.file-kinds fact, which tags each file a task touches as `test` or `source`.
+test-file-patterns: ["tests/**", "**/*.test.*", "**/*.spec.*", "**/*Tests.cs"]
 
 # The LENS-001 step-0 per-lens path table. It holds only path conditions the
 # lens's own Applicability section states: documentation-only changes skip the
