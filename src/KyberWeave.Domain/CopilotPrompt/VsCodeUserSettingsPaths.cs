@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace KyberWeave.Core.CopilotPrompt;
+namespace KyberWeave.Domain.CopilotPrompt;
 
 /// <summary>
 /// The two VS Code builds that can receive the Copilot system-prompt override.

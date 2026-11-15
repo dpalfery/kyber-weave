@@ -1,4 +1,4 @@
-namespace KyberWeave.Core.CopilotPrompt;
+namespace KyberWeave.Domain.CopilotPrompt;
 
 /// <summary>
 /// Resolves the home directory the Copilot prompt override lives under, the same way for the install

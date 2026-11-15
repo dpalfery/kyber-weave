@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Cli.Commands;
-using KyberWeave.Core.CopilotPrompt;
+using KyberWeave.Domain.CopilotPrompt;
 using KyberWeave.Core.Docs.Mcp;
 using KyberWeave.Core.FileSystem;
 using Spectre.Console;

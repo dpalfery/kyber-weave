@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace KyberWeave.Core.CopilotPrompt;
+namespace KyberWeave.Domain.CopilotPrompt;
 
 /// <summary>
 /// What one VS Code settings file says about the Copilot prompt override.

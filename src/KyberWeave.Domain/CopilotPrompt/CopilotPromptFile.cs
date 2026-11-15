@@ -2,7 +2,7 @@ using System.Text;
 using YamlDotNet.RepresentationModel;
 using YamlDotNet.Core;
 
-namespace KyberWeave.Core.CopilotPrompt;
+namespace KyberWeave.Domain.CopilotPrompt;
 
 /// <summary>
 /// The Copilot system-prompt override file: the text Kyber-Weave ships, where it is installed,

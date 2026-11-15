@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
-using KyberWeave.Core.CopilotPrompt;
+using KyberWeave.Domain.CopilotPrompt;
 
 namespace KyberWeave.Core.Doctor;
 

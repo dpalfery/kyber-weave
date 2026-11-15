@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
-using KyberWeave.Core.CopilotPrompt;
+using KyberWeave.Domain.CopilotPrompt;
 using KyberWeave.Core.Doctor;
 using Xunit;
 
