@@ -8,64 +8,7 @@ using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Review;
 
-/// <summary>One member of a duplicate cluster.</summary>
-/// <param name="Name">Bare symbol name. Two members of a cluster need not share it.</param>
-/// <param name="QualifiedName">Fully qualified name, when the index recorded one.</param>
-/// <param name="File">Repository-relative path.</param>
-/// <param name="StartLine">1-based first line of the declaration.</param>
-/// <param name="EndLine">1-based last line of the declaration.</param>
-public sealed record DuplicateMember(
-    string Name,
-    string QualifiedName,
-    string File,
-    int StartLine,
-    int EndLine);
-
-/// <summary>A set of symbols whose normalized bodies are identical.</summary>
-/// <param name="Id">Stable identifier, derived from the body hash rather than from ordering.</param>
-/// <param name="NormalizedLines">How many lines the shared body is, after normalization.</param>
-/// <param name="Members">Every symbol carrying that body, ordered by file then line.</param>
-public sealed record DuplicateCluster(
-    string Id,
-    int NormalizedLines,
-    IReadOnlyList<DuplicateMember> Members);
-
-/// <summary>The duplicates gate's result document.</summary>
-/// <param name="Schema">Format identifier, for readers that must tolerate later versions.</param>
-/// <param name="IndexPath">Where the CodeGraph index was looked for.</param>
-/// <param name="IndexAvailable">Whether it was found and read.</param>
-/// <param name="IndexModifiedUtc">
-/// When the index file was last written. The index syncs behind the working tree, so a
-/// consumer weighing a cluster against uncommitted edits needs to know how stale it is.
-/// </param>
-/// <param name="UnavailableReason">Why the index could not be read, when it could not.</param>
-/// <param name="MinimumLines">The threshold this run applied.</param>
-/// <param name="SymbolsConsidered">Bodies that met the threshold and were hashed.</param>
-/// <param name="SymbolsUnreadable">
-/// Bodies skipped because the index named a file or span the working tree no longer has.
-/// Reported rather than swallowed: a high count means the index is stale, and every cluster
-/// in the same run is suspect.
-/// </param>
-/// <param name="Clusters">Duplicate clusters, largest body first.</param>
-public sealed record DuplicateReport(
-    string Schema,
-    string IndexPath,
-    bool IndexAvailable,
-    DateTime? IndexModifiedUtc,
-    string? UnavailableReason,
-    int MinimumLines,
-    int SymbolsConsidered,
-    int SymbolsUnreadable,
-    IReadOnlyList<DuplicateCluster> Clusters)
-{
-    /// <summary>The current duplicates report format.</summary>
-    public const string CurrentSchema = "kyber-weave.review-duplicates/v1";
-}
-
-/// <summary>
-/// Finds symbols whose bodies are the same code written twice, from the CodeGraph index and
-/// the working tree.
-/// </summary>
+/// <summary>Measures declarations' bodies and reports the ones that repeat verbatim.</summary>
 /// <remarks>
 /// <para>
 /// This exists because nothing else in the chain can answer the question. JetBrains retired
@@ -119,7 +62,7 @@ public static class DuplicateDetector
         ArgumentNullException.ThrowIfNull(indexPath);
 
         Dictionary<string, string[]?> fileCache = new(StringComparer.Ordinal);
-        Dictionary<string, (int Lines, List<DuplicateMember> Members)> byBody = new(StringComparer.Ordinal);
+        List<(string Key, int Lines, DuplicateMember Member)> measured = [];
         int considered = 0;
         int unreadable = 0;
 
@@ -141,34 +84,15 @@ public static class DuplicateDetector
             if (body.Count < options.MinimumLines) continue;
 
             considered++;
-            string key = Hash(body);
-
-            if (!byBody.TryGetValue(key, out (int Lines, List<DuplicateMember> Members) entry))
-            {
-                entry = (body.Count, []);
-                byBody[key] = entry;
-            }
-
-            entry.Members.Add(new DuplicateMember(
+            measured.Add((Hash(body), body.Count, new DuplicateMember(
                 symbol.Name,
                 symbol.QualifiedName,
                 symbol.FilePath,
                 symbol.StartLine,
-                symbol.EndLine));
+                symbol.EndLine)));
         }
 
-        List<DuplicateCluster> clusters = byBody
-            .Where(pair => pair.Value.Members.Count > 1)
-            .Select(pair => new DuplicateCluster(
-                ClusterId(pair.Key),
-                pair.Value.Lines,
-                pair.Value.Members
-                    .OrderBy(m => m.File, StringComparer.Ordinal)
-                    .ThenBy(m => m.StartLine)
-                    .ToArray()))
-            .OrderByDescending(c => c.NormalizedLines)
-            .ThenBy(c => c.Id, StringComparer.Ordinal)
-            .ToList();
+        IReadOnlyList<DuplicateCluster> clusters = DuplicateReport.Merge(measured);
 
         return new DuplicateReport(
             DuplicateReport.CurrentSchema,
@@ -268,9 +192,6 @@ public static class DuplicateDetector
         byte[] digest = SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n', body)));
         return Convert.ToHexStringLower(digest);
     }
-
-    private static string ClusterId(string hash) =>
-        string.Create(CultureInfo.InvariantCulture, $"dup-{hash[..8]}");
 
     private static string[]? ReadFile(string repoRoot, string relativePath, Dictionary<string, string[]?> cache)
     {

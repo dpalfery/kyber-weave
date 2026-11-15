@@ -183,7 +183,7 @@ public static class FileTextFacts
 
         string root = Path.GetFullPath(repoRoot);
         string relative = Path.GetRelativePath(root, full);
-        return DocsRootPath.IsContainedFile(root, relative, []) ? full : null;
+        return KyberWeave.Core.Configuration.DocsRootPath.IsContainedFile(root, relative, []) ? full : null;
     }
 
     /// <summary>

@@ -13,7 +13,7 @@ internal sealed class McpYamlSection
 /// <summary>One entry of <c>mcp.required-servers</c>.</summary>
 /// <remarks>
 /// Every field the loader needs a decision on is read as raw YAML rather than bound to an enum.
-/// Binding <c>provenance</c> straight to <see cref="McpProvenance"/> would let a misspelling
+/// Binding <c>provenance</c> straight to <c>McpProvenance</c> would let a misspelling
 /// deserialize to the default member, which claims the server is first-party and required — a
 /// silent change to what the repository says it depends on. <c>level</c> has the same shape.
 /// </remarks>

@@ -70,7 +70,7 @@ public sealed record LensCoverage(string Lens, string Outcome, string? Reason);
 /// read, because a lens may carry more than the engine consumes, but a missing required
 /// field is a parse failure rather than a silently defaulted value. A finding that arrives
 /// without its evidence must reach the engine as a finding without evidence, so that
-/// <see cref="VerdictEngine.IncompleteFinding"/> can drop it and say so.
+/// <c>VerdictEngine.IncompleteFinding</c> can drop it and say so.
 /// </remarks>
 public static class ReviewJson
 {

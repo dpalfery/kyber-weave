@@ -4,7 +4,7 @@ namespace KyberWeave.Core.Review;
 /// <remarks>
 /// Severity is impact, never certainty. A finding the reporter is only half sure of but
 /// which would lose data is <see cref="Critical"/> at a low confidence — both facts are
-/// recorded, and <see cref="VerdictEngine"/> uses each for what it measures.
+/// recorded, and <c>VerdictEngine</c> uses each for what it measures.
 /// </remarks>
 public enum ReviewSeverity
 {
@@ -160,7 +160,7 @@ public sealed record DroppedFinding(ReviewFinding Finding, string Code, string R
 /// <param name="PathLineCounts">Per-path added and removed lines, when the producer counted them.</param>
 /// <remarks>
 /// Scope is reporting metadata for reviewers. It is not an input to
-/// <see cref="VerdictEngine.Evaluate" />; the verdict is computed from findings, gates, config,
+/// <c>VerdictEngine.Evaluate</c>; the verdict is computed from findings, gates, config,
 /// the evaluation date, and the optional coverage result only.
 /// </remarks>
 public sealed record ReviewScope(

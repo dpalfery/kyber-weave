@@ -1,5 +1,6 @@
 using KyberWeave.Core.Docs.Model;
 using YamlDotNet.Core;
+using KyberWeave.Domain.FileSystem;
 
 namespace KyberWeave.Core.Configuration;
 
