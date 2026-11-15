@@ -336,7 +336,7 @@ public sealed class SquadPathSafetyTests : IDisposable
                 null!,
                 new SquadUninstallSettings
                 {
-                    Path = targetDir,
+                    PathOption = targetDir,
                     Global = false,
                     DryRun = false
                 })
@@ -443,7 +443,7 @@ public sealed class SquadPathSafetyTests : IDisposable
                 null!,
                 new SquadUninstallSettings
                 {
-                    Path = targetDir,
+                    PathOption = targetDir,
                     Global = false,
                     DryRun = false
                 })
@@ -587,7 +587,7 @@ public sealed class SquadPathSafetyTests : IDisposable
                 null!,
                 new SquadUninstallSettings
                 {
-                    Path = anchorRoot,
+                    PathOption = anchorRoot,
                     Global = true,
                     DryRun = false
                 })

@@ -271,6 +271,52 @@ public sealed class SquadHookJsonBlockTests
     [InlineData(SquadHookBlockFormat.Factory)]
     [InlineData(SquadHookBlockFormat.Devin)]
     [InlineData(SquadHookBlockFormat.Antigravity)]
+    public void RemoveFile_FileSquadCreated_LeavesNoEmptyContainers(SquadHookBlockFormat format)
+    {
+        using TempDirectory fixture = new();
+        string path = HookFile(fixture, format);
+        (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post) = ManagedEntries(format);
+        SquadHookJsonBlock.SpliceFile(format, path, pre, post);
+
+        SquadHookJsonBlock.RemoveFile(format, path);
+
+        JsonObject root = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        Assert.DoesNotContain("PostToolUse", root.ToJsonString(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\"hooks\":{}", root.ToJsonString(), StringComparison.Ordinal);
+        Assert.True(SquadHookJsonBlock.IsEmpty(format, root.ToJsonString()));
+    }
+
+    [Fact]
+    public void RemoveContent_ClaudeKeepsUserEmptyArrayAndSharedContainerButDropsEmptiedOnes()
+    {
+        string squad = "{\"matcher\":\"Task\",\"hooks\":[{\"type\":\"command\",\"command\":\"kyber-weave-arbiter hook --harness claude\"}]}";
+        string user = "{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"user-linter\"}]}";
+        string existing = "{\"hooks\":{\"PreToolUse\":[" + squad + "],\"PostToolUse\":[" + user + "," + squad
+            + "],\"Stop\":[]}}";
+
+        JsonObject hooks = JsonNode.Parse(SquadHookJsonBlock.RemoveContent(SquadHookBlockFormat.Claude, existing))!["hooks"]!.AsObject();
+
+        Assert.False(hooks.ContainsKey("PreToolUse"));
+        Assert.Single(hooks["PostToolUse"]!.AsArray());
+        Assert.Empty(hooks["Stop"]!.AsArray());
+    }
+
+    [Fact]
+    public void RemoveContent_ClaudeUserOwnedEmptyHooksObjectIsKept()
+    {
+        JsonObject root = JsonNode.Parse(
+            SquadHookJsonBlock.RemoveContent(SquadHookBlockFormat.Claude, "{\"hooks\":{},\"theme\":\"dark\"}"))!.AsObject();
+
+        Assert.True(root.ContainsKey("hooks"));
+        Assert.Equal("dark", root["theme"]!.GetValue<string>());
+    }
+
+    [Theory]
+    [InlineData(SquadHookBlockFormat.Cursor)]
+    [InlineData(SquadHookBlockFormat.Codex)]
+    [InlineData(SquadHookBlockFormat.Factory)]
+    [InlineData(SquadHookBlockFormat.Devin)]
+    [InlineData(SquadHookBlockFormat.Antigravity)]
     public void IsEmptyReportsWhetherAnyHookRemains(SquadHookBlockFormat format)
     {
         Assert.True(SquadHookJsonBlock.IsEmpty(format, null));

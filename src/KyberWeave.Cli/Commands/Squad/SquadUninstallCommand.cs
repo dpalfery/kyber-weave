@@ -57,20 +57,50 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
         SquadStateStore stateStore =
             _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths, _environmentReader);
 
-        // Coalesce the positional path with --path; invalid client input returns exit
-        // code 2 before any resolution or work
-        string? effectivePath;
-        try
+        // Invalid client input returns exit code 2 before any resolution or work.
+        if (settings.Project && settings.Global)
         {
-            effectivePath = SquadCommandComposition.CoalesceTargetPath(settings.Path, settings.PathOption);
-        }
-        catch (ArgumentException ex)
-        {
-            SquadCommandComposition.WriteClientInputError(ex.Message);
+            SquadCommandComposition.WriteClientInputError(
+                "--global and --project are mutually exclusive. Omit both to use the default scope.");
             return 2;
         }
 
-        SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(settings.Global);
+        SquadTarget? target = null;
+        if (settings.Harness is not null)
+        {
+            IReadOnlyList<SquadTarget> parsed;
+            try
+            {
+                parsed = SquadTargetCatalog.Parse([settings.Harness]);
+            }
+            catch (ArgumentException ex)
+            {
+                SquadCommandComposition.WriteClientInputError(ex.Message);
+                return 2;
+            }
+
+            if (parsed.Count != 1)
+            {
+                SquadCommandComposition.WriteClientInputError(
+                    "Name exactly one harness to uninstall, or omit it to remove every harness in the receipt.");
+                return 2;
+            }
+
+            target = parsed[0];
+        }
+
+        // A named harness defaults to the global scope, as `squad install --target ... -g` does; --project
+        // selects the local project. With no harness the project stays the default, as it always was.
+        bool isGlobal = settings.Global || (target is not null && !settings.Project);
+        if (!string.IsNullOrWhiteSpace(settings.PathOption) && target is not null && !settings.Project)
+        {
+            SquadCommandComposition.WriteClientInputError(
+                "--path is only valid with --project when a harness is named. Add --project to target a project root.");
+            return 2;
+        }
+
+        string? effectivePath = settings.PathOption;
+        SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(isGlobal);
 
         string projectRoot = SquadCommandComposition.ResolveTargetRoot(effectivePath);
 
@@ -99,18 +129,28 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
             globalRoots: _globalRoots,
             environmentReader: _environmentReader);
 
+        if (target is { } chosen
+            && !SquadCommandComposition.ReceiptHasTarget(stateStore, targetRoot, scope, chosen))
+        {
+            SquadCommandComposition.WriteClientInputError(
+                $"Harness '{SquadTargetCatalog.GetToken(chosen)}' is not installed in the {(scope == SquadDeploymentScope.Global ? "global" : "project")} " +
+                $"deployment at '{targetRoot}'. Run `kyber-weave squad status{(scope == SquadDeploymentScope.Global ? " --global" : string.Empty)}` to see what is installed.");
+            return 2;
+        }
+
         SquadUninstallRequest uninstallRequest = new(
             targetRoot,
             scope,
-            settings.DryRun);
+            settings.DryRun,
+            target);
 
-        // Uninstall has no --target option: its targets are the receipt's. A --global
+        // Uninstall's targets are the receipt's, narrowed to the named harness when one is given. A --global
         // receipt's files live beneath each target's own physical global root, not beneath
         // targetRoot — the state anchor — so the roots the lifecycle will write are
         // derived from the same receipt and named in the confirmation.
         IReadOnlyList<(SquadTarget Target, string GlobalRoot)>? globalTargetRoots =
             scope == SquadDeploymentScope.Global
-                ? SquadCommandComposition.ResolveUninstallGlobalTargetRoots(stateStore, targetRoot, _globalRoots)
+                ? SquadCommandComposition.ResolveUninstallGlobalTargetRoots(stateStore, targetRoot, _globalRoots, target)
                 : null;
 
         // The confirmation is the last gate before the lifecycle call — the only

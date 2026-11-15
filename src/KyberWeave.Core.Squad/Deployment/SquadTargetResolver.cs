@@ -118,7 +118,7 @@ public static class SquadTargetResolver
 
     private const string InstallRecoveryCommand = "kyber-weave squad install --target <target>";
     private const string UpdateRecoveryCommand = "kyber-weave squad update --target <target>";
-    private const string UninstallRecoveryCommand = "kyber-weave squad uninstall --target <target>";
+    private const string UninstallRecoveryCommand = "kyber-weave squad uninstall <harness>";
 
     private static string GetRecoveryCommand(SquadTargetOperation operation) => operation switch
     {

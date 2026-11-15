@@ -610,7 +610,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
             fleet.Harness.GlobalRoots);
 
         CommandExecution execution = Capture(() =>
-            command.Execute(null!, new SquadUninstallSettings { Path = fleet.Anchor, Global = true, Yes = true }));
+            command.Execute(null!, new SquadUninstallSettings { PathOption = fleet.Anchor, Global = true, Yes = true }));
 
         AssertExit(execution, 0);
         Assert.Empty(picker.Calls);
@@ -1800,7 +1800,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
                 false,
                 null,
                 h.GlobalRoots)
-            .Execute(null!, new SquadUninstallSettings { Path = path, Global = global, Yes = true }));
+            .Execute(null!, new SquadUninstallSettings { PathOption = path, Global = global, Yes = true }));
     }
 
     private static CommandExecution Status(Harness h, string path, bool global)

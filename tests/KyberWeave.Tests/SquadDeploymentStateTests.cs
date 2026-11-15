@@ -846,7 +846,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             null!,
             new SquadUninstallSettings
             {
-                Path = fixture.Path,
+                PathOption = fixture.Path,
                 DryRun = true
             }));
 

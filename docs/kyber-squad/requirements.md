@@ -190,7 +190,14 @@ recorded in [ADR 0054](../adr/0054-squad-owned-blocks-in-shared-hook-files.md):
   `squad status` and `squad doctor` naming the file and the container. `squad update`
   rewrites the block but preserves a drifted entry, reporting it, unless
   `--replace-managed` is given. `squad uninstall` removes only the owned entries and
-  deletes the file only when Squad created it and no hook remains.
+  deletes the file only when Squad created it and no hook remains. Hook containers the
+  removal empties are dropped; containers the user left empty are kept.
+- **Per-harness uninstall.** WHEN `squad uninstall <harness>` runs, THE SYSTEM SHALL remove
+  only that harness's files and owned hook entries, keep every other harness in the receipt,
+  and delete the receipt when the last harness is removed. WHERE a harness is named, THE
+  SYSTEM SHALL default to the global scope and use the local project only with `--project`.
+  IF the harness is unknown, is not in the receipt, or `--global` and `--project` are both
+  given, THEN THE SYSTEM SHALL exit 2 before changing anything.
 
 ---
 
