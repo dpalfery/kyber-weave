@@ -10,6 +10,9 @@ using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Brief;
 using KyberWeave.Cli.Commands.Update;
 using KyberWeave.Cli.Commands.Utilities;
+using KyberWeave.Application;
+using KyberWeave.Cli.Composition;
+using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli;
@@ -17,9 +20,14 @@ namespace KyberWeave.Cli;
 /// <summary>Assembles the kyber-weave command tree, shared by the entry point and the in-process tests.</summary>
 internal static class CliApplication
 {
-    internal static CommandApp Create()
+    /// <summary>Builds the command tree over the application container.</summary>
+    /// <param name="configure">Registers services before the application's own, so a registration made here (a fake in a test) wins.</param>
+    internal static CommandApp Create(Action<IServiceCollection>? configure = null)
     {
-        CommandApp app = new();
+        ServiceCollection services = [];
+        configure?.Invoke(services);
+        _ = services.AddWeaveApplication();
+        CommandApp app = new(new ServiceCollectionTypeRegistrar(services));
         app.Configure(config =>
         {
             config.SetApplicationName("kyber-weave");
