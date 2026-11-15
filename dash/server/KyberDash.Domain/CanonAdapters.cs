@@ -407,9 +407,25 @@ public static class CanonAdapters
             CacheRead: cacheRead,
             CacheCreation: cacheCreation,
             Output: output,
-            ReportedInput: input + cacheRead + cacheCreation,
+            ReportedInput: SaturatingSum(input, cacheRead, cacheCreation),
             ReportedOutput: output,
             Reasoning: reasoning);
+    }
+
+    /// <summary>
+    /// Sums token classes without wrapping. The classes are untrusted, and a wrapped total would
+    /// look like a small measurement; saturating leaves it out of range so the decomposition check
+    /// reports a mismatch instead of agreeing.
+    /// </summary>
+    private static long SaturatingSum(long first, long second, long third)
+    {
+        decimal total = (decimal)first + second + third;
+        if (total > long.MaxValue)
+            return long.MaxValue;
+        if (total < long.MinValue)
+            return long.MinValue;
+
+        return (long)total;
     }
 
     /// <summary>
@@ -477,6 +493,24 @@ public static class CanonAdapters
         return null;
     }
 
+    /// <summary>
+    /// Truncates a finite double counter to <see langword="long"/>, refusing values outside long's
+    /// range: the cast itself wraps on x64, and a wrapped counter then reads as a real measurement.
+    /// </summary>
+    private static bool TryTruncateToCounter(double value, out long result)
+    {
+        const double UpperExclusive = 9223372036854775808d;
+        const double LowerInclusive = -9223372036854775808d;
+        if (!double.IsFinite(value) || value >= UpperExclusive || value < LowerInclusive)
+        {
+            result = 0;
+            return false;
+        }
+
+        result = (long)Math.Truncate(value);
+        return true;
+    }
+
     private static long? ReadOptionalCounter(IReadOnlyDictionary<string, JsonElement> attributes, IReadOnlyList<string> keys)
     {
         foreach (string key in keys)
@@ -489,17 +523,17 @@ public static class CanonAdapters
                 if (element.TryGetInt64(out long longValue))
                     return longValue;
 
-                if (element.TryGetDouble(out double doubleValue) && double.IsFinite(doubleValue))
-                    return (long)doubleValue;
+                if (element.TryGetDouble(out double doubleValue) && TryTruncateToCounter(doubleValue, out long truncated))
+                    return truncated;
             }
             else if (element.ValueKind == JsonValueKind.String)
             {
                 string? raw = element.GetString();
                 if (!string.IsNullOrWhiteSpace(raw)
                     && double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed)
-                    && double.IsFinite(parsed))
+                    && TryTruncateToCounter(parsed, out long truncated))
                 {
-                    return (long)parsed;
+                    return truncated;
                 }
             }
         }
