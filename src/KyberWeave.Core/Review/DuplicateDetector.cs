@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Review;
 
@@ -68,7 +69,7 @@ public sealed record DuplicateReport(
 /// <remarks>
 /// <para>
 /// This exists because nothing else in the chain can answer the question. JetBrains retired
-/// <c>dupfinder</c>, and the inspections InspectCode still ships that touch duplication —
+/// <c>dupfinder</c>, and the ReSharper inspections that touch duplication —
 /// <c>DuplicatedStatements</c>, <c>RedundantOverload</c> — are scoped to one statement or one
 /// method group. Neither sees across files, which is where duplication that matters lives.
 /// </para>
@@ -280,13 +281,13 @@ public static class DuplicateDetector
 
         try
         {
-            if (File.Exists(full)) lines = File.ReadAllLines(full);
+            // The same cap every other read of a path a seat or an index names applies: an oversized file is unreadable.
+            // A symbolic link on the path can lead out of the tree, so a file reached through one is unreadable here, as
+            // it is for every other read of a path an index or a seat names.
+            if (DocsRootPath.IsContainedFile(repoRoot, relativePath, []))
+                lines = BoundedFileReader.ReadAllLines(full, ReviewSeatInput.MaxFileBytes);
         }
-        catch (IOException)
-        {
-            lines = null;
-        }
-        catch (UnauthorizedAccessException)
+        catch (Exception ex) when (ReviewSeatInput.IsFileFailure(ex) || ex is InvalidDataException)
         {
             lines = null;
         }

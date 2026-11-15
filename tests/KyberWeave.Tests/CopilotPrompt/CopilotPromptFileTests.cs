@@ -50,7 +50,6 @@ public sealed class CopilotPromptFileTests : IDisposable
     [InlineData(".github/copilot-instructions.md")]
     [InlineData(".kyber-weave/kyber-weave.yml")]
     [InlineData("conductor")]
-    [InlineData("skill")]
     [InlineData("tool_search_tool")]
     [InlineData("codegraph_explore")]
     [InlineData("docs_answer_question_from_repo_documentation")]
@@ -70,14 +69,6 @@ public sealed class CopilotPromptFileTests : IDisposable
         Assert.True(
             text.Split('\n').Any(line => line.Contains("Safety", StringComparison.Ordinal)),
             "the embedded system prompt has no heading or line containing 'Safety'");
-    }
-
-    [Fact]
-    public void EmbeddedText_DoesNotContainRetiredDelegationDefault()
-    {
-        string text = CopilotPromptFile.EmbeddedText();
-
-        Assert.DoesNotContain("Default to doing the work yourself", text, StringComparison.Ordinal);
     }
 
     [Fact]

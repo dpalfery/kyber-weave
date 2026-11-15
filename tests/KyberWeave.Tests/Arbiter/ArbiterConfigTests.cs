@@ -22,8 +22,8 @@ public sealed class ArbiterConfigTests
         "KW-ARB-READY-001",
         "KW-ARB-OWNER-001",
         "KW-ARB-OWNER-002",
-        "KW-ARB-MODE-001",
         "KW-ARB-ROSTER-001",
+        "KW-ARB-RUN-001",
         "KW-ARB-DIFF-001",
         "KW-ARB-PLANNER-001",
         "KW-ARB-PLANNER-DIFF-001",
@@ -48,6 +48,10 @@ public sealed class ArbiterConfigTests
         "KW-ARB-FAILURE-001",
         "KW-ARB-TRIM-001",
         "KW-ARB-COMMENT-001",
+        "KW-ARB-CHECKOUT-001",
+        "KW-ARB-MODE-002",
+        "KW-ARB-SEVERITY-001",
+        "KW-ARB-OVERRIDE-001",
     ];
 
     [Fact]
@@ -60,10 +64,12 @@ public sealed class ArbiterConfigTests
         Assert.Equal("https://api.typesafe.ai/v1", config.Provider.Endpoint);
         Assert.Equal("jev-1.14.0", config.Provider.Model);
         Assert.Equal(3000, config.Provider.TimeoutMs);
-        // 32 shipped rule ids; ROSTER-001 runs on two triggers, so it appears twice.
+        // 34 shipped rule ids; ROSTER-001 runs on two triggers, RUN-001 and CHECKOUT-001 on three, so they add five entries.
         Assert.Equal(ExpectedRuleIds, config.Rules.Select(rule => rule.Id).Distinct());
-        Assert.Equal(ExpectedRuleIds.Length + 1, config.Rules.Count);
-        Assert.All(config.Rules, rule => Assert.True(rule.Enabled));
+        Assert.Equal(ExpectedRuleIds.Length + 5, config.Rules.Count);
+        // KW-ARB-OWNER-002 ships disabled: it only logged a pick, and a dispatch should make no model call for that.
+        Assert.All(config.Rules.Where(rule => rule.Id != "KW-ARB-OWNER-002"), rule => Assert.True(rule.Enabled));
+        Assert.False(config.Rules.Single(rule => rule.Id == "KW-ARB-OWNER-002").Enabled);
     }
 
     [Fact]
@@ -187,7 +193,7 @@ public sealed class ArbiterConfigTests
                   effects: { touches: escalate, clear: allow }
             """);
 
-        Assert.Equal(ExpectedRuleIds.Length + 2, config.Arbiter.Rules.Count);
+        Assert.Equal(ExpectedRuleIds.Length + 6, config.Arbiter.Rules.Count);
         ArbiterRule host = config.Arbiter.Rules[^1];
         Assert.Equal("HOST-MIGRATIONS-001", host.Id);
         Assert.Equal("delegate", host.Trigger);

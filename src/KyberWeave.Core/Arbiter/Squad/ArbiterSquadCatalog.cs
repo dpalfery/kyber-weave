@@ -78,7 +78,7 @@ public sealed class ArbiterSquadCatalog
     /// <remarks>
     /// The classes are fixed: implementation (worker, publishing-worker,
     /// documentation), planner (architect, product-planning), read-only
-    /// (investigator, read-only, reviewer). Any other profile — including the
+    /// (investigator, read-only, review-seat, reviewer). Any other profile — including the
     /// orchestrator's — is not Squad routable and maps to <c>not-squad</c>.
     /// </remarks>
     public static string TargetClassFor(string capabilityProfile)
@@ -88,7 +88,7 @@ public sealed class ArbiterSquadCatalog
         {
             "worker" or "publishing-worker" or "documentation" => "implementation",
             ArchitectCapabilityProfile or "product-planning" => "planner",
-            "investigator" or "read-only" or "reviewer" => "read-only",
+            "investigator" or "read-only" or "review-seat" or "reviewer" => "read-only",
             _ => "not-squad",
         };
     }

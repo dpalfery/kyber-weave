@@ -168,7 +168,7 @@ public sealed class AntigravityHookAdapterTests
     }
 
     [Fact]
-    public void PreInvoke_EmptyPromptAndTypeName_FailsClosed()
+    public void PreInvoke_EmptyPromptAndTypeName_AllowsAndLogs()
     {
         ContextualEngine engine = new();
         JsonObject root = JsonNode.Parse(Payload("PreToolUse", "invoke_subagent", "/repo"))!.AsObject();
@@ -176,27 +176,29 @@ public sealed class AntigravityHookAdapterTests
         subagent["Prompt"] = string.Empty;
         subagent["TypeName"] = string.Empty;
 
-        (int exit, string stdout, _) = Run(root.ToJsonString(), null, engine);
+        (int exit, string stdout, string log) = Run(root.ToJsonString(), null, engine);
 
+        // ADR 0072: a fault the host cannot decide on allows, with the code in the log.
         Assert.Equal(0, exit);
-        using JsonDocument doc = JsonDocument.Parse(stdout);
-        Assert.Equal("deny", doc.RootElement.GetProperty("decision").GetString());
+        Assert.Equal("{}", stdout);
+        Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
         Assert.Empty(engine.SeenPre);
     }
 
     [Fact]
-    public void PreInvoke_MissingTypeName_FailsClosedInsteadOfEvaluatingATargetlessDispatch()
+    public void PreInvoke_MissingTypeName_AllowsWithoutEvaluatingATargetlessDispatch()
     {
         ContextualEngine engine = new();
         JsonObject root = JsonNode.Parse(Payload("PreToolUse", "invoke_subagent", "/repo"))!.AsObject();
         JsonObject subagent = root["toolCall"]!["args"]!["Subagents"]![0]!.AsObject();
         subagent.Remove("TypeName");
 
-        (int exit, string stdout, _) = Run(root.ToJsonString(), null, engine);
+        (int exit, string stdout, string log) = Run(root.ToJsonString(), null, engine);
 
+        // ADR 0072: a fault the host cannot decide on allows, with the code in the log.
         Assert.Equal(0, exit);
-        using JsonDocument doc = JsonDocument.Parse(stdout);
-        Assert.Equal("deny", doc.RootElement.GetProperty("decision").GetString());
+        Assert.Equal("{}", stdout);
+        Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
         Assert.Empty(engine.SeenPre);
     }
 
@@ -264,19 +266,16 @@ public sealed class AntigravityHookAdapterTests
     }
 
     [Fact]
-    public void InternalError_WritesDenyShapeWithFailClosedEnvelope()
+    public void InternalError_AllowsWithTheEmptyDocumentAndLogs()
     {
         ScriptedEngine engine = new() { ThrowOnPre = true };
 
-        (int exit, string stdout, _) = Run(Fixture("pre-invoke-subagent.json"), null, engine);
+        (int exit, string stdout, string log) = Run(Fixture("pre-invoke-subagent.json"), null, engine);
 
+        // ADR 0072: a fault the host cannot decide on allows, with the code in the log.
         Assert.Equal(0, exit);
-        using JsonDocument doc = JsonDocument.Parse(stdout);
-        Assert.Equal("deny", doc.RootElement.GetProperty("decision").GetString());
-        string reason = doc.RootElement.GetProperty("reason").GetString() ?? string.Empty;
-        Assert.Contains(HookCommand.FailClosedCode, reason, StringComparison.Ordinal);
-        Assert.Contains("ANSWER: error", reason, StringComparison.Ordinal);
-        Assert.StartsWith("STATUS: ARBITER_ESCALATION", reason, StringComparison.Ordinal);
+        Assert.Equal("{}", stdout);
+        Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
     }
 
     private static string Payload(string eventName, string tool, string workspace, string? cwd = null)

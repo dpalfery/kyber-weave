@@ -418,7 +418,7 @@ public sealed class PiRendererContractTests : IDisposable
                 .ToArray();
             Assert.Equal(expectedKeyOrder, actualKeys);
 
-            string expectedBody = NormalizeBody(agent.InstructionBody);
+            string expectedBody = NormalizeBody(TestSquadCorpus.ExpectedRenderText(SquadTarget.Pi, agent.InstructionBody));
             Assert.Contains(expectedBody, body, StringComparison.Ordinal);
         }
     }
@@ -1238,7 +1238,7 @@ public sealed class PiRendererContractTests : IDisposable
 internal sealed class PiModelOverrideFixture : IDisposable
 {
     internal const string OverriddenProfile = "general";
-    internal const string OverriddenAgentName = "dal-dev";
+    internal const string OverriddenAgentName = "go-dev";
     internal const string OverrideModel = "acme/pi-test-model";
     internal const string InheritProfile = "fast";
     internal const string InheritAgentName = "csharp-dev";
@@ -1372,7 +1372,7 @@ internal sealed class PiOverlayOnlyFixture : IDisposable
         string agentPath = Path.Combine(fixture.ProductRoot, "agents", TestAgentName + ".md");
         string original = File.ReadAllText(agentPath);
         string mutated = original
-            .Replace("capability-profile: read-only", "capability-profile: pi-overlay-only", StringComparison.Ordinal)
+            .Replace("capability-profile: review-seat", "capability-profile: pi-overlay-only", StringComparison.Ordinal)
             .Replace(
                 "copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, \"codegraph/*\", \"kw-docs/*\", \"context7/resolve-library-id\", \"context7/query-docs\", search, web]",
                 "copilot-tools: [vscode/toolSearch, vscode/askQuestions, todo]\n" +
@@ -1383,7 +1383,7 @@ internal sealed class PiOverlayOnlyFixture : IDisposable
         if (string.Equals(original, mutated, StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
-                $"Expected '{agentPath}' to carry the read-only profile and full Copilot roster to repoint.");
+                $"Expected '{agentPath}' to carry the review-seat profile and full Copilot roster to repoint.");
         }
 
         File.WriteAllText(agentPath, mutated, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
@@ -1442,7 +1442,7 @@ internal sealed class PiFileReadDeniedFixture : IDisposable
         string agentPath = Path.Combine(fixture.ProductRoot, "agents", TestAgentName + ".md");
         string original = File.ReadAllText(agentPath);
         string mutated = original
-            .Replace("capability-profile: read-only", $"capability-profile: {DeniedProfileName}", StringComparison.Ordinal)
+            .Replace("capability-profile: review-seat", $"capability-profile: {DeniedProfileName}", StringComparison.Ordinal)
             .Replace(
                 "copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, \"codegraph/*\", \"kw-docs/*\", \"context7/resolve-library-id\", \"context7/query-docs\", search, web]",
                 "copilot-tools: [vscode/toolSearch, vscode/askQuestions, todo]",
@@ -1451,7 +1451,7 @@ internal sealed class PiFileReadDeniedFixture : IDisposable
         if (string.Equals(original, mutated, StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
-                $"Expected '{agentPath}' to carry the read-only profile and full Copilot roster to repoint.");
+                $"Expected '{agentPath}' to carry the review-seat profile and full Copilot roster to repoint.");
         }
 
         File.WriteAllText(agentPath, mutated, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
@@ -1469,7 +1469,7 @@ internal sealed class PiFileReadDeniedFixture : IDisposable
 /// </summary>
 internal sealed class PiThinkingSuffixFixture : IDisposable
 {
-    internal const string TestAgentName = "dal-dev";
+    internal const string TestAgentName = "go-dev";
 
     private readonly TempDirectory _temp = new();
 

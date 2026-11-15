@@ -6,6 +6,7 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Cli.Commands.Arbiter;
 
@@ -73,10 +74,7 @@ public sealed class ArbiterEvalCommand : Command<ArbiterSettings>
             ev = JsonSerializer.Deserialize<ArbiterEvent>(json, EventJson)
                 ?? throw new JsonException("The event file holds no event.");
         }
-        catch (Exception exception) when (exception is IOException
-            or UnauthorizedAccessException
-            or JsonException
-            or NotSupportedException)
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is JsonException)
         {
             report.Add(new Diagnostic(
                 RuleValidator.MalformedSection,
@@ -145,7 +143,7 @@ public sealed class ArbiterEvalCommand : Command<ArbiterSettings>
             report.Add(new Diagnostic(
                 result.ErrorCode ?? ArbiterEvaluator.HookErrorCode,
                 Severity.Error,
-                result.ErrorMessage ?? "The dry-run evaluation failed closed.",
+                result.ErrorMessage ?? "The dry-run evaluation failed; a hook would allow the dispatch and log this error.",
                 "--event"));
         }
 

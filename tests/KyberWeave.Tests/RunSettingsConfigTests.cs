@@ -31,11 +31,6 @@ namespace KyberWeave.Tests;
 ///                 mode property only when the operator wrote it.
 ///             </description>
 ///         </item>
-///         <item>
-///             <description>
-///                 <c>run.harness-names</c> — a boolean, default true, published as a mode property only when set.
-///             </description>
-///         </item>
 ///     </list>
 ///     <para>
 ///         Property names are asserted by the setting name they must contain rather than by an exact
@@ -49,7 +44,6 @@ public sealed class RunSettingsConfigTests
 {
     private const string StopOnToolFailureSetting = "stop-on-tool-failure";
     private const string BaseBranchSetting = "base-branch";
-    private const string HarnessNamesSetting = "harness-names";
 
     /// <summary>
     ///     A configured <c>stop-on-tool-failure</c> does not reach the registry an agent reads: the CLI
@@ -75,7 +69,7 @@ public sealed class RunSettingsConfigTests
     {
         KyberWeaveConfig configured =
             KyberWeaveConfigLoader.LoadFromYaml("run:\n  base-branch: develop\n");
-        KyberWeaveConfig unset = KyberWeaveConfigLoader.LoadFromYaml("run:\n  harness-names: false\n");
+        KyberWeaveConfig unset = KyberWeaveConfigLoader.LoadFromYaml("stop-on-tool-failure: false\n");
 
         ConfigRegEntry entry = Assert.Single(
             configured.ConfigReg.Resolve(configured.Ontology),
@@ -88,27 +82,6 @@ public sealed class RunSettingsConfigTests
         Assert.DoesNotContain(
             unset.ConfigReg.Resolve(unset.Ontology),
             candidate => candidate.Name.Contains(BaseBranchSetting, StringComparison.Ordinal));
-    }
-
-    /// <summary>
-    ///     A configured <c>run.harness-names</c> is published, and a repository that left the default alone
-    ///     publishes nothing, so the block never restates a default an agent already applies.
-    /// </summary>
-    [Fact]
-    public void AConfiguredHarnessNamesSettingIsPublishedAndAnUnsetOneIsSilent()
-    {
-        KyberWeaveConfig configured =
-            KyberWeaveConfigLoader.LoadFromYaml("run:\n  harness-names: false\n");
-        KyberWeaveConfig unset = KyberWeaveConfigLoader.LoadFromYaml("run:\n  base-branch: main\n");
-
-        ConfigRegEntry entry = Assert.Single(
-            configured.ConfigReg.Resolve(configured.Ontology),
-            candidate => candidate.Name.Contains(HarnessNamesSetting, StringComparison.Ordinal));
-        Assert.Equal(ConfigRegEntryKind.Mode, entry.Kind);
-
-        Assert.DoesNotContain(
-            unset.ConfigReg.Resolve(unset.Ontology),
-            candidate => candidate.Name.Contains(HarnessNamesSetting, StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -125,20 +98,6 @@ public sealed class RunSettingsConfigTests
         string message = AssertInvalid($"stop-on-tool-failure: {value}\n").Message;
 
         Assert.Contains(StopOnToolFailureSetting, message, StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    ///     The same rule inside the <c>run:</c> block, which reaches the loader through a different shape.
-    /// </summary>
-    /// <param name="value">A value YAML accepts as a scalar but the setting does not accept.</param>
-    [Theory]
-    [InlineData("sometimes")]
-    [InlineData("yes-please")]
-    public void AnUnrecognisedHarnessNamesValueIsRefused(string value)
-    {
-        string message = AssertInvalid($"run:\n  harness-names: {value}\n").Message;
-
-        Assert.Contains(HarnessNamesSetting, message, StringComparison.Ordinal);
     }
 
     /// <summary>

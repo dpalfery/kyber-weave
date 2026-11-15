@@ -134,6 +134,10 @@ public sealed class ArbiterNitpickRuleTests : IDisposable
         };
 
     private static ArbiterRule Shipped(string id) =>
+        HookAskedRules.AsHookAsked(Raw(id));
+
+    /// <summary>The rule exactly as shipped, before <see cref="HookAskedRules.AsHookAsked"/>.</summary>
+    private static ArbiterRule Raw(string id) =>
         Assert.Single(
             ArbiterConfig.ProductDefaults.Rules,
             rule => string.Equals(rule.Id, id, StringComparison.Ordinal));
@@ -187,9 +191,13 @@ public sealed class ArbiterNitpickRuleTests : IDisposable
     /// sees, so an upgrade does not silently discard findings before the calibration is run.
     /// </summary>
     [Fact]
-    public void TheShippedNitpickRuleShipsInShadowMode()
+    public void TheShippedNitpickRuleIsEnforcedByTheVerdictAndNotAskedByTheHook()
     {
-        Assert.True(Shipped(NitpickRule).Shadow);
+        ArbiterRule rule = Raw(NitpickRule);
+
+        Assert.False(rule.Shadow);
+        Assert.Contains(rule.Decide!, clause => clause.Answer == "asked-by-review-verdict");
+        Assert.Equal(RuleEffects.Allow, rule.Effects["asked-by-review-verdict"]);
     }
 
     /// <summary>A nitpick is dropped and a substantive finding is allowed; no other answer reaches an effect.</summary>

@@ -186,7 +186,7 @@ public sealed class PiHookAdapterTests
     [InlineData("")]
     [InlineData("{\"schema\":\"nope\",\"harness\":\"pi\",\"phase\":\"before\",\"tool\":\"Agent\"}")]
     [InlineData("{\"schema\":\"kyber-arbiter.plugin-event/v1\",\"harness\":\"pi\",\"phase\":\"middle\",\"tool\":\"Agent\"}")]
-    public void MalformedEnvelope_BlocksFailClosedWithHarnessToken(string stdin)
+    public void MalformedEnvelope_AllowsAndLogsWithHarnessToken(string stdin)
     {
         ScriptedEngine engine = new();
         PluginHookAdapter adapter = new("pi", "Agent", "subagent_type", "prompt", engine);
@@ -199,12 +199,10 @@ public sealed class PiHookAdapterTests
 
         int exit = command.Run("pi", "conductor", stdin, stdout, log);
 
+        // ADR 0072: an envelope the host cannot read allows, with the code and the harness in the log.
         Assert.Equal(0, exit);
-        using JsonDocument doc = JsonDocument.Parse(stdout.ToString());
-        Assert.Equal("block", doc.RootElement.GetProperty("decision").GetString());
-        string reason = doc.RootElement.GetProperty("reason").GetString() ?? string.Empty;
-        Assert.Contains(HookCommand.FailClosedCode, reason, StringComparison.Ordinal);
-        Assert.Contains("pi", reason, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, stdout.ToString());
+        Assert.Contains(HookCommand.FailClosedCode, log.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

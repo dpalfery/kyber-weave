@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Arbiter.Facts;
 
@@ -99,29 +100,163 @@ internal static class ArbiterLogFiles
     }
 
     /// <summary>
-    /// Reads the complete lines of <paramref name="path"/> without taking any
-    /// lock, ignoring a final line that has no newline (a writer mid-line).
+    /// The most bytes one read of an append-only Arbiter log looks at, taken from the end. A log is never swept, so
+    /// reading all of it would make every hook call cost more as the log ages; the newest records are the ones the
+    /// in-flight and decision queries need.
     /// </summary>
-    internal static IReadOnlyList<string> ReadCompleteLines(string path)
+    internal const long MaxReadBytes = 8L * 1024 * 1024;
+
+    /// <summary>
+    /// Reads the complete lines of <paramref name="path"/>, looking only at its last <see cref="MaxReadBytes"/> bytes,
+    /// without taking any lock, and ignoring a final line that has no newline (a writer mid-line). A log that is
+    /// absent or cannot be read reads as empty; <see cref="ReadComplete"/> says which, and whether the window cut.
+    /// </summary>
+    internal static IReadOnlyList<string> ReadCompleteLines(string path) => ReadComplete(path).Lines;
+
+    /// <summary>
+    /// <see cref="ReadCompleteLines"/> with what it left out: whether the window cut older lines off, and why a
+    /// log that exists could not be read.
+    /// </summary>
+    internal static LogTail ReadComplete(string path) =>
+        ReadTail(path, MaxReadBytes, keepUnterminatedFinalLine: false);
+
+    /// <summary>
+    /// Reads the lines inside the last <paramref name="tailBytes"/> bytes of <paramref name="path"/>. A line the
+    /// window cuts the start of is dropped, so a whole line is never read as a fragment. A file that is absent or
+    /// cannot be opened or read (see <see cref="FileFailure"/>) reads as
+    /// empty: a log that cannot be read has no records to offer, and must not crash the caller.
+    /// </summary>
+    /// <param name="path">The file to read.</param>
+    /// <param name="tailBytes">The window, at least 1.</param>
+    /// <param name="keepUnterminatedFinalLine">Whether a final line with no newline is returned.</param>
+    internal static IReadOnlyList<string> ReadTailLines(string path, long tailBytes, bool keepUnterminatedFinalLine) =>
+        ReadTail(path, tailBytes, keepUnterminatedFinalLine).Lines;
+
+    /// <summary>
+    /// <see cref="ReadTailLines(string, long, bool)"/> with what it left out. An absent file is an empty log with no
+    /// problem; any other open or read failure is an empty log with <see cref="LogTail.Unreadable"/> set, so a
+    /// caller that can report it does not mistake an unreadable log for an empty one.
+    /// </summary>
+    internal static LogTail ReadTail(string path, long tailBytes, bool keepUnterminatedFinalLine)
     {
-        if (!File.Exists(path))
+        ArgumentOutOfRangeException.ThrowIfLessThan(tailBytes, 1);
+        try
         {
-            return [];
+            using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            return ReadTail(stream, tailBytes, keepUnterminatedFinalLine);
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return new LogTail([], Truncated: false, Unreadable: null);
+        }
+        catch (Exception exception) when (FileFailure.Is(exception))
+        {
+            return new LogTail([], Truncated: false, Unreadable: $"{exception.GetType().Name}: {exception.Message}");
+        }
+    }
+
+    /// <summary>
+    /// The stream form of <see cref="ReadTailLines(string, long, bool)"/>. It catches nothing: an
+    /// <see cref="IOException"/> from the stream propagates, and only the path overloads turn it into an empty read.
+    /// </summary>
+    internal static IReadOnlyList<string> ReadTailLines(Stream stream, long tailBytes, bool keepUnterminatedFinalLine) =>
+        ReadTail(stream, tailBytes, keepUnterminatedFinalLine).Lines;
+
+    /// <summary>The stream form of <see cref="ReadTail(string, long, bool)"/>; it catches nothing.</summary>
+    /// <remarks>
+    /// The window is read in fixed chunks and cut into lines as it goes, so the memory held is one chunk, the line
+    /// being assembled and the lines kept, not a buffer, a string and a split of the whole window.
+    /// </remarks>
+    internal static LogTail ReadTail(Stream stream, long tailBytes, bool keepUnterminatedFinalLine)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentOutOfRangeException.ThrowIfLessThan(tailBytes, 1);
+
+        // Length is read once: a second read of a file that is being appended to, or truncated, could disagree with
+        // the first and yield a negative seek or a window of the wrong size.
+        long length = stream.Length;
+        long window = Math.Min(length, tailBytes);
+        bool truncated = length > tailBytes;
+        bool startsMidLine = false;
+        if (truncated)
+        {
+            stream.Seek(length - tailBytes - 1, SeekOrigin.Begin);
+            startsMidLine = stream.ReadByte() != '\n';
         }
 
-        string text = File.ReadAllText(path);
-        if (text.Length == 0)
+        List<string> lines = [];
+        byte[] chunk = new byte[Math.Min(window, ChunkBytes)];
+        using MemoryStream pending = new();
+        long remaining = window;
+        int segment = 0;
+        while (remaining > 0)
         {
-            return [];
+            int read = stream.Read(chunk, 0, (int)Math.Min(chunk.Length, remaining));
+            if (read == 0)
+            {
+                break;
+            }
+
+            remaining -= read;
+            int start = 0;
+            while (start < read)
+            {
+                int newline = Array.IndexOf(chunk, (byte)'\n', start, read - start);
+                if (newline < 0)
+                {
+                    pending.Write(chunk, start, read - start);
+                    break;
+                }
+
+                pending.Write(chunk, start, newline - start);
+                AddSegment(lines, pending, segment++, startsMidLine);
+                start = newline + 1;
+            }
         }
 
-        string[] segments = text.Split('\n');
-        // A file that ends with '\n' yields a trailing empty segment; a torn
-        // final write yields a trailing partial line. Either way the last
-        // segment is not a complete record, so readers drop it.
-        return [.. segments.Take(segments.Length - 1)];
+        // What is left has no newline after it: a writer mid-line or a torn write. The first segment is a fragment
+        // when the window opened mid-line (and possibly mid-character), and is never kept.
+        if (pending.Length > 0 && keepUnterminatedFinalLine)
+        {
+            AddSegment(lines, pending, segment, startsMidLine);
+        }
+
+        return new LogTail(lines, truncated, Unreadable: null);
+    }
+
+    private const int ChunkBytes = 64 * 1024;
+
+    private static void AddSegment(List<string> lines, MemoryStream segmentBytes, int index, bool startsMidLine)
+    {
+        if (index > 0 || !startsMidLine)
+        {
+            lines.Add(Encoding.UTF8.GetString(segmentBytes.GetBuffer(), 0, (int)segmentBytes.Length).TrimEnd('\r'));
+        }
+
+        segmentBytes.SetLength(0);
     }
 }
+
+/// <summary>What one windowed read of an append-only log found, and what it could not show.</summary>
+/// <param name="Lines">The whole lines in the window, in file order.</param>
+/// <param name="Truncated">Whether the log was longer than the window, so older lines were not read.</param>
+/// <param name="Unreadable">Why a log that exists could not be read; null when it was read or is absent.</param>
+internal readonly record struct LogTail(IReadOnlyList<string> Lines, bool Truncated, string? Unreadable);
+
+/// <summary>
+/// The records of an append-only Arbiter log with what the read could not show: lines that were not a record, a window
+/// that cut older records off, and a log that exists but could not be read.
+/// </summary>
+/// <typeparam name="T">The record type.</typeparam>
+/// <param name="Records">The records in the window, in append order.</param>
+/// <param name="MalformedLines">How many whole lines were not a record.</param>
+/// <param name="Truncated">Whether the log was longer than the read window, so older records were not read.</param>
+/// <param name="Unreadable">Why a log that exists could not be read; null otherwise.</param>
+public sealed record ArbiterLogRead<T>(
+    IReadOnlyList<T> Records,
+    int MalformedLines,
+    bool Truncated,
+    string? Unreadable);
 
 /// <summary>
 /// The ledger (<c>artifacts/arbiter/ledger.jsonl</c>, schema
@@ -181,19 +316,21 @@ public sealed class InFlightLedger
             cancellationToken);
     }
 
-    /// <summary>Reads every complete event, in append order. Takes no lock.</summary>
+    /// <summary>Reads every complete event in the newest <see cref="ArbiterLogFiles.MaxReadBytes"/> bytes, in append order. Takes no lock.</summary>
     public IReadOnlyList<ArbiterLedgerEvent> ReadAll() => ReadAllWithDiagnostics().Records;
 
     /// <summary>
-    /// Reads every complete event and reports how many lines were malformed. The hook
-    /// uses <see cref="ReadAll"/> and skips them; <c>audit</c> uses this overload to
-    /// report the corruption instead of silently hiding it.
+    /// Reads every complete event in the newest <see cref="ArbiterLogFiles.MaxReadBytes"/> bytes and reports what
+    /// the read could not show: how many lines were malformed, whether older events fell outside the window, and
+    /// why a log that exists could not be read. The hook uses <see cref="ReadAll"/> and stays quiet about all three;
+    /// <c>audit</c> and <c>tune</c> use this overload to report them instead of presenting a partial log as whole.
     /// </summary>
-    public (IReadOnlyList<ArbiterLedgerEvent> Records, int MalformedLines) ReadAllWithDiagnostics()
+    public ArbiterLogRead<ArbiterLedgerEvent> ReadAllWithDiagnostics()
     {
         List<ArbiterLedgerEvent> records = [];
         int malformed = 0;
-        foreach (string line in ArbiterLogFiles.ReadCompleteLines(FilePath))
+        LogTail tail = ArbiterLogFiles.ReadComplete(FilePath);
+        foreach (string line in tail.Lines)
         {
             ArbiterLedgerEvent? record = TryDeserialize(line);
             if (record is null)
@@ -205,7 +342,7 @@ public sealed class InFlightLedger
             records.Add(record);
         }
 
-        return (records, malformed);
+        return new ArbiterLogRead<ArbiterLedgerEvent>(records, malformed, tail.Truncated, tail.Unreadable);
     }
 
     /// <summary>
@@ -302,34 +439,80 @@ public sealed class InFlightLedger
     }
 
     /// <summary>
-    /// The task files of the dispatches that were in flight at any moment
-    /// between <paramref name="preId"/> and <paramref name="postId"/>: every
-    /// other dispatch whose interval overlaps this one, including a dispatch
-    /// still unpaired (no return yet) that started before this return.
+    /// The writer dispatches (<c>delegate</c> and <c>delegate.planner</c>) that were in flight at any moment
+    /// between <paramref name="preId"/> and <paramref name="postId"/>, other than that dispatch itself: their
+    /// declared task files, and whether any of them declared none, so the paths it wrote cannot be told apart.
     /// </summary>
-    public IReadOnlyList<string> ConcurrentPaths(string preId, string postId)
+    /// <remarks>
+    /// A dispatch with no return yet overlaps from its start, unless it started more than
+    /// <see cref="UnreturnedDispatchHorizon"/> before this return: a harness that crashed never reports it, and it
+    /// must not hold a window open forever. Read-only dispatches write nothing, so they are not counted. A return
+    /// that paired with no pre event has no known start, so its window is taken as the whole horizon.
+    /// </remarks>
+    /// <param name="preId">The pre event of the dispatch that returned, or null when the return paired with none.</param>
+    /// <param name="postId">Its return.</param>
+    /// <param name="notDispatched">Pre events that were refused, so never ran.</param>
+    /// <returns>The overlap, or null when either event is not in the ledger.</returns>
+    public ConcurrentDispatches? ConcurrentWriters(string? preId, string postId, IReadOnlySet<string>? notDispatched = null)
     {
-        ArgumentNullException.ThrowIfNull(preId);
         ArgumentNullException.ThrowIfNull(postId);
         IReadOnlyList<ArbiterLedgerEvent> events = ReadAll();
-        ArbiterLedgerEvent pre = events.FirstOrDefault(e => e.Id == preId)
-            ?? throw new ArgumentException($"No ledger event '{preId}' exists.", nameof(preId));
-        ArbiterLedgerEvent post = events.FirstOrDefault(e => e.Id == postId)
-            ?? throw new ArgumentException($"No ledger event '{postId}' exists.", nameof(postId));
+        ArbiterLedgerEvent? post = events.FirstOrDefault(e => e.Id == postId);
+        ArbiterLedgerEvent? pre = preId is null ? null : events.FirstOrDefault(e => e.Id == preId);
+        if (post is null || (preId is not null && pre is null))
+        {
+            return null;
+        }
+
+        DateTimeOffset start = pre?.At ?? post.At - UnreturnedDispatchHorizon;
 
         Dictionary<string, ArbiterLedgerEvent> returnsById = events
             .Where(e => e.Phase == ArbiterLedgerPhases.Post && e.PreId is not null)
             .GroupBy(e => e.PreId!, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
 
-        return [.. events
+        List<ArbiterLedgerEvent> overlapping = [.. events
             .Where(e => e.Phase == ArbiterLedgerPhases.Pre
                 && e.Id != preId
-                && e.TaskFiles is { Count: > 0 })
-            .Where(e => Overlaps(e, returnsById.GetValueOrDefault(e.Id), pre.At, post.At))
-            .SelectMany(e => e.TaskFiles ?? [])
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(path => path, StringComparer.Ordinal)];
+                && WriterTriggers.Contains(e.Trigger ?? string.Empty)
+                && notDispatched?.Contains(e.Id) != true)
+            .Where(e => returnsById.GetValueOrDefault(e.Id) is { } otherPost
+                ? e.At <= post.At && start <= otherPost.At
+                : e.At <= post.At && post.At - e.At <= UnreturnedDispatchHorizon)];
+
+        return new ConcurrentDispatches(
+            [.. overlapping
+                .SelectMany(e => e.TaskFiles ?? [])
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(path => path, StringComparer.Ordinal)],
+            overlapping.Any(e => e.TaskFiles is not { Count: > 0 }));
+    }
+
+    /// <summary>How long a dispatch with no return still counts as in flight for <see cref="ConcurrentWriters"/>.</summary>
+    public static TimeSpan UnreturnedDispatchHorizon { get; } = TimeSpan.FromHours(4);
+
+    private static readonly HashSet<string> WriterTriggers = new(StringComparer.Ordinal) { "delegate", "delegate.planner" };
+
+    /// <summary>
+    /// The headers of the dispatch a return answers: the return's own, or else its paired pre event's, because a
+    /// specialist's headers are stripped before it runs. Null when the event is unknown or names none.
+    /// </summary>
+    public ArbiterLedgerHeaders? DispatchHeadersFor(string postId)
+    {
+        ArgumentNullException.ThrowIfNull(postId);
+        IReadOnlyList<ArbiterLedgerEvent> events = ReadAll();
+        ArbiterLedgerEvent? post = events.FirstOrDefault(e => string.Equals(e.Id, postId, StringComparison.Ordinal));
+        if (post is null)
+        {
+            return null;
+        }
+
+        if (post.Headers is not null || post.PreId is null)
+        {
+            return post.Headers;
+        }
+
+        return events.FirstOrDefault(e => string.Equals(e.Id, post.PreId, StringComparison.Ordinal))?.Headers;
     }
 
     /// <summary>
@@ -343,27 +526,6 @@ public sealed class InFlightLedger
             .SelectMany(item => CompletedTasksOf(item.Post, item.Task))
             .Distinct(StringComparer.Ordinal)
             .OrderBy(task => task, StringComparer.Ordinal)];
-
-    /// <summary>
-    /// The tasks with RED evidence: a returned <c>test-dev</c> output whose
-    /// <c>RED_EVIDENCE:</c> value states evidence, or an
-    /// attestation <c>&lt;task&gt;=red</c> (D31).
-    /// </summary>
-    /// <param name="planFile">When set, only returns for this plan count.</param>
-    public IReadOnlyList<string> RedEvidenceTasks(string? planFile = null) =>
-        [.. ReturnsFor(planFile)
-            .SelectMany(item => RedEvidenceTasksOf(item.Post, item.Task))
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(task => task, StringComparer.Ordinal)];
-
-    private static bool Overlaps(
-        ArbiterLedgerEvent otherPre,
-        ArbiterLedgerEvent? otherPost,
-        DateTimeOffset start,
-        DateTimeOffset end) =>
-        otherPost is null
-            ? otherPre.At <= end
-            : otherPre.At <= end && start <= otherPost.At;
 
     /// <summary>
     /// Each post event with the task it answers. A specialist's headers are stripped
@@ -416,21 +578,6 @@ public sealed class InFlightLedger
         return tasks;
     }
 
-    private static IEnumerable<string> RedEvidenceTasksOf(ArbiterLedgerEvent e, string? task)
-    {
-        List<string> tasks = [];
-        string? red = e.Returns?.RedEvidence;
-        if (task is not null
-            && red is not null
-            && !NoRedEvidence.IsStatedBy(red))
-        {
-            tasks.Add(task);
-        }
-
-        tasks.AddRange(AttestedTasks(e, "red"));
-        return tasks;
-    }
-
     private static IEnumerable<string> AttestedTasks(ArbiterLedgerEvent e, string value)
     {
         foreach (string attested in e.Returns?.Attested ?? [])
@@ -445,3 +592,8 @@ public sealed class InFlightLedger
         }
     }
 }
+
+/// <summary>The writer dispatches that overlapped one dispatch's window.</summary>
+/// <param name="Paths">Their declared task files.</param>
+/// <param name="AnyWithoutFiles">Whether any of them declared no task files, so what it wrote is unknown.</param>
+public sealed record ConcurrentDispatches(IReadOnlyList<string> Paths, bool AnyWithoutFiles);

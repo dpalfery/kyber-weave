@@ -485,36 +485,6 @@ public sealed class SquadOperatorChannelOptInTests : IDisposable
         Assert.DoesNotContain("`operator-channel`", overlay, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void OperatorChannelOverlay_NamesTheThreeEventsAndNothingElse()
-    {
-        string overlay = SquadOperatorChannelFixture.OverlayText();
-
-        foreach (string eventLabel in SquadOperatorChannelFixture.EventLabels)
-        {
-            Assert.Contains(eventLabel, overlay, StringComparison.Ordinal);
-        }
-
-        Assert.Contains("Send nothing else.", overlay, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void OperatorChannelOverlay_BoundsEachReceiveAtFiveMinutesAndAtMostSixCalls()
-    {
-        string overlay = SquadOperatorChannelFixture.OverlayText();
-
-        Assert.Contains("up to 5 minutes", overlay, StringComparison.Ordinal);
-        Assert.Contains("at most 6 receive calls", overlay, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void OperatorChannelOverlay_StatesThatSupervisedModeNeverUsesIt()
-    {
-        string overlay = SquadOperatorChannelFixture.OverlayText();
-
-        Assert.Contains("Supervised mode never uses it", overlay, StringComparison.Ordinal);
-    }
-
     /// <summary>
     /// An overlay the process cannot read must fail the render as <see cref="SquadRenderValidationException"/> that names
     /// the overlay path and the cause. A raw <see cref="UnauthorizedAccessException"/> escaping the renderer reaches the

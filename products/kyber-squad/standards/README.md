@@ -24,8 +24,9 @@ does not deploy them, and nothing reads one until a host adopts it — all fourt
 
 Until step 3 is done the agents have nothing to follow. They ship no built-in standard: an
 agent that finds `<react-coding-standard>` undeclared, or pointing at a `status: draft`
-document, says so and asks a human whether to proceed. The code-review checklists report the
-same gap rather than substituting rules of their own.
+document, never stops: it follows the existing code's pattern or uses the draft as the best
+available guidance, and names the gap or the draft in one line of its report. The code-review
+checklists report the same gap rather than substituting rules of their own.
 
 ## What these are
 
@@ -51,8 +52,7 @@ follows `tauri` instead. `typescript` was written with the `typescript-dev` agen
 `python` were then rewritten from their agents so stack, packaging, environment, and
 quality-gate policy live in the template — those agents only name **<pulumi-coding-standard>**
 and **<python-coding-standard>**. `github-actions` and `sql` also carry the defaults the
-`github-devops` and `sql-database-architect` agents used to embed, and `csharp` carries the
-ReSharper redundancy-tier guidance the C# review reference used to hold. `test` was
+`github-devops` and `sql-database-architect` agents used to embed. `test` was
 rewritten from the `test-dev` agent so runners,
 isolation, naming, and assertion policy live in the template — the agent only names
 **<test-coding-standard>**. Kyber-Weave's own
@@ -65,6 +65,8 @@ may reasonably reverse. The same is true of
 decisions a host may reasonably reverse — a line length, a state-management library, a naming
 convention. Reversing one is the point of the standard being project-specific; what matters is
 that the repository says which way it went.
+
+A template holds only what applies to work in its technology; a statement that applies to every task and is never OK to break is a rule and belongs in the host's root `AGENTS.md` or rules folder (see "Rules and standards" in the host's documentation ontology).
 
 ## #128 additions
 

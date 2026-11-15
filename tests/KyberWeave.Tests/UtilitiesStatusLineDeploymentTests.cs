@@ -653,8 +653,7 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
     [Fact]
     public void DeployRefusesSymlinkInStagingPath()
     {
-        if (OperatingSystem.IsWindows())
-            return;
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Creating a symbolic link needs extra privileges on Windows.");
 
         StatusLineTargetRoots roots = Roots();
         string harnessRoot = Path.Combine(_temp.Path, HarnessRootRelativePath(StatusLineTarget.Pi));

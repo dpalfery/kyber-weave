@@ -42,10 +42,23 @@ standard separates them.
 **Boundary types that are not translated.** A boundary that passes the same object straight
 through in both directions is not a boundary; it is a rename.
 
+**A file in the wrong project, layer or folder.** A class or file placed somewhere other than
+where the repository's documented structure puts its kind — in C#, a shared transfer object in
+the Domain project when the standard puts shared DTOs in a contracts project — is `major`, not
+`minor`. Wrong placement against a documented structure rule is a maintainability defect that
+compounds: every later contributor copies where the last one put it.
+
+**Existing code that contradicts the standard.** The standard outranks the code around the
+change: a new type placed beside existing misplaced ones is still misplaced. When the change
+touches or extends a folder or project, report each existing type there that the standard puts
+elsewhere, with no comment marking it as a deliberate exception, as `major`. If that type's file
+is not in the change, start the `claim` with `Pre-existing debt:`, so it becomes a todo instead of
+blocking this change. Respect a commented exception.
+
 ## What this lens must not report
 
 - Placement in a repository with no declared standard. Absent a standard, this is preference,
   and preference reported as a finding is noise.
 - Naming and folder conventions, unless the standard states them.
 - Layering opinions the standard does not hold, however widely held elsewhere.
-- Pre-existing misplacement of types the diff merely touches.
+- Existing placement the standard allows, or that a comment marks as a deliberate exception.

@@ -11,9 +11,6 @@ public static class ConfigRegConfigLoader
     /// <summary>Key name as an operator wrote it, so diagnostics name the real line.</summary>
     private const string SectionKey = "config-reg";
 
-    /// <summary>Key path of the nested setting, spelled as the operator writes it.</summary>
-    private const string RunHarnessNamesKey = "run.harness-names";
-
     internal static ConfigRegConfig Merge(
         ConfigRegConfig defaults,
         Dictionary<string, string>? section,
@@ -35,19 +32,12 @@ public static class ConfigRegConfigLoader
                 ConfigRegConfig.StopOnToolFailureProperty,
                 "a run stops when a tool fails unless the setting says otherwise.") ??
             defaults.StopOnToolFailure;
-        bool? harnessNames =
-            ParseBoolean(
-                run?.HarnessNames,
-                RunHarnessNamesKey,
-                "harness names are published unless the setting says otherwise.") ??
-            defaults.RunHarnessNames;
         string? baseBranch = ParseBaseBranch(run?.BaseBranch) ?? defaults.RunBaseBranch;
 
         bool unchanged = setting == defaults.Autonomy
                          && answer == defaults.Onboarding
                          && toolFailure == defaults.StopOnToolFailure
-                         && baseBranch == defaults.RunBaseBranch
-                         && harnessNames == defaults.RunHarnessNames;
+                         && baseBranch == defaults.RunBaseBranch;
         if (section is null && unchanged)
             return defaults;
 
@@ -57,8 +47,7 @@ public static class ConfigRegConfigLoader
             Autonomy = setting,
             Onboarding = answer,
             StopOnToolFailure = toolFailure,
-            RunBaseBranch = baseBranch,
-            RunHarnessNames = harnessNames
+            RunBaseBranch = baseBranch
         };
     }
 
@@ -79,7 +68,6 @@ public static class ConfigRegConfigLoader
                 ConfigRegConfig.IntakeAssessmentProperty => "the 'ontology.intake:' setting",
                 ConfigRegConfig.StopOnToolFailureProperty => "the top-level 'stop-on-tool-failure:' setting",
                 ConfigRegConfig.RunBaseBranchProperty => "the 'run.base-branch:' setting",
-                ConfigRegConfig.RunHarnessNamesProperty => "the 'run.harness-names:' setting",
                 _ => null
             };
             if (owningSetting is not null)

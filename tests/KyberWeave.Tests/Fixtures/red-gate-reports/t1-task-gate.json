@@ -1,0 +1,30 @@
+{
+  "schema": "kyber-weave.review-gates/v1",
+  "gates": [
+    {
+      "id": "dotnet-build",
+      "blocking": true,
+      "exitCode": 0,
+      "summary": "passed",
+      "durationMilliseconds": 4751,
+      "notApplicableReason": null,
+      "outcome": "completed",
+      "passed": true,
+      "notApplicable": false
+    },
+    {
+      "id": "tests",
+      "blocking": true,
+      "exitCode": 8,
+      "summary": "skipped: 0 | duration: 460ms | Test run completed with non-success exit code: 8 (see: https://aka.ms/testingplatform/exitcodes)",
+      "durationMilliseconds": 794,
+      "notApplicableReason": null,
+      "outcome": "completed",
+      "passed": false,
+      "notApplicable": false
+    }
+  ],
+  "coverage": null,
+  "coverageReports": [],
+  "base": null
+}

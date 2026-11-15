@@ -11,7 +11,7 @@ namespace KyberWeave.Core.Arbiter.Plans;
 /// <param name="TestProjectOrFile">The <c>Test project or file</c> cell.</param>
 /// <param name="RunnerFilter">The <c>Runner filter</c> or <c>Runner command</c> cell.</param>
 /// <param name="ObservableBehaviour">The <c>Observable behaviour</c> (or <c>behavior</c>) cell.</param>
-/// <param name="RedEvidenceRequired">The <c>RED evidence required</c> cell; read by MODE-001.</param>
+/// <param name="RedEvidenceRequired">The <c>RED evidence required</c> cell; read by MODE-002.</param>
 /// <param name="GreenAcceptance">The <c>GREEN acceptance</c> cell.</param>
 /// <remarks>
 /// Headers bind by containment as well as by exact name, because the archive writes
@@ -54,8 +54,14 @@ public sealed record PlanTask(
     /// <summary>The dependency task ids, resolved against this document's tasks.</summary>
     public IReadOnlyList<string> DependsOn { get; init; } = DependsOn ?? [];
 
-    /// <summary>The skill names the task names or requires.</summary>
+    /// <summary>The skill names the task names or requires: the legacy routing label, kept so older plans parse.</summary>
     public IReadOnlyList<string> Skills { get; init; } = Skills ?? [];
+
+    /// <summary>
+    /// The abilities the task needs, in plain words, from its Capabilities label; null when it has none. The
+    /// conductor matches this text against the descriptions of the agents it can dispatch.
+    /// </summary>
+    public string? Capabilities { get; init; }
 }
 
 /// <summary>

@@ -78,12 +78,11 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         "pr-review-fix-comments",
         "product-owner",
         "python-dev",
-        "resharper-clt",
         "rust-dev",
         "security-review",
         "setup-dev-environment",
         "task-gate",
-        "test-dev",
+        "testing",
         "typescript-dev"
     ];
 
@@ -160,8 +159,8 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             Assert.Contains(entryNames, name => name == $"agents/{agent}.md");
         }
 
-        // Presence of all 29 canonical skills
-        Assert.Equal(29, CanonicalSkills.Length);
+        // Presence of all 28 canonical skills
+        Assert.Equal(28, CanonicalSkills.Length);
         foreach (string skill in CanonicalSkills)
         {
             Assert.Contains(entryNames, name => name == $"skills/{skill}/SKILL.md" || name.StartsWith($"skills/{skill}/", StringComparison.Ordinal));
@@ -372,7 +371,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
     {
         using QualifiedSquadRepoFixture repo = QualifiedSquadRepoFixture.CreateStub();
         const string agentResource = "agents/conductor/references/plan-path.md";
-        const string skillResource = "skills/test-dev/references/unit-test-patterns.md";
+        const string skillResource = "skills/testing/references/unit-test-patterns.md";
         const string agentContent = "# Plan path\n\nExecute a Ready plan.\n";
         const string skillContent = "# Unit test patterns\n\nPin observable behaviour.\n";
         repo.AddResourceClosure(agentResource, agentContent, skillResource, skillContent);
@@ -863,7 +862,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
                 "products",
                 "kyber-squad",
                 "skills",
-                "test-dev",
+                "testing",
                 "SKILL.md");
             File.AppendAllText(
                 skillPath,

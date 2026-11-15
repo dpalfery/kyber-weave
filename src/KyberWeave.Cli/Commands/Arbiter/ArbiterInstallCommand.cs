@@ -15,6 +15,7 @@ using KyberWeave.Core.Squad.Rendering;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using YamlDotNet.Core;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Cli.Commands.Arbiter;
 
@@ -114,13 +115,38 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
             return 2;
         }
 
-        string kindName = providerKind == ArbiterProviderKind.Systemone ? "systemone" : "none";
         bool isProjectScope = settings.Project;
         string root = isProjectScope
             ? Path.GetFullPath(string.IsNullOrWhiteSpace(settings.PathOption)
                 ? (string.IsNullOrWhiteSpace(settings.Path) ? "." : settings.Path)
                 : settings.PathOption)
             : Path.GetFullPath(ArbiterCommandComposition.HomeDirectory());
+
+        ArbiterProviderKind existingKind;
+        ArbiterProviderKind effectiveKind;
+        try
+        {
+            (existingKind, effectiveKind) = ReadExistingProviderKind(root, settings.Config, isProjectScope);
+        }
+        catch (YamlException ex)
+        {
+            WriteError(ex.Message);
+            return 1;
+        }
+
+        bool providerOmitted = settings.Provider is null;
+        if (providerOmitted)
+            providerKind = existingKind;
+
+        string kindName = KindName(providerKind);
+        string overrideNote = effectiveKind != providerKind
+            ? $" The per-user override sets {KindName(effectiveKind)}, which takes precedence."
+            : string.Empty;
+        AnsiConsole.MarkupLine(providerOmitted
+            ? $"Arbiter provider: [bold]{kindName}[/] (kept; pass --provider to change it).{Markup.Escape(overrideNote)}"
+            : providerKind == existingKind
+                ? $"Arbiter provider: [bold]{kindName}[/] (unchanged).{Markup.Escape(overrideNote)}"
+                : $"Arbiter provider: [bold]{kindName}[/] (changed from {KindName(existingKind)}).{Markup.Escape(overrideNote)}");
 
         if (!string.IsNullOrWhiteSpace(settings.ArbiterKey))
         {
@@ -177,10 +203,7 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
             {
                 DocsScaffolder.Scaffold(root);
             }
-            catch (Exception ex) when (ex is ArgumentException
-                                           or IOException
-                                           or UnauthorizedAccessException
-                                           or InvalidOperationException)
+            catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException)
             {
                 WriteError($"The documentation scaffold could not be created: {ex.Message}");
                 return 1;
@@ -269,11 +292,7 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         {
             existingReceipt = stateStore.ReadReceipt(root, scope);
         }
-        catch (Exception ex) when (ex is ArgumentException
-                                       or InvalidDataException
-                                       or IOException
-                                       or UnauthorizedAccessException
-                                       or InvalidOperationException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException or InvalidOperationException)
         {
             WriteError($"The Squad deployment state for '{root}' could not be read: {ex.Message}");
             return 1;
@@ -489,6 +508,28 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         }
     }
 
+    private static string KindName(ArbiterProviderKind kind) =>
+        kind == ArbiterProviderKind.Systemone ? "systemone" : "none";
+
+    /// <summary>
+    /// The provider kind the host config holds before this run (none when nothing is configured),
+    /// and the kind in effect once the per-user override is applied over it.
+    /// </summary>
+    /// <exception cref="YamlException">Thrown when the per-user override is malformed.</exception>
+    private static (ArbiterProviderKind Configured, ArbiterProviderKind Effective) ReadExistingProviderKind(
+        string root, string? configOption, bool projectScope)
+    {
+        KyberWeaveConfigLoadResult loaded = projectScope
+            ? KyberWeaveConfigLoader.TryLoad(root, configOption)
+            : KyberWeaveConfigLoader.TryLoadUserConfig(root, configOption);
+        ArbiterProviderConfig repository = loaded.Success && loaded.Config is not null
+            ? loaded.Config.Arbiter.Provider
+            : KyberWeaveConfig.ProductDefaults.Arbiter.Provider;
+        ArbiterProviderKind effective =
+            ArbiterUserSettings.ApplyTo(repository, ArbiterCommandComposition.HomeDirectory()).Kind;
+        return (repository.Kind, effective);
+    }
+
     private static bool TryParseProvider(string? raw, out ArbiterProviderKind kind)
     {
         kind = ArbiterProviderKind.None;
@@ -530,7 +571,7 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         {
             return ArbiterCommandComposition.KeyStdinReader();
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             return null;
         }
@@ -585,10 +626,7 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         {
             store = ArbiterCommandComposition.CredentialStore();
         }
-        catch (Exception ex) when (ex is InvalidOperationException
-                                       or IOException
-                                       or UnauthorizedAccessException
-                                       or Win32Exception)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or Win32Exception)
         {
             return null;
         }
@@ -597,11 +635,7 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         {
             return ArbiterKeyResolver.Resolve(endpoint, store, EnvironmentReader());
         }
-        catch (Exception ex) when (ex is InvalidOperationException
-                                       or IOException
-                                       or UnauthorizedAccessException
-                                       or Win32Exception
-                                       or ArgumentException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or Win32Exception)
         {
             return null;
         }
@@ -613,11 +647,7 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         {
             return ArbiterCommandComposition.CredentialStore().Read(origin);
         }
-        catch (Exception ex) when (ex is InvalidOperationException
-                                       or IOException
-                                       or UnauthorizedAccessException
-                                       or Win32Exception
-                                       or ArgumentException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or Win32Exception)
         {
             return null;
         }
@@ -629,11 +659,7 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         {
             ArbiterCommandComposition.CredentialStore().Write(origin, key);
         }
-        catch (Exception ex) when (ex is InvalidOperationException
-                                       or IOException
-                                       or UnauthorizedAccessException
-                                       or Win32Exception
-                                       or ArgumentException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or Win32Exception)
         {
             WriteError(
                 $"The credential store for origin '{origin}' is not available: {ex.Message} " +
@@ -685,7 +711,7 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         {
             return File.ReadAllText(configPath);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             WriteError($"The host configuration '{configPath}' could not be read: {ex.Message}");
             return null;
@@ -703,7 +729,7 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
             File.WriteAllText(configPath, text);
             return true;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             WriteError($"The host configuration '{configPath}' could not be written: {ex.Message}");
             return false;
@@ -733,11 +759,7 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
                     ArbiterCommandComposition.CredentialStore(),
                     ArbiterCommandComposition.GetEnvironmentVariable);
             }
-            catch (Exception ex) when (ex is InvalidOperationException
-                                           or IOException
-                                           or UnauthorizedAccessException
-                                           or Win32Exception
-                                           or ArgumentException)
+            catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or Win32Exception)
             {
                 key = null;
             }
@@ -770,10 +792,7 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
                     "Install the binary matching this CLI version so hooks can enforce.");
             }
         }
-        catch (Exception ex) when (ex is InvalidOperationException
-                                       or IOException
-                                       or UnauthorizedAccessException
-                                       or Win32Exception)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or Win32Exception)
         {
             AnsiConsole.MarkupLine(
                 "[yellow]warn:[/] The 'kyber-weave-arbiter' binary probe failed: " +
@@ -824,7 +843,7 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
                 directory = directory.Parent;
             }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
         }
 

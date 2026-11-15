@@ -28,7 +28,7 @@ A specification is open only while it is built. The pull request that finishes i
 
 Every specification maintains a permanent `## Decisions` section (ID, Question, Answer / decision, Mitigating and supporting information, Status / approval provenance), preserved intact across all lifecycle transitions. Every specification declares its scale at authoring time via `documentation-impact` (`new-component` | `extends-component` | `no-design-change`) with `impact-components`, plus a `Design harvest` table mapping each durable design item to its target component and doc type. During closeout, durable content is harvested into canonical documentation and/or ADRs before archival.
 
-A specification delivered by a conductor carries `tasks.json` beside `tasks.md`. `product-owner` writes it at finalization with the execution digest from `kyber-weave arbiter plan <spec-folder>/tasks.md -f json`, which the conductor supplies. `KW-DOC-TASKS-001` to `-006` validate it, and closeout removes it with `git rm`.
+A specification delivered by a conductor carries `tasks.json` beside `tasks.md`. The conductor derives it from `tasks.md` with `kyber-weave docs tasks <spec-folder>/tasks.md --write` before finalization; nobody writes it or its digest by hand. `KW-DOC-TASKS-001` to `-006` validate it, and closeout removes it with `git rm`.
 
 ## Specification inventory
 

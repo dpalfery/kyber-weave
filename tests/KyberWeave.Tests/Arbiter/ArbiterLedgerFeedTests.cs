@@ -4,21 +4,22 @@ using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Review;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
 /// The rules read the ledger through the facts this feed supplies: a worker's report
-/// completes its task and carries RED evidence to the tasks that depend on it, and an
-/// unfinished dispatch holds its files.
+/// completes its task for the tasks that depend on it, and an unfinished dispatch holds
+/// its files.
 /// </summary>
 public sealed class ArbiterLedgerFeedTests : IDisposable
 {
     private const string Plan = "docs/plans/x.md";
 
     private const string PassReport =
-        "All done.\nSTATUS: PASS\nRESULT: PASS\nRED_EVIDENCE: dotnet test failed 6 of 6\n";
+        "All done.\nSTATUS: PASS\nRESULT: PASS\n";
 
     private readonly string _root = Path.Combine(
         Path.GetTempPath(), "kw-ledger-feed-" + Guid.NewGuid().ToString("N"));
@@ -29,16 +30,43 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
 
     public void Dispose() => Directory.Delete(_root, recursive: true);
 
-    private sealed class FirstAnswerProvider : IArbiterProvider
+    /// <summary>
+    /// The answer a rule records when step 0 could not decide it from the ledger and the question went to a model
+    /// that did not answer: the prose reading is the model's, never step 0's (ADR 0072).
+    /// </summary>
+    private const string Asked = ArbiterStep1BatchResult.NotEvaluated;
+
+    /// <summary>Answers the scripted rules with high confidence and leaves every other question unevaluated.</summary>
+    private sealed class ScriptedProvider : IArbiterProvider
     {
+        public Dictionary<string, string> Answers { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>The facts sent with each call, in call order.</summary>
+        public List<ArbiterFactSet> FactsSent { get; } = [];
+
         public Task<ArbiterStep1BatchResult> AskStep1Async(
             IReadOnlyList<ArbiterRule> rules,
             ArbiterFactSet facts,
             IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new ArbiterStep1BatchResult(
-                rules.ToDictionary(rule => rule.Id, rule => rule.Answers[0], StringComparer.Ordinal), "stub", null, true));
+            CancellationToken cancellationToken = default)
+        {
+            FactsSent.Add(facts);
+            return Task.FromResult(new ArbiterStep1BatchResult(
+                rules.ToDictionary(
+                    rule => rule.Id,
+                    rule => Answers.TryGetValue(rule.Id, out string? answer) ? answer : ArbiterStep1BatchResult.NotEvaluated,
+                    StringComparer.Ordinal),
+                "stub",
+                null,
+                true,
+                rules.ToDictionary(
+                    rule => rule.Id,
+                    rule => new ArbiterStep1Score(null, 0.95, rule.Ask?.ConfidenceAtLeast),
+                    StringComparer.Ordinal)));
+        }
     }
+
+    private readonly ScriptedProvider _provider = new();
 
     private sealed class NoGitFacts : IArbiterGitFacts
     {
@@ -68,7 +96,7 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     }
 
     private ArbiterEvaluator Evaluator() => new(
-        new FirstAnswerProvider(),
+        _provider,
         _ => null,
         new InFlightLedger(ArbiterDirectory),
         new DecisionLog(ArbiterDirectory),
@@ -128,16 +156,48 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
         Assert.Single(LastPrimary().Rules, rule => rule.Id == ruleId).Answer;
 
     [Fact]
-    public async Task WithoutAReturn_DependentTaskWaitsAndHasNoRedEvidence()
+    public async Task WithoutAReturn_DependentTaskWaits()
     {
         await Dispatch("csharp-dev", Prompt("T2"));
 
-        Assert.Equal("waiting", Answer("KW-ARB-READY-001"));
-        Assert.Equal("missing", Answer("KW-ARB-MODE-001"));
+        Assert.Equal(Asked, Answer("KW-ARB-READY-001"));
     }
 
     [Fact]
-    public async Task WorkerReport_CompletesTheTaskAndCarriesRedEvidenceToDependents()
+    public async Task AReturnsReportTail_ReachesTheDependentTasksQuestion()
+    {
+        // The report carries no RESULT: marker, so the ledger cannot show T1 complete; the model reads the tail.
+        await Dispatch("csharp-dev", Prompt("T1"));
+        await Return("csharp-dev", Prompt("T1"), "Implemented the parser; all tests pass.");
+        await Dispatch("csharp-dev", Prompt("T2"));
+
+        List<string> tails = [.. _provider.FactsSent
+            .Select(facts => facts.TryGet("ledger.task-returns", out ArbiterFact? fact) ? fact.Value as IEnumerable<string> : null)
+            .Where(value => value is not null)
+            .SelectMany(value => value!)];
+        string stored = Assert.Single(tails);
+        Assert.StartsWith("task: T1\n", stored, StringComparison.Ordinal);
+        Assert.Contains("all tests pass", stored, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ADryRunReturn_StoresNoReportTail()
+    {
+        await Dispatch("csharp-dev", Prompt("T1"));
+        await Evaluator().EvaluateAsync(
+            Event("post", "csharp-dev", HeaderBlock.Strip(Prompt("T1")), "s1", "Implemented the parser."),
+            Config(),
+            new ArbiterEvaluatorOptions(DryRun: true),
+            TestContext.Current.CancellationToken);
+
+        string stores = Path.Combine(ArbiterDirectory, "stores");
+        Assert.False(
+            Directory.Exists(stores) && Directory.EnumerateDirectories(stores, "returns-*").Any(),
+            "A dry run must not store a report tail.");
+    }
+
+    [Fact]
+    public async Task WorkerReport_CompletesTheTaskForItsDependents()
     {
         await Dispatch("test-dev", Prompt("T1"));
         await Return("test-dev", Prompt("T1"), PassReport);
@@ -145,19 +205,17 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
         await Dispatch("csharp-dev", Prompt("T2"));
 
         Assert.Equal("ready", Answer("KW-ARB-READY-001"));
-        Assert.Equal("present", Answer("KW-ARB-MODE-001"));
     }
 
     [Fact]
     public async Task FailedReport_LeavesTheDependentWaiting()
     {
         await Dispatch("test-dev", Prompt("T1"));
-        await Return("test-dev", Prompt("T1"), "STATUS: ESCALATION\nRESULT: FAIL\nRED_EVIDENCE: none\n");
+        await Return("test-dev", Prompt("T1"), "STATUS: ESCALATION\nRESULT: FAIL\n");
 
         await Dispatch("csharp-dev", Prompt("T2"));
 
-        Assert.Equal("waiting", Answer("KW-ARB-READY-001"));
-        Assert.Equal("missing", Answer("KW-ARB-MODE-001"));
+        Assert.Equal(Asked, Answer("KW-ARB-READY-001"));
     }
 
     [Fact]
@@ -168,7 +226,7 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
 
         await Dispatch("csharp-dev", Prompt("T2"));
 
-        Assert.Equal("waiting", Answer("KW-ARB-READY-001"));
+        Assert.Equal(Asked, Answer("KW-ARB-READY-001"));
     }
 
     [Fact]
@@ -179,7 +237,7 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
 
         await Dispatch("csharp-dev", Prompt("T2"));
 
-        Assert.Equal("waiting", Answer("KW-ARB-READY-001"));
+        Assert.Equal(Asked, Answer("KW-ARB-READY-001"));
     }
 
     [Fact]
@@ -190,7 +248,7 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
 
         await Dispatch("csharp-dev", Prompt("T2"));
 
-        Assert.Equal("waiting", Answer("KW-ARB-READY-001"));
+        Assert.Equal(Asked, Answer("KW-ARB-READY-001"));
     }
 
     [Fact]
@@ -206,40 +264,6 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
 
         Assert.Empty(ledger.CompletedTasks(Plan));
         Assert.Equal(["T1"], ledger.CompletedTasks());
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("none")]
-    [InlineData("None")]
-    [InlineData("n/a")]
-    [InlineData("N/A \u2014 docs only")]
-    [InlineData("no evidence")]
-    [InlineData("No RED evidence.")]
-    [InlineData("no evidence captured")]
-    [InlineData("not run")]
-    [InlineData("none captured")]
-    [InlineData("no failing test")]
-    [InlineData("no tests failed")]
-    public async Task ReportWithoutEvidence_IsNotRedEvidence(string value)
-    {
-        await Dispatch("test-dev", Prompt("T1"));
-        await Return("test-dev", Prompt("T1"), $"STATUS: PASS\nRESULT: PASS\nRED_EVIDENCE: {value}\n");
-
-        await Dispatch("csharp-dev", Prompt("T2"));
-
-        Assert.Equal("missing", Answer("KW-ARB-MODE-001"));
-    }
-
-    [Fact]
-    public async Task EvidenceThatStartsWithNone_IsStillEvidence()
-    {
-        await Dispatch("test-dev", Prompt("T1"));
-        await Return("test-dev", Prompt("T1"), "STATUS: PASS\nRESULT: PASS\nRED_EVIDENCE: none of the 6 tests pass\n");
-
-        await Dispatch("csharp-dev", Prompt("T2"));
-
-        Assert.Equal("present", Answer("KW-ARB-MODE-001"));
     }
 
     [Fact]
@@ -268,7 +292,10 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     [Fact]
     public async Task RefusedDispatch_HoldsNothing()
     {
+        // A confident "adds work the task does not describe" from the model refuses the dispatch.
+        _provider.Answers["KW-ARB-SCOPE-002"] = "adds-work";
         await Dispatch("csharp-dev", Prompt("T5"));
+        _provider.Answers.Clear();
         Assert.Equal("escalate", LastPrimary().Outcome);
 
         await Dispatch("test-dev", Prompt("T1"));
@@ -313,6 +340,56 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
         Assert.Equal(expected, document.RedEvidenceRequirement("T5"));
     }
 
+    private string WriteReport(string name, string summary, DateTime writtenAt)
+    {
+        string folder = Path.Combine(_root, ".agent_scratchpad", "T5");
+        Directory.CreateDirectory(folder);
+        string path = Path.Combine(folder, name);
+        File.WriteAllText(path, ReviewJson.Write(new GateReport(GateReport.CurrentSchema, [new GateResult("tests", true, 0, summary)])));
+        File.SetLastWriteTimeUtc(path, writtenAt);
+        return path;
+    }
+
+    /// <summary>
+    /// A return whose prompt still carries its routing headers reaches <c>KW-ARB-MODE-002</c> with the task, the mode
+    /// and the claimed report, and the two reports on disk decide the answer.
+    /// </summary>
+    [Theory]
+    [InlineData(true, "failing-run-first")]
+    [InlineData(false, "no-failing-run")]
+    public async Task AReturnIsJudgedByTheTaskGatesTwoReports(bool failedFirst, string expected)
+    {
+        DateTime earlier = new(2026, 11, 13, 10, 0, 0, DateTimeKind.Utc);
+        if (failedFirst)
+        {
+            WriteReport("task-gate-red.json", GateReportFacts.RedAcceptedSummaryPrefix + ": 1 test failed", earlier);
+        }
+
+        string pass = WriteReport("task-gate.json", "3 passed", earlier.AddMinutes(10));
+        await Dispatch("csharp-dev", Prompt("T5"));
+        await Evaluator().EvaluateAsync(
+            Event("post", "csharp-dev", Prompt("T5"), output: $"{PassReport}TASK_GATE: PASS — agent=csharp-dev gates=1 failed=none skipped=0 report={pass} runs=2\n"),
+            Config(),
+            null,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(expected, Answer("KW-ARB-MODE-002"));
+    }
+
+    /// <summary>
+    /// A return whose headers the harness stripped names no plan task, so the return-side plan rules answer
+    /// <c>no-task</c>. Recovering the task from the paired dispatch would also start <c>KW-ARB-DIFF-001</c>'s model
+    /// question on those harnesses, so it is left for a decision of its own.
+    /// </summary>
+    [Fact]
+    public async Task AReturnWithItsHeadersStrippedIsNotJudgedByTheFailingRunRule()
+    {
+        await Dispatch("csharp-dev", Prompt("T5"));
+        await Return("csharp-dev", Prompt("T5"), PassReport);
+
+        Assert.Equal("no-task", Answer("KW-ARB-MODE-002"));
+    }
+
     [Fact]
     public void RedEvidenceRequirement_IsNullWithoutARow()
     {
@@ -322,45 +399,13 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     }
 
     [Fact]
-    public void NoTestRow_IsExemptFromMode001()
-    {
-        ArbiterRule mode = Assert.Single(ArbiterConfig.ProductDefaults.Rules, rule => rule.Id == "KW-ARB-MODE-001");
-        ArbiterFactSet facts = new ArbiterFactSet()
-            .With("plan.development-mode", "test-first", ArbiterFactLabel.Derived)
-            .With("delegation.target", "typescript-dev", ArbiterFactLabel.Derived)
-            .With("plan.test-contract.row", "Not applicable", ArbiterFactLabel.Derived);
-
-        Assert.Equal("not-required", RuleEngine.Decide(mode, facts));
-    }
-
-    [Fact]
     public void Markers_ReadThePlainReport()
     {
         ArbiterReturnMarkers? markers = ReturnMarkerParser.Parse(
             "prose\nSTATUS: PASS\nRESULT: PASS\nRED_EVIDENCE: 6 failed\n", readAttestations: false);
 
         Assert.Equal("PASS", markers?.TaskReview);
-        Assert.Equal("6 failed", markers?.RedEvidence);
         Assert.Equal("PASS", markers?.PlannerStatus);
-    }
-
-    [Theory]
-    [InlineData("no tests passed, 6 failed")]
-    [InlineData("not run before the fix: 6 failed after it")]
-    public async Task EvidenceOpeningLikeNoEvidence_IsStillEvidence(string value)
-    {
-        await Dispatch("test-dev", Prompt("T1"));
-        await Return("test-dev", Prompt("T1"), $"STATUS: PASS\nRESULT: PASS\nRED_EVIDENCE: {value}\n");
-
-        await Dispatch("csharp-dev", Prompt("T2"));
-
-        Assert.Equal("present", Answer("KW-ARB-MODE-001"));
-    }
-
-    [Fact]
-    public void Markers_BlankRedEvidenceIsAbsent()
-    {
-        Assert.Null(ReturnMarkerParser.Parse("RED_EVIDENCE:   \n", readAttestations: false));
     }
 
     [Fact]

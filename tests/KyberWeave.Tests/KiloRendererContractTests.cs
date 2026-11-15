@@ -330,6 +330,29 @@ public sealed class KiloRendererContractTests : IDisposable
         }
     }
 
+    /// <summary>
+    ///     Kilo denies <c>task</c> in a sub-agent's session unless the agent's own ruleset names it, so the
+    ///     reviewer carries a <c>task</c> entry for each agent on its roster and no other.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Kilo_GrantsTheReviewerTaskForItsRosterOnly()
+    {
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Kilo);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile file = Assert.Single(result.Files, f => f.RelativePath == ".kilo/agents/code-reviewer.md");
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(Encoding.UTF8.GetString(file.Content.Span), "code-reviewer");
+        YamlMappingNode task = RequireMapping(RequireMapping(frontmatter, "permission", "code-reviewer"), "task", "code-reviewer");
+
+        Assert.Equal(
+            ["azure-reader", "review-lens", "review-triage"],
+            task.Children.Keys.Cast<YamlScalarNode>().Select(key => key.Value!).ToArray());
+        Assert.All(task.Children.Values, value => Assert.Equal("allow", ((YamlScalarNode)value).Value));
+
+        SquadDeploymentFile lens = Assert.Single(result.Files, f => f.RelativePath == ".kilo/agents/review-lens.md");
+        Assert.DoesNotContain("task:", Encoding.UTF8.GetString(lens.Content.Span), StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task RenderAsync_ConcurrentRenders_ProduceConsistentOutputWithoutLocking()
     {

@@ -13,7 +13,7 @@ standard names a command, run that one; the table below is the shape it usually 
 | Format | `cargo fmt --all -- --check` | Exit 0, no diff |
 | Lint | `cargo clippy --workspace --all-targets --all-features -- -D warnings` | Exit 0; every warning is an error |
 | Build | `cargo build --workspace --locked` | Exit 0; `--locked` fails if `Cargo.lock` would change |
-| Test | `cargo nextest run -E 'test(<name>)'` or `cargo test -p <crate> '<name>'` | Exit 0 with a non-zero test count — authored by `test-dev`; run the tests covering your change to prove you broke nothing, and never run the full test suite: the review council and CI run it |
+| Test | `cargo nextest run -E 'test(<name>)'` or `cargo test -p <crate> '<name>'` | Exit 0 with a non-zero test count — written by you with the change; run them with the one command in the `testing` skill, and never run the full test suite: the review council and CI run it |
 
 Fix the cause of a clippy finding. An `#[allow(clippy::…)]` needs a comment saying why, and is
 scoped to the item, never the crate.

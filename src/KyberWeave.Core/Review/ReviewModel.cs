@@ -8,7 +8,10 @@ namespace KyberWeave.Core.Review;
 /// </remarks>
 public enum ReviewSeverity
 {
-    /// <summary>Bounded: clarity, convention, or a narrow edge case.</summary>
+    /// <summary>A purely stylistic point with no effect on how the application operates; raised only at fix level <c>nitpick</c>.</summary>
+    Nitpick,
+
+    /// <summary>Real but bounded: a narrow edge case, a misleading comment or document statement, a missing test for a stated behaviour.</summary>
     Minor,
 
     /// <summary>Wrong, or failing under conditions a real user reaches.</summary>
@@ -58,6 +61,15 @@ public enum RiskGrade
 /// <param name="Evidence">How the reporter knows.</param>
 /// <param name="FailureScenario">Concrete conditions and the wrong behaviour that results.</param>
 /// <param name="Suggestion">The specific change that fixes it.</param>
+/// <param name="Override">
+/// The host severity override (a <c>Severity overrides</c> row id in the review guidance) the finding cites or was
+/// matched to; null when none.
+/// </param>
+/// <param name="OverrideSource">
+/// Who matched <see cref="Override"/> once the verdict applied it: <c>seat</c> or <c>decision model</c>; null while
+/// the override is only cited, or when none applied.
+/// </param>
+/// <param name="SeatSeverity">The severity the seat gave, when an applied override changed it; null otherwise.</param>
 public sealed record ReviewFinding(
     string Id,
     string Lens,
@@ -69,7 +81,10 @@ public sealed record ReviewFinding(
     string? Claim = null,
     string? Evidence = null,
     string? FailureScenario = null,
-    string? Suggestion = null);
+    string? Suggestion = null,
+    string? Override = null,
+    string? OverrideSource = null,
+    ReviewSeverity? SeatSeverity = null);
 
 /// <summary>What one deterministic gate reported.</summary>
 /// <param name="Id">The gate's declared identifier.</param>

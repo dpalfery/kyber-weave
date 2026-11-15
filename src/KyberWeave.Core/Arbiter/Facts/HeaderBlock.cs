@@ -61,17 +61,31 @@ public sealed partial class HeaderBlock
     /// </summary>
     public IReadOnlySet<string> RejectedNames { get; }
 
+    /// <summary>
+    /// The raw value of every closed header name the prompt writes in its first lines, keyed by the canonical
+    /// name. It keeps what <see cref="Headers"/> discards: a value that failed validation (a <c>PLAN_FILE</c>
+    /// with a space or an absolute path), a repeated name (first sighting), a name in another case
+    /// (<c>plan_file:</c>), and a header line written after a line that ended the block. It is evidence for a
+    /// model question and a lenient plan lookup, never a gate: nothing blocks on it.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> RawValues { get; }
+
     /// <summary>Whether the block carries the routing marker.</summary>
     public bool IsMarked => Headers.ContainsKey("KYBER-ARBITER");
+
+    /// <summary>How many leading lines the raw tier reads. Headers sit at the top of a dispatch.</summary>
+    private const int RawScanLines = 40;
 
     private HeaderBlock(
         IReadOnlyDictionary<string, string> headers,
         int lineCount,
-        IReadOnlySet<string> rejectedNames)
+        IReadOnlySet<string> rejectedNames,
+        IReadOnlyDictionary<string, string> rawValues)
     {
         Headers = headers;
         LineCount = lineCount;
         RejectedNames = rejectedNames;
+        RawValues = rawValues;
     }
 
     /// <summary>Parses the header block at the start of <paramref name="prompt"/>.</summary>
@@ -111,7 +125,41 @@ public sealed partial class HeaderBlock
             headers[name] = value;
         }
 
-        return new HeaderBlock(headers, count, rejected);
+        return new HeaderBlock(headers, count, rejected, ReadRawValues(lines, headers));
+    }
+
+    /// <summary>
+    /// The raw tier: a validated header keeps its value; otherwise the first line among the leading lines whose
+    /// name matches a closed name, ignoring case and treating <c>-</c> and <c>_</c> alike, supplies the raw value.
+    /// </summary>
+    private static Dictionary<string, string> ReadRawValues(string[] lines, IReadOnlyDictionary<string, string> headers)
+    {
+        Dictionary<string, string> raw = new(headers, StringComparer.Ordinal);
+        foreach (string line in lines.Take(RawScanLines))
+        {
+            int colon = line.IndexOf(':', StringComparison.Ordinal);
+            if (colon <= 0)
+                continue;
+
+            string name = CanonicalName(line[..colon].Trim().TrimStart('-', '*', ' ').Trim('*', '`', ' '));
+            string value = line[(colon + 1)..].Trim().Trim('`');
+            if (name.Length > 0 && value.Length > 0 && !raw.ContainsKey(name))
+                raw[name] = value;
+        }
+
+        return raw;
+    }
+
+    private static string CanonicalName(string written)
+    {
+        string normalized = written.Replace('-', '_').ToUpperInvariant();
+        foreach (string name in ClosedNames)
+        {
+            if (string.Equals(name.Replace('-', '_'), normalized, StringComparison.Ordinal))
+                return name;
+        }
+
+        return string.Empty;
     }
 
     /// <summary>

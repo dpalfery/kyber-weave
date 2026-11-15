@@ -39,9 +39,9 @@ Consequences worth stating:
   Measured on Linux, Windows and macOS for all three verbs. Those globs in a gate's `include`
   buy **selection** — a change to one of those files makes the gate run instead of selecting
   nothing — and never coverage of the project file itself.
-- **Persistent InspectCode AST caching.** Whole-solution ReSharper InspectCode
-  (`inspectcode`) runs with `--caches-home=artifacts/inspectcode-cache` to persist AST
-  caches across runs, cutting warm inspection duration by ~35% wall-clock and ~68% CPU.
+- **No ReSharper command-line tools.** InspectCode is not a gate here: it can write its
+  report and then never exit ([ADR 0075](../../adr/0075-inspectcode-is-removed-from-the-squad.md)).
+  Static analysis is the compiler and analyzer warnings from the build gate.
 
 ## Style the analyzers already enforce
 
@@ -50,8 +50,8 @@ coming from other .NET repositories.
 
 - **Explicit types, never `var`** — including where the type is apparent. `csharp_style_var_*`
   is `false:warning` in all three positions. `KyberWeave.sln.DotSettings` sets ReSharper's
-  var preferences to `UseExplicitType` to match, so the `KyberWeave` cleanup profile rewrites
-  `var` to explicit types rather than the reverse.
+  var preferences to `UseExplicitType` to match, so Rider and ReSharper in the editor suggest
+  explicit types rather than `var`. The file only configures the editor now; no gate reads it.
 - **File-scoped namespaces.**
 - **Predefined type keywords** — `string`, `int`, `bool`, never `String` or `Int32`.
 - **Allman braces**, and a new line before `else`, `catch` and `finally`.
@@ -158,19 +158,7 @@ scripts/proc-guard.sh run -- dotnet format KyberWeave.sln whitespace --verify-no
 scripts/proc-guard.sh run -- dotnet format KyberWeave.sln style --verify-no-changes --severity warn -v minimal
 ```
 
-The cleanupcode fix pass is optional and off by default. Run it only after the two `dotnet format`
-steps above, which restore the solution that `--no-build` needs. On this machine `dotnet jb
-cleanupcode` never exits, so the command runs under a wrapper that stops it once the log shows its
-finish line, and fails with exit 124 after 300 seconds. Remove the wrapper when the tool exits on its
-own. Replace `<task>` with a scratch folder name and `<changed files>` with the files you changed.
-The tool logs its finish line after a failed cleanup too, so a log holding `Failed to run cleanup` fails the command.
-The profile rewrites the whole of each included file, not only the changed lines, so revert edits to members you did not touch.
-
-```bash
-mkdir -p ".agent_scratchpad/<task>"
-scripts/report-gate.sh --report "$PWD/.agent_scratchpad/<task>/cleanupcode.log" --contains "Close solution instance" --grace 5 --timeout 300 -- dotnet jb cleanupcode KyberWeave.sln --profile=KyberWeave --include="<changed files>" --no-build "--LogFile=$PWD/.agent_scratchpad/<task>/cleanupcode.log" --LogLevel=VERBOSE \
-  && ! grep -q "Failed to run cleanup" "$PWD/.agent_scratchpad/<task>/cleanupcode.log"
-```
+`dotnet format` is the only formatter. ReSharper `cleanupcode` is not used: it can finish its work and then never exit (ADR 0074).
 
 - **Build first, and let the later runs reuse it.** The build is where the analyzers run, so a
   warning stops here rather than at review; `--no-build` on the test line is safe only after it.

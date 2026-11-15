@@ -14,6 +14,7 @@ using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Cli.Commands.Arbiter;
 
@@ -92,6 +93,7 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
 
         report.AddRange(RuleValidator.Validate(config.Arbiter, configPath));
         report.AddRange(RuleValidator.CheckModelTuning(config.Arbiter));
+        CheckProviderTimeout(config, home, report);
         CheckKey(config, report);
         CheckLogIgnored(settings, report);
         CheckBinary(report);
@@ -106,6 +108,25 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
     /// The file lives under the global Arbiter directory, and it must be at least as new as the global
     /// Squad lock, because an older one was written before the last squad update.
     /// </summary>
+    /// <summary>
+    /// Warns (<c>KW-ARB-CONFIG-016</c>) when the user override's provider timeout cannot finish inside the hook
+    /// timeout the repository renders. A malformed override is reported by the hook and validate paths, not here.
+    /// </summary>
+    private static void CheckProviderTimeout(KyberWeaveConfig config, string home, DiagnosticReport report)
+    {
+        ArbiterProviderConfig effective;
+        try
+        {
+            effective = ArbiterUserSettings.ApplyTo(config.Arbiter.Provider, home);
+        }
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or YamlDotNet.Core.YamlException)
+        {
+            return;
+        }
+
+        report.AddRange(RuleValidator.CheckProviderTimeout(config.Arbiter.Provider, effective));
+    }
+
     private static void CheckModelTargets(KyberWeaveConfig config, string home, IReadOnlyList<string> globalTargets, DiagnosticReport report)
     {
         if (string.Equals(config.Arbiter.ModelTargeting.Mode, ModelTargetingOff, StringComparison.Ordinal))
@@ -160,7 +181,7 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
         {
             writtenUtc = File.GetLastWriteTimeUtc(path);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             return false;
         }
@@ -310,10 +331,7 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
                 "arbiter.provider"));
             return;
         }
-        catch (Exception exception) when (exception is InvalidOperationException
-            or IOException
-            or UnauthorizedAccessException
-            or System.ComponentModel.Win32Exception)
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             key = null;
         }
@@ -370,10 +388,7 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
             ProcessResult result = ArbiterCommandComposition.RunProcess(startInfo, string.Empty);
             return result.ExitCode == 0;
         }
-        catch (Exception exception) when (exception is InvalidOperationException
-            or IOException
-            or UnauthorizedAccessException
-            or System.ComponentModel.Win32Exception)
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             // Without git there is no evidence the log is ignored: warn, the safe direction.
             return false;
@@ -464,10 +479,7 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
             string full = Path.IsPathRooted(path) ? path : Path.Combine(root, path);
             return File.Exists(full) || Directory.Exists(full);
         }
-        catch (Exception exception) when (exception is IOException
-            or UnauthorizedAccessException
-            or ArgumentException
-            or NotSupportedException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             return false;
         }

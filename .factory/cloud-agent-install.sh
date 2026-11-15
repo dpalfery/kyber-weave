@@ -129,8 +129,7 @@ export PATH="$HOME/.local/bin:$PATH"
 hash -r 2>/dev/null || true
 log "node: $(node --version)  npm: $(npm --version)  (via $(command -v node))"
 
-# --- .NET restore + pinned tools (ReSharper CLT for InspectCode) ------------
-dotnet tool restore
+# --- .NET restore -----------------------------------------------------------
 dotnet restore KyberWeave.sln
 
 # --- KyberDash TypeScript deps (root + web dashboard) -----------------------

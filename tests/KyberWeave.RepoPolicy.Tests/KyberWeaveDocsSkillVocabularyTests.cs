@@ -6,7 +6,9 @@ namespace KyberWeave.Tests;
 /// The authoring skill once published a doc-type list that omitted <c>todo</c> and
 /// <c>coding-standard</c>, then told the agent to use <c>reference</c> when nothing
 /// fitted. A coding standard labelled that way validates, and nothing reports that
-/// it will never resolve as a standard.
+/// it will never resolve as a standard. These tests check the tokens and table rows that
+/// replaced that list; the rules themselves (doc types read from the ontology, the misplaced
+/// technology remedy) are graded from the prose rule catalog.
 /// </summary>
 /// <remarks>
 /// The skill root pins the Kyber-Docs rename: the authoring contract lives at
@@ -22,8 +24,6 @@ public sealed class KyberWeaveDocsSkillVocabularyTests
     {
         string skill = File.ReadAllText(Path.Combine(SkillRoot, "SKILL.md"));
 
-        Assert.DoesNotContain("the answer is `reference`", skill, StringComparison.Ordinal);
-        Assert.DoesNotContain("is one of:", skill, StringComparison.Ordinal);
         Assert.Contains("<documentation-ontology>", skill, StringComparison.Ordinal);
         Assert.Contains("`todo`", skill, StringComparison.Ordinal);
         Assert.Contains("`coding-standard`", skill, StringComparison.Ordinal);
@@ -40,7 +40,6 @@ public sealed class KyberWeaveDocsSkillVocabularyTests
         Assert.Contains("`standards/<technology>/README.md` | `coding-standard`", retrofit, StringComparison.Ordinal);
         Assert.Contains("`todo/` | `todo`", retrofit, StringComparison.Ordinal);
         Assert.DoesNotContain("`standards/<technology>/` | `coding-standard`", retrofit, StringComparison.Ordinal);
-        Assert.DoesNotContain("is the correct fallback", retrofit, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -51,7 +50,5 @@ public sealed class KyberWeaveDocsSkillVocabularyTests
         Assert.Contains("### `KW-DOC-SPEC-007`", rules, StringComparison.Ordinal);
         Assert.Contains("ontology.technologies", rules, StringComparison.Ordinal);
         Assert.Contains("standards/<technology>/README.md", rules, StringComparison.Ordinal);
-        Assert.Contains("changing the key to the folder's name", rules, StringComparison.Ordinal);
-        Assert.Contains("A file anywhere else is cleared", rules, StringComparison.Ordinal);
     }
 }

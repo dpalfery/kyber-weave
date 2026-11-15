@@ -34,13 +34,16 @@ public sealed record SquadHookDrift(string Location, string Reason);
 /// <remarks>
 /// JSON hook files carry no comments, so markers in the style of the Config Reg block cannot
 /// be used (D25). Ownership is by command signature instead:
-/// <c>kyber-weave-arbiter hook --harness &lt;h&gt;</c>. Antigravity is the exception — Squad
+/// <c>kyber-weave-arbiter hook --harness &lt;h&gt;</c> or <c>kyber-weave-arbiter worker-guard --harness &lt;h&gt;</c>. Antigravity is the exception — Squad
 /// owns the whole top-level <c>kyber-arbiter</c> group, since top-level keys there are group
 /// names and any unknown key would read as another group.
 /// </remarks>
 public static class SquadHookJsonBlock
 {
     private const string CommandPrefix = "kyber-weave-arbiter hook --harness ";
+
+    /// <summary>The worker guard's command, which Squad also owns: <c>kyber-weave-arbiter worker-guard --harness &lt;h&gt;</c>.</summary>
+    private const string WorkerGuardPrefix = "kyber-weave-arbiter worker-guard --harness ";
 
     private const string AntigravityGroupKey = "kyber-arbiter";
 
@@ -924,7 +927,8 @@ public static class SquadHookJsonBlock
         }
 
         if (string.Equals(command, CommandPrefix + harness, StringComparison.Ordinal)
-            || string.Equals(command, CommandPrefix + harness + " --scope global", StringComparison.Ordinal))
+            || string.Equals(command, CommandPrefix + harness + " --scope global", StringComparison.Ordinal)
+            || string.Equals(command, WorkerGuardPrefix + harness, StringComparison.Ordinal))
         {
             return true;
         }

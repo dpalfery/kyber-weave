@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Text.Json;
 using KyberWeave.Arbiter.Hooks;
+using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Rendering;
 using Xunit;
 
@@ -29,6 +31,7 @@ public sealed class ConductorGuardTests
     [InlineData("ask_user")]
     [InlineData("task_complete")]
     [InlineData("rename_chat")]
+    [InlineData("update_todo")]
     [InlineData("tool_search_tool")]
     [InlineData("kyber-weave-docs_answer_question_from_repo_documentation")]
     [InlineData("kw-docs-docs_look_up_glossary_term_definition")]
@@ -47,6 +50,10 @@ public sealed class ConductorGuardTests
     [InlineData("kyber-weave run start --harness copilot --type fix --slug a --failing-version 1.2.3 --resume copilot/fix/a --json")]
     [InlineData("kyber-weave doctor --ensure")]
     [InlineData("kyber-weave doctor --ensure /repo")]
+    [InlineData("kyber-weave run start --harness copilot --type feat --slug a --brief --path plan --autonomy autonomous")]
+    [InlineData("kyber-weave squad brief conductor --path intake --autonomy supervised")]
+    [InlineData("kyber-weave squad brief architect --path finalize --plan docs/plans/2026-11-13-x.md --mode test-first")]
+    [InlineData("kyber-weave docs tasks docs/plans/2026-11-13-x.md --list")]
     public void RunStartCommands_ArePermitted(string command)
     {
         Assert.Empty(Run(Event("bash", new { command })));
@@ -63,6 +70,21 @@ public sealed class ConductorGuardTests
     [InlineData("kyber-weave run start --slug `id`")]
     [InlineData("kyber-weave run start --slug a | tee x")]
     [InlineData("kyber-weave run start --slug a\nrm x")]
+    [InlineData("kyber-weave run start --slug a --brief > out.txt")]
+    [InlineData("kyber-weave run start --path elsewhere")]
+    [InlineData("kyber-weave squad brief conductor && rm x")]
+    [InlineData("kyber-weave squad brief conductor; rm x")]
+    [InlineData("kyber-weave squad brief conductor | tee x")]
+    [InlineData("kyber-weave squad brief conductor --plan $(id)")]
+    [InlineData("kyber-weave squad brief conductor --plan `id`")]
+    [InlineData("kyber-weave squad brief conductor --plan ../../etc/passwd")]
+    [InlineData("kyber-weave squad brief conductor --from /tmp/evil")]
+    [InlineData("kyber-weave squad brief conductor\nrm x")]
+    [InlineData("kyber-weave docs tasks docs/plans/x.md --write")]
+    [InlineData("kyber-weave docs tasks docs/plans/x.md --check")]
+    [InlineData("kyber-weave docs tasks docs/plans/x.md")]
+    [InlineData("kyber-weave docs tasks docs/plans/x.md --list 2> err")]
+    [InlineData("kyber-weave docs validate .")]
     public void OtherCommands_AreDenied(string command)
     {
         Assert.NotEmpty(ReasonFor(Event("bash", new { command })));
@@ -75,6 +97,10 @@ public sealed class ConductorGuardTests
     [InlineData("/repo/6-Docs/plans/README.md")]
     [InlineData("docs/specs/feature/tasks.md")]
     [InlineData("docs/todo/item.md")]
+    [InlineData("docs/plans/2026-11-12-widget.tasks.json")]
+    [InlineData("/home/me/.copilot/skills/delivery-execution/SKILL.md")]
+    [InlineData("/home/me/.copilot/skills/delivery-execution/references/gate.md")]
+    [InlineData(".github/skills/delivery-execution/SKILL.md")]
     public void ContractFiles_ArePermitted(string path)
     {
         Assert.Empty(Run(Event("view", new { path })));
@@ -84,13 +110,45 @@ public sealed class ConductorGuardTests
     [InlineData("src/App.cs")]
     [InlineData("README.md")]
     [InlineData("docs/plans/../../src/notes.md")]
-    [InlineData("docs/plans/code.cs")]
     [InlineData("/elsewhere/plans/x.md")]
+    [InlineData("/home/me/.copilot/config.json")]
+    [InlineData("src/skills/x.cs")]
+    [InlineData("docs/plans/code.cs")]
+    [InlineData("web/specs/login.spec.ts")]
     [InlineData("evil/agents/conductor/secret.md")]
     [InlineData("/tmp/agents/conductor/secret.md")]
     public void OtherFiles_AreDenied(string path)
     {
         Assert.NotEmpty(ReasonFor(Event("view", new { path })));
+    }
+
+    [Theory]
+    [InlineData("edit")]
+    [InlineData("create")]
+    [InlineData("apply_patch")]
+    public void WritingAPlanningFile_IsStillDenied(string tool)
+    {
+        Assert.Contains(tool, ReasonFor(Event(tool, new { path = "docs/plans/2026-11-12-widget.tasks.json" })), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AConfiguredPlanningDirectory_IsReadable()
+    {
+        string repo = Directory.CreateTempSubdirectory("guard-config-").FullName;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(repo, ".kyber-weave"));
+            File.WriteAllText(
+                Path.Combine(repo, ".kyber-weave", "kyber-weave.yml"),
+                "ontology:\n  docs-root: handbook\nconfig-reg:\n  plan-index: handbook/roadmap/README.md\n");
+
+            Assert.Empty(RunIn(repo, "handbook/roadmap/widget.tasks.json"));
+            Assert.Contains("deny", RunIn(repo, "handbook/guide.md"), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(repo, recursive: true);
+        }
     }
 
     [Fact]
@@ -283,6 +341,59 @@ public sealed class ConductorGuardTests
         Assert.EndsWith(ConductorGuard.WorkflowReminder, modified, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void APlanInTheRunsOwnWorktree_IsPermittedFromTheCanonicalCheckout()
+    {
+        using TempDirectory parent = new();
+        string repo = Path.Combine(parent.Path, "repo");
+        string other = Path.Combine(parent.Path, "other");
+        Directory.CreateDirectory(repo);
+        Directory.CreateDirectory(Path.Combine(other, "docs", "plans"));
+        Git(repo, "init", "-q", "-b", "main");
+        Git(repo, "-c", "user.email=a@example.com", "-c", "user.name=A", "commit", "-q", "--allow-empty", "-m", "initial");
+        string worktree = Path.Combine(parent.Path, "repo.worktrees", "run");
+        Git(repo, "worktree", "add", "-q", "-b", "claude/feat/run", worktree);
+        string root = GitRoot(worktree);
+        Directory.CreateDirectory(Path.Combine(root, "docs", "plans"));
+
+        Assert.Empty(RunIn(repo, Path.Combine(root, "docs", "plans", "2026-11-13-widget.md")));
+        Assert.Empty(RunIn(repo, Path.Combine(root, "docs", "plans", "2026-11-13-widget.tasks.json")));
+        Assert.NotEmpty(RunIn(repo, Path.Combine(root, "src", "App.cs")));
+        Assert.NotEmpty(RunIn(repo, Path.Combine(other, "docs", "plans", "x.md")));
+    }
+
+    [Fact]
+    public void ARunRecord_IsPermittedAndTheRestOfHomeIsNot()
+    {
+        using TempDirectory home = new();
+        string runs = Path.Combine(home.Path, ".kyber-weave", "runs");
+        Directory.CreateDirectory(runs);
+
+        Assert.Empty(RunIn(Cwd, Path.Combine(runs, "claude-feat-run.json"), home.Path));
+        Assert.NotEmpty(RunIn(Cwd, Path.Combine(home.Path, ".kyber-weave", "credentials.json"), home.Path));
+        Assert.NotEmpty(RunIn(Cwd, Path.Combine(runs, "..", "secrets.json"), home.Path));
+    }
+
+    private static string GitRoot(string directory) =>
+        KyberWeave.Core.Arbiter.Facts.GitFacts.GetRoot(directory) ?? throw new InvalidOperationException("no git root");
+
+    private static void Git(string directory, params string[] arguments)
+    {
+        ProcessStartInfo startInfo = new("git")
+        {
+            WorkingDirectory = directory,
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+        };
+        foreach (string argument in arguments) startInfo.ArgumentList.Add(argument);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        Assert.True(result.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {result.StandardError}");
+    }
+
     private static string Event(string tool, object arguments) =>
         JsonSerializer.Serialize(new { cwd = Cwd, toolName = tool, toolArgs = arguments });
 
@@ -293,14 +404,15 @@ public sealed class ConductorGuardTests
         return stdout.ToString();
     }
 
-    private static string RunIn(string cwd, string path)
+    private static string RunIn(string cwd, string path, string? home = null)
     {
         using StringWriter stdout = new();
         ConductorGuard.Run(
             JsonSerializer.Serialize(new { cwd, toolName = "view", toolArgs = new { path } }),
             stdout,
             TextWriter.Null,
-            copilotHome: CopilotHome);
+            copilotHome: CopilotHome,
+            homeDirectory: home);
         return stdout.ToString();
     }
 

@@ -31,11 +31,7 @@ dotnet watch
 
 ## Run tests
 
-```bash
-dotnet test
-```
-
-The `dotnet test` line is the gate the review council and CI run. For your own run, filter to the
-tests covering your change: `dotnet test --filter "FullyQualifiedName~<TestClass>"`.
+Run your task's tests with the one command in the `testing` skill. A bare `dotnet test` is the
+whole suite, which only the review council and CI run.
 
 Migrations are owned by `dal-dev`. See **<data-access-layer-coding-standard>**.

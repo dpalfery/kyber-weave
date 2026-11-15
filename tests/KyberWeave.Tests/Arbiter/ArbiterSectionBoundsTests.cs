@@ -80,4 +80,17 @@ public sealed class ArbiterSectionBoundsTests : IDisposable
         Assert.True(selection.FailedSafe);
         Assert.Equal(0, provider.CallCount);
     }
+
+    /// <summary>A path the file system cannot take (an embedded NUL) raises ArgumentException; the selector still never throws.</summary>
+    [Fact]
+    public async Task APathTheFileSystemCannotTakeFailsSafeWithoutAskingTheProvider()
+    {
+        UnaskedProvider provider = new();
+
+        SectionSelection selection = await new SectionSelector(provider)
+            .SelectAsync(Path.Combine(_temp.Path, "bad\0name.md"), "Change the install steps.");
+
+        Assert.True(selection.FailedSafe);
+        Assert.Equal(0, provider.CallCount);
+    }
 }

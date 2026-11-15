@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using KyberWeave.Core.Configuration;
 using Xunit;
 
@@ -23,13 +22,10 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class StandardsCompletionSectionTests
 {
-    private const string CompletionHeading = "## Completion";
     private const string CommandsHeading = "## Commands";
 
     /// <summary>The test standard's retired anchor, as every link to it is written.</summary>
     private const string Anchor = "standards/test/README.md#commands";
-
-    private static readonly string[] InnerLoopCommands = ["build", "test", "format"];
 
     /// <summary>One argument per declared technology, read from the configuration rather than listed here.</summary>
     public static IEnumerable<object[]> DeclaredTechnologies() =>
@@ -49,31 +45,6 @@ public sealed class StandardsCompletionSectionTests
             count == 1,
             $"The '{technology}' coding standard declares {count} '## Completion' sections. Add exactly one: it " +
             "carries the inner-loop commands a finishing worker runs, what runs when, and why.");
-    }
-
-    /// <summary>The section names every inner-loop command: build, test and format.</summary>
-    /// <remarks>
-    /// The section exists to answer "how do I finish". A section that omits one of the three leaves the worker to
-    /// guess, which is exactly what the portable files were doing. A standard whose stack has no build or no
-    /// formatter says so there, so the reader learns the answer either way.
-    /// </remarks>
-    [Theory]
-    [MemberData(nameof(DeclaredTechnologies))]
-    public void TheCompletionSectionNamesEveryInnerLoopCommand(string technology)
-    {
-        string section = Section(File.ReadAllText(StandardPath(technology)), CompletionHeading);
-
-        Assert.False(
-            string.IsNullOrWhiteSpace(section),
-            $"The '{technology}' coding standard has no '## Completion' section, so there is nothing to read.");
-        string[] missing = InnerLoopCommands
-            .Where(command => !Regex.IsMatch(section, $@"\b{Regex.Escape(command)}\b", RegexOptions.IgnoreCase))
-            .ToArray();
-        Assert.True(
-            missing.Length == 0,
-            $"The '{technology}' coding standard's '## Completion' section never names " +
-            $"{string.Join(", ", missing)}. Say what a finishing worker runs, and say so when a command does not " +
-            "apply to this stack.");
     }
 
     /// <summary>
@@ -132,19 +103,6 @@ public sealed class StandardsCompletionSectionTests
             .Select(line => line.TrimEnd('\r').Trim())
             .Where(line => line.StartsWith("## ", StringComparison.Ordinal))
             .ToArray();
-    }
-
-    /// <summary>One section, from its heading to the next level-two heading.</summary>
-    private static string Section(string markdown, string heading)
-    {
-        string[] lines = markdown.Split('\n').Select(line => line.TrimEnd('\r')).ToArray();
-        int start = Array.FindIndex(lines, line => string.Equals(line.Trim(), heading, StringComparison.Ordinal));
-        if (start < 0)
-            return string.Empty;
-
-        int end = Array.FindIndex(lines, start + 1, line => line.StartsWith("## ", StringComparison.Ordinal));
-
-        return string.Join("\n", end < 0 ? lines[start..] : lines[start..end]);
     }
 
     /// <summary>

@@ -41,23 +41,23 @@ it is wrong, however reasonable the trigger sounds.
 
 ### 2. Review cost is a budget, and determinism is cheaper than judgement
 
-**Reduce the passes the reviewer makes, and use deterministic tooling — the ReSharper command
-line tools and the Roslyn compiler checks — to find *and fix* formatting and code-quality
+**Reduce the passes the reviewer makes, and use deterministic tooling — `dotnet format` and the
+Roslyn compiler and analyzer checks — to find *and fix* formatting and code-quality
 issues before the reviewer is invoked.**
 
 The ordering follows from the cost of being wrong at each layer:
 
 | Layer | Cost of catching a defect here |
 |---|---|
-| Deterministic fix (`dotnet format`, analyzer code fixes, `cleanupcode`) | One command. The defect is corrected, not reported. |
+| Deterministic fix (`dotnet format`, analyzer code fixes) | One command. The defect is corrected, not reported. |
 | `code-reviewer` | The full council, plus the gate suite. |
 
 A mechanical defect that reaches a reviewer costs a pass to write it up, a rework cycle to
-apply the fix, and another pass to confirm it — to arrive at an edit `cleanupcode` would have
+apply the fix, and another pass to confirm it — to arrive at an edit `dotnet format` would have
 made for free. So the machine layer runs first, as the developer's exit gate, and a mechanical
 finding in the council's review is evidence the gate did not run, and *that* is the finding.
 
-The same logic caps the passes. The gate gets two rework cycles per key. The council
+The same logic caps the passes. The gate gets three rework cycles per key. The council
 re-reviews after every fix round until it approves, each later cycle a cheap verifier re-check
 of the fix delta, and stops after 5 cycles or 3 in a row without the critical and major count
 falling; what is still open goes in the pull request for a person. A defect surviving that many
@@ -74,7 +74,9 @@ fail differently:
   does not pay for a database-migration reviewer to tell it so.
 - **The host's own gates** — build, tests, coverage, analyzers — run as declared commands and
   produce a repeatable artifact. That artifact is what a claim about executed behaviour is
-  allowed to cite. Nothing else counts.
+  allowed to cite. Nothing else counts. The gates run first, and every lens starts from the
+  evidence their run writes, so no lens re-runs a check, and a lens whose whole answer a passing
+  gate already gives is not seated.
 - **A verdict engine** turns findings and gate results into `APPROVE` or `REQUEST_CHANGES` by
   fixed rule. It is ordinary unit-tested code, so the same inputs give the same answer twice
   and every decision names the rule that made it.
@@ -86,14 +88,14 @@ individual task, and paying the council's price to ask it was the problem this s
 
 | Layer | Who | Scope | Cost |
 |---|---|---|---|
-| **Developer exit gate** | The developer agent running `task-gate`: `dotnet format`, analyzer code fixes, `cleanupcode --include`, build and tests | The files one task changed | No model at all |
+| **Developer exit gate** | The developer agent running `task-gate`: `dotnet format`, analyzer code fixes, build and tests | The files one task changed | No model at all |
 | **Run review** | `code-reviewer` | The whole run at the end, then each fix round | The full council, then verifier cycles |
 
 **The bottom layer has no model in it.** Each developer's exit gate applies fixes and then
 verifies, before the change leaves the worker: predefined type keywords, `var` where the standard
 forbids it, redundant qualifiers, unused usings, formatting, and the declared build and tests. It
 reports a `TASK_GATE:` line; the conductor rejects a missing or failing line back to the same
-worker, and two reworks for the same gate key trip the circuit-breaker into the conductor's
+worker, and three reworks for the same gate key trip the circuit-breaker into the conductor's
 findings collection, which `architect` plans against before the run ends. A mechanical defect that
 reaches the council means the gate did not run.
 
@@ -114,6 +116,7 @@ kyber-weave review gates .                                          # run the de
 kyber-weave review suppressions .                                   # fail an added suppression with no reason
 kyber-weave review duplicates .                                     # cluster duplicate bodies
 kyber-weave review verdict . --seats seats --gates gates.json --out findings.json  # verdict from the seat files
+kyber-weave review cycle . --task my-task                           # which cycle this run is in, and what it re-checks (read-only; the council's gate run does it itself)
 kyber-weave review catalogue                                        # print the shipped per-technology gates
 ```
 

@@ -123,12 +123,11 @@ public sealed record ArbiterSnapshot(
 
 /// <summary>The markers a hook read from a dispatch output.</summary>
 /// <param name="TaskReview">The <c>task-review</c> marker: <c>PASS</c> or <c>FAIL</c> from <c>^RESULT:\s+(PASS|FAIL)\b</c>.</param>
-/// <param name="RedEvidence">The <c>red-evidence</c> marker: the <c>RED_EVIDENCE:</c> value.</param>
 /// <param name="PlannerStatus">The <c>planner-status</c> marker: the <c>STATUS:</c> value.</param>
-/// <param name="Attested">The <c>attested</c> markers (D31): <c>&lt;task&gt;=complete|red</c> pairs.</param>
+/// <param name="Attested">The <c>attested</c> markers (D31): <c>&lt;task&gt;=complete</c> pairs.</param>
+/// <remarks>Ledgers written before test-first moved to one worker also carry <c>red-evidence</c>; it is ignored on read.</remarks>
 public sealed record ArbiterReturnMarkers(
     [property: JsonPropertyName("task-review")] string? TaskReview = null,
-    [property: JsonPropertyName("red-evidence")] string? RedEvidence = null,
     [property: JsonPropertyName("planner-status")] string? PlannerStatus = null,
     [property: JsonPropertyName("attested")] IReadOnlyList<string>? Attested = null);
 

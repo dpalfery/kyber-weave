@@ -14,6 +14,7 @@ using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Processes;
 using Spectre.Console;
 using YamlDotNet.Core;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Cli.Commands.Arbiter;
 
@@ -107,10 +108,7 @@ public static class ArbiterCommandComposition
         {
             return ResolveKey(config, endpoint);
         }
-        catch (Exception exception) when (exception is InvalidOperationException
-            or IOException
-            or UnauthorizedAccessException
-            or System.ComponentModel.Win32Exception)
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             return null;
         }
@@ -307,7 +305,7 @@ public static class ArbiterCommandComposition
             configPath = repoConfigPath;
             return true;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or YamlException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is YamlException)
         {
             config = KyberWeaveConfig.ProductDefaults;
             configPath = repoConfigPath;
@@ -455,10 +453,7 @@ public static class ArbiterCommandComposition
             if (!string.IsNullOrWhiteSpace(root))
                 return root;
         }
-        catch (Exception exception) when (exception is InvalidOperationException
-            or IOException
-            or UnauthorizedAccessException
-            or System.ComponentModel.Win32Exception)
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             // No git, no root: the caller works from the path itself.
         }
@@ -590,11 +585,7 @@ public static class ArbiterCommandComposition
         {
             return null;
         }
-        catch (IOException)
-        {
-            return null;
-        }
-        catch (UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             return null;
         }
@@ -642,65 +633,8 @@ public static class ArbiterCommandComposition
     /// </remarks>
     internal sealed class ArbiterCliPlanReader(string repositoryRoot) : IArbiterPlanReader
     {
-        public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification)
-        {
-            ArgumentNullException.ThrowIfNull(facts);
-            ArgumentNullException.ThrowIfNull(classification);
-
-            if (!classification.Headers.TryGetValue("PLAN_FILE", out string? planFile)
-                || string.IsNullOrWhiteSpace(planFile))
-            {
-                return facts;
-            }
-
-            string? resolved = PlanPathResolver.Resolve(planFile, repositoryRoot);
-            if (resolved is null || !File.Exists(resolved))
-            {
-                return facts.With("plan.exists", false, ArbiterFactLabel.Derived);
-            }
-
-            PlanDocument document;
-            string content;
-            try
-            {
-                content = File.ReadAllText(resolved);
-                document = PlanDocumentParser.Parse(content);
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                return facts.With("plan.exists", false, ArbiterFactLabel.Derived);
-            }
-
-            // The digest of the text just parsed; the evaluator keys REPEAT on it.
-            facts = facts.With("plan.digest", PlanDocumentParser.Digest(content), ArbiterFactLabel.Derived);
-            facts = facts.With("plan.exists", true, ArbiterFactLabel.Derived);
-            if (document.Status is not null)
-                facts = facts.With("plan.status", document.Status, ArbiterFactLabel.Derived);
-            facts = facts.With("plan.development-mode", document.DevelopmentMode, ArbiterFactLabel.Derived);
-            facts = facts.With("plan.tasks.count", document.Tasks.Count, ArbiterFactLabel.Derived);
-            facts = facts.With("plan.out-of-scope", document.OutOfScope.ToList(), ArbiterFactLabel.Derived);
-
-            if (classification.Headers.TryGetValue("TASK", out string? taskId)
-                && !string.IsNullOrWhiteSpace(taskId))
-            {
-                PlanTask? task = document.Tasks.FirstOrDefault(
-                    candidate => string.Equals(candidate.Id, taskId, StringComparison.Ordinal));
-                if (task is not null)
-                {
-                    facts = facts.With("plan.task", task.Id, ArbiterFactLabel.Derived);
-                    facts = facts.With("plan.task.text", task.Text, ArbiterFactLabel.Derived);
-                    facts = facts.With("plan.task.files", task.Files.ToList(), ArbiterFactLabel.Derived);
-                    facts = facts.With("plan.task.depends-on", task.DependsOn.ToList(), ArbiterFactLabel.Derived);
-                    facts = facts.With("plan.task.skills", task.Skills.ToList(), ArbiterFactLabel.Derived);
-                    facts = facts.With(
-                        "plan.test-contract.row",
-                        document.RedEvidenceRequirement(task.Id),
-                        ArbiterFactLabel.Derived);
-                }
-            }
-
-            return facts;
-        }
+        public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification) =>
+            PlanFacts.Enrich(facts, classification, repositoryRoot);
     }
 }
 

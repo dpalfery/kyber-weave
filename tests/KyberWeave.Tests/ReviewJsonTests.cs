@@ -17,6 +17,32 @@ public sealed class ReviewJsonTests
         Assert.Throws<JsonException>(() => ReviewJson.ReadFindings("{}"));
     }
 
+    [Theory]
+    [InlineData("-2147483648")]
+    [InlineData("-1")]
+    [InlineData("10000001")]
+    [InlineData("\"12\"")]
+    [InlineData("null")]
+    [InlineData("1.5")]
+    public void AFindingWhoseLineIsOutOfRangeOrNotAWholeNumberIsRejected(string line)
+    {
+        JsonException error = Assert.Throws<JsonException>(() => ReviewJson.ReadFindings(Report(line)));
+
+        Assert.Contains("line", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("10000000")]
+    public void AFindingWhoseLineIsAtTheEdgeOfTheRangeIsRead(string line)
+    {
+        Assert.Single(ReviewJson.ReadFindings(Report(line)).Findings);
+    }
+
+    private static string Report(string line) =>
+        "{\"schema\":\"kyber-weave.review-findings/v1\",\"findings\":[{\"id\":\"correctness/a\",\"lens\":\"correctness\"," +
+        "\"severity\":\"minor\",\"confidence\":5,\"file\":\"a.cs\",\"line\":" + line + "}],\"changedPaths\":[],\"changedLines\":0}";
+
     [Fact]
     public void AnEmptyGatesObjectIsRejected()
     {

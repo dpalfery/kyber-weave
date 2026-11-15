@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using KyberWeave.Core.Review;
 
 namespace KyberWeave.Core.Configuration;
 
@@ -167,6 +168,26 @@ public enum ReviewStrictness
     Strict
 }
 
+/// <summary>
+/// How much of what a review finds is fixed in the run (<c>review.policy.fix-level</c>). Each level includes the ones
+/// before it. It decides what is fixed, never what blocks: strictness, <c>major-count-blocks</c> and
+/// <c>min-confidence</c> decide that.
+/// </summary>
+public enum ReviewFixLevel
+{
+    /// <summary>Failed blocking gates and critical findings: data loss, a security hole, corruption, a silent break in behaviour.</summary>
+    Critical,
+
+    /// <summary>Also major findings: the change is wrong or fails under conditions a normal user reaches; a file or type placed against the documented structure.</summary>
+    Major,
+
+    /// <summary>The product default. Also minor findings: real but bounded, such as a narrow edge case, a misleading comment or document statement, a missing test for a stated behaviour.</summary>
+    Minor,
+
+    /// <summary>Also nitpicks: purely stylistic points with no effect on how the application operates (formatting, wording preference, naming style).</summary>
+    Nitpick
+}
+
 /// <summary>The rules the verdict engine may not decide for itself.</summary>
 public sealed class ReviewPolicy
 {
@@ -181,6 +202,31 @@ public sealed class ReviewPolicy
 
     /// <summary>Active finding suppressions.</summary>
     public IReadOnlyList<ReviewSuppression> Suppressions { get; init; } = [];
+
+    /// <summary>The lowest severity a fix round takes (<c>review.policy.fix-level</c>).</summary>
+    public ReviewFixLevel FixLevel { get; init; } = ReviewFixLevel.Minor;
+
+    /// <summary>Whether a fix round takes <paramref name="finding"/>: its severity is at or above <see cref="FixLevel"/>.</summary>
+    public bool FixRoundTakes(ReviewFinding finding)
+    {
+        ArgumentNullException.ThrowIfNull(finding);
+        return finding.Severity >= FixLevel switch
+        {
+            ReviewFixLevel.Critical => ReviewSeverity.Critical,
+            ReviewFixLevel.Major => ReviewSeverity.Major,
+            ReviewFixLevel.Minor => ReviewSeverity.Minor,
+            _ => ReviewSeverity.Nitpick
+        };
+    }
+
+    /// <summary>The level's name as the configuration spells it.</summary>
+    public string FixLevelName => FixLevel switch
+    {
+        ReviewFixLevel.Critical => "critical",
+        ReviewFixLevel.Major => "major",
+        ReviewFixLevel.Minor => "minor",
+        _ => "nitpick"
+    };
 
     /// <summary>Product defaults for a host that declares no policy.</summary>
     public static ReviewPolicy ProductDefaults { get; } = new();
@@ -244,6 +290,15 @@ public sealed class ReviewConfig
     /// waiting on a slow suite. Without <c>--deadline</c> no run deadline applies.
     /// </remarks>
     public int CouncilDeadlineSeconds { get; init; } = 600;
+
+    /// <summary>The most gates a <c>review gates</c> run has running at one time.</summary>
+    /// <remarks>
+    /// Read from <c>review.parallelism</c>. Gates still start in declaration order and each waits for the one before
+    /// it unless it is declared <c>concurrent</c>, so a host that declares none sees no change. The bound is on the
+    /// gates in flight, concurrent or not: a host that marks several independent gates <c>concurrent</c> cannot
+    /// pile them onto one machine's cores at once. Two matches one sequential gate beside one concurrent gate.
+    /// </remarks>
+    public int Parallelism { get; init; } = 2;
 
     /// <summary>The rules the verdict engine may not override.</summary>
     public ReviewPolicy Policy { get; init; } = ReviewPolicy.ProductDefaults;

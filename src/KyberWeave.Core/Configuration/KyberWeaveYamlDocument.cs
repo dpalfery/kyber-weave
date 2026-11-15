@@ -61,16 +61,11 @@ internal sealed class KyberWeaveYamlDocument
 /// The <c>run:</c> block of a <c>kyber-weave.yml</c> file.
 /// </summary>
 /// <remarks>
-/// Both members stay raw here. <c>harness-names</c> is kept a string so an unrecognised value
-/// is refused by the loader that can name the setting, and <c>base-branch</c> is kept as
-/// written because a branch name is a free string: its only default is applied where the
-/// setting is read, not where it is parsed.
+/// <c>base-branch</c> is kept as written because a branch name is a free string: its only
+/// default is applied where the setting is read, not where it is parsed.
 /// </remarks>
 internal sealed class RunYamlSection
 {
     /// <summary>The branch a run is compared against, or null when the operator named none.</summary>
     public string? BaseBranch { get; set; }
-
-    /// <summary>Raw <c>harness-names:</c> value, kept a string for the reason on the type.</summary>
-    public string? HarnessNames { get; set; }
 }

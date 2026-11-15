@@ -175,6 +175,20 @@ public sealed class DocumentCorpus
     }
 
     /// <summary>
+    /// How much naming one word of a document's id, component or keyword says about the
+    /// document, on the scale of inverse document frequency with a small floor.
+    /// </summary>
+    /// <remarks>
+    /// Coverage of an identity used to count every word equally, so "rules" covering one word
+    /// of <c>squad/worker-rule-map</c> and "arbiter" covering one word of
+    /// <c>kyber-arbiter/architecture</c> scored alike, though the first is a word the corpus
+    /// uses everywhere and the second names a subject. Weighting by rarity lets the subject
+    /// decide. The floor keeps a word every document uses from erasing a match entirely: an
+    /// identity made only of common words still counts for something.
+    /// </remarks>
+    public double IdentityTokenWeight(string term) => Math.Max(0.15, InverseDocumentFrequency(term));
+
+    /// <summary>
     /// A copy of the query vector with each term scaled by its rarity, for callers that
     /// still want cosine similarity — section selection, where documents are not the
     /// unit and BM25's length normalisation does not apply.

@@ -204,7 +204,7 @@ public class McpPackagingTests
 
         Assert.Equal(typeof(string), tool.ReturnType);
         Assert.Equal(
-            ["technology", "topic", "charBudget"],
+            ["technology", "topic", "charBudget", "projectPath"],
             tool.GetParameters().Select(parameter => parameter.Name));
         Assert.Equal(12_000, tool.GetParameters()[2].DefaultValue);
     }

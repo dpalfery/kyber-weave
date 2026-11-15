@@ -92,6 +92,7 @@ public sealed class ArbiterReviewRunAndFindingCapTests : IDisposable
         {
             Enabled = true,
             Rules = ArbiterConfig.ProductDefaults.Rules
+                .Select(HookAskedRules.AsHookAsked)
                 .Select(rule => string.Equals(rule.Id, NitpickRule, StringComparison.Ordinal) ? rule with { Shadow = false } : rule)
                 .ToList(),
         },

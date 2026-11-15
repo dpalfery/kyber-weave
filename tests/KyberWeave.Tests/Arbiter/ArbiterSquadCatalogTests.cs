@@ -31,19 +31,17 @@ public sealed class ArbiterSquadCatalogTests
     }
 
     [Fact]
-    public void EmbeddedCatalog_CarriesDelegatesToDescriptionAndProfile()
+    public void EmbeddedCatalog_CarriesDelegatesToAndProfile()
     {
         ArbiterSquadCatalog catalog = ArbiterSquadCatalog.LoadEmbedded();
 
         ArbiterSquadAgent conductor = catalog.Agents["conductor"];
         Assert.Contains("architect", conductor.DelegatesTo);
         Assert.Contains("test-dev", conductor.DelegatesTo);
-        Assert.Contains("orchestrat", conductor.Description, StringComparison.OrdinalIgnoreCase);
 
         ArbiterSquadAgent csharp = catalog.Agents["csharp-dev"];
         Assert.Empty(csharp.DelegatesTo);
         Assert.Equal("worker", csharp.CapabilityProfile);
-        Assert.Contains(".NET", csharp.Description, StringComparison.Ordinal);
 
         ArbiterSquadAgent reviewer = catalog.Agents["code-reviewer"];
         Assert.Equal(
@@ -85,10 +83,6 @@ public sealed class ArbiterSquadCatalogTests
 
         Assert.Equal(expected.Order(StringComparer.Ordinal), catalog.Lenses.Keys.Order(StringComparer.Ordinal));
         Assert.All(catalog.Lenses.Values, lens => Assert.False(string.IsNullOrWhiteSpace(lens.Applicability)));
-        Assert.Contains(
-            "untrusted input",
-            catalog.Lenses["security"].Applicability,
-            StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

@@ -65,8 +65,8 @@ Verify each item, and fix or report anything that fails before creating the pull
 - [ ] **The host's declared gates pass.** Run the commands the root `AGENTS.md` lists, and the
   build, test, lint, and format commands the declared **<technology>-coding-standard** names for
   each technology the change touches (for example **<csharp-coding-standard>**). When a standard
-  is undeclared or still a draft, say so and ask whether to proceed; do not substitute commands
-  of your own.
+  is undeclared or still a draft, say so in the description and use the draft's commands, or
+  none if undeclared; do not substitute commands of your own.
 - [ ] **Scoped instructions are followed.** Read the nearest `AGENTS.md` to every changed file
   and confirm the change complies.
 - [ ] **Architecture rules hold.** Check the change against the rules declared under
@@ -160,21 +160,24 @@ are provider facts.
 
 ## Description
 
-If the host has a pull request template, fill in every section of the host's pull request
-template; the provider file lists where each provider looks for one. Leave no placeholder text.
-Otherwise use these sections:
+One format serves every pull request: [assets/pull-request-description.md](assets/pull-request-description.md).
+Its comment says what each section holds; fill each `{{token}}` and drop a section whose token has no
+value. The docs server's deliver tool fills the same file from a run's records, so a description written
+here and one the tool writes read the same. The sections are Summary, Type of change, Linked work,
+Changes, Validation, Not verified, Decisions made for you to check, Pending human review,
+Follow-up work filed, Documentation impact (the docs-dev outcome verbatim plus recommendations; what documentation changed,
+or why none was needed), and Notes.
 
-- **Summary**: the problem and the outcome, in one to three sentences; why more than how.
-- **Type of change**: bug fix, feature, breaking change, refactor, or documentation.
-- **Linked work**: as decided under Linked work; omit when there is none.
-- **Changes**: a short list of what changed, summarized from the commits and the diff.
-- **Validation**: which suites ran, which tests were added, and any manual verification and its
-  environment. Never write "tests pass" without naming them.
-- **Documentation impact**: the docs-dev outcome verbatim plus recommendations; what documentation changed, or why none was needed. When the host supplies no template, use the heading fallback `## Documentation impact`.
-- **Notes**: extra notes, follow-ups, and anything reviewers should know.
+If the host has a pull request template, fill in every section of the host's pull request template
+instead, each with the section of the format it asks for; the provider file lists where each provider
+looks for one. Leave no placeholder text. Not verified, Decisions made for you to check, Pending
+human review, Follow-up work filed and Notes follow the host's sections when it has none of its own for them.
 
-Do not paste raw commit lists or file lists; the provider shows both. Write the description to a
-UTF-8 file and pass the file wherever the provider's CLI allows; the provider file says how.
+Write for a human reviewer: plain words, short, why more than how, and no internal rule ids, tool or
+agent names, decision ids or scratch paths unless the reviewer needs one to act. Do not paste raw
+commit lists or file lists; the provider shows both. Write the description to a UTF-8 file in the
+run's scratch folder or the system temporary folder, never in the repository's canonical checkout, and
+pass the file wherever the provider's CLI allows; the provider file says how.
 
 ## Create or update
 
@@ -190,7 +193,9 @@ reviewers, and before enabling automatic completion or merge.
 ## CI checks
 
 Checks run on the pull request as the host configured them. Use the provider file's "Check CI
-status" step and wait for the result before requesting review.
+status" step and wait for the result before requesting review. The wait is capped at 15
+minutes (the conductor's delivery step sets 60). If checks are still pending at the cap, leave
+the pull request draft and report what is still pending; do not wait again.
 
 When a check fails:
 
@@ -209,7 +214,7 @@ When a check fails:
 - Answer every review comment, with a change or with the reason the current approach stands. Use
   the `pr-review-fix-comments` skill to work through them.
 - Request review again after pushing changes. Do not merge while a conversation is unresolved or a
-  required check is failing.
+  required check is failing: stop and report it instead of waiting for it to clear.
 
 ## After merge
 
@@ -233,6 +238,8 @@ When a check fails:
 
 ## Resources
 
+- [assets/pull-request-description.md](assets/pull-request-description.md): the one pull request
+  description format, shared with the deliver tool.
 - [providers/github.md](providers/github.md): GitHub tools, CLI commands, templates, and closing
   keywords.
 - [providers/azure-devops.md](providers/azure-devops.md): Azure DevOps tools, CLI commands,

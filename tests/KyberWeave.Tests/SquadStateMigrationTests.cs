@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -782,12 +783,12 @@ public sealed class SquadStateMigrationTests
     /// reason, so the migration reports it as a warning. An access denial must not escape as an unhandled exception.
     /// </summary>
     [Fact]
+    [UnsupportedOSPlatform("windows")]
     public void LedgerThatCannotBeOpenedIsReadAsEmptyWithAReason()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
+        Assert.SkipWhen(
+            OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess,
+            "Unix file modes are not enforced on Windows, so a ledger that cannot be opened cannot be simulated; a privileged process (root) ignores the mode too, so it is skipped there as well.");
 
         using TempDirectory fixture = new TempDirectory();
         MigrationScenario scenario = CreateScenario(fixture);

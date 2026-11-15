@@ -29,13 +29,12 @@ try
 }
 catch (Exception ex)
 {
-    // Last resort: the hook path already fails closed with a harness block, so reaching
-    // here means the streams themselves broke. Nothing may go to stdout. Exit 2, not 1:
-    // on Claude a crash without exit code 2 is non-blocking, and on Copilot exit 1 is a
-    // non-blocking hook error, so exit 1 would let a gated dispatch proceed.
-    await Console.Error.WriteLineAsync($"KW-ARB-HOOK-001: hook host failed: {ex.Message}")
+    // Last resort: the streams themselves broke. Nothing may go to stdout. Exit 0: the
+    // Arbiter never blocks a dispatch on its own failure (ADR 0072), and exit 2 is a block
+    // on Claude. The failure is logged with its code.
+    await Console.Error.WriteLineAsync($"KW-ARB-HOOK-001: hook host failed: {ex.Message}. The dispatch continues.")
         .ConfigureAwait(false);
-    exitCode = 2;
+    exitCode = 0;
 }
 
 return exitCode;

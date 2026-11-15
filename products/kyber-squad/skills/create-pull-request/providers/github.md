@@ -31,7 +31,7 @@ prefix MCP tool names with the name the host gave the server; match on the bare 
 | Create the PR | `create_pull_request` (`owner`, `repo`, `title`, `head`, `base`, `body`, `draft`) | `gh pr create --repo <owner>/<repo> --head <source> --base <target> --title <title> --body-file <file>`, plus `--draft` for a draft |
 | Update the PR | `update_pull_request` (`owner`, `repo`, `pullNumber`, `title`, `body`) | `gh pr edit <number> --repo <owner>/<repo> --title <title> --body-file <file>` |
 | Read the PR back | `pull_request_read` with `method: get` | `gh pr view <number> --repo <owner>/<repo> --json title,body,url,isDraft` |
-| Check CI status | `pull_request_read` with `method: get_status` or `get_check_runs` | `gh pr checks <number> --repo <owner>/<repo>`; add `--watch` to wait, `--required` for required checks only |
+| Check CI status | `pull_request_read` with `method: get_status` or `get_check_runs` | `gh pr checks <number> --repo <owner>/<repo>`; add `--watch` to wait (cap it at 15 minutes, for example with `timeout 900`; on the cap leave the PR draft and report what is still pending), `--required` for required checks only |
 | Link work items | none; write the reference into the body (see Linking work below) | none; the body carries it |
 
 `gh pr checks` exits with code 8 while checks are still pending and exits non-zero when a check

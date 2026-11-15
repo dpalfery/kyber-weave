@@ -4,7 +4,7 @@ title: Kyber Arbiter three-step decision gates
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-11
+last-reviewed: 2026-11-12
 ---
 
 # ADR 0053: Kyber Arbiter three-step decision gates
@@ -16,6 +16,11 @@ through a rule engine that answers in up to three steps — plain code, a decisi
 reasoning agent — enforced by harness hooks, delivered in three phases by harness group:
 Phase 1 Claude, Copilot in VS Code, Copilot CLI, and OpenCode; Phase 2 Pi, Codex, and Cursor;
 Phase 3 Kilo, Antigravity, Factory, Devin, Warp, and ZCode.
+
+Amended 2026-11-12: decisions 1, 3, 8 and 23 and one rejected alternative changed when
+[ADR 0072](0072-the-arbiter-blocks-only-on-machine-facts-and-confident-model-answers.md) limited
+blocking to machine facts and confident model answers; format mismatches in agent-written text
+were stalling runs for hours.
 
 Amended 2026-11-08 by the conductor run-speed programme: decision 9's changed-path basis
 becomes committed plus dirty (D44), and decision 23 adds `KW-ARB-PLANREAD-001`.
@@ -50,20 +55,23 @@ judgement about meaning is made without a confidence attached.
 
 ## Decision
 
-1. **Three steps, in order (D1).** Step 0 answers only from exact facts through a closed
-   predicate set (`all`, `any`, `not`, `exists`, `equals`, `in`, `matches`, `subset-of`,
-   `intersects`, `count`). Step 1 asks a decision model one batched call per trigger. Step 2
-   is a reasoning agent dispatched after the block, never inside the hook. First match wins
-   inside step 0; one confident red flag escalates the trigger without averaging.
+1. **Three steps, in order (D1).** Step 0 answers only from facts the machine produces itself
+   (git, files on disk, the harness payload, the embedded catalog) through a closed predicate
+   set (`all`, `any`, `not`, `exists`, `equals`, `in`, `matches`, `subset-of`, `intersects`,
+   `count`), plus the answers that let a dispatch proceed. A judgment that rests on reading
+   agent-written prose is a step-1 question ([ADR 0072](0072-the-arbiter-blocks-only-on-machine-facts-and-confident-model-answers.md)).
+   Step 1 asks a decision model one batched call per trigger. Step 2 is a reasoning agent
+   dispatched after the block, never inside the hook. First match wins inside step 0; one
+   confident red flag escalates the trigger without averaging.
 2. **Separation (D2, D16).** The feature is named Kyber Arbiter — JEV names one provider, not
    the feature. Hook and MCP surfaces ship in a separate `kyber-weave-arbiter` binary with no
    Spectre.Console dependency; human commands live in the existing CLI as
    `kyber-weave arbiter …`; the engine lives in Core and serves both.
 3. **Enforcement comes from the harness (D3–D5).** Hooks fire from harness machinery, never
    from the gated agent's instructions. Harnesses without hooks use the MCP fallback, called
-   by the conductor and code-reviewer. Any internal hook error blocks with an explicit
-   reason — fail closed — inside a per-hook latency budget, with an audit for delegations
-   that have no matching decision.
+   by the conductor and code-reviewer. An internal hook error allows the dispatch and logs
+   `KW-ARB-HOOK-001` (ADR 0072), inside a per-hook latency budget, with an audit for
+   delegations that have no matching decision.
 4. **Phased by harness (D6, D28, D32).** Phase 1 covers Claude, Copilot in VS Code, Copilot
    CLI, and OpenCode — targets that need no shared hook file. Phase 2 adds Pi, Codex, and
    Cursor with owned blocks in shared hook files. Phase 3 adds Kilo, Antigravity, Factory,
@@ -83,9 +91,9 @@ judgement about meaning is made without a confidence attached.
    artifacts with C#, Markdig, and regex, writes nothing, and resolves `TASK:` ids against
    both grammars. A task that lists no files skips its file-scope checks with a logged skip
    rather than escalating.
-8. **Undecidable maps by trigger family (D10).** Conductor and investigate triggers escalate
-   on `undecidable`; review triggers allow and log, because lenses and refutations run as
-   they do today. A plan with no parseable tasks escalates.
+8. **Undecidable maps by trigger family (D10).** Every family maps `undecidable` to its
+   proceeding effect: conductor and investigate triggers allow and log, as review triggers
+   always did (ADR 0072). A plan with no parseable tasks is asked about, not escalated.
 9. **Review uses hooks with refutation as step 2 (D11).** Lens applicability gates the spawn (skip
    below P(applies) 0.1). The changed-path basis is the review base against the working tree —
    **committed plus dirty**, the form `GitFacts.GetChangedPathsSinceBase` already computes — not the
@@ -100,7 +108,7 @@ judgement about meaning is made without a confidence attached.
     failed. Older `review-gates/v1` reports still read.
 11. **Reserved paths keep the council (D13).** `always-human` paths still run code-reviewer
     to `NEEDS_HUMAN`; delegation rules still apply first.
-12. **Thirty-two shipped rules with permanent ids (D14).** Phase 1 shipped twenty-one. Phase 2 ships two more (`KW-ARB-DIFFICULTY-001`, `KW-ARB-LADDER-001`), and phase 3 ships nine, so the count is now thirty-two. Hosts tune shipped rules by id
+12. **Thirty-two shipped rules with permanent ids (D14).** Phase 1 shipped twenty-one. Phase 2 ships two more (`KW-ARB-DIFFICULTY-001`, `KW-ARB-LADDER-001`), and phase 3 ships nine. `KW-ARB-RUN-001` and `KW-ARB-CHECKOUT-001` were added with [ADR 0072](0072-the-arbiter-blocks-only-on-machine-facts-and-confident-model-answers.md), so the count is now thirty-four. Hosts tune shipped rules by id
     (`enabled`, thresholds, `effects` only) and add their own under non-`KW-ARB-` ids. Ids
     are never reused or renumbered.
 13. **Every non-allow conductor outcome escalates to architect (D15).** The harness blocks
@@ -159,7 +167,8 @@ judgement about meaning is made without a confidence attached.
     closeout after Phase 3 archives the specification.
 23. **The plan-read ban is enforced at dispatch (fix 10).** `KW-ARB-PLANREAD-001` runs on the
     `delegate` trigger. After the routing header block is removed, it asks whether the prompt names
-    a path under `config.planning-dirs`; if it does, the dispatch escalates. The routing header is
+    a path under `config.planning-dirs`; if it does, the decision model is asked whether the worker
+    is told to open it, and only a confident yes escalates (ADR 0072). The routing header is
     removed first because that block names the plan by design, so a rule reading the raw prompt
     would fire on every dispatch. Documentation-profile targets are exempt, because a `docs-dev`
     dispatch naming the plan at closeout is correct. It shares `PlanReadInstruction` with
@@ -186,7 +195,9 @@ judgement about meaning is made without a confidence attached.
     in full, but contributes the family's neutral effect to the combined outcome. The two
     model-targeting rules take their shadow state from `arbiter.model-targeting.mode` alone, so
     a `shadow` override on either fails `KW-ARB-CONFIG-014`. New step-1 rules ship in shadow
-    until thresholds are measured from the decision log.
+    until thresholds are measured from the decision log. The step-1 questions ADR 0072 added
+    to existing conductor rules enforce at once: they can block only on a confident answer, and
+    the step-0 escalations they replace enforced before them.
 27. **Model profiles resolve at render time (D16, D17).** Squad's render resolves each profile to
     its model token and writes a per-harness model-targets table. The hook host reads that table
     and never references the Squad assemblies, so the layering rule holds and no hook process
@@ -221,9 +232,9 @@ fact outside those declared states leaves the machine.
   documentation is reproducible, and defects are recorded against it as they appear.
 - **A `FILES:` routing header.** Having the conductor list editable files per dispatch was
   rejected as over-engineering that takes decisions away from the sub-agent.
-- **Effects on the conductor family** for `retarget` and the skip outcomes. Rejected: the
-  conductor family's `undecidable` is `escalate` and cannot be remapped, so every unsure
-  model or shortcut answer would block a dispatch (decision 24, D15).
+- **Effects on the conductor family** for `retarget` and the skip outcomes. Rejected: they
+  would mix two kinds of outcome on one dispatch and let a shortcut answer stand in for a
+  conductor decision (decision 24, D15).
 - **Resolving model tokens in the hook host.** Rejected: the hook host may not reference the
   Squad assemblies, and the bundled matrix is not on disk at hook time (decision 27, D16).
 - **The in-flight ledger as the text store.** Rejected: the ledger is digest-only by contract
@@ -241,9 +252,10 @@ fact outside those declared states leaves the machine.
   report reads `RESULT: PASS`, because the separate task reviewer the design named no longer
   exists. A worker can therefore mark its own task complete; the final review still judges
   the whole change.
-- **Ledger loss needs attestation.** Completion and RED evidence live in `artifacts/`, which
-  is not committed; a fresh clone escalates dependent tasks until architect attests, after
-  user confirmation, what is complete (D31).
+- **Ledger loss needs attestation.** Completion lives in `artifacts/`, which
+  is not committed. On a fresh clone the readiness question sees no completion and no stored
+  report, so a confident `waiting` answer escalates dependent tasks until architect attests,
+  after user confirmation, what is complete (D31).
 - **Step-1 thresholds are measured for Jev 1.13 and Jev 1.14.** Shipped thresholds started
   conservative for `jev-1.13.0`. A measurement on 2026-11-09 with 120 labelled cases left
   them unchanged and moved the default model to `jev-1.14.0`; `jev-1.13.0` stays supported.
@@ -269,7 +281,7 @@ fact outside those declared states leaves the machine.
 
 ## Permanent identifiers
 
-Rule ids `KW-ARB-*` (32 shipped), `KW-REVIEW-026` (gate not applicable), the reason codes
+Rule ids `KW-ARB-*` (34 shipped), `KW-REVIEW-026` (gate not applicable), the reason codes
 `fallback-only`, `project-only`, `dispatch-unconfirmed`, and `hooks-disabled-by-harness`, the
 record schemas `kyber-arbiter.decision/v1` and `kyber-arbiter.ledger/v1`, and the routing
 headers `KYBER-ARBITER:`, `PLAN_FILE:`, `TASK:`, `LENS:`, `REFUTE:`, and `REVIEW_RUN:` are permanent.
@@ -285,7 +297,8 @@ The savings phase 1 adds `KW-ARB-LENS-002`, `KW-ARB-CONFIG-012` to `KW-ARB-CONFI
 
 - [ADR 0054](0054-squad-owned-blocks-in-shared-hook-files.md) — owned entries in shared hook files, the exception to decision 6
 - [Kyber Arbiter architecture](../kyber-arbiter/architecture.md) — engine, rules, configuration
-- [Kyber Arbiter runbook](../kyber-arbiter/runbook.md) — hooks, trust, fail-closed operation
+- [Kyber Arbiter runbook](../kyber-arbiter/runbook.md) — hooks, trust, failure behaviour
+- [ADR 0072](0072-the-arbiter-blocks-only-on-machine-facts-and-confident-model-answers.md) — what may block
 - [Kyber-Squad architecture](../kyber-squad/architecture.md) — hook wiring per harness
 - [Review council architecture](../code-review/architecture.md) — review triggers and gate applicability
 - [Rule reference](../ci-pipelines/rule-reference.md) — every `KW-ARB-*` id and `KW-REVIEW-026`

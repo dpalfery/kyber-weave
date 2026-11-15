@@ -66,7 +66,7 @@ public sealed record SquadPackRun(int ExitCode, string Output, string OutDirecto
 /// declared characterization that passes by design.
 /// </summary>
 /// <remarks>
-/// Contract: <c>docs/plans/2026-10-31-kyber-skills-user-level-deploy.md</c>, "Test contract (test-first)". The six names
+/// Contract: <c>docs/plans/2026-10-31-kyber-skills-user-level-deploy.md</c>, "Test contract (test-first)". The pinned names
 /// are pinned here, and every <c>.apm/skills/*/SKILL.md</c> is discovered at test time so a later skill is covered
 /// too. Real-repository cases resolve the root through <see cref="KyberWeaveTestPaths.ToolRoot"/>. Every temp directory
 /// is disposed, and install, update, and uninstall run against a temp home.
@@ -87,6 +87,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         "kyber-docs-onboarding-and-assessment",
         "kyber-weave-cli",
         "kyber-weave-model-profile",
+        "kw-onboarding",
         "spec-conductor"
     ];
 
@@ -704,7 +705,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
 
     private static string ApmSkillsRoot => Path.Combine(KyberWeaveTestPaths.ToolRoot, ".apm", "skills");
 
-    /// <summary>The six pinned names, plus every <c>.apm/skills</c> directory that holds a <c>SKILL.md</c>, ordinally sorted.</summary>
+    /// <summary>The pinned names, plus every <c>.apm/skills</c> directory that holds a <c>SKILL.md</c>, ordinally sorted.</summary>
     private static string[] AllKyberWeaveSkillNames()
     {
         string[] discovered = Directory.EnumerateDirectories(ApmSkillsRoot)

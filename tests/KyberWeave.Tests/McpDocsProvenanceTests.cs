@@ -122,13 +122,13 @@ public sealed class McpDocsProvenanceTests : IDisposable
     }
 
     [Fact]
-    public void DocsStatusIsAPublicReadOnlyClosedWorldToolWithNoParameters()
+    public void DocsStatusIsAPublicReadOnlyClosedWorldToolWithOnlyTheOptionalProjectPath()
     {
         MethodInfo status = FindMcpTool("docs_get_source_repository_and_revision");
         McpServerToolAttribute attribute = status.GetCustomAttribute<McpServerToolAttribute>()!;
 
         Assert.Equal(typeof(string), status.ReturnType);
-        Assert.Empty(status.GetParameters());
+        Assert.Equal(["projectPath"], status.GetParameters().Select(parameter => parameter.Name));
         Assert.True(attribute.ReadOnly, "docs_get_source_repository_and_revision must declare ReadOnly so clients see readOnlyHint.");
         Assert.False(attribute.OpenWorld, "docs_get_source_repository_and_revision reads a local corpus and must not claim an open world.");
     }
@@ -141,7 +141,7 @@ public sealed class McpDocsProvenanceTests : IDisposable
         MethodInfo status = FindMcpTool("docs_get_source_repository_and_revision");
 
         string expected = ParseProvenance(tools.Explore("documentation")).Raw;
-        string actual = (string)status.Invoke(tools, null)!;
+        string actual = (string)status.Invoke(tools, [null])!;
 
         Assert.Equal(expected, actual.TrimEnd('\n', '\r'));
     }

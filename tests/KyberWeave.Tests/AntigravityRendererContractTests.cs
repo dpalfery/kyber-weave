@@ -452,8 +452,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
         HashSet<string> expectedTrueProfiles =
         [
-            "architect", "documentation", "investigator", "product-planning", "reviewer", "root-fixer", "worker",
-            "publishing-worker"
+            "architect", "documentation", "investigator", "product-planning", "reviewer", "review-seat", "root-fixer",
+            "worker", "publishing-worker"
         ];
         HashSet<string> expectedFalseProfiles = ["orchestrator", "read-only"];
 
@@ -507,7 +507,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         HashSet<string> expectedWriteToFileProfiles =
-            ["architect", "documentation", "product-planning", "root-fixer", "worker", "publishing-worker"];
+            ["architect", "documentation", "product-planning", "review-seat", "root-fixer", "worker", "publishing-worker"];
 
         List<SquadAgent> writeAgents = [];
         List<SquadAgent> nonWriteAgents = [];

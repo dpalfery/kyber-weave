@@ -9,9 +9,10 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Pins the one always-on source of worker text (decision D27, task T47): the Discovery order, the
-/// plan-read ban, the full-suite ban and the batched-read rule live in
-/// <c>products/kyber-squad/shared/worker-baseline.md</c> and reach each worker's render once.
+/// Pins the one always-on source of worker text (decision D27, task T47): the baseline lives in
+/// <c>products/kyber-squad/shared/worker-baseline.md</c>, carries the Discovery and plan-read rule
+/// tokens, and reaches each worker's render once. The full-suite ban and the batched-read rule it
+/// also carries are graded from the prose rule catalog.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -42,22 +43,19 @@ public sealed class SquadWorkerBaselineInjectionTests
     private static readonly string BaselineSourcePath = Path.Combine(ProductRoot, "shared", "worker-baseline.md");
 
     /// <summary>
-    /// The rules the one source carries, each named by the vocabulary its rule already uses so the
-    /// assertion reads as the rule rather than as a sample of prose.
+    /// The protocol tokens the one source carries: the Discovery tool and the plan-index lookup.
     /// </summary>
-    private static readonly string[] BaselineRulePhrases =
+    private static readonly string[] BaselineRuleTokens =
     [
         "codegraph_explore",
-        "<plan-index>",
-        "full test suite",
-        "one round trip"
+        "<plan-index>"
     ];
 
     public static TheoryData<SquadTarget> ShippedTargets() =>
         new(SquadCommandComposition.CreateRenderers().SelectMany(renderer => renderer.SupportedTargets));
 
     /// <summary>
-    /// The single source exists and holds every rule the baseline is for. One file is the whole point:
+    /// The single source exists and carries the baseline's rule tokens. One file is the whole point:
     /// text copied into each agent file is the text this slice removes.
     /// </summary>
     [Fact]
@@ -68,11 +66,11 @@ public sealed class SquadWorkerBaselineInjectionTests
             $"The shared baseline must live at '{BaselineSourcePath}', the one source every worker render injects.");
 
         string baseline = File.ReadAllText(BaselineSourcePath);
-        foreach (string phrase in BaselineRulePhrases)
+        foreach (string token in BaselineRuleTokens)
         {
             Assert.True(
-                baseline.Contains(phrase, StringComparison.OrdinalIgnoreCase),
-                $"The shared baseline must carry the rule that names '{phrase}'.");
+                baseline.Contains(token, StringComparison.OrdinalIgnoreCase),
+                $"The shared baseline must carry the rule that names '{token}'.");
         }
     }
 
@@ -113,11 +111,11 @@ public sealed class SquadWorkerBaselineInjectionTests
             Occurrences(file.Content, BaselineOpenTag) <= 1,
             $"'{file.RelativePath}' carries the shared baseline more than once."));
 
-        foreach (string phrase in BaselineRulePhrases)
+        foreach (string token in BaselineRuleTokens)
         {
             Assert.True(
-                carrier.Content.Contains(phrase, StringComparison.OrdinalIgnoreCase),
-                $"'{carrier.RelativePath}' carries the baseline block without the rule that names '{phrase}'.");
+                carrier.Content.Contains(token, StringComparison.OrdinalIgnoreCase),
+                $"'{carrier.RelativePath}' carries the baseline block without the rule that names '{token}'.");
         }
     }
 

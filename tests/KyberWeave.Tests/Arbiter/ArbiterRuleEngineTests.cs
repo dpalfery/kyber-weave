@@ -349,7 +349,7 @@ public sealed class ArbiterRuleEngineTests
     }
 
     [Fact]
-    public void EvaluateStep0_UndecidableOnConductor_EscalatesAndShortCircuits()
+    public void EvaluateStep0_UndecidableOnConductor_AllowsAndLeavesStep1Open()
     {
         ArbiterRule rule = DecideRule(
             "KW-ARB-SCOPE-001",
@@ -358,8 +358,8 @@ public sealed class ArbiterRuleEngineTests
         ArbiterFactSet facts = Facts(("plan.task", "T3", ArbiterFactLabel.Asserted));
         ArbiterOutcome outcome = RuleEngine.EvaluateStep0([rule], facts, "delegate");
         Assert.Equal(RuleEngine.Undecidable, outcome.RuleAnswers[0].Answer);
-        Assert.Equal(RuleEffects.Escalate, outcome.CombinedEffect);
-        Assert.True(outcome.Step0ShortCircuitsStep1);
+        Assert.Equal(RuleEffects.Allow, outcome.CombinedEffect);
+        Assert.False(outcome.Step0ShortCircuitsStep1);
     }
 
     // ---- trigger families ----
@@ -393,10 +393,10 @@ public sealed class ArbiterRuleEngineTests
     }
 
     [Fact]
-    public void UndecidableEffect_ConductorAndInvestigate_MapToEscalate()
+    public void UndecidableEffect_ConductorAndInvestigate_MapToAllow()
     {
-        Assert.Equal(RuleEffects.Escalate, ArbiterTriggerFamilies.UndecidableEffect(ArbiterTriggerFamily.Conductor));
-        Assert.Equal(RuleEffects.Escalate, ArbiterTriggerFamilies.UndecidableEffect(ArbiterTriggerFamily.Investigate));
+        Assert.Equal(RuleEffects.Allow, ArbiterTriggerFamilies.UndecidableEffect(ArbiterTriggerFamily.Conductor));
+        Assert.Equal(RuleEffects.Allow, ArbiterTriggerFamilies.UndecidableEffect(ArbiterTriggerFamily.Investigate));
     }
 
     [Fact]
@@ -471,7 +471,7 @@ public sealed class ArbiterRuleEngineTests
         ArbiterRule escalate = DecideRule(
             "KW-ARB-B-001",
             "delegate",
-            new RuleDecideClause(RulePredicate.Exists("plan.task", false), "not-in-plan"));
+            new RuleDecideClause(RulePredicate.Exists("plan.task", true), "not-in-plan"));
         ArbiterFactSet facts = Facts(("plan.task", "T3", ArbiterFactLabel.Asserted));
         ArbiterOutcome outcome = RuleEngine.EvaluateStep0([allow, escalate], facts, "delegate");
         Assert.Equal(RuleEffects.Escalate, outcome.CombinedEffect);

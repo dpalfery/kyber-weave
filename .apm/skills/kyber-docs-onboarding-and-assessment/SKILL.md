@@ -48,6 +48,8 @@ Documentation paths below are relative to **<docs-root>**, resolved through the 
 |---|---|---|
 | Root policy | Mandatory, repo-wide rules; read before any work | `AGENTS.md` (or `CLAUDE.md`) at repo root |
 | Scoped policy | Narrower rules for a subtree; can't weaken root | `AGENTS.md` in subtrees that need it |
+| Rules | Rules too long for one line of `AGENTS.md` | `<docs-root>/rules/` (**<rules-index>**) |
+| Coding standards | How one technology is written here; fetched only by the agent working in it | `<docs-root>/standards/<technology>/` (**<standards-root>**) |
 | Documentation index | Canonical entry point, links everything below | `<docs-root>/README.md` |
 | Documentation standard | The rules this checklist enforces — required doc shape, ownership, review cadence | `<docs-root>/documentation-standard.md` |
 | Component catalog | One row per maintained component: owner, doc path, last-reviewed, status | `<docs-root>/catalog.md` |
@@ -57,6 +59,8 @@ Documentation paths below are relative to **<docs-root>**, resolved through the 
 | Archive | Superseded/completed material — never authoritative | `<docs-root>/archive/` |
 
 Each layer answers a different question. An agent or human should be able to walk down exactly as far as a task requires without re-reading the whole tree.
+
+**Rule or standard.** Every agent reads the root policy and the rules on every task; only the agent working in a technology reads its standard. So before writing any instruction, apply the placement test (stated in the "Rules and standards" section of the path declared as **<documentation-ontology>**, when that copy has one): does it apply to every task, and is breaking it never OK? Yes means a rule, kept short; anything else goes in the technology's standard. One home per statement, and the always-loaded text stays near 3 KB.
 
 ## Bootstrap steps
 
@@ -74,6 +78,7 @@ Each layer answers a different question. An agent or human should be able to wal
 - Are there `Completed` or `Superseded` plans still sitting in `<docs-root>/plans/` instead of `<docs-root>/archive/plans/`, with the plan index still listing them as active?
 - Does any ADR-worthy decision exist only inside a plan that's about to be archived? Flag it for promotion before the plan goes stale.
 - Is anything in `<docs-root>/archive/` being linked to or treated as current guidance elsewhere? That's a correctness bug, not a style nit.
+- Conflicting, stale or misplaced instructions in the root `AGENTS.md`, the rules and the standards (including rule-versus-standard placement) are the `kw-onboarding` skill's rules conflict check; run that rather than auditing them here.
 
 ## Assessment and remediation mode (owner-started)
 

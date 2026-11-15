@@ -328,14 +328,14 @@ public sealed class CursorHookAdapterTests
     }
 
     [Fact]
-    public void PostDispatch_AnExplicitNullToolOutput_FailsClosedRatherThanScanningTheWordNull()
+    public void PostDispatch_AnExplicitNullToolOutput_AllowsRatherThanScanningTheWordNull()
     {
         // An explicit `"tool_output": null` is not the four-letter string "null". Reading
         // it through GetRawText() handed the engine that literal and nothing else, so the
         // post-dispatch scan judged an absent result by its own spelling.
         ScriptedEngine engine = new();
 
-        (int exit, string stdout, _) = Run(
+        (int exit, string stdout, string log) = Run(
             """
             {"hook_event_name":"postToolUse","tool_name":"Task","tool_use_id":"toolu-cursor-post-1",
              "tool_input":{"prompt":"Implement the adapter.","subagent_type":"csharp-dev"},
@@ -344,14 +344,12 @@ public sealed class CursorHookAdapterTests
             null,
             engine);
 
+        // ADR 0072: a fault the host cannot decide on allows, with the code in the log.
         Assert.Equal(0, exit);
+        Assert.Equal(string.Empty, stdout);
+        Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
+        Assert.Contains("carries a null tool_output", log, StringComparison.Ordinal);
         Assert.NotEqual("null", engine.SeenPostToolOutput);
-        using JsonDocument doc = JsonDocument.Parse(stdout);
-        Assert.Equal("deny", doc.RootElement.GetProperty("permission").GetString());
-        Assert.Contains(
-            "carries a null tool_output",
-            doc.RootElement.GetProperty("agent_message").GetString(),
-            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -372,22 +370,16 @@ public sealed class CursorHookAdapterTests
     }
 
     [Fact]
-    public void InternalError_WritesDenyShape()
+    public void InternalError_AllowsAndLogs()
     {
         ScriptedEngine engine = new() { ThrowOnPre = true };
 
-        (int exit, string stdout, _) = Run(Fixture("pre-task-dispatch.json"), null, engine);
+        (int exit, string stdout, string log) = Run(Fixture("pre-task-dispatch.json"), null, engine);
 
+        // ADR 0072: a fault the host cannot decide on allows, with the code in the log.
         Assert.Equal(0, exit);
-        using JsonDocument doc = JsonDocument.Parse(stdout);
-        Assert.Equal("deny", doc.RootElement.GetProperty("permission").GetString());
-        string agentMessage = doc.RootElement.GetProperty("agent_message").GetString() ?? string.Empty;
-        Assert.Contains(HookCommand.FailClosedCode, agentMessage, StringComparison.Ordinal);
-        Assert.Contains("ANSWER: error", agentMessage, StringComparison.Ordinal);
-        string userMessage = doc.RootElement.GetProperty("user_message").GetString() ?? string.Empty;
-        Assert.NotEmpty(userMessage);
-        Assert.DoesNotContain("\n", userMessage, StringComparison.Ordinal);
-        Assert.StartsWith("STATUS: ARBITER_ESCALATION", userMessage, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, stdout);
+        Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
     }
 
     [Fact]
