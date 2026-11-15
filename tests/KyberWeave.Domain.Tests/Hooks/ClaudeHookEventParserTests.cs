@@ -38,13 +38,14 @@ public sealed class ClaudeHookEventParserTests
 
     [Theory]
     [InlineData("", "no input")]
+    [InlineData(null, "no input")]
     [InlineData("not json", "not valid JSON")]
     [InlineData("[]", "not a JSON object")]
     [InlineData("""{"cwd":"/repo"}""", "no 'tool_input'")]
     [InlineData("""{"tool_input":"x"}""", "no 'tool_input'")]
     [InlineData("""{"tool_input":{"file_path":3}}""", "file_path")]
     [InlineData("""{"tool_input":{"file_path":"a.cs"},"cwd":123}""", "'cwd'")]
-    public void ReportsAProblemForUnusableInput(string json, string expected)
+    public void ReportsAProblemForUnusableInput(string? json, string expected)
     {
         HookParseResult result = ClaudeHookEventParser.Parse(json);
 

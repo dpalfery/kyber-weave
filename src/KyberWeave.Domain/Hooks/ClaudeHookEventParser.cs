@@ -9,16 +9,14 @@ public static class ClaudeHookEventParser
     public const int MaxInputChars = 1_048_576;
 
     /// <summary>Reads an edit event from hook JSON.</summary>
-    /// <param name="json">The text Claude Code wrote to the hook's stdin.</param>
+    /// <param name="json">The text Claude Code wrote to the hook's stdin; null or blank counts as no input.</param>
     /// <returns>
     /// A result with the event when the JSON names a file in <c>tool_input.file_path</c>; a result with neither event nor
     /// problem when the tool input names no file (not an edit); a result with a problem when the input is oversized,
     /// malformed, or not shaped like Claude Code hook JSON.
     /// </returns>
-    public static HookParseResult Parse(string json)
+    public static HookParseResult Parse(string? json)
     {
-        ArgumentNullException.ThrowIfNull(json);
-
         if (string.IsNullOrWhiteSpace(json))
         {
             return HookParseResult.Invalid("the hook received no input on stdin.");
