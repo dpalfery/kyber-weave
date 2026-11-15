@@ -26,7 +26,7 @@ public static class DashEndpointMappings
     private const string MutationForbiddenMessage =
         "Mutating routes accept same-machine loopback requests without browser Origin headers only";
     private const string PagingInvalidMessage =
-        "limit and page must be positive whole numbers and offset a whole number";
+        "limit and page must be positive whole numbers and offset a non-negative whole number";
 
     private static readonly string[] PostAnalyticsOperations =
     [
