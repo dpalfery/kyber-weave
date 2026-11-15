@@ -18,7 +18,10 @@ internal sealed partial class ConventionTestClassResolver(IFileSystem fileSystem
         string testClass = stem.EndsWith("Tests", StringComparison.Ordinal) ? stem : stem + "Tests";
 
         List<(string Class, string Project)> found = [];
-        foreach (string file in fileSystem.EnumerateFiles(repositoryRoot, testClass + ".cs", recursive: true).Order(StringComparer.Ordinal))
+        string fileName = testClass + ".cs";
+        foreach (string file in fileSystem.EnumerateFiles(repositoryRoot, "*.cs", recursive: true)
+            .Where(f => string.Equals(Path.GetFileName(f), fileName, StringComparison.Ordinal))
+            .Order(StringComparer.Ordinal))
         {
             string? name;
             try
@@ -53,7 +56,8 @@ internal sealed partial class ConventionTestClassResolver(IFileSystem fileSystem
 
     private static string? QualifiedName(string source, string className)
     {
-        if (!Regex.IsMatch(source, $@"\bclass\s+{Regex.Escape(className)}\b", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)))
+        string code = BlockComment().Replace(source, string.Empty);
+        if (!Regex.IsMatch(code, $@"^[ \t]*(?:\[[^\]\r\n]*\][ \t]*)*(?:(?:public|internal|private|protected|static|sealed|abstract|partial|unsafe|file|new)[ \t]+)*class[ \t]+{Regex.Escape(className)}\b", RegexOptions.Multiline | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)))
         {
             return null;
         }
@@ -77,6 +81,9 @@ internal sealed partial class ConventionTestClassResolver(IFileSystem fileSystem
 
         return null;
     }
+
+    [GeneratedRegex(@"/\*.*?\*/", RegexOptions.Singleline | RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
+    private static partial Regex BlockComment();
 
     [GeneratedRegex(@"^\s*namespace\s+([\w.]+)", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     private static partial Regex NamespacePattern();

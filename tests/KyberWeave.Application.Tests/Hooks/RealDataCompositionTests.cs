@@ -223,6 +223,31 @@ public sealed class RealDataCompositionTests : IDisposable
             runner.Calls[^1].Argv);
     }
 
+    [Theory]
+    [InlineData("// class FooTests is still to be written\npublic sealed class Other {}")]
+    [InlineData("public sealed class Other { string s = \"class FooTests\"; }")]
+    [InlineData("/*\n  class FooTests {}\n*/\npublic sealed class Other {}")]
+    public void ConventionResolverIgnoresClassNamesInCommentsAndStrings(string source)
+    {
+        _ = Write("tests/App.Tests/App.Tests.csproj", "<Project />");
+        _ = Write("tests/App.Tests/FooTests.cs", "namespace App.Tests;\n" + source);
+        using ServiceProvider provider = Provider(new FakeProcessRunner(clock));
+
+        Assert.Equal(TestClassResolution.None, provider.GetRequiredService<ITestClassResolver>().Resolve(root.FullName, "src/App/Foo.cs"), new ResolutionComparer());
+    }
+
+    [Fact]
+    public void ConventionResolverTreatsWildcardCharactersInTheFileNameAsPlainText()
+    {
+        _ = Write("tests/App.Tests/App.Tests.csproj", "<Project />");
+        _ = Write("tests/App.Tests/Foo1Tests.cs", "namespace App.Tests;\npublic sealed class Foo1Tests {}");
+        using ServiceProvider provider = Provider(new FakeProcessRunner(clock));
+
+        TestClassResolution result = provider.GetRequiredService<ITestClassResolver>().Resolve(root.FullName, "src/App/Foo[1].cs");
+
+        Assert.Equal(TestClassResolution.None, result, new ResolutionComparer());
+    }
+
     [Fact]
     public void SameNamedClassInTwoProjectsKeepsTheFirstProjectAndSaysTheOtherWasNotRun()
     {
