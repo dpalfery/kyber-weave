@@ -148,14 +148,14 @@ this document.
 
 A finishing worker builds once, runs the test classes its change touches, and passes the format
 check. Nothing here runs the whole suite: the review council's `test` gate and CI run it, and a
-cross-cutting change is no exception. Run everything through the process watchdog, from the
-repository root.
+cross-cutting change is no exception. Run these `dotnet` commands directly from the repository root
+(only KyberDash/tray commands use `scripts/proc-guard.sh`).
 
 ```bash
-scripts/proc-guard.sh run -- dotnet build KyberWeave.sln -c Release
-scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~<Class>"
-scripts/proc-guard.sh run -- dotnet format KyberWeave.sln whitespace --verify-no-changes -v minimal
-scripts/proc-guard.sh run -- dotnet format KyberWeave.sln style --verify-no-changes --severity warn -v minimal
+dotnet build KyberWeave.sln -c Release
+dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~<Class>"
+dotnet format KyberWeave.sln whitespace --verify-no-changes -v minimal
+dotnet format KyberWeave.sln style --verify-no-changes --severity warn -v minimal
 ```
 
 `dotnet format` is the only formatter. ReSharper `cleanupcode` is not used: it can finish its work and then never exit (ADR 0074).
@@ -173,6 +173,6 @@ scripts/proc-guard.sh run -- dotnet format KyberWeave.sln style --verify-no-chan
   With `--artifacts-path <dir>` the same assembly is at `<dir>/bin/KyberWeave.Tests/release/`
   (the configuration is lowercase in that path). The
   [test standard](../test/README.md#completion) gives the full runner contract.
-- **The watchdog refuses a full run** with exit 89 unless the caller passes `--council` or stdin is
-  a terminal. Only the review council and CI pass `--council`; a person at a terminal is not
-  refused.
+- **Dev agents never run the full suite.** `kyber-weave review gates` refuses `full-suite: true`
+  gates (`test`, `ts-test`, `cargo-test`) unless the caller passes `--council` or stdin is a
+  terminal. Only the review council and CI pass `--council`.

@@ -1,28 +1,25 @@
-using System.Globalization;
 using Xunit;
 using YamlDotNet.RepresentationModel;
 
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Pins that the review gates which run test processes are wrapped by the process watchdog in
-/// <c>.kyber-weave/kyber-weave.yml</c>.
+/// Pins which review gates in <c>.kyber-weave/kyber-weave.yml</c> run through the process watchdog and which run
+/// <c>dotnet test</c> directly.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The two <c>dotnet test</c> gates (<c>test</c> and <c>test-policy</c>) and the dash <c>ts-test</c> gate are the review
-/// gates that start a test runner. Each must start with <c>scripts/proc-guard.sh run --</c>, so the cap and the leftover check apply when the review
-/// runs them. The wrapped command after <c>--</c> must stay the command the gate always ran.
+/// Only the dash <c>ts-test</c> gate starts with <c>scripts/proc-guard.sh run --</c>, so Node/Vitest worker caps and
+/// leftover checks apply when the review runs it. The <c>.NET</c> test gates (<c>test</c> and <c>test-policy</c>) run
+/// <c>dotnet test</c> directly without <c>scripts/proc-guard.sh</c> so Roslyn/MSBuild build servers stay warm and
+/// watchdog teardown overhead does not slow <c>.NET</c> runs.
 /// </para>
 /// <para>
-/// A gate whose argv drops the wrapper runs unguarded, and the review would pass a run that had no cap. This suite reads
-/// the YAML only. It starts no process.
+/// This suite reads the YAML only. It starts no process.
 /// </para>
 /// </remarks>
 public sealed class ReviewGateProcGuardWiringTests
 {
-    private const int DefaultGateTimeoutSeconds = 900;
-
     /// <summary>
     /// The watchdog prefix of a full-suite gate. <c>--council</c> sits between <c>run</c> and the <c>--</c> separator, so
     /// the watchdog consumes it and admits the full run; after <c>--</c> it would reach the wrapped command instead.
@@ -46,138 +43,46 @@ public sealed class ReviewGateProcGuardWiringTests
     }
 
     /// <summary>
-    /// The <c>test</c> and <c>test-policy</c> review gates (the <c>dotnet test</c> gates) start with the watchdog
-    /// wrapper and then run <c>dotnet test</c>.
+    /// The <c>test</c> and <c>test-policy</c> review gates run <c>dotnet test</c> directly without
+    /// <c>scripts/proc-guard.sh</c>.
     /// </summary>
     /// <remarks>
-    /// The .NET test run is the process class that caused the original incident. The wrapper is the cap on it, and the
-    /// review must not run it outside that cap. Only the full-suite <c>test</c> gate carries <c>--council</c>; the
-    /// policy gate is partial and runs without it.
+    /// Only KyberDash/Node suites require the process watchdog wrapper. Wrapping <c>.NET</c> test gates shuts down
+    /// warm Roslyn/MSBuild build servers on every invocation and adds watchdog teardown latency.
     /// </remarks>
     [Theory]
-    [InlineData("test", "--council")]
-    [InlineData("test-policy", "")]
-    public void DotnetTestGateArgvStartsWithProcGuardRunAndKeepsDotnetTestCommand(string gateId, string councilFlag)
+    [InlineData("test", "tests/KyberWeave.Tests/KyberWeave.Tests.csproj")]
+    [InlineData("test-policy", "tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj")]
+    public void DotnetTestGateArgvRunsDotnetTestDirectlyWithoutProcGuard(string gateId, string projectPath)
     {
         string[] run = GateRunArgv(gateId);
-        string[] expectedPrefix = councilFlag.Length == 0
-            ? ["scripts/proc-guard.sh", "run"]
-            : ["scripts/proc-guard.sh", "run", councilFlag];
 
-        Assert.Equal(expectedPrefix, run.Take(expectedPrefix.Length));
-        int separator = Array.IndexOf(run, "--");
-        Assert.True(separator >= 2, "The test gate's proc-guard flags must end with '--' before the wrapped command.");
-        Assert.Equal(["dotnet", "test"], run.Skip(separator + 1).Take(2));
+        Assert.All(run, word => Assert.NotEqual("scripts/proc-guard.sh", word));
+        Assert.Equal(["dotnet", "test", projectPath, "-c", "Release", "--no-build"], run.Take(6));
     }
 
     /// <summary>
-    /// The <c>test</c> review gate takes the machine-wide <c>dotnet-test</c> slot, with a bounded queue wait.
+    /// No review gate other than <c>ts-test</c> wraps its command in <c>scripts/proc-guard.sh</c>.
     /// </summary>
     /// <remarks>
-    /// Each conductor's final council runs one full <c>dotnet test</c>, and several councils on one machine used to overlap.
-    /// A gate without <c>--slot</c> would keep overlapping them; a gate without <c>--slot-wait</c> would inherit the guard's
-    /// default and could give up before a long queue drained.
+    /// Keeps the process watchdog scoped strictly to KyberDash JavaScript runs while <c>.NET</c> and Rust gates execute
+    /// their toolchains directly.
     /// </remarks>
     [Fact]
-    public void DotnetTestGateTakesTheMachineWideTestSlotWithABoundedWait()
+    public void OnlyTheTsTestGateRunsThroughProcGuard()
     {
-        string[] run = GateRunArgv("test");
-        string[] guardFlags = run.Skip(2).TakeWhile(word => word != "--").ToArray();
-
-        Assert.Equal("dotnet-test", FlagValue(guardFlags, "--slot"));
-        Assert.True(
-            int.TryParse(FlagValue(guardFlags, "--slot-wait"), out int slotWaitSeconds) && slotWaitSeconds > 0,
-            "The test gate must pass a positive --slot-wait.");
-    }
-
-    /// <summary>
-    /// The gate's own timeout is longer than its queue wait, so waiting for the slot cannot use up the budget for the run.
-    /// </summary>
-    /// <remarks>
-    /// The review runner kills a gate at <c>timeout-seconds</c> (900 by default) from the moment it starts the gate, and it
-    /// cannot tell a queued gate from a hung one. The queue wait and the 900 seconds the run itself had must both fit.
-    /// </remarks>
-    [Fact]
-    public void DotnetTestGateTimeoutCoversTheSlotWaitPlusTheDefaultRunBudget()
-    {
-        string[] run = GateRunArgv("test");
-        int slotWaitSeconds = int.Parse(FlagValue(run.Skip(2).TakeWhile(word => word != "--").ToArray(), "--slot-wait")!, CultureInfo.InvariantCulture);
-        int timeoutSeconds = int.Parse(GateScalar("test", "timeout-seconds") ?? "900", CultureInfo.InvariantCulture);
-
-        Assert.True(
-            timeoutSeconds >= slotWaitSeconds + DefaultGateTimeoutSeconds,
-            $"The test gate's timeout-seconds ({timeoutSeconds}) must be at least its --slot-wait ({slotWaitSeconds}) plus {DefaultGateTimeoutSeconds}.");
-    }
-
-    /// <summary>
-    /// <c>fast-loop.sh --regenerate</c> queues for the <c>dotnet-test</c> slot as long as the <c>test</c> gate does.
-    /// </summary>
-    /// <remarks>
-    /// Both wait on the same slot. The guard's default wait is shorter than the gate's, so a regenerate that did not say so
-    /// would give up with exit 88 under exactly the contention the slot serialises, while a gate queued beside it kept waiting.
-    /// </remarks>
-    [Fact]
-    public void FastLoopRegenerateWaitsForTheSlotAsLongAsTheTestGate()
-    {
-        string[] gateFlags = GateRunArgv("test").Skip(2).TakeWhile(word => word != "--").ToArray();
-        string script = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "fast-loop.sh"));
-        string[] regenerates = script.Split('\n')
-            .Select(line => line.Trim())
-            .Where(line => line.StartsWith("scripts/proc-guard.sh run", StringComparison.Ordinal) && line.Contains("-xml", StringComparison.Ordinal))
-            .ToArray();
-
-        // One timing run per test project; each queues like the gate.
-        Assert.Equal(2, regenerates.Length);
-        foreach (string regenerate in regenerates)
-        {
-            string[] regenerateFlags = regenerate.Split(' ', StringSplitOptions.RemoveEmptyEntries).Skip(2).TakeWhile(word => word != "--").ToArray();
-
-            Assert.Equal(FlagValue(gateFlags, "--slot"), FlagValue(regenerateFlags, "--slot"));
-            Assert.Equal(FlagValue(gateFlags, "--slot-wait"), FlagValue(regenerateFlags, "--slot-wait"));
-        }
-    }
-
-    /// <summary>
-    /// No gate other than <c>test</c> takes a slot: builds, format checks and the dash tests are never serialized.
-    /// </summary>
-    /// <remarks>
-    /// The slot is for the full .NET suite, the run that saturates every core. Serializing a build or a format check would
-    /// make a review wait behind a test run it does not compete with.
-    /// </remarks>
-    [Fact]
-    public void OnlyTheDotnetTestGateTakesASlot()
-    {
-        List<string> slotted = [];
+        List<string> guarded = [];
         foreach (YamlNode node in ((YamlSequenceNode)Child((YamlMappingNode)Child(LoadRoot(), "review")!, "gates")!).Children)
         {
             YamlMappingNode gate = (YamlMappingNode)node;
             if (Child(gate, "run") is YamlSequenceNode argv &&
-                argv.Children.Any(item => ((YamlScalarNode)item).Value == "--slot"))
+                argv.Children.Any(item => ((YamlScalarNode)item).Value == "scripts/proc-guard.sh"))
             {
-                slotted.Add(Scalar(gate, "id") ?? "(no id)");
+                guarded.Add(Scalar(gate, "id") ?? "(no id)");
             }
         }
 
-        Assert.Equal(["test"], slotted);
-    }
-
-    private static string? FlagValue(string[] words, string flag)
-    {
-        int index = Array.IndexOf(words, flag);
-        return index >= 0 && index + 1 < words.Length ? words[index + 1] : null;
-    }
-
-    private static string? GateScalar(string gateId, string key)
-    {
-        YamlMappingNode review = (YamlMappingNode)Child(LoadRoot(), "review")!;
-        foreach (YamlNode node in ((YamlSequenceNode)Child(review, "gates")!).Children)
-        {
-            YamlMappingNode gate = (YamlMappingNode)node;
-            if (Scalar(gate, "id") == gateId)
-                return Scalar(gate, key);
-        }
-
-        return null;
+        Assert.Equal(["ts-test"], guarded);
     }
 
     private static string[] GateRunArgv(string gateId)

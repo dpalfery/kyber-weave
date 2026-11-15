@@ -159,7 +159,7 @@ instead of a grade; if an absent-from file keeps drawing warnings, drop it and s
 endpoint's origin:
 
 ```bash
-KW_PROSE_GRADE=1 scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj \
+KW_PROSE_GRADE=1 dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj \
   -c Release --filter "FullyQualifiedName~ProseRuleGradingTests"
 ```
 
@@ -207,8 +207,9 @@ two static audits (below) keep the list of such sites honest.
 5. **Bound every wait.** Give each readiness wait a timeout, and each `spawnSync`, `execSync` and
    `execFileSync` a `timeout` with `killSignal: 'SIGKILL'`. A child that exits by itself is better
    than one the test must kill.
-6. **Run it through the watchdog.** `scripts/proc-guard.sh run -- <command>` from the repository
-   root, as the [runbook](../../dash/runbook.md#running-tests-safely) describes. The watchdog is
+6. **Run KyberDash and tray tests through the watchdog.** `scripts/proc-guard.sh run -- <command>`
+   from the repository root (`.NET` commands run directly via `dotnet`), as the
+   [runbook](../../dash/runbook.md#running-tests-safely) describes. The watchdog is
    POSIX-only; on Windows the process ledger still checks the children the run recorded, by pid,
    but there is no absolute process cap. The guard gives the command stdin from `/dev/null` when
    its own stdin is a terminal, so a command that reads the terminal does not stop; `--tty` keeps
@@ -252,14 +253,15 @@ belong in a test: remove it or inject a fake.
 ## Completion
 
 This is how a change to a test is proved. Build once, run the classes the change touches, run the
-format check, then report. Every command runs through the watchdog, from the repository root.
+format check, then report. Run these `dotnet` commands directly from the repository root (only
+KyberDash and tray commands use `scripts/proc-guard.sh`).
 **No dev agent runs the full test suite**: the review council's `test` gate and CI run it.
 
 ```bash
-scripts/proc-guard.sh run -- dotnet build tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
-scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~<Class>"
-scripts/proc-guard.sh run -- dotnet format KyberWeave.sln whitespace --verify-no-changes -v minimal
-scripts/proc-guard.sh run -- dotnet format KyberWeave.sln style --verify-no-changes --severity warn -v minimal
+dotnet build tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
+dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~<Class>"
+dotnet format KyberWeave.sln whitespace --verify-no-changes -v minimal
+dotnet format KyberWeave.sln style --verify-no-changes --severity warn -v minimal
 ```
 
 The build comes first and `--no-build` depends on it: the same build produced the binaries the

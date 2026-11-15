@@ -789,8 +789,8 @@ Gates run one after another in declaration order, except a gate marked `concurre
 whether two gates share build output or a lock file, so it never overlaps gates on its own: a host that knows
 two gates are independent (a Node lint and a .NET test run, say) declares the first `concurrent`, ahead of the
 longer gates it can overlap. `review.parallelism` (default `2`) bounds the gates running at one time,
-`concurrent` or not, so marking several gates `concurrent` cannot pile them onto one machine's cores; the
-`proc-guard` machine slot a gate such as `test` takes still applies on top. A gate waits for a free slot before it
+`concurrent` or not, so marking several gates `concurrent` cannot pile them onto one machine's cores; any
+`proc-guard` machine slot a wrapped gate takes still applies on top. A gate waits for a free slot before it
 starts, and a gate the council deadline passed while it waited is reported as not started, exactly as before. The
 report lists results in declaration order and the verdict reads the same results whatever the bound.
 
@@ -919,21 +919,22 @@ partitioned by ecosystem:
 
 #### Test and build gates run under the process watchdog
 
-The two gates that run test suites declare their argv through `scripts/proc-guard.sh run --`:
-the KyberDash `ts-test` gate (`npm --prefix dash run test`) and the .NET `test` gate (`dotnet test`). The
-watchdog kills the command's whole tree at an absolute cap (64 descendants, or 128 JavaScript runtime
-processes for this user: `node`, `nodejs`, `bun`, `deno`, `tsx`), and it fails the gate when a process the run started survives it. A
-watchdog trip is a failed gate: the gate's exit code is the watchdog's 86 (cap) or 87 (leftover),
-or 124 when a `--timeout` is set. The council reports it as any other non-zero exit.
+Only the KyberDash `ts-test` gate (`npm --prefix dash run test`) declares its argv through
+`scripts/proc-guard.sh run --`. The `.NET` gates (`build`, `test`, `test-policy`) and format checks
+run `dotnet` directly so Roslyn/MSBuild build servers stay warm and `dotnet test` avoids watchdog
+teardown latency (`test` keeps `full-suite: true` so `kyber-weave review gates` still refuses dev
+agents unless `--council` is passed). For `ts-test`, the watchdog kills the command's whole tree at
+an absolute cap (64 descendants, or 128 JavaScript runtime processes for this user: `node`, `nodejs`,
+`bun`, `deno`, `tsx`), and it fails the gate when a process the run started survives it. A watchdog
+trip is a failed gate: the gate's exit code is the watchdog's 86 (cap) or 87 (leftover), or 124 when
+a `--timeout` is set. The council reports it as any other non-zero exit.
 
-The `test` gate also takes the `dotnet-test` slot, machine-wide for one user account (the lock directory is under `$HOME`), (`--slot dotnet-test --slot-wait 900`). Each
-conductor's final council runs one full `dotnet test`, and several councils on one machine used to overlap; with the
-slot they queue, and the queued gate prints who holds it. The gate's `timeout-seconds` is 1800, the 900-second wait plus
-the 900 seconds the run had before, because the runner starts that clock when it starts the gate and cannot tell a queued
-gate from a hung one. A wait that runs out is a failed gate with exit 88. No other gate takes a slot, so builds and
-format checks never queue.
+No gate takes a machine-wide `--slot` today (`test` uses `timeout-seconds: 900` directly), though
+`scripts/proc-guard.sh` still provides `--slot` and `--slot-wait` when serialization is needed.
 
-`ReviewGateProcGuardWiringTests` pins both declarations, so a change to the argv has to change the test with it. The
+`ReviewGateProcGuardWiringTests` pins the `ts-test` watchdog wrapper and the direct `dotnet test`
+declarations on `test` and `test-policy`, so a change to those argv values has to change the test
+with it. The
 exit-code meanings and the local commands are in the
 [KyberDash runbook](../dash/runbook.md#running-tests-safely). The guard's flags are `--max-node`, `--max-tree`,
 `--timeout` and, for the slot, `--slot`, `--slot-count`, `--slot-wait` and `--task`; the runbook also covers `--tty`, the standard-input behaviour, and the rule to keep

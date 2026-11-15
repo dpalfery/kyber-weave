@@ -150,10 +150,11 @@ templates, which is where a host copies the mistake from.
 - The argv in `review.gates` of [`.kyber-weave/kyber-weave.yml`](../../../.kyber-weave/kyber-weave.yml)
   is the command, and a workflow step repeats it. CI therefore reproduces a local failure instead
   of approximating it.
-- Every local test, gate and e2e command runs through `scripts/proc-guard.sh run --` (root
-  `AGENTS.md`). The watchdog refuses an unfiltered full-suite run from a dev agent (exit 89) and
-  admits the council and CI, which pass `--council`. A workflow step that runs the full suite is
-  legal precisely because CI is one of those two callers.
+- KyberDash and tray local tests, gates and e2e commands run through `scripts/proc-guard.sh run --`,
+  while `.NET` commands run directly via `dotnet` (root `AGENTS.md`). Both `scripts/proc-guard.sh run`
+  and `kyber-weave review gates` refuse an unfiltered full-suite run from a dev agent and admit the
+  council and CI, which pass `--council`. A workflow step that runs the full suite is legal precisely
+  because CI is one of those two callers.
 - The skill and docs gates build the pull request's own CLI and run it with `--no-build`; they
   never install a released binary. The behaviour under test is the commit's.
 
@@ -222,8 +223,8 @@ A workflow change is proved the way a code change is — a build, the tests cove
 format check — and the three are not optional because the file is YAML:
 
 ```bash
-scripts/proc-guard.sh run -- dotnet build tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj -c Release
-scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~<TestClass>"
+dotnet build tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj -c Release
+dotnet test tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~<TestClass>"
 git diff --check
 actionlint .github/workflows/<file>.yml
 ```

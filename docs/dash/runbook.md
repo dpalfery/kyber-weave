@@ -1583,21 +1583,16 @@ A fourth, separate concern is load rather than runaway processes: several harnes
 can each start a full `dotnet test` run at the same moment. Full suite runs take turns through a
 machine-wide test slot, shared by every process of one user account ([Taking turns: the test slot](#taking-turns-the-test-slot)).
 
-**Rule: every local test, gate and e2e command runs through the watchdog, from the repository root.**
+**Rule: every local KyberDash and tray test, gate and e2e command runs through the watchdog, from the repository root; `.NET` commands run directly via `dotnet`.**
 Do not start the dashboard (`kyberdash web`, `npm run dev -- web`) to run a test.
 
 ```bash
 scripts/proc-guard.sh run -- npm --prefix dash run test:related -- <files>
 scripts/proc-guard.sh run -- npm --prefix dash run test:locks
-scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj --filter "FullyQualifiedName~<Class>"
+dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj --filter "FullyQualifiedName~<Class>"
 ```
 
-The whole `npm --prefix dash run test`, the whole tray UI `npm --prefix dash/tray/ui run test` (no path after `--`), a bare `dotnet test`, `dotnet test KyberWeave.sln`, and `dotnet run --project` on `KyberWeave.Tests` with no narrowing flag are full runs; only CI and the review council start them. The guard refuses a full run with exit 89 when it is
-started from a shell with no terminal (a dev agent's shell) and not passed `--council`. The refusal names
-the targeted alternatives and starts nothing. Only the review council (`code-reviewer`) and CI pass
-`--council`. Dev agents run a filtered set, for example `scripts/proc-guard.sh run -- dotnet test
-tests/KyberWeave.Tests/KyberWeave.Tests.csproj --filter "FullyQualifiedName~<Class>"`.
-`scripts/fast-loop.sh --full` and `--scoped` are refused the same way.
+The whole `npm --prefix dash run test`, the whole tray UI `npm --prefix dash/tray/ui run test` (no path after `--`), a bare `dotnet test`, `dotnet test KyberWeave.sln`, and `dotnet run --project` on `KyberWeave.Tests` with no narrowing flag are full runs; only CI and the review council start them. When invoked through `scripts/proc-guard.sh run`, the guard refuses a full run with exit 89 when it is started from a shell with no terminal (a dev agent's shell) and not passed `--council`; `kyber-weave review gates` enforces the same refusal for `full-suite: true` gates (`test`, `ts-test`, `cargo-test`). The refusal names the targeted alternatives and starts nothing. Only the review council (`code-reviewer`) and CI pass `--council`. Dev agents run `.NET` filtered sets directly via `dotnet`, for example `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj --filter "FullyQualifiedName~<Class>"`. `scripts/fast-loop.sh --full` and `--scoped` are refused the same way.
 
 The watchdog runs the command in its own process group and polls the process table about every
 half second. It has two caps, both absolute, not measured against a baseline. The only way to change
@@ -1649,21 +1644,16 @@ watchdog cap; the ledger's Windows mode is described under the process ledger be
 
 #### Taking turns: the test slot
 
-One full `dotnet test` run (about 2655 cases) saturates every core of an 18-core Mac. Three or four
-agent harnesses on one machine, each with a few worker threads, can start several at once. The runs
-then slow each other down, the classes that are bound by the file system slow further as a shared
-`$TMPDIR` fills, and `SquadDeploymentStateTests`, whose lease test has a fixed 5-second wait, flakes
-on the loaded machine; the rerun adds the load again. A full run therefore takes a slot first:
+When several overlapping runs would saturate every core of a machine or share constrained temp resources,
+`scripts/proc-guard.sh` provides an opt-in `--slot <name>` lock so callers can queue and take turns:
 
 ```bash
-scripts/proc-guard.sh run --slot dotnet-test -- dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
+scripts/proc-guard.sh run --slot dotnet-test -- <command>
 ```
 
-- **Opt-in, and for full suites only.** A run without `--slot` never queues. Builds, format checks,
-  the dash tests and partial runs (`-class`, `-method`, the fast tier) go through the watchdog
-  without one. The declared `test` gate in `.kyber-weave/kyber-weave.yml` and the
-  `scripts/fast-loop.sh --regenerate` timing run pass it; `scripts/fast-loop.sh --full` reaches it
-  through the `test` gate.
+- **Opt-in only.** A run without `--slot` never queues. Standard `.NET` builds, tests and format
+  checks run directly via `dotnet` (outside `scripts/proc-guard.sh` so Roslyn/MSBuild build servers
+  stay warm), and the declared `test`, `test-policy`, and `ts-test` gates do not take a slot.
 - **One slot by default.** One run already uses every core, so a second one concurrently only
   makes both slower. `--slot-count N` raises it for a machine that has cores to spare. The count is
   a flag only, like the caps.
@@ -1680,8 +1670,8 @@ scripts/proc-guard.sh run --slot dotnet-test -- dotnet test tests/KyberWeave.Tes
   command run from an agent tool) ends the wait with exit 88 and runs nothing. Time spent queued
   does not count against `--timeout`, which starts when the command does. A caller with its own
   deadline has to cover both: the review runner kills a gate at its `timeout-seconds` and cannot
-  tell a queued gate from a hung one, so the `test` gate sets `--slot-wait 900` and
-  `timeout-seconds: 1800`, the wait plus the 900 seconds the run always had.
+  tell a queued gate from a hung one, so any queued gate would need `timeout-seconds` large enough
+  to cover both its `--slot-wait` and its run budget.
 - **A lock with no live holder is recovered.** The next caller removes a lock when the holder pid no
   longer exists, when that pid now belongs to a process with a different start time (the pid was
   reused), or when the lock directory has had no holder file for 30 seconds (its creator died

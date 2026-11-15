@@ -172,23 +172,24 @@ public sealed class ProcGuardScriptTests
     }
 
     /// <summary>
-    /// Every <c>npm --prefix dash</c> and <c>dotnet test</c> command line in <c>scripts/fast-loop.sh</c> must
-    /// run through <c>scripts/proc-guard.sh run --</c>.
+    /// Every <c>npm --prefix dash</c> command line in <c>scripts/fast-loop.sh</c> must run through
+    /// <c>scripts/proc-guard.sh run --</c>, while <c>.NET</c> test invocations run directly via <c>dotnet</c>.
     /// </summary>
     /// <remarks>
-    /// The fast loop is the path developers run most often, so an unwrapped <c>npm</c> or <c>dotnet test</c>
-    /// line there is a bypass of the watchdog. The check skips hint text that merely prints these commands
-    /// (<c>printf</c> and <c>echo</c>) and comment lines, and requires at least one invocation so an empty
-    /// match cannot pass vacuously.
+    /// KyberDash Vitest/UI runs remain under the process watchdog, whereas <c>.NET</c> runs execute directly so
+    /// Roslyn/MSBuild build servers stay warm. The check skips hint text (<c>printf</c> and <c>echo</c>) and comment
+    /// lines, and requires non-zero matches for both command classes so empty matches cannot pass vacuously.
     /// </remarks>
     [Fact]
-    public void FastLoopNpmDashAndDotnetTestLines_RunThroughProcGuard()
+    public void FastLoopNpmDashLinesRunThroughProcGuardAndDotnetLinesRunDirectly()
     {
         string script = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "fast-loop.sh"));
         string[] lines = script.Split('\n');
 
-        int invocationCount = 0;
-        List<string> unwrapped = [];
+        int npmCount = 0;
+        int dotnetCount = 0;
+        List<string> unwrappedNpm = [];
+        List<string> wrappedDotnet = [];
         for (int index = 0; index < lines.Length; index++)
         {
             string code = lines[index].Trim();
@@ -198,45 +199,54 @@ public sealed class ProcGuardScriptTests
                 continue;
             }
 
-            if (!code.Contains("npm --prefix dash", StringComparison.Ordinal) && !IsDotnetTestInvocation(code))
+            if (code.Contains("npm --prefix dash", StringComparison.Ordinal))
             {
-                continue;
+                npmCount++;
+                if (!code.Contains("scripts/proc-guard.sh run --", StringComparison.Ordinal))
+                {
+                    unwrappedNpm.Add($"line {index + 1}: {code}");
+                }
             }
-
-            invocationCount++;
-            if (!code.Contains("scripts/proc-guard.sh run --", StringComparison.Ordinal))
+            else if (IsDotnetTestInvocation(code))
             {
-                unwrapped.Add($"line {index + 1}: {code}");
+                dotnetCount++;
+                if (code.Contains("proc-guard.sh", StringComparison.Ordinal))
+                {
+                    wrappedDotnet.Add($"line {index + 1}: {code}");
+                }
             }
         }
 
-        Assert.True(invocationCount > 0, "No npm --prefix dash or dotnet test lines were found in fast-loop.sh.");
+        Assert.True(npmCount > 0, "No npm --prefix dash lines were found in fast-loop.sh.");
+        Assert.True(dotnetCount > 0, "No .NET test invocations were found in fast-loop.sh.");
         Assert.True(
-            unwrapped.Count == 0,
-            "fast-loop.sh runs these without scripts/proc-guard.sh run --: " + string.Join("; ", unwrapped));
+            unwrappedNpm.Count == 0,
+            "fast-loop.sh runs these npm --prefix dash lines without scripts/proc-guard.sh run --: " + string.Join("; ", unwrappedNpm));
+        Assert.True(
+            wrappedDotnet.Count == 0,
+            "fast-loop.sh runs these .NET test lines through proc-guard.sh: " + string.Join("; ", wrappedDotnet));
     }
 
     /// <summary>
-    /// The full-suite <c>dotnet</c> runs in <c>scripts/fast-loop.sh</c> outside the declared gates (the <c>--regenerate</c>
-    /// timing runs, one over each test assembly) must take the machine-wide test slot.
+    /// The <c>--regenerate</c> timing runs in <c>scripts/fast-loop.sh</c> invoke both test assemblies directly via
+    /// <c>dotnet</c> without <c>scripts/proc-guard.sh</c>.
     /// </summary>
     /// <remarks>
-    /// <c>--full</c> reaches the slot through the <c>test</c> gate, but <c>--regenerate</c> runs the test assemblies itself,
-    /// every case, and would otherwise overlap other full runs on the machine. The fast tier and <c>--class</c> runs are
-    /// partial and stay unslotted.
+    /// <c>--regenerate</c> runs both test assemblies directly so Roslyn/MSBuild build servers stay warm instead of being
+    /// shut down by the watchdog.
     /// </remarks>
     [Fact]
-    public void FastLoopRegenerateTimingRun_TakesTheMachineWideTestSlot()
+    public void FastLoopRegenerateTimingRun_RunsDotnetAssembliesDirectly()
     {
         string script = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "fast-loop.sh"));
         string[] regenerateLines = script.Split('\n')
             .Select(line => line.Trim())
-            .Where(line => line.StartsWith("scripts/proc-guard.sh run", StringComparison.Ordinal) &&
+            .Where(line => line.StartsWith("dotnet ", StringComparison.Ordinal) &&
                            line.Contains("-xml", StringComparison.Ordinal))
             .ToArray();
 
         Assert.Equal(2, regenerateLines.Length);
-        Assert.All(regenerateLines, line => Assert.Contains("--slot dotnet-test", line, StringComparison.Ordinal));
+        Assert.All(regenerateLines, line => Assert.DoesNotContain("proc-guard.sh", line, StringComparison.Ordinal));
         Assert.Single(regenerateLines, line => line.Contains("\"${TEST_DLL}\"", StringComparison.Ordinal));
         Assert.Single(regenerateLines, line => line.Contains("\"${POLICY_TEST_DLL}\"", StringComparison.Ordinal));
     }
@@ -246,7 +256,9 @@ public sealed class ProcGuardScriptTests
         string[] tokens = code.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
         for (int index = 0; index + 1 < tokens.Length; index++)
         {
-            if (tokens[index] == "dotnet" && tokens[index + 1] == "test")
+            if (tokens[index] == "dotnet" &&
+                (tokens[index + 1] == "test" ||
+                 tokens[index + 1].Contains("TEST_DLL", StringComparison.Ordinal)))
             {
                 return true;
             }
