@@ -4,7 +4,7 @@ title: Agent harness governance
 doc-type: architecture
 status: current
 component: ContextHygiene
-source-root: src/KyberWeave.Core/Agents
+source-root: src/KyberWeave.Domain/Agents
 owner: dpalfery
 last-reviewed: 2026-10-16
 code-refs:

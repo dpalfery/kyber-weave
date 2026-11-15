@@ -1,0 +1,8 @@
+<Project>
+
+  <ItemGroup>
+    <!-- Compile-time only: [UsedImplicitly] annotations on moved exception types. -->
+    <PackageReference Include="JetBrains.Annotations" Version="2026.2.0" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>
