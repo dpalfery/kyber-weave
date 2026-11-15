@@ -91,7 +91,12 @@ internal static class DashHttp
 
         string raw = values.ToString();
         if (string.IsNullOrWhiteSpace(raw))
+        {
+            // Present but blank is a malformed value, not an absent one: treating it as absent
+            // would run the query without the bound the caller asked for.
+            invalid = true;
             return null;
+        }
 
         if (int.TryParse(raw, NumberStyles.None, CultureInfo.InvariantCulture, out int value) && value > 0)
             return value;

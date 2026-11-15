@@ -244,11 +244,13 @@ public static class DashEndpointMappings
             return DashHttp.Error(StatusCodes.Status400BadRequest, "Invalid turn index");
 
         // The response budget caps what this endpoint may return, so an oversized request cannot
-        // talk it into a bigger body.
-        int budget = Math.Clamp(
-            DashHttp.OptionalPositiveInt(request.Query, "budget") ?? DefaultSessionContentBudget,
-            1,
-            DefaultSessionContentBudget);
+        // talk it into a bigger body. A budget that is present but malformed is a bad request, not
+        // a request for the default.
+        int? requestedBudget = DashHttp.OptionalPositiveInt(request.Query, "budget", out bool invalidBudget);
+        if (invalidBudget)
+            return DashHttp.Error(StatusCodes.Status400BadRequest, "budget must be a positive whole number");
+
+        int budget = Math.Clamp(requestedBudget ?? DefaultSessionContentBudget, 1, DefaultSessionContentBudget);
         bool full = DashHttp.IsTruthy(DashHttp.OptionalQueryString(request.Query, "full"));
         return await Task.Run<IResult>(
             () => DashHttp.FromNullableJson(query.GetTurnContent(id, turnIndex, budget, full), "Turn not found"),
