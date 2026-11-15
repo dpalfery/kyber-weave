@@ -10,8 +10,8 @@ namespace KyberWeave.Core.Docs.Validation;
 /// <para>
 /// The file duplicates the plan on purpose: each task's id, capabilities, dependencies and file scope
 /// are restated so the conductor can dispatch without reading the plan, and the plan stays the
-/// authority the file is checked against. The duplication is what
-/// <see cref="PlanTaskFileValidator" /> checks, because a file that has drifted hands a worker
+/// authority the file is checked against. The duplication is what the engine's
+/// <c>PlanTaskFileValidator</c> checks, because a file that has drifted hands a worker
 /// work the plan does not describe. In a specification folder the file is checked against that
 /// folder's <c>tasks.md</c>, and its <see cref="Plan"/> field then holds that <c>tasks.md</c> path.
 /// </para>
@@ -31,7 +31,7 @@ namespace KyberWeave.Core.Docs.Validation;
 /// </param>
 /// <param name="ExecutionDigest">
 /// The <c>ExecutionDigest</c> of the plan as parsed when the file was written, from
-/// <see cref="KyberWeave.Core.Arbiter.Plans.PlanDocumentParser" />.
+/// <c>KyberWeave.Core.Arbiter.Plans.PlanDocumentParser</c>.
 /// </param>
 /// <param name="Tasks">One entry per plan task, in plan order; null when the file declares none.</param>
 public sealed record PlanTaskFile(

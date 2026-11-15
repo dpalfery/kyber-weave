@@ -2,7 +2,7 @@ using JetBrains.Annotations;
 
 namespace KyberWeave.Core.Docs.Parsing;
 
-/// <summary>Why <see cref="DocumentLoader.LoadArchivedDocument"/> refused an archived entry.</summary>
+/// <summary>Why the engine's <c>DocumentLoader.LoadArchivedDocument</c> refused an archived entry.</summary>
 public enum ArchivedEntryRefusalReason
 {
     /// <summary>
