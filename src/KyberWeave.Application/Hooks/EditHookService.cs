@@ -41,9 +41,15 @@ public sealed class EditHookService(
     {
         string baseDirectory = string.IsNullOrWhiteSpace(edit.Cwd) ? Directory.GetCurrentDirectory() : edit.Cwd;
         string fullPath = Path.GetFullPath(edit.FilePath, baseDirectory);
+        string sessionDirectory = string.IsNullOrWhiteSpace(edit.ProjectDirectory) ? baseDirectory : Path.GetFullPath(edit.ProjectDirectory, baseDirectory);
         string? fileDirectory = Path.GetDirectoryName(fullPath);
-        string? root = fileDirectory is null ? null : ProjectLocator.FindRepositoryRoot(fileSystem, fileDirectory);
-        if (root is null || fileDirectory is null || !fileSystem.FileExists(fullPath))
+        if (fileDirectory is null || !PathContainment.IsWithin(sessionDirectory, fullPath))
+        {
+            return HookResult.Silent;
+        }
+
+        string? root = ProjectLocator.FindRepositoryRoot(fileSystem, fileDirectory);
+        if (root is null || !PathContainment.IsWithin(sessionDirectory, root) || !fileSystem.FileExists(fullPath))
         {
             return HookResult.Silent;
         }

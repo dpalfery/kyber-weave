@@ -109,6 +109,41 @@ public sealed class EditHookServiceTests
         Assert.Empty(runner.Calls);
     }
 
+    [Theory]
+    [InlineData("../other/x.cs")]
+    [InlineData("../repo-other/x.cs")]
+    public async Task FileOutsideTheSessionDirectoryIsSkippedWithoutReadingItsConfig(string relative)
+    {
+        _ = fileSystem.WithDirectory(Path.GetDirectoryName(relative)! + "/.git").WithFile(relative);
+        (EditHookService service, FakeProcessRunner runner, _) = Build(new InvalidDataException("hooks.yml must not be read"));
+
+        HookResult result = await service.RunAsync(Edit with { FilePath = FakeFileSystem.Abs(relative) }, CancellationToken.None);
+
+        Assert.Equal(HookResult.Silent, result);
+        Assert.Empty(runner.Calls);
+    }
+
+    [Fact]
+    public async Task RepositoryRootOutsideTheProjectDirectoryIsSkipped()
+    {
+        (EditHookService service, FakeProcessRunner runner, _) = Build(new InvalidDataException("hooks.yml must not be read"));
+
+        HookResult outsideProject = await service.RunAsync(Edit with { ProjectDirectory = FakeFileSystem.Abs("src/App") }, CancellationToken.None);
+
+        Assert.Equal(HookResult.Silent, outsideProject);
+        Assert.Empty(runner.Calls);
+    }
+
+    [Fact]
+    public async Task ProjectDirectoryEqualToTheRepositoryRootRunsTheRules()
+    {
+        (EditHookService service, FakeProcessRunner runner, _) = Build();
+
+        _ = await service.RunAsync(Edit with { Cwd = FakeFileSystem.Abs("src/App"), ProjectDirectory = FakeFileSystem.Root }, CancellationToken.None);
+
+        Assert.Equal(2, runner.Calls.Count);
+    }
+
     [Fact]
     public async Task RelativeFilePathIsResolvedAgainstCwd()
     {

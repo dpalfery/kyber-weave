@@ -17,6 +17,7 @@ internal static class HooksCli
     /// <param name="stdin">Where the harness writes its hook JSON.</param>
     /// <param name="stdout">Receives the version text, or the JSON that shows notes from an exit-0 run to the agent.</param>
     /// <param name="stderr">Receives feedback text and usage errors; Claude Code shows it to the agent only on exit 2.</param>
+    /// <param name="environment">Reads an environment variable; defaults to the process environment.</param>
     /// <param name="configure">Registers services before the application defaults, so they win over them.</param>
     /// <returns>0 to continue, 2 to hand feedback to the agent, 1 for a usage error.</returns>
     public static async Task<int> DispatchAsync(
@@ -24,7 +25,8 @@ internal static class HooksCli
         TextReader stdin,
         TextWriter stdout,
         TextWriter stderr,
-        Action<IServiceCollection>? configure = null)
+        Action<IServiceCollection>? configure = null,
+        Func<string, string?>? environment = null)
     {
         if (args.Length == 1 && args[0] == "--version")
         {
@@ -43,6 +45,9 @@ internal static class HooksCli
         {
             return 0;
         }
+
+        string? projectDirectory = (environment ?? Environment.GetEnvironmentVariable).Invoke("CLAUDE_PROJECT_DIR");
+        edit = edit with { ProjectDirectory = string.IsNullOrWhiteSpace(projectDirectory) ? null : projectDirectory };
 
         ServiceCollection services = [];
         configure?.Invoke(services);

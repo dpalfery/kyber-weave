@@ -104,6 +104,25 @@ public sealed class HooksCliTests : IDisposable
         Assert.Contains("unknown key 'surprise'", output.GetProperty("additionalContext").GetString(), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task ProjectDirectoryFromTheEnvironmentLimitsWhichRepositoryIsUsed()
+    {
+        string file = Repository();
+        string elsewhere = Path.Combine(root.FullName, "elsewhere");
+        _ = Directory.CreateDirectory(elsewhere);
+
+        int code = await HooksCli.DispatchAsync(
+            ["run", "--harness", "claude"],
+            new StringReader(Json(file)),
+            stdout,
+            stderr,
+            services => services.AddSingleton<IProcessRunner>(new StubRunner(new ProcessRunResult(2, "bad", false))),
+            name => name == "CLAUDE_PROJECT_DIR" ? elsewhere : null);
+
+        Assert.Equal(0, code);
+        Assert.Equal(string.Empty, stderr.ToString());
+    }
+
     private sealed class StubRunner(ProcessRunResult result) : IProcessRunner
     {
         public Task<ProcessRunResult> RunAsync(IReadOnlyList<string> argv, string workingDirectory, TimeSpan timeout, CancellationToken cancellationToken) =>
