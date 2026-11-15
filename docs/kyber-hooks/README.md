@@ -71,6 +71,10 @@ past its own time. A command that times out is reported and skipped, not treated
 When the budget runs out the remaining checks are skipped with a note. Notes and config warnings
 go to stderr; Claude Code shows stderr to the agent only on exit 2.
 
+## Safety notes
+
+Path checks compare normalized paths and do not resolve symbolic links, so a symlink under the project is checked by its own path; the effect is that a format check may run on a file the agent could already edit.
+
 ## Built-in rules
 
 | Id | Kind | On by default | Runs |
