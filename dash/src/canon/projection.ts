@@ -24,7 +24,7 @@ import {
   type ClaimedProjectionLease,
 } from './projection-lease.js'
 import { descriptorFor } from '../refresh/registry.js'
-import { getPricingGenerationKey } from '../pricing/models.js'
+import { getPricingGenerationKey, snapshotPricingState } from '../pricing/models.js'
 
 /**
  * Metadata key: the records-write marker the last projection observed.
@@ -95,7 +95,8 @@ const STORE_SCHEMA_VERSION_KEY = 'schema_version'
  * the timestamp. Either must force one projection.
  */
 function pricingFingerprint(): string {
-  return getPricingGenerationKey()
+  const state = snapshotPricingState()
+  return `${getPricingGenerationKey()}:${JSON.stringify(state.aliases)}:${JSON.stringify(state.priceOverrides)}`
 }
 
 /**
@@ -128,10 +129,7 @@ function parserContractFingerprint(store: CanonStore): string {
  * corpus that no longer exists, or money figures that are no longer the
  * money, and a gate that watched only one of them would serve a stale view.
  */
-export function projectionIsCurrent(store: CanonStore): boolean {
-  const recordedMarker = store.getMetadata(PROJECTION_RECORDS_MARKER_KEY)
-  if (recordedMarker === undefined) return false
-  if (recordedMarker !== String(store.recordsWriteMarker())) return false
+function projectionEnvironmentIsCurrent(store: CanonStore): boolean {
   // The store's own detector stamp against this build's: a stamp that names
   // an older generation means the derived findings were produced by rules
   // this build has replaced.
@@ -147,8 +145,14 @@ export function projectionIsCurrent(store: CanonStore): boolean {
   // is unknown, and unknown reads as stale rather than as current.
   const recordedSchema = store.getMetadata(PROJECTION_SCHEMA_VERSION_KEY)
   if (recordedSchema === undefined) return false
-  if (recordedSchema !== store.getMetadata(STORE_SCHEMA_VERSION_KEY)) return false
-  return true
+  return recordedSchema === store.getMetadata(STORE_SCHEMA_VERSION_KEY)
+}
+
+export function projectionIsCurrent(store: CanonStore): boolean {
+  const recordedMarker = store.getMetadata(PROJECTION_RECORDS_MARKER_KEY)
+  if (recordedMarker === undefined) return false
+  if (recordedMarker !== String(store.recordsWriteMarker())) return false
+  return projectionEnvironmentIsCurrent(store)
 }
 
 /**
@@ -221,8 +225,35 @@ export function yieldToEventLoop(): Promise<void> {
  * write when already correct), and a re-ingest overwrite self-heals it.
  */
 export async function projectCanonicalStore(store: CanonStore): Promise<BuildSessionsReport> {
-  const report = await buildSessions(store, { yieldToLoop: yieldToEventLoop })
+  const prevMarkerRaw = store.getMetadata(PROJECTION_RECORDS_MARKER_KEY)
+  const prevMarker = prevMarkerRaw !== undefined ? Number(prevMarkerRaw) : NaN
+  const currentMarker = store.recordsWriteMarker()
+  const dirtyState = store.dirtyProjectionState()
+  const existingMap = store.projectedSessionIdsByKey()
+  const canIncremental =
+    projectionEnvironmentIsCurrent(store) &&
+    Number.isFinite(prevMarker) &&
+    dirtyState !== undefined &&
+    dirtyState.fromSeq === prevMarker &&
+    dirtyState.toSeq === currentMarker &&
+    Array.isArray(dirtyState.keys) &&
+    existingMap !== undefined
+
+  const sessionIdsByKey = new Map<string, readonly string[]>()
+  const report = await buildSessions(store, {
+    yieldToLoop: yieldToEventLoop,
+    ...(canIncremental
+      ? {
+          dirtySessionKeys: new Set(dirtyState.keys as string[]),
+          existingSessionIdsByKey: existingMap,
+        }
+      : {}),
+    onSessionKeyBuilt: (key, sessionIds) => {
+      sessionIdsByKey.set(key, sessionIds)
+    },
+  })
   recordProjectionState(store)
+  store.recordProjectedSessionKeys(store.recordsWriteMarker(), sessionIdsByKey)
   return report
 }
 

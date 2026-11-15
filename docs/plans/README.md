@@ -64,9 +64,7 @@ its `tasks.json` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-| Plan | Component | Status | Created | Summary |
-|---|---|---|---|---|
-| [Phased migration of the KyberDash collector, canonical store, and engine to C#](2026-11-14-kyberdash-csharp-rewrite.md) | KyberDash | Draft | 2026-11-14 | Five-slice roadmap and Slice 1 design to port the KyberDash OTLP collector, SQLite canonical store, session projection, analyses, and `/api/kyber/*` server from TypeScript/Node to C# on .NET 10. |
+No plans are open.
 
 ## Archived Plans
 

@@ -1139,12 +1139,25 @@ export async function buildSessions(
   const report: BuildSessionsReport = { built: 0, skipped: 0, derivationDegraded: 0, pruned: 0, rollups: 0, findings: 0 }
   const built = new Set<string>()
   const identities = store.sessionIdentities()
+  const existingBuiltSet =
+    options?.dirtySessionKeys !== undefined && options?.existingSessionIdsByKey !== undefined
+      ? new Set(store.builtSessionIds())
+      : undefined
 
   for (const key of store.sessionKeys()) {
     // Before the unit, not after: a session that is skipped still consumed a
     // turn, and the waiter's wait is bounded by one session either way.
     await yieldToLoop()
+    if (existingBuiltSet !== undefined && !options!.dirtySessionKeys!.has(key.key)) {
+      const priorIds = options!.existingSessionIdsByKey!.get(key.key)
+      if (priorIds !== undefined && priorIds.every((id) => existingBuiltSet.has(id))) {
+        for (const id of priorIds) built.add(id)
+        options?.onSessionKeyBuilt?.(key.key, priorIds)
+        continue
+      }
+    }
     try {
+    const keyBuilt: string[] = []
     // The session's payloads are reduced as they are read: the records stay
     // (the twin collapse, the descendant collection and the subagent
     // projection need the whole session), their decompressed telemetry does
@@ -1156,6 +1169,7 @@ export async function buildSessions(
     }
     const grouped = groupByCanonicalHarness(repriceTurns(store, records))
     if (grouped.size === 0) {
+      options?.onSessionKeyBuilt?.(key.key, keyBuilt)
       report.skipped += 1
       continue
     }
@@ -1190,6 +1204,7 @@ export async function buildSessions(
       })
       store.upsertSession(parentRow)
       built.add(sessionId)
+      keyBuilt.push(sessionId)
       report.built += 1
 
       // Subagent session projection (Contract T1.1)
@@ -1243,6 +1258,7 @@ export async function buildSessions(
 
           store.upsertSession(subagentRow)
           built.add(subagentId)
+          keyBuilt.push(subagentId)
           report.built += 1
         }
       }
@@ -1368,10 +1384,12 @@ export async function buildSessions(
 
           store.upsertSession(subagentRow)
           built.add(subagentId)
+          keyBuilt.push(subagentId)
           report.built += 1
         }
       }
     }
+    options?.onSessionKeyBuilt?.(key.key, keyBuilt)
     } catch (error) {
       // One bad session must not fail the refresh: record it as a problem so
       // the dashboard can explain the gap, count it as skipped and degraded,
@@ -1430,6 +1448,17 @@ export type BuildSessionsOptions = {
    * starved by a rebuild; a direct build has nothing to interleave with.
    */
   readonly yieldToLoop?: () => Promise<void>
+  /**
+   * When provided alongside `existingSessionIdsByKey`, only session keys in
+   * this set (or keys whose previously built session rows are missing from the
+   * store) are loaded and re-derived; unchanged keys reuse their existing
+   * rows. Omit for a full rebuild over every session key.
+   */
+  readonly dirtySessionKeys?: ReadonlySet<string>
+  /** Previously built session IDs per session key from the last complete projection. */
+  readonly existingSessionIdsByKey?: ReadonlyMap<string, readonly string[]>
+  /** Receives the built session IDs (parent + subagents) for each session key. */
+  readonly onSessionKeyBuilt?: (sessionKey: string, sessionIds: readonly string[]) => void
 }
 
 export type BuildSessionRowOptions = {

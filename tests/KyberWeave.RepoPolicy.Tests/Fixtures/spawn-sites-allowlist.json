@@ -998,6 +998,12 @@
       "bound": "Process.Start for `kyberdash menubar --update`. RunProcess waits TrayUpdateTimeout = 5 min (SelfUpdater.cs:56); on expiry it kills the tree, waits 5 s, and throws TimeoutException (SelfUpdater.cs:617-632)."
     },
     {
+      "file": "src/KyberWeave.Core/Dash/CanonStore.cs",
+      "text": "result = ProcessRunner.Run(startInfo, boundedInput, SqliteBatchTimeout);",
+      "count": 1,
+      "bound": "ProcessRunner.Run with SqliteBatchTimeout = 120 s (CanonStore.cs:26); the child tree is killed on expiry and sqlite busy timeout is bounded separately at 5000 ms."
+    },
+    {
       "file": "src/KyberWeave.Core/CodeGraph/CodeGraphResolverAdapter.cs",
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, SqliteReadTimeout);",
       "count": 1,

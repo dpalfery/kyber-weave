@@ -4,7 +4,7 @@ title: KyberDash as a One-Time Fork, and the Engine Language Re-Decided
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-18
+last-reviewed: 2026-11-15
 ---
 
 # ADR 0020: KyberDash as a One-Time Fork, and the Engine Language Re-Decided
@@ -83,30 +83,19 @@ therefore takes the current code as a one-time fork.
    `scripts/install.sh` places self-contained Node SEA binaries for the five stable runtime
    identifiers. The package is renamed `kyberdash` but is not published to npm.
 
-5. **The engine stays TypeScript, for current reasons.** ADR 0006 rejected a C# core
-   because a cross-language fork cannot be merged. That reason is gone, so the question is
-   decided again here.
-   - **The parsers are the asset.** They are 46 modules and roughly 21,700 lines, each
-     encoding a harness's on-disk format, worked out by hand and field-tested against real
-     installs. Porting them buys no capability and resets that testing.
-   - **The analysis layer is TypeScript,** with parity tests that pin it to the retired
-     Python pipeline's results. A port would have to re-earn that parity.
-   - **Every surface reads the engine through one seam,** the REST API under
-     `/api/kyber/*`. The tray, the web dashboard and the context report all consume that
-     API and not the implementation, so moving the engine to .NET later changes none of
-     them.
-
-   Revisit this decision if a .NET component needs the same analyses in-process, or if the
-   Node toolchain keeps blocking the local release loop that the .NET toolchain already
-   passes.
+5. **The engine is ported to C# on .NET 10 ([ADR 0084](0084-kyberdash-csharp-engine.md)).**
+   Every surface continues to read the engine through one canonical store (`canon.db`) and
+   one `/api/kyber/*` REST seam ([ADR 0033](0033-kyberdash-surfaces-are-display-layers.md)),
+   while the collector, store, projection, analysis pipeline, HTTP/OTLP server, in-process
+   job host, and fallback synthesizers run under `src/KyberWeave.Core/Dash/`
+   (`KyberWeave.Core.Dash`). Amended 2026-11-15 by [ADR 0084](0084-kyberdash-csharp-engine.md),
+   which supersedes the original TypeScript-only retention.
 
 ## Alternatives Considered
 
 - **Keep tracking upstream.** Rejected. The products have diverged, so upstream's changes
   arrive mostly in code KyberDash is deleting, while the zone forbids edits the product now
   needs, such as deleting upstream directories and changing upstream command wiring.
-- **Port the engine to C# now.** Rejected for now, on the grounds in decision 5. It is not
-  ruled out, and the REST seam is what keeps it possible.
 - **Keep ADR 0006 current and supersede only its first decision.** Rejected. That would leave
   a current record whose title and first decision describe a relationship that no longer
   exists. Restating the three surviving decisions costs less than every reader who would

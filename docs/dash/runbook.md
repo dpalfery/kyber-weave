@@ -6,8 +6,9 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-11-10
+last-reviewed: 2026-11-15
 decided-by:
+  - adr/0084-kyberdash-csharp-engine
   - adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys
   - adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline
   - adr/0055-factory-capture-is-a-hooks-plugin-pipeline
@@ -1773,6 +1774,13 @@ These suites validate:
 - Edge cases: 400 on missing session IDs, 404 on nonexistent sessions/routes, 405 on non-GET methods.
 - Resilient error handling (returns HTTP 400 on invalid query params without crashing the long-running server process).
 - That the CLI report and the REST report are equal for the same store and scope.
+
+For the C# canonical engine under `src/KyberWeave.Core/Dash/` ([ADR 0084](../adr/0084-kyberdash-csharp-engine.md)), build the solution and run the targeted parity tests directly via `dotnet` (never through `scripts/proc-guard.sh`):
+
+```bash
+dotnet build KyberWeave.sln -c Release
+dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~CanonStoreParityTests|FullyQualifiedName~CanonIngestParityTests|FullyQualifiedName~CanonAnalysisParityTests|FullyQualifiedName~CanonServerParityTests|FullyQualifiedName~CanonSynthParityTests"
+```
 
 ### Harness OpenTelemetry capture
 

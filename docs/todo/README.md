@@ -4,7 +4,7 @@ title: Todos
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-10
+last-reviewed: 2026-11-15
 ---
 
 # Todos
@@ -122,6 +122,7 @@ last-reviewed: YYYY-MM-DD
 | [factory-native-metrics-projection.md](factory-native-metrics-projection.md) | KyberDash | draft | Droid's native OpenTelemetry metrics (lines and files modified, commits, pull requests, MCP tool and skill invocations) are stored but never projected or shown: `CanonStore.getMetricPoints` has no production caller. Slice 2 of the Droid data-completeness work. |
 | [factory-plugin-contract-2.md](factory-plugin-contract-2.md) | KyberDash | draft | Factory plugin contract 2: the tool-span anchor collapse, the `Stop` and `SessionEnd` timings the plugin does not record, 21 quarantined plugin spans, and capture status reporting native export as not configured while metrics arrive. Slice 3 of the Droid data-completeness work. |
 | [kyberdash-tray-supervisor-restart-loop.md](kyberdash-tray-supervisor-restart-loop.md) | KyberDash | draft | The tray runs one engine start attempt per call and nothing guarantees the next, so a dead `kyberdash web` stayed down about 55 minutes on 2026-11-10 until restarted by hand; decide who owns the restart schedule. |
+| [kyberdash-cli-switchover-and-node-sea-retirement.md](kyberdash-cli-switchover-and-node-sea-retirement.md) | KyberDash | draft | Wire `kyberdash` CLI, MCP, and `dash/tray/` entrypoints to `KyberWeave.Core.Dash`, and retire Node SEA packaging in release scripts and distribution docs. |
 
 Nine earlier open todos moved to GitHub issues #125–#133. The four that those issues
 left listed here while pull requests were open are closed below.

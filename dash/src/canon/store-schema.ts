@@ -81,6 +81,8 @@ export const DETECTOR_VERSION = 5
  * race.
  */
 export const RECORDS_WRITE_MARKER_KEY = 'records_write_seq'
+export const PROJECTION_DIRTY_SESSIONS_KEY = 'projection_dirty_sessions'
+export const PROJECTION_SESSION_KEY_MAP_KEY = 'projection_session_key_map'
 
 /**
  * The whole schema, as code. `CREATE ... IF NOT EXISTS` throughout so

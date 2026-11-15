@@ -27,7 +27,7 @@ import { SESSION_PAYLOAD_FRAGMENTS_SELECT, SESSION_PAYLOAD_SELECT, SESSION_TURNS
 import type { CanonicalRecord, ContentPart, CostBlock, ExecutionRow, ExecutionTreeNode, HarnessRollupRow, Measurability, RunRow, SessionRow, TokenUsage } from './types.js'
 import type { DetectorId, Finding, FindingConfidence, FindingEvidenceLink } from '../analysis/findings.js'
 import { calculateCalibrationCurve, type CalibrationCurveResult, type PredictionRecord } from '../analysis/calibration.js'
-import { DETECTOR_VERSION, METADATA_SQL, RECORDS_WRITE_MARKER_KEY, SCHEMA_SQL, SCHEMA_VERSION, SESSION_TURN_TABLE_SQL, WAL_SIZE_LIMIT_BYTES, createSessionDenormIndex, normalizeHistoryWeeks, normalizeIngestSource, schemaVersionRefusal, toRefreshRunRow } from './store-schema.js'
+import { DETECTOR_VERSION, METADATA_SQL, PROJECTION_DIRTY_SESSIONS_KEY, PROJECTION_SESSION_KEY_MAP_KEY, RECORDS_WRITE_MARKER_KEY, SCHEMA_SQL, SCHEMA_VERSION, SESSION_TURN_TABLE_SQL, WAL_SIZE_LIMIT_BYTES, createSessionDenormIndex, normalizeHistoryWeeks, normalizeIngestSource, schemaVersionRefusal, toRefreshRunRow } from './store-schema.js'
 import { MIGRATIONS, type MigrationOptions, type SessionDerivedColumns, deleteSupersededSpans, escapeLike, hasRecordDigest, materializeContextLimitSource, problemIdentity, sessionColumnsMatch, sessionTurnsMatch, splitSessionTurns, storedCount, storedText } from './store-migrations.js'
 import { type CandidateRow, DEFAULT_PENDING_PAGE_BYTES, DEFAULT_QUARANTINE_PAGE_BYTES, type ExecutionDbRow, type FindingDbRow, type FindingsListOptions, type HarnessRollupDbRow, type IngestLogEntry, type MetricPointRow, type ModelCallCandidate, type PendingInteractionPromptRow, type PendingLogEntry, type PendingLogMetadata, type PredictionDbRow, type ProjectedSessionRecord, type QuarantineEntry, type QuarantineEntryDetail, type QuarantineMetadata, type QuarantinedLog, type RecordRow, type RunDbRow, type SessionDbRow, type SpanProblem, UPSERT_METRIC_POINT_SQL, UPSERT_RECORD_SQL, compressRaw, decompressRaw, materializeSessionSummary, metadataChangeCount, metricPointDrafts, problemsHarnessWhere, projectedAttributes, quarantineHarnessWhere, readSessionSummaryFigures, systemPromptTextsFromContentColumns, text, toCandidate, toExecutionRow, toFinding, toHarnessRollupRow, toMetricPointRow, toPrediction, toQuarantineEntry, toRecord, toRunRow, toSessionRow, toSpanProblem } from './store-rows.js'
 const _require = createRequire(import.meta.url)
@@ -141,7 +141,7 @@ function wipeHarnessRows(
 
 // Split into `./store-schema.ts`, `./store-migrations.ts` and `./store-rows.ts`;
 // re-exported so every importer of this module keeps resolving the same names.
-export { SCHEMA_VERSION, schemaVersionRefusal, WAL_SIZE_LIMIT_BYTES, DETECTOR_VERSION, RECORDS_WRITE_MARKER_KEY, METADATA_SQL, SESSION_TURN_TABLE_SQL, SCHEMA_SQL, normalizeHistoryWeeks, normalizeIngestSource } from './store-schema.js'
+export { SCHEMA_VERSION, schemaVersionRefusal, WAL_SIZE_LIMIT_BYTES, DETECTOR_VERSION, RECORDS_WRITE_MARKER_KEY, PROJECTION_DIRTY_SESSIONS_KEY, PROJECTION_SESSION_KEY_MAP_KEY, METADATA_SQL, SESSION_TURN_TABLE_SQL, SCHEMA_SQL, normalizeHistoryWeeks, normalizeIngestSource } from './store-schema.js'
 export { MIGRATIONS, problemIdentity, type MigrationYield, type MigrationOptions } from './store-migrations.js'
 export { compressRaw, decompressRaw, systemPromptTextsFromContentColumns, quarantineHarnessWhere, problemsHarnessWhere, releaseRecordParts, toRecord, projectedAttributes, reduceRecordPayloads, toSessionRow, readSessionSummaryFigures, toRunRow, toExecutionRow, toHarnessRollupRow, toFinding, toPrediction, DEFAULT_PENDING_PAGE_BYTES, type SpanProblem, type IngestLogEntry, type MetricPointRow, type QuarantineEntry, type QuarantineEntryDetail, type QuarantineMetadata, type QuarantinedLog, type ModelCallCandidate, type RecordRow, type ProjectedSessionRecord, type SessionDbRow, type SessionSummaryFigureFields, type SessionSummaryFigureRow, type RunDbRow, type ExecutionDbRow, type HarnessRollupDbRow, type FindingDbRow, type PredictionDbRow, type FindingsListOptions, type PendingLogMetadata, type PendingLogEntry, type PendingInteractionPromptRow } from './store-rows.js'
 
@@ -439,9 +439,16 @@ export class CanonStore {
    */
   upsertMany(records: readonly CanonicalRecord[]): void {
     if (records.length === 0) return
+    const keys = new Set<string>()
+    let hasUnkeyed = false
+    for (const record of records) {
+      const key = record.sessionId ?? record.traceId
+      if (key) keys.add(key)
+      else hasUnkeyed = true
+    }
     this.writeRecords(() => {
       for (const record of records) this.writeRecord(record)
-    })
+    }, hasUnkeyed ? '*' : keys)
   }
 
   private writeRecord(record: CanonicalRecord): void {
@@ -536,12 +543,19 @@ export class CanonStore {
     provenance: readonly RecordProvenance[]
     checkpoint: SourceCheckpoint
   }): void {
+    const keys = new Set<string>()
+    let hasUnkeyed = false
+    for (const record of input.records) {
+      const key = record.sessionId ?? record.traceId
+      if (key) keys.add(key)
+      else hasUnkeyed = true
+    }
     this.writeRecords(() => {
       this.deleteSupersededCopies(input.records, input.checkpoint)
       for (const record of input.records) this.writeRecord(record)
       for (const row of input.provenance) this.writeProvenance(row)
       this.writeCheckpoint(input.checkpoint)
-    })
+    }, hasUnkeyed ? '*' : keys)
   }
 
   /**
@@ -838,6 +852,7 @@ export class CanonStore {
    */
   setContent(spanId: string, content: CanonicalRecord['content'], parts?: readonly ContentPart[]): void {
     const hasParts = parts !== undefined && parts.length > 0
+    const key = this.sessionKeyForSpan(spanId)
     this.writeRecords(() => {
       this.db
         .prepare('UPDATE records SET content_json = ?, parts_json = ? WHERE span_id = ?')
@@ -846,7 +861,7 @@ export class CanonStore {
           hasParts ? compressColumn(parts) : null,
           spanId,
         )
-    })
+    }, key !== undefined ? new Set([key]) : '*')
   }
 
   /**
@@ -884,7 +899,10 @@ export class CanonStore {
         )
         .run(cutoffUtc)
       const purged = typeof info.changes === 'number' ? info.changes : Number(info.changes) || 0
-      if (purged > 0) this.bumpRecordsWriteMarker()
+      if (purged > 0) {
+        this.recordDirtySessionsForNextMarker('*')
+        this.bumpRecordsWriteMarker()
+      }
       this.db.exec('COMMIT')
       return purged
     } catch (err) {
@@ -900,10 +918,17 @@ export class CanonStore {
    */
   setCosts(changes: ReadonlyArray<{ spanId: string; cost: CostBlock }>): void {
     if (changes.length === 0) return
+    const keys = new Set<string>()
+    let hasUnkeyed = false
+    for (const change of changes) {
+      const key = this.sessionKeyForSpan(change.spanId)
+      if (key !== undefined) keys.add(key)
+      else hasUnkeyed = true
+    }
     this.writeRecords(() => {
       const update = this.db.prepare('UPDATE records SET cost_json = ? WHERE span_id = ?')
       for (const change of changes) update.run(JSON.stringify(change.cost), change.spanId)
-    })
+    }, hasUnkeyed ? '*' : keys)
   }
 
   /** Distinct trace ids, the unit attribution votes over. */
@@ -942,11 +967,12 @@ export class CanonStore {
     spanId: string,
     fields: { harness: string; source: string; op: string; tokens: TokenUsage },
   ): void {
+    const key = this.sessionKeyForSpan(spanId)
     this.writeRecords(() => {
       this.db
         .prepare('UPDATE records SET harness = ?, source = ?, op = ?, tokens_json = ? WHERE span_id = ?')
         .run(fields.harness, fields.source, fields.op, JSON.stringify(fields.tokens), spanId)
-    })
+    }, key !== undefined ? new Set([key]) : '*')
   }
 
   /**
@@ -3586,6 +3612,98 @@ export class CanonStore {
     this.setMetadata(RECORDS_WRITE_MARKER_KEY, String(this.recordsWriteMarker() + 1))
   }
 
+  private sessionKeyForSpan(spanId: string): string | undefined {
+    const row = this.db
+      .prepare('SELECT COALESCE(session_id, trace_id) AS key FROM records WHERE span_id = ?')
+      .get(spanId) as { key?: unknown } | undefined
+    return row !== undefined && typeof row.key === 'string' && row.key !== '' ? row.key : undefined
+  }
+
+  dirtyProjectionState(): { fromSeq: number; toSeq: number; keys: string[] | '*' } | undefined {
+    const raw = this.getMetadata(PROJECTION_DIRTY_SESSIONS_KEY)
+    if (raw === undefined) return undefined
+    try {
+      const parsed = JSON.parse(raw) as unknown
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined
+      const record = parsed as Record<string, unknown>
+      if (typeof record['fromSeq'] !== 'number' || typeof record['toSeq'] !== 'number') return undefined
+      const keys = record['keys']
+      if (keys === '*') return { fromSeq: record['fromSeq'], toSeq: record['toSeq'], keys: '*' }
+      if (Array.isArray(keys) && keys.every((item): item is string => typeof item === 'string')) {
+        return { fromSeq: record['fromSeq'], toSeq: record['toSeq'], keys }
+      }
+      return undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  projectedSessionIdsByKey(): Map<string, string[]> | undefined {
+    const raw = this.getMetadata(PROJECTION_SESSION_KEY_MAP_KEY)
+    if (raw === undefined) return undefined
+    try {
+      const parsed = JSON.parse(raw) as unknown
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined
+      const map = new Map<string, string[]>()
+      for (const [key, value] of Object.entries(parsed)) {
+        if (!Array.isArray(value) || !value.every((item): item is string => typeof item === 'string')) {
+          return undefined
+        }
+        map.set(key, value)
+      }
+      return map
+    } catch {
+      return undefined
+    }
+  }
+
+  recordProjectedSessionKeys(
+    seq: number,
+    sessionIdsByKey: ReadonlyMap<string, readonly string[]>,
+  ): void {
+    this.setMetadata(
+      PROJECTION_DIRTY_SESSIONS_KEY,
+      JSON.stringify({ fromSeq: seq, toSeq: seq, keys: [] }),
+    )
+    this.setMetadata(
+      PROJECTION_SESSION_KEY_MAP_KEY,
+      JSON.stringify(Object.fromEntries(sessionIdsByKey)),
+    )
+  }
+
+  private recordDirtySessionsForNextMarker(dirtyKeys: ReadonlySet<string> | '*'): void {
+    const prevSeq = this.recordsWriteMarker()
+    const nextSeq = prevSeq + 1
+    const existing = this.dirtyProjectionState()
+    if (dirtyKeys === '*') {
+      const fromSeq = existing !== undefined && existing.toSeq === prevSeq ? existing.fromSeq : prevSeq
+      this.setMetadata(
+        PROJECTION_DIRTY_SESSIONS_KEY,
+        JSON.stringify({ fromSeq, toSeq: nextSeq, keys: '*' }),
+      )
+      return
+    }
+    if (existing !== undefined && existing.toSeq === prevSeq) {
+      if (existing.keys === '*') {
+        this.setMetadata(
+          PROJECTION_DIRTY_SESSIONS_KEY,
+          JSON.stringify({ fromSeq: existing.fromSeq, toSeq: nextSeq, keys: '*' }),
+        )
+        return
+      }
+      const merged = Array.from(new Set([...existing.keys, ...dirtyKeys]))
+      this.setMetadata(
+        PROJECTION_DIRTY_SESSIONS_KEY,
+        JSON.stringify({ fromSeq: existing.fromSeq, toSeq: nextSeq, keys: merged }),
+      )
+      return
+    }
+    this.setMetadata(
+      PROJECTION_DIRTY_SESSIONS_KEY,
+      JSON.stringify({ fromSeq: prevSeq, toSeq: nextSeq, keys: Array.from(dirtyKeys) }),
+    )
+  }
+
   /**
    * Run a write to `records` and mark the corpus as changed, in one transaction.
    *
@@ -3594,10 +3712,11 @@ export class CanonStore {
    * rebuild a corpus that never changed; a marker not bumped after a
    * successful write would let the next pass skip a corpus that did.
    */
-  private writeRecords(change: () => void): void {
+  private writeRecords(change: () => void, dirtyKeys: ReadonlySet<string> | '*' = '*'): void {
     this.db.exec('BEGIN')
     try {
       change()
+      this.recordDirtySessionsForNextMarker(dirtyKeys)
       this.bumpRecordsWriteMarker()
       this.db.exec('COMMIT')
     } catch (err) {

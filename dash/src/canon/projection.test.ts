@@ -748,3 +748,52 @@ describe('CanonicalProjectionScheduler shared cycle completion (F7)', () => {
     }
   })
 })
+
+describe('projectCanonicalStore: incremental dirty-session projection', () => {
+  it('rebuilds only dirty session keys when records change without reloading clean sessions', async () => {
+    await loadPricing()
+    const makeTurn = (id: string, sessionId: string, minute: number): CanonicalRecord => ({
+      spanId: id,
+      traceId: `trace-${sessionId}`,
+      parentSpanId: null,
+      sessionId,
+      source: 'synthetic',
+      harness: 'claude-code',
+      name: `turn ${id}`,
+      op: 'llm.invoke',
+      kind: 'client',
+      timestamp: `2026-09-04T10:${String(minute).padStart(2, '0')}:00.000Z`,
+      durationMs: 100,
+      status: 'ok',
+      tokens: {
+        freshInput: 100,
+        cacheRead: 0,
+        cacheCreation: 0,
+        output: 20,
+        reportedInput: 100,
+        reportedOutput: 20,
+      },
+      content: {},
+      cost: { basis: 'published', status: 'priced', value: 0.001 },
+      raw: { model: 'claude-opus-5' },
+    })
+
+    const store = new CanonStore(':memory:')
+    try {
+      store.upsertMany([makeTurn('s-a-1', 'sess-a', 0), makeTurn('s-b-1', 'sess-b', 1)])
+      const first = await projectCanonicalStore(store)
+      expect(first.built).toBe(2)
+
+      store.upsertMany([makeTurn('s-b-2', 'sess-b', 2)])
+      const spy = vi.spyOn(store, 'recordsForSessionProjected')
+      const second = await projectCanonicalStore(store)
+
+      expect(second.built).toBe(1)
+      expect(second.pruned).toBe(0)
+      expect(spy.mock.calls.map((call) => call[0])).toEqual(['sess-b'])
+      expect(new Set(store.builtSessionIds())).toEqual(new Set(['sess-a', 'sess-b']))
+    } finally {
+      store.close()
+    }
+  })
+})

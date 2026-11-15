@@ -6,8 +6,9 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-10
+last-reviewed: 2026-11-15
 decided-by:
+  - adr/0084-kyberdash-csharp-engine
   - adr/0020-kyberdash-one-time-fork
   - adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys
   - adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline
@@ -1278,9 +1279,32 @@ share one cadence and never project at once:
   for the next request, `drain()`, or timer.
 
 Unchanged work writes nothing at either level: the maintenance pass skips the
-projection when the corpus-level change gate reads unchanged (below), and the store's
+projection when the corpus-level change gate reads unchanged (below), `buildSessions`
+skips reloading clean session keys when only a subset of sessions changed since the last
+complete pass (`projection_dirty_sessions` / `projection_session_key_map`) while all
+projection environment stamps remain current, and the store's
 `upsertSession`/`upsertRun`/`upsertExecution` skip provably-identical row rewrites,
-so re-projecting a stable corpus settles with no derived writes.
+so re-projecting a stable or incrementally updated corpus avoids full-corpus reads and writes.
+
+In parallel, the C# canonical engine under `src/KyberWeave.Core/Dash/` mirrors the
+schema-24 SQLite layout (`CanonDbPath`, `CanonSchema`, `CanonCompressedColumn`, and
+`CanonStore` via bounded `ProcessRunner` batches to `sqlite3`), ingestion pipeline
+(`CanonicalRecord`, `CanonValidation`, `CanonAdapters`, `CanonIngest`, `OtlpCollector`,
+and `BoundedIngestWriter` enforcing 64 MiB request / 256 MiB pending bounds, 64 KiB
+UTF-8-safe content truncation, eight harness adapters, and quarantine routing),
+session/finding analysis pipeline (`CanonPricing`, `CanonTokenCache`,
+`CanonContextAnalysis`, `CanonFindings`, and `CanonSessionProjector` performing
+incremental dirty-key projection, twin turn deduplication, compressed `session_turn`
+storage, and D5/D6/D8 diagnostic findings), loopback server and job host
+(`LoopbackHttpHost`, `OtlpHttpServer` with bounded OTLP/Protobuf wire decoding,
+`CanonSettings`, `CanonClean`, `CanonRollups`, `KyberJobHost` managing `jobs.lock` and
+atomic `0600` `server.json`, `KyberBridge`, and `KyberApiServer` exposing `/api/kyber/*`
+and `/api/events` SSE), and fallback transcript synthesis and checkpointed refresh
+(`CanonSynth` supporting 44 provider conventions, exclusive reasoning folding, and 64 KiB
+bounded `tool.invoke` synthesis, `CanonSynthDedup` enforcing OTLP precedence with
+`DEDUP_DISAGREEMENT` audit problems, `CanonTranscriptReaders` streaming Claude Code and
+Codex JSONL line-by-line, and `CanonRefresh` coordinating `CommitSourceUnit`
+checkpoints and 14-day rolling `PurgeExpiredContent` sweeps).
 
 Waiter state is O(1) per cycle: every `request()` made before the next quiescence
 shares one cycle-completion promise, however many requests arrive mid-pass.
