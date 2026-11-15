@@ -31,6 +31,11 @@
         "resolved": "1.5.1",
         "contentHash": "NtHwU5t5yKr6Gnylhs8/hlR0mOAftTFQURDz2ID8bkunxps1neOzKw0dYKKlwNuwiYIGLHjJTXK91f809Ko1ww=="
       },
+      "Microsoft.Extensions.DependencyInjection.Abstractions": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "QtpQzuSZVyTPCuHW058yCs9Nj0394uUkNyFHS813nOmK9UgUdBdaprJ5PPsBgsQIpxADTsTkbaMMonykem6qdw=="
+      },
       "Spectre.Console.Ansi": {
         "type": "Transitive",
         "resolved": "0.57.2",
@@ -80,7 +85,8 @@
         "dependencies": {
           "KyberWeave.Contracts": "[0.1.0, )",
           "KyberWeave.Domain": "[0.1.0, )",
-          "KyberWeave.Kernel": "[0.1.0, )"
+          "KyberWeave.Kernel": "[0.1.0, )",
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "[10.0.14, )"
         }
       },
       "kyberweave.domain": {
