@@ -25,6 +25,8 @@ public static class DashEndpointMappings
     private const int DefaultSessionContentBudget = 32_768;
     private const string MutationForbiddenMessage =
         "Mutating routes accept same-machine loopback requests without browser Origin headers only";
+    private const string PagingInvalidMessage =
+        "limit and page must be positive whole numbers and offset a whole number";
 
     private static readonly string[] PostAnalyticsOperations =
     [
@@ -302,7 +304,10 @@ public static class DashEndpointMappings
         ArgumentNullException.ThrowIfNull(query);
 
         string? harness = DashHttp.NormalizeFilter(DashHttp.OptionalQueryString(request.Query, "harness"));
-        (int limit, int offset, int page) = DashHttp.Pagination(request.Query, defaultLimit: 200);
+        (int limit, int offset, int page) = DashHttp.Pagination(request.Query, defaultLimit: 200, out bool invalidPaging);
+        if (invalidPaging)
+            return DashHttp.Error(StatusCodes.Status400BadRequest, PagingInvalidMessage);
+
         return await Task.Run<IResult>(
             () => DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetQuarantinePage(harness, limit, offset, page)),
             cancellationToken).ConfigureAwait(false);
@@ -322,7 +327,10 @@ public static class DashEndpointMappings
         ArgumentNullException.ThrowIfNull(query);
 
         string? harness = DashHttp.NormalizeFilter(DashHttp.OptionalQueryString(request.Query, "harness"));
-        (int limit, int offset, int page) = DashHttp.Pagination(request.Query, defaultLimit: 200);
+        (int limit, int offset, int page) = DashHttp.Pagination(request.Query, defaultLimit: 200, out bool invalidPaging);
+        if (invalidPaging)
+            return DashHttp.Error(StatusCodes.Status400BadRequest, PagingInvalidMessage);
+
         return await Task.Run<IResult>(
             () => DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetProblemsPage(harness, limit, offset, page)),
             cancellationToken).ConfigureAwait(false);
@@ -386,7 +394,10 @@ public static class DashEndpointMappings
         string? sessionId = DashHttp.OptionalQueryString(request.Query, "sessionId");
         string? detector = DashHttp.OptionalQueryString(request.Query, "detector");
         string? harness = DashHttp.OptionalQueryString(request.Query, "harness");
-        (int limit, int offset, int _) = DashHttp.Pagination(request.Query, defaultLimit: 100);
+        (int limit, int offset, int _) = DashHttp.Pagination(request.Query, defaultLimit: 100, out bool invalidPaging);
+        if (invalidPaging)
+            return DashHttp.Error(StatusCodes.Status400BadRequest, PagingInvalidMessage);
+
         return await Task.Run<IResult>(
             () => DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetFindings(runId, sessionId, detector, harness, limit, offset)),
             cancellationToken).ConfigureAwait(false);

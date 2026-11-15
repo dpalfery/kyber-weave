@@ -118,18 +118,51 @@ internal static class DashHttp
 
     /// <summary>Reads a whole number query value when it is zero or greater.</summary>
     public static int? OptionalNonNegativeInt(IQueryCollection query, string key) =>
-        int.TryParse(query[key].ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out int value) && value >= 0
-            ? value
-            : null;
+        OptionalNonNegativeInt(query, key, out _);
 
-    /// <summary>Resolves <c>limit</c>/<c>page</c>/<c>offset</c> into a clamped page window.</summary>
-    public static (int Limit, int Offset, int Page) Pagination(IQueryCollection query, int defaultLimit)
+    /// <summary>
+    /// Reads a whole number query value when it is zero or greater. <paramref name="invalid"/>
+    /// reports that the value was present but not a non-negative whole number.
+    /// </summary>
+    public static int? OptionalNonNegativeInt(IQueryCollection query, string key, out bool invalid)
     {
-        int limit = Math.Clamp(OptionalPositiveInt(query, "limit") ?? defaultLimit, 1, 500);
-        int? rawPage = OptionalPositiveInt(query, "page");
+        invalid = false;
+        if (!query.TryGetValue(key, out Microsoft.Extensions.Primitives.StringValues values))
+            return null;
+
+        string raw = values.ToString();
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            invalid = true;
+            return null;
+        }
+
+        if (int.TryParse(raw, NumberStyles.None, CultureInfo.InvariantCulture, out int value) && value >= 0)
+            return value;
+
+        invalid = true;
+        return null;
+    }
+
+    /// <summary>
+    /// Resolves <c>limit</c>/<c>page</c>/<c>offset</c> into a clamped page window.
+    /// <paramref name="invalid"/> reports a value that was present but malformed, so a caller can
+    /// answer 400 instead of paging with a silent default.
+    /// </summary>
+    public static (int Limit, int Offset, int Page) Pagination(IQueryCollection query, int defaultLimit, out bool invalid)
+    {
+        int? requestedLimit = OptionalPositiveInt(query, "limit", out bool invalidLimit);
+        int? rawPage = OptionalPositiveInt(query, "page", out bool invalidPage);
+        int? rawOffset = OptionalNonNegativeInt(query, "offset", out bool invalidOffset);
+
+        invalid = invalidLimit || invalidPage || invalidOffset;
+        if (invalid)
+            return (defaultLimit, 0, 1);
+
+        int limit = Math.Clamp(requestedLimit ?? defaultLimit, 1, 500);
         int offset = rawPage.HasValue
             ? (rawPage.Value - 1) * limit
-            : OptionalNonNegativeInt(query, "offset") ?? 0;
+            : rawOffset ?? 0;
         return (limit, offset, (offset / limit) + 1);
     }
 
