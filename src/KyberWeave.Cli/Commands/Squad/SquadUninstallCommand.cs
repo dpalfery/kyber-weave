@@ -75,7 +75,9 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
             }
             catch (ArgumentException ex)
             {
-                SquadCommandComposition.WriteClientInputError(ex.Message);
+                SquadCommandComposition.WriteClientInputError(
+                    $"{ex.Message} The argument names a harness, not a directory: to uninstall a project directory, " +
+                    "use `--project` for the current directory or `--project --path <dir>`.");
                 return 2;
             }
 
