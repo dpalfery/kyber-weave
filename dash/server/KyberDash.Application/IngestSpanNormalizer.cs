@@ -499,8 +499,15 @@ internal static class IngestSpanNormalizer
         public IReadOnlyList<RecordProvenanceRow> ListRecordProvenance(string harnessId, string sourceKey) => [];
 
         /// <inheritdoc />
-        public IReadOnlyList<CanonicalRecord> ListOtlpRecords() =>
-            [.. records.Where(static record => !record.SpanId.StartsWith("synth:", StringComparison.Ordinal))];
+        public IReadOnlyList<CanonicalRecord> ListOtlpRecords(string? coveredFromUtc = null, string? coveredThroughUtc = null) =>
+            [
+                .. records
+                    .Where(static record => !record.SpanId.StartsWith("synth:", StringComparison.Ordinal))
+                    .Where(record => string.IsNullOrWhiteSpace(coveredFromUtc)
+                        || string.CompareOrdinal(record.Timestamp, coveredFromUtc) >= 0)
+                    .Where(record => string.IsNullOrWhiteSpace(coveredThroughUtc)
+                        || string.CompareOrdinal(record.Timestamp, coveredThroughUtc) <= 0),
+            ];
 
         /// <inheritdoc />
         public void CommitSourceUnit(

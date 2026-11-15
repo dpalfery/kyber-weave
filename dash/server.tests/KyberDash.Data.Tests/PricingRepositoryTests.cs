@@ -297,7 +297,7 @@ public class PricingRepositoryTests : IDisposable
 
         public IReadOnlyList<RecordProvenanceRow> ListRecordProvenance(string harnessId, string sourceKey) => throw new InvalidOperationException("store offline");
 
-        public IReadOnlyList<CanonicalRecord> ListOtlpRecords() => throw new InvalidOperationException("store offline");
+        public IReadOnlyList<CanonicalRecord> ListOtlpRecords(string? coveredFromUtc = null, string? coveredThroughUtc = null) => throw new InvalidOperationException("store offline");
 
         public void CommitSourceUnit(
             SourceCheckpoint checkpoint,

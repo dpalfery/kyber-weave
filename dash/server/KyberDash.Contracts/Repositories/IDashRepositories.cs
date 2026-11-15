@@ -277,8 +277,12 @@ public interface ICanonStoreRepository
     /// <summary>Lists persisted <see cref="RecordProvenanceRow"/> entries for one source unit.</summary>
     IReadOnlyList<RecordProvenanceRow> ListRecordProvenance(string harnessId, string sourceKey);
 
-    /// <summary>Loads all non-<c>synth:</c> (OTLP-ingested) records from <c>records</c> for cross-path deduplication.</summary>
-    IReadOnlyList<CanonicalRecord> ListOtlpRecords();
+    /// <summary>
+    /// Loads non-<c>synth:</c> (OTLP-ingested) records from <c>records</c> for cross-path
+    /// deduplication, optionally restricted to a covered interval so a long history is not
+    /// materialized on every refresh.
+    /// </summary>
+    IReadOnlyList<CanonicalRecord> ListOtlpRecords(string? coveredFromUtc = null, string? coveredThroughUtc = null);
 
     /// <summary>Atomically commits one checkpointed source unit inside a single store transaction.</summary>
     void CommitSourceUnit(

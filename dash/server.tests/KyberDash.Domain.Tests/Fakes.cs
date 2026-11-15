@@ -932,9 +932,13 @@ public class FakeCanonStoreRepository : ICanonStoreRepository
             .OrderBy(static row => row.SpanId, StringComparer.Ordinal)];
 
     /// <inheritdoc />
-    public IReadOnlyList<CanonicalRecord> ListOtlpRecords() =>
+    public IReadOnlyList<CanonicalRecord> ListOtlpRecords(string? coveredFromUtc = null, string? coveredThroughUtc = null) =>
         [.. records
             .Where(static record => !record.SpanId.StartsWith("synth:", StringComparison.Ordinal))
+            .Where(record => string.IsNullOrWhiteSpace(coveredFromUtc)
+                || string.CompareOrdinal(record.Timestamp, coveredFromUtc) >= 0)
+            .Where(record => string.IsNullOrWhiteSpace(coveredThroughUtc)
+                || string.CompareOrdinal(record.Timestamp, coveredThroughUtc) <= 0)
             .OrderBy(static record => record.Timestamp, StringComparer.Ordinal)];
 
     /// <inheritdoc />

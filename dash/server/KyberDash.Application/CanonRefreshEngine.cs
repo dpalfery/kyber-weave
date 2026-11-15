@@ -184,7 +184,7 @@ public class CanonRefreshEngine
         bool runClosed = false;
         try
         {
-            IReadOnlyList<CanonicalRecord> existingOtlp = store.ListOtlpRecords();
+            IReadOnlyList<CanonicalRecord> existingOtlp = store.ListOtlpRecords(coveredFromUtc, coveredThroughUtc);
             HashSet<string> existingOtlpSpanIds = new(existingOtlp.Select(static r => r.SpanId), StringComparer.Ordinal);
             List<RefreshSourceStatusRow> rows = new(sources.Count);
 
