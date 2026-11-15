@@ -66,11 +66,8 @@ public static class CanonValidation
             charCount += rune.Utf16SequenceLength;
         }
 
-        while (charCount > 0 && Encoding.UTF8.GetByteCount(text.AsSpan(0, charCount)) > maxBytes)
-        {
-            charCount--;
-        }
-
+        // The rune walk above already bounds the prefix to maxBytes, so no rescan is needed here.
+        // Rescanning per character made truncation quadratic in the length of attacker content.
         if (charCount > 0 && char.IsHighSurrogate(text[charCount - 1]))
             charCount--;
 

@@ -1211,10 +1211,12 @@ public static class CanonAdapters
                 long? output = ReadOptionalCounter(raw.Attributes, ["opencode.usage.output"]);
                 long? reasoning = ReadOptionalCounter(raw.Attributes, ["opencode.usage.reasoning"]);
 
+                // Sum in decimal: it cannot wrap, and a negative reasoning count must not read as an
+                // overflow. The comparisons keep the cast inside long's range.
+                decimal adjustedSum = (decimal)(output ?? 0) + (reasoning ?? 0);
                 bool outputOverflowed = output.HasValue
-                    && reasoning.HasValue
-                    && output.Value > long.MaxValue - reasoning.Value;
-                long adjustedOutput = output.HasValue && !outputOverflowed ? output.Value + (reasoning ?? 0) : 0;
+                    && (adjustedSum > long.MaxValue || adjustedSum < long.MinValue);
+                long adjustedOutput = output.HasValue && !outputOverflowed ? (long)adjustedSum : 0;
                 long? adjustedReasoning = output.HasValue && reasoning.HasValue && !outputOverflowed
                     ? reasoning.Value
                     : null;
