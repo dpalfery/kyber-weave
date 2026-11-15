@@ -480,9 +480,9 @@ public sealed class SquadTransaction
                         ? OriginalEntryKind.File
                         : OriginalEntryKind.Missing,
                     mutation.Kind == SquadFileMutationKind.Write
-                        ? Digest(mutation.Content
+                        ? Digest((mutation.Content
                                  ?? throw new InvalidOperationException(
-                                     $"Write mutation '{mutation.RelativePath}' has no content."))
+                                     $"Write mutation '{mutation.RelativePath}' has no content.")).ToArray())
                         : string.Empty);
             })
             .ToArray();
@@ -594,9 +594,9 @@ public sealed class SquadTransaction
                 workDirectory,
                 "staging",
                 $"{mutation.Target}/{mutation.RelativePath}");
-            byte[] content = mutation.Content
+            byte[] content = (mutation.Content
                              ?? throw new InvalidOperationException(
-                                 $"Write mutation '{mutation.RelativePath}' has no content.");
+                                 $"Write mutation '{mutation.RelativePath}' has no content.")).ToArray();
             PublishArtifact(
                 workDirectory,
                 ArtifactArea.Work,

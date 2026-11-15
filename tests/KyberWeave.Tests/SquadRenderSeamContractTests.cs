@@ -74,16 +74,16 @@ public sealed class SquadRenderSeamContractTests : IDisposable
                 ? "invalid server name with spaces!"
                 : null;
 
-        SquadOperatorChannel.ServerName valid = SquadOperatorChannel.ResolveServerName(validReader);
+        SquadOperatorChannelServerName valid = SquadOperatorChannel.ResolveServerName(validReader);
         Assert.Equal(expectedServerName, valid.Name);
         Assert.Null(valid.Warning);
 
-        SquadOperatorChannel.ServerName missing = SquadOperatorChannel.ResolveServerName(nullReader);
+        SquadOperatorChannelServerName missing = SquadOperatorChannel.ResolveServerName(nullReader);
         Assert.Null(missing.Name);
         Assert.NotNull(missing.Warning);
         Assert.Equal(SquadOperatorChannel.ServerNameMissingCode, missing.Warning.Code);
 
-        SquadOperatorChannel.ServerName invalid = SquadOperatorChannel.ResolveServerName(invalidReader);
+        SquadOperatorChannelServerName invalid = SquadOperatorChannel.ResolveServerName(invalidReader);
         Assert.Null(invalid.Name);
         Assert.NotNull(invalid.Warning);
         Assert.Equal(SquadOperatorChannel.ServerNameInvalidCode, invalid.Warning.Code);

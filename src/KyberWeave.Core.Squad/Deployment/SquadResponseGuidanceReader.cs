@@ -1,4 +1,3 @@
-using System.Reflection;
 using System.Text;
 
 namespace KyberWeave.Core.Squad.Deployment;
@@ -7,13 +6,8 @@ namespace KyberWeave.Core.Squad.Deployment;
 /// Resolves the effective response-preferences text for a user session, prioritising the
 /// operator's home file and otherwise falling back to the shipped default.
 /// </summary>
-public static partial class SquadResponseGuidanceSource
+public static class SquadResponseGuidanceReader
 {
-    private static readonly Lazy<string> DefaultTextLazy = new(LoadDefaultText);
-
-    /// <summary>The shipped default text embedded in the assembly.</summary>
-    public static string DefaultText => DefaultTextLazy.Value;
-
     /// <summary>Returns the effective advice text for the current user home.</summary>
     /// <remarks>
     ///     Throws the deployer's degradable <c>SquadShippedGuidanceUnavailableException</c> (an
@@ -27,7 +21,7 @@ public static partial class SquadResponseGuidanceSource
     ///     Resolves the effective text, reading the shipped default through <paramref name="readDefault"/>
     ///     when given. Injected so a test can drive a build that shipped without its default.
     /// </summary>
-    internal static string ReadEffective(string homeDirectory, ICollection<string> warnings, Func<string>? readDefault)
+    public static string ReadEffective(string homeDirectory, ICollection<string> warnings, Func<string>? readDefault)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
         ArgumentNullException.ThrowIfNull(warnings);
@@ -62,16 +56,5 @@ public static partial class SquadResponseGuidanceSource
     }
 
     private static string ShippedDefault(Func<string>? readDefault)
-        => readDefault is null ? DefaultText : readDefault();
-
-    private static string LoadDefaultText()
-    {
-        Assembly assembly = typeof(SquadResponseGuidanceDeployer).Assembly;
-        string resourceName = "Squad.response-guidance.md";
-        using Stream stream = assembly.GetManifestResourceStream(resourceName)
-                              ?? throw new SquadShippedGuidanceUnavailableException(
-                                  $"The embedded response-guidance resource '{resourceName}' is missing.");
-        using StreamReader reader = new(stream, Encoding.UTF8);
-        return reader.ReadToEnd();
-    }
+        => readDefault is null ? SquadResponseGuidanceSource.DefaultText : readDefault();
 }

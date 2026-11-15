@@ -64,7 +64,7 @@ public sealed class SquadOwnedBlockLifecycleTests
     {
         using TempDirectory fixture = new TempDirectory();
         SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock(),
@@ -116,7 +116,7 @@ public sealed class SquadOwnedBlockLifecycleTests
             """);
 
         SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock(),
@@ -154,7 +154,7 @@ public sealed class SquadOwnedBlockLifecycleTests
         string existingDigest = Digest(File.ReadAllBytes(
             Path.Combine(fixture.Path, ".cursor/hooks.json")));
 
-        SquadDeploymentPlan existingPlan = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan existingPlan = SquadDeploymentPlanner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock(),
@@ -169,7 +169,7 @@ public sealed class SquadOwnedBlockLifecycleTests
         Assert.Equal(existingDigest, precondition.Sha256);
 
         using TempDirectory absent = new TempDirectory();
-        SquadDeploymentPlan absentPlan = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan absentPlan = SquadDeploymentPlanner.CreateInstall(
             absent.Path,
             SquadDeploymentScope.Project,
             Lock(),
@@ -236,7 +236,7 @@ public sealed class SquadOwnedBlockLifecycleTests
     {
         using TempDirectory fixture = new TempDirectory();
         SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock(),
@@ -276,7 +276,7 @@ public sealed class SquadOwnedBlockLifecycleTests
     {
         using TempDirectory fixture = new TempDirectory();
         SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock(),
@@ -303,7 +303,7 @@ public sealed class SquadOwnedBlockLifecycleTests
     {
         using TempDirectory fixture = new TempDirectory();
         SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan install = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan install = SquadDeploymentPlanner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock(),
@@ -316,7 +316,7 @@ public sealed class SquadOwnedBlockLifecycleTests
         SquadReceipt previous = Assert.IsType<SquadReceipt>(
             store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
 
-        SquadDeploymentPlan update = SquadDeploymentPlan.CreateUpdate(
+        SquadDeploymentPlan update = SquadDeploymentPlanner.CreateUpdate(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock(),
@@ -343,7 +343,7 @@ public sealed class SquadOwnedBlockLifecycleTests
     {
         using TempDirectory fixture = new TempDirectory();
         SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan install = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan install = SquadDeploymentPlanner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock(),
@@ -358,7 +358,7 @@ public sealed class SquadOwnedBlockLifecycleTests
 
         DriftOwnedEntry(fixture.Path, ".cursor/hooks.json", "cursor-one", "cursor-one drifted by hand");
 
-        SquadDeploymentPlan preserved = SquadDeploymentPlan.CreateUpdate(
+        SquadDeploymentPlan preserved = SquadDeploymentPlanner.CreateUpdate(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock(),
@@ -374,7 +374,7 @@ public sealed class SquadOwnedBlockLifecycleTests
         new SquadTransaction(store).Execute(preserved);
         Assert.Contains("cursor-one drifted by hand", Read(fixture.Path, ".cursor/hooks.json"), StringComparison.Ordinal);
 
-        SquadDeploymentPlan replaced = SquadDeploymentPlan.CreateUpdate(
+        SquadDeploymentPlan replaced = SquadDeploymentPlanner.CreateUpdate(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock(),
@@ -411,7 +411,7 @@ public sealed class SquadOwnedBlockLifecycleTests
             }
             """);
         SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan install = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan install = SquadDeploymentPlanner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock(),
@@ -424,7 +424,7 @@ public sealed class SquadOwnedBlockLifecycleTests
         SquadReceipt receipt = Assert.IsType<SquadReceipt>(
             store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
 
-        SquadDeploymentPlan uninstall = SquadDeploymentPlan.CreateUninstall(
+        SquadDeploymentPlan uninstall = SquadDeploymentPlanner.CreateUninstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             receipt);
@@ -441,7 +441,7 @@ public sealed class SquadOwnedBlockLifecycleTests
     {
         using TempDirectory fixture = new TempDirectory();
         SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan install = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan install = SquadDeploymentPlanner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock(),
@@ -455,7 +455,7 @@ public sealed class SquadOwnedBlockLifecycleTests
             store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
         Assert.True(Assert.Single(receipt.Blocks).CreatedFile);
 
-        SquadDeploymentPlan uninstall = SquadDeploymentPlan.CreateUninstall(
+        SquadDeploymentPlan uninstall = SquadDeploymentPlanner.CreateUninstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             receipt);
@@ -560,7 +560,7 @@ public sealed class SquadOwnedBlockLifecycleTests
         File.WriteAllText(GlobalHookFile(installedCorrupted.Roots, SquadTarget.Cursor), "{ unclosed json");
         File.WriteAllText(GlobalHookFile(installedCorrupted.Roots, SquadTarget.Codex), "{ unclosed json");
 
-        SquadDeploymentPlan keepBoth = SquadDeploymentPlan.CreateUninstall(
+        SquadDeploymentPlan keepBoth = SquadDeploymentPlanner.CreateUninstall(
             installedCorrupted.Home,
             SquadDeploymentScope.Global,
             twoBlocks,
@@ -574,7 +574,7 @@ public sealed class SquadOwnedBlockLifecycleTests
         Assert.Equal("kyber-squad.receipt/v3", cleanReceipt.Schema);
         Assert.Equal(2, cleanReceipt.Blocks.Count);
 
-        SquadDeploymentPlan keepNone = SquadDeploymentPlan.CreateUninstall(
+        SquadDeploymentPlan keepNone = SquadDeploymentPlanner.CreateUninstall(
             installedClean.Home,
             SquadDeploymentScope.Global,
             cleanReceipt,
@@ -604,7 +604,7 @@ public sealed class SquadOwnedBlockLifecycleTests
         SquadReceipt previous = Assert.IsType<SquadReceipt>(
             installed.Store.ReadReceipt(installed.Home, SquadDeploymentScope.Global));
 
-        SquadDeploymentPlan update = SquadDeploymentPlan.CreateUpdate(
+        SquadDeploymentPlan update = SquadDeploymentPlanner.CreateUpdate(
             installed.Home,
             SquadDeploymentScope.Global,
             Lock(),
@@ -661,7 +661,7 @@ public sealed class SquadOwnedBlockLifecycleTests
             store.ReadReceipt(home, SquadDeploymentScope.Global));
         Assert.Equal(["cursor", "codex"], previous.Blocks.Select(block => block.Target).ToArray());
 
-        SquadDeploymentPlan update = SquadDeploymentPlan.CreateUpdate(
+        SquadDeploymentPlan update = SquadDeploymentPlanner.CreateUpdate(
             home,
             SquadDeploymentScope.Global,
             Lock(),
@@ -821,7 +821,7 @@ public sealed class SquadOwnedBlockLifecycleTests
     private static SquadStateStore InstallProjectClaudeAndCursor(string root)
     {
         SquadStateStore store = Store(root);
-        new SquadTransaction(store).Execute(SquadDeploymentPlan.CreateInstall(
+        new SquadTransaction(store).Execute(SquadDeploymentPlanner.CreateInstall(
             root,
             SquadDeploymentScope.Project,
             Lock(),
@@ -836,7 +836,7 @@ public sealed class SquadOwnedBlockLifecycleTests
     private static void UninstallOnly(SquadStateStore store, string root, SquadTarget target)
     {
         SquadReceipt receipt = Assert.IsType<SquadReceipt>(store.ReadReceipt(root, SquadDeploymentScope.Project));
-        new SquadTransaction(store).Execute(SquadDeploymentPlan.CreateUninstall(
+        new SquadTransaction(store).Execute(SquadDeploymentPlanner.CreateUninstall(
             root,
             SquadDeploymentScope.Project,
             receipt,
@@ -928,7 +928,7 @@ public sealed class SquadOwnedBlockLifecycleTests
         Directory.CreateDirectory(home);
         SquadGlobalRoots roots = new(_ => null, home);
         SquadStateStore store = new(userPaths);
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
             home,
             SquadDeploymentScope.Global,
             Lock(),

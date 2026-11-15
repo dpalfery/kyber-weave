@@ -34,7 +34,7 @@ public static class SquadMarkdownDocument
     /// than from a serialized dictionary.
     /// </summary>
     /// <remarks>
-    /// <see cref="ZCodeRenderer"/> is the one caller: ZCode's frontmatter reader is a
+    /// <c>ZCodeRenderer</c> is the one caller: ZCode's frontmatter reader is a
     /// hand-rolled line parser, not a YAML parser, so the emitted scalar form has to match
     /// ZCode's own writer rather than whatever a general-purpose serializer produces. The
     /// fencing, CRLF normalization, and trailing-newline guarantees are the reason this

@@ -39,7 +39,7 @@ public sealed class ArbiterGlobalHookFileRenderingTests
 
         SquadRenderedBlock block = CreateBlock(target, format);
 
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Global,
             Lock(),
@@ -77,7 +77,7 @@ public sealed class ArbiterGlobalHookFileRenderingTests
 
         SquadRenderedBlock block = CreateBlock(SquadTarget.Cursor, SquadHookBlockFormat.Cursor);
 
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Global,
             Lock(),
@@ -110,7 +110,7 @@ public sealed class ArbiterGlobalHookFileRenderingTests
             {"SubagentStop": [{"hooks": [{"type": "command", "command": "user-own-stop-notifier"}]}]}
             """);
 
-        new SquadTransaction(store).Execute(SquadDeploymentPlan.CreateInstall(
+        new SquadTransaction(store).Execute(SquadDeploymentPlanner.CreateInstall(
             home,
             SquadDeploymentScope.Global,
             Lock(),
@@ -130,7 +130,7 @@ public sealed class ArbiterGlobalHookFileRenderingTests
         Assert.Contains("user-own-stop-notifier", stop.ToJsonString(), StringComparison.Ordinal);
 
         SquadReceipt receipt = Assert.IsType<SquadReceipt>(store.ReadReceipt(home, SquadDeploymentScope.Global));
-        new SquadTransaction(store).Execute(SquadDeploymentPlan.CreateUninstall(
+        new SquadTransaction(store).Execute(SquadDeploymentPlanner.CreateUninstall(
             home,
             SquadDeploymentScope.Global,
             receipt,
@@ -159,7 +159,7 @@ public sealed class ArbiterGlobalHookFileRenderingTests
 
         SquadRenderedBlock current = CreateBlock(SquadTarget.Antigravity, SquadHookBlockFormat.Antigravity);
         SquadRenderedBlock stale = current with { RelativePath = ".agents/hooks.json" };
-        new SquadTransaction(store).Execute(SquadDeploymentPlan.CreateInstall(
+        new SquadTransaction(store).Execute(SquadDeploymentPlanner.CreateInstall(
             home,
             SquadDeploymentScope.Global,
             Lock(),
@@ -175,7 +175,7 @@ public sealed class ArbiterGlobalHookFileRenderingTests
         SquadReceipt receipt = Assert.IsType<SquadReceipt>(store.ReadReceipt(home, SquadDeploymentScope.Global));
         Assert.Equal(".agents/hooks.json", Assert.Single(receipt.Blocks).RelativePath);
 
-        new SquadTransaction(store).Execute(SquadDeploymentPlan.CreateUninstall(
+        new SquadTransaction(store).Execute(SquadDeploymentPlanner.CreateUninstall(
             home,
             SquadDeploymentScope.Global,
             receipt,

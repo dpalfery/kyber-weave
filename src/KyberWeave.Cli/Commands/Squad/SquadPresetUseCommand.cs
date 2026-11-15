@@ -325,7 +325,7 @@ public sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
             ModelPresets = applied
         };
 
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
             anchorRoot,
             scope,
             nextLock,

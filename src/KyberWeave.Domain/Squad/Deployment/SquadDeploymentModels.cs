@@ -183,7 +183,7 @@ public sealed record SquadReceipt(
     ///     Additive so every existing positional construction of <see cref="SquadReceipt" /> keeps
     ///     compiling: it defaults to <see cref="SquadReceiptLayout.PerTargetRoots" />, the layout
     ///     every deployment has used since #91, and a legacy receipt read from v1 JSON gets this
-    ///     overwritten by classification in <see cref="SquadStateStore.DeserializeReceipt" />.
+    ///     overwritten by classification in <c>SquadStateStore.DeserializeReceipt</c>.
     /// </summary>
     public SquadReceiptLayout Layout { get; init; } = SquadReceiptLayout.PerTargetRoots;
 

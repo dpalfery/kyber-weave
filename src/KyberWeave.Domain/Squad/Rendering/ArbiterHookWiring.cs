@@ -77,9 +77,12 @@ public static class ArbiterHookWiring
     private static readonly HashSet<string> GuardedCapabilityProfiles =
         new(StringComparer.Ordinal) { "worker", "publishing-worker" };
 
+    /// <summary>The capability profile of the architect agent; a test pins it to <c>ArbiterSquadCatalog.ArchitectCapabilityProfile</c>.</summary>
+    internal const string ArchitectCapabilityProfile = "architect";
+
     /// <summary>The capability profiles whose agents' Bash and PowerShell calls the architect shell guard checks.</summary>
     private static readonly HashSet<string> ShellGuardedCapabilityProfiles =
-        new(StringComparer.Ordinal) { KyberWeave.Core.Arbiter.ArbiterSquadCatalog.ArchitectCapabilityProfile };
+        new(StringComparer.Ordinal) { ArchitectCapabilityProfile };
 
     /// <summary>The targets on which Arbiter hooks are produced today.</summary>
     /// <remarks>

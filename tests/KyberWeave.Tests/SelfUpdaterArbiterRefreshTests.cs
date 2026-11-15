@@ -415,12 +415,12 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     /// </summary>
     private static void SeedGlobalBlocks(SquadStateStore store, SquadGlobalRoots roots, string home)
     {
-        IReadOnlyList<SquadHookOwnedEntry> cursorOwned = SquadHookJsonBlock.SpliceFile(
+        IReadOnlyList<SquadHookOwnedEntry> cursorOwned = SquadHookJsonFile.SpliceFile(
             SquadHookBlockFormat.Cursor,
             GlobalHookFile(roots, SquadTarget.Cursor),
             [CursorHookEntry()],
             [CursorHookEntry()]);
-        IReadOnlyList<SquadHookOwnedEntry> codexOwned = SquadHookJsonBlock.SpliceFile(
+        IReadOnlyList<SquadHookOwnedEntry> codexOwned = SquadHookJsonFile.SpliceFile(
             SquadHookBlockFormat.Codex,
             GlobalHookFile(roots, SquadTarget.Codex),
             [MatcherGroupHookEntry()],

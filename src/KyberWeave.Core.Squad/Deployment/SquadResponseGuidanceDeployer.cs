@@ -1,4 +1,3 @@
-using System.Reflection;
 using System.Security.Cryptography;
 
 namespace KyberWeave.Core.Squad.Deployment;
@@ -53,8 +52,7 @@ internal sealed class SquadResponseGuidanceDeployer
     /// <summary>The file name Squad owns beneath the home state root.</summary>
     public const string FileName = "response-guidance.md";
 
-    /// <summary>The manifest resource the shipped default is read from.</summary>
-    private const string DefaultResourceName = "Squad.response-guidance.md";
+    private const string DefaultResourceName = SquadResponseGuidanceSource.ResourceName;
 
     private readonly string _homeStateRoot;
     private readonly Func<byte[]> _readDefault;
@@ -271,8 +269,7 @@ internal sealed class SquadResponseGuidanceDeployer
 
     private static byte[] ReadDefaultContent()
     {
-        Assembly assembly = typeof(SquadResponseGuidanceDeployer).Assembly;
-        using Stream stream = assembly.GetManifestResourceStream(DefaultResourceName)
+        using Stream stream = SquadResponseGuidanceSource.OpenDefaultResource()
                               ?? throw new SquadShippedGuidanceUnavailableException(
                                   $"KyberWeave.Core does not carry its default response guidance " +
                                   $"('{DefaultResourceName}'), so a global update has nothing to deploy. " +
@@ -285,33 +282,5 @@ internal sealed class SquadResponseGuidanceDeployer
     private static string Digest(ReadOnlySpan<byte> content)
     {
         return Convert.ToHexStringLower(SHA256.HashData(content));
-    }
-}
-
-/// <summary>
-///     Raised when this assembly carries no readable default response guidance, so a global update has
-///     nothing to deploy.
-/// </summary>
-/// <remarks>
-///     An <see cref="IOException" /> subclass on purpose: an embedded stream that cannot be opened is
-///     the same class of failure as a file that cannot be read, and it belongs on the degradable side of
-///     <see cref="SquadResponseGuidanceDeployer.IsDegradableFailure" /> so a broken build costs a warning
-///     rather than the whole deployment. The type is distinct so the warning can name a defect a rerun
-///     cannot fix, which a plain <see cref="IOException" /> from the filesystem must not claim.
-/// </remarks>
-internal sealed class SquadShippedGuidanceUnavailableException : IOException
-{
-    public SquadShippedGuidanceUnavailableException()
-    {
-    }
-
-    public SquadShippedGuidanceUnavailableException(string message)
-        : base(message)
-    {
-    }
-
-    public SquadShippedGuidanceUnavailableException(string message, Exception innerException)
-        : base(message, innerException)
-    {
     }
 }

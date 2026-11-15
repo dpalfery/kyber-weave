@@ -335,7 +335,7 @@ public sealed class SquadHomeStateStoreTests
             Directory.Exists(homeStore),
             "A committed transaction must write its state under the home store.");
         SortedSet<string> before = DirectoriesUnder(homeStore);
-        SquadDeploymentPlan update = SquadDeploymentPlan.CreateUpdate(
+        SquadDeploymentPlan update = SquadDeploymentPlanner.CreateUpdate(
             root,
             scope,
             Lock("1.2.4"),
@@ -427,7 +427,7 @@ public sealed class SquadHomeStateStoreTests
         string root,
         SquadDeploymentScope scope,
         params SquadDeploymentFile[] files) =>
-        SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlanner.CreateInstall(
             root,
             scope,
             Lock(),

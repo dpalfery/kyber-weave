@@ -230,7 +230,7 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
         SquadHarnessRenderContext context,
         SquadAgent agent,
         CopilotPlan plan,
-        SquadOperatorChannel.Overlay? operatorChannelOverlay)
+        SquadOperatorChannelOverlay? operatorChannelOverlay)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
@@ -397,7 +397,7 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
     /// </remarks>
     private static void AddConductorGuard(
         Dictionary<string, object?> hooks,
-        SquadOperatorChannel.Overlay? operatorChannelOverlay,
+        SquadOperatorChannelOverlay? operatorChannelOverlay,
         int timeoutSeconds)
     {
         string? allowedServer = operatorChannelOverlay?.ToolEntry.Replace("/*", string.Empty, StringComparison.Ordinal);
@@ -483,7 +483,7 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
     /// </summary>
     private sealed record CopilotPlan(
         string? GlobalAgentsRoot,
-        SquadOperatorChannel.Overlay? OperatorChannelOverlay,
+        SquadOperatorChannelOverlay? OperatorChannelOverlay,
         IReadOnlyList<SquadArbiterHook> ArbiterHooks,
         IReadOnlySet<string> Dispatchers)
     {
@@ -509,10 +509,10 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
             // The operator channel attaches only at global scope, and only when the user's Copilot config
             // declares the server it calls. Without the server the conductor must stay exactly as it is,
             // because a tool entry for a server Copilot cannot reach is a tool the agent cannot call.
-            SquadOperatorChannel.Overlay? operatorChannelOverlay = null;
+            SquadOperatorChannelOverlay? operatorChannelOverlay = null;
             if (copilotGlobalRoot is not null && SquadOperatorChannel.IsGateOn(request.EnvironmentReader))
             {
-                SquadOperatorChannel.ServerName server = SquadOperatorChannel.ResolveServerName(request.EnvironmentReader);
+                SquadOperatorChannelServerName server = SquadOperatorChannel.ResolveServerName(request.EnvironmentReader);
                 if (server.Warning is { } nameWarning)
                 {
                     warnings.Add(nameWarning);
@@ -524,7 +524,7 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
                         string overlaySourceDirectory = Directory.Exists(request.SourceDirectory)
                             ? request.SourceDirectory
                             : request.PreloadedSource?.RootPath ?? request.SourceDirectory;
-                        operatorChannelOverlay = SquadOperatorChannel.LoadOverlay(overlaySourceDirectory, serverName);
+                        operatorChannelOverlay = SquadOperatorChannelOverlayFile.LoadOverlay(overlaySourceDirectory, serverName);
                         warnings.Add(SquadOperatorChannel.OverlayApplied());
                     }
                     else

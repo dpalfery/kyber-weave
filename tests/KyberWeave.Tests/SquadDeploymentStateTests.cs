@@ -102,7 +102,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             string targetRoot = Path.Combine(fixture.Path, "target");
             Directory.CreateDirectory(targetRoot);
             SquadStateStore store = Store(Path.Combine(fixture.Path, "application-data"));
-            SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
+            SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
                 targetRoot,
                 SquadDeploymentScope.Project,
                 Lock(),
@@ -572,7 +572,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         string home = Path.Combine(applicationData, "home");
         Directory.CreateDirectory(home);
         SquadStateStore store = Store(applicationData);
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Global,
             Lock(),
@@ -622,7 +622,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         // dot-prefixed path here would only manufacture a self-contradicting receipt of this
         // test's own making against the read-side layout cross-check (#91), not exercise
         // anything CreateInstall itself does.
-        SquadDeploymentPlan firstPlan = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan firstPlan = SquadDeploymentPlanner.CreateInstall(
             firstRoot,
             SquadDeploymentScope.Global,
             Lock(),
@@ -771,7 +771,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             [SquadTarget.Codex] = codexRoot
         });
         SquadStateStore store = Store(applicationData);
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Global,
             Lock(),
@@ -879,7 +879,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                     "codex",
                     false)
             ]);
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
             targetRoot,
             SquadDeploymentScope.Global,
             Lock("1.2.4"),
@@ -911,7 +911,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         Write(fixture.Path, ".codex/agents/conductor.toml", "same bytes");
         DateTime before = File.GetLastWriteTimeUtc(
             Path.Combine(fixture.Path, ".codex/agents/conductor.toml"));
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock(),
@@ -934,7 +934,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     {
         using TempDirectory fixture = new();
         const string relativePath = ".codex/agents/conductor.toml";
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock(),
@@ -966,7 +966,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         SortedDictionary<string, byte[]> before = Snapshot(fixture.Path);
 
         SquadDeploymentConflictException exception = Assert.Throws<SquadDeploymentConflictException>(() =>
-            SquadDeploymentPlan.CreateInstall(
+            SquadDeploymentPlanner.CreateInstall(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 Lock(),
@@ -994,7 +994,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         using TempDirectory fixture = new();
 
         SquadDeploymentConflictException exception = Assert.Throws<SquadDeploymentConflictException>(() =>
-            SquadDeploymentPlan.CreateInstall(
+            SquadDeploymentPlanner.CreateInstall(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 Lock(),
@@ -1023,7 +1023,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             new SquadOwnedFile(aliasPath, Digest("second"), "codex", false));
 
         SquadDeploymentConflictException exception = Assert.Throws<SquadDeploymentConflictException>(() =>
-            SquadDeploymentPlan.CreateUninstall(
+            SquadDeploymentPlanner.CreateUninstall(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 receipt));
@@ -1043,7 +1043,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 "codex",
                 false));
         Write(fixture.Path, ".codex/agents/conductor.toml", "operator edit");
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),
@@ -1080,7 +1080,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         SquadDeploymentPlan plan;
         using (KyberWeave.Tests.Fakes.SquadHomeHarness.DenyReadOrSkip(fullPath))
         {
-            plan = SquadDeploymentPlan.CreateUpdate(
+            plan = SquadDeploymentPlanner.CreateUpdate(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),
@@ -1114,7 +1114,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         SquadDeploymentPlan plan;
         using (KyberWeave.Tests.Fakes.SquadHomeHarness.DenyReadOrSkip(fullPath))
         {
-            plan = SquadDeploymentPlan.CreateUpdate(
+            plan = SquadDeploymentPlanner.CreateUpdate(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),
@@ -1152,7 +1152,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         SquadDeploymentPlan plan;
         using (KyberWeave.Tests.Fakes.SquadHomeHarness.DenyReadOrSkip(codexPath))
         {
-            plan = SquadDeploymentPlan.CreateUpdate(
+            plan = SquadDeploymentPlanner.CreateUpdate(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),
@@ -1219,7 +1219,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         const string agentContent = "# Plan path\n";
         const string skillContent = "# Requirements phase\n";
         SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock(),
@@ -1295,7 +1295,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         Write(fixture.Path, editedObsoleteResource, "operator legacy edit\n");
         Write(fixture.Path, unchangedObsoleteResource, "installed legacy skill\n");
         WriteState(fixture.Path, Lock(), receipt);
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),
@@ -1321,7 +1321,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     /// <summary>
     ///     When updating an existing deployment from Antigravity's fallback role-skill lowering
     ///     shape (.agents/skills/&lt;name&gt;/SKILL.md) to its native agent shape (.agents/agents/&lt;name&gt;/agent.md),
-    ///     receipt-diff logic in <see cref="SquadDeploymentPlan.CreateUpdate" /> plans a Delete mutation
+    ///     receipt-diff logic in <see cref="SquadDeploymentPlanner.CreateUpdate" /> plans a Delete mutation
     ///     for orphaned fallback skill files whose on-disk bytes still match the previous receipt digest,
     ///     and retains orphaned skill files whose bytes were locally edited by an operator.
     /// </summary>
@@ -1370,7 +1370,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         Assert.False(File.Exists(ToPlatformPath(fixture.Path, nativeWorkerAgentPath)));
         Assert.False(File.Exists(ToPlatformPath(fixture.Path, nativeReviewerAgentPath)));
 
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),
@@ -1415,14 +1415,14 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             m => m.RelativePath == nativeWorkerAgentPath);
         Assert.Equal(SquadFileMutationKind.Write, workerWrite.Kind);
         Assert.Equal(target, workerWrite.Target);
-        Assert.Equal(nativeWorkerAgentContent, Encoding.UTF8.GetString(workerWrite.Content!));
+        Assert.Equal(nativeWorkerAgentContent, Encoding.UTF8.GetString(workerWrite.Content!.Value.Span));
 
         SquadFileMutation reviewerWrite = Assert.Single(
             plan.FileMutations,
             m => m.RelativePath == nativeReviewerAgentPath);
         Assert.Equal(SquadFileMutationKind.Write, reviewerWrite.Kind);
         Assert.Equal(target, reviewerWrite.Target);
-        Assert.Equal(nativeReviewerAgentContent, Encoding.UTF8.GetString(reviewerWrite.Content!));
+        Assert.Equal(nativeReviewerAgentContent, Encoding.UTF8.GetString(reviewerWrite.Content!.Value.Span));
 
         Assert.DoesNotContain(plan.FileMutations, m => m.RelativePath == editedSkillPath);
 
@@ -1520,7 +1520,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             Write(fixture.Path, retiredSkillPath, installedContent);
             WriteState(fixture.Path, Lock(), previousReceipt);
 
-            SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
+            SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),
@@ -1549,7 +1549,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             Write(fixture.Path, retiredSkillPath, editedContent);
             WriteState(fixture.Path, Lock(), previousReceipt);
 
-            SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
+            SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),
@@ -1587,7 +1587,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             false));
         Write(fixture.Path, resourcePath, installedContent);
         WriteState(fixture.Path, Lock(), receipt);
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),
@@ -1621,7 +1621,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 "codex",
                 false));
         Write(fixture.Path, ".codex/agents/conductor.toml", "operator edit");
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),
@@ -1652,7 +1652,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             false));
         Write(fixture.Path, relativePath, "installed body");
         WriteState(fixture.Path, Lock(), receipt);
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),
@@ -1687,7 +1687,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         SortedDictionary<string, byte[]> before = Snapshot(fixture.Path);
 
         SquadDeploymentConflictException exception = Assert.Throws<SquadDeploymentConflictException>(() =>
-            SquadDeploymentPlan.CreateUpdate(
+            SquadDeploymentPlanner.CreateUpdate(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),
@@ -1725,7 +1725,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         Write(fixture.Path, unchanged.RelativePath, "installed conductor");
         Write(fixture.Path, edited.RelativePath, "operator reviewer edit");
         WriteState(fixture.Path, Lock(), receipt);
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUninstall(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUninstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             receipt);
@@ -1762,7 +1762,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         SquadReceipt receipt = Receipt(CodexOwned, CursorOwned);
         WriteState(fixture.Path, Lock(), receipt);
 
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUninstall(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUninstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             receipt,
@@ -1790,7 +1790,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         SquadReceipt receipt = Receipt(CursorOwned);
         WriteState(fixture.Path, Lock(), receipt);
 
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUninstall(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUninstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             receipt,
@@ -1812,7 +1812,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         Write(fixture.Path, CursorOwned.RelativePath, cursorFileEdited ? "operator edit" : "cursor body");
         SquadReceipt receipt = Receipt(CodexOwned, CursorOwned) with { Degradations = CodexAndCursorDegradations };
 
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUninstall(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUninstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             receipt,
@@ -1832,7 +1832,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         Write(fixture.Path, CursorOwned.RelativePath, "cursor body");
         SquadReceipt receipt = Receipt(CodexOwned, CursorOwned) with { Degradations = CodexAndCursorDegradations };
 
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUninstall(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUninstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             receipt);
@@ -1854,7 +1854,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         SquadReceipt receipt = GlobalReceiptWithHomeFiles(homeFile) with { Files = [codex, cursor] };
         SquadReceipt sibling = GlobalReceiptWithHomeFiles() with { Files = [codex] };
 
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUninstall(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUninstall(
             fixture.Path,
             SquadDeploymentScope.Global,
             receipt,
@@ -1879,7 +1879,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             false));
         Write(fixture.Path, relativePath, "installed body");
         WriteState(fixture.Path, Lock(), receipt);
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUninstall(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUninstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             receipt);
@@ -1902,7 +1902,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         using TempDirectory fixture = new();
 
         SquadPathContainmentException exception = Assert.Throws<SquadPathContainmentException>(() =>
-            SquadDeploymentPlan.CreateInstall(
+            SquadDeploymentPlanner.CreateInstall(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 Lock(),
@@ -1925,7 +1925,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         Directory.CreateSymbolicLink(Path.Combine(codex, "agents"), outside.Path);
 
         SquadPathContainmentException exception = Assert.Throws<SquadPathContainmentException>(() =>
-            SquadDeploymentPlan.CreateInstall(
+            SquadDeploymentPlanner.CreateInstall(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 Lock(),
@@ -1957,7 +1957,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 false));
 
         SquadPathContainmentException exception = Assert.Throws<SquadPathContainmentException>(() =>
-            SquadDeploymentPlan.CreateUninstall(
+            SquadDeploymentPlanner.CreateUninstall(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 receipt));
@@ -2303,7 +2303,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         string fixturePath = fixture.Path;
         const string generatedPath = ".warp/roles/reviewer.md";
         const string externalPath = ".warp/roles/operator-note.md";
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
             fixturePath,
             SquadDeploymentScope.Project,
             Lock(),
@@ -2425,7 +2425,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         Directory.CreateDirectory(targetRoot);
         Directory.CreateSymbolicLink(aliasRoot, targetRoot);
         SquadStateStore store = Store(applicationData);
-        SquadDeploymentPlan activePlan = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan activePlan = SquadDeploymentPlanner.CreateInstall(
             targetRoot,
             activeScope,
             Lock(),
@@ -2435,7 +2435,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             new FixedTimeProvider(InstalledAt));
         string contenderRoot = useSymlinkAlias ? aliasRoot : targetRoot;
         string contenderFile = AgentRelativePath(contenderScope, "contender.toml");
-        SquadDeploymentPlan contenderPlan = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan contenderPlan = SquadDeploymentPlanner.CreateInstall(
             contenderRoot,
             contenderScope,
             Lock(),
@@ -2636,7 +2636,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         Assert.Equal(upperIdentity, symlinkIdentity);
 
         using BlockingObserver blocker = new(SquadTransactionStepKind.IntentWritten);
-        SquadDeploymentPlan activePlan = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan activePlan = SquadDeploymentPlanner.CreateInstall(
             upperRoot,
             SquadDeploymentScope.Project,
             Lock(),
@@ -2644,7 +2644,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             [],
             false,
             new FixedTimeProvider(InstalledAt));
-        SquadDeploymentPlan siblingPlan = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan siblingPlan = SquadDeploymentPlanner.CreateInstall(
             lowerRoot,
             SquadDeploymentScope.Project,
             Lock(),
@@ -2705,7 +2705,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             store.ResolveReceiptPath(caseAlias, SquadDeploymentScope.Global));
 
         using BlockingObserver blocker = new(SquadTransactionStepKind.IntentWritten);
-        SquadDeploymentPlan activePlan = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan activePlan = SquadDeploymentPlanner.CreateInstall(
             actualRoot,
             SquadDeploymentScope.Project,
             Lock(),
@@ -2716,7 +2716,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         // Project scope, not global: the lease of a project is its physical root, so a case alias of that
         // root contends. Global state is leased on the home, which this root is not, so a global alias
         // would correctly not contend with a project at an unrelated root.
-        SquadDeploymentPlan aliasPlan = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan aliasPlan = SquadDeploymentPlanner.CreateInstall(
             caseAlias,
             SquadDeploymentScope.Project,
             Lock(),
@@ -2756,7 +2756,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         Directory.CreateDirectory(firstRoot);
         Directory.CreateDirectory(secondRoot);
         Directory.CreateSymbolicLink(aliasRoot, firstRoot);
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
             aliasRoot,
             SquadDeploymentScope.Global,
             Lock(),
@@ -2873,7 +2873,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         SquadReceipt receipt = Receipt(owned);
 
         Assert.IsAssignableFrom<InvalidOperationException>(Record.Exception(() =>
-            SquadDeploymentPlan.CreateInstall(
+            SquadDeploymentPlanner.CreateInstall(
                 fixturePath,
                 SquadDeploymentScope.Project,
                 Lock(),
@@ -2882,7 +2882,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 false,
                 new FixedTimeProvider(InstalledAt))));
         Assert.IsAssignableFrom<InvalidOperationException>(Record.Exception(() =>
-            SquadDeploymentPlan.CreateUpdate(
+            SquadDeploymentPlanner.CreateUpdate(
                 fixturePath,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),
@@ -2892,7 +2892,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 false,
                 new FixedTimeProvider(InstalledAt.AddDays(1)))));
         Assert.IsAssignableFrom<InvalidOperationException>(Record.Exception(() =>
-            SquadDeploymentPlan.CreateUninstall(
+            SquadDeploymentPlanner.CreateUninstall(
                 fixturePath,
                 SquadDeploymentScope.Project,
                 receipt)));
@@ -2913,7 +2913,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             new SquadOwnedFile(aliasPath, Digest("alias"), "codex", false));
 
         Assert.IsAssignableFrom<InvalidOperationException>(Record.Exception(() =>
-            SquadDeploymentPlan.CreateInstall(
+            SquadDeploymentPlanner.CreateInstall(
                 fixturePath,
                 SquadDeploymentScope.Project,
                 Lock(),
@@ -2922,7 +2922,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 false,
                 new FixedTimeProvider(InstalledAt))));
         Assert.IsAssignableFrom<InvalidOperationException>(Record.Exception(() =>
-            SquadDeploymentPlan.CreateUpdate(
+            SquadDeploymentPlanner.CreateUpdate(
                 fixturePath,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),
@@ -2932,7 +2932,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 false,
                 new FixedTimeProvider(InstalledAt.AddDays(1)))));
         Assert.IsAssignableFrom<InvalidOperationException>(Record.Exception(() =>
-            SquadDeploymentPlan.CreateUninstall(
+            SquadDeploymentPlanner.CreateUninstall(
                 fixturePath,
                 SquadDeploymentScope.Project,
                 receipt)));
@@ -2948,7 +2948,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         using TempDirectory fixture = new();
         const string relativePath = ".codex/agents/conductor.toml";
         SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock(),
@@ -2999,7 +2999,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         SquadDeploymentPlan plan;
         if (operation == "missing-write")
         {
-            plan = SquadDeploymentPlan.CreateInstall(
+            plan = SquadDeploymentPlanner.CreateInstall(
                 fixturePath,
                 SquadDeploymentScope.Project,
                 Lock(),
@@ -3018,7 +3018,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 false));
             WriteState(fixturePath, Lock(), receipt);
             plan = operation == "existing-write"
-                ? SquadDeploymentPlan.CreateUpdate(
+                ? SquadDeploymentPlanner.CreateUpdate(
                     fixturePath,
                     SquadDeploymentScope.Project,
                     Lock("1.2.4"),
@@ -3027,7 +3027,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                     [],
                     false,
                     new FixedTimeProvider(InstalledAt.AddDays(1)))
-                : SquadDeploymentPlan.CreateUninstall(
+                : SquadDeploymentPlanner.CreateUninstall(
                     fixturePath,
                     SquadDeploymentScope.Project,
                     receipt);
@@ -3562,7 +3562,8 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         string identitySource = File.ReadAllText(Path.Combine(
             KyberWeaveTestPaths.ToolRoot,
             "src",
-            "KyberWeave.Core.Squad",
+            "KyberWeave.Domain",
+            "Squad",
             "Deployment",
             "SquadPhysicalRootIdentity.cs"), Encoding.UTF8);
         string transactionSource = File.ReadAllText(Path.Combine(
@@ -3619,7 +3620,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
         using BlockingObserver blocker = new(SquadTransactionStepKind.IntentWritten);
         SquadTransaction activeTransaction = new(store, blocker);
-        SquadDeploymentPlan upperPlan = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan upperPlan = SquadDeploymentPlanner.CreateInstall(
             upperRoot,
             SquadDeploymentScope.Project,
             Lock(),
@@ -3635,7 +3636,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         try
         {
             SquadTransaction siblingTransaction = new(store);
-            SquadDeploymentPlan lowerPlan = SquadDeploymentPlan.CreateInstall(
+            SquadDeploymentPlan lowerPlan = SquadDeploymentPlanner.CreateInstall(
                 lowerRoot,
                 SquadDeploymentScope.Project,
                 Lock(),
@@ -3815,7 +3816,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             SquadPathPolicy.ResolveFile(upperRoot, $"escape/{canaryRelativePath}"));
 
         Assert.Throws<SquadPathContainmentException>(() =>
-            SquadDeploymentPlan.CreateInstall(
+            SquadDeploymentPlanner.CreateInstall(
                 upperRoot,
                 SquadDeploymentScope.Project,
                 Lock(),
@@ -3826,7 +3827,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
         Directory.Delete(directAlias);
         Directory.CreateDirectory(Path.Combine(upperRoot, ".kyber-weave"));
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
             upperRoot,
             SquadDeploymentScope.Project,
             Lock(),
@@ -3900,21 +3901,19 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void AllContainmentHelpersUseCanonicalFileSystemSemantics()
     {
-        // The semantics stay in Core, which the status-line deployer shares; the rest of Squad
-        // deployment is its own assembly. Both trees are held to the rule.
-        string coreDeploymentRoot = Path.Combine(
-            KyberWeaveTestPaths.ToolRoot,
-            "src",
-            "KyberWeave.Core",
-            "Squad",
-            "Deployment");
-        string squadDeploymentRoot = Path.Combine(
-            KyberWeaveTestPaths.ToolRoot,
-            "src",
-            "KyberWeave.Core.Squad",
-            "Deployment");
+        string sourceRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "src");
+        string[] deploymentRoots =
+        [
+            .. Directory.EnumerateDirectories(sourceRoot, "Deployment", SearchOption.AllDirectories)
+                .Where(path => path.Contains("Squad", StringComparison.Ordinal)
+                               && !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+                               && !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+        ];
         string semanticsPath = Path.Combine(
-            coreDeploymentRoot,
+            sourceRoot,
+            "KyberWeave.Domain",
+            "Squad",
+            "Deployment",
             "SquadFileSystemPathSemantics.cs");
 
         Assert.True(
@@ -3922,9 +3921,8 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             "Containment must be centralized in SquadFileSystemPathSemantics.");
 
         List<string> offenders = new();
-        foreach (string sourcePath in Directory
-                     .EnumerateFiles(coreDeploymentRoot, "*.cs", SearchOption.AllDirectories)
-                     .Concat(Directory.EnumerateFiles(squadDeploymentRoot, "*.cs", SearchOption.AllDirectories)))
+        foreach (string sourcePath in deploymentRoots
+                     .SelectMany(root => Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)))
         {
             if (string.Equals(sourcePath, semanticsPath, StringComparison.Ordinal))
                 continue;
@@ -4730,7 +4728,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             [SquadTarget.Copilot] = fakeCopilotRoot
         });
 
-        SquadDeploymentPlan uninstallPlan = SquadDeploymentPlan.CreateUninstall(
+        SquadDeploymentPlan uninstallPlan = SquadDeploymentPlanner.CreateUninstall(
             recordedRoot,
             SquadDeploymentScope.Global,
             legacyReceipt,
@@ -4802,7 +4800,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             [SquadTarget.Copilot] = fakeCopilotRoot
         });
 
-        SquadDeploymentPlan uninstallPlan = SquadDeploymentPlan.CreateUninstall(
+        SquadDeploymentPlan uninstallPlan = SquadDeploymentPlanner.CreateUninstall(
             recordedRoot,
             SquadDeploymentScope.Global,
             legacyReceipt,
@@ -4975,7 +4973,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                     false)
             ]);
 
-        SquadDeploymentPlan updatePlan = SquadDeploymentPlan.CreateUpdate(
+        SquadDeploymentPlan updatePlan = SquadDeploymentPlanner.CreateUpdate(
             targetRoot,
             SquadDeploymentScope.Global,
             Lock("1.2.4"),
@@ -5025,7 +5023,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             ]);
 
         SquadDeploymentConflictException exception = Assert.Throws<SquadDeploymentConflictException>(() =>
-            SquadDeploymentPlan.CreateUpdate(
+            SquadDeploymentPlanner.CreateUpdate(
                 targetRoot,
                 SquadDeploymentScope.Global,
                 Lock("1.2.4"),
@@ -5064,7 +5062,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                     false)
             ]);
 
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
             targetRoot,
             SquadDeploymentScope.Global,
             Lock("1.2.4"),
@@ -5225,7 +5223,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         string renderedBody = string.Equals(subject, "target", StringComparison.Ordinal)
             ? "updated claim body"
             : installedBody;
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
             root,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),
@@ -5394,7 +5392,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             "codex",
             false));
         WriteState(root, Lock(), previousReceipt);
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
             root,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),
@@ -5611,7 +5609,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 ? [Rendered(relativePath, "updated file body")]
                 : [];
             return new ActiveTransitionScenario(
-                SquadDeploymentPlan.CreateUpdate(
+                SquadDeploymentPlanner.CreateUpdate(
                     root,
                     SquadDeploymentScope.Project,
                     Lock("1.2.4"),
@@ -5644,7 +5642,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 ? [Rendered(relativePath, "updated link body")]
                 : [];
             return new ActiveTransitionScenario(
-                SquadDeploymentPlan.CreateUpdate(
+                SquadDeploymentPlanner.CreateUpdate(
                     root,
                     SquadDeploymentScope.Project,
                     Lock("1.2.4"),
@@ -5660,7 +5658,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         WriteState(root, Lock(), emptyReceipt);
         if (scenario is "lock-write" or "receipt-write")
             return new ActiveTransitionScenario(
-                SquadDeploymentPlan.CreateUpdate(
+                SquadDeploymentPlanner.CreateUpdate(
                     root,
                     SquadDeploymentScope.Project,
                     Lock("1.2.4"),
@@ -5673,7 +5671,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
         if (scenario is "lock-delete" or "receipt-delete")
             return new ActiveTransitionScenario(
-                SquadDeploymentPlan.CreateUninstall(
+                SquadDeploymentPlanner.CreateUninstall(
                     root,
                     SquadDeploymentScope.Project,
                     emptyReceipt),
@@ -6273,7 +6271,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
     private static SquadDeploymentPlan CreateGlobalInstallPlan(string targetRoot)
     {
-        return SquadDeploymentPlan.CreateInstall(
+        return SquadDeploymentPlanner.CreateInstall(
             targetRoot,
             SquadDeploymentScope.Global,
             Lock(),
@@ -7795,7 +7793,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
         public SquadDeploymentPlan CreateUpdatePlan()
         {
-            return SquadDeploymentPlan.CreateUpdate(
+            return SquadDeploymentPlanner.CreateUpdate(
                 Path,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),
@@ -7845,7 +7843,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
         public SquadDeploymentPlan CreateUpdatePlan()
         {
-            return SquadDeploymentPlan.CreateUpdate(
+            return SquadDeploymentPlanner.CreateUpdate(
                 Path,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),

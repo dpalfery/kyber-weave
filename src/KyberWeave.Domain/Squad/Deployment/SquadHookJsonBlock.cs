@@ -186,77 +186,6 @@ public static class SquadHookJsonBlock
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(node.ToJsonString())));
     }
 
-    /// <summary>
-    /// Replaces Squad's entries in <paramref name="filePath"/> with <paramref name="preToolUse"/>,
-    /// <paramref name="postToolUse"/> and, for Factory, <paramref name="subagentStop"/>, appending
-    /// them at the end of each owned container (or setting the Antigravity group key). A missing
-    /// or blank file starts from the minimal document. Returns the owned entries written.
-    /// </summary>
-    public static IReadOnlyList<SquadHookOwnedEntry> SpliceFile(
-        SquadHookBlockFormat format,
-        string filePath,
-        IReadOnlyList<JsonNode> preToolUse,
-        IReadOnlyList<JsonNode> postToolUse,
-        IReadOnlyList<JsonNode>? subagentStop = null)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
-        ArgumentNullException.ThrowIfNull(preToolUse);
-        ArgumentNullException.ThrowIfNull(postToolUse);
-        RefuseForeignSubagentStop(format, subagentStop);
-
-        string? existing = File.Exists(filePath) ? File.ReadAllText(filePath) : null;
-        string content;
-        IReadOnlyList<SquadHookOwnedEntry> owned;
-        try
-        {
-            (content, owned) = SpliceContent(format, existing, preToolUse, postToolUse, subagentStop);
-        }
-        catch (Exception ex) when (ex is JsonException || ex is InvalidOperationException)
-        {
-            throw new InvalidOperationException(
-                $"Squad hook splice failed: '{filePath}' does not parse as a hook file for {Harness(format)}.",
-                ex);
-        }
-
-        string? directory = Path.GetDirectoryName(Path.GetFullPath(filePath));
-        if (directory is not null)
-        {
-            Directory.CreateDirectory(directory);
-        }
-
-        File.WriteAllText(filePath, content);
-        return owned;
-    }
-
-    /// <summary>
-    /// Removes Squad's entries from <paramref name="filePath"/>, restoring the user's content.
-    /// A missing file needs no work; an unparsable file fails and is left untouched.
-    /// </summary>
-    public static void RemoveFile(SquadHookBlockFormat format, string filePath)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
-
-        if (!File.Exists(filePath))
-        {
-            return;
-        }
-
-        string existing = File.ReadAllText(filePath);
-        string content;
-        try
-        {
-            content = RemoveContent(format, existing);
-        }
-        catch (Exception ex) when (ex is JsonException || ex is InvalidOperationException)
-        {
-            throw new InvalidOperationException(
-                $"Squad hook removal failed: '{filePath}' does not parse as a hook file for {Harness(format)}.",
-                ex);
-        }
-
-        File.WriteAllText(filePath, content);
-    }
-
     /// <summary>Whether any hook remains anywhere in <paramref name="json"/>.</summary>
     /// <remarks>
     /// This looks beyond Squad's owned containers on purpose: uninstall deletes the file only
@@ -463,7 +392,7 @@ public static class SquadHookJsonBlock
         return false;
     }
 
-    private static void RefuseForeignSubagentStop(SquadHookBlockFormat format, IReadOnlyList<JsonNode>? subagentStop)
+    public static void RefuseForeignSubagentStop(SquadHookBlockFormat format, IReadOnlyList<JsonNode>? subagentStop)
     {
         if (format != SquadHookBlockFormat.Factory && subagentStop is { Count: > 0 })
         {
@@ -474,7 +403,7 @@ public static class SquadHookJsonBlock
 
     /// <summary>
     /// Splices Squad's entries into hook-file <paramref name="existing"/> content without
-    /// touching the disk: the single implementation behind both <see cref="SpliceFile"/> and
+    /// touching the disk: the single implementation behind both <c>SquadHookJsonFile.SpliceFile</c> and
     /// the deployment plan, so a dry run and a real install can never disagree. A missing
     /// or blank file starts from the format's minimal document. Throws
     /// <see cref="JsonException"/> or <see cref="InvalidOperationException"/> when the
@@ -959,7 +888,7 @@ public static class SquadHookJsonBlock
         return false;
     }
 
-    private static string Harness(SquadHookBlockFormat format) =>
+    public static string Harness(SquadHookBlockFormat format) =>
         format switch
         {
             SquadHookBlockFormat.Cursor => "cursor",

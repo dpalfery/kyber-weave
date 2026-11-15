@@ -6,7 +6,7 @@ namespace KyberWeave.Core.Squad.Deployment;
 /// Centralizes deployment-path identity and containment using the spelling and aliases exposed by
 /// the containing filesystem rather than an operating-system-wide case rule.
 /// </summary>
-internal static class SquadFileSystemPathSemantics
+public static class SquadFileSystemPathSemantics
 {
     public static bool AreSame(string first, string second)
     {

@@ -183,7 +183,7 @@ public sealed class SquadLifecycleService
             }
 
             List<string> warnings = [.. RenderWarningMessages(renderResult.Warnings)];
-            string effectiveGuidance = SquadResponseGuidanceSource.ReadEffective(
+            string effectiveGuidance = SquadResponseGuidanceReader.ReadEffective(
                 _stateStore.ResolveHomeOwnedFilesRoot(),
                 warnings);
             if (!SquadResponsePreferencesInjector.HasAnyBlock(renderResult))
@@ -226,7 +226,7 @@ public sealed class SquadLifecycleService
             SquadDeploymentPlan plan;
             if (existingReceipt is null)
             {
-                plan = SquadDeploymentPlan.CreateInstall(
+                plan = SquadDeploymentPlanner.CreateInstall(
                     targetRoot: targetRoot,
                     scope: request.Scope,
                     squadLock: squadLock,
@@ -240,7 +240,7 @@ public sealed class SquadLifecycleService
             }
             else
             {
-                plan = SquadDeploymentPlan.CreateUpdate(
+                plan = SquadDeploymentPlanner.CreateUpdate(
                     targetRoot: targetRoot,
                     scope: request.Scope,
                     squadLock: squadLock,
@@ -462,7 +462,7 @@ public sealed class SquadLifecycleService
             }
 
             List<string> warnings = [.. RenderWarningMessages(renderResult.Warnings)];
-            string effectiveGuidance = SquadResponseGuidanceSource.ReadEffective(
+            string effectiveGuidance = SquadResponseGuidanceReader.ReadEffective(
                 _stateStore.ResolveHomeOwnedFilesRoot(),
                 warnings);
             if (!SquadResponsePreferencesInjector.HasAnyBlock(renderResult))
@@ -502,7 +502,7 @@ public sealed class SquadLifecycleService
             // decides whether this run may write at all before anything outside the transaction is
             // touched. The home guidance is written after that decision and before the commit, so the
             // receipt carries only a digest read back from the deployed path.
-            SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
+            SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
                 targetRoot: targetRoot,
                 scope: request.Scope,
                 squadLock: squadLock,
@@ -629,7 +629,7 @@ public sealed class SquadLifecycleService
             if (parsedTargets.Count == 1) planGlobalRoots = new SquadInstanceRootResolver(targetRoot, parsedTargets[0]);
         }
 
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUninstall(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUninstall(
             targetRoot,
             request.Scope,
             receipt,
