@@ -160,10 +160,14 @@ internal static class DashHttp
             return (defaultLimit, 0, 1);
 
         int limit = Math.Clamp(requestedLimit ?? defaultLimit, 1, 500);
+        // A page number is only bounded by int, so page × limit overflows int for a huge page.
+        // Compute in long and clamp: an absurd page then reads as "past the end" instead of
+        // wrapping to a small offset and returning a different page's rows.
         int offset = rawPage.HasValue
-            ? (rawPage.Value - 1) * limit
+            ? (int)Math.Clamp((long)(rawPage.Value - 1) * limit, 0, int.MaxValue)
             : rawOffset ?? 0;
-        return (limit, offset, (offset / limit) + 1);
+        long page = ((long)offset / limit) + 1;
+        return (limit, offset, (int)Math.Min(page, int.MaxValue));
     }
 
     /// <summary>Reads a boolean query value written as <c>true</c> or <c>1</c>.</summary>
