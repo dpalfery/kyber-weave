@@ -87,6 +87,23 @@ public sealed class HooksCliTests : IDisposable
         Assert.Equal(string.Empty, stdout.ToString());
     }
 
+    [Fact]
+    public async Task NotesOnAnExitZeroRunAreAlsoPrintedAsAdditionalContextJson()
+    {
+        string file = Repository();
+        _ = Directory.CreateDirectory(Path.Combine(root.FullName, ".kyber-weave"));
+        await File.WriteAllTextAsync(Path.Combine(root.FullName, ".kyber-weave", "hooks.yml"), "surprise: 1\n");
+
+        int code = await Run(Json(file), new ProcessRunResult(0, string.Empty, false), "run", "--harness", "claude");
+
+        Assert.Equal(0, code);
+        Assert.Contains("unknown key 'surprise'", stderr.ToString(), StringComparison.Ordinal);
+        using System.Text.Json.JsonDocument json = System.Text.Json.JsonDocument.Parse(stdout.ToString());
+        System.Text.Json.JsonElement output = json.RootElement.GetProperty("hookSpecificOutput");
+        Assert.Equal("PostToolUse", output.GetProperty("hookEventName").GetString());
+        Assert.Contains("unknown key 'surprise'", output.GetProperty("additionalContext").GetString(), StringComparison.Ordinal);
+    }
+
     private sealed class StubRunner(ProcessRunResult result) : IProcessRunner
     {
         public Task<ProcessRunResult> RunAsync(IReadOnlyList<string> argv, string workingDirectory, TimeSpan timeout, CancellationToken cancellationToken) =>

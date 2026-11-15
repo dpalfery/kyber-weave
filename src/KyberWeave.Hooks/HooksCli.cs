@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.Json;
 using KyberWeave.Application;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Domain.Hooks;
@@ -14,8 +15,8 @@ internal static class HooksCli
     /// <summary>Runs one command.</summary>
     /// <param name="args">The command-line arguments.</param>
     /// <param name="stdin">Where the harness writes its hook JSON.</param>
-    /// <param name="stdout">Receives only the version text.</param>
-    /// <param name="stderr">Receives feedback for the agent and usage errors.</param>
+    /// <param name="stdout">Receives the version text, or the JSON that shows notes from an exit-0 run to the agent.</param>
+    /// <param name="stderr">Receives feedback text and usage errors; Claude Code shows it to the agent only on exit 2.</param>
     /// <param name="configure">Registers services before the application defaults, so they win over them.</param>
     /// <returns>0 to continue, 2 to hand feedback to the agent, 1 for a usage error.</returns>
     public static async Task<int> DispatchAsync(
@@ -52,10 +53,20 @@ internal static class HooksCli
         if (result.Feedback.Length > 0)
         {
             await stderr.WriteLineAsync(result.Feedback).ConfigureAwait(false);
+            if (result.ExitCode == 0)
+            {
+                await stdout.WriteLineAsync(AdditionalContext(result.Feedback)).ConfigureAwait(false);
+            }
         }
 
         return result.ExitCode;
     }
+
+    private static string AdditionalContext(string feedback) =>
+        JsonSerializer.Serialize(new
+        {
+            hookSpecificOutput = new { hookEventName = "PostToolUse", additionalContext = feedback }
+        });
 
     private static string Version() =>
         typeof(HooksCli).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "0.0.0";
