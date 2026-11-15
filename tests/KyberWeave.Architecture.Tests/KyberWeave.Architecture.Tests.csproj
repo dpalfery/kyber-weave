@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Pins the layering of the shared core (Kernel, Domain, Contracts, Data, Application) and the
+    four entry apps. It reads project files only, so it builds without any other project.
+  -->
+  <PropertyGroup>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <NoWarn>$(NoWarn);CA1707;xUnit1051</NoWarn>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>KyberWeave.Architecture.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" Version="2.5.2" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
+    <PackageReference Include="xunit.v3" Version="4.0.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\KyberWeave.Tests\KyberWeaveTestPaths.cs" Link="Shared\KyberWeaveTestPaths.cs" />
+    <Compile Include="..\KyberWeave.Tests\TestTempRoot.cs" Link="Shared\TestTempRoot.cs" />
+  </ItemGroup>
+
+</Project>

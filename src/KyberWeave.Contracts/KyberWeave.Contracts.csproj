@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <RootNamespace>KyberWeave.Contracts</RootNamespace>
+    <Version>0.1.0</Version>
+    <Authors>KyberWeave</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\KyberWeave.Kernel\KyberWeave.Kernel.csproj" />
+    <ProjectReference Include="..\KyberWeave.Domain\KyberWeave.Domain.csproj" />
+  </ItemGroup>
+
+</Project>
