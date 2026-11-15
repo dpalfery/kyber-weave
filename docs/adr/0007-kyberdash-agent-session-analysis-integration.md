@@ -59,7 +59,7 @@ Four cohesive architectural decisions (D1–D4) govern the integrated KyberDash 
    - Backward-compatible endpoints: `/api/kyber/context`, `/schema`, `/timeline` (defaulting to the first active session when ID is omitted).
    - Precedence guard: Any unhandled `/api/kyber/*` request returns HTTP 404 JSON (never falling through to SPA HTML). Non-GET requests return HTTP 405 Method Not Allowed with `cache-control: no-store`.
 
-4. **D4: Dual-Database SQLite Bridge (`KyberBridge`)**:
+4. **D4: Dual-Database SQLite Bridge (`KyberBridge`, now `KyberBridgeEngine` in the C# engine, [ADR 0084](0084-kyberdash-csharp-engine.md))**:
    A unified query service (`dash/kyber/server/bridge.ts`) connects to SQLite via Node's built-in `node:sqlite` (`DatabaseSync`):
    - Primary: `~/.kyberdash/canon.db` (live OTel records).
    - Fallback: `agent-session-analysis-dashboard/sessions.db` (configurable via `AGENTDASH_DB` or `KYBER_DB` environment variables).
@@ -68,7 +68,7 @@ Four cohesive architectural decisions (D1–D4) govern the integrated KyberDash 
 ## Alternatives Considered
 
 - **Retaining Standalone Global Tabs for Schema and Timeline**: Rejected. Schema cost, turn spend, and execution timelines are inherently scoped to an individual agent session. Attempting to display them without an active session caused blank screens and architectural fragmentation.
-- **Requiring a Full Database Migration**: Rejected. Rather than running a one-time migration of the 2.9 GB derived SQLite store into `canon.db`, `KyberBridge` provides seamless zero-copy dual-database querying directly over both schemas.
+- **Requiring a Full Database Migration**: Rejected. Rather than running a one-time migration of the 2.9 GB derived SQLite store into `canon.db`, `KyberBridge` (now `KyberBridgeEngine` in the C# engine, [ADR 0084](0084-kyberdash-csharp-engine.md)) provides seamless zero-copy dual-database querying directly over both schemas.
 - **Express / Fastify Web Frameworks**: Rejected. Using the lightweight Node standard library `http.createServer` already in upstream codeburn preserves the merge zone boundaries and avoids extraneous runtime dependencies.
 
 ## Consequences

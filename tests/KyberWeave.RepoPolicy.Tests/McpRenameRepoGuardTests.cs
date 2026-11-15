@@ -152,7 +152,7 @@ public sealed class McpRenameRepoGuardTests
     private static readonly string[] InScopeRoots =
     [
         "src/",
-        "dash/src/",
+        "dash/web/src/",
         "dash/scripts/",
         "products/",
         ".apm/",
@@ -464,7 +464,7 @@ public sealed class McpRenameRepoGuardTests
     [InlineData("AGENTS.md", true)]
     [InlineData("README.md", true)]
     [InlineData("src/KyberWeave.Mcp/DocsTools.cs", true)]
-    [InlineData("dash/src/analysis/query/aggregate.ts", true)]
+    [InlineData("dash/web/src/lib/kyberApi.ts", true)]
     [InlineData("dash/scripts/build-sbom.mjs", true)]
     [InlineData("products/kyber-squad/mcp.json", true)]
     [InlineData(".apm/skills/codegraph/SKILL.md", true)]
@@ -473,8 +473,8 @@ public sealed class McpRenameRepoGuardTests
     [InlineData("docs/archive/plans/2026-10-31-universal-kyber-weave-mcp-grant.md", false)]
     [InlineData("tests/KyberWeave.RepoPolicy.Tests/UpstreamSeveranceTests.cs", false)]
     [InlineData("tests/KyberWeave.Tests/McpLiveProbeTests.cs", false)]
-    [InlineData("dash/src/analysis/query/aggregate.test.ts", false)]
-    [InlineData("scripts/proc-guard.sh", true)]
+    [InlineData("dash/web/src/lib/kyberApi.test.ts", false)]
+    [InlineData("scripts/fast-loop.sh", true)]
     [InlineData("templates/github-actions/kyber-weave-docs-gate.yml", true)]
     [InlineData(".github/workflows/ci.yml", true)]
     [InlineData("samples/agents/README.md", true)]

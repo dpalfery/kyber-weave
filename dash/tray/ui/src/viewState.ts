@@ -7,7 +7,7 @@
  * the Rust structs serialize into exactly this.
  */
 
-import type { ContextReport } from '../../../src/analysis/report/types.ts'
+import type { ContextReport } from './report-types.ts'
 
 export type Phase = 'setup' | 'starting' | 'ready' | 'stale'
 

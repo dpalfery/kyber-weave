@@ -18,7 +18,8 @@ metrics, which record things the transcript does not.
 ## What is deferred
 
 - Factory's native metric points reach the store, but nothing reads them back.
-  `CanonStore.getMetricPoints` has no production caller, so the session view never shows them.
+  `CanonStoreRepository.StoreMetrics` writes them to the `metric_point` table, and no query method
+  reads that table, so the session view never shows them.
 - Candidate metrics to project into the session:
   - `droid.code.lines_modified`
   - `droid.code.files_modified`

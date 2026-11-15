@@ -98,9 +98,10 @@ Asset names follow `kyber-weave-<rid>`, `kyber-weave-mcp-<rid>`, and
 except `win-x64`, which is `.zip`. Windows archives contain `*.exe`; others contain
 extensionless binaries.
 
-KyberDash is a Node single-executable (SEA), so it publishes Node's stable RID names
-instead: `linux-x64`, `linux-arm64`, `darwin-x64`, `darwin-arm64`, `win-x64` — macOS is
-`darwin-*` where .NET is `osx-*`. Assets follow `kyberdash-<rid>` with the same archive
+KyberDash compiles from `dash/server/` as a self-contained single-file `.NET 10`
+executable and retains the historical RID archive names (`linux-x64`, `linux-arm64`,
+`darwin-x64`, `darwin-arm64`, `win-x64`, where macOS archives stay `darwin-*` while CLI, MCP,
+and Arbiter assets use `osx-*`). Assets follow `kyberdash-<rid>` with the same archive
 extensions. Two mappings translate between the sets and must stay in step:
 `kyber_weave_kyberdash_rid` in `install.sh` and `PlatformRid.KyberDashRid` for the
 self-updater.
@@ -311,7 +312,7 @@ kyber-weave-arbiter -v
 
 Output format: exactly `kyber-weave <version>`, with the `+<sha>` build metadata removed. For example, a release candidate prints `kyber-weave 0.2.0-rc.1`. The output never contains a `+` suffix. The [local release loop](#verifying-a-release-locally) enforces this exact format on the published binaries; the release workflow's publish step does not run this check itself.
 
-The same release also stamps `dash/package.json` with that version (`npm version` in `.github/workflows/release.yml`) before the KyberDash binaries are built. The KyberDash Settings views, in the web dashboard and the tray, read the version from the engine, so for a release they show the same version that `kyber-weave --version` prints. A source checkout keeps whatever version `dash/package.json` holds, so its Settings views show that value.
+The same release also stamps the release version onto `dash/server/KyberDash.{Cli,Api,Mcp}` (`-p:Version` in `.github/workflows/release.yml` and `scripts/release-local.sh`) when publishing the `kyberdash`, `kyberdash-api`, and `kyberdash-mcp` binaries. The KyberDash Settings views, in the web dashboard and the tray, read `/api/kyber/version` from the engine (`Program.cs` assembly informational version with `+<sha>` stripped), so for a release they show the same version that `kyberdash --version` prints.
 
 ## Code signing status
 
@@ -326,7 +327,7 @@ for the complete decision record.
 | Windows `.exe` files (`kyber-weave`, `kyber-weave-mcp`, `kyber-weave-arbiter`, `kyberdash` in `win-x64` archives) | **Not signed** | Deferred per [issue #132](https://github.com/dpalfery/kyber-weave/issues/132). Users typically see SmartScreen warning. |
 | macOS tray (`kyberdash-tray-darwin-*.zip`) | Developer ID-signed and notarized | Team ID `J2UNNQ466J`. Verified by `.github/workflows/release.yml` signature and notarization checks. |
 | macOS CLI and MCP binaries | Not Developer ID-signed | `install.sh` clears the macOS quarantine attribute at install time ([scripts/install.sh:735–742](../scripts/install.sh)). |
-| macOS KyberDash binary | Ad-hoc signed | Signed after the Node SEA injection in the `build-kyberdash` job, `Build Node SEA for ${{ matrix.rid }}` step ([.github/workflows/release.yml](../.github/workflows/release.yml)). |
+| macOS KyberDash binary | Ad-hoc signed | Signed in the `build-kyberdash` job, `Publish KyberDash single-file for ${{ matrix.rid }}` step ([.github/workflows/release.yml](../.github/workflows/release.yml)). |
 | Linux binaries | Unsigned | Standard for Linux. HTTPS transport and hash verification provide integrity. |
 
 ### Manifest completeness and the pre-publish check
@@ -375,14 +376,14 @@ the same document for the same version.
 What the aggregate SBOM covers, and what it deliberately does not, is documented in
 [install.md](install.md#the-sbom-what-each-release-ships). In short: it is the
 repository's dependency closure, not a byte-level scan of a published archive, and it
-does **not** list the .NET runtime that the self-contained CLI and MCP binaries embed
-(the single largest component of what actually ships), the Node runtime that the
-KyberDash single-executable embeds, or test-only dependencies. The per-artifact
+does **not** list the .NET runtime that the self-contained single-file binaries embed
+(the single largest component of what actually ships) or test-only dependencies. The per-artifact
 SBOMs close the byte-level half of that gap: each lists its archive's shipped
 files, and states via `kyber-weave:sbom:not-measured` where runtime coverage was
-not measurable (`dotnet-single-file`, `node-sea`, `tauri-bundle`; Squad bundles
-carry no marker). The Node single-executables carry both the file catalogue and
-the marker. SBOM attestation, once a follow-up, now ships with every release —
+not measurable (`dotnet-single-file`, `tauri-bundle`; Squad bundles
+carry no marker). Every single-file .NET archive (`kyber-weave-*`, `kyber-weave-mcp-*`,
+`kyber-weave-arbiter-*`, `kyberdash-*`) carries both the file catalogue and
+the `dotnet-single-file` marker. SBOM attestation, once a follow-up, now ships with every release —
 see below.
 
 Two properties of that generator are worth knowing before changing it:
@@ -393,10 +394,12 @@ Two properties of that generator are worth knowing before changing it:
   never used: the generator is not a `dotnet tool`.
 - **The .NET coverage depends on a publish, not on the lock files.** The .NET cataloger
   reads `*.deps.json`, which only a publish produces, so the script publishes
-  `KyberWeave.Cli` and `KyberWeave.Mcp` framework-dependent and non-single-file into a
-  throwaway directory and copies only the `deps.json` into the scanned tree. Without the
+  `KyberWeave.Cli`, `KyberWeave.Mcp`, `KyberWeave.Arbiter`, and the three `dash/server`
+  hosts (`KyberDash.Cli`, `KyberDash.Api`, `KyberDash.Mcp`)
+  framework-dependent and non-single-file into a throwaway directory and copies only the
+  `deps.json` files into the scanned tree. Without the
   .NET SDK it falls back to the checked-in `packages.lock.json` files — which under-report
-  .NET, because `src/KyberWeave.Mcp` has no lock file — and says so in its output rather
+  .NET, because `src/KyberWeave.Mcp` and the `dash/server` projects may have no lock files — and says so in its output rather
   than emitting a quietly incomplete SBOM.
 
 The generated document is validated against the vendored CycloneDX 1.6 JSON schema before
@@ -615,28 +618,22 @@ loop's, not a step the workflow repeats.
 
 ### KyberDash in the loop
 
-`release-local.sh` builds `kyberdash-<node-rid>.tar.gz` for this machine the way the
-`build-kyberdash` job does: an ESM bundle behind the CommonJS shim, injected into a prebuilt
-Node from nodejs.org, and ad-hoc signed on macOS. Both also build the web dashboard
-(`npm --prefix web ci` and `npm --prefix web run build`), pack it as the `web.json` SEA asset
-with `scripts/pack-sea-web.mjs`, add that asset to the SEA blob alongside the CLI, and
-smoke-test the result with `scripts/sea-web-smoke.mjs` — confirming that the built binary's
-`kyberdash web` serves the SPA rather than the "not built" page. The same loop and the
-release job also run `dash/scripts/sea-mcp-smoke.mjs` against the staged binary: it
-initializes over stdio with an isolated loopback fixture, lists exactly the eight
-`dash_*` tools, calls `dash_list_available_analytics_operations`, then closes the child and
-asserts a clean exit —
-proving the bundled MCP SDK works from the single executable with no checkout and no
-access to the operator's state. The job is the authority.
-`ReleaseTests.LocalKyberDashBuildMatchesTheReleaseJob` pins those web-build, packing, and
-smoke-test commands too, alongside the fuse, the postject version, and Node's version in
-`dash/.nvmrc`. `BuildKyberDashEmbedsTheWebDashboard` pins the order — tsup, then the web
-build, then the packer, then the SEA blob injection, then the smoke test — and confirms the
-archive still contains exactly `kyberdash` and `THIRD_PARTY_NOTICES.md`, unchanged by the
-embedded dashboard. (`dash/tsup.sea.config.ts` also now sets `removeNodeProtocol: false`, so
-the SEA bundle keeps the `node:` prefix on builtins such as `node:sea` that have no bare
-alias, rather than tsup's default of stripping it.) The build needs `node` and `npm` on
-`PATH`. A failed build fails the loop; `--no-kyberdash` is the explicit opt-out.
+`release-local.sh` builds `kyberdash-<rid>.tar.gz` (or `.zip` on Windows) for this machine
+the way the `build-kyberdash` job does: build the React dashboard (`npm --prefix dash run build:web`),
+pack `dash/dist/dash` into `dash/dist-sea/web.json` with `dash/scripts/pack-sea-web.mjs`, and
+publish the three `dash/server` hosts (`KyberDash.Cli`, `KyberDash.Api`, `KyberDash.Mcp`)
+self-contained single-file with `web.json` embedded as `KyberDash.Api.web.json` (plus ad-hoc
+`codesign` on macOS). The archive carries `kyberdash`, `kyberdash-api`, and `kyberdash-mcp`.
+Both the
+loop and the release job run `dash/scripts/sea-web-smoke.mjs` and `dash/scripts/sea-mcp-smoke.mjs`
+against the staged binary — confirming `kyberdash web` serves the embedded SPA and `kyberdash mcp`
+initializes over stdio, lists the eight `dash_*` tools, calls `dash_list_available_analytics_operations`,
+and exits cleanly with no checkout and no access to operator state. The job is the authority.
+`ReleaseTests.LocalKyberDashBuildMatchesTheReleaseJob` and `AssertEmbedsWebDashboard` pin those
+web-build, packing, publish, archive contents (`kyberdash`, `kyberdash-api`, `kyberdash-mcp` and
+`THIRD_PARTY_NOTICES.md`), and
+smoke-test commands. The build needs `dotnet`, `node`, and `npm` on `PATH`. A failed build fails
+the loop; `--no-kyberdash` is the explicit opt-out.
 
 Each case starts from a fresh copy of a staged build, with its own `HOME`, so the tray
 record the updater reads is a fixture and never this machine's:
@@ -648,8 +645,6 @@ record the updater reads is a fixture and never this machine's:
 | `tray-opt-out` | `--no-menubar` replaces `kyberdash` and leaves the tray alone. |
 | `tray-delegated` | With a `tray.json`, the update runs the new `kyberdash menubar --update`, and that step's failure fails the update by name. |
 | `kyberdash-floor` | A release below the KyberDash floor, which carries no `kyberdash` archive, still updates the CLI and MCP. It needs no build, so it runs under `--no-kyberdash` too. |
-| `recovery-manifest` | When the build fails after `npm version` has stamped `dash/package.json`, the manifest and its lockfile come back byte for byte. A stand-in `npx` forces the failure. |
-| `recovery-cache` | A cached Node download that does not match its `SHASUMS256.txt` fails the build and is removed, not trusted by the next run. |
 
 The main self-update also asserts that an absent `kyberdash` stays absent.
 
@@ -671,7 +666,7 @@ that a tray was installed. Its first run found the tray step had never run at al
 `--version` swallowed the updater's `menubar --update --version <v>`, so `kyberdash`
 printed its version and exited 0.
 
-Cross-RID builds stay out of reach. The Node that makes the blob has to run here.
+Cross-RID builds are supported by `dotnet publish`, though macOS ad-hoc `codesign` requires a macOS host.
 
 ## Continuous integration security
 
@@ -682,20 +677,16 @@ sibling product repos — without Azure or container scans, which do not apply h
 | Job | What it covers |
 |---|---|
 | Build and test | Restore, `dotnet format` (whitespace + curated style), NuGet audit, build, test, pack |
-| CodeQL (`csharp`, `javascript-typescript`) | SAST with `security-extended` queries, minus one rule excluded by id |
+| CodeQL (`csharp`, `javascript-typescript`) | SAST with `security-extended` queries, no rule or path exclusions |
 | Trivy filesystem | Dependency, misconfig, secret, and license findings at HIGH/CRITICAL |
 | Semgrep Community | Additional SAST (`p/default`, ERROR) |
 | gitleaks | Secret scan of the full history fetch |
 | Skill and docs gate | Dogfoods the PR's CLI: `skill validate` / `lint` / `scan` on `.apm/skills/kyber-docs-authoring`, `.apm/skills/kyber-docs-integrity-review`, `.apm/skills/kyber-docs-onboarding-and-assessment`, and `.apm/skills/kyber-weave-cli`, plus `docs validate`. `codegraph`, `kw-onboarding` and `kyber-weave-model-profile` are gated only by the review council's `skill-*` gates, and `spec-conductor` by neither |
 
-CodeQL excludes exactly one rule, `js/http-to-file-access`, by id and never by path: no file
-or directory is excluded. Its only open-alert sink as of 2026-11-04 (alert 288) is the live gate's evidence writer
-(`dash/scripts/opencode-live-gate/run.mjs`), which records kyberDash and OpenCode responses
-into evidence files — the thing the gate exists to prove — and the query has no default
-sanitizer, so no code guard can clear it. The owner and a review date live in
-`.github/codeql/codeql-config.yml`, and `CodeQlConfigTests` keeps the exclusion rule-scoped
-rather than letting it drift into the path-wide exclusion [ADR 0020](adr/0020-kyberdash-one-time-fork.md)
-retired.
+CodeQL runs with zero `paths`/`paths-ignore` exclusions and zero `query-filters`: after retiring
+the TypeScript live-gate script (`opencode-live-gate/run.mjs`), no `js/http-to-file-access`
+suppression is needed. The owner and review date live in `.github/codeql/codeql-config.yml`,
+and `CodeQlConfigTests` asserts both that metadata and the absence of rule or path exclusions.
 
 Formatting is gated by [`.editorconfig`](../.editorconfig): whitespace plus a small style
 pack (file-scoped namespaces, usings, predefined types, `var` when apparent). The

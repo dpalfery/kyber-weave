@@ -25,20 +25,7 @@ public sealed class ReviewGatesCycleTests : IDisposable
     public ReviewGatesCycleTests()
     {
         _repo = Path.Combine(_temp.Path, "repo");
-        TestGitRepositoryTemplate.CreateReviewGatesCouncilRepository(_repo);
-        Git("checkout", "--quiet", "-b", "feature");
-        Write(".kyber-weave/kyber-weave.yml", """
-                                              review:
-                                                gates:
-                                                  - id: build
-                                                    include: ["**/*.cs"]
-                                                    run: [git, --version]
-                                                  - id: docs
-                                                    include: ["**/*.md"]
-                                                    run: [git, --version]
-                                                  - id: always
-                                                    run: [git, --version]
-                                              """);
+        TestGitRepositoryTemplate.CreateReviewGatesCycleRepository(_repo);
     }
 
     public void Dispose() => _temp.Dispose();

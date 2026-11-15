@@ -4,12 +4,14 @@ title: Factory (Droid) Capture Is a Hooks-Plugin Pipeline
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-09
+last-reviewed: 2026-11-15
 code-refs:
-  - droidAdapter
-  - installFactoryPlugin
-  - mapHookEvent
-  - FACTORY_CONTRACT_VERSION
+  - CanonAdapters
+  - IsSupportedDroidEnvelope
+  - FactoryHookMapper
+  - FactoryKeys
+  - MapHookEvent
+  - DroidContractVersion
 ---
 
 # ADR 0055: Factory (Droid) Capture Is a Hooks-Plugin Pipeline
@@ -44,7 +46,8 @@ parked under consent-on and re-delivered after consent-off is not stored with th
 
 Amended 2026-11-03: the file source's counters are read **live** for the sessions the plugin
 captured, not only by a folder import. The live counter pass
-(`dash/src/sync/factory-live-counters.ts`) reads the same companion file the file source reads,
+(`CanonSessionProjectorEngine.SplitDroidSessionRecords`) reads the same companion file data the file
+source reads,
 for the captured sessions, while those sessions run, and writes the same records under the same
 identity — so a later folder import replaces them rather than adding to them, and nothing is
 counted twice. Without it a live Factory session reached the dashboard with its turns and **no
@@ -83,8 +86,8 @@ plugin's tool span therefore anchors on the session id, and every tool call of a
 onto one span. The plugin also stamps start equal to end on every span, so it measures no duration.
 The premise above that the plugin owns tool timing holds for turns and prompts only.
 
-Amended 2026-11-09 (the file source's transcript reader): the transcript content reader
-(`dash/src/synth/readers/droid.ts`) is part of the **existing file source**, not a new collection
+Amended 2026-11-09 (the file source's transcript reader): the transcript synthesis path
+(`CanonSynth`) is part of the **existing file source**, not a new collection
 source. It turns each assistant message's `tool_use` and `tool_result` blocks into tool records,
 gives each assistant call its active duration, and carries the session's own title. The `droid`
 parser contract is 2, so stored sessions re-synthesise. No plugin or hook changed.

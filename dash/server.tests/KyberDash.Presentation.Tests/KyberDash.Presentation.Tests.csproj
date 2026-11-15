@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- reason: xUnit test method underscores (CA1707) and synchronous test cancellation tokens (xUnit1051). -->
+    <NoWarn>$(NoWarn);CA1707;xUnit1051</NoWarn>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>KyberDash.Presentation.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" Version="10.0.14" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.14" />
+    <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" Version="2.5.2" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
+    <PackageReference Include="Moq" Version="4.21.0" />
+    <PackageReference Include="xunit.v3" Version="4.0.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\server\KyberDash.Api\KyberDash.Api.csproj" />
+    <ProjectReference Include="..\..\server\KyberDash.Application\KyberDash.Application.csproj" />
+    <ProjectReference Include="..\..\server\KyberDash.Cli\KyberDash.Cli.csproj" />
+    <ProjectReference Include="..\..\server\KyberDash.Contracts\KyberDash.Contracts.csproj" />
+    <ProjectReference Include="..\..\server\KyberDash.Core\KyberDash.Core.csproj" />
+    <ProjectReference Include="..\..\server\KyberDash.Domain\KyberDash.Domain.csproj" />
+    <ProjectReference Include="..\..\server\KyberDash.Mcp\KyberDash.Mcp.csproj" />
+  </ItemGroup>
+
+</Project>

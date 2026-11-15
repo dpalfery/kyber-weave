@@ -21,7 +21,6 @@ namespace KyberWeave.Tests;
 /// <c>ArbiterKey</c> (--arbiter-key), <c>KeyStdin</c>, <c>Global</c>, over the inherited
 /// <c>Path</c>.
 /// </summary>
-[Collection(ArbiterCommandCompositionCollection.Name)]
 public sealed class ArbiterInstallCommandTests : IDisposable
 {
     private const string TypeSafeOrigin = "https://api.typesafe.ai";

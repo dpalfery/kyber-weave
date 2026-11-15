@@ -11,12 +11,12 @@ import { useState } from 'react'
 import { act, render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
-import statusMixed from '../../../../src/server/fixtures/capture-api/status-mixed.json'
-import statusUnknown from '../../../../src/server/fixtures/capture-api/status-unknown.json'
-import postPreviewEnable from '../../../../src/server/fixtures/capture-api/post-preview-enable.json'
-import postWroteEnable from '../../../../src/server/fixtures/capture-api/post-wrote-enable.json'
-import postRefusedDrift from '../../../../src/server/fixtures/capture-api/post-refused-drift.json'
-import postDisableLast from '../../../../src/server/fixtures/capture-api/post-disable-last.json'
+import statusMixed from '../../fixtures/capture-api/status-mixed.json'
+import statusUnknown from '../../fixtures/capture-api/status-unknown.json'
+import postPreviewEnable from '../../fixtures/capture-api/post-preview-enable.json'
+import postWroteEnable from '../../fixtures/capture-api/post-wrote-enable.json'
+import postRefusedDrift from '../../fixtures/capture-api/post-refused-drift.json'
+import postDisableLast from '../../fixtures/capture-api/post-disable-last.json'
 
 import { SettingsDrawer } from './SettingsDrawer.js'
 
@@ -866,7 +866,7 @@ describe('SettingsDrawer: version line', () => {
     stubFetch({ version: () => ({ status: 500, json: { error: 'Version failed' } }) })
     await openedDrawer()
 
-    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version unknown'))
+    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version unknown'), RETRY_WAIT)
     expect(versionLine().textContent).not.toContain('0.0.0')
   })
 
@@ -874,7 +874,7 @@ describe('SettingsDrawer: version line', () => {
     stubFetch({ version: () => ({ networkError: true }) })
     await openedDrawer()
 
-    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version unknown'))
+    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version unknown'), RETRY_WAIT)
     expect(versionLine().textContent).not.toContain('0.0.0')
   })
 

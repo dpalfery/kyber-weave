@@ -14,8 +14,8 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import full from '../../../src/analysis/report/fixtures/full.json' with { type: 'json' }
-import type { ContextReport } from '../../../src/analysis/report/types.ts'
+import full from './fixtures/report/full.json' with { type: 'json' }
+import type { ContextReport } from './report-types.ts'
 
 import { Popover } from './Popover'
 import type { KyberdashVersion, TrayCommands, ViewState } from './viewState'

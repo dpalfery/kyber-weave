@@ -78,7 +78,5 @@ explicit purpose is financial accounting are permitted to use dollar spend as th
 
 ## Verification & Conformance
 
-- Boundary tests (`dash/kyber/tools/boundary.test.ts`) assert that cost-shaped types do not appear
-  in canonical diagnostic entities.
-- UI component tests (`dash/src/components/kyber/Scorecard.test.tsx`) assert that financial figures
-  never occupy primary card headers or default table sorting properties.
+- C# pricing and model contracts (`dash/server/KyberDash.Domain/CanonPricing.cs`, `dash/server/KyberDash.Domain/CanonModels.cs`, and `dash/server.tests/KyberDash.Domain.Tests/CanonAnalysisTests.cs`) isolate financial cost blocks behind typed pricing seams rather than leaking dollars into diagnostic vectors.
+- UI component tests (`dash/web/src/components/analysis/Scorecard.test.tsx` and `dash/web/src/components/SessionCostPanel.test.tsx`) assert that financial figures never occupy primary card headers or default table sorting properties.

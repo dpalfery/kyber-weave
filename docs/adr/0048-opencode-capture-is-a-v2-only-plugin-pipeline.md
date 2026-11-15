@@ -4,11 +4,13 @@ title: OpenCode Capture Is a V2-Only Plugin Pipeline
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-31
+last-reviewed: 2026-11-15
 code-refs:
-  - createSetup
-  - isSupportedOpencodeEnvelope
-  - OPENCODE_KEYS
+  - CanonAdapters
+  - IsOpencodeEnvelopeSpan
+  - IsSupportedOpencodeEnvelope
+  - OpencodeContractVersion
+  - OpencodeContractVersionKey
 ---
 
 # ADR 0048: OpenCode Capture Is a V2-Only Plugin Pipeline
@@ -79,8 +81,9 @@ The plugin is the single source of OpenCode data:
 - The plugin depends on OpenCode 2.x bus and hook surfaces. An OpenCode change to them breaks capture until the
   plugin changes. The wire contract version invalidates stored rows when the plugin's shape changes.
 - The OpenCode live gate passed on the owner's Mac on 2026-10-31 (OpenCode CLI 2.2.3, one scripted session): every
-  compared figure matched OpenCode's own, and the session title was waived. Replay tests prove the pipeline on
-  recorded events; the live gate proves it on a real session and runs only on request.
+  compared figure matched OpenCode's own, and the session title was waived. C# parity tests in
+  `dash/server.tests/` prove the pipeline on recorded envelopes; the legacy TypeScript live-gate script
+  was retired with the C# engine cutover after that pass.
 - Any future OpenCode source, such as a V2 importer or a new event feed, is a new decision. It must state how it
   avoids double counting against the plugin.
 - The shared projection now sums session duration over request roots whenever records nest. That rule applies to

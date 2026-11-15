@@ -13,7 +13,6 @@ namespace KyberWeave.Tests;
 /// fallback-only, and the install must write an explicit Arbiter MCP entry into the target's own
 /// <c>.warp/.mcp.json</c> without clobbering any foreign JSON the user already kept there.
 /// </summary>
-[Collection(ArbiterCommandCompositionCollection.Name)]
 public sealed class ArbiterGlobalWarpFallbackTests : IDisposable
 {
     private readonly TempDirectory _temp = new();

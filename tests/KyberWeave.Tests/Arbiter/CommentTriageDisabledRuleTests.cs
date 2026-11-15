@@ -23,7 +23,6 @@ namespace KyberWeave.Tests.Arbiter;
 /// The evaluator drops a disabled rule before it asks anything, so the disabled rule never appears in the record's rules.
 /// <c>Status</c> is the provider status the decision record carries, so the tool, the CLI and the log read the same word.
 /// </remarks>
-[Collection(ArbiterCommandCompositionCollection.Name)]
 public sealed class CommentTriageDisabledRuleTests : IDisposable
 {
     private const string BotLogin = "kilo-code-bot";

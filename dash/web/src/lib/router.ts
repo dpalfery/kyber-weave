@@ -6,7 +6,7 @@
 // to catch it (R5.1). This module reads that file and substitutes params;
 // it does not restate the patterns.
 
-import patterns from '../../../src/server/view-paths.json' with { type: 'json' }
+import patterns from './view-paths.json' with { type: 'json' }
 
 export const VIEW_PATH_PATTERNS: readonly string[] = patterns
 

@@ -44,7 +44,12 @@ pub fn setup_state_for(resolution: &Resolution, api_version: Option<u32>) -> Opt
 }
 
 #[cfg(windows)]
-const WINDOWS_CLI_NAMES: [&str; 2] = ["kyberdash.cmd", "kyberdash.exe"];
+const WINDOWS_CLI_NAMES: [&str; 4] = [
+    "kyberdash-api.exe",
+    "kyberdash-api.cmd",
+    "kyberdash.cmd",
+    "kyberdash.exe",
+];
 
 /// Alphanumerics plus `._/-~` and space, with `\`, `:`, `(`, `)` also allowed on Windows
 /// so a user-supplied `KYBERDASH_BIN` path like `C:\Users\...\kyberdash.cmd` is accepted.
@@ -161,7 +166,16 @@ pub fn resolve_from(sources: &CliSources) -> Resolution {
     {
         // An install dir is a directory; a recorded path is the binary itself.
         let path = if candidate.is_dir() {
-            candidate.join(default_program_name())
+            let names = candidate_names();
+            let mut matched = None;
+            for name in &names {
+                let candidate_bin = candidate.join(name);
+                if candidate_bin.is_file() {
+                    matched = Some(candidate_bin);
+                    break;
+                }
+            }
+            matched.unwrap_or_else(|| candidate.join(default_program_name()))
         } else {
             candidate.clone()
         };
@@ -260,11 +274,11 @@ impl KyberdashCli {
 fn default_program_name() -> String {
     #[cfg(windows)]
     {
-        "kyberdash.cmd".to_string()
+        "kyberdash-api.exe".to_string()
     }
     #[cfg(not(windows))]
     {
-        "kyberdash".to_string()
+        "kyberdash-api".to_string()
     }
 }
 
@@ -319,7 +333,8 @@ fn tray_config_path(home: &std::path::Path) -> PathBuf {
     home.join(".kyberdash").join("tray.json")
 }
 
-/// Reads `kyberdashPath` out of `tray.json`.
+/// Reads `kyberdashApiPath` or `kyberdashPath` out of `tray.json`, preferring
+/// a sibling `kyberdash-api` binary beside `kyberdashPath` when present.
 ///
 /// A missing, unreadable or malformed file is simply "not recorded": this runs
 /// at startup on every machine, and a hand-edited config must not stop the tray
@@ -327,11 +342,23 @@ fn tray_config_path(home: &std::path::Path) -> PathBuf {
 fn recorded_cli_path(config: &std::path::Path) -> Option<PathBuf> {
     let text = std::fs::read_to_string(config).ok()?;
     let value: Value = serde_json::from_str(&text).ok()?;
+    if let Some(api_path) = value.get("kyberdashApiPath").and_then(|v| v.as_str()) {
+        if !api_path.trim().is_empty() {
+            return Some(PathBuf::from(api_path));
+        }
+    }
     let recorded = value.get("kyberdashPath")?.as_str()?;
     if recorded.trim().is_empty() {
         return None;
     }
-    Some(PathBuf::from(recorded))
+    let cli_path = PathBuf::from(recorded);
+    if let Some(parent) = cli_path.parent() {
+        let sibling = parent.join(default_program_name());
+        if sibling.is_file() {
+            return Some(sibling);
+        }
+    }
+    Some(cli_path)
 }
 
 /// The absolute-only filter is the security boundary, so it lives here where every search
@@ -358,7 +385,7 @@ fn candidate_names() -> Vec<&'static str> {
     }
     #[cfg(not(windows))]
     {
-        vec!["kyberdash"]
+        vec!["kyberdash-api", "kyberdash"]
     }
 }
 
@@ -712,6 +739,30 @@ mod tests {
             std::fs::write(&config, bad).unwrap();
             assert_eq!(recorded_cli_path(&config), None, "input: {bad}");
         }
+
+        // An explicit kyberdashApiPath wins immediately.
+        std::fs::write(
+            &config,
+            br#"{"kyberdashApiPath":"/opt/kyberdash/bin/kyberdash-api","kyberdashPath":"/opt/kyberdash/bin/kyberdash"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            recorded_cli_path(&config),
+            Some(PathBuf::from("/opt/kyberdash/bin/kyberdash-api"))
+        );
+
+        // When kyberdashPath sits beside an existing sibling kyberdash-api, prefer the sibling.
+        let sibling_dir = scratch.dir("sibling-bin");
+        let sibling_cli = sibling_dir.join("kyberdash");
+        let sibling_api = sibling_dir.join(default_program_name());
+        std::fs::write(&sibling_cli, b"#!/bin/sh\n").unwrap();
+        std::fs::write(&sibling_api, b"#!/bin/sh\n").unwrap();
+        std::fs::write(
+            &config,
+            serde_json::json!({ "kyberdashPath": sibling_cli.to_string_lossy() }).to_string(),
+        )
+        .unwrap();
+        assert_eq!(recorded_cli_path(&config), Some(sibling_api));
 
         assert_eq!(recorded_cli_path(&scratch.root.join("absent.json")), None);
     }

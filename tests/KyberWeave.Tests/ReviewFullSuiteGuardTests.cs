@@ -62,8 +62,8 @@ public sealed class ReviewFullSuiteGuardTests
     {
         ReviewGate[] gates =
         [
-            new ReviewGate("test", ["scripts/proc-guard.sh", "run", "--", "dotnet", "test"]) { FullSuite = true },
-            new ReviewGate("ts-test", ["scripts/proc-guard.sh", "run", "--", "npm", "run", "test"]) { FullSuite = true },
+            new ReviewGate("test", ["dotnet", "test"]) { FullSuite = true },
+            new ReviewGate("ts-test", ["npm", "run", "test"]) { FullSuite = true },
             new ReviewGate("cargo-test", ["cargo", "test"]) { FullSuite = true }
         ];
 

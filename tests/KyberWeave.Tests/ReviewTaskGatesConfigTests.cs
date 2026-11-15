@@ -705,7 +705,7 @@ public sealed class ReviewTaskGatesConfigTests
     {
         IReadOnlyList<ReviewGate> gates = RepositoryReviewGates();
 
-        Assert.Equal(39, gates.Count);
+        Assert.Equal(43, gates.Count);
         List<string> missing = [];
         foreach (ReviewGate gate in gates)
             if (gate.Include.Count == 0)
@@ -741,7 +741,7 @@ public sealed class ReviewTaskGatesConfigTests
 
         string[] shouldNotMatch =
         [
-            "dash/src/index.ts",
+            "dash/web/src/main.tsx",
             "docs/README.md"
         ];
 
@@ -796,7 +796,7 @@ public sealed class ReviewTaskGatesConfigTests
             "products/kyber-squad/agents/conductor.md",
             "REVIEW.md",
             "docs/README.md",
-            "dash/src/index.ts"
+            "dash/web/src/main.tsx"
         ];
 
         foreach (string id in gateIds)

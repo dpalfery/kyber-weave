@@ -67,7 +67,7 @@ public sealed partial class PlanTaskFileGenerator
     private static readonly HashSet<string> Runners = new(StringComparer.Ordinal)
     {
         "dotnet", "npm", "npx", "pnpm", "yarn", "cargo", "go", "pytest", "python", "python3", "node", "make",
-        "bash", "sh", "pwsh", "kyber-weave", "scripts/proc-guard.sh"
+        "bash", "sh", "pwsh", "kyber-weave", "scripts/fast-loop.sh"
     };
 
     private const string WorktreeSlot = "{worktree}";

@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 
-import type { ContextReport } from '../../../../src/analysis/report/types.ts'
+import type { ContextReport } from '../report-types.ts'
 import { SessionPanel } from './SessionPanel'
 
 const REASON = "no system_prompt part was observed in this session's captured messages"

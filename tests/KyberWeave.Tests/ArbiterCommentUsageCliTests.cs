@@ -7,7 +7,6 @@ namespace KyberWeave.Tests;
 /// Usage errors on <c>arbiter comment</c>. A missing <c>--path</c> is refused with the sibling commands' usage error
 /// (exit 2, one line) rather than an exception that escapes the command.
 /// </summary>
-[Collection(ArbiterCommandCompositionCollection.Name)]
 public sealed class ArbiterCommentUsageCliTests : IDisposable
 {
     private readonly TempDirectory _temp = new();

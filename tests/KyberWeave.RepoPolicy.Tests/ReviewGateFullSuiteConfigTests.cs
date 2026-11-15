@@ -12,9 +12,9 @@ namespace KyberWeave.Tests;
 /// <para>
 /// A gate with <c>full-suite: true</c> is one that runs the whole product suite, so <c>kyber-weave review gates</c>
 /// refuses it unless the caller passes <c>--council</c> (or the terminal is interactive). The key is set on exactly
-/// <c>test</c>, <c>ts-test</c> and <c>cargo-test</c>. The watchdog-wrapped <c>ts-test</c> argv passes <c>--council</c>
-/// to <c>scripts/proc-guard.sh run</c>, which needs it to admit the full run, while <c>test</c> runs
-/// <c>dotnet test</c> directly without <c>proc-guard.sh</c>. The CI template passes <c>--council</c> to
+/// <c>test</c>, <c>ts-test</c> and <c>cargo-test</c>. Every one of them declares its command directly — <c>test</c> runs
+/// <c>dotnet test</c> and <c>ts-test</c> runs <c>npm run --prefix dash test</c>, with no process wrapper in between — so
+/// the gate-level <c>full-suite: true</c> key is the whole refusal. The CI template passes <c>--council</c> to
 /// <c>review gates</c>, because CI is the other caller allowed to run the full suite.
 /// </para>
 /// <para>
@@ -65,31 +65,6 @@ public sealed class ReviewGateFullSuiteConfigTests
         }
 
         Assert.Equal(FullSuiteGates.Order(StringComparer.Ordinal), keyed.Order(StringComparer.Ordinal));
-    }
-
-    /// <summary>
-    /// The watchdog-wrapped <c>ts-test</c> gate passes <c>--council</c> after <c>run</c> and before the <c>--</c> separator,
-    /// so the watchdog consumes it and admits the full run.
-    /// </summary>
-    /// <remarks>
-    /// Placed after <c>--</c> the flag would reach the test runner, which does not know it. Placed before <c>run</c> the
-    /// watchdog would not see it as a flag at all. The <c>.NET</c> <c>test</c> gate runs <c>dotnet test</c> directly and
-    /// is guarded at the gate level by <c>full-suite: true</c>.
-    /// </remarks>
-    [Theory]
-    [InlineData("ts-test")]
-    public void FullSuiteProcGuardArgvCarriesCouncilAfterRunAndBeforeTheSeparator(string gateId)
-    {
-        string[] run = GateRunArgv(gateId);
-
-        Assert.Equal(["scripts/proc-guard.sh", "run"], run.Take(2));
-        Assert.Equal(1, run.Count(word => word == CouncilFlagText));
-        int councilIndex = Array.IndexOf(run, CouncilFlagText);
-        int separator = Array.IndexOf(run, "--");
-        Assert.True(separator > 2, "The gate's proc-guard flags must end with '--' before the wrapped command.");
-        Assert.True(
-            councilIndex > 1 && councilIndex < separator,
-            $"--council must sit between 'run' and '--' in gate '{gateId}': {string.Join(' ', run)}");
     }
 
     /// <summary>

@@ -16,7 +16,6 @@ namespace KyberWeave.Tests;
 /// artifacts, honors <c>--remove-key</c>, and reports misuse without side effects.
 /// RED: <c>ArbiterUninstallCommand</c> and <c>ArbiterUninstallSettings</c> do not exist yet.
 /// </summary>
-[Collection(ArbiterCommandCompositionCollection.Name)]
 public sealed class ArbiterUninstallCommandTests : IDisposable
 {
     private readonly TempDirectory _temp = new();

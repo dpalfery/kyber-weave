@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Core.Processes;
+using KyberWeave.Core.Review;
 
 namespace KyberWeave.Tests.Fakes;
 
@@ -103,6 +104,144 @@ public static class TestGitRepositoryTemplate
     }
 
     /// <summary>
+    ///     The archived plan a <c>RunDeliveryTests</c> run leaves behind. It is the text those tests read back as the
+    ///     pull request's changes, low-confidence decisions and unverified items.
+    /// </summary>
+    private const string RunDeliveryPlanText = """
+        ---
+        id: plans/widget-export
+        title: Export widgets as CSV from the list page
+        doc-type: plan
+        status: archived
+        component: Widget API
+        autonomy: autonomous
+        ---
+
+        # Export widgets as CSV from the list page
+
+        ## Decisions
+
+        | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+        |---|---|---|---|---|
+        | D1 | Which delimiter? | A comma, with RFC 4180 quoting. Semicolons were considered. | Spreadsheet default. | ANSWERED: owner requirement |
+        | D2 | Cap the export size? | Yes, at 50,000 rows, with a message past it. | No source names a limit. | autonomous: low-confidence, no authoritative source |
+        | D3 | Stream or buffer? | Stream the rows. | Memory stays flat. | autonomous: recommendation accepted (2026-11-13) |
+        | AP1 | Approve and execute. | Approved. | Conductor. | autonomous: recommendation accepted (2026-11-13) |
+
+        ## Tasks
+
+        ### T1: RED for the CSV writer
+        ### T2: GREEN for the CSV writer
+        ### T3: Export button on the list page
+
+        ## Completion summary
+
+        - NOT VERIFIED: the export in a real browser — no browser in the run environment.
+        """;
+
+    /// <summary>
+    ///     Creates the <c>RunDeliveryTests</c> run repository at <paramref name="workPath" /> and the bare remote it
+    ///     pushes to at <paramref name="remotePath" />: a checkout on the run branch carrying the run's work, the
+    ///     active plan, the run record and the review evidence.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         The remote holds only the base commit, so a plain (non-forced) push of the run branch is accepted. Both
+    ///         come from one seed, written once per test assembly: only the copy is per test.
+    ///     </para>
+    ///     <para>
+    ///         The copy is clean and the plan is still active, so the caller makes exactly the one change it is about:
+    ///         move the plan into the archive, and commit that move or leave it staged.
+    ///     </para>
+    /// </remarks>
+    public static void CreateRunDeliveryRepositories(string workPath, string remotePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(remotePath);
+
+        string seed = EnsureTemplate("run-delivery-seed", InitializeRunDeliverySeedTemplate);
+        CopyDirectory(Path.Combine(seed, "remote.git"), remotePath);
+        CopyDirectory(Path.Combine(seed, "run-delivery-model"), workPath);
+        ConfigureSeedCopy(workPath, remotePath);
+    }
+
+    /// <summary>
+    ///     Gives a freshly copied repository the git state the delivery tests expect: the identity the deliver step
+    ///     commits under, a github.com fetch URL, and a push URL for the copy's own
+    ///     <paramref name="remotePath" />.
+    /// </summary>
+    /// <remarks>
+    ///     The whole <c>.git</c> folder is copied, configuration included, so the identity and the remote-tracking
+    ///     refs the seed recorded survive. Only the remote's location is local to one test, and that is what is
+    ///     rewritten here: a copy can therefore never push to another test's remote by accident.
+    /// </remarks>
+    private static void ConfigureSeedCopy(string workPath, string remotePath)
+    {
+        // The deliver step commits with plain `git commit`, which needs an identity, and the test runner's global
+        // gitconfig is not guaranteed to carry one.
+        GitIdentity(workPath);
+        // The fetch URL names the github.com repository the deliver step reads as owner/name, so it is the same in
+        // every test; only the push URL is repointed at that test's own bare remote.
+        RunGit(workPath, "remote", "set-url", "origin", SeedFetchUrl);
+        RunGit(workPath, "remote", "set-url", "--push", "origin", remotePath);
+        RunGit(workPath, "config", "branch.main.remote", "origin");
+        RunGit(workPath, "remote", "set-head", "origin", "main");
+    }
+
+    /// <summary>The github.com URL the seed clone records, which every copy keeps as its fetch URL.</summary>
+    private const string SeedFetchUrl = "https://github.com/acme/widgets.git";
+
+    /// <summary>
+    ///     Creates the <c>ReviewCycleTests</c> repository: the council baseline already on its <c>feature</c> branch,
+    ///     with the three gate configuration written but not committed.
+    /// </summary>
+    public static void CreateReviewCycleRepository(string destinationPath)
+    {
+        CreateRepositoryCopy("review-cycle", destinationPath, dir =>
+        {
+            InitializeReviewGatesCouncilTemplate(dir);
+            SeedReviewCycleBranch(dir);
+        });
+    }
+
+    /// <summary>
+    ///     Creates the <c>ReviewGatesCycleTests</c> repository: the same council baseline, already on its
+    ///     <c>feature</c> branch, with the three gate configuration written but not committed.
+    /// </summary>
+    public static void CreateReviewGatesCycleRepository(string destinationPath)
+    {
+        CreateRepositoryCopy("review-gates-cycle", destinationPath, dir =>
+        {
+            InitializeReviewGatesCouncilTemplate(dir);
+            SeedReviewCycleBranch(dir);
+        });
+    }
+
+    /// <summary>
+    ///     Creates the <c>PostCheckoutGitFixture</c> ungoverned repository: an empty <c>git init</c> with nothing
+    ///     committed, exactly as the fixture's own <c>git init</c> left it.
+    /// </summary>
+    public static void CreatePostCheckoutEmptyRepository(string destinationPath)
+    {
+        CreateRepositoryCopy("post-checkout-empty", destinationPath, InitializePostCheckoutEmptyTemplate);
+    }
+
+    /// <summary>
+    ///     Creates the <c>PostCheckoutGitFixture</c> governed repository: only the <c>.kyber-weave</c> folder and its
+    ///     docs, neither committed nor staged, with the fixture's own configuration text.
+    /// </summary>
+    /// <param name="destinationPath">The repository path the copy is written to.</param>
+    /// <param name="config">The <c>kyber-weave.yml</c> text the test wants.</param>
+    public static void CreatePostCheckoutGovernedRepository(string destinationPath, string config)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
+        ArgumentNullException.ThrowIfNull(config);
+
+        CreateRepositoryCopy("post-checkout-governed:" + config, destinationPath,
+            dir => InitializePostCheckoutGovernedTemplate(dir, config));
+    }
+
+    /// <summary>
     ///     Gets or creates a pre-seeded git template identified by <paramref name="templateKey" /> and copies
     ///     the full working tree (including <c>.git</c>) into <paramref name="destinationPath" />.
     /// </summary>
@@ -115,6 +254,16 @@ public static class TestGitRepositoryTemplate
         ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
         ArgumentNullException.ThrowIfNull(initialize);
 
+        CopyDirectory(EnsureTemplate(templateKey, initialize), destinationPath);
+    }
+
+    /// <summary>
+    ///     Gets or creates the pre-seeded template directory identified by <paramref name="templateKey" /> without
+    ///     copying it. One initialization failure evicts the entry and deletes the partial directory, so a later
+    ///     request retries.
+    /// </summary>
+    private static string EnsureTemplate(string templateKey, Action<string> initialize)
+    {
         Lazy<string> lazyTemplate = Templates.GetOrAdd(
             templateKey,
             key => new Lazy<string>(() =>
@@ -130,31 +279,32 @@ public static class TestGitRepositoryTemplate
                 return dir;
             }));
 
-        string templateDir;
         try
         {
-            templateDir = lazyTemplate.Value;
+            return lazyTemplate.Value;
         }
         catch
         {
             Templates.TryRemove(KeyValuePair.Create(templateKey, lazyTemplate));
-            try
-            {
-                string dir = GetTemplateDirectoryPath(templateKey);
-                if (Directory.Exists(dir))
-                {
-                    Directory.Delete(dir, true);
-                }
-            }
-            catch
-            {
-                // Best-effort cleanup of partial template directory on initialization failure.
-            }
-
+            TryDeleteDirectory(GetTemplateDirectoryPath(templateKey));
             throw;
         }
+    }
 
-        CopyDirectory(templateDir, destinationPath);
+    /// <summary>Deletes a template directory, which may already be gone or gone by now, without failing the caller.</summary>
+    private static void TryDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, true);
+            }
+        }
+        catch
+        {
+            // Best-effort cleanup: the process-exit hook removes the template root anyway.
+        }
     }
 
     private static string GetTemplateDirectoryPath(string key)
@@ -167,7 +317,21 @@ public static class TestGitRepositoryTemplate
     /// <summary>
     ///     Recursively copies a directory tree adhering to safe filesystem enumeration standards.
     /// </summary>
-    public static void CopyDirectory(string sourceDir, string destinationDir)
+    /// <param name="sourceDir">The directory tree to copy.</param>
+    /// <param name="destinationDir">The directory the tree is copied into, created when absent.</param>
+    /// <param name="skipRelativePath">
+    ///     A repository-relative path to leave out, or null to copy everything. A caller passes one to drop a file
+    ///     whose recorded paths no longer hold, such as the template's own <c>.git/config</c>.
+    /// </param>
+    public static void CopyDirectory(string sourceDir, string destinationDir, string? skipRelativePath = null)
+    {
+        string skip = skipRelativePath?.Replace('\\', '/').Trim('/') ?? string.Empty;
+        CopyDirectory(sourceDir, destinationDir, skip, Path.GetFullPath(sourceDir));
+    }
+
+    /// <param name="skip">The entry to leave out, relative to <paramref name="rootDir" />; empty to copy everything.</param>
+    /// <param name="rootDir">The directory <paramref name="skip" /> is relative to, so a nested call keeps the whole path.</param>
+    private static void CopyDirectory(string sourceDir, string destinationDir, string skip, string rootDir)
     {
         Directory.CreateDirectory(destinationDir);
         DirectoryInfo sourceInfo = new(sourceDir);
@@ -179,11 +343,18 @@ public static class TestGitRepositoryTemplate
         }))
         {
             if (entry.LinkTarget is not null) continue;
+            if (skip.Length > 0 && string.Equals(
+                    Path.GetRelativePath(rootDir, entry.FullName).Replace('\\', '/'),
+                    skip,
+                    StringComparison.Ordinal))
+            {
+                continue;
+            }
 
             string targetPath = Path.Combine(destinationDir, entry.Name);
             if (entry is DirectoryInfo subDir)
             {
-                CopyDirectory(subDir.FullName, targetPath);
+                CopyDirectory(subDir.FullName, targetPath, skip, rootDir);
             }
             else if (entry is FileInfo file)
             {
@@ -258,6 +429,136 @@ public static class TestGitRepositoryTemplate
             "-c", "commit.gpgsign=false",
             "commit", "--quiet", "--allow-empty", "-m", "initial");
         AppendInfoExclude(repo, ".kyber-weave/\n");
+    }
+
+    /// <summary>
+    ///     Writes the <c>RunDeliveryTests</c> history once, into a directory holding the bare <c>remote.git</c> at the
+    ///     base commit and the <c>run-delivery-model</c> checkout cloned from it on the run branch.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         The checkout is a real clone because only a clone derives the remote-tracking refs a run needs:
+    ///         <c>origin/main</c> on the same commit as the remote's own <c>main</c>, and <c>origin/HEAD</c> naming it.
+    ///         <c>origin/main</c> therefore differs from <c>HEAD</c> by exactly the run branch's commits, which is the
+    ///         measured change.
+    ///     </para>
+    ///     <para>
+    ///         The checkout is clean: the run's work, the active plan and the evidence in an ignored scratch folder are
+    ///         all committed. The archive move is the one change each test makes, so the deliver step has exactly that
+    ///         to commit or find committed.
+    ///     </para>
+    /// </remarks>
+    private static void InitializeRunDeliverySeedTemplate(string seed)
+    {
+        const string branch = "claude/feat/widget-export";
+        const string activePlan = "docs/plans/2026-11-13-widget-export.md";
+
+        string remote = Path.Combine(seed, "remote.git");
+        string model = Path.Combine(seed, "run-delivery-model");
+        Directory.CreateDirectory(seed);
+
+        RunGit(seed, "init", "--quiet", "--bare", remote);
+        RunGit(seed, "clone", "--quiet", remote, model);
+        GitIdentity(model);
+        ConfigureTemplateRepository(model);
+        WriteFile(model, "README.md", "# Widgets\n");
+        WriteFile(model, "docs/plans/README.md", "# Plans\n");
+        WriteFile(model, "docs/archive/plans/.keep", string.Empty);
+        RunGit(model, "add", "-A");
+        Commit(model, "chore: the widget list");
+        RunGit(model, "push", "--quiet", "origin", "HEAD:refs/heads/main");
+        // The clone already put the initial branch (main) on the commit it cloned, tracking origin/main.
+        RunGit(model, "remote", "set-head", "origin", "main");
+        // Record the github.com URL in the template's own configuration; each test copy repoints only the push URL.
+        RunGit(model, "remote", "set-url", "origin", SeedFetchUrl);
+        RunGit(model, "checkout", "--quiet", "-b", branch);
+        WriteFile(model, ".kyber-weave/.keep", string.Empty);
+        WriteFile(model, "src/Export.cs", "// export\n");
+        // The plan is committed as an active plan. Moving it into the archive is the change the deliver step commits
+        // or finds committed, so the seed stops short of it and each test makes that move itself.
+        WriteFile(model, activePlan, RunDeliveryPlanText);
+        RunGit(model, "add", "-A");
+        Commit(model, "feat: export widgets as CSV");
+        WriteRunEvidence(model, branch);
+    }
+
+    /// <summary>
+    ///     Writes one task's passing gate report and an approving review cycle with one minor finding, the evidence a
+    ///     completed run leaves in its scratch folder. The scratch folder is ignored so it never reaches the pushed
+    ///     branch, which is what the deliver step expects of a real run.
+    /// </summary>
+    private static void WriteRunEvidence(string model, string branch)
+    {
+        WriteFile(model, ".gitignore", ".agent_scratchpad/\n");
+        RunGit(model, "add", ".gitignore");
+        Commit(model, "chore: ignore scratch");
+        WriteFile(model, ".agent_scratchpad/T3/task-gate.json", ReviewJson.Write(new GateReport(GateReport.CurrentSchema,
+            [new GateResult("build", true, 0, "passed"), new GateResult("test", true, 0, "passed"), new GateResult("format", true, 0, "passed")])));
+        string cycle = Path.Combine(model, ".agent_scratchpad", "review", "review", "cycle-1");
+        Directory.CreateDirectory(cycle);
+        File.WriteAllText(Path.Combine(cycle, "gates.json"), ReviewJson.Write(new GateReport(GateReport.CurrentSchema,
+            [new GateResult("build", true, 0, "passed"), new GateResult("test", true, 0, "passed")])));
+        File.WriteAllText(Path.Combine(cycle, "findings.json"), ReviewJson.Write(new FindingsReport(FindingsReport.CurrentSchema,
+            [new ReviewFinding("naming/vague", "naming", ReviewSeverity.Minor, 8, "src/Export.cs", 1, "// export",
+                "The file name does not say it writes CSV.", "Read the file.", "A reader looks for the CSV writer elsewhere.", "Rename it CsvExport.cs.")],
+            ["src/Export.cs"], 1)));
+        ReviewCycles.WriteIdentity(cycle, new ReviewCycleIdentity(
+            branch,
+            Output(model, "merge-base", "origin/main", "HEAD"),
+            Output(model, "rev-parse", "HEAD")));
+    }
+
+    /// <summary>
+    ///     Takes the council baseline onto the <c>feature</c> branch and writes the gate configuration those tests read,
+    ///     both done once here rather than per test.
+    /// </summary>
+    /// <remarks>
+    ///     The configuration stays uncommitted: it is edited after the run starts, and nothing under test reads the
+    ///     gate list from history.
+    /// </remarks>
+    private static void SeedReviewCycleBranch(string repo)
+    {
+        RunGit(repo, "checkout", "--quiet", "-b", "feature");
+        WriteFile(repo, ".kyber-weave/kyber-weave.yml", ReviewCycleGateConfiguration);
+    }
+
+    /// <summary>The three <c>review.gates</c> entries the cycle tests rely on: one per changed kind, and one that always runs.</summary>
+    private const string ReviewCycleGateConfiguration = """
+        review:
+          gates:
+            - id: build
+              include: ["**/*.cs"]
+              run: [git, --version]
+            - id: docs
+              include: ["**/*.md"]
+              run: [git, --version]
+            - id: always
+              run: [git, --version]
+        """;
+
+    private static void InitializePostCheckoutEmptyTemplate(string repo)
+    {
+        RunGit(repo, "init", "--quiet");
+    }
+
+    private static void InitializePostCheckoutGovernedTemplate(string repo, string config)
+    {
+        InitializePostCheckoutEmptyTemplate(repo);
+        WriteFile(repo, ".kyber-weave/kyber-weave.yml", config);
+        WriteFile(repo, "docs/README.md", "# Docs\n");
+    }
+
+    /// <summary>Pins the commit identity a template repository commits under.</summary>
+    private static void GitIdentity(string repo)
+    {
+        RunGit(repo, "config", "user.name", "t");
+        RunGit(repo, "config", "user.email", "t@example.com");
+    }
+
+    /// <summary>Commits everything already staged, refusing nothing because the checkout has nothing to commit.</summary>
+    private static void Commit(string repo, string message)
+    {
+        RunGit(repo, "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", message);
     }
 
     private static void InitializeDocsInitFixtureTemplate(
@@ -344,7 +645,17 @@ public static class TestGitRepositoryTemplate
         RunGit(repo, "config", "maintenance.auto", "false");
     }
 
+    /// <summary>
+    ///     Runs git in <paramref name="repo" /> and throws git's own stderr when it fails. The directory need not be a
+    ///     repository: seeding runs <c>git init</c> and <c>git clone</c> inside a plain template directory.
+    /// </summary>
     private static void RunGit(string repo, params string[] arguments)
+    {
+        _ = Output(repo, arguments);
+    }
+
+    /// <summary>Runs git as <see cref="RunGit" /> does and returns its standard output, trimmed.</summary>
+    private static string Output(string repo, params string[] arguments)
     {
         ProcessStartInfo startInfo = new("git")
         {
@@ -362,6 +673,7 @@ public static class TestGitRepositoryTemplate
         if (result.ExitCode != 0)
             throw new InvalidOperationException(
                 $"git {string.Join(' ', arguments)} failed in '{repo}': {result.StandardError}");
+        return result.StandardOutput.Trim();
     }
 
     private static void AppendInfoExclude(string repo, string entry)

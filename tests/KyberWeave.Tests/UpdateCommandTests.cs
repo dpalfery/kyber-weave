@@ -834,6 +834,32 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.Equal("new-kyberdash", File.ReadAllText(installed));
     }
 
+    [Theory]
+    [InlineData("osx-arm64", false)]
+    [InlineData("win-x64", true)]
+    public void RunReplacesInstalledKyberDashAndSiblingsWhenPresentInArchive(string rid, bool windows)
+    {
+        string installed = InstallKyberDash(windows);
+        using MapHandler handler = MapRelease(
+            "0.2.0",
+            rid,
+            windows,
+            withKyberDash: true,
+            withKyberDashSiblings: true);
+        SelfUpdateHost host = CreateHost("0.1.0", rid, windows);
+
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("0.2.0", false, false));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Equal("new-kyberdash", File.ReadAllText(installed));
+        Assert.Equal(
+            "new-kyberdash-api",
+            File.ReadAllText(Path.Combine(_install.Path, BinaryInstaller.InstalledFileName("kyberdash-api", windows))));
+        Assert.Equal(
+            "new-kyberdash-mcp",
+            File.ReadAllText(Path.Combine(_install.Path, BinaryInstaller.InstalledFileName("kyberdash-mcp", windows))));
+    }
+
     // ---- Arbiter: installed beside the CLI, updated with it ----
 
     [Fact]
@@ -1990,7 +2016,8 @@ public sealed class UpdateCommandTests : IDisposable
         string rid,
         bool windows,
         bool withKyberDash = false,
-        bool withArbiter = false)
+        bool withArbiter = false,
+        bool withKyberDashSiblings = false)
     {
         MapHandler handler = new();
         string tag = "v" + version;
@@ -2008,14 +2035,27 @@ public sealed class UpdateCommandTests : IDisposable
 
         if (withKyberDash)
         {
-            // Published under the Node SEA RID, so an update that asked for the .NET
+            // Published under the KyberDash RID, so an update that asked for the .NET
             // RID would miss this mapping and fail rather than quietly pass.
             string dashName = BinaryInstaller.ArchiveName(
                 "kyberdash",
                 PlatformRid.KyberDashRid(rid));
             string dashArchive = Path.Combine(_assets.Path, dashName);
-            string dashFile = BinaryInstaller.InstalledFileName("kyberdash", windows);
-            WriteArchive(dashArchive, dashFile, "new-kyberdash"u8.ToArray(), windows);
+            List<(string EntryName, byte[] Content)> dashEntries =
+            [
+                (BinaryInstaller.InstalledFileName("kyberdash", windows), "new-kyberdash"u8.ToArray())
+            ];
+            if (withKyberDashSiblings)
+            {
+                dashEntries.Add((
+                    BinaryInstaller.InstalledFileName("kyberdash-api", windows),
+                    "new-kyberdash-api"u8.ToArray()));
+                dashEntries.Add((
+                    BinaryInstaller.InstalledFileName("kyberdash-mcp", windows),
+                    "new-kyberdash-mcp"u8.ToArray()));
+            }
+
+            WriteArchiveEntries(dashArchive, windows, dashEntries);
             byte[] dashBytes = File.ReadAllBytes(dashArchive);
             sums += $"{Sha(dashBytes)}  {dashName}\n";
             handler.MapFile(GitHubReleaseClient.AssetUri(tag, dashName).AbsoluteUri, dashBytes);
@@ -2061,25 +2101,38 @@ public sealed class UpdateCommandTests : IDisposable
         return path;
     }
 
-    private static void WriteArchive(string archivePath, string entryName, byte[] content, bool windows)
+    private static void WriteArchive(string archivePath, string entryName, byte[] content, bool windows) =>
+        WriteArchiveEntries(archivePath, windows, [(entryName, content)]);
+
+    private static void WriteArchiveEntries(
+        string archivePath,
+        bool windows,
+        IReadOnlyList<(string EntryName, byte[] Content)> entries)
     {
         if (windows)
         {
             using ZipArchive zip = ZipFile.Open(archivePath, ZipArchiveMode.Create);
-            ZipArchiveEntry entry = zip.CreateEntry(entryName, CompressionLevel.Fastest);
-            using Stream stream = entry.Open();
-            stream.Write(content);
+            foreach ((string entryName, byte[] content) in entries)
+            {
+                ZipArchiveEntry entry = zip.CreateEntry(entryName, CompressionLevel.Fastest);
+                using Stream stream = entry.Open();
+                stream.Write(content);
+            }
+
             return;
         }
 
         using FileStream file = File.Create(archivePath);
         using GZipStream gzip = new(file, CompressionLevel.Fastest);
         using TarWriter writer = new(gzip);
-        using MemoryStream data = new(content);
-        writer.WriteEntry(new PaxTarEntry(TarEntryType.RegularFile, entryName)
+        foreach ((string entryName, byte[] content) in entries)
         {
-            DataStream = data
-        });
+            using MemoryStream data = new(content);
+            writer.WriteEntry(new PaxTarEntry(TarEntryType.RegularFile, entryName)
+            {
+                DataStream = data
+            });
+        }
     }
 
     [SuppressMessage(

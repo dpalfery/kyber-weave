@@ -3,36 +3,17 @@
   "version": "0.9.23",
   "description": "Context health reports and dashboards for AI coding sessions",
   "type": "module",
-  "main": "./dist/cli.js",
-  "bin": {
-    "kyberdash": "dist/cli.js"
-  },
-  "files": [
-    "dist",
-    "THIRD_PARTY_NOTICES.md",
-    "!dist/parse-worker.js.map"
-  ],
+  "main": "./web/dist/index.html",
+  "private": true,
   "scripts": {
-    "bundle-litellm": "node scripts/bundle-litellm.mjs",
-    "bundle:opencode-plugin": "node scripts/bundle-opencode-plugin.mjs",
-    "bundle:factory-plugin": "node scripts/bundle-factory-plugin.mjs",
-    "build": "node scripts/bundle-litellm.mjs && node scripts/bundle-opencode-plugin.mjs && node scripts/bundle-factory-plugin.mjs && tsup && node -e \"const fs=require('fs'); fs.copyFileSync('src/launcher.ts','dist/cli.js'); fs.chmodSync('dist/cli.js',0o755)\" && npm run build:web",
-    "build:cli": "node scripts/bundle-opencode-plugin.mjs && node scripts/bundle-factory-plugin.mjs && tsup && node -e \"const fs=require('fs'); fs.copyFileSync('src/launcher.ts','dist/cli.js'); fs.chmodSync('dist/cli.js',0o755)\"",
+    "build": "npm run build:web",
     "build:web": "cd web && npm install --no-audit --no-fund --silent && npm run build",
-    "dev": "NODE_OPTIONS=--no-deprecation tsx src/launcher.ts",
-    "test": "vitest run src tests scripts web/src --exclude \"src/refresh/lock*\"",
+    "test": "vitest run tests scripts web/src",
     "test:related": "vitest related --run",
-    "test:cost-isolation": "vitest run src/tools/cost-isolation.test.ts",
     "check:reachable": "node scripts/unreachable.mjs",
-    "test:locks": "vitest run src/refresh/lock.test.ts src/refresh/lock-corrupt-body.test.ts src/refresh/lock-process.test.ts --pool=forks --no-file-parallelism",
-    "test:watch": "vitest src tests scripts web/src --exclude \"src/refresh/lock*\"",
+    "test:watch": "vitest tests scripts web/src",
     "typecheck": "tsc --noEmit && tsc --noEmit -p web/tsconfig.json && tsc --noEmit -p tsconfig.tests.json",
-    "lint": "eslint .",
-    "verify:upgrade": "node scripts/upgrade-path/run.mjs",
-    "gate:opencode-live": "node scripts/opencode-live-gate/run.mjs",
-    "prepublishOnly": "npm run build:cli",
-    "report:fixtures": "tsx src/tools/report-fixtures.ts",
-    "memory:store": "tsx src/tools/store-memory.ts"
+    "lint": "eslint ."
   },
   "keywords": [
     "claude-code",
@@ -65,29 +46,14 @@
     "url": "https://github.com/dpalfery/kyber-weave/issues"
   },
   "homepage": "https://github.com/dpalfery/kyber-weave#readme",
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.32.0",
-    "bonjour-service": "^1.4.1",
-    "chalk": "^5.4.1",
-    "commander": "^13.1.0",
-    "js-tiktoken": "^1.0.21",
-    "jsonc-parser": "^3.3.1",
-    "selfsigned": "^5.5.0",
-    "strip-ansi": "^7.2.0",
-    "undici": "^7.30.1",
-    "zod": "^4.6.7"
-  },
   "devDependencies": {
     "@eslint/js": "^9.18.0",
     "@playwright/test": "^1.63.0",
     "@types/node": "^22.19.17",
-    "@types/selfsigned": "^2.0.4",
     "@vitest/coverage-v8": "^5.0.0",
-    "esbuild": "^0.28.2",
     "eslint": "^9.18.0",
     "happy-dom": "^21.0.4",
     "playwright": "^1.61.1",
-    "tsup": "^9.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.8.0",
     "typescript-eslint": "^8.20.0",

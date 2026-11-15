@@ -326,7 +326,8 @@ dotnet build KyberWeave.sln -c Release
 dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build
 ```
 
-For KyberDash (`dash/`) and tray test runs, use `scripts/proc-guard.sh run --`, the process watchdog
+KyberDash (`dash/`) and tray commands run directly too — `npm --prefix dash …`,
+`npx --prefix dash playwright test …` and `cargo … --manifest-path dash/tray/src-tauri/Cargo.toml …`
 (see [the KyberDash runbook](docs/dash/runbook.md#running-tests-safely)). `.NET` runs directly via
 `dotnet` so Roslyn/MSBuild build servers stay warm.
 

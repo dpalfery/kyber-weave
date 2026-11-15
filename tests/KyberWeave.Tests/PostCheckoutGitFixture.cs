@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Diagnostics;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Processes;
+using KyberWeave.Tests.Fakes;
 
 namespace KyberWeave.Tests;
 
@@ -18,7 +19,7 @@ namespace KyberWeave.Tests;
 /// </para>
 /// <para>
 /// The script tests start background children on purpose. The stub appends its PID to the marker folder, and
-/// <see cref="Dispose"/> kills any shell or sleep left running, so proc-guard never sees a leftover child.
+/// <see cref="Dispose"/> kills any shell or sleep left running, so the fixture never leaves a child behind.
 /// </para>
 /// </remarks>
 internal sealed class PostCheckoutGitFixture : IDisposable
@@ -87,25 +88,33 @@ internal sealed class PostCheckoutGitFixture : IDisposable
         return result.StandardOutput;
     }
 
-    /// <summary>Creates an empty repository with one commit-less <c>git init</c>.</summary>
+    /// <summary>Creates an empty repository from the pre-seeded <c>git init</c> template, with nothing committed.</summary>
     public void CreateRepository()
     {
-        Directory.CreateDirectory(Repository);
-        GitOk(Repository, "init", "--quiet");
+        TestGitRepositoryTemplate.CreatePostCheckoutEmptyRepository(Repository);
     }
 
     /// <summary>Creates a repository with governed docs: a config file and a docs folder, not yet committed.</summary>
     public void CreateGovernedRepository()
     {
-        CreateRepository();
-        WriteGoverned(Repository, "stop-on-tool-failure: true\n");
+        Directory.CreateDirectory(Repository);
+        TestGitRepositoryTemplate.CreatePostCheckoutGovernedRepository(Repository, "stop-on-tool-failure: true\n");
     }
 
     /// <summary>Writes the governed config and docs folder that make a repository governed.</summary>
     public static void WriteGoverned(string root, string config)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(root);
+        ArgumentNullException.ThrowIfNull(config);
+
+        string configPath = Path.Combine(root, ".kyber-weave", "kyber-weave.yml");
+        if (File.Exists(configPath) && File.ReadAllText(configPath) == config)
+        {
+            return;
+        }
+
         Directory.CreateDirectory(Path.Combine(root, ".kyber-weave"));
-        File.WriteAllText(Path.Combine(root, ".kyber-weave", "kyber-weave.yml"), config);
+        File.WriteAllText(configPath, config);
         Directory.CreateDirectory(Path.Combine(root, "docs"));
         File.WriteAllText(Path.Combine(root, "docs", "README.md"), "# Docs\n");
     }

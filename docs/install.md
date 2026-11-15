@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-11-09
+last-reviewed: 2026-11-15
 ---
 
 # Installing Kyber-Weave
@@ -139,8 +139,9 @@ default location.
 
 ## KyberDash and the version floor
 
-KyberDash ships as a Node single-executable, so its archives are keyed by Node's RID names —
-`darwin-x64` and `darwin-arm64` where the .NET binaries use `osx-x64` and `osx-arm64`. The
+KyberDash compiles from `dash/server/` as a self-contained single-file `.NET 10` executable,
+preserving its historical `kyberdash-<rid>` archive names for compatibility with existing installers —
+`darwin-x64` and `darwin-arm64` where the CLI/MCP binaries use `osx-x64` and `osx-arm64`. The
 script maps your platform to both names and verifies every archive against the same
 `SHA256SUMS.txt`.
 
@@ -303,15 +304,15 @@ component even when no lockfile or binary cataloger fires.
 What a per-artifact SBOM covers is exactly that file list: which bytes shipped
 in that archive. What it does not cover is the runtime closure those bytes may
 hide. A single-file .NET publish folds its dependency closure into the
-executable, a Node single-executable bundles the runtime and the dashboard, and
+executable, a single-file .NET publish folds its dependency closure (and for `kyberdash-*`
+the packed `web.json` dashboard) into the executable, and
 a Tauri bundle/installer is an opaque binary — none of them leaves anything for
 a package cataloger to read. Those archives therefore carry a loud
 `kyber-weave:sbom:not-measured` marker rather than a quietly incomplete package
 list:
 
-- `kyber-weave-*` / `kyber-weave-mcp-*` — `dotnet-single-file`
-- `kyberdash-*` (the Node single-executables) — `node-sea`, carrying **both**
-  the file catalogue entry **and** the not-measured marker: the bytes are
+- `kyber-weave-*` / `kyber-weave-mcp-*` / `kyber-weave-arbiter-*` / `kyberdash-*` — `dotnet-single-file`,
+  carrying **both** the file catalogue entry **and** the not-measured marker: the bytes are
   listed, and the document states that runtime coverage was not measurable
 - `kyberdash-tray-*` — `tauri-bundle`
 - `kyber-squad-*.zip` — no marker: a skill bundle's file list *is* its content,
@@ -801,7 +802,8 @@ dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build
 ```
 
 `.NET` commands run directly via `dotnet` so Roslyn/MSBuild build servers stay warm. KyberDash (`dash/`)
-and tray test runs continue to use `scripts/proc-guard.sh run --`, the process watchdog; see
+and tray commands (`npm --prefix dash …`, `cargo … --manifest-path dash/tray/src-tauri/Cargo.toml …`)
+run directly too, with no process wrapper; see
 [Running tests safely](dash/runbook.md#running-tests-safely).
 
 ## Related

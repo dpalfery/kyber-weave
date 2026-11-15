@@ -58,18 +58,18 @@ dropping the requirement would reproduce it.
 ## Invariants the requirements impose
 
 - **Disjointness is what makes the token check possible.** Storing token classes separately is
-  what lets `validateTokens` detect the pi/Copilot convention inversion — the same
+  what lets `CanonValidation` detect the pi/Copilot convention inversion — the same
   `gen_ai.usage.input_tokens` key with opposite meanings across harnesses. A store that kept
   "input" as one number could not.
 - **A display layer cannot grow a job.** KD-011 is enforced by
-  `dash/src/architecture/display-layer.test.ts`, which runs in `npm --prefix dash run test`.
-  Adding a scheduler or job to a surface fails the architecture test, not merely a review.
+  [`rules/kyberdash-display-layer`](../rules/kyberdash-display-layer.md) and the C# / Tauri /
+  web gates. Adding a scheduler or job to `dash/web/` or `dash/tray/` violates the boundary.
 - **Quarantine is a first-class, counted outcome.** KD-003 and KD-016 together mean an
   uncorrelated or unmatchable input is preserved and surfaced, never dropped to make a number
   look clean.
 - **Derived data is a cache, with one named exception.** Every derived table is rebuildable
   from `records`; the single exception is the projection-time cost write-back through
-  `CanonStore.setCosts` in one transaction, which is itself re-derivable on the next pass.
+  `CanonStoreRepository.SetCosts` in one transaction, which is itself re-derivable on the next pass.
 
 ---
 

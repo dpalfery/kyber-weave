@@ -15,7 +15,7 @@ Accepted, 2026-09-03. Supersedes [ADR 0007](0007-kyberdash-agent-session-analysi
 
 ## Context
 
-`canon.db` had no `session` table, so `KyberBridge.getSessionPayload`'s canon branch was unreachable dead code and every read fell through to a hard-coded absolute path pointing at another checkout on one developer's machine.
+`canon.db` had no `session` table, so `KyberBridge.getSessionPayload`'s canon branch was unreachable dead code and every read fell through to a hard-coded absolute path pointing at another checkout on one developer's machine. (Both now live in the C# engine as `KyberBridgeEngine`, [ADR 0084](0084-kyberdash-csharp-engine.md).)
 
 The TypeScript analysis layer (`analyzeContext`, `rankSchemas`, `buildTimeline`, `compareHarnesses`) had zero non-test consumers; `bridge.ts` reimplemented a cruder comparison in roughly 300 lines of raw SQL instead.
 

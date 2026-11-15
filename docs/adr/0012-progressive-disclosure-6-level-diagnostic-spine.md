@@ -49,7 +49,7 @@ ADR 0007 and ADR 0011 established the Agent Session Analysis Dashboard (ASAD) as
 
 ## Consequences
 
-- The store schema introduces `run` and `execution` derived tables migrated in `CanonStore`, rebuildable via `kyber build`.
+- The store schema introduces `run` and `execution` derived tables migrated in `CanonStore` (now `CanonStoreRepository` in the C# engine, [ADR 0084](0084-kyberdash-csharp-engine.md)), rebuildable via `kyber build`.
 - Navigation in the web dashboard spans `ContextDoctor`, `HarnessDetail`, `RunDetail`, down to `AgentSessionDashboard` and `ContextInspector`.
 - Rollup metrics and scorecards preserve measurability contracts; harnesses without telemetry produce dashes rather than misleading zeros.
 - Comparison views align runs by phase and guard against premature recommendations (requiring sufficiency thresholds before promoting findings).

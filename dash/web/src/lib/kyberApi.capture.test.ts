@@ -6,12 +6,12 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import statusMixed from '../../../src/server/fixtures/capture-api/status-mixed.json'
-import statusUnknown from '../../../src/server/fixtures/capture-api/status-unknown.json'
-import postPreviewEnable from '../../../src/server/fixtures/capture-api/post-preview-enable.json'
-import postWroteEnable from '../../../src/server/fixtures/capture-api/post-wrote-enable.json'
-import postRefusedDrift from '../../../src/server/fixtures/capture-api/post-refused-drift.json'
-import postDisableLast from '../../../src/server/fixtures/capture-api/post-disable-last.json'
+import statusMixed from '../fixtures/capture-api/status-mixed.json'
+import statusUnknown from '../fixtures/capture-api/status-unknown.json'
+import postPreviewEnable from '../fixtures/capture-api/post-preview-enable.json'
+import postWroteEnable from '../fixtures/capture-api/post-wrote-enable.json'
+import postRefusedDrift from '../fixtures/capture-api/post-refused-drift.json'
+import postDisableLast from '../fixtures/capture-api/post-disable-last.json'
 
 import {
   KyberApiError,

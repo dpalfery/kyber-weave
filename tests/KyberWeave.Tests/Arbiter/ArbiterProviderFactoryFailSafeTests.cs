@@ -15,7 +15,6 @@ namespace KyberWeave.Tests.Arbiter;
 /// builds it is a seam with no enumerable failure types, so any failure except a cancellation means no model call and
 /// a <c>real</c> answer, never an exception out of the tool.
 /// </summary>
-[Collection(ArbiterCommandCompositionCollection.Name)]
 public sealed class ArbiterProviderFactoryFailSafeTests : IDisposable
 {
     private readonly TempDirectory _repo = new();

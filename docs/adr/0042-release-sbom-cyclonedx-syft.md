@@ -73,15 +73,15 @@ The .NET cataloger does not read `packages.lock.json` for the full closure. It r
    binary.
 
 3. **The .NET input is a throwaway, framework-dependent, non-single-file `dotnet
-   publish` of `KyberWeave.Cli` and `KyberWeave.Mcp`, of which only the resulting
+   publish` of `KyberWeave.Cli`, `KyberWeave.Mcp`, `KyberWeave.Arbiter`, and the three `dash/server`
+   hosts (`KyberDash.Cli`, `KyberDash.Api`, `KyberDash.Mcp`), of which only the resulting
    `*.deps.json` files enter the scanned tree.** A single-file publish folds the
    dependency closure into the executable and emits no readable `deps.json`; a
    self-contained one adds the runtime packs as components of their own. The publish
    happens *outside* the scanned tree because a publish directory is full of PE
    binaries, and Syft's .NET binary cataloger turns each DLL it cannot pair with a
    claimed runtime path into a separate "dotnet binary" component — a bogus NuGet
-   package per shipped DLL, including for our own assemblies. The `deps.json` alone
-   carries the whole closure and does not need the DLLs on disk.
+   package per shipped DLL, including for our own assemblies. The `deps.json` alone   carries the whole closure and does not need the DLLs on disk.
 
 4. **The npm and Cargo inputs are the repository's lock files.** Syft parses
    `package-lock.json` and `Cargo.lock` directly, so neither needs its toolchain
@@ -105,10 +105,9 @@ The .NET cataloger does not read `packages.lock.json` for the full closure. It r
 
 7. **The SBOM's coverage limits are documented, not buried.** It is the repository's
    dependency closure, not a byte-level scan of a published archive. It does **not**
-   list the .NET runtime that the self-contained CLI and MCP binaries embed — the
-   single largest component of what actually ships — because a framework-dependent
-   publish's `deps.json` lists NuGet packages only. It does not list the Node runtime
-   that the KyberDash single-executable embeds, for the same class of reason. It does
+   list the .NET runtime that the self-contained CLI, MCP, Arbiter, and KyberDash
+   single-file binaries embed — the single largest component of what actually ships —
+   because a framework-dependent publish's `deps.json` lists NuGet packages only. It does
    not list test-only dependencies. `docs/install.md` states all of this to the
    consumer.
 
@@ -152,14 +151,13 @@ D3. **A per-artifact file catalogue is provenance, not runtime coverage.**
    which runtime dependencies those bytes contain: a file-level catalogue is
    not runtime coverage, and the document never claims otherwise.
 
-D4. **Archives whose runtime closure cannot be measured say so loudly — and a
-   Node single-executable carries both the catalogue and the marker.**
-   `kyber-weave-*` / `kyber-weave-mcp-*` (single-file .NET publishes, closure
-   folded into the executable) carry `kyber-weave:sbom:not-measured` =
-   `dotnet-single-file`; `kyberdash-tray-*` (opaque Tauri bundles/installers)
-   carry `tauri-bundle`; `kyberdash-*` Node single-executables (runtime and
-   dashboard bundled in the SEA blob) carry `node-sea` **alongside** the file
-   catalogue entry — both, never one instead of the other. Squad skill zips
+D4. **Archives whose runtime closure cannot be measured say so loudly — carrying both
+   the file catalogue and the marker.**
+   `kyber-weave-*`, `kyber-weave-mcp-*`, `kyber-weave-arbiter-*`, and `kyberdash-*`
+   (single-file .NET publishes, closure folded into the executable) carry
+   `kyber-weave:sbom:not-measured` = `dotnet-single-file` **alongside** the file
+   catalogue entry — both, never one instead of the other; `kyberdash-tray-*` (opaque
+   Tauri bundles/installers) carry `tauri-bundle`. Squad skill zips
    carry no marker: their file list *is* their content, with no hidden runtime
    closure to disclaim.
 

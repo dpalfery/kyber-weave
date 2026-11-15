@@ -18,7 +18,6 @@ namespace KyberWeave.Tests;
 /// Every test isolates the home directory and the environment reader, so the real user home and
 /// the real environment are never read or written. Global state lives only in the temp home.
 /// </remarks>
-[Collection(ArbiterCommandCompositionCollection.Name)]
 public sealed class ArbiterHarnessGatingTests : IDisposable
 {
     private const string ZeroDigest = "0000000000000000000000000000000000000000000000000000000000000000";

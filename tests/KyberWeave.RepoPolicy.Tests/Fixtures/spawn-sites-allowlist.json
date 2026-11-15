@@ -134,42 +134,6 @@
       "bound": "ProcessRunner timeout 30 s kills the child tree on expiry. The fixture touches only dash/tray/ui, so the npm call is the stub and no vitest or tsx starts."
     },
     {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/Fixtures/proc-guard/ps-dotnet-servers-node-orphan.sh",
-      "text": "user=\"$(id -un)\"",
-      "count": 1,
-      "bound": "Fixture-only: `id -un` prints the account name and exits. This file is a fake process table that proc-guard.sh reads through KW_PROC_GUARD_PS; it starts nothing else."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/Fixtures/proc-guard/ps-dotnet-servers.sh",
-      "text": "user=\"$(id -un)\"",
-      "count": 1,
-      "bound": "Fixture-only: `id -un` prints the account name and exits. This file is a fake process table that proc-guard.sh reads through KW_PROC_GUARD_PS; it starts nothing else."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/Fixtures/proc-guard/ps-node-3.sh",
-      "text": "user=\"$(id -un)\"",
-      "count": 1,
-      "bound": "Fixture-only: `id -un` prints the account name and exits. This file is a fake process table that proc-guard.sh reads through KW_PROC_GUARD_PS; it starts nothing else."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/Fixtures/proc-guard/ps-orphan.sh",
-      "text": "printf '%s %s %s %s %s\\n' 2147483003 1 \"$(id -un)\" sh \"sh -c ${root}/dash/node_modules/.bin/vitest run\"",
-      "count": 1,
-      "bound": "Fixture-only: `id -un` inside a printf of fake ps rows. The vitest text on this line is printf data for the fake table, never executed."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/Fixtures/proc-guard/ps-orphan-two.sh",
-      "text": "user=\"$(id -un)\"",
-      "count": 1,
-      "bound": "Fixture-only: `id -un` prints the account name and exits. This file is a fake process table that proc-guard.sh reads through KW_PROC_GUARD_PS; it starts nothing else."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/Fixtures/proc-guard/ps-tree-2.sh",
-      "text": "user=\"$(id -un)\"",
-      "count": 1,
-      "bound": "Fixture-only: `id -un` prints the account name and exits. This file is a fake process table that proc-guard.sh reads through KW_PROC_GUARD_PS; it starts nothing else."
-    },
-    {
       "file": "tests/KyberWeave.Tests/GateCatalogueToolchainTests.cs",
       "text": "ProcessStartInfo startInfo = new(\"npm\")",
       "count": 1,
@@ -228,90 +192,6 @@
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, ExecutableRequests, TimeSpan.FromSeconds(30));",
       "count": 1,
       "bound": "ProcessRunner timeout 30 s kills the child tree on expiry. The child is the KyberWeave product assembly, fed ExecutableRequests on stdin, which ProcessRunner closes so it exits at EOF."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardPollCostTests.cs",
-      "text": "ProcessStartInfo startInfo = new(\"/bin/bash\")",
-      "count": 1,
-      "bound": "Started by the Run at the end of RunGuard: GuardTimeout (20 s) kills the tree. The wrapped command is sleep 2 or sh -c \"exit 0\", which exit by themselves; the process table is a counting fixture (KW_PROC_GUARD_PS) that lists no processes."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardPollCostTests.cs",
-      "text": "return ProcessRunner.Run(startInfo, string.Empty, GuardTimeout);",
-      "count": 1,
-      "bound": "GuardTimeout (20 s) kills the tree. The wrapped command exits by itself within two seconds; the process table is a fixture."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardDotnetServersTests.cs",
-      "text": "ProcessStartInfo startInfo = new(\"/bin/bash\")",
-      "count": 1,
-      "bound": "Started by the Run at the end of RunGuard: GuardTimeout (30 s) kills the tree. The wrapped command is sh -c \"exit 0\", which exits at once; the guard's process table is a fixture (KW_PROC_GUARD_PS) and dotnet is a fake (KW_PROC_GUARD_DOTNET) that starts nothing."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardDotnetServersTests.cs",
-      "text": "return ProcessRunner.Run(startInfo, string.Empty, GuardTimeout);",
-      "count": 1,
-      "bound": "GuardTimeout (30 s) kills the tree. The wrapped command exits at once; the process table is a fixture and dotnet is a fake that starts nothing."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardSinceTests.cs",
-      "text": "ProcessStartInfo startInfo = new(\"/bin/bash\")",
-      "count": 1,
-      "bound": "Started by RunCheckLeftovers: GuardTimeout (20 s) kills the tree. The guard's process table and elapsed-time lookup are fixtures (KW_PROC_GUARD_PS, KW_PROC_GUARD_ETIME) and its clock is fixed (KW_PROC_GUARD_NOW); no real process is examined."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardSinceTests.cs",
-      "text": "return ProcessRunner.Run(startInfo, string.Empty, GuardTimeout);",
-      "count": 1,
-      "bound": "GuardTimeout (20 s) kills the tree. The guard's process table, elapsed-time lookup, and clock are fixtures, so the guard can never examine or signal a live process."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardSlotTests.cs",
-      "text": "ProcessStartInfo startInfo = new(\"/bin/bash\")",
-      "count": 1,
-      "bound": "Started by the Run at the end of RunGuard: GuardTimeout (30 s) kills the tree. The guard's process table is a fixture (KW_PROC_GUARD_PS) and its slot directory is a per-test temp directory (--slot-dir). The wrapped command is sh -c \"exit N\", an echo, or a sleep of at most 5 s, so every child exits by itself."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardSlotTests.cs",
-      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GuardTimeout);",
-      "count": 1,
-      "bound": "GuardTimeout (30 s) kills the tree. The guard's process table is a fixture and its slot directory is a temp directory; the wrapped command exits by itself within 5 s."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardScriptTests.cs",
-      "text": "ProcessStartInfo startInfo = new(\"/bin/bash\")",
-      "count": 1,
-      "bound": "Started by the Run at line 273: GuardTimeout (20 s) kills the tree. The guard's process table is a fixture (KW_PROC_GUARD_PS), not the real process table."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardScriptTests.cs",
-      "text": "return ProcessRunner.Run(startInfo, string.Empty, GuardTimeout);",
-      "count": 1,
-      "bound": "GuardTimeout (20 s) kills the tree. The guard's process table is a fixture (KW_PROC_GUARD_PS), not the real process table."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardScriptTests.cs",
-      "text": "ProcessStartInfo startInfo = new(\"pgrep\")",
-      "count": 1,
-      "bound": "Started by the Run at line 297: 10 s timeout; pgrep -f lists pids and exits."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardScriptTests.cs",
-      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(10));",
-      "count": 1,
-      "bound": "ProcessRunner timeout 10 s kills the tree; pgrep -f lists pids and exits."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardScriptTests.cs",
-      "text": "ProcessStartInfo startInfo = new(\"kill\")",
-      "count": 1,
-      "bound": "Started by the Run at line 350: 5 s timeout; kill -KILL of a pid this test created, result ignored."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardScriptTests.cs",
-      "text": "_ = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(5));",
-      "count": 1,
-      "bound": "ProcessRunner timeout 5 s kills the tree; kill -KILL of a pid this test created, result ignored."
     },
     {
       "file": "tests/KyberWeave.Tests/ProcessRunnerInputTests.cs",
@@ -1028,60 +908,6 @@
       "bound": "unbounded by design: user-attended interactive harness session (`squad run`); ends when the user ends it; a timeout would kill the live session; child inherits the console."
     },
     {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/Fixtures/proc-guard/ps-kill-scope-linked.sh",
-      "text": "user=\"$(id -un)\"",
-      "count": 1,
-      "bound": "Fixture-only: `id -un` prints the account name and exits. This file is a fake process table that proc-guard.sh reads through KW_PROC_GUARD_PS; it starts nothing else."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/Fixtures/proc-guard/ps-kill-scope-sibling.sh",
-      "text": "user=\"$(id -un)\"",
-      "count": 1,
-      "bound": "Fixture-only: `id -un` prints the account name and exits. This file is a fake process table that proc-guard.sh reads through KW_PROC_GUARD_PS; it starts nothing else."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/Fixtures/proc-guard/ps-kill-scope-unlinked.sh",
-      "text": "user=\"$(id -un)\"",
-      "count": 1,
-      "bound": "Fixture-only: `id -un` prints the account name and exits. This file is a fake process table that proc-guard.sh reads through KW_PROC_GUARD_PS; it starts nothing else."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/Fixtures/proc-guard/ps-kill-scope-unlinked.sh",
-      "text": "next=\"$(ps -o ppid= -p \"${cur}\" | tr -d ' ')\"",
-      "count": 1,
-      "bound": "Fixture-only: ps -o ppid= prints one parent pid and exits, inside a loop capped at 8 iterations; it starts nothing else."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/Fixtures/proc-guard/ps-kill-scope-unlinked.sh",
-      "text": "if ps -o args= -p \"${next}\" | grep -q 'proc-guard\\.sh'; then",
-      "count": 1,
-      "bound": "Fixture-only: ps -o args= prints one command line and exits; grep -q reads it and exits. Inside a loop capped at 8 iterations."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/Fixtures/proc-guard/ps-kill-scope-unlinked.sh",
-      "text": "parent=\"$(ps -o ppid= -p \"${next}\" | tr -d ' ')\"",
-      "count": 1,
-      "bound": "Fixture-only: ps -o ppid= prints one parent pid and exits."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/Fixtures/proc-guard/ps-kill-scope-unlinked.sh",
-      "text": "break",
-      "count": 1,
-      "bound": "Shell loop keyword in the capped parent walk; starts nothing."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardKillScopeTests.cs",
-      "text": "ProcessStartInfo startInfo = new(\"/bin/bash\")",
-      "count": 1,
-      "bound": "Started by the Run at the end of RunGuard: GuardTimeout (30 s) kills the tree. The wrapped command is sh -c \"exit 0\", which exits at once; the process table is a fixture (KW_PROC_GUARD_PS) and signals go to a recording fake (KW_PROC_GUARD_KILL) that signals nothing."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardKillScopeTests.cs",
-      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GuardTimeout);",
-      "count": 1,
-      "bound": "GuardTimeout (30 s) kills the tree. The wrapped command exits at once; the process table is a fixture and kill is a recording fake."
-    },
-    {
       "file": "tests/KyberWeave.Tests/Squad/SquadPackResponsePreferencesTests.cs",
       "text": "ProcessStartInfo startInfo = new(CliHostPath())",
       "count": 1,
@@ -1094,70 +920,10 @@
       "bound": "ProcessRunner timeout 120 s kills the child tree on expiry; one self-exiting kyber-weave CLI pack invocation in a temp directory."
     },
     {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/Fixtures/proc-guard/ps-node-family-3.sh",
-      "text": "user=\"$(id -un)\"",
-      "count": 1,
-      "bound": "Fixture-only: `id -un` prints the account name and exits. This file is a fake process table that proc-guard.sh reads through KW_PROC_GUARD_PS; it starts nothing else."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardReviewTests.cs",
-      "text": "ProcessStartInfo startInfo = new(\"/bin/bash\")",
-      "count": 1,
-      "bound": "Started by the Run at the end of RunGuard: GuardTimeout (30 s) kills the tree. The only child is the guard, whose wrapped command is sleep 5 (self-exiting, killed by the guard at the first poll) or none; the process table is a fixture."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardReviewTests.cs",
-      "text": "return ProcessRunner.Run(startInfo, string.Empty, GuardTimeout);",
-      "count": 1,
-      "bound": "GuardTimeout (30 s) kills the tree. The wrapped command is sleep 5, which exits by itself; the process table is a fixture."
-    },
-    {
       "file": "src/KyberWeave.Cli/Commands/Squad/SquadRunCommand.cs",
       "text": "Func<ProcessStartInfo, int> runner = _runner ?? ProcessRunner.RunInteractive;",
       "count": 1,
       "bound": "unbounded by design: user-attended interactive harness session (`squad run`); ends when the user ends it; a timeout would kill the live session; child inherits the console. This line only selects the delegate; the spawn happens at line 183 (runner(startInfo)), starting the harness built at line 161 from SquadHarnessLauncher.BuildStartInfo. An injected _runner replaces it in tests."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardTtyTests.cs",
-      "text": "ProcessStartInfo startInfo = new(scriptPath)",
-      "count": 1,
-      "bound": "Started by the Run below: HarnessTimeout (60 s) kills the tree. The child is script, which runs proc-guard.sh with --timeout 20 around sh -c 'read x; echo done'; the inner command exits by itself on EOF."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardTtyTests.cs",
-      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, HarnessTimeout);",
-      "count": 1,
-      "bound": "HarnessTimeout (60 s) kills the tree; the guard's own --timeout 20 kills the wrapped read; the inner command exits by itself."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/Fixtures/proc-guard/fake-date-fails-after-marker.sh",
-      "text": "exec /bin/date \"$@\"",
-      "count": 1,
-      "bound": "Fixture-only: /bin/date prints the epoch seconds and exits at once; the script fails before it when the marker file exists."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardReviewTests.cs",
-      "text": "ProcessStartInfo startInfo = new(\"pgrep\")",
-      "count": 1,
-      "bound": "Started by the Run below: 10 s timeout; pgrep -f lists pids and exits."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardReviewTests.cs",
-      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(10));",
-      "count": 1,
-      "bound": "ProcessRunner timeout 10 s kills the tree; pgrep -f lists pids and exits."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardReviewTests.cs",
-      "text": "ProcessStartInfo startInfo = new(\"kill\")",
-      "count": 1,
-      "bound": "Started by the Run below: 5 s timeout; kill -KILL of a sleep 7 this test caused, in finally, result ignored."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardReviewTests.cs",
-      "text": "_ = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(5));",
-      "count": 1,
-      "bound": "ProcessRunner timeout 5 s kills the tree; kill -KILL of a sleep 7 this test caused, result ignored."
     },
     {
       "file": "src/KyberWeave.Core/Doctor/CodeGraphProvisioner.cs",
@@ -1296,18 +1062,6 @@
       "text": "ProcessStartInfo startInfo = new(\"node\")",
       "count": 1,
       "bound": "Started by the ProcessRunner.Run below with a 60 s timeout that kills the child tree; the Node one-liner exits immediately."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardFullRunGuardTests.cs",
-      "text": "ProcessStartInfo startInfo = new(\"/bin/bash\")",
-      "count": 1,
-      "bound": "Started by the Guard helper's ProcessRunner.Run with a 30 s timeout that kills the tree. The guard reads a fixture process table (KW_PROC_GUARD_PS), and PATH starts with stub dotnet, npm and cargo executables that only append to a marker and exit, so no real build or test runs."
-    },
-    {
-      "file": "tests/KyberWeave.RepoPolicy.Tests/ProcGuardFullRunGuardTests.cs",
-      "text": "return ProcessRunner.Run(startInfo, string.Empty, GuardTimeout);",
-      "count": 1,
-      "bound": "GuardTimeout (30 s) kills the tree. The child is proc-guard.sh over a fixture process table with stub toolchain executables first on PATH; the stubs exit at once."
     },
     {
       "file": "tests/KyberWeave.RepoPolicy.Tests/FastLoopFullRunRefusalTests.cs",

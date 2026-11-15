@@ -17,7 +17,6 @@ namespace KyberWeave.Tests.Arbiter;
 /// root, and the served sections tool refuses a document over the size cap. The served comment tool answers a path
 /// outside the root with the same error shape as the sections tool.
 /// </summary>
-[Collection(ArbiterCommandCompositionCollection.Name)]
 public sealed class ArbiterServedContainmentTests : IDisposable
 {
     private const string OutsideMessageStem = "was not found under the repository root.";

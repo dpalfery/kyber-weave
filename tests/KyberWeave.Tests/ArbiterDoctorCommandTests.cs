@@ -9,7 +9,6 @@ namespace KyberWeave.Tests;
 /// Contract: <c>arbiter doctor</c> reports both scope sections, falls back to the global
 /// mapping, and warns when a project enables Arbiter without any project hook installation.
 /// </summary>
-[Collection(ArbiterCommandCompositionCollection.Name)]
 public sealed class ArbiterDoctorCommandTests : IDisposable
 {
     private readonly TempDirectory _home = new();

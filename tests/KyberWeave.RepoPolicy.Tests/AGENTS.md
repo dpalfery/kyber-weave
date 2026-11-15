@@ -1,10 +1,10 @@
 # KyberWeave.RepoPolicy.Tests
 
-Tests whose subject is the repository, not the product code: the scripts (`proc-guard.sh`,
-`fast-loop.sh`, release and SBOM tooling), CI workflows, `.kyber-weave/kyber-weave.yml`, docs
-prose, and source scans such as the spawn-site audit. Read [`/AGENTS.md`](../../AGENTS.md)
-first, and [`../KyberWeave.Tests/AGENTS.md`](../KyberWeave.Tests/AGENTS.md) for the shared
-fixtures.
+Tests whose subject is the repository, not the product code: the scripts (`fast-loop.sh`,
+release and SBOM tooling), CI workflows, `.kyber-weave/kyber-weave.yml`, docs prose, and source
+scans such as the spawn-site audit and the root instruction pointers. Read
+[`/AGENTS.md`](../../AGENTS.md) first, and
+[`../KyberWeave.Tests/AGENTS.md`](../KyberWeave.Tests/AGENTS.md) for the shared fixtures.
 
 - A test belongs here when it reads a repository file as its subject. A test that calls product
   code to check its behaviour belongs in `KyberWeave.Tests`, even if it reads a fixture.

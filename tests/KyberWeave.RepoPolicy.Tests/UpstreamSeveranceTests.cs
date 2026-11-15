@@ -131,7 +131,7 @@ public sealed class UpstreamSeveranceTests
         }
 
         // A path that is neither an attribution file nor under docs/ is not exempt.
-        Assert.False(IsExempt("dash/src/cli/report.ts"));
+        Assert.False(IsExempt("dash/web/src/main.tsx"));
         Assert.True(IsExempt("docs/adr/0020-one-time-fork.md"));
     }
 
@@ -150,8 +150,8 @@ public sealed class UpstreamSeveranceTests
         string[] requiredFragments =
         {
             "cp THIRD_PARTY_NOTICES.md \"${BIN_DIR}/THIRD_PARTY_NOTICES.md\"",
-            "tar -C \"${BIN_DIR}\" -czf \"${BIN_DIR}/kyberdash-${RID}.tar.gz\" \"kyberdash${EXE}\" THIRD_PARTY_NOTICES.md",
-            "zip -9 -j \"${BIN_DIR}/kyberdash-${RID}.zip\" \"${FINAL_BIN}\" \"${BIN_DIR}/THIRD_PARTY_NOTICES.md\""
+            "tar -C \"${BIN_DIR}\" -czf \"${BIN_DIR}/kyberdash-${RID}.tar.gz\" \"kyberdash${EXE}\" \"kyberdash-api${EXE}\" \"kyberdash-mcp${EXE}\" THIRD_PARTY_NOTICES.md",
+            "zip -9 -j \"${BIN_DIR}/kyberdash-${RID}.zip\" \"${FINAL_BIN}\" \"${API_BIN}\" \"${MCP_BIN}\" \"${BIN_DIR}/THIRD_PARTY_NOTICES.md\""
         };
         foreach (string fragment in requiredFragments)
         {

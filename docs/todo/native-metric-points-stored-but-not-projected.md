@@ -19,19 +19,19 @@ does not restate D31, and it adds the question D31 leaves open.
 Factory's native OpenTelemetry export carries metrics, and the receiver accepts them. The decoded
 points are persisted in the canon store's own `metric_point` table — one row per **distinct**
 decoded point, since a point's identity is a content digest
-(`dash/src/canon/store-rows.ts`; see the separate todo on that identity) — through the production
-sink's `upsertMetrics` and the `ingestMetricBatch` seam
-(`dash/src/canon/metric-ingest.ts`).
+(`dash/server/KyberDash.Data/Repositories/CanonStoreRepository.Queries.cs`; see the separate todo on
+that identity) — through `CanonStoreRepository.StoreMetrics`, reached from the production sink's
+`BoundedIngestWriter.TryEnqueueMetrics`.
 
 No projection consumes them. They reach no session, no turn, no cost and no chart. The canon
-projection has no metric concept, and the read-back accessor exists for a caller that wants the
-rows rather than for a consumer that turns them into anything
-(`dash/src/canon/store.ts`, `getMetricPoints`).
+projection has no metric concept, and no query method reads `metric_point` back at all
+(`dash/server/KyberDash.Data/Repositories/CanonStoreRepository.cs`), so the rows exist only to keep
+the values from being lost.
 
 That is a deliberate position and it is stated: the native path is a **complementary** second
 path, not a replacement, and the metrics it carries are stored so their values are not lost — the
 writer's rule is that a sink that cannot persist metrics is refused rather than accepted-and-
-dropped (`dash/src/otel/writer.ts`), and an OTLP exporter that got a 200 does not resend the batch.
+dropped (`BoundedIngestWriter` in `dash/server/KyberDash.Application/BoundedIngestWriter.cs`), and an OTLP exporter that got a 200 does not resend the batch.
 Storing the values and projecting them later are separate decisions.
 
 **What a decision must settle.** What should consume the stored points, and whether that belongs

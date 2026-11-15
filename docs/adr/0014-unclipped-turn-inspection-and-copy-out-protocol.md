@@ -45,7 +45,7 @@ At the same time, storing the complete plaintext of every prompt, tool parameter
 ## Consequences
 
 - The backend bridge implements `assembleTurnContent` and `getSessionContent` with explicit budget parameters and compression handling.
-- `CanonStore` manages compressed `parts_json` columns and exposes content purge routines.
+- `CanonStore` (now `CanonStoreRepository` in the C# engine, [ADR 0084](0084-kyberdash-csharp-engine.md)) manages compressed `parts_json` columns and exposes content purge routines (`PurgeContentBefore`).
 - Developers gain immediate end-to-end visibility into exact prompt composition with seamless export into local editing environments.
 
 ## Related

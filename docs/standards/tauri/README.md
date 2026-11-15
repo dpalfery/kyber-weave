@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: tauri
 owner: dpalfery
-last-reviewed: 2026-10-27
+last-reviewed: 2026-11-15
 ---
 
 # Tauri coding standard
@@ -123,12 +123,12 @@ A change to the Tauri layer passes the Rust gates of the Rust standard, and the 
 that the root `AGENTS.md` lists. Run them from the repository root:
 
 ```bash
-scripts/proc-guard.sh run -- cargo fmt --manifest-path dash/tray/src-tauri/Cargo.toml --check
-scripts/proc-guard.sh run -- cargo clippy --manifest-path dash/tray/src-tauri/Cargo.toml -- -D warnings
-scripts/proc-guard.sh run -- cargo test --manifest-path dash/tray/src-tauri/Cargo.toml '<name>'
-scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run typecheck
-scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run build
-scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run test
+cargo fmt --manifest-path dash/tray/src-tauri/Cargo.toml --check
+cargo clippy --manifest-path dash/tray/src-tauri/Cargo.toml -- -D warnings
+cargo test --manifest-path dash/tray/src-tauri/Cargo.toml '<name>'
+npm --prefix dash/tray/ui run typecheck
+npm --prefix dash/tray/ui run build
+npm --prefix dash/tray/ui run test
 ```
 
 The format check is `cargo fmt --check`; it writes nothing and reports what it would rewrite.
@@ -138,8 +138,8 @@ then a Vite bundle — so it proves the UI type-checks and bundles, which `typec
 not. The two test lines are the gates the review council and CI run. A dev agent never runs a
 full suite; it adds a name filter to `cargo test` and a path to the UI `test` command.
 
-Each command runs through the process watchdog, `scripts/proc-guard.sh run --`
-([runbook](../../../dash/runbook.md#running-tests-safely)).
+Each command runs directly, with no process wrapper
+([runbook](../../dash/runbook.md#running-tests-safely)).
 
 The same three Rust commands run from `dash/tray/src-tauri`, as the Rust standard gives them.
 The council declares them as `review.gates` entries `cargo-fmt`, `cargo-clippy` and `cargo-test`,

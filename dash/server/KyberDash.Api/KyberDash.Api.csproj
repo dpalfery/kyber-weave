@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>KyberDash.Api</RootNamespace>
+    <AssemblyName>kyberdash-api</AssemblyName>
+    <Version>0.21.0</Version>
+    <Authors>KyberWeave</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\dist-sea\web.json" Condition="Exists('..\..\dist-sea\web.json')" LogicalName="KyberDash.Api.web.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\KyberDash.Application\KyberDash.Application.csproj" />
+    <ProjectReference Include="..\KyberDash.Contracts\KyberDash.Contracts.csproj" />
+    <ProjectReference Include="..\KyberDash.Core\KyberDash.Core.csproj" />
+    <ProjectReference Include="..\KyberDash.Domain\KyberDash.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

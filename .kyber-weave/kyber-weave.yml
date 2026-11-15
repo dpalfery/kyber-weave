@@ -69,13 +69,10 @@ review:
     # `--no-build` because the `build` gate above already produced these binaries in
     # Release. Without it every run re-links the test project, and the gate evidence
     # would come from binaries the suite did not actually gate.
-    # Runs `dotnet test` directly (`scripts/proc-guard.sh` is reserved for KyberDash/tray suites so
-    # .NET retains warm Roslyn/MSBuild build servers and avoids watchdog teardown overhead).
-    # Accepted risk: with no `--slot`, no `--max-tree`/`--max-node` cap and no leftover check, two
-    # `kyber-weave review gates --council` processes on one host run their full suites at the same
-    # time and can slow each other and flake load-sensitive classes. The review runner's
-    # `timeout-seconds` is the only bound. Wrap the run in `scripts/proc-guard.sh run --slot` to
-    # queue it again.
+    # Runs `dotnet test` directly, as every gate does: with KyberDash's jobs and OTLP receiver running
+    # in-process in C# there are no recursive Node spawners to reap, and running directly keeps the
+    # Roslyn/MSBuild build servers warm. `full-suite: true` below is what reserves this gate for the
+    # council and CI, so nothing needs to wrap the command to enforce that.
     - id: test
       include: *net-test-paths
       run: [dotnet, test, tests/KyberWeave.Tests/KyberWeave.Tests.csproj, -c, Release, --no-build, --coverlet, --coverlet-output-format, cobertura, --results-directory, artifacts/coverage]
@@ -232,6 +229,25 @@ review:
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, review, duplicates, ., --out, artifacts/duplicates.json]
       blocking: true
 
+    # Clean-Architecture C# KyberDash server and unit/integration tests live under dash/server{,.tests}/
+    # in their own solution. Runs `dotnet` directly like every other gate.
+    - id: dash-server-format-whitespace
+      include: &dash-server-paths ["dash/server/**", "dash/server.tests/**", "Directory.Build.props", ".editorconfig", "global.json", "**/NuGet.config"]
+      run: [dotnet, format, dash/server/KyberDash.sln, whitespace, --verify-no-changes, -v, minimal]
+      blocking: true
+    - id: dash-server-format-style
+      include: *dash-server-paths
+      run: [dotnet, format, dash/server/KyberDash.sln, style, --verify-no-changes, --severity, warn, -v, minimal]
+      blocking: true
+    - id: dash-server-build
+      include: *dash-server-paths
+      run: [dotnet, build, dash/server/KyberDash.sln, -c, Release, --no-incremental, -nr:false, -p:UseSharedCompilation=false]
+      blocking: true
+    - id: dash-server-test
+      include: *dash-server-paths
+      run: [dotnet, test, dash/server/KyberDash.sln, -c, Release, --no-build]
+      blocking: true
+
     # TypeScript gates for KyberDash under dash/. They are the counterpart to
     # the dotnet gates above — checks that run the same command a local
     # contributor runs, behind the same argv-only contract the rest of the
@@ -265,9 +281,13 @@ review:
     # coverageReports. Its coverage field, the one a floor is checked against,
     # stays the .NET suite's, because the runner picks that from files named
     # coverage.cobertura.xml only.
+    #
+    # argv only, like the other TypeScript gates: no wrapper script sits between
+    # the gate and `npm`. `full-suite: true` below is what reserves this gate for
+    # the council and CI.
     - id: ts-test
       include: ["dash/**"]
-      run: [scripts/proc-guard.sh, run, --council, --, npm, run, --prefix, dash, test, --, --coverage]
+      run: [npm, run, --prefix, dash, test, --, --coverage]
       requires-paths: ["dash/node_modules"]
       # Full-suite gates run only for the review council or CI; a dev agent's run is refused.
       full-suite: true
@@ -458,7 +478,7 @@ review:
     react-dev:
       - &dash-typecheck
         id: dash-typecheck
-        include: &dash-paths ["dash/src/**", "dash/tests/**", "dash/web/**", "dash/e2e/**", "dash/scripts/**", "dash/*.ts", "dash/*.js", "dash/*.mjs", "dash/*.json"]
+        include: &dash-paths ["dash/tests/**", "dash/web/**", "dash/e2e/**", "dash/scripts/**", "dash/*.ts", "dash/*.js", "dash/*.mjs", "dash/*.json"]
         run: [npm, run, --prefix, dash, typecheck]
       - &dash-lint
         id: dash-lint

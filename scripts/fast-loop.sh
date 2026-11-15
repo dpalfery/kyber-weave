@@ -48,11 +48,12 @@
 # Tests now skip fsync (SquadTestDurability) and the lookup is cheaper, which took the
 # full suite from ~14 minutes to ~89s. Keep $TMPDIR clean; a crowded one slows these again.
 #
-# .NET RUNS DIRECTLY; WATCHDOG GUARDS KYBERDASH AND TRAY
+# EVERY COMMAND RUNS DIRECTLY
 #
-# .NET test, build, and format steps run directly via `dotnet` so Roslyn/MSBuild build servers
-# stay warm instead of being torn down by `scripts/proc-guard.sh`. KyberDash (`dash/`) and
-# tray UI (`dash/tray/ui`) commands continue to run through `scripts/proc-guard.sh run --`.
+# .NET test, build, and format steps run via `dotnet` so Roslyn/MSBuild build servers stay warm.
+# KyberDash (`dash/`) and tray UI (`dash/tray/ui`) commands run via `npm --prefix ...` directly:
+# KyberDash does its work in-process, so there are no recursive Node spawners to wrap or reap.
+# The full-suite refusal below is this script's own: it needs no wrapper to enforce.
 
 set -euo pipefail
 
@@ -110,7 +111,7 @@ EOF
 fi
 
 # The full-suite modes belong to the review council and CI. A non-interactive caller (a dev agent)
-# is refused with exit 89 before any build or other work, the same rule proc-guard.sh applies.
+# is refused with exit 89 before any build or other work; this script is the only guard the modes need.
 refuse_full_suite_mode() {
   if [[ -t 0 ]]; then
     return 0
@@ -144,8 +145,6 @@ if [[ "${1:-}" == "--regenerate" ]]; then
     step "collecting per-test timings (this takes ~90 seconds)"
     timings=("$(mktemp "${TMPDIR:-/tmp}/kw-timings.XXXXXX")" "$(mktemp "${TMPDIR:-/tmp}/kw-timings.XXXXXX")")
     generated_timings=("${timings[@]}")
-    # Accepted risk: these full-suite timing runs have no watchdog cap, leftover check or slot queue,
-    # so a runaway run is bounded only by the caller. Run `--regenerate` alone on the machine.
     # One list covers both test projects: the classes share a namespace, so a name means one test.
     dotnet "${TEST_DLL}" -xml "${timings[0]}" >/dev/null
     dotnet "${POLICY_TEST_DLL}" -xml "${timings[1]}" >/dev/null
@@ -203,6 +202,7 @@ esac
 # Component routing: if --class or --method was supplied, focus on .NET and docs validate.
 # Otherwise, inspect changed workspace paths to run targeted fast checks.
 needs_dotnet=0
+needs_dash_server=0
 needs_dash=0
 needs_tray_ui=0
 needs_rust=0
@@ -238,6 +238,9 @@ else
         dash/tray/ui/*)
           needs_tray_ui=1
           needs_dash=1
+          ;;
+        dash/server/* | dash/server.tests/*)
+          needs_dash_server=1
           ;;
         dash/*.md | docs/*)
           needs_docs=1
@@ -333,6 +336,17 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
   dotnet format KyberWeave.sln whitespace --verify-no-changes --no-restore -v minimal
 fi
 
+if [[ "${needs_dash_server}" -eq 1 ]]; then
+  step "kyberdash server build (Release, warnings-as-errors)"
+  dotnet build dash/server/KyberDash.sln -c "${CONFIGURATION}"
+
+  step "kyberdash server format (whitespace)"
+  dotnet format dash/server/KyberDash.sln whitespace --verify-no-changes --no-restore -v minimal
+
+  step "kyberdash server tests"
+  dotnet test dash/server/KyberDash.sln -c "${CONFIGURATION}" --no-build
+fi
+
 if [[ "${needs_docs}" -eq 1 ]]; then
   step "docs validate (no CodeGraph index required)"
   if [[ "${needs_dotnet}" -eq 0 && ! -f "src/KyberWeave.Cli/bin/${CONFIGURATION}/net10.0/kyber-weave.dll" ]]; then
@@ -345,14 +359,14 @@ fi
 
 if [[ "${needs_dash}" -eq 1 ]]; then
   step "dash typecheck"
-  scripts/proc-guard.sh run -- npm --prefix dash run typecheck
+  npm --prefix dash run typecheck
 
   step "dash lint"
-  scripts/proc-guard.sh run -- npm --prefix dash run lint
+  npm --prefix dash run lint
 
   if [[ ${#dash_related_files[@]} -gt 0 ]]; then
     step "dash tests (related: ${#dash_related_files[@]} files)"
-    scripts/proc-guard.sh run -- npm --prefix dash run test:related -- "${dash_related_files[@]}"
+    npm --prefix dash run test:related -- "${dash_related_files[@]}"
   fi
 
   if [[ "${needs_tray_ui}" -eq 1 ]]; then
@@ -361,10 +375,10 @@ if [[ "${needs_dash}" -eq 1 ]]; then
       exit 1
     fi
     step "tray ui typecheck"
-    scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run typecheck
+    npm --prefix dash/tray/ui run typecheck
 
     step "tray ui test"
-    scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run test
+    npm --prefix dash/tray/ui run test
   fi
 fi
 

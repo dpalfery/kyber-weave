@@ -14,6 +14,7 @@ import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
 const ignorePaths = [
+  'archived/**',
   'dist/**',
   'dist-sea/**',
   'build/**',
@@ -23,9 +24,6 @@ const ignorePaths = [
   'tray/ui/dist/**',
   'tray/ui/node_modules/**',
   'tray/src-tauri/**',
-  'scripts/upgrade-path/**', // release-verification helpers, run by node directly
-  'src/tools/**/*.mjs',
-  'tests/fixtures/**',
   'eslint.config.js',
 ];
 

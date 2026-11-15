@@ -1,46 +1,22 @@
-// Shared fixture: harness-collection matrix into a temp canon.db (never ~/.kyberdash/canon.db).
-//
-// Two kinds of row live here, and only one of them is capture proof:
-// - OpenCode 2.2.1 run A (fixtures/v2/runA) is replayed through the production modules: plugin ->
-//   OTLP JSON body -> receiver decode -> canonical ingest -> projection. It is the only OpenCode row
-//   in this world that proves capture, and no session, run or execution row of it is written by hand.
-// - Every other row is a rendering-only seed, written straight into the store. A seed gives the
-//   dashboard a shape to render; it says nothing about what a harness captured.
+// Shared harness-collection world backed by `kyberdash e2e-seed` (never ~/.kyberdash/canon.db).
 
-import { mkdtempSync } from 'node:fs'
+import { spawn, spawnSync } from 'node:child_process'
+import { existsSync, mkdirSync, mkdtempSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
-
-import { buildHarnessRollup } from '../src/canon/harnesses.js'
-import { ingestBatch } from '../src/canon/ingest.js'
-import { projectCanonicalStore } from '../src/canon/projection.js'
-import { CanonStore } from '../src/canon/store.js'
-import { KYBERDASH_OPENCODE_CONTEXT_ENV } from '../src/capture/harnesses/opencode-plugin/consent.js'
-import { createSetup } from '../src/capture/harnesses/opencode-plugin/entry.js'
-import {
-  OWNED_SESSION_ID,
-  consentPathIn,
-  createHost,
-  receiver,
-  replayRunA,
-  start,
-  stopPlugin,
-} from '../src/capture/harnesses/opencode-plugin/testing.js'
-import { decodeOtlpJson } from '../src/otel/receiver.js'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 export const USER_CANON = join(homedir(), '.kyberdash', 'canon.db')
 
 export const MEASURED_HARNESS = 'claude-code'
-// The honest-empty row is a rendering-only seed on the `opencode` harness, the same harness the replay writes.
 export const HONEST_EMPTY_HARNESS = 'opencode'
 export const ZERO_RECORD_HARNESS = 'droid'
-/** The session the production replay writes for OpenCode run A (fixtures/v2/runA). */
-export const OPENCODE_REPLAY_SESSION_ID = OWNED_SESSION_ID
+/** The session derived from OpenCode run A (`e2e/fixtures/opencode/otlp-v3-runA.consent-on.json`). */
+export const OPENCODE_REPLAY_SESSION_ID = 'ses_e74c398c7ffeVajzhRWZNgfR2n'
 
 export type CollectedWorld = {
-  root: string
-  dbPath: string
-  store: CanonStore
+  readonly root: string
+  readonly dbPath: string
 }
 
 export function createTempRoot(): string {
@@ -54,170 +30,144 @@ export function createTempRoot(): string {
   return root
 }
 
+export function resolveKyberdashCommand(): {
+  readonly command: string
+  readonly prefixArgs: readonly string[]
+  readonly repoRoot: string
+  readonly dashRoot: string
+} {
+  const e2eDir = dirname(fileURLToPath(import.meta.url))
+  const dashRoot = resolve(e2eDir, '..')
+  const repoRoot = resolve(dashRoot, '..')
+  const explicit = process.env['KYBERDASH_BIN']?.trim()
+  if (explicit) {
+    return { command: explicit, prefixArgs: [], repoRoot, dashRoot }
+  }
+
+  const exeName = process.platform === 'win32' ? 'kyberdash.exe' : 'kyberdash'
+  for (const config of ['Release', 'Debug']) {
+    const candidate = join(repoRoot, 'dash', 'server', 'KyberDash.Cli', 'bin', config, 'net10.0', exeName)
+    if (existsSync(candidate)) {
+      return { command: candidate, prefixArgs: [], repoRoot, dashRoot }
+    }
+  }
+
+  return {
+    command: 'dotnet',
+    prefixArgs: ['run', '--project', join(repoRoot, 'dash', 'server', 'KyberDash.Cli'), '-c', 'Release', '--'],
+    repoRoot,
+    dashRoot,
+  }
+}
+
+export function runE2eSeed(worldName: 'harness-collection' | 'factory-replay', dbPath: string): void {
+  const { command, prefixArgs, repoRoot } = resolveKyberdashCommand()
+  const result = spawnSync(command, [...prefixArgs, 'e2e-seed', '--world', worldName, '--db', dbPath], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    timeout: 90_000,
+    killSignal: 'SIGKILL',
+  })
+  if (result.status !== 0) {
+    throw new Error(
+      `kyberdash e2e-seed (${worldName}) exited ${result.status}: ${result.stdout ?? ''}\n${result.stderr ?? ''}`,
+    )
+  }
+}
+
 export async function refreshTempCanon(root = createTempRoot()): Promise<CollectedWorld> {
   const dbPath = join(root, 'canon.db')
   if (dbPath === USER_CANON) {
     throw new Error('refusing to use the user canon.db as a harness-collection write target')
   }
-
-  const store = new CanonStore(dbPath)
-
-  // The fixture owns an open handle: seeding the second harness can throw (a
-  // schema or constraint change), and without the close the failure leaks the
-  // store and its file lock into the rest of the run.
-  try {
-    await replayOpencodeRunA(store, root)
-    // Projection rebuilds the derived rows from `records` and would prune a seeded row that has no
-    // records behind it, so the rendering-only seeds are written after it.
-    seedMeasuredClaudeCode(store)
-    seedRenderingOnlyOpencode(store)
-
-    buildHarnessRollup(store)
-    // Bounded zero-record seed: droid never gains a session or run, but its
-    // rollup row must exist so /harness/droid renders honest-empty
-    // (No runs recorded) instead of the missing-rollup state.
-    buildHarnessRollup(store, ZERO_RECORD_HARNESS)
-
-    return { root, dbPath, store }
-  } catch (error) {
-    store.close()
-    throw error
-  }
+  runE2eSeed('harness-collection', dbPath)
+  return { root, dbPath }
 }
 
-/**
- * Replays OpenCode 2.2.1 run A through the production modules, in capture order. Content consent is
- * on through the env override, so the session carries the consent-on figures. Nothing here writes a
- * session, run or execution row: the projection derives them from the ingested spans.
- */
-async function replayOpencodeRunA(store: CanonStore, root: string): Promise<void> {
-  const wire = receiver()
-  const host = createHost()
-  await stage('plugin', async () => {
-    const cleanup = await start(
-      createSetup({
-        fetchFn: wire.fetch,
-        env: { [KYBERDASH_OPENCODE_CONTEXT_ENV]: '1' },
-        consentPath: consentPathIn(root),
-      }),
-      host,
-    )
-    await replayRunA(host)
-    await stopPlugin(cleanup)
-  })
-  if (wire.accepted.length === 0) {
-    throw new Error('OpenCode round trip stopped at the plugin stage: no OTLP body was accepted')
+export async function bootIsolatedWorld(
+  worldName: 'harness-collection' | 'factory-replay',
+  prefix: 'HC' | 'FR',
+): Promise<void> {
+  const root = createTempRoot()
+  const dbPath = join(root, 'canon.db')
+  if (dbPath === USER_CANON) {
+    throw new Error('refusing to serve the user canon.db')
   }
 
-  const spans = await stage('receiver decode', () =>
-    wire.accepted.flatMap((body) => decodeOtlpJson(JSON.stringify(body))),
+  runE2eSeed(worldName, dbPath)
+
+  const stateDir = join(root, 'state')
+  mkdirSync(stateDir, { recursive: true })
+
+  const { command, prefixArgs, repoRoot, dashRoot } = resolveKyberdashCommand()
+  const dashDist = join(dashRoot, 'dist', 'dash')
+  const homeDir = join(root, 'home')
+  mkdirSync(homeDir, { recursive: true })
+
+  const child = spawn(
+    command,
+    [...prefixArgs, 'web', '--no-open', '--port', '0', '--db', dbPath, '--state-dir', stateDir],
+    {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        HOME: homeDir,
+        USERPROFILE: homeDir,
+        KYBER_CANON_DB: dbPath,
+        KYBERDASH_STATE_DIR: stateDir,
+        KYBERDASH_DASH_DIR: process.env['KYBERDASH_DASH_DIR'] ?? dashDist,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
   )
-  await stage('canonical ingest', () => ingestBatch(spans, store))
-  await stage('projection', () => projectCanonicalStore(store))
-}
 
-/** Names the stage that failed, so the boot's error says which production module broke first. */
-async function stage<T>(name: string, work: () => T | Promise<T>): Promise<T> {
-  try {
-    return await work()
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error)
-    throw new Error(`OpenCode round trip stopped at the ${name} stage: ${reason}`, { cause: error })
+  const forwardSignal = (signal: NodeJS.Signals): void => {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill(signal)
+    }
   }
-}
+  process.on('SIGTERM', () => forwardSignal('SIGTERM'))
+  process.on('SIGINT', () => forwardSignal('SIGINT'))
 
-/** Rendering-only seed: a measured claude-code session, run and execution written straight into the store. */
-function seedMeasuredClaudeCode(store: CanonStore): void {
-  store.upsertSession({
-    sessionId: 'hc-measured-session-1',
-    harness: MEASURED_HARNESS,
-    label: 'harness-collection measured session',
-    started: '2026-09-06T10:00:00.000Z',
-    ended: '2026-09-06T10:05:00.000Z',
-    payload: {
-      id: 'hc-measured-session-1',
-      session_id: 'hc-measured-session-1',
-      harness: MEASURED_HARNESS,
-      context: {
-        measurable: true,
-        contextLimit: 200000,
-        contextLimitSource: 'reported',
-        turns: [
-          { pressure: 0.42, headroom: 116000 },
-          { pressure: 0.35, headroom: 130000 },
-        ],
-      },
-      summary: {
-        turn_count: 2,
-        total_input: 2000,
-        total_output: 500,
-        total_cache_read: 800,
-        cost: { status: 'priced', value: 0.012, basis: 'published', currency: 'USD' },
-      },
-    },
+  let buffer = ''
+  let stderr = ''
+  let readyEmitted = false
+
+  child.stderr.on('data', (chunk: Buffer) => {
+    stderr += chunk.toString('utf8')
   })
 
-  store.upsertRun({
-    runId: 'hc-measured-run-1',
-    harness: MEASURED_HARNESS,
-    label: 'harness-collection measured run',
-    groupingBasis: 'explicit',
-    started: '2026-09-06T10:00:00.000Z',
-    ended: '2026-09-06T10:05:00.000Z',
-    executionCount: 1,
+  child.stdout.on('data', (chunk: Buffer) => {
+    if (readyEmitted) return
+    buffer += chunk.toString('utf8')
+    let newlineAt = buffer.indexOf('\n')
+    while (newlineAt !== -1) {
+      const line = buffer.slice(0, newlineAt)
+      buffer = buffer.slice(newlineAt + 1)
+      try {
+        const parsed = JSON.parse(line) as { event?: string; url?: string }
+        if (parsed.event === 'kyberdash.web.listening' && typeof parsed.url === 'string') {
+          readyEmitted = true
+          process.stdout.write(`${prefix}_READY ${parsed.url}\n`)
+          process.stdout.write(`${prefix}_DB ${dbPath}\n`)
+          return
+        }
+      } catch {
+        // Ignore non-JSON lines.
+      }
+      newlineAt = buffer.indexOf('\n')
+    }
   })
 
-  store.upsertExecution({
-    executionId: 'hc-measured-exec-1',
-    runId: 'hc-measured-run-1',
-    sessionId: 'hc-measured-session-1',
-    harness: MEASURED_HARNESS,
-    isRoot: true,
-    started: '2026-09-06T10:00:00.000Z',
-    ended: '2026-09-06T10:05:00.000Z',
-    parentLinkage: 'measured',
-  })
-}
-
-/**
- * rendering-only seed — not capture proof. The honest-empty `opencode` row is a visible,
- * unmeasurable session written straight into the store, so the dashboard has an unmeasurable row to
- * render. It says nothing about what OpenCode captured; the replay in `replayOpencodeRunA` does that.
- */
-function seedRenderingOnlyOpencode(store: CanonStore): void {
-  store.upsertSession({
-    sessionId: 'hc-honest-session-1',
-    harness: HONEST_EMPTY_HARNESS,
-    label: 'rendering-only seed — not capture proof',
-    started: '2026-09-06T11:00:00.000Z',
-    ended: '2026-09-06T11:02:00.000Z',
-    payload: {
-      id: 'hc-honest-session-1',
-      session_id: 'hc-honest-session-1',
-      harness: HONEST_EMPTY_HARNESS,
-      context: { measurable: false },
-      summary: { turn_count: 1 },
-    },
-  })
-
-  store.upsertRun({
-    runId: 'hc-honest-run-1',
-    harness: HONEST_EMPTY_HARNESS,
-    label: 'harness-collection honest-empty run',
-    groupingBasis: 'explicit',
-    started: '2026-09-06T11:00:00.000Z',
-    ended: '2026-09-06T11:02:00.000Z',
-    executionCount: 1,
-  })
-
-  store.upsertExecution({
-    executionId: 'hc-honest-exec-1',
-    runId: 'hc-honest-run-1',
-    sessionId: 'hc-honest-session-1',
-    harness: HONEST_EMPTY_HARNESS,
-    isRoot: true,
-    started: '2026-09-06T11:00:00.000Z',
-    ended: '2026-09-06T11:02:00.000Z',
-    parentLinkage: 'measured',
+  await new Promise<void>((resolveExit, rejectExit) => {
+    child.once('error', (error) => rejectExit(error))
+    child.once('exit', (code) => {
+      if (!readyEmitted) {
+        rejectExit(new Error(`kyberdash web exited ${code} before ready: ${buffer}\n${stderr}`))
+        return
+      }
+      process.exitCode = code ?? 0
+      resolveExit()
+    })
   })
 }

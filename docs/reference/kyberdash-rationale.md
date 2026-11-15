@@ -4,7 +4,7 @@ title: KyberDash measurable rationale
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-03
+last-reviewed: 2026-11-15
 ---
 
 # KyberDash measurable rationale
@@ -40,8 +40,7 @@ The consequence is architectural: adapters must convert each harness's conventio
 in**, and `TokenUsage` must store `freshInput + cacheRead + cacheCreation` disjointly so the
 identity `freshInput + cacheRead + cacheCreation === reportedInput` is checkable on every
 record — orphans included (R4.3, R4.4). A model that stored "input" as one number could not
-detect the inversion. Regression coverage: `dash/kyber/canon/adapters/{copilot,pi}.test.ts`,
-`dash/kyber/canon/types.test.ts`.
+detect the inversion. Regression coverage: `dash/server.tests/KyberDash.Domain.Tests/CanonIngestTests.cs` (`CanonAdapters.ConvertInclusiveCounts`).
 
 ### R4.5 — Per-turn sum vs harness-reported total
 
@@ -55,7 +54,7 @@ Counts produced by tokenizing content rather than read from a counter carry the 
 identity and are presented as a lower bound. On the `o200k_base` proxy tokenizer the
 unattributed residual measured **2.8–4.4% on one model against 35–41% on another** — the
 difference is the tokenizer, not missing content, and the figure must not read as a true
-count. Regression coverage: `dash/kyber/canon/tokens.test.ts`.
+count. Regression coverage: `dash/server.tests/KyberDash.Domain.Tests/CanonAnalysisTests.cs` (`CanonTokenCache`).
 
 ### R4.7 — Flat token validation and finite checks (Issue #227)
 
@@ -74,8 +73,7 @@ understated, plausible total is accepted where a suspicious one would be questio
 The consequence is that a cost figure travels with its **basis** — a published table or the
 harness's own arithmetic (R5.1) — and a harness the table does not name is priced as
 `out_of_scope`, never from that table. Regression coverage:
-`dash/src/canon/cost.scoping.test.ts` (the regression test reproduces the $0.27 fabrication
-when the guard is removed).
+`dash/server.tests/KyberDash.Domain.Tests/CanonAnalysisTests.cs` (covering `CanonPricing` harness scoping).
 
 Issue #186 was the same hazard in latent form: the Copilot parser priced through LiteLLM and was
 labelled `harness`. Copilot is now priced only from its own credits table, and only the genuine
@@ -83,12 +81,10 @@ reader's `cost_usd` keeps the `harness` basis.
 
 **Known follow-ups (issue #186, non-blocking).**
 
-- The `ratesPath` override branch of `getMeta().rates` is untested.
-- The `published` table's source and date are hardcoded in `bridge.ts` `getMeta` rather than
-  derived from `pricing-provenance.json`.
-- The legacy `cost_usd` fallback in the session row is untested.
-- The Run and Harness cost cells (`RunDetail.tsx:459`, `HarnessDetail.tsx:395`) still use the bare
-  `—` pattern.
+- In the C# cutover, `KyberBridgeEngine.GetMeta()` (`dash/server/KyberDash.Application/KyberBridgeEngine.cs`)
+  exposes schema, detector, store generation, and API version metadata while embedded rates live in
+  `CanonPricing` (`dash/server/KyberDash.Domain/CanonPricing.cs`).
+- The Run and Harness cost cells (`RunDetail.tsx`, `HarnessDetail.tsx`) follow the cost basis/status rendering rules.
 
 **PR #225 review items declined, with reasons.**
 
@@ -128,7 +124,7 @@ A span that matches no adapter is quarantined with its observed attribute namesp
 assigned a harness by guess. Quarantined spans and validation problems are exposed in a view
 with the counts and namespaces needed to write the missing adapter — unclassifiable telemetry
 is a diagnosable gap, not a silent absence. Regression coverage:
-`dash/kyber/canon/adapters/{quarantine,registry}.test.ts`.
+`dash/server.tests/KyberDash.Domain.Tests/CanonIngestTests.cs`.
 
 ## Other measured constraints
 
@@ -136,9 +132,9 @@ is a diagnosable gap, not a silent absence. Regression coverage:
 |---|---|---|
 | R2.7 | **25 of 1,009 spans** had already lost their parent to ring-buffer eviction in the Aspire-mediated pipeline; **17 sessions held 27 run identifiers against only 20 surviving run spans**. | The embedded OTLP receiver owns the buffer instead of depending on Aspire's; where records arrive with a missing parent they are still grouped, by attribute rather than ancestry. |
 | R7/R10 (design) | pi **invoked 14 distinct tools across 368 calls while reporting zero tools offered**, because it exports no definitions. | Absent is not zero: each source declares measurability per metric, and a view a source cannot fill renders "not measurable", never a zero that reads as a result. |
-| R12.4 | The existing store held **37,623 spans in 2.9 GB — roughly 78 KB per span** — because raw content attributes were persisted uncompressed. | The raw column is compressed, and stored bytes per record are asserted under a budget in `dash/kyber/canon/store.test.ts`. |
+| R12.4 | The existing store held **37,623 spans in 2.9 GB — roughly 78 KB per span** — because raw content attributes were persisted uncompressed. | The raw column is compressed, and round-trip deflate behavior is verified in `dash/server.tests/KyberDash.Data.Tests/CanonStoreRepositoryParityTests.cs` (`CanonCompressedColumn`). |
 | R12.3 | The Python pipeline's tracked-artifact check **caught three real leaks** of captured content into version control. | The KyberDash equivalent is specified rather than assumed: seeded local-only markers must never appear in a git-tracked file, because one commit survives every later cleanup. |
-| R15.1 | The ported pipeline must reproduce the Python pipeline's **content-free parity digest** exactly. | `dash/kyber/tools/parity.ts` emits the same digest shape; the digest test fails with a section report when the two diverge, and the Python pipeline stays authoritative until they agree. |
+| R15.1 | The ported pipeline reproduces the Python pipeline's **content-free parity digest** contract. | Both the Python pipeline and the intermediate TypeScript engine are retired; the parity suite in `dash/server.tests/` enforces the canonical schema and figures on the C# engine in `dash/server/`. |
 
 ## How the rationale is enforced
 

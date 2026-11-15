@@ -11,7 +11,6 @@ namespace KyberWeave.Tests;
 /// <c>arbiter audit</c> reports how often the decision model was asked, and flags a run whose writer dispatches never
 /// reached it while a model is configured (ADR 0082). With provider <c>none</c> it stays silent.
 /// </summary>
-[Collection(ArbiterCommandCompositionCollection.Name)]
 public sealed class ArbiterAuditModelEvaluationTests : IDisposable
 {
     private const string LedgerId = "0000000000000001-aaaaaaaa";

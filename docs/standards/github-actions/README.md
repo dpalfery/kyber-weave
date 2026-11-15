@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: github-actions
 owner: dpalfery
-last-reviewed: 2026-11-07
+last-reviewed: 2026-11-15
 ---
 
 # GitHub Actions coding standard
@@ -137,24 +137,21 @@ templates, which is where a host copies the mistake from.
   carries its own budget rather than inheriting the six-hour runner default.
 - A cache key names what the cached content depends on — the tray's apt cache keys on the package
   set and the week. A key that never changes serves a stale tree and hides a broken restore.
-- **Three jobs start real processes** — `build-test`, `ts-gates` and `dash-e2e`. Each records
-  `JOB_START_EPOCH` as its first step and ends with an `if: always()` step running
-  `scripts/proc-guard.sh check-leftovers --root "$GITHUB_WORKSPACE" --since "$JOB_START_EPOCH"`, so
-  a job that leaves a child behind fails even when its test step passed. `build-test` shuts the
-  .NET build servers down first because they outlive every build by design. `CiLeftoverStepTests`
-  pins all three jobs; add the pair of steps to any new job that starts a server, a watcher or a
-  browser.
+- **A job that can hang carries `timeout-minutes`, and the run's leftovers are checked by the
+  workflow itself.** The repository's former watchdog helper for this (`scripts/proc-guard.sh
+  check-leftovers`) is retired, so a job that starts a server, a watcher or a browser states its
+  bound in the step's own timeout and cleans up in an `if: always()` step.
 
 ## The workflow runs the commands a contributor runs
 
 - The argv in `review.gates` of [`.kyber-weave/kyber-weave.yml`](../../../.kyber-weave/kyber-weave.yml)
   is the command, and a workflow step repeats it. CI therefore reproduces a local failure instead
   of approximating it.
-- KyberDash and tray local tests, gates and e2e commands run through `scripts/proc-guard.sh run --`,
-  while `.NET` commands run directly via `dotnet` (root `AGENTS.md`). Both `scripts/proc-guard.sh run`
-  and `kyber-weave review gates` refuse an unfiltered full-suite run from a dev agent and admit the
-  council and CI, which pass `--council`. A workflow step that runs the full suite is legal precisely
-  because CI is one of those two callers.
+- KyberDash and tray local commands run directly (`npm --prefix dash …`, `npx --prefix dash
+  playwright test …`, `cargo … --manifest-path dash/tray/src-tauri/Cargo.toml …`), and `.NET`
+  commands run directly via `dotnet` (root `AGENTS.md`). `kyber-weave review gates` refuses an
+  unfiltered full-suite gate from a dev agent and admits the council and CI, which pass `--council`.
+  A workflow step that runs the full suite is legal precisely because CI is one of those two callers.
 - The skill and docs gates build the pull request's own CLI and run it with `--no-build`; they
   never install a released binary. The behaviour under test is the commit's.
 
@@ -208,7 +205,7 @@ what the workflow was supposed to check. A disabled test or scan needs a linked 
 
 The workflow YAML is a test subject in
 [`tests/KyberWeave.RepoPolicy.Tests/`](../../../tests/KyberWeave.RepoPolicy.Tests/AGENTS.md):
-`CiLeftoverStepTests`, `ReviewGateWorkflowTemplateTests`, `ReviewGateFullSuiteConfigTests`,
+`ReviewGateWorkflowTemplateTests`, `ReviewGateFullSuiteConfigTests`,
 `ReleaseTests`, `ReleaseNotesTests` and `SbomTests` read it. They run as the `test-policy` gate,
 which selects on the same paths as `build`.
 
@@ -229,7 +226,7 @@ git diff --check
 actionlint .github/workflows/<file>.yml
 ```
 
-- **The tests are the policy classes.** `CiLeftoverStepTests`, `ReviewGateWorkflowTemplateTests`,
+- **The tests are the policy classes.** `ReviewGateWorkflowTemplateTests`,
   `ReviewGateFullSuiteConfigTests`, `ReleaseTests`, `ReleaseNotesTests` and `SbomTests` read the
   workflow files; a change to one of them runs that class by name, filtered, before the change is
   reported. `test-policy` is the gate that runs the whole class set, and the unfiltered product

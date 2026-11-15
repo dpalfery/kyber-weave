@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
 
-import viewPathPatterns from '../../../src/server/view-paths.json' with { type: 'json' }
+import viewPathPatterns from './view-paths.json' with { type: 'json' }
 
 import {
   VIEW_PATH_PATTERNS,
@@ -19,7 +19,7 @@ import {
 } from './router.js'
 
 const jsonOnDisk = JSON.parse(
-  readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../../src/server/view-paths.json'), 'utf8'),
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), './view-paths.json'), 'utf8'),
 ) as readonly string[]
 
 /**

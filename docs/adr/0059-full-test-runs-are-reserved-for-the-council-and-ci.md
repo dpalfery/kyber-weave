@@ -4,7 +4,7 @@ title: Full test runs are reserved for the review council and CI
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-08
+last-reviewed: 2026-11-15
 code-refs:
   - FullSuiteGate
   - FullSuiteSelection
@@ -21,7 +21,9 @@ Accepted, 2026-11-06. Amended 2026-11-07: a review reaches its verdict in one pa
 gate stops an `--all` run, one gate can be re-run on demand, and a gate with a missing dependency
 reports that fact rather than a failure (decisions 6 to 8). Amended 2026-11-08: the shipped gate
 catalogue writes the key itself, on every gate whose role is `test` (decision 5), so a host
-scaffolded by `docs init` starts guarded rather than unguarded.
+scaffolded by `docs init` starts guarded rather than unguarded. Amended 2026-11-15: the
+`scripts/proc-guard.sh` wrapper layer was retired with the Node engine, so `kyber-weave review gates`
+and `scripts/fast-loop.sh` are now the two places a full run is refused (decision 2).
 
 ## Context
 
@@ -35,12 +37,8 @@ cannot stop a run, so the rule is enforced in code.
 
 1. **A full test run is reserved for the review council and CI.** A developer agent runs only
    the tests that cover its change.
-2. **Three guard layers share one definition of a full run.**
-   - **A. `scripts/proc-guard.sh`.** `classify -- <argv>` prints `full` or `partial` and starts
-     nothing. `run` refuses a full run with exit 89 before it waits for a test slot and before
-     it starts anything, unless `--council` is given or stdin is an interactive terminal. The
-     wrapper consumes `--council` and does not forward it to the command.
-   - **B. `kyber-weave review gates --council`.** A gate that declares `full-suite: true` in
+2. **Two guard layers share one definition of a full run.**
+   - **A. `kyber-weave review gates`.** A gate that declares `full-suite: true` in
      `.kyber-weave/kyber-weave.yml` is refused unless `--council` is given or stdin is an
      interactive terminal. A refused gate is a blocking failure: diagnostic `KW-REVIEW-033`
      (Error, a gate that never started) and exit 1. What happens to the rest of the run depends
@@ -48,8 +46,13 @@ cannot stop a run, so the rule is enforced in code.
      lives in `FullSuiteGate`
      (`src/KyberWeave.Core/Configuration/FullSuiteGate.cs`), and the command applies it in
      `src/KyberWeave.Cli/Commands/Review/ReviewGatesCommand.cs`.
-   - **C. `scripts/fast-loop.sh`.** `--full`, `--scoped` and `--regenerate` exit 89 before any
+   - **B. `scripts/fast-loop.sh`.** `--full`, `--scoped` and `--regenerate` exit 89 before any
      build when stdin is not a terminal. This script has no `--council` flag.
+
+   The original third layer, `scripts/proc-guard.sh run`, was retired on 2026-11-15 with the Node
+   engine. It refused a full run with exit 89, but only when a caller chose to route a command
+   through it, so its coverage was the commands its docs wrapped rather than the commands a worker
+   actually types.
 3. **The full-run definition.** The classifier first strips launchers, skipping each one's own
    options, in any order: `env`, `timeout`, `nice`, `time`, `command`, `exec`, `nohup`,
    `caffeinate`, `sudo`, `doas`, `ionice`, `setsid`, `stdbuf` and `arch`. An unknown word after a
@@ -80,8 +83,8 @@ cannot stop a run, so the rule is enforced in code.
    shipped catalogue writes the key too: `GateCatalogue` renders `full-suite: true` on every gate
    whose role is `test` and on no other gate, derived from the role rather than from a list of ids,
    so a family that later ships a second whole-suite gate is covered without another row. The
-   generated command is not wrapped in `scripts/proc-guard.sh`: the guard does not ship to a host,
-   and the key is the half that travels.
+   generated command carries no wrapper: there is none to ship, and the key is the half that
+   travels.
 6. **Only an `--all` run stops when a full-suite gate is refused.** Under `--all` the run exits
    at once with no gate started. A scoped call without `--council` keeps the existing behaviour
    and still runs the other gates, because the pre-push self-review relies on their evidence and
@@ -112,14 +115,15 @@ cannot stop a run, so the rule is enforced in code.
 
 - A shell with a pseudo-terminal passes the terminal test.
 - Typing `--council` passes the guard.
-- A raw `dotnet test` run that bypasses `proc-guard.sh` is not seen.
+- A `dotnet test` run started outside `review gates` is not seen.
 - `sh -c`, `bash -c` and `env -S` command strings are not parsed.
 - A launcher outside the list in the definition is not unwrapped. Its command is classified only
   when a `dotnet`, `npm` or `cargo` word follows it.
 - Other test runners are not classified: `dotnet vstest`, `npx vitest` and `cargo nextest` are
   classified as partial and run.
 - The default path of `scripts/fast-loop.sh` runs an unfiltered `cargo test` of the tray crate
-  for a tray Rust change. It does not go through `proc-guard.sh`, so no refusal applies. Tracked in
+  for a tray Rust change. That path is neither a declared gate nor a `--full`/`--scoped` mode, so no
+  refusal applies. Tracked in
   [the fast-loop tray cargo test todo](../todo/fast-loop-default-tray-cargo-test.md).
 - Deliberate over-refusals: a targeted run classified as full is refused by design. These are any
   directory target, `npm test --workspace <name>`, `cargo test -p <package>` (`--package` too), any npm
@@ -129,7 +133,7 @@ cannot stop a run, so the rule is enforced in code.
 
 ## Release Ordering
 
-The CLI, `scripts/proc-guard.sh`, the `full-suite` configuration key and
+The CLI, the `full-suite` configuration key and
 `templates/github-actions/kyber-weave-review-gate.yml` ship together. An older CLI, such as
 `0.1.8-rc.19`, warns `KW-CONFIG-002` on the `full-suite` key and does not know `--council`. A host
 that pins an older CLI must update it before its council can run the guarded gates. The same holds

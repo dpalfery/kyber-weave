@@ -6,7 +6,7 @@ status: current
 component: ReviewCouncil
 source-root: src/KyberWeave.Core/Review
 owner: dpalfery
-last-reviewed: 2026-11-13
+last-reviewed: 2026-11-15
 decided-by:
   - adr/0002-three-layer-review-council-verdict-engine
   - adr/0003-cross-file-duplication-and-prior-art-lenses
@@ -789,8 +789,8 @@ Gates run one after another in declaration order, except a gate marked `concurre
 whether two gates share build output or a lock file, so it never overlaps gates on its own: a host that knows
 two gates are independent (a Node lint and a .NET test run, say) declares the first `concurrent`, ahead of the
 longer gates it can overlap. `review.parallelism` (default `2`) bounds the gates running at one time,
-`concurrent` or not, so marking several gates `concurrent` cannot pile them onto one machine's cores; any
-`proc-guard` machine slot a wrapped gate takes still applies on top. A gate waits for a free slot before it
+`concurrent` or not, so marking several gates `concurrent` cannot pile them onto one machine's cores.
+A gate waits for a free place before it
 starts, and a gate the council deadline passed while it waited is reported as not started, exactly as before. The
 report lists results in declaration order and the verdict reads the same results whatever the bound.
 
@@ -917,28 +917,26 @@ partitioned by ecosystem:
 - **TypeScript gates** (`ts-*`): scoped to `["dash/**"]` (which also keeps `display-layer.test.ts` active when `dash/tray/**` changes).
 - **Rust gates** (`cargo-*`): scoped to `["dash/tray/src-tauri/**"]`.
 
-#### Test and build gates run under the process watchdog
+#### Test and build gates run their commands directly
 
-Only the KyberDash `ts-test` gate (`npm --prefix dash run test`) declares its argv through
-`scripts/proc-guard.sh run --`. The `.NET` gates (`build`, `test`, `test-policy`) and format checks
-run `dotnet` directly so Roslyn/MSBuild build servers stay warm and `dotnet test` avoids watchdog
-teardown latency (`test` keeps `full-suite: true` so `kyber-weave review gates` still refuses dev
-agents unless `--council` is passed). For `ts-test`, the watchdog kills the command's whole tree at
-an absolute cap (64 descendants, or 128 JavaScript runtime processes for this user: `node`, `nodejs`,
-`bun`, `deno`, `tsx`), and it fails the gate when a process the run started survives it. A watchdog
-trip is a failed gate: the gate's exit code is the watchdog's 86 (cap) or 87 (leftover), or 124 when
-a `--timeout` is set. The council reports it as any other non-zero exit.
+Every gate declares its argv as the command itself — no process wrapper. The `.NET` gates (`build`,
+`test`, `test-policy`) and the format checks run `dotnet` directly so Roslyn/MSBuild build servers
+stay warm, and the KyberDash `ts-test` gate (`npm --prefix dash run test`) runs `npm` directly. The
+retired watchdog (`scripts/proc-guard.sh`) used to wrap `ts-test` and reap its process tree; it went
+away with the Node engine, which no longer spawns recursive children
+([ADR 0047](../adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint.md)). A gate that runs
+away is stopped by its own `timeout-seconds`, and the council reports it as any other non-zero exit.
+`test` and `ts-test` keep `full-suite: true` so `kyber-weave review gates` still refuses dev agents
+unless `--council` is passed.
 
-No gate takes a machine-wide `--slot` today (`test` uses `timeout-seconds: 900` directly), though
-`scripts/proc-guard.sh` still provides `--slot` and `--slot-wait` when serialization is needed.
+Gates run one after another unless marked `concurrent`, and `review.parallelism` bounds the ones
+that do. There is no machine-wide slot: a gate that must not overlap another is ordered after it.
 
-`ReviewGateProcGuardWiringTests` pins the `ts-test` watchdog wrapper and the direct `dotnet test`
-declarations on `test` and `test-policy`, so a change to those argv values has to change the test
+`ReviewGateFullSuiteConfigTests` pins the `full-suite` keys on the `test`, `ts-test` and
+`cargo-test` gates, so a change to those entries has to change the test
 with it. The
-exit-code meanings and the local commands are in the
-[KyberDash runbook](../dash/runbook.md#running-tests-safely). The guard's flags are `--max-node`, `--max-tree`,
-`--timeout` and, for the slot, `--slot`, `--slot-count`, `--slot-wait` and `--task`; the runbook also covers `--tty`, the standard-input behaviour, and the rule to keep
-`--timeout` at or below 540 when a run comes from an agent tool. Changing a `review.gates` entry in
+local commands and what a gate failure means are in the
+[KyberDash runbook](../dash/runbook.md#running-tests-safely). Changing a `review.gates` entry in
 `.kyber-weave/kyber-weave.yml` is a reserved-path change; it is reviewed as one.
 
 Every file kind this repository's agents edit now selects at least one task gate: a workflow, a
@@ -994,8 +992,8 @@ anywhere, and a single check keeps running for a developer agent. The key is wha
 `review gates` refuse the gate for a caller that is not the council or CI
 ([ADR 0059](../adr/0059-full-test-runs-are-reserved-for-the-council-and-ci.md)), so a host
 scaffolded by `docs init` cannot hand a developer agent the whole suite. The generated command is
-**not** wrapped in `scripts/proc-guard.sh`: the guard is this repository's own file and does not
-ship to a host, while the key is the half that travels; host repositories rely on the gate runner's
+**not** wrapped in a process supervisor: there is none to ship, and the key is the half that
+travels; host repositories rely on the gate runner's
 `timeout-seconds` rather than repository-specific process tree caps or slot queuing.
 `GateCatalogueRenderTests` pins both
 directions of the rule in one comparison, so a scaffold that marked every gate full-suite and one

@@ -336,20 +336,13 @@ jobs:
           if-no-files-found: error
 
   build-kyberdash:
-    # Single-executable Node SEA packaging per KyberDash spec task 12.1 /
-    # decision D7. RIDs follow the stable Node SEA set (not the .NET RID set),
-    # so macOS is published as darwin-* rather than osx-* — install.sh re-maps.
-    # macOS builds run on macos-latest so postject can be followed by an
-    # ad-hoc codesign (which is what replaces postject's deliberate
-    # invalidation of the embedded codesignature, per design.md D7 caveat b).
-    #
-    # Issue #157 defect 1 (D1-A): the web dashboard is built here too, packed
-    # into the dist-sea/web.json SEA asset, and embedded in the blob alongside
-    # main.js and package.json, so a released `kyberdash web` serves the SPA
-    # from memory instead of the "not built" page. A native-RID smoke test
-    # (below, beside the existing --version check) proves it actually does.
-    # docs/plans/2026-09-28-kyberdash-sea-release-integrity.md carries the
-    # design; scripts/release-local.sh mirrors these same steps.
+    # Single-file .NET 10 binaries for the C# KyberDash CLI, API, and MCP hosts
+    # with the React SPA embedded as KyberDash.Api.web.json (dist-sea/web.json).
+    # RIDs follow the archive naming set install.sh and SelfUpdater expect
+    # (darwin-* for macOS; linux-* / win-x64 coincide), mapped to .NET RIDs
+    # when invoking `dotnet publish`.
+    # macOS builds run on macos-latest so the single-file executable can be
+    # ad-hoc codesigned and smoke-tested on native macOS.
     name: Build KyberDash ${{ matrix.rid }}
     needs: [version, approve]
     runs-on: ${{ matrix.os }}
@@ -370,135 +363,77 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup Node (for tsup and postject only; SEA binary comes from nodejs.org/dist)
+      - name: Setup Node (for building and packing the embedded web UI)
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Bundle dash CLI as ESM + CJS
-        # ink and yoga-layout are ESM-only and use top-level await, so the SEA
-        # bundle cannot be CommonJS. It is emitted as ESM and loaded by
-        # src/sea-shim.cjs; tsup.sea.config.ts carries the reasoning.
-        #
-        # The web dashboard (issue #157 defect 1, D1-A) is built and packed
-        # here too, after tsup: `npm --prefix web` builds the Vite SPA into
-        # dist/dash, and scripts/pack-sea-web.mjs packs it into the
-        # dist-sea/web.json asset that the SEA config below embeds. The
-        # packer already fails loudly on a missing index.html; the check
-        # here catches the case where it did not run at all.
+      - name: Setup .NET
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Build and pack embedded web dashboard
         working-directory: dash
-        env:
-          RELEASE_VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
-          npm ci --no-audit --no-fund
-          npm version "${RELEASE_VERSION}" --no-git-tag-version --allow-same-version
-          npx tsup --config tsup.sea.config.ts
-          test -f dist-sea/main.js || { echo "tsup did not emit dist-sea/main.js" >&2; exit 1; }
           npm --prefix web ci --no-audit --no-fund
           npm --prefix web run build
           node scripts/pack-sea-web.mjs dist/dash dist-sea/web.json
           test -f dist-sea/web.json || { echo "pack-sea-web did not emit dist-sea/web.json" >&2; exit 1; }
 
-      - name: Build Node SEA for ${{ matrix.rid }}
+      - name: Publish KyberDash single-file for ${{ matrix.rid }}
         working-directory: dash
         env:
           RID: ${{ matrix.rid }}
           EXE: ${{ matrix.exe }}
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
           RID="${RID}"
           case "${RID}" in
-              darwin-arm64) NODE_PLATFORM=darwin; NODE_ARCH=arm64 ;;
-              darwin-x64)   NODE_PLATFORM=darwin; NODE_ARCH=x64   ;;
-              linux-arm64)  NODE_PLATFORM=linux;  NODE_ARCH=arm64 ;;
-              linux-x64)    NODE_PLATFORM=linux;  NODE_ARCH=x64   ;;
-              win-x64)      NODE_PLATFORM=win;    NODE_ARCH=x64   ;;
+              darwin-arm64) DOTNET_RID=osx-arm64;  NODE_PLATFORM=darwin; NODE_ARCH=arm64 ;;
+              darwin-x64)   DOTNET_RID=osx-x64;    NODE_PLATFORM=darwin; NODE_ARCH=x64   ;;
+              linux-arm64)  DOTNET_RID=linux-arm64; NODE_PLATFORM=linux;  NODE_ARCH=arm64 ;;
+              linux-x64)    DOTNET_RID=linux-x64;   NODE_PLATFORM=linux;  NODE_ARCH=x64   ;;
+              win-x64)      DOTNET_RID=win-x64;     NODE_PLATFORM=win;    NODE_ARCH=x64   ;;
               *) echo "::error::unsupported RID: ${RID}"; exit 1 ;;
           esac
 
-          BUNDLE_DIR="$(pwd)/dist-sea"
           BIN_DIR="$(pwd)/dist-bin"
-          WORK="$(mktemp -d)"
-          mkdir -p "${BIN_DIR}" "${WORK}/node"
-          trap 'rm -rf "${WORK}"' EXIT
+          mkdir -p "${BIN_DIR}"
 
-          # Download the platform's prebuilt Node archive from nodejs.org/dist.
-          # Homebrew's node formula ships with SEA disabled (spec D7 caveat a),
-          # so we never use it as the SEA host binary.
-          TARBALL="node-v${NODE_VERSION}-${NODE_PLATFORM}-${NODE_ARCH}"
-          BASE_URL="https://nodejs.org/dist/v${NODE_VERSION}"
-          if [ "${NODE_PLATFORM}" = "win" ]; then
-              URL="${BASE_URL}/${TARBALL}.zip"
-              curl -fsSL -o "${WORK}/node.zip" "${URL}"
-              # unzip has no --strip-components, so the archive keeps its own
-              # top-level directory; address the binary through it.
-              unzip -q "${WORK}/node.zip" -d "${WORK}/node"
-              NODE_BIN="${WORK}/node/${TARBALL}/node${EXE}"
-          else
-              URL="${BASE_URL}/${TARBALL}.tar.xz"
-              curl -fsSL -o "${WORK}/node.tar.xz" "${URL}"
-              tar -xJf "${WORK}/node.tar.xz" -C "${WORK}/node" --strip-components=1
-              NODE_BIN="${WORK}/node/bin/node"
-          fi
-          [ -f "${NODE_BIN}" ] || { echo "::error::node binary missing"; exit 1; }
-
-          # Configure SEA. The CJS bundle written by tsup is named cli.js when
-          # both formats are emitted; that file is what the SEA loader resolves.
-          SEA_CONFIG="${WORK}/sea-config.json"
-          # The main script is the CommonJS shim, not the bundle: Node runs a
-          # SEA main as CJS whatever its extension. The ESM bundle rides along
-          # as an asset, and package.json answers the version lookups that
-          # would otherwise resolve off a filesystem the binary does not have.
-          # web.json (issue #157 defect 1, D1-A) is the packed web dashboard;
-          # web.ts's embedded-source resolution reads it through
-          # node:sea's getAsset, the same way it reads main.js.
-          # shellcheck disable=SC2154
-          cat > "${SEA_CONFIG}" <<EOF
-          {
-            "main": "$(pwd)/src/sea-shim.cjs",
-            "output": "${WORK}/sea-prep.blob",
-            "useSnapshot": false,
-            "disableExperimentalSEAWarning": true,
-            "assets": {
-              "main.js": "${BUNDLE_DIR}/main.js",
-              "web.json": "${BUNDLE_DIR}/web.json",
-              "package.json": "$(pwd)/package.json"
-            }
-          }
-          EOF
-          # Built with the runner's own Node, not the downloaded one: for a
-          # cross-built RID the target binary cannot execute here at all
-          # (Exec format error). Both are ${NODE_VERSION}, and a non-snapshot
-          # blob carries no host architecture, so the output is identical.
-          node --experimental-sea-config "${SEA_CONFIG}"
+          for proj in \
+            server/KyberDash.Cli/KyberDash.Cli.csproj \
+            server/KyberDash.Api/KyberDash.Api.csproj \
+            server/KyberDash.Mcp/KyberDash.Mcp.csproj; do
+              dotnet publish "${proj}" \
+                -c "${{ env.CONFIGURATION }}" \
+                -r "${DOTNET_RID}" \
+                --self-contained true \
+                -p:PublishSingleFile=true \
+                -p:IncludeNativeLibrariesForSelfExtract=true \
+                -p:DebugType=None \
+                -p:DebugSymbols=false \
+                -p:Version="${RELEASE_VERSION}" \
+                -o "${BIN_DIR}"
+          done
 
           FINAL_BIN="${BIN_DIR}/kyberdash${EXE}"
-          cp "${NODE_BIN}" "${FINAL_BIN}"
-          chmod +x "${FINAL_BIN}"
-
-          # Inject the SEA blob into the executable. postject (npm) reframes
-          # the binary without disturbing the executable header.
-          npm install --no-save --no-audit --no-fund postject@1.0.0-alpha.6
-          # The fuse string must match the one Node compiles in, or the
-          # runtime will not detect the injected blob. macOS additionally
-          # needs the blob in the NODE_SEA segment.
-          POSTJECT_ARGS=(--sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2)
-          if [ "${NODE_PLATFORM}" = "darwin" ]; then
-              POSTJECT_ARGS+=(--macho-segment-name NODE_SEA)
-          fi
-          npx postject "${FINAL_BIN}" NODE_SEA_BLOB "${WORK}/sea-prep.blob" \
-            "${POSTJECT_ARGS[@]}"
-
-          # macOS: ad-hoc codesign is required after postject replaces the
-          # embedded signature (spec D7 caveat b). Linux and Windows runners
-          # skip this step; install.sh strips com.apple.quarantine on first run.
-          if [ "${NODE_PLATFORM}" = "darwin" ]; then
-              codesign --sign - --force "${FINAL_BIN}"
-              codesign --verify --verbose "${FINAL_BIN}" || true
-              # Ensure no quarantine xattr was applied by AppleDouble-aware tools.
-              xattr -c "${FINAL_BIN}" || true
-          fi
+          API_BIN="${BIN_DIR}/kyberdash-api${EXE}"
+          MCP_BIN="${BIN_DIR}/kyberdash-mcp${EXE}"
+          for bin in "${FINAL_BIN}" "${API_BIN}" "${MCP_BIN}"; do
+              [ -f "${bin}" ] || { echo "::error::kyberdash binary missing at ${bin}"; exit 1; }
+              if [ "${NODE_PLATFORM}" != "win" ]; then
+                  chmod +x "${bin}"
+              fi
+              if [ "${NODE_PLATFORM}" = "darwin" ]; then
+                  codesign --sign - --force "${bin}"
+                  codesign --verify --verbose "${bin}" || true
+                  # Ensure no quarantine xattr was applied by AppleDouble-aware tools.
+                  xattr -c "${bin}" || true
+              fi
+          done
 
           # Ship the third-party notices with the binary (R1.5): the archive is
           # what install.sh downloads and unpacks, so the attribution travels
@@ -507,29 +442,21 @@ jobs:
 
           # Archive the artifact under the RID-keyed name the installer expects.
           if [ "${RID}" = "win-x64" ]; then
-              zip -9 -j "${BIN_DIR}/kyberdash-${RID}.zip" "${FINAL_BIN}" "${BIN_DIR}/THIRD_PARTY_NOTICES.md"
+              zip -9 -j "${BIN_DIR}/kyberdash-${RID}.zip" "${FINAL_BIN}" "${API_BIN}" "${MCP_BIN}" "${BIN_DIR}/THIRD_PARTY_NOTICES.md"
           else
-              tar -C "${BIN_DIR}" -czf "${BIN_DIR}/kyberdash-${RID}.tar.gz" "kyberdash${EXE}" THIRD_PARTY_NOTICES.md
+              tar -C "${BIN_DIR}" -czf "${BIN_DIR}/kyberdash-${RID}.tar.gz" "kyberdash${EXE}" "kyberdash-api${EXE}" "kyberdash-mcp${EXE}" THIRD_PARTY_NOTICES.md
           fi
 
-          # Verify the binary still reports --version (catches a corrupt blob or
-          # a failed inject before archiving). Only meaningful where the RID is
-          # native to this runner; a cross-built one cannot be executed here.
+          # Verify the binary reports --version, serves the embedded dashboard, and speaks MCP.
+          # Only meaningful where the RID is native to this runner; a cross-built one cannot run here.
           HOST_OS="$(uname -s)"; HOST_ARCH="$(uname -m)"
           case "${HOST_OS}" in Darwin) HOST_OS=darwin ;; Linux) HOST_OS=linux ;; esac
           case "${HOST_ARCH}" in arm64|aarch64) HOST_ARCH=arm64 ;; x86_64) HOST_ARCH=x64 ;; esac
           if [ "${NODE_PLATFORM}" = "${HOST_OS}" ] && [ "${NODE_ARCH}" = "${HOST_ARCH}" ]; then
               "${FINAL_BIN}" --version >/dev/null
               echo "smoke test passed for ${RID}"
-              # Issue #157 defect 1 (D1-A): the embedded dashboard must serve
-              # the SPA, not the "not built" page, once the blob above is
-              # actually injected and runnable. Same native-RID restriction as
-              # the --version check just above.
               node scripts/sea-web-smoke.mjs "${FINAL_BIN}"
               echo "dashboard smoke test passed for ${RID}"
-              # The MCP command is a second released-shape entry point. It must load the
-              # SDK from the SEA rather than a checkout's node_modules, and its fixture
-              # stays on loopback with an isolated HOME/state directory.
               node scripts/sea-mcp-smoke.mjs "${FINAL_BIN}"
               echo "mcp smoke test passed for ${RID}"
           else

@@ -16,7 +16,7 @@ namespace KyberWeave.Tests;
 /// with 89: the first prints usage, the other two are the targeted runs the refusal sends agents to.
 /// </para>
 /// <para>
-/// Safety of this suite: the fixture copies <c>fast-loop.sh</c> and <c>proc-guard.sh</c> into a temporary repository and
+/// Safety of this suite: the fixture copies <c>fast-loop.sh</c> into a temporary repository and
 /// puts stub <c>dotnet</c>, <c>npm</c> and <c>cargo</c> FIRST on PATH. Each stub appends its argv to a marker file.
 /// <c>TMPDIR</c> and <c>HOME</c> point into the temporary directory, so no lock or timing file lands in the real home.
 /// No row starts a real build or test run. A refused row must leave the marker absent.
@@ -140,13 +140,8 @@ public sealed class FastLoopFullRunRefusalTests
         }
     }
 
-    private static string FixturePath(string fixtureName)
-    {
-        return Path.Combine(KyberWeaveTestPaths.ToolRoot, "tests", "KyberWeave.RepoPolicy.Tests", "Fixtures", "proc-guard", fixtureName);
-    }
-
     /// <summary>
-    /// A temporary repository holding copies of the two scripts, a stub solution file, and stub toolchain executables that
+    /// A temporary repository holding a copy of the script, a stub solution file, and stub toolchain executables that
     /// record every invocation in a marker file.
     /// </summary>
     private sealed class FastLoopSandbox : IDisposable
@@ -165,7 +160,6 @@ public sealed class FastLoopFullRunRefusalTests
             Directory.CreateDirectory(_stubDir);
 
             CopyScript("fast-loop.sh");
-            CopyScript("proc-guard.sh");
             File.WriteAllText(Path.Combine(_root, "KyberWeave.sln"), "# stub solution\n");
 
             WriteStub("dotnet");
@@ -200,7 +194,6 @@ public sealed class FastLoopFullRunRefusalTests
             string originalPath = Environment.GetEnvironmentVariable("PATH") ?? "/usr/bin:/bin";
             startInfo.Environment["PATH"] = $"{_stubDir}:{originalPath}";
             startInfo.Environment["STUB_MARKER"] = _markerPath;
-            startInfo.Environment["KW_PROC_GUARD_PS"] = FixturePath("ps-clean.sh");
             startInfo.Environment["TMPDIR"] = _temp.Path;
             startInfo.Environment["HOME"] = _temp.Path;
 

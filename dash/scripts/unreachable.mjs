@@ -135,24 +135,9 @@ export async function findUnreachable({ root, entries, scanRoots, aliases = {}, 
  * Entry points, with the reason each one is loaded other than by import.
  */
 export const ENTRIES = [
-  'src/launcher.ts', //         the installed launcher
-  'src/cli/main.ts', //         tsup and SEA entry
-  'src/ingest/parse-worker.ts', // loaded by URL from parse-workers.ts as a worker thread
-  'src/sea-shim.cjs', //        SEA entry that evaluates the bundled app
-  'src/sea-devtools-stub.js', // aliased in by tsup.sea.config.ts
-  'src/tools/parity.ts', //     operator tools, run with tsx
-  'src/tools/reingest.ts',
-  'src/tools/capture-content-fixture.mjs',
-  'src/tools/cost-isolation.ts', // run by its test as a repository-wide check
-  'src/tools/store-memory.ts', // operator tool: attributes a store handle's resident memory
-  'src/tools/report-fixtures.ts', // `npm run report:fixtures`, regenerates the renderer fixtures
-  'src/capture/harnesses/opencode-plugin/entry.ts', // opencode loads the installed plugin file by path (runbook), never by dash import
-  'src/capture/harnesses/factory-plugin/entry.ts', // factory runs the installed hook script by path (runbook), never by dash import
-  'src/capture/harnesses/opencode-plugin/generated/plugin-source.ts', // generated text of the plugin; the T4 installer imports it, bundle.test.ts guards it
-  'src/capture/harnesses/factory-plugin/generated/plugin-source.ts', // generated text of the plugin; the installer imports it, bundle.test.ts guards it
   'web/src/main.tsx', //        the web dashboard's Vite entry
 ]
-export const SCAN_ROOTS = ['src', 'web/src']
+export const SCAN_ROOTS = ['web/src']
 export const ALIASES = { '@': 'web/src' }
 
 /**
@@ -163,15 +148,10 @@ export const ALIASES = { '@': 'web/src' }
 export const TEST_ENTRIES = [
   'tests/setup/env-isolation.ts', //                  vitest.config.ts setupFiles
   'tests/setup/network-guard-setup.ts', //            vitest.config.ts setupFiles (D10 live-receiver guard)
-  'tests/setup/process-ledger-global.ts', //          vitest.config.ts globalSetup (storm guard T5 ledger)
-  'tests/setup/process-ledger-global-playwright.ts', // playwright configs globalTeardown
-  'tests/fixtures/cache-refresh-worker.ts', //        spawned by path from lock-process.test.ts
-  'tests/fixtures/cache-refresh-corrupt-owner.ts', // spawned via spawnFixture() in lock-corrupt-body.test.ts
-  'tests/fixtures/cache-refresh-slow-owner.ts', //    spawned via spawnFixture() in lock-corrupt-body.test.ts
 ]
 
 /** Where tests and their support live; mirrors vitest.config.ts `include`. */
-export const TEST_SCAN_ROOTS = ['src', 'web/src', 'tests', 'scripts']
+export const TEST_SCAN_ROOTS = ['web/src', 'tests', 'scripts']
 
 /** Every test file under the test scan roots, which are the test pass's entry points. */
 export function findTestFiles(root) {
