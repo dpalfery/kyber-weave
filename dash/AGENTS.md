@@ -37,16 +37,17 @@ schedule, run a job, spawn a CLI child for one, host the receiver, or compute a 
 
 ## Gates
 
-From the repository root, run Node/UI gates through the process watchdog (`scripts/proc-guard.sh run --`)
-and .NET engine gates directly via `dotnet`:
+From the repository root, run the Node/UI gates and the .NET engine gates directly — there is no
+process wrapper: KyberDash runs its jobs and OTLP receiver in-process, so nothing spawns children
+that need reaping:
 
 ```bash
 dotnet build dash/server/KyberDash.sln -c Release
 dotnet test dash/server/KyberDash.sln -c Release   # add --filter "FullyQualifiedName~<Class>" for one suite
-scripts/proc-guard.sh run -- npm --prefix dash run typecheck
-scripts/proc-guard.sh run -- npm --prefix dash run lint
-scripts/proc-guard.sh run -- npm --prefix dash run test:related -- <files>
-scripts/proc-guard.sh run -- npm --prefix dash run check:reachable
+npm --prefix dash run typecheck
+npm --prefix dash run lint
+npm --prefix dash run test:related -- <files>
+npm --prefix dash run check:reachable
 ```
 
 `<files>` are relative to `dash/` (`web/src/foo.ts`, not `dash/web/src/foo.ts`). A repo-root path matches
@@ -56,8 +57,8 @@ nothing and passes with zero tests, so check the run reports a non-zero test cou
 CI run it; no dev agent does.
 
 Editing `dash/tray/**` also means the tray's own gates — see
-[`dash/tray/AGENTS.md`](tray/AGENTS.md) for the Rust and popover-UI commands. Run those through
-`scripts/proc-guard.sh run --` too.
+[`dash/tray/AGENTS.md`](tray/AGENTS.md) for the Rust and popover-UI commands. Run those directly
+from the repository root too.
 
 ## Tests that start processes
 
@@ -66,13 +67,13 @@ These rules hold for every test under `dash/`
 [test standard](../docs/standards/test/README.md#tests-that-start-processes)):
 
 - **Playwright runs only with the isolated config**, from the repository root:
-  `scripts/proc-guard.sh run --timeout 600 -- npx --prefix dash playwright test --config dash/playwright.isolated.config.ts <spec>`.
+  `npx --prefix dash playwright test --config dash/playwright.isolated.config.ts <spec>`.
   Never run `dash/playwright.config.ts` by hand, and never omit `--config`.
 - **Never start the dashboard manually to run a test** (`kyberdash web`, `npm run dev`). The isolated
   e2e boots seed an isolated state directory via `E2eSeederService` in `dash/server/KyberDash.Application/Services/` and launch
   a loopback-bound `kyberdash-api` server over ephemeral ports, torn down in `finally`.
-- **C# process spawns stay bounded and allowlisted.** Self-spawns in `dash/server/**` use bounded
-  `ProcessRunner` / `ProcessStartInfo` calls governed by
+- **C# process spawns stay bounded and allowlisted.** Every self-spawn in `dash/server/**` uses a
+  bounded `ProcessRunner` / `ProcessStartInfo` call governed by
   `tests/KyberWeave.RepoPolicy.Tests/Fixtures/spawn-sites-allowlist.json` (`ProcessSpawnSitesTests`).
   Any new Node `child_process` spawn, `Worker`, or Playwright `webServer` under `dash/` must likewise
   use bounded timeouts and clean teardown.

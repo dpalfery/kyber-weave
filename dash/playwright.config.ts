@@ -1,10 +1,6 @@
 import { defineConfig } from '@playwright/test'
 import { fileURLToPath } from 'node:url'
 
-import { beginLedgerRun } from './tests/setup/process-ledger-global.js'
-
-beginLedgerRun()
-
 const dashRoot = fileURLToPath(new URL('.', import.meta.url))
 
 export default defineConfig({
@@ -12,7 +8,6 @@ export default defineConfig({
   timeout: 30_000,
   expect: { timeout: 10_000 },
   workers: 1,
-  globalTeardown: './tests/setup/process-ledger-global-playwright.ts',
   reporter: 'list',
   use: { baseURL: 'http://127.0.0.1:4747' },
   webServer: {

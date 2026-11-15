@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: typescript
 owner: dpalfery
-last-reviewed: 2026-11-11
+last-reviewed: 2026-11-15
 ---
 
 # TypeScript coding standard
@@ -109,10 +109,10 @@ the format check is the lint gate below rather than a formatter of its own.
 For changes under `dash/`, run the applicable gates from the repository instructions:
 
 ```bash
-scripts/proc-guard.sh run -- npm --prefix dash run typecheck
-scripts/proc-guard.sh run -- npm --prefix dash run lint
-scripts/proc-guard.sh run -- npm --prefix dash run test:related -- <files>
-scripts/proc-guard.sh run -- npm --prefix dash run check:reachable
+npm --prefix dash run typecheck
+npm --prefix dash run lint
+npm --prefix dash run test:related -- <files>
+npm --prefix dash run check:reachable
 ```
 
 `typecheck` is the build check: it compiles every project in `dash/`, including `web/` and the test
@@ -121,7 +121,7 @@ tsconfig, and emits nothing. `lint` is also the format check, because ESLint own
 to `dash/`. The whole `npm --prefix dash run test` suite is the review council's and CI's gate; a
 dev agent does not run it.
 
-Run each command through `scripts/proc-guard.sh run --` (the process watchdog); see
+Run each command directly, with no process wrapper; see
 [Running tests safely](../../dash/runbook.md#running-tests-safely).
 
 A change to the engine's shipped output also requires `npm --prefix dash run build:cli`, and a

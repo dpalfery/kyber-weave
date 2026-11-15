@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: test
 owner: dpalfery
-last-reviewed: 2026-11-12
+last-reviewed: 2026-11-15
 decided-by:
   - adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint
 ---
@@ -190,32 +190,29 @@ A test that starts a process can start more of them. In 2026-10 a dashboard test
 that and fork-bombed `node`. The rules below keep every process a test starts bounded, and the
 two static audits (below) keep the list of such sites honest.
 
-1. **Inject a recording spawner by default.** Every KyberDash self-spawn takes a `spawnFn`
-   (`createNodeSpawner(spawnFn)`, the `DetachedLauncher` constructor). A recording function starts
-   nothing, so the test asserts the argv and environment it would have used.
-2. **Under test the guard is deny.** `dash/tests/setup/spawn-guard-setup.ts` sets
-   `KYBERDASH_SPAWN_GUARD=deny` for every vitest file. A spawn that gets through anyway is recorded,
-   and the test that caused it fails with the hit list. Playwright gets the same setting from
-   `dash/playwright.isolated.config.ts`.
-3. **A real child needs `allowRealSpawns(reason)`.** Call it in the test, from
-   `dash/tests/setup/spawn-guard.ts`. The reason names the bound (for example, "self-exits after
-   30 s" or "fixed argv, one line, exits"). The opt-in ends after the test. Add the site to the
-   allow-list with the same bound.
-4. **Kill the whole group, not only the wrapper.** A Playwright boot is spawned `detached: true` and
+1. **Inject a recording spawner by default.** A test that needs to observe a spawn takes an
+   injectable spawn function. A recording function starts nothing, so the test asserts the argv and
+   environment it would have used. KyberDash's own engine spawns no Node children any more, so most
+   suites need no spawn at all.
+2. **A real child states its bound at the site.** If a test cannot avoid starting a real child, give
+   it a fixed argv, a timeout and a `killSignal`, and add the site to the allow-list below with the
+   same bound.
+3. **Kill the whole group, not only the wrapper.** A Playwright boot is spawned `detached: true` and
    stopped with `process.kill(-pid, signal)`. Killing only `npx` or `sh` leaves the node process
    under it running.
-5. **Bound every wait.** Give each readiness wait a timeout, and each `spawnSync`, `execSync` and
+4. **Bound every wait.** Give each readiness wait a timeout, and each `spawnSync`, `execSync` and
    `execFileSync` a `timeout` with `killSignal: 'SIGKILL'`. A child that exits by itself is better
    than one the test must kill.
-6. **Run KyberDash and tray tests through the watchdog.** `scripts/proc-guard.sh run -- <command>`
-   from the repository root (`.NET` commands run directly via `dotnet`), as the
-   [runbook](../../dash/runbook.md#running-tests-safely) describes. The watchdog is
-   POSIX-only; on Windows the process ledger still checks the children the run recorded, by pid,
-   but there is no absolute process cap. The guard gives the command stdin from `/dev/null` when
-   its own stdin is a terminal, so a command that reads the terminal does not stop; `--tty` keeps
-   the terminal and is risky. From an agent tool keep `--timeout` at or below 540 seconds, because
-   a longer foreground command is moved to the background.
-7. **Never start the dashboard from a test.** Use the e2e boot seams in `dash/e2e/harness-collection-boot.ts` and `dash/e2e/factory-replay-boot.ts`.
+5. **Bound the run itself.** Run KyberDash and tray commands directly from the repository root
+   (`npm --prefix dash …`, `npx --prefix dash playwright test …`, `cargo … --manifest-path
+   dash/tray/src-tauri/Cargo.toml …`); `.NET` commands run directly via `dotnet`, as the
+   [runbook](../../dash/runbook.md#running-tests-safely) describes. There is no process wrapper: the
+   retired watchdog and JS process ledger went away with the Node engine, because KyberDash now runs
+   its jobs and OTLP receiver in-process and starts no recursive Node children. Keep each run's own
+   bounds (per-test timeouts, a bounded `webServer`, `killSignal: 'SIGKILL'`) and stop it yourself
+   when it hangs. From an agent tool keep a foreground run under about 600 seconds, because a longer
+   command is moved to the background.
+6. **Never start the dashboard from a test.** Use the e2e boot seams in `dash/e2e/harness-collection-boot.ts` and `dash/e2e/factory-replay-boot.ts`.
 
 **The allow-list (.NET and repo scripts).** `ProcessSpawnSitesTests` in
 `tests/KyberWeave.RepoPolicy.Tests/ProcessSpawnSitesTests.cs` scans three roots:
@@ -246,8 +243,7 @@ belong in a test: remove it or inject a fake.
 ## Completion
 
 This is how a change to a test is proved. Build once, run the classes the change touches, run the
-format check, then report. Run these `dotnet` commands directly from the repository root (only
-KyberDash and tray commands use `scripts/proc-guard.sh`).
+format check, then report. Run these `dotnet` commands directly from the repository root.
 **No dev agent runs the full test suite**: the review council's `test` gate and CI run it.
 
 ```bash
@@ -278,9 +274,13 @@ Leading launchers (`env`, `timeout`, `nice`, `time`, `command`, `exec`, `nohup`,
 `setsid`, `stdbuf`, `arch`) are skipped before the command is classified; an unknown word after a launcher makes the
 classifier scan forward to the first `dotnet`, `npm` or `cargo` word. Naming another project (the RepoPolicy project, for example) or a path narrows a run to a partial run, which dev agents
 may use. `npm run test:related` and `dotnet build` are never full runs. When a shape is ambiguous the classifier calls
-it full. A command wrapped in a shell string (`sh -c '...'`) is not parsed. `scripts/proc-guard.sh run` refuses a full run with exit 89 unless the caller
-passes `--council` or stdin is a terminal; the refusal names the targeted alternatives and starts nothing. Only the
-`code-reviewer` council and CI pass `--council`. Check a full run's argv with `scripts/proc-guard.sh classify -- <cmd>`.
+it full. A command wrapped in a shell string (`sh -c '...'`) is not parsed. The refusal lives in the commands
+themselves, not in a wrapper: `kyber-weave review gates` refuses a gate marked `full-suite: true` unless the
+caller passes `--council` or stdin is a terminal (blocking failure `KW-REVIEW-033`, exit 1, nothing started),
+and `scripts/fast-loop.sh --full`, `--scoped` and `--regenerate` exit 89 from a non-interactive shell. Only the
+`code-reviewer` council and CI pass `--council`. The full-run definition above is the rule; the docs previously
+exposed it as a `classify` verb on the retired watchdog script, and that verb is gone with the script, so read
+this section as the reference.
 
 A filter that matches nothing exits 8 ("Zero tests ran"). Outside a Kyber-Squad run,
 `scripts/fast-loop.sh --class 'KyberWeave.Tests.<Area>*'` does the same for one area and builds
@@ -292,13 +292,13 @@ The guard is best effort. It reads the command line and whether stdin is a termi
 
 - A shell with a pseudo-terminal looks like a person at a terminal and passes the terminal test. The Claude Code Bash tool has no terminal (checked 2026-11-06); other harnesses have not been checked.
 - An agent that types `--council` passes. The flag is the caller's claim, not proof of who is calling.
-- A raw `dotnet test` that skips the watchdog wrapper is not seen. Only a harness-level hook can see it.
+- A `dotnet test` run outside `review gates` is not seen. Only a harness-level hook can see it.
 - A command inside a shell string (`sh -c '...'`, `bash -c '...'`) or an `env -S` string is not parsed, so it is classified as partial and runs.
 - A launcher outside the list above is not unwrapped. Its command is classified only when a `dotnet`, `npm` or `cargo` word follows it.
 - An unknown value-taking flag before the command word can hide the subcommand, so the run is classified as partial.
 - Other test runners are not classified: `dotnet vstest`, `npx vitest` and `cargo nextest` are classified as partial and run.
 - Deliberate over-refusals: a targeted run classified as full is refused by design. These are any directory target, `npm test --workspace <name>`, `cargo test -p <package>` (`--package` too), any npm `--prefix` directory on a test script, and a launcher followed by an unknown word and then a `dotnet`, `npm` or `cargo` word (such as `sudo echo please run dotnet test`). Recover with a named class (`-class` for dotnet, `--class` for `scripts/fast-loop.sh`), `--council`, or a terminal.
-- `scripts/fast-loop.sh` with no arguments runs an unfiltered `cargo test` over the whole tray crate for a tray Rust change, outside the watchdog.
+- `scripts/fast-loop.sh` with no arguments runs an unfiltered `cargo test` over the whole tray crate for a tray Rust change, outside `review gates`.
 
 The real closure is a per-harness shell hook that sees each shell call before it runs. It is tracked in [`docs/todo/per-harness-shell-hook-for-full-run-guard.md`](../../todo/per-harness-shell-hook-for-full-run-guard.md). The decision and its alternatives are in [ADR 0059](../../adr/0059-full-test-runs-are-reserved-for-the-council-and-ci.md).
 

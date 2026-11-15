@@ -245,10 +245,10 @@ can instead run `kyberdash kyber clean --harness opencode --yes`.
 **Test replay.** The e2e spec `dash/e2e/harness-collection.spec.ts` replays recorded OpenCode 2.2.1 events
 through the production plugin, receiver, adapter and projection, against an isolated dashboard and temp
 `canon.db`. It proves what the dashboard renders from that replay. It is not proof of live capture. Run it
-through the watchdog with the isolated config:
+with the isolated config:
 
 ```bash
-scripts/proc-guard.sh run --timeout 600 -- npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/harness-collection.spec.ts
+npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/harness-collection.spec.ts
 ```
 
 **Live gate note.** The legacy TypeScript OpenCode live-gate script (`dash/scripts/opencode-live-gate/run.mjs`) and `dash/e2e/opencode-live-gate.spec.ts` passed against OpenCode CLI 2.2.3 on 2026-10-31 and were retired in the C# engine cutover; C# OpenCode envelope ingestion and token parity are verified in `dash/server.tests/KyberDash.Domain.Tests/CanonIngestTests.cs`.
@@ -396,11 +396,11 @@ came from.
 **Test replay.** The e2e spec `dash/e2e/harness-collection.spec.ts` replays recorded Factory hook
 payloads through the production plugin runner, receiver, adapter, projection and dashboard,
 against an isolated dashboard and a temp `canon.db`. It proves what the dashboard renders from
-that replay. It is **not** proof of live capture. Run it through the watchdog with the isolated
+that replay. It is **not** proof of live capture. Run it with the isolated
 config:
 
 ```bash
-scripts/proc-guard.sh run --timeout 600 -- npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/harness-collection.spec.ts
+npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/harness-collection.spec.ts
 ```
 
 **Uninstall.** `kyberdash kyber capture disable --harness factory` turns the consent off, asks
@@ -1045,7 +1045,7 @@ records made after it. Read a spanning window as two populations, not as a drop 
 
 ```bash
 dotnet test dash/server/KyberDash.sln -c Release --filter "FullyQualifiedName~MinimalApiEndpointTests|FullyQualifiedName~WebAssetRepositoryTests"
-scripts/proc-guard.sh run -- node dash/scripts/sea-mcp-smoke.mjs <path-to-kyberdash-mcp>
+node dash/scripts/sea-mcp-smoke.mjs <path-to-kyberdash-mcp>
 ```
 
 `dash/scripts/sea-mcp-smoke.mjs` stages the real single-executable `kyberdash-mcp` binary outside any
@@ -1192,21 +1192,20 @@ Build the native shell with `cargo build --locked --manifest-path dash/tray/src-
 
 #### Local gates
 
-Run each of these through the watchdog from the repository root
+Run each of these directly from the repository root
 ([Running tests safely](#running-tests-safely)):
 
 ```bash
-scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run typecheck
-scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run test -- <path relative to dash/tray/ui>
-scripts/proc-guard.sh run -- cargo fmt --manifest-path dash/tray/src-tauri/Cargo.toml --check
-scripts/proc-guard.sh run -- cargo clippy --manifest-path dash/tray/src-tauri/Cargo.toml -- -D warnings
-scripts/proc-guard.sh run -- cargo test --manifest-path dash/tray/src-tauri/Cargo.toml '<name>'
+npm --prefix dash/tray/ui run typecheck
+npm --prefix dash/tray/ui run test -- <path relative to dash/tray/ui>
+cargo fmt --manifest-path dash/tray/src-tauri/Cargo.toml --check
+cargo clippy --manifest-path dash/tray/src-tauri/Cargo.toml -- -D warnings
+cargo test --manifest-path dash/tray/src-tauri/Cargo.toml '<name>'
 ```
 
 `cargo test --manifest-path dash/tray/src-tauri/Cargo.toml '<name>'` is the targeted form a dev agent runs.
-A `cargo test` with no name is the whole crate: a full run, refused by the guard, for the review council and CI
-only. Keep the three gates as separate commands. The guard does not parse `bash -c` strings, so a gate wrapped
-in one is not checked.
+A `cargo test` with no name is the whole crate: a full run for the review council and CI
+only. Keep the three gates as separate commands.
 
 `npm --prefix dash run lint` also covers the tray UI. To run the shell against a locally
 built CLI, build `dash/dist/cli.js` first (`npm --prefix dash run build:cli`) and point
@@ -1545,191 +1544,81 @@ curl -s http://127.0.0.1:3000/api/kyber/meta | jq .
 ### Running tests safely
 
 A test run that starts its own dashboard can start more dashboards, and each one starts more. In
-2026-10 this fork-bombed `node` (536 processes) and crashed three developer Macs. Three independent
-layers now guard against a repeat:
+2026-10 this fork-bombed `node` (536 processes) and crashed three developer Macs. The structural fix
+is the C# engine cutover: KyberDash now runs its jobs and OTLP receiver in-process and starts no
+recursive Node children. Three independent layers guard against a repeat:
 
-- **The watchdog** (`scripts/proc-guard.sh run`) kills the command's whole process tree at an
-  absolute cap, and refuses to call a run clean while its children are still alive.
+- **No recursive self-spawn.** Nothing in the engine starts a child just to run a job or host the
+  receiver. `JobSchedulerService` (under `JobsLease`) and `OtlpCollectorService` run in the
+  `kyberdash web` process, and `EngineOwner` bounds the engine to one instance per state directory.
 - **Process bounds and allow-list** (ADR 0047). Every C# process launch goes through bounded `ProcessRunner` / allow-listed sites (`ProcessSpawnSitesTests` against `tests/KyberWeave.RepoPolicy.Tests/Fixtures/spawn-sites-allowlist.json`); single-instance ownership uses `EngineOwner` and `JobsLease`.
-- **Isolated e2e boots.** The self-booting Playwright spec uses `dash/e2e/harness-collection-boot.ts`, which
-  boots its own isolated C# `kyberdash` engine under a temp state dir (`dash/playwright.isolated.config.ts`).
+- **Isolated e2e boots.** The self-booting Playwright spec boots its own isolated C# `kyberdash`
+  engine under a temp state dir (`dash/playwright.isolated.config.ts`,
+  `dash/e2e/harness-collection-boot.ts`), and tears it down itself.
 
 A fourth, separate concern is load rather than runaway processes: several harnesses on one machine
-can each start a full `dotnet test` run at the same moment. Full suite runs take turns through a
-machine-wide test slot, shared by every process of one user account ([Taking turns: the test slot](#taking-turns-the-test-slot)).
+can each start a full `dotnet test` run at the same moment. That is why full runs belong to the
+review council and CI, not to a loop ([full runs](#running-unit--contract-tests)).
 
-**Rule: every local KyberDash and tray test, gate and e2e command runs through the watchdog, from the repository root; `.NET` commands run directly via `dotnet`.**
+**Rule: run every local KyberDash and tray test, gate and e2e command directly — `npm --prefix dash …`, `npx --prefix dash playwright test …`, `cargo … --manifest-path dash/tray/src-tauri/Cargo.toml …` — and `.NET` commands directly via `dotnet`. There is no process wrapper.**
 Do not start the dashboard (`kyberdash web`, `npm run dev -- web`) to run a test.
 
 ```bash
-scripts/proc-guard.sh run -- npm --prefix dash run test:related -- <files>
+npm --prefix dash run test:related -- <files>
 dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj --filter "FullyQualifiedName~<Class>"
 ```
 
-The whole `npm --prefix dash run test`, the whole tray UI `npm --prefix dash/tray/ui run test` (no path after `--`), a bare `dotnet test`, `dotnet test KyberWeave.sln`, and `dotnet run --project` on `KyberWeave.Tests` with no narrowing flag are full runs; only CI and the review council start them. When invoked through `scripts/proc-guard.sh run`, the guard refuses a full run with exit 89 when it is started from a shell with no terminal (a dev agent's shell) and not passed `--council`; `kyber-weave review gates` enforces the same refusal for `full-suite: true` gates (`test`, `ts-test`, `cargo-test`). The refusal names the targeted alternatives and starts nothing. Only the review council (`code-reviewer`) and CI pass `--council`. Dev agents run `.NET` filtered sets directly via `dotnet`, for example `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj --filter "FullyQualifiedName~<Class>"`. `scripts/fast-loop.sh --full` and `--scoped` are refused the same way.
+The whole `npm --prefix dash run test`, the whole tray UI `npm --prefix dash/tray/ui run test` (no path after `--`), a bare `dotnet test`, `dotnet test KyberWeave.sln`, and `dotnet run --project` on `KyberWeave.Tests` with no narrowing flag are full runs; only CI and the review council start them. `kyber-weave review gates` enforces that for `full-suite: true` gates (`test`, `ts-test`, `cargo-test`): a refused gate is a blocking failure `KW-REVIEW-033` with exit 1, starts nothing, and names the targeted alternatives. Only the review council (`code-reviewer`) and CI pass `--council`. Dev agents run `.NET` filtered sets, for example `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj --filter "FullyQualifiedName~<Class>"`. `scripts/fast-loop.sh --full`, `--scoped` and `--regenerate` exit 89 from a non-interactive shell.
 
-The watchdog runs the command in its own process group and polls the process table about every
-half second. It has two caps, both absolute, not measured against a baseline. The only way to change
-a cap is its flag; there is no environment variable for it, so a stray exported value cannot raise
-the safety limit.
-
-| Option | Default | Trips when |
-|---|---|---|
-| `--max-node N` | 128 | This user's JavaScript runtime processes on the machine reach N. Counted by basename: `node`, `nodejs`, `bun`, `deno` and `tsx`. |
-| `--max-tree M` | 64 | Descendants of the wrapped command reach M |
-| `--timeout S` | none | S seconds of wall clock pass |
-| `--tty` | off | Keeps the guard's terminal as the command's stdin (see below). Risky. |
-| `--slot NAME` | none | Takes a slot (machine-wide for one user account) before the command starts and queues while it is held. For full test suites only. |
-| `--slot-count N` | 1 | How many runs may hold the slot at once. Needs `--slot`. |
-| `--slot-wait S` | 540 | Queues at most S seconds (at most 86400, no leading zero), then exits 88. 0 means do not queue. Needs `--slot`. |
-| `--task LABEL` | checkout name and command | What other callers see while this run holds the slot (cut to 100 characters). Needs `--slot`. |
-| `--slot-dir DIR` | `~/.cache/kyber-weave/test-slots` | Absolute directory for the locks. For the guard's own tests only. Needs `--slot`. |
-
-The watchdog refuses to run with an empty root, a root that is not a directory, or `/` (exit 2).
-
-**Standard input.** When the guard's own stdin is a terminal, the wrapped command gets stdin from
-`/dev/null`. The command runs as a background job in its own process group, so a read from the
-terminal would stop it with SIGTTIN, and it would then run until `--timeout` killed it (exit 124).
-`--tty` turns that redirection off. Use it only for a command that must read the terminal; a
-command that does so is stopped by SIGTTIN and ends only at `--timeout`.
-
-**Timeouts from an agent tool.** A foreground command longer than about 600 seconds is moved to the
-background by the agent tool. A guard timeout above 600 seconds therefore must not be used from an
-agent tool. Keep `--timeout` at or below 540 when a run comes from an agent tool.
-
-**Silent runs.** `review gates` prints its result only at the end, so a slow run and a stuck run look
-the same until the timeout fires. Progress output is a follow-up, tracked in
-[the spawn-guard residuals todo](../todo/kyberdash-spawn-guard-residuals.md).
-
-Exit codes:
-
-| Code | Meaning | What to do |
-|---|---|---|
-| 86 | A cap tripped. stderr names the cap and the count. The whole tree was killed. | Read the top commands it prints. A real storm needs a fix before a rerun. A false trip on a loaded machine: rerun with a higher flag for that one run, for example `scripts/proc-guard.sh run --max-node 256 -- npm --prefix dash run test:related -- <files>`, and say in the PR why the default was too low. |
-| 87 | Processes started by the run survived it. When the command itself passed, the run exits 87 anyway; they were killed. | Read the listed pids and commands. Fix the test that left them. |
-| 88 | `--slot-wait` elapsed and every slot stayed held. The command never started. | The message names the holder (pid, task, how long it has held the slot). Wait and rerun. Do not delete the lock by hand: a lock whose process is gone is recovered by the next caller. |
-| 89 | The command is a full test-suite run, and the caller passed neither `--council` nor a terminal. The command never started; nothing was queued. | Run a filtered set instead (the message names it). Only the review council and CI pass `--council`. |
-| 124 | `--timeout` elapsed. The tree was killed. | Find the hang; do not raise the timeout first. |
-| 143 | The guard itself was interrupted (SIGINT or SIGTERM), while queued for a slot or while the command ran; a running command's tree was killed first. A wrapped command that died of SIGTERM also exits 143, as its own code. | Someone or something stopped the run. Rerun it. |
-| any other | The wrapped command's own exit code. | Normal failure. |
-
-The watchdog (`scripts/proc-guard.sh`) is POSIX-only and runs on macOS and Linux. Windows has no
-watchdog cap; the ledger's Windows mode is described under the process ledger below.
-
-#### Taking turns: the test slot
-
-When several overlapping runs would saturate every core of a machine or share constrained temp resources,
-`scripts/proc-guard.sh` provides an opt-in `--slot <name>` lock so callers can queue and take turns:
-
-```bash
-scripts/proc-guard.sh run --slot dotnet-test -- <command>
-```
-
-- **Opt-in only.** A run without `--slot` never queues. Standard `.NET` builds, tests and format
-  checks run directly via `dotnet` (outside `scripts/proc-guard.sh` so Roslyn/MSBuild build servers
-  stay warm), and the declared `test`, `test-policy`, and `ts-test` gates do not take a slot.
-- **One slot by default.** One run already uses every core, so a second one concurrently only
-  makes both slower. `--slot-count N` raises it for a machine that has cores to spare. The count is
-  a flag only, like the caps.
-- **The slot is a lock directory.** `~/.cache/kyber-weave/test-slots/<name>.<n>.lock`, created with
-  an atomic `mkdir` because macOS has no `flock`. Its `holder` file records the guard's pid and
-  process start time, the task label, the checkout and the command. The directory is under the user's
-  home, so the queue is machine-wide for one user account: harnesses run by different accounts on the
-  same Mac do not queue behind each other, and a second account's full run is not held back by the
-  first's. Run the harnesses that share the machine as the same user.
-- **A queued caller says who holds the slot.** It prints the holder's pid, task and how long the
-  holder has had the slot, repeats that every 30 seconds, and polls every half second. It is not
-  first in, first out: the first caller to retry after a release gets the slot.
-- **The queue wait is its own bound.** `--slot-wait` (default 540 seconds, the limit for a
-  command run from an agent tool) ends the wait with exit 88 and runs nothing. Time spent queued
-  does not count against `--timeout`, which starts when the command does. A caller with its own
-  deadline has to cover both: the review runner kills a gate at its `timeout-seconds` and cannot
-  tell a queued gate from a hung one, so any queued gate would need `timeout-seconds` large enough
-  to cover both its `--slot-wait` and its run budget.
-- **A lock with no live holder is recovered.** The next caller removes a lock when the holder pid no
-  longer exists, when that pid now belongs to a process with a different start time (the pid was
-  reused), or when the lock directory has had no holder file for 30 seconds (its creator died
-  between the `mkdir` and the write). It prints `recovered stale slot lock` when it does. Callers
-  that find the same lock stale are serialised by a second `mkdir` mutex, so two of them cannot both
-  clear it and then delete the lock the first one took.
-- **Every normal exit releases it.** An `EXIT` trap covers a pass, a failure, a cap trip, a timeout
-  and `SIGTERM`/`SIGINT`. `SIGKILL` of the guard cannot be trapped; the lock is then recovered as
-  stale. Its wrapped command can outlive the guard in that case and run without holding the slot
-  until it ends.
-
-Do not pass `--slot-dir` outside the guard's own tests: it replaces the slot directory, and callers
-with different directories do not queue behind each other. It is a flag rather than an environment
-variable so that a stray exported value cannot move one caller out of the queue; the guard ignores
-any environment variable for this.
+The retired watchdog (`scripts/proc-guard.sh`) and the process ledger (`dash/tests/setup/process-ledger*`, now kept read-only under `dash/archived/tests/setup/`) are gone: they existed to cap and reap the recursive Node children the TypeScript engine spawned, and the C# engine spawns none. What remains is the spawn allow-list above: `ProcessSpawnSitesTests` fails the repository policy suite when any `Process.Start`, `new Process`, `ProcessStartInfo`, `ProcessRunner.Run` or `BuildStartInfo` site in `src/` or `tests/` is not declared with an explicit bound in `tests/KyberWeave.RepoPolicy.Tests/Fixtures/spawn-sites-allowlist.json`. On every platform, including Windows, that static audit is the bound. A run that hangs is stopped by you or by the tool's own timeout; there is no absolute process cap any more.
 
 **Playwright runs only with the isolated config.** Give `--config dash/playwright.isolated.config.ts`
-on every invocation, from the repository root, through the watchdog:
+on every invocation, from the repository root:
 
 ```bash
-scripts/proc-guard.sh run --timeout 600 -- npx --prefix dash playwright test --config dash/playwright.isolated.config.ts
+npx --prefix dash playwright test --config dash/playwright.isolated.config.ts
 ```
 
 That config runs the two self-booting specs (`harness-collection.spec.ts` and
-`refresh-filters.spec.ts`), one worker, and adds the process-ledger teardown. The only Playwright
-configs in `dash/` are `playwright.config.ts` and `playwright.isolated.config.ts`: a test pins that
-set, and that each sets the spawn guard to deny and wires the ledger. Do not run `dash/playwright.config.ts` by
-hand. Its `webServer` starts a dashboard on port 4747, the port the tray uses, and it is not the
-isolated path. Which specs have no sanctioned invocation is tracked in
+`refresh-filters.spec.ts`) with one worker. The only Playwright configs in `dash/` are
+`playwright.config.ts` and `playwright.isolated.config.ts`: a test pins that set. Do not run
+`dash/playwright.config.ts` by hand. Its `webServer` starts a dashboard on port 4747, the port the
+tray uses, and it is not the isolated path. Which specs have no sanctioned invocation is tracked in
 [the Playwright webServer specs todo](../todo/kyberdash-playwright-webserver-specs.md).
 
-**Process ledger.** Vitest and Playwright both end with a ledger teardown. It finds three kinds of
-child: every child a guarded spawn started in the run (recorded in `KYBERDASH_SPAWN_LEDGER_FILE`),
-every descendant of the test runner, and every process re-parented to PID 1 whose command line
-contains the `dash/` directory and that started after the run began. It kills each one (TERM, then
-KILL after a short grace period) and fails the run, listing them. Two residuals are known. A
-child that exits within about 3 seconds of the end of the run is not counted, because the ledger
-waits that long for pool workers to finish exiting. The descendant and orphan scans use `ps`, so
-they run on POSIX only. On Windows the ledger runs in ledger-entry-only mode: it checks the
-children it recorded, by pid liveness, then sends TERM and KILL; it does not scan descendants or
-orphans, and it cannot tell a reused pid from its child. The other residuals (the receiver child labelled `job`, the allow-list granularity,
-and spawns through another module's API) are listed in
-[the spawn-guard residuals todo](../todo/kyberdash-spawn-guard-residuals.md).
-
-**Process ledger & C# spawn audit.** JS/Playwright suites register descendants in `dash/tests/setup/process-ledger.ts`, while C# `ProcessSpawnSitesTests` enforces explicit bounds in `tests/KyberWeave.RepoPolicy.Tests/Fixtures/spawn-sites-allowlist.json` (`docs/dash/runbook.md` / ADR 0047).
-[the test standard](../standards/test/README.md#tests-that-start-processes).
-
-**Leftovers from an earlier run.** `check-leftovers` lists processes that a run left behind. It
-does not kill anything.
+**Leftovers from an earlier run.** With no watchdog and no ledger, a process a killed run left behind
+is yours to find and stop:
 
 ```bash
-scripts/proc-guard.sh check-leftovers --root "$(git rev-parse --show-toplevel)"
-scripts/proc-guard.sh check-leftovers --root "$(git rev-parse --show-toplevel)" --since <epoch-seconds>
 pgrep -x node | wc -l
 ```
 
-It exits 0 when none are listed and 87 when some are. Each survivor is printed as pid, then command.
-`--since` limits the list to processes that started at or after that epoch second. Read each
-command, confirm it is a KyberDash test process from this checkout, and stop it yourself. A process
-you do not recognise is not yours to stop; report it.
+Read each command with `ps -p <pid> -o pid=,command=`, confirm it is a KyberDash test process from
+this checkout, and stop it yourself. A process you do not recognise is not yours to stop; report it.
 
 ### Running Unit & Contract Tests
 
 The dash suites are co-located with the code they cover. The canonical gates are:
 
 ```bash
-scripts/proc-guard.sh run -- npm --prefix dash run typecheck
-scripts/proc-guard.sh run -- npm --prefix dash run lint
-scripts/proc-guard.sh run -- npm --prefix dash run test:related -- <files>  # <files> relative to dash/
-scripts/proc-guard.sh run -- npm --prefix dash run test:locks  # refresh lock takeover/heartbeat behaviour, forked pool
-scripts/proc-guard.sh run -- npm --prefix dash run check:reachable
+npm --prefix dash run typecheck
+npm --prefix dash run lint
+npm --prefix dash run test:related -- <files>  # <files> relative to dash/
+npm --prefix dash run test:locks  # refresh lock takeover/heartbeat behaviour, forked pool
+npm --prefix dash run check:reachable
 ```
 
 The whole `npm --prefix dash run test` suite (which excludes the refresh-lock files) is run by CI and the
 review council, not by the author before a PR. Run `test:locks` for the lock files it excludes.
 
-Focused runs use the same runner, also through the watchdog:
+Focused runs use the same runners directly:
 
 ```bash
 # C# engine, API, bridge, and report parity suites
 dotnet test dash/server/KyberDash.sln -c Release --filter "FullyQualifiedName~KyberDash"
 
 # Web dashboard React component tests
-scripts/proc-guard.sh run -- npm --prefix dash exec -- vitest run web/src
+npm --prefix dash exec -- vitest run web/src
 ```
 
 These suites validate:
@@ -1739,7 +1628,7 @@ These suites validate:
 - Resilient error handling (returns HTTP 400 on invalid query params without crashing the long-running server process).
 - That the CLI report and the REST report are equal for the same store and scope.
 
-For the C# canonical engine under `dash/server/` ([ADR 0084](../adr/0084-kyberdash-csharp-engine.md)), build the solution and run the targeted parity tests directly via `dotnet` (never through `scripts/proc-guard.sh`):
+For the C# canonical engine under `dash/server/` ([ADR 0084](../adr/0084-kyberdash-csharp-engine.md)), build the solution and run the targeted parity tests directly via `dotnet`:
 
 ```bash
 dotnet build dash/server/KyberDash.sln -c Release

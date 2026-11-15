@@ -2011,13 +2011,16 @@ receiver child spawns ([ADR 0047](../adr/0047-kyberdash-self-spawns-through-one-
   batches (`ProcessRunner.Run`), and detached engine handoff (`Program.TrySpawnDetachedEngine`,
   bounded to one instance by `EngineOwner` on `engine.sock`) — must all be declared with explicit
   bounds in `tests/KyberWeave.RepoPolicy.Tests/Fixtures/spawn-sites-allowlist.json`.
-- **JS/Playwright isolation and watchdog:** `dash/` UI and Playwright runs use
-  `dash/playwright.isolated.config.ts` (`harness-collection.spec.ts`, `workers: 1`), the process
-  ledger (`dash/tests/setup/process-ledger.ts`), and `scripts/proc-guard.sh` (absolute process caps
-  and descendant reaping). On Windows, the ledger runs in PID-only mode without `proc-guard.sh`
-  (tracked in [the spawn-guard residuals todo](../todo/kyberdash-spawn-guard-residuals.md)).
-`scripts/proc-guard.sh` is POSIX-only. The residual risks are listed in
-[the spawn-guard residuals todo](../todo/kyberdash-spawn-guard-residuals.md).
+- **JS/Playwright isolation:** `dash/` UI and Playwright runs use
+  `dash/playwright.isolated.config.ts` (`harness-collection.spec.ts`, `workers: 1`), and the spec
+  boots and tears down its own C# engine.
+- **No wrapper and no process cap any more:** `scripts/proc-guard.sh`, the absolute process-cap
+  watchdog, and the JS process ledger it worked with (`dash/tests/setup/process-ledger.ts`, now kept
+  read-only under `dash/archived/tests/setup/`) were retired with the Node engine, once nothing under
+  `dash/server/` spawned recursive `job` or `receiver` children. Commands run directly, and the
+  static allow-list above is the bound on the process sites that remain. The retired guard's
+  residuals are kept for provenance at
+  [the archived spawn-guard residuals todo](../archive/todo/kyberdash-spawn-guard-residuals.md).
 
 **.NET side of the audit.** The .NET project runs the same kind of audit over `tests/KyberWeave.Tests`,
 `dash/server.tests`, `src/`, and `dash/server/`, and its product process starts carry their own timeouts. The bounds and the one

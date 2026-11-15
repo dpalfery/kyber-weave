@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: csharp
 owner: dpalfery
-last-reviewed: 2026-11-11
+last-reviewed: 2026-11-15
 ---
 
 # C# coding standard
@@ -148,8 +148,7 @@ this document.
 
 A finishing worker builds once, runs the test classes its change touches, and passes the format
 check. Nothing here runs the whole suite: the review council's `test` gate and CI run it, and a
-cross-cutting change is no exception. Run these `dotnet` commands directly from the repository root
-(only KyberDash/tray commands use `scripts/proc-guard.sh`).
+cross-cutting change is no exception. Run these `dotnet` commands directly from the repository root.
 
 ```bash
 dotnet build KyberWeave.sln -c Release

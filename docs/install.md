@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-11-09
+last-reviewed: 2026-11-15
 ---
 
 # Installing Kyber-Weave
@@ -802,7 +802,8 @@ dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build
 ```
 
 `.NET` commands run directly via `dotnet` so Roslyn/MSBuild build servers stay warm. KyberDash (`dash/`)
-and tray test runs continue to use `scripts/proc-guard.sh run --`, the process watchdog; see
+and tray commands (`npm --prefix dash …`, `cargo … --manifest-path dash/tray/src-tauri/Cargo.toml …`)
+run directly too, with no process wrapper; see
 [Running tests safely](dash/runbook.md#running-tests-safely).
 
 ## Related

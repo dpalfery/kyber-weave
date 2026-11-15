@@ -4,7 +4,7 @@ title: The KyberDash tray and web dashboard are display layers
 doc-type: rule
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-10
+last-reviewed: 2026-11-15
 decided-by:
   - adr/0033-kyberdash-surfaces-are-display-layers
 ---
@@ -123,7 +123,7 @@ engine and expose it through `/api/kyber/*` — never in `dash/web/` or `dash/tr
    `cargo fmt --manifest-path dash/tray/src-tauri/Cargo.toml --check`,
    `cargo clippy --manifest-path dash/tray/src-tauri/Cargo.toml -- -D warnings` and
    `cargo test --manifest-path dash/tray/src-tauri/Cargo.toml '<name>'` from
-   [dash/tray/AGENTS.md](../../dash/tray/AGENTS.md). Run each through `scripts/proc-guard.sh run --`
+   [dash/tray/AGENTS.md](../../dash/tray/AGENTS.md). Run each directly from the repository root
    (see [dash/AGENTS.md](../../dash/AGENTS.md#tests-that-start-processes)).
 
 ## Related

@@ -33,9 +33,10 @@ you do write.
 
 **No dev agent runs the full test suite**, in or out of a Kyber-Squad run, and a cross-cutting change is no exception:
 run a targeted set instead. The council's `test` gate and CI run the full suite. To reproduce a CI failure, run the classes or files CI reported.
-A dev agent's full run is refused by the guard (best-effort; limits in the test standard): `scripts/proc-guard.sh run` exits 89 on an unfiltered
-`dotnet test`, `npm --prefix dash run test` or `cargo test`, and names the targeted alternative. The
-council and CI pass `--council`; a person at a terminal is not refused.
+Three mechanical refusals back that rule (best-effort; limits in the test standard):
+`kyber-weave review gates` refuses a gate marked `full-suite: true` with `KW-REVIEW-033` unless the caller is the council
+(`--council`) or a person at a terminal; `scripts/fast-loop.sh --full`, `--scoped` and `--regenerate` exit 89 from a
+non-interactive shell; and the shipped gate catalogue writes `full-suite: true` on every whole-suite gate.
 
 Inside a Squad run, your task packet names the test command and your agent rules say when to
 run it. Otherwise, run `scripts/fast-loop.sh` while iterating: it inspects modified files and
@@ -52,16 +53,15 @@ run reports a non-zero test count. The commands for each area:
 - KyberDash: [`dash/AGENTS.md`](dash/AGENTS.md#gates)
 - Tray UI and tray crate: [`dash/tray/AGENTS.md`](dash/tray/AGENTS.md#gates)
 
-**KyberDash and tray tests, gates and e2e commands run through the process watchdog; `.NET` runs
-directly via `dotnet`.** Run `.NET` build, test and format commands directly so Roslyn/MSBuild build
-servers stay warm. For KyberDash (`dash/`) and tray (`dash/tray/`) commands from the repository
-root, wrap as `scripts/proc-guard.sh run -- <command>`. The watchdog kills the command's process
-tree at an absolute cap (exit 86) and fails a run that leaves children behind (exit 87). The caps
-change only by flag (`--max-node`, `--max-tree`), never by environment variable. `fast-loop.sh`
-wraps its dash/tray calls and runs `.NET` directly. Playwright runs only with
+**Every test, gate and e2e command runs directly, with no process wrapper.** `.NET` commands run via
+`dotnet`, so Roslyn/MSBuild build servers stay warm; KyberDash (`dash/`) and tray (`dash/tray/`)
+commands run via `npm --prefix dash …`, `npx --prefix dash playwright test …` and
+`cargo … --manifest-path dash/tray/src-tauri/Cargo.toml …`. KyberDash no longer spawns Node
+children for jobs or the OTLP receiver, so there is no watchdog to wrap them with: the safety now
+comes from bounded, allow-listed process sites ([ADR 0047](docs/adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint.md)).
+`fast-loop.sh` runs the same commands directly. Playwright runs only with
 `--config dash/playwright.isolated.config.ts`, and never start the dashboard to run a test. See
-[Running tests safely](docs/dash/runbook.md#running-tests-safely) and
-[ADR 0047](docs/adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint.md).
+[Running tests safely](docs/dash/runbook.md#running-tests-safely).
 
 ### Before opening a PR
 
@@ -84,10 +84,11 @@ are not run: each is reported as a refused blocking failure (`KW-REVIEW-033`, ex
 here", not a code finding. Only the `code-reviewer` council and CI pass `--council`. A scoped run still
 runs the other gates; with `--all` a refused full-suite gate ends the run at once, with no gate started.
 
-Run any KyberDash/tray test or e2e command you start yourself through `scripts/proc-guard.sh run --`,
-and run `.NET` commands directly via `dotnet`. In [`.kyber-weave/kyber-weave.yml`](.kyber-weave/kyber-weave.yml),
-the dash `ts-test` gate runs through `scripts/proc-guard.sh run --`, while `dotnet test` gates
-(`test`, `test-policy`) run directly via `dotnet`. Council gates skip gates whose `include` does not match changed files (`KW-REVIEW-026`);
+Run every test and e2e command you start yourself directly: `.NET` via `dotnet`, KyberDash and tray
+via `npm --prefix dash …`, `npx --prefix dash playwright test …` and `cargo … --manifest-path
+dash/tray/src-tauri/Cargo.toml …`. In [`.kyber-weave/kyber-weave.yml`](.kyber-weave/kyber-weave.yml)
+every gate — the `dotnet test` gates (`test`, `test-policy`) and the dash `ts-test` gate — declares
+its command directly. Council gates skip gates whose `include` does not match changed files (`KW-REVIEW-026`);
 see [`docs/code-review/architecture.md`](docs/code-review/architecture.md). Format, build,
 test, and skill argv are the `review.gates` entries in
 [`.kyber-weave/kyber-weave.yml`](.kyber-weave/kyber-weave.yml). There is no separate

@@ -474,7 +474,7 @@ public sealed class McpRenameRepoGuardTests
     [InlineData("tests/KyberWeave.RepoPolicy.Tests/UpstreamSeveranceTests.cs", false)]
     [InlineData("tests/KyberWeave.Tests/McpLiveProbeTests.cs", false)]
     [InlineData("dash/web/src/lib/kyberApi.test.ts", false)]
-    [InlineData("scripts/proc-guard.sh", true)]
+    [InlineData("scripts/fast-loop.sh", true)]
     [InlineData("templates/github-actions/kyber-weave-docs-gate.yml", true)]
     [InlineData(".github/workflows/ci.yml", true)]
     [InlineData("samples/agents/README.md", true)]

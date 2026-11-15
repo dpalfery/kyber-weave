@@ -5,7 +5,7 @@ doc-type: todo
 component: KyberDash
 status: draft
 owner: dpalfery
-last-reviewed: 2026-10-31
+last-reviewed: 2026-11-15
 ---
 
 # Remove the dash minimatch override once eslint and typescript-eslint accept 11
@@ -67,8 +67,9 @@ and 11 still export, and `ts-lint` over the whole dash tree is the behaviour che
 5. Run the dash gates: `ts-typecheck`, `ts-lint`, `ts-test`, `ts-reachable` via
    `dotnet run --project src/KyberWeave.Cli -- review gates . --paths dash/package.json`.
 
-Every npm and gate command goes through `scripts/proc-guard.sh run -- <command>`, from the
-repository root. Do not use `npm audit fix`: it still proposes `eslint@4.0.0`, a semver-major
+Every npm and gate command runs directly from the
+repository root (`npm --prefix dash …`, `dotnet run --project src/KyberWeave.Cli -- review gates …`);
+there is no process wrapper. Do not use `npm audit fix`: it still proposes `eslint@4.0.0`, a semver-major
 downgrade.
 
 No gate fails if the override is removed too early — `ts-lint` passes on the old resolution

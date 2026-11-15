@@ -18,7 +18,7 @@ namespace KyberWeave.Tests;
 /// </para>
 /// <para>
 /// The script tests start background children on purpose. The stub appends its PID to the marker folder, and
-/// <see cref="Dispose"/> kills any shell or sleep left running, so proc-guard never sees a leftover child.
+/// <see cref="Dispose"/> kills any shell or sleep left running, so the fixture never leaves a child behind.
 /// </para>
 /// </remarks>
 internal sealed class PostCheckoutGitFixture : IDisposable

@@ -7,7 +7,8 @@ namespace KyberWeave.Tests;
 /// <summary>
 /// Pins D7's no-orphan rule for the bounded stdio session: whatever path the session takes, disposing it leaves no
 /// child behind. The real child is a trivial <c>/bin/cat</c> echo or a <c>/bin/sleep</c>, both bounded by the session
-/// budget, and the run that proves it goes through <c>scripts/proc-guard.sh run --</c>.
+/// budget, and disposing the session is what proves it: whichever path the test takes, <c>Dispose</c> leaves no child
+/// behind and nothing is left for a later run to reap.
 /// </summary>
 /// <remarks>
 /// The session's public surface (constructor, <c>SendLine</c>, <c>ReadLine</c>, <c>ProcessId</c>) is not fixed by the

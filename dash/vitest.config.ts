@@ -9,10 +9,8 @@ export default defineConfig({
     ],
   },
   test: {
-    // Forks, pinned: the ledger treats every descendant of the vitest process as a test child.
+    // Forks, pinned: a run torn down leaves no detached children behind.
     pool: 'forks',
-    // Leftover-process ledger: fails the run, and kills the children, if any outlive it.
-    globalSetup: [resolve(__dirname, './tests/setup/process-ledger-global.ts')],
     // Include backend tests, operator-tool tests, and UI component tests
     include: [
       'tests/**/*.{test,spec}.?(c|m)[jt]s?(x)',

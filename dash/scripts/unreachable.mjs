@@ -148,8 +148,6 @@ export const ALIASES = { '@': 'web/src' }
 export const TEST_ENTRIES = [
   'tests/setup/env-isolation.ts', //                  vitest.config.ts setupFiles
   'tests/setup/network-guard-setup.ts', //            vitest.config.ts setupFiles (D10 live-receiver guard)
-  'tests/setup/process-ledger-global.ts', //          vitest.config.ts globalSetup (storm guard T5 ledger)
-  'tests/setup/process-ledger-global-playwright.ts', // playwright configs globalTeardown
 ]
 
 /** Where tests and their support live; mirrors vitest.config.ts `include`. */

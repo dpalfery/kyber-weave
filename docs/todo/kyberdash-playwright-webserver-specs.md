@@ -5,14 +5,14 @@ doc-type: todo
 component: KyberDash
 status: draft
 owner: dpalfery
-last-reviewed: 2026-10-30
+last-reviewed: 2026-11-15
 ---
 
 # Give the webServer Playwright specs a sanctioned, isolated invocation and run refresh-filters in CI
 
 After the [test process storm guard plan](../archive/plans/2026-10-30-test-process-storm-guard.md), the
 repository rule is that Playwright runs only through
-`scripts/proc-guard.sh run -- npx --prefix dash playwright test --config dash/playwright.isolated.config.ts`
+`npx --prefix dash playwright test --config dash/playwright.isolated.config.ts`
 (root `AGENTS.md`, `dash/AGENTS.md`, `docs/dash/runbook.md`). That config runs only the two
 self-booting specs, `harness-collection.spec.ts` and `refresh-filters.spec.ts`.
 

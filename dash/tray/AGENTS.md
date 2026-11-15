@@ -41,24 +41,24 @@ Architecture: [`docs/dash/architecture.md`](../../../docs/dash/architecture.md).
 
 ## Gates
 
-Run each command from the repository root through the process watchdog, `scripts/proc-guard.sh run --`
+Run each command from the repository root, directly, with no process wrapper
 ([`dash/AGENTS.md`](../AGENTS.md#tests-that-start-processes)):
 
 ```bash
-scripts/proc-guard.sh run -- npm --prefix dash run typecheck
-scripts/proc-guard.sh run -- npm --prefix dash run lint          # already covers dash/tray/ui
-scripts/proc-guard.sh run -- npm --prefix dash run test:related -- <files relative to dash/>
-scripts/proc-guard.sh run -- npm --prefix dash run check:reachable
+npm --prefix dash run typecheck
+npm --prefix dash run lint          # already covers dash/tray/ui
+npm --prefix dash run test:related -- <files relative to dash/>
+npm --prefix dash run check:reachable
 ```
 
 The popover UI has its own gates after `npm --prefix dash/tray/ui ci`:
 
 ```bash
-scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run typecheck
-scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run test -- <path relative to dash/tray/ui>
-scripts/proc-guard.sh run -- cargo fmt --manifest-path dash/tray/src-tauri/Cargo.toml --check
-scripts/proc-guard.sh run -- cargo clippy --manifest-path dash/tray/src-tauri/Cargo.toml -- -D warnings
-scripts/proc-guard.sh run -- cargo test --manifest-path dash/tray/src-tauri/Cargo.toml '<name>'
+npm --prefix dash/tray/ui run typecheck
+npm --prefix dash/tray/ui run test -- <path relative to dash/tray/ui>
+cargo fmt --manifest-path dash/tray/src-tauri/Cargo.toml --check
+cargo clippy --manifest-path dash/tray/src-tauri/Cargo.toml -- -D warnings
+cargo test --manifest-path dash/tray/src-tauri/Cargo.toml '<name>'
 ```
 
 `npm --prefix dash run lint` does not cover the Rust crate — `cargo fmt`, `cargo clippy` and

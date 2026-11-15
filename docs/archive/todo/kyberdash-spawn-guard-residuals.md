@@ -3,14 +3,26 @@ id: todo/kyberdash-spawn-guard-residuals
 title: Close the known residuals of the KyberDash spawn guard and process ledger
 doc-type: todo
 component: KyberDash
-status: draft
+status: archived
 owner: dpalfery
-last-reviewed: 2026-10-30
+last-reviewed: 2026-11-15
+documentation-impact: extends-component
+impact-components: [KyberDash]
 ---
 
 # Close the known residuals of the KyberDash spawn guard and process ledger
 
-The [test process storm guard plan](../archive/plans/2026-10-30-test-process-storm-guard.md) put
+> **Archived 2026-11-15 — superseded, not fixed.** This todo lists gaps in the KyberDash spawn guard
+> and the process ledger, both of which were built for the TypeScript engine. The C# engine cutover
+> removed the recursive Node `job` and `receiver` children those layers policed, and the layers were
+> then retired: `scripts/proc-guard.sh` and the ledger under `dash/tests/setup/process-ledger*` are
+> gone (the ledger's files are kept read-only under `dash/archived/tests/setup/`). Every item below
+> describes code that no longer ships, so none of them are open work. What remains in force is
+> [ADR 0047](../../adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint.md): `EngineOwner`,
+> `JobsLease`, the in-process `JobSchedulerService` and `OtlpCollectorService`, and the static
+> spawn-site audit in `ProcessSpawnSitesTests`. The items are kept for provenance only.
+
+The [test process storm guard plan](../plans/2026-10-30-test-process-storm-guard.md) put
 every KyberDash self-spawn behind one chokepoint (`dash/src/process/spawn-guard.ts`), added an
 end-of-run process ledger (`dash/tests/setup/process-ledger.ts`), and added two static spawn-site
 audits. Its findings drain on 2026-10-30 left these residuals. None of them reopens the 2026-10
@@ -80,3 +92,23 @@ audits are.
 
 This todo is complete when each item is either fixed, with a test, or recorded in ADR 0047 or
 `docs/dash/architecture.md` as an accepted limit with its reason.
+
+## Decisions
+
+| ID | Question | Answer / decision | Where it is recorded |
+|---|---|---|---|
+| SPG-1 | Are the residuals still open work? | No. Every item names the retired spawn guard, the retired process ledger or the retired watchdog, and none of that code ships. The C# engine cutover removed the recursive Node `job` and `receiver` spawns they policed. | [ADR 0047, Status](../../adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint.md) |
+| SPG-2 | What replaces the runtime guard layers? | In-process hosting (`JobSchedulerService` under `JobsLease`, `OtlpCollectorService`), single-engine ownership (`EngineOwner` over `engine.sock`), and the static spawn-site audit (`ProcessSpawnSitesTests` over `tests/KyberWeave.RepoPolicy.Tests/Fixtures/spawn-sites-allowlist.json`). | [ADR 0047, Decision](../../adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint.md) |
+| SPG-3 | Is any residual still a live limit worth keeping? | No new limit is accepted here. The unrelated Playwright webServer gap stays open in its own todo, which records it against the current code. | [Playwright webServer specs todo](../../todo/kyberdash-playwright-webserver-specs.md) |
+
+## Design harvest
+
+| ID | Target component | Target doc type | Target doc | Durable item |
+|---|---|---|---|---|
+| DH-SPG-1 | KyberDash | architecture | [KyberDash architecture: bounded process launches and spawn audit](../../dash/architecture.md#bounded-process-launches-and-spawn-audit-adr-0047) | With no recursive engine spawn there is no wrapper and no absolute process cap; the static allow-list is the bound, and it gives the same guarantee on every platform. |
+
+## Closeout mapping
+
+| ID | Destination | Impact component | Last-reviewed | Status |
+|---|---|---|---|---|
+| SPG-1, SPG-2, SPG-3, DH-SPG-1 | [ADR 0047: KyberDash self-spawns](../../adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint.md) | KyberDash | 2026-11-15 | archived |

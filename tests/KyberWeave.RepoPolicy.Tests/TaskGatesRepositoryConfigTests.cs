@@ -40,7 +40,7 @@ public sealed class TaskGatesRepositoryConfigTests
     /// </remarks>
     [Theory]
     [InlineData(".github/workflows/ci.yml", "workflow YAML")]
-    [InlineData("scripts/proc-guard.sh", "a shell script")]
+    [InlineData("scripts/fast-loop.sh", "a shell script")]
     [InlineData(".kyber-weave/kyber-weave.yml", "the review configuration")]
     public void ATaskThatEditsOnlyThatFileKindSelectsAtLeastOneGate(string changed, string kind)
     {

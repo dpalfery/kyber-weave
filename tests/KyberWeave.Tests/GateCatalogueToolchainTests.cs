@@ -181,7 +181,7 @@ public sealed class GateCatalogueToolchainTests(ITestOutputHelper output) : IDis
     /// </remarks>
     [Theory]
     [InlineData(".github/workflows/ci.yml")]
-    [InlineData("scripts/proc-guard.sh")]
+    [InlineData("scripts/fast-loop.sh")]
     [InlineData(".kyber-weave/kyber-weave.yml")]
     public void TheCatalogueShipsAGateThatSelectsEachFileKindNoLanguageGateSelects(string changed)
     {

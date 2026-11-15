@@ -168,9 +168,6 @@ jobs:
     name: Build and test
     runs-on: ubuntu-latest
     steps:
-      - name: Record job start epoch
-        run: echo "JOB_START_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
-
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -278,11 +275,6 @@ jobs:
       - name: Shut down .NET build servers
         if: always()
         run: dotnet build-server shutdown
-
-      - name: Check for leftover processes
-        if: always()
-        run: |
-          scripts/proc-guard.sh check-leftovers --root "$GITHUB_WORKSPACE" --since "$JOB_START_EPOCH"
 
   sbom:
     # The release workflow attaches a CycloneDX SBOM to every GitHub Release. This
@@ -877,9 +869,6 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Record job start epoch
-        run: echo "JOB_START_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
-
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -950,11 +939,6 @@ jobs:
         working-directory: dash/tray/ui
         run: npm test
 
-      - name: Check for leftover processes
-        if: always()
-        run: |
-          scripts/proc-guard.sh check-leftovers --root "$GITHUB_WORKSPACE" --since "$JOB_START_EPOCH"
-
   # Harness-collection standard: deterministic per-harness completeness
   # enforcement. Runs the Playwright conformance spec against an isolated
   # dashboard booted from a self-seeded temp canon.db — never the live 4747
@@ -974,9 +958,6 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Record job start epoch
-        run: echo "JOB_START_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
-
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -1044,11 +1025,6 @@ jobs:
       - name: Shut down .NET build servers
         if: always()
         run: dotnet build-server shutdown
-
-      - name: Check for leftover processes
-        if: always()
-        run: |
-          scripts/proc-guard.sh check-leftovers --root "$GITHUB_WORKSPACE" --since "$JOB_START_EPOCH"
 
   tray-rust:
     name: Tray Rust gates (${{ matrix.os }})

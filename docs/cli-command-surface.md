@@ -4,7 +4,7 @@ title: CLI command surface
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-12
+last-reviewed: 2026-11-15
 ---
 
 # CLI command surface
@@ -731,13 +731,21 @@ risk. The three rules below mirror the contract in
 
 ### Repository scripts
 
-The two test-running scripts in `scripts/` share one full-suite refusal. Exit `89` means the
-command is a full test-suite run and the caller is not the council or CI: `scripts/proc-guard.sh run`
-(no `--council` and stdin not a terminal) and `scripts/fast-loop.sh --full`, `--scoped` or `--regenerate`
-(stdin not a terminal). Both exit `89` before any build or process starts, and print the targeted
-alternatives. `proc-guard.sh run` takes `--council` on its command line only; no environment variable lifts
-the refusal. `scripts/proc-guard.sh classify -- <argv>` prints `full` or `partial` for a command and starts
-nothing, so you can check a command before running it; shell strings such as `bash -c` are not parsed and count as `partial`. The launcher list, the per-tool full-run rules and the remaining limits are in the [test standard, limits of the guard](standards/test/README.md#limits-of-the-guard). `scripts/fast-loop.sh --class` and `--method` are unchanged.
+The full-suite refusal now lives in the commands a run goes through, because the watchdog wrapper
+(`scripts/proc-guard.sh`) was retired with the Node engine. Two places refuse:
+
+- **`kyber-weave review gates`.** A gate marked `full-suite: true` in `.kyber-weave/kyber-weave.yml`
+  is refused unless `--council` is given or stdin is a terminal. A refused gate is reported as a
+  blocking failure `KW-REVIEW-033` with exit `1`, and starts nothing. Under `--all`, the run stops at
+  once; a scoped run still runs the other gates.
+- **`scripts/fast-loop.sh --full`, `--scoped` and `--regenerate`.** Exit `89` before any build when
+  stdin is not a terminal, and print the targeted alternatives. `--class` and `--method` are the
+  targeted, unchanged modes.
+
+Exit `89` therefore means "this is a full test-suite run and the caller is not the council or CI"
+for `fast-loop.sh`. The full-run definition (launchers, `dotnet test` targets, `--prefix` spellings,
+`+toolchain`, ambiguous means full, `sh -c` not parsed) and the remaining limits are in the
+[test standard, limits of the guard](standards/test/README.md#limits-of-the-guard).
 
 ### `kyberdash`
 

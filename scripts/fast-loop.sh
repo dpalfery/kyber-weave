@@ -48,11 +48,12 @@
 # Tests now skip fsync (SquadTestDurability) and the lookup is cheaper, which took the
 # full suite from ~14 minutes to ~89s. Keep $TMPDIR clean; a crowded one slows these again.
 #
-# .NET RUNS DIRECTLY; WATCHDOG GUARDS KYBERDASH AND TRAY
+# EVERY COMMAND RUNS DIRECTLY
 #
-# .NET test, build, and format steps run directly via `dotnet` so Roslyn/MSBuild build servers
-# stay warm instead of being torn down by `scripts/proc-guard.sh`. KyberDash (`dash/`) and
-# tray UI (`dash/tray/ui`) commands continue to run through `scripts/proc-guard.sh run --`.
+# .NET test, build, and format steps run via `dotnet` so Roslyn/MSBuild build servers stay warm.
+# KyberDash (`dash/`) and tray UI (`dash/tray/ui`) commands run via `npm --prefix ...` directly:
+# KyberDash does its work in-process, so there are no recursive Node spawners to wrap or reap.
+# The full-suite refusal below is this script's own: it needs no wrapper to enforce.
 
 set -euo pipefail
 
@@ -110,7 +111,7 @@ EOF
 fi
 
 # The full-suite modes belong to the review council and CI. A non-interactive caller (a dev agent)
-# is refused with exit 89 before any build or other work, the same rule proc-guard.sh applies.
+# is refused with exit 89 before any build or other work; this script is the only guard the modes need.
 refuse_full_suite_mode() {
   if [[ -t 0 ]]; then
     return 0
@@ -358,14 +359,14 @@ fi
 
 if [[ "${needs_dash}" -eq 1 ]]; then
   step "dash typecheck"
-  scripts/proc-guard.sh run -- npm --prefix dash run typecheck
+  npm --prefix dash run typecheck
 
   step "dash lint"
-  scripts/proc-guard.sh run -- npm --prefix dash run lint
+  npm --prefix dash run lint
 
   if [[ ${#dash_related_files[@]} -gt 0 ]]; then
     step "dash tests (related: ${#dash_related_files[@]} files)"
-    scripts/proc-guard.sh run -- npm --prefix dash run test:related -- "${dash_related_files[@]}"
+    npm --prefix dash run test:related -- "${dash_related_files[@]}"
   fi
 
   if [[ "${needs_tray_ui}" -eq 1 ]]; then
@@ -374,10 +375,10 @@ if [[ "${needs_dash}" -eq 1 ]]; then
       exit 1
     fi
     step "tray ui typecheck"
-    scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run typecheck
+    npm --prefix dash/tray/ui run typecheck
 
     step "tray ui test"
-    scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run test
+    npm --prefix dash/tray/ui run test
   fi
 fi
 

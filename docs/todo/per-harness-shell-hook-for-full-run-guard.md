@@ -5,16 +5,17 @@ doc-type: todo
 component: ReviewCouncil
 status: draft
 owner: dpalfery
-last-reviewed: 2026-11-06
+last-reviewed: 2026-11-15
 ---
 
 # Close the full-run guard with a shell hook in each harness
 
 [ADR 0059](../adr/0059-full-test-runs-are-reserved-for-the-council-and-ci.md) refuses a full test
-run through `scripts/proc-guard.sh`, but only when the command is started through that wrapper and
-the caller is not a terminal or the council. A raw `dotnet test` typed into a harness's shell
-bypasses it. The strongest closure is a shell hook in each harness that runs
-`scripts/proc-guard.sh classify -- <argv>` before every shell command and refuses a `full` result.
+run inside `kyber-weave review gates` (`full-suite: true`, `KW-REVIEW-033`) and inside
+`scripts/fast-loop.sh --full`/`--scoped`/`--regenerate` (exit 89), but only for commands that go
+through those two entry points. A `dotnet test`, `npm --prefix dash run test` or `cargo test` typed
+straight into a harness's shell bypasses both. The strongest closure is a shell hook in each harness
+that runs the full-run classifier before every shell command and refuses a `full` result.
 
 **Work.** Add a pre-tool-use style hook for each harness the Squad target catalogue lists
 (`src/KyberWeave.Core/Squad/Deployment/SquadTarget.cs`), which includes Claude Code, Copilot CLI,
@@ -22,18 +23,18 @@ Factory, Pi, OpenCode and Antigravity. The hook replaces the soft caller test (t
 with the classifier's answer. Each harness has its own hook format, so the shape of each hook is a
 per-harness decision and is not assumed here.
 
-**Limits the hook should replace.** The classifier in `scripts/proc-guard.sh` cannot see these
+**Limits the hook should replace.** The classifier cannot see these
 today. The hook should refuse them by its own rule, so each harness's shell is covered:
 
 - A pseudo-terminal shell passes the terminal test, and a typed `--council` passes the guard. The
   hook replaces the terminal check, so neither flag nor terminal is the caller's proof.
-- A raw `dotnet test` run that skips the wrapper is not seen by the classifier at all.
+- A full run typed outside `review gates` and `fast-loop.sh` is not seen at all.
 - `sh -c`, `bash -c` and `env -S` command strings are not parsed.
 - A launcher outside the classifier's list is not unwrapped. Its command is classified only when a
   `dotnet`, `npm` or `cargo` word follows it.
 - Other test runners are not classified: `dotnet vstest`, `npx vitest` and `cargo nextest`.
 - `scripts/fast-loop.sh` with no arguments runs an unfiltered `cargo test` of the tray crate, outside
-  the wrapper ([fast-loop todo](fast-loop-default-tray-cargo-test.md)).
+  its own refusal ([fast-loop todo](fast-loop-default-tray-cargo-test.md)).
 
 **Parked classifier gap.**
 

@@ -69,8 +69,10 @@ review:
     # `--no-build` because the `build` gate above already produced these binaries in
     # Release. Without it every run re-links the test project, and the gate evidence
     # would come from binaries the suite did not actually gate.
-    # Runs `dotnet test` directly (`scripts/proc-guard.sh` is reserved for KyberDash/tray suites so
-    # .NET retains warm Roslyn/MSBuild build servers and avoids watchdog teardown overhead).
+    # Runs `dotnet test` directly, as every gate does: with KyberDash's jobs and OTLP receiver running
+    # in-process in C# there are no recursive Node spawners to reap, and running directly keeps the
+    # Roslyn/MSBuild build servers warm. `full-suite: true` below is what reserves this gate for the
+    # council and CI, so nothing needs to wrap the command to enforce that.
     - id: test
       include: *net-test-paths
       run: [dotnet, test, tests/KyberWeave.Tests/KyberWeave.Tests.csproj, -c, Release, --no-build, --coverlet, --coverlet-output-format, cobertura, --results-directory, artifacts/coverage]
@@ -228,7 +230,7 @@ review:
       blocking: true
 
     # Clean-Architecture C# KyberDash server and unit/integration tests live under dash/server{,.tests}/
-    # in their own solution. Runs dotnet directly (never through proc-guard.sh).
+    # in their own solution. Runs `dotnet` directly like every other gate.
     - id: dash-server-format-whitespace
       include: &dash-server-paths ["dash/server/**", "dash/server.tests/**", "Directory.Build.props", ".editorconfig", "global.json", "**/NuGet.config"]
       run: [dotnet, format, dash/server/KyberDash.sln, whitespace, --verify-no-changes, -v, minimal]
@@ -279,9 +281,13 @@ review:
     # coverageReports. Its coverage field, the one a floor is checked against,
     # stays the .NET suite's, because the runner picks that from files named
     # coverage.cobertura.xml only.
+    #
+    # argv only, like the other TypeScript gates: no wrapper script sits between
+    # the gate and `npm`. `full-suite: true` below is what reserves this gate for
+    # the council and CI.
     - id: ts-test
       include: ["dash/**"]
-      run: [scripts/proc-guard.sh, run, --council, --, npm, run, --prefix, dash, test, --, --coverage]
+      run: [npm, run, --prefix, dash, test, --, --coverage]
       requires-paths: ["dash/node_modules"]
       # Full-suite gates run only for the review council or CI; a dev agent's run is refused.
       full-suite: true
