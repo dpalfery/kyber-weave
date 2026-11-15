@@ -1117,6 +1117,8 @@ public static class CanonAdapters
             "model",
             "slug",
             "conversation.id",
+            "gen_ai.session.id",
+            "session.id",
             "event.timestamp",
         };
         private static readonly string[] AllowedPrefixes = ["gen_ai.usage.", "codex.usage."];
@@ -1209,8 +1211,13 @@ public static class CanonAdapters
                 long? output = ReadOptionalCounter(raw.Attributes, ["opencode.usage.output"]);
                 long? reasoning = ReadOptionalCounter(raw.Attributes, ["opencode.usage.reasoning"]);
 
-                long adjustedOutput = output.HasValue ? output.Value + (reasoning ?? 0) : 0;
-                long? adjustedReasoning = output.HasValue && reasoning.HasValue ? reasoning.Value : null;
+                bool outputOverflowed = output.HasValue
+                    && reasoning.HasValue
+                    && output.Value > long.MaxValue - reasoning.Value;
+                long adjustedOutput = output.HasValue && !outputOverflowed ? output.Value + (reasoning ?? 0) : 0;
+                long? adjustedReasoning = output.HasValue && reasoning.HasValue && !outputOverflowed
+                    ? reasoning.Value
+                    : null;
 
                 tokens = ExclusiveConvention(
                     input ?? 0,
@@ -1223,9 +1230,20 @@ public static class CanonAdapters
                 measurability["token_usage"] = inputReported
                     ? MeasuredElement()
                     : NotMeasurableElement("OpenCode telemetry did not report input token usage for this span.");
-                measurability["output"] = output.HasValue
-                    ? MeasuredElement()
-                    : NotMeasurableElement("OpenCode telemetry did not report output token usage for this span.");
+                if (!output.HasValue)
+                {
+                    measurability["output"] = NotMeasurableElement(
+                        "OpenCode telemetry did not report output token usage for this span.");
+                }
+                else if (outputOverflowed)
+                {
+                    measurability["output"] = NotMeasurableElement(
+                        "OpenCode reported an output count whose sum with its reasoning count overflows a 64-bit counter.");
+                }
+                else
+                {
+                    measurability["output"] = MeasuredElement();
+                }
                 measurability["cache_read"] = cacheRead.HasValue
                     ? MeasuredElement()
                     : NotMeasurableElement("OpenCode did not export a cache read counter.");
