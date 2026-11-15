@@ -8,7 +8,10 @@ public static class PathContainment
     /// <param name="path">The absolute path to test.</param>
     /// <returns>True when <paramref name="path"/> is <paramref name="directory"/> or below it; false when either input is empty or relative.</returns>
     /// <remarks>Comparison ignores case on Windows and macOS and is case-sensitive elsewhere, matching the usual file system behaviour.</remarks>
-    public static bool IsWithin(string directory, string path)
+    public static bool IsWithin(string directory, string path) =>
+        IsWithinUsing(directory, path, OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+
+    internal static bool IsWithinUsing(string directory, string path, StringComparison comparison)
     {
         ArgumentNullException.ThrowIfNull(directory);
         ArgumentNullException.ThrowIfNull(path);
@@ -19,9 +22,6 @@ public static class PathContainment
             return false;
         }
 
-        StringComparison comparison = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
         string root = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         string target = Path.GetFullPath(path);
         return target.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Equals(root, comparison)

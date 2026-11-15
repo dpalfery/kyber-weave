@@ -30,6 +30,12 @@ public sealed class PathContainmentTests
         Assert.False(PathContainment.IsWithin("/repo", "/REPO/a.cs"));
     }
 
+    [Theory]
+    [InlineData(StringComparison.Ordinal, false)]
+    [InlineData(StringComparison.OrdinalIgnoreCase, true)]
+    public void AppliesTheGivenComparison(StringComparison comparison, bool expected) =>
+        Assert.Equal(expected, PathContainment.IsWithinUsing("/repo", "/REPO/a.cs", comparison));
+
     [Fact]
     public void RejectsDotDotTraversalOutOfTheDirectory()
     {
