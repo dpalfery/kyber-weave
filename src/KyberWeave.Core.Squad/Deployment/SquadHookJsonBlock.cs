@@ -560,7 +560,8 @@ public static class SquadHookJsonBlock
     /// <summary>
     /// Removes Squad's entries from hook-file <paramref name="existing"/> content without
     /// touching the disk, restoring the user's content. Same failure contract as
-    /// <see cref="SpliceContent"/>.
+    /// <see cref="SpliceContent"/>. A container this call empties is dropped, and so is a
+    /// <c>hooks</c> object that ends empty; containers the user left empty are kept.
     /// </summary>
     public static string RemoveContent(SquadHookBlockFormat format, string? existing)
     {
@@ -572,14 +573,25 @@ public static class SquadHookJsonBlock
         }
         else
         {
+            bool hooksHeldEntries = root["hooks"] is JsonObject { Count: > 0 };
             if (format == SquadHookBlockFormat.Claude)
             {
-                RemoveSquadFromLegacyClaudeContainers(root, dropEmptied: false);
+                RemoveSquadFromLegacyClaudeContainers(root, dropEmptied: true);
             }
 
             foreach ((_, JsonArray array) in OwnedArrays(format, root, create: false))
             {
+                bool hadEntries = array.Count > 0;
                 RemoveSquadEntries(format, array);
+                if (hadEntries && array.Count == 0 && array.Parent is JsonObject container)
+                {
+                    container.Remove(container.First(child => ReferenceEquals(child.Value, array)).Key);
+                }
+            }
+
+            if (hooksHeldEntries && root["hooks"] is JsonObject { Count: 0 })
+            {
+                root.Remove("hooks");
             }
         }
 

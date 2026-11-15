@@ -50,7 +50,7 @@ Context to give (the worked example below shows the full wording):
   on the machine but not in use; and "show me the other supported tools". Name each tool with a
   few words so the user recognises it. Choosing nothing installs nothing.
 - *Cost and undo*: about a minute; writes the harness's home folder (global) or this repository
-  (project); undo by re-running this skill, or `kyber-weave squad uninstall --global` (or `kyber-weave squad uninstall .` for a project install) for all.
+  (project); undo by re-running this skill, or `kyber-weave squad uninstall <harness>` for one harness (add `--project` for a project install), or `kyber-weave squad uninstall --global` (or `kyber-weave squad uninstall` for a project install) for all.
 - *Found*: which tools are on the machine and which already have the squad, with its version.
 - *Recommend*: the tools in use (first-look: the squad is there, or its command is on `PATH`).
   Tools with only a home folder are named once as "also found", not recommended.
@@ -117,7 +117,7 @@ Context to give (the worked example below shows the full wording):
   <the harnesses to keep>` or `kyber-weave squad update . --target <the harnesses to keep>`,
   after `--dry-run`; and `kyber-weave arbiter uninstall --global --target <removed>` (or
   `--project`) for its hook. With nothing left to keep, `kyber-weave squad uninstall --global`
-  or `kyber-weave squad uninstall .`.
+  or `kyber-weave squad uninstall`.
 - *Undo*: install it again; local edits to the squad's files in that harness are lost.
 
 ## Per harness

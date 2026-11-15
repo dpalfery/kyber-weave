@@ -664,12 +664,17 @@ public sealed class SquadDeploymentPlan
     }
 
     /// <summary>Preflights an ownership-aware uninstall without changing the deployment tree.</summary>
+    /// <remarks>
+    ///     A non-null <paramref name="onlyTarget" /> removes just that harness: every other harness's files,
+    ///     blocks and degradations stay in the retained receipt, which is deleted only when nothing is left.
+    /// </remarks>
     public static SquadDeploymentPlan CreateUninstall(
         string targetRoot,
         SquadDeploymentScope scope,
         SquadReceipt receipt,
         ISquadGlobalRootResolver? globalRoots = null,
-        IReadOnlyList<SquadReceipt>? siblingGlobalReceipts = null)
+        IReadOnlyList<SquadReceipt>? siblingGlobalReceipts = null,
+        SquadTarget? onlyTarget = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
         ArgumentNullException.ThrowIfNull(receipt);
@@ -688,10 +693,17 @@ public sealed class SquadDeploymentPlan
         List<SquadFileMutation> mutations = new();
         List<SquadFilePrecondition> preconditions = new();
         List<SquadOwnedFile> retained = new();
+        string? onlyTargetToken = onlyTarget is { } only ? SquadTargetCatalog.GetToken(only) : null;
         foreach (SquadOwnedFile owned in receipt.Files)
         {
             if (IsOwnedBySiblingReceipt(siblingGlobalReceipts, owned.Target, owned.RelativePath))
                 continue;
+
+            if (onlyTargetToken is not null && !string.Equals(owned.Target, onlyTargetToken, StringComparison.Ordinal))
+            {
+                retained.Add(owned);
+                continue;
+            }
 
             string fullPath = ResolvePhysicalPath(
                 scope, root, globalRoots, owned.Target, owned.RelativePath, isSingleRootLayout);
@@ -726,7 +738,8 @@ public sealed class SquadDeploymentPlan
             globalRoots,
             receipt,
             mutations,
-            preconditions);
+            preconditions,
+            onlyTargetToken);
 
         // The layout carries forward onto the retained receipt so a later re-serialize (when
         // any file was locally edited and survives the uninstall) still writes the correct
@@ -749,7 +762,12 @@ public sealed class SquadDeploymentPlan
             Files = retained,
             Blocks = retainedBlocks,
             Layout = retainedLayout,
-            Schema = retainedSchema
+            Schema = retainedSchema,
+            Degradations = onlyTargetToken is null
+                  || retained.Any(f => string.Equals(f.Target, onlyTargetToken, StringComparison.Ordinal))
+                  || retainedBlocks.Any(b => string.Equals(b.Target, onlyTargetToken, StringComparison.Ordinal))
+                ? receipt.Degradations
+                : [.. receipt.Degradations.Where(d => !string.Equals(d.Target, onlyTargetToken, StringComparison.Ordinal))]
         };
         bool hasRetainedFiles = retained.Count > 0 || retainedBlocks.Count > 0;
         return new SquadDeploymentPlan(
@@ -1281,12 +1299,19 @@ public sealed class SquadDeploymentPlan
         ISquadGlobalRootResolver? globalRoots,
         SquadReceipt receipt,
         List<SquadFileMutation> mutations,
-        List<SquadFilePrecondition> preconditions)
+        List<SquadFilePrecondition> preconditions,
+        string? onlyTargetToken = null)
     {
         List<SquadOwnedBlock> retained = [];
         foreach (SquadOwnedBlock owned in receipt.Blocks)
         {
             ArgumentNullException.ThrowIfNull(owned);
+            if (onlyTargetToken is not null && !string.Equals(owned.Target, onlyTargetToken, StringComparison.Ordinal))
+            {
+                retained.Add(owned);
+                continue;
+            }
+
             if (RemoveOwnedBlockEntries(root, scope, globalRoots, owned, mutations, preconditions))
                 retained.Add(owned);
         }

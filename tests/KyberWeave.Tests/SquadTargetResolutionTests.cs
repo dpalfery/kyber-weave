@@ -366,7 +366,7 @@ public sealed class SquadTargetResolutionTests : IDisposable
     [Theory]
     [InlineData(SquadTargetOperation.Install, "kyber-weave squad install --target <target>")]
     [InlineData(SquadTargetOperation.Update, "kyber-weave squad update --target <target>")]
-    [InlineData(SquadTargetOperation.Uninstall, "kyber-weave squad uninstall --target <target>")]
+    [InlineData(SquadTargetOperation.Uninstall, "kyber-weave squad uninstall <harness>")]
     public void NonInteractiveNoTargetReturnsExitTwoAndOperationSpecificRecoveryCommand(
         SquadTargetOperation operation,
         string expectedCommand)

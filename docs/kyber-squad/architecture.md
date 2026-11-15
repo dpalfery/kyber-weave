@@ -594,7 +594,10 @@ A hand-edited or missing owned entry is drift, reported by `squad status` and
 `squad doctor` naming the file and the container. `squad update` rewrites the block
 but preserves a drifted entry, reporting it, unless `--replace-managed` is given.
 `squad uninstall` removes only the owned entries and deletes the file only when
-Squad created it and no hook remains.
+Squad created it and no hook remains. It also drops each hook container and `hooks`
+object that this removal emptied, never one the user left empty. `squad uninstall <harness>`
+does the same for a single harness: the other harnesses' files, blocks and degradations stay
+in the receipt, which is deleted only when nothing remains.
 
 #### Home-owned files and the user-home response guidance
 

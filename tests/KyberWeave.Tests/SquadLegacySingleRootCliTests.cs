@@ -71,7 +71,7 @@ public sealed class SquadLegacySingleRootCliTests : IDisposable
         TreeSnapshot elsewhereBefore = DirectoryTreeSnapshot.SnapshotTree(elsewhere);
 
         CommandExecution execution = Capture(() =>
-            f.Uninstall().Execute(null!, new SquadUninstallSettings { Path = elsewhere, Global = true, Yes = true }));
+            f.Uninstall().Execute(null!, new SquadUninstallSettings { PathOption = elsewhere, Global = true, Yes = true }));
 
         AssertExit(execution, 0);
         Assert.False(File.Exists(OwnedPath(f.Binding)), "The legacy file beneath its binding root must be removed.");

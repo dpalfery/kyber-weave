@@ -846,7 +846,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             null!,
             new SquadUninstallSettings
             {
-                Path = fixture.Path,
+                PathOption = fixture.Path,
                 DryRun = true
             }));
 
@@ -1739,6 +1739,132 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             SquadDeploymentScope.Project);
         SquadOwnedFile retained = Assert.Single(Assert.IsType<SquadReceipt>(retainedReceipt).Files);
         Assert.Equal(edited, retained);
+    }
+
+    private static readonly SquadOwnedFile CodexOwned =
+        new(".codex/agents/conductor.toml", Digest("codex body"), "codex", false);
+
+    private static readonly SquadOwnedFile CursorOwned =
+        new(".cursor/agents/reviewer.md", Digest("cursor body"), "cursor", false);
+
+    private static readonly SquadDegradation[] CodexAndCursorDegradations =
+    [
+        new("codex", "conductor", "codex-code"),
+        new("cursor", "reviewer", "cursor-code")
+    ];
+
+    [Fact]
+    public void CreateUninstallOnlyTargetRemovesThatTargetAndKeepsEveryOtherTargetsFiles()
+    {
+        using TempDirectory fixture = new();
+        Write(fixture.Path, CodexOwned.RelativePath, "codex body");
+        Write(fixture.Path, CursorOwned.RelativePath, "cursor body");
+        SquadReceipt receipt = Receipt(CodexOwned, CursorOwned);
+        WriteState(fixture.Path, Lock(), receipt);
+
+        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUninstall(
+            fixture.Path,
+            SquadDeploymentScope.Project,
+            receipt,
+            onlyTarget: SquadTarget.Cursor);
+
+        SquadFileMutation removal = Assert.Single(plan.FileMutations);
+        Assert.Equal(CursorOwned.RelativePath, removal.RelativePath);
+        Assert.Equal(CodexOwned, Assert.Single(plan.Receipt.Files));
+        Assert.Equal(SquadStateMutation.Write, plan.ReceiptMutation);
+
+        Transaction(fixture.Path).Execute(plan);
+
+        Assert.True(File.Exists(Path.Combine(fixture.Path, CodexOwned.RelativePath)));
+        Assert.False(File.Exists(Path.Combine(fixture.Path, CursorOwned.RelativePath)));
+        SquadReceipt kept = Assert.IsType<SquadReceipt>(
+            Store(fixture.Path).ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
+        Assert.Equal(CodexOwned, Assert.Single(kept.Files));
+    }
+
+    [Fact]
+    public void CreateUninstallOnlyTargetDeletesTheReceiptOnlyWhenNothingRemains()
+    {
+        using TempDirectory fixture = new();
+        Write(fixture.Path, CursorOwned.RelativePath, "cursor body");
+        SquadReceipt receipt = Receipt(CursorOwned);
+        WriteState(fixture.Path, Lock(), receipt);
+
+        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUninstall(
+            fixture.Path,
+            SquadDeploymentScope.Project,
+            receipt,
+            onlyTarget: SquadTarget.Cursor);
+
+        Assert.Equal(SquadStateMutation.Delete, plan.ReceiptMutation);
+        Assert.Equal(SquadStateMutation.Delete, plan.LockMutation);
+        Assert.Empty(plan.Receipt.Files);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void CreateUninstallOnlyTargetKeepsItsDegradationsWhileAFileIsRetainedAndDropsThemOtherwise(
+        bool cursorFileEdited)
+    {
+        using TempDirectory fixture = new();
+        Write(fixture.Path, CodexOwned.RelativePath, "codex body");
+        Write(fixture.Path, CursorOwned.RelativePath, cursorFileEdited ? "operator edit" : "cursor body");
+        SquadReceipt receipt = Receipt(CodexOwned, CursorOwned) with { Degradations = CodexAndCursorDegradations };
+
+        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUninstall(
+            fixture.Path,
+            SquadDeploymentScope.Project,
+            receipt,
+            onlyTarget: SquadTarget.Cursor);
+
+        Assert.Equal(
+            cursorFileEdited ? CodexAndCursorDegradations : [CodexAndCursorDegradations[0]],
+            plan.Receipt.Degradations);
+        Assert.Equal(cursorFileEdited, plan.Receipt.Files.Contains(CursorOwned));
+    }
+
+    [Fact]
+    public void CreateUninstallWithoutOnlyTargetDropsEveryDegradationWithTheReceipt()
+    {
+        using TempDirectory fixture = new();
+        Write(fixture.Path, CodexOwned.RelativePath, "codex body");
+        Write(fixture.Path, CursorOwned.RelativePath, "cursor body");
+        SquadReceipt receipt = Receipt(CodexOwned, CursorOwned) with { Degradations = CodexAndCursorDegradations };
+
+        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUninstall(
+            fixture.Path,
+            SquadDeploymentScope.Project,
+            receipt);
+
+        Assert.Equal(SquadStateMutation.Delete, plan.ReceiptMutation);
+        Assert.Equal(2, plan.FileMutations.Count);
+    }
+
+    [Fact]
+    public void CreateUninstallOnlyTargetDropsASiblingOwnedFileInsteadOfRetainingItAndKeepsHomeFiles()
+    {
+        using TempDirectory fixture = new();
+        SquadGlobalRoots roots = new(_ => null, fixture.Path);
+        Write(roots.ResolveGlobalRoot(SquadTarget.Codex), "agents/conductor.toml", "codex body");
+        Write(roots.ResolveGlobalRoot(SquadTarget.Cursor), "agents/reviewer.md", "cursor body");
+        SquadOwnedFile codex = new("agents/conductor.toml", Digest("codex body"), "codex", false);
+        SquadOwnedFile cursor = new("agents/reviewer.md", Digest("cursor body"), "cursor", false);
+        SquadHomeFile homeFile = GuidanceHomeFile();
+        SquadReceipt receipt = GlobalReceiptWithHomeFiles(homeFile) with { Files = [codex, cursor] };
+        SquadReceipt sibling = GlobalReceiptWithHomeFiles() with { Files = [codex] };
+
+        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUninstall(
+            fixture.Path,
+            SquadDeploymentScope.Global,
+            receipt,
+            roots,
+            [sibling],
+            SquadTarget.Cursor);
+
+        Assert.Equal(cursor.RelativePath, Assert.Single(plan.FileMutations).RelativePath);
+        Assert.DoesNotContain(codex, plan.Receipt.Files);
+        Assert.Equal([homeFile], plan.Receipt.HomeFiles);
     }
 
     [Fact]

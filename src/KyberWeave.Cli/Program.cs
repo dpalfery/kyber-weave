@@ -207,8 +207,9 @@ app.Configure(config =>
             .WithExample("squad", "update", "--version", "1.2.3");
 
         squad.AddCommand<SquadUninstallCommand>("uninstall")
-            .WithDescription("Remove deployed files and state recorded in the ownership receipt.")
-            .WithExample("squad", "uninstall", ".")
+            .WithDescription("Remove deployed files and state recorded in the ownership receipt, for one harness or all.")
+            .WithExample("squad", "uninstall", "claude")
+            .WithExample("squad", "uninstall", "cursor", "--project")
             .WithExample("squad", "uninstall", "--dry-run")
             .WithExample("squad", "uninstall", "--global")
             .WithExample("squad", "uninstall", "--path", "./deploy")

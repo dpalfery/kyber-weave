@@ -634,7 +634,8 @@ public sealed class SquadLifecycleService
             request.Scope,
             receipt,
             planGlobalRoots,
-            []);
+            [],
+            request.Target);
 
         if (request.DryRun)
             return Task.FromResult(new SquadLifecycleResult(
