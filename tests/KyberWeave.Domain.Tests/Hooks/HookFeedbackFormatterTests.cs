@@ -52,6 +52,13 @@ public sealed class HookFeedbackFormatterTests
         Assert.EndsWith("warning: unknown key 'x'", text, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(0, false, false)]
+    [InlineData(2, false, true)]
+    [InlineData(-1, true, true)]
+    public void NeedsAttentionWhenTheCommandFailedOrTimedOut(int exitCode, bool timedOut, bool expected) =>
+        Assert.Equal(expected, new RuleOutcome("r", HookRuleKind.Lint, true, exitCode, timedOut, string.Empty).NeedsAttention);
+
     [Fact]
     public void ShowsWarningsEvenWhenNothingFailed() =>
         Assert.Equal("warning: w", HookFeedbackFormatter.Format("a.cs", [], ["w"], 10, 1000));

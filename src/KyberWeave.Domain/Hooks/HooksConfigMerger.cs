@@ -33,15 +33,7 @@ public static class HooksConfigMerger
                 continue;
             }
 
-            rules.Add(new HookRule(
-                change.Id,
-                change.Kind.Value,
-                change.Include,
-                change.Exclude ?? [],
-                change.Run,
-                change.TimeoutSeconds ?? 25,
-                change.Blocking ?? true,
-                change.Enabled ?? true));
+            rules.Add(Apply(new HookRule(change.Id, change.Kind.Value, [], [], [], 25, true, true), change));
         }
 
         return new HooksConfig(

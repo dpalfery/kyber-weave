@@ -23,7 +23,7 @@ public static class HookFeedbackFormatter
         ArgumentNullException.ThrowIfNull(warnings);
 
         StringBuilder text = new();
-        List<RuleOutcome> problems = [.. outcomes.Where(o => o.Failed || o.TimedOut)];
+        List<RuleOutcome> problems = [.. outcomes.Where(o => o.NeedsAttention)];
         if (problems.Count > 0)
         {
             _ = text.Append("kyber-weave-hooks: ").Append(problems.Count).Append(" check(s) need attention for ").AppendLine(file);

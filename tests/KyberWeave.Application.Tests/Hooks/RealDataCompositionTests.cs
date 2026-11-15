@@ -87,6 +87,46 @@ public sealed class RealDataCompositionTests : IDisposable
     }
 
     [Fact]
+    public void WrongValueTypesWarnAndFallBackToTheDefaults()
+    {
+        _ = Repository();
+        _ = Write(
+            ".kyber-weave/hooks.yml",
+            """
+            time-budget-seconds: soon
+            stop-on-first-blocking: maybe
+            rules:
+              - just-a-string
+              - id: dotnet-format-style
+                kind: 5
+                include: "**/*.cs"
+                timeout-seconds: 0
+                blocking: nope
+              - id: Lowercase-kind
+                kind: LINT
+                include: ["**/*.ts"]
+                run: [tool]
+            """);
+        using ServiceProvider provider = Provider(new FakeProcessRunner(clock));
+
+        HooksConfig config = provider.GetRequiredService<IHooksConfigSource>().Load(root.FullName);
+
+        Assert.Equal(HooksDefaults.Config.TimeBudgetSeconds, config.TimeBudgetSeconds);
+        Assert.Equal(HooksDefaults.Config.StopOnFirstBlocking, config.StopOnFirstBlocking);
+        HookRule style = config.Rules.Single(r => r.Id == "dotnet-format-style");
+        Assert.Equal(HookRuleKind.Lint, style.Kind);
+        Assert.Equal(25, style.TimeoutSeconds);
+        Assert.True(style.Blocking);
+        Assert.Equal(HookRuleKind.Lint, config.Rules.Single(r => r.Id == "Lowercase-kind").Kind);
+        Assert.Contains(config.Warnings, w => w.Contains("not a mapping", StringComparison.Ordinal));
+        Assert.Contains(config.Warnings, w => w.Contains("kind must be", StringComparison.Ordinal));
+        Assert.Contains(config.Warnings, w => w.Contains("'include' must be a list", StringComparison.Ordinal));
+        Assert.Contains(config.Warnings, w => w.Contains("'timeout-seconds' must be a positive whole number", StringComparison.Ordinal));
+        Assert.Contains(config.Warnings, w => w.Contains("'blocking' must be true or false", StringComparison.Ordinal));
+        Assert.Contains(config.Warnings, w => w.Contains("'time-budget-seconds' must be a positive whole number", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task MalformedConfigFailsOpen()
     {
         string file = Repository();

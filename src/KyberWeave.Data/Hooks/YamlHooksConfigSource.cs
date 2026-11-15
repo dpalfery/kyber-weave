@@ -11,6 +11,20 @@ internal sealed class YamlHooksConfigSource(IFileSystem fileSystem) : IHooksConf
     private static readonly string[] TopKeys = ["time-budget-seconds", "stop-on-first-blocking", "max-output-lines", "max-output-bytes", "rules"];
     private static readonly string[] RuleKeys = ["id", "kind", "include", "exclude", "run", "timeout-seconds", "blocking", "enabled"];
 
+    private static readonly IDeserializer Deserializer = new DeserializerBuilder().Build();
+
+    private static readonly Reader<int?> PositiveInt = new(
+        "a positive whole number",
+        value => int.TryParse(Text(value), NumberStyles.None, CultureInfo.InvariantCulture, out int number) && number > 0 ? number : null);
+
+    private static readonly Reader<bool?> Boolean = new(
+        "true or false",
+        value => bool.TryParse(Text(value), out bool flag) ? flag : null);
+
+    private static readonly Reader<List<string>?> StringList = new(
+        "a list",
+        value => value is List<object> list ? [.. list.Select(Text)] : null);
+
     public HooksConfig Load(string repositoryRoot)
     {
         string path = Path.Combine(repositoryRoot, ".kyber-weave", "hooks.yml");
@@ -19,7 +33,7 @@ internal sealed class YamlHooksConfigSource(IFileSystem fileSystem) : IHooksConf
             return HooksDefaults.Config;
         }
 
-        object? document = new DeserializerBuilder().Build().Deserialize<object>(fileSystem.ReadAllText(path));
+        object? document = Deserializer.Deserialize<object>(fileSystem.ReadAllText(path));
         if (document is null)
         {
             return HooksDefaults.Config;
@@ -44,31 +58,31 @@ internal sealed class YamlHooksConfigSource(IFileSystem fileSystem) : IHooksConf
         List<HookRuleOverlay> rules = [];
         if (map.TryGetValue("rules", out object? rawRules))
         {
-            if (rawRules is List<object> list)
+            if (rawRules is not List<object> list)
             {
-                foreach (object item in list)
-                {
-                    if (item is Dictionary<object, object> rule && ToRule(rule, warnings) is { } parsed)
-                    {
-                        rules.Add(parsed);
-                    }
-                    else if (item is not Dictionary<object, object>)
-                    {
-                        warnings.Add("hooks.yml: a rule that is not a mapping was ignored.");
-                    }
-                }
+                warnings.Add("hooks.yml: 'rules' must be a list and was ignored.");
             }
             else
             {
-                warnings.Add("hooks.yml: 'rules' must be a list and was ignored.");
+                foreach (object item in list)
+                {
+                    if (item is not Dictionary<object, object> rule)
+                    {
+                        warnings.Add("hooks.yml: a rule that is not a mapping was ignored.");
+                    }
+                    else if (ToRule(rule, warnings) is { } parsed)
+                    {
+                        rules.Add(parsed);
+                    }
+                }
             }
         }
 
         return new HooksConfigOverlay(
-            Int(map, "time-budget-seconds", "hooks.yml", warnings),
-            Bool(map, "stop-on-first-blocking", "hooks.yml", warnings),
-            Int(map, "max-output-lines", "hooks.yml", warnings),
-            Int(map, "max-output-bytes", "hooks.yml", warnings),
+            Read(map, "time-budget-seconds", "hooks.yml", warnings, PositiveInt),
+            Read(map, "stop-on-first-blocking", "hooks.yml", warnings, Boolean),
+            Read(map, "max-output-lines", "hooks.yml", warnings, PositiveInt),
+            Read(map, "max-output-bytes", "hooks.yml", warnings, PositiveInt),
             rules,
             warnings);
     }
@@ -91,14 +105,9 @@ internal sealed class YamlHooksConfigSource(IFileSystem fileSystem) : IHooksConf
         HookRuleKind? kind = null;
         if (map.TryGetValue("kind", out object? rawKind))
         {
-            string? text = Convert.ToString(rawKind, CultureInfo.InvariantCulture);
-            if (string.Equals(text, "lint", StringComparison.OrdinalIgnoreCase))
+            if (Enum.TryParse(Text(rawKind), ignoreCase: true, out HookRuleKind parsedKind) && Enum.IsDefined(parsedKind))
             {
-                kind = HookRuleKind.Lint;
-            }
-            else if (string.Equals(text, "test", StringComparison.OrdinalIgnoreCase))
-            {
-                kind = HookRuleKind.Test;
+                kind = parsedKind;
             }
             else
             {
@@ -109,63 +118,35 @@ internal sealed class YamlHooksConfigSource(IFileSystem fileSystem) : IHooksConf
         return new HookRuleOverlay(
             id,
             kind,
-            Strings(map, "include", scope, warnings),
-            Strings(map, "exclude", scope, warnings),
-            Strings(map, "run", scope, warnings),
-            Int(map, "timeout-seconds", scope, warnings),
-            Bool(map, "blocking", scope, warnings),
-            Bool(map, "enabled", scope, warnings));
+            Read(map, "include", scope, warnings, StringList),
+            Read(map, "exclude", scope, warnings, StringList),
+            Read(map, "run", scope, warnings, StringList),
+            Read(map, "timeout-seconds", scope, warnings, PositiveInt),
+            Read(map, "blocking", scope, warnings, Boolean),
+            Read(map, "enabled", scope, warnings, Boolean));
     }
 
     private static IEnumerable<string> UnknownKeys(Dictionary<object, object> map, string[] known) =>
         map.Keys.Select(k => Convert.ToString(k, CultureInfo.InvariantCulture) ?? string.Empty)
             .Where(k => !known.Contains(k, StringComparer.Ordinal));
 
-    private static int? Int(Dictionary<object, object> map, string key, string scope, List<string> warnings)
+    private static T Read<T>(Dictionary<object, object> map, string key, string scope, List<string> warnings, Reader<T> reader)
     {
         if (!map.TryGetValue(key, out object? value))
         {
-            return null;
+            return default!;
         }
 
-        if (int.TryParse(Convert.ToString(value, CultureInfo.InvariantCulture), NumberStyles.None, CultureInfo.InvariantCulture, out int parsed) && parsed > 0)
+        T parsed = reader.Parse(value);
+        if (parsed is null)
         {
-            return parsed;
+            warnings.Add($"{scope}: '{key}' must be {reader.Expected} and was ignored.");
         }
 
-        warnings.Add($"{scope}: '{key}' must be a positive whole number and was ignored.");
-        return null;
+        return parsed;
     }
 
-    private static bool? Bool(Dictionary<object, object> map, string key, string scope, List<string> warnings)
-    {
-        if (!map.TryGetValue(key, out object? value))
-        {
-            return null;
-        }
+    private static string Text(object? value) => Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
 
-        if (bool.TryParse(Convert.ToString(value, CultureInfo.InvariantCulture), out bool parsed))
-        {
-            return parsed;
-        }
-
-        warnings.Add($"{scope}: '{key}' must be true or false and was ignored.");
-        return null;
-    }
-
-    private static List<string>? Strings(Dictionary<object, object> map, string key, string scope, List<string> warnings)
-    {
-        if (!map.TryGetValue(key, out object? value))
-        {
-            return null;
-        }
-
-        if (value is List<object> list)
-        {
-            return [.. list.Select(item => Convert.ToString(item, CultureInfo.InvariantCulture) ?? string.Empty)];
-        }
-
-        warnings.Add($"{scope}: '{key}' must be a list and was ignored.");
-        return null;
-    }
+    private sealed record Reader<T>(string Expected, Func<object, T> Parse);
 }

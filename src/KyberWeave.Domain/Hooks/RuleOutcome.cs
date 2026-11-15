@@ -11,4 +11,7 @@ public sealed record RuleOutcome(string RuleId, HookRuleKind Kind, bool Blocking
 {
     /// <summary>Gets whether the command ran and reported a problem.</summary>
     public bool Failed => !TimedOut && ExitCode != 0;
+
+    /// <summary>Gets whether the command failed or timed out, so the agent should hear about it.</summary>
+    public bool NeedsAttention => TimedOut || ExitCode != 0;
 }
