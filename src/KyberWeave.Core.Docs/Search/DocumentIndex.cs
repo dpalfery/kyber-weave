@@ -1,9 +1,11 @@
 using System.Text.RegularExpressions;
-using KyberWeave.Core.CodeGraph;
+
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Graph;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Text;
+using KyberWeave.Domain.CodeGraph;
 
 namespace KyberWeave.Core.Docs.Search;
 

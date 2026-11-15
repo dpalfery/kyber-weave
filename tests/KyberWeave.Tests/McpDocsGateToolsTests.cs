@@ -1,7 +1,8 @@
 using System.Globalization;
 using System.Reflection;
 using System.Text.RegularExpressions;
-using KyberWeave.Core.CodeGraph;
+
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Scaffolding;
@@ -9,10 +10,11 @@ using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
+using KyberWeave.Domain.CodeGraph;
 using KyberWeave.Mcp;
 using ModelContextProtocol.Server;
-using Xunit;
 using Xunit.Sdk;
+using Xunit;
 
 namespace KyberWeave.Tests;
 

@@ -1,4 +1,4 @@
-namespace KyberWeave.Core.CodeGraph;
+namespace KyberWeave.Domain.CodeGraph;
 
 /// <summary>One resolved code symbol from the CodeGraph index.</summary>
 /// <param name="Id">Stable node id from the index.</param>

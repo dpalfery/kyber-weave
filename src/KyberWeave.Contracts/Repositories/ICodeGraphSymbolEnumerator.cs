@@ -1,4 +1,6 @@
-namespace KyberWeave.Core.CodeGraph;
+using KyberWeave.Domain.CodeGraph;
+
+namespace KyberWeave.Contracts.Repositories;
 
 /// <summary>
 /// Optional CodeGraph port for enumerating every indexed symbol of one kind.

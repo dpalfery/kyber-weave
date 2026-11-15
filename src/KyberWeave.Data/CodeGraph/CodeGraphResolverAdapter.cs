@@ -1,8 +1,12 @@
 using System.Diagnostics;
 using System.Globalization;
-using KyberWeave.Core.Processes;
 
-namespace KyberWeave.Core.CodeGraph;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.CodeGraph;
+using KyberWeave.Core.Processes;
+using KyberWeave.Domain.CodeGraph;
+
+namespace KyberWeave.Data.CodeGraph;
 
 /// <summary>
 /// Default <see cref="ICodeGraphResolver"/>: reads a CodeGraph SQLite database via the
@@ -93,6 +97,7 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
     /// repository root. Composition roots call this; core consumers take
     /// <see cref="ICodeGraphResolver"/> only.
     /// </summary>
+    /// <param name="repoRoot">The checkout the index belongs to.</param>
     public static CodeGraphResolverAdapter ForRepository(string repoRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
@@ -167,8 +172,18 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
         _stalenessRead = true;
         if (root is null) return _staleness = null;
 
-        // Read on demand, and separately from the node table: only a caller that has something to
-        // explain needs it, and an index without these tables simply cannot be judged.
+        (string? indexedCommit, IReadOnlyDictionary<string, (long ModifiedMilliseconds, int NodeCount)> files) = ReadStalenessFacts();
+        return _staleness = CodeGraphIndexStaleness.Describe(root, indexedCommit, files);
+    }
+
+    /// <summary>Reads the recorded commit and per-file state the staleness rule needs.</summary>
+    /// <returns>The commit the index recorded (null when it recorded none), and each indexed path with its recorded modification time (ms) and symbol count.</returns>
+    /// <remarks>
+    /// Read on demand, and separately from the node table: only a caller that has something to explain needs it, and
+    /// an index without these tables simply cannot be judged.
+    /// </remarks>
+    public (string? IndexedCommit, IReadOnlyDictionary<string, (long ModifiedMilliseconds, int NodeCount)> Files) ReadStalenessFacts()
+    {
         const string sql = """
             SELECT 'file', path, CAST(modified_at AS INTEGER), node_count FROM files
             UNION ALL
@@ -176,6 +191,9 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
             """;
         Dictionary<string, (long ModifiedMilliseconds, int NodeCount)> files = new(StringComparer.Ordinal);
         string? indexedCommit = null;
+
+        if (!IsAvailable) return (null, files);
+
         try
         {
             foreach (string line in RunSqlite(sql))
@@ -197,10 +215,10 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
                                        or System.ComponentModel.Win32Exception
                                        or TimeoutException)
         {
-            return _staleness = null;
+            return (null, files);
         }
 
-        return _staleness = CodeGraphIndexStaleness.Describe(root, indexedCommit, files);
+        return (indexedCommit, files);
     }
 
     private void IncrementDegree(string nodeId)

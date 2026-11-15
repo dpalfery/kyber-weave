@@ -1,4 +1,4 @@
-namespace KyberWeave.Core.CodeGraph;
+namespace KyberWeave.Domain.CodeGraph;
 
 /// <summary>One directed relationship from the CodeGraph index.</summary>
 /// <param name="SourceId">Stable id of the source code node.</param>

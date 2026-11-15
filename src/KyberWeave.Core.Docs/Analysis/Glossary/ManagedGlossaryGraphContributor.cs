@@ -1,6 +1,7 @@
-using KyberWeave.Core.CodeGraph;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Docs.Graph;
 using KyberWeave.Core.Docs.Model;
+using KyberWeave.Domain.CodeGraph;
 
 namespace KyberWeave.Core.Docs.Analysis.Glossary;
 

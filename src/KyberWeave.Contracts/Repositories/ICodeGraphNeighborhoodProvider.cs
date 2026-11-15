@@ -1,4 +1,6 @@
-namespace KyberWeave.Core.CodeGraph;
+using KyberWeave.Domain.CodeGraph;
+
+namespace KyberWeave.Contracts.Repositories;
 
 /// <summary>
 /// Optional CodeGraph port for batched, one-hop relationships between resolved nodes.

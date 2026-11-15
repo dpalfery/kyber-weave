@@ -1,10 +1,11 @@
 using System.Globalization;
 using System.Reflection;
 using System.Text.RegularExpressions;
-using KyberWeave.Core.CodeGraph;
+
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Search;
+using KyberWeave.Data.CodeGraph;
 using KyberWeave.Mcp;
 using ModelContextProtocol.Server;
 using Xunit;

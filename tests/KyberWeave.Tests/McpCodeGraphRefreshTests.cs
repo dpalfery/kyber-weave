@@ -1,13 +1,15 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
+
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
-using KyberWeave.Core.CodeGraph;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Doctor;
 using KyberWeave.Core.Processes;
+using KyberWeave.Data.CodeGraph;
 using KyberWeave.Mcp;
 using KyberWeave.Tests.Fakes;
 using Xunit;

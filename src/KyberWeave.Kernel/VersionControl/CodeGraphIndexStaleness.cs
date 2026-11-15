@@ -20,7 +20,7 @@ namespace KyberWeave.Core.CodeGraph;
 /// change constantly and say nothing about whether a symbol still resolves.
 /// </para>
 /// </remarks>
-internal static class CodeGraphIndexStaleness
+public static class CodeGraphIndexStaleness
 {
     private const int ExampleCap = 3;
 

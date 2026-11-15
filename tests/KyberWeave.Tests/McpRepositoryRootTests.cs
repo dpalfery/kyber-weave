@@ -1,10 +1,11 @@
 using System.Diagnostics;
-using KyberWeave.Core.CodeGraph;
+
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Processes;
+using KyberWeave.Data.CodeGraph;
 using KyberWeave.Mcp;
 using Xunit;
 

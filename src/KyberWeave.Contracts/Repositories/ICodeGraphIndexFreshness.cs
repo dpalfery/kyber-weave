@@ -1,4 +1,6 @@
-namespace KyberWeave.Core.CodeGraph;
+using KyberWeave.Domain.CodeGraph;
+
+namespace KyberWeave.Contracts.Repositories;
 
 /// <summary>
 /// An index that can say whether it is older than the code it describes.
