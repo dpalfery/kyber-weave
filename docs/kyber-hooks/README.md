@@ -114,6 +114,9 @@ A rule has these keys:
 | `blocking` | Whether failure exits 2; default true. |
 | `enabled` | Turn a rule off, or an opt-in rule on. |
 
+Numbers outside their range are clamped with a warning: `time-budget-seconds` 1 to 120, `timeout-seconds` 1 to 300,
+`max-output-lines` 1 to 500, `max-output-bytes` 100 to 100000.
+
 Tokens in `run`: `{file}`, `{marker}`, `{project}` and `{target}` (the project, else the marker), all
 repository-relative, `{root}` (absolute repository root), `{testProject}` (the test project holding the covering tests), and a standalone
 `{testClasses}` argument, which expands to one argument per class. `{testClasses}` is not expanded inside a longer

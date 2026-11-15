@@ -81,4 +81,37 @@ public sealed class HooksDefaultsTests
         Assert.DoesNotContain(merged.Rules, r => r.Id == "half");
         Assert.Contains(merged.Warnings, w => w.Contains("'half'", StringComparison.Ordinal));
     }
+
+    [Fact]
+    public void MergeClampsOutOfRangeNumbersAndWarns()
+    {
+        HooksConfigOverlay overlay = new(
+            0,
+            null,
+            2_000_000,
+            0,
+            [new HookRuleOverlay("dotnet-test", null, null, null, null, 100_000, null, null)],
+            []);
+
+        HooksConfig merged = HooksConfigMerger.Merge(HooksDefaults.Config, overlay);
+
+        Assert.Equal(1, merged.TimeBudgetSeconds);
+        Assert.Equal(500, merged.MaxOutputLines);
+        Assert.Equal(100, merged.MaxOutputBytes);
+        Assert.Equal(300, Assert.Single(merged.Rules, r => r.Id == "dotnet-test").TimeoutSeconds);
+        Assert.Contains(merged.Warnings, w => w.Contains("'time-budget-seconds' must be between 1 and 120", StringComparison.Ordinal));
+        Assert.Contains(merged.Warnings, w => w.Contains("rule 'dotnet-test': 'timeout-seconds'", StringComparison.Ordinal));
+        Assert.Equal(4, merged.Warnings.Count);
+    }
+
+    [Fact]
+    public void MergeLeavesInRangeNumbersAlone()
+    {
+        HooksConfigOverlay overlay = new(60, null, 10, 2000, [], []);
+
+        HooksConfig merged = HooksConfigMerger.Merge(HooksDefaults.Config, overlay);
+
+        Assert.Equal((60, 10, 2000), (merged.TimeBudgetSeconds, merged.MaxOutputLines, merged.MaxOutputBytes));
+        Assert.Empty(merged.Warnings);
+    }
 }
