@@ -41,6 +41,13 @@
 # class list or filter as the product suite. A C#-only edit runs only the two policy tests that
 # read source text (POLICY_SOURCE_SCANS): the rest read scripts, workflows, project files and docs.
 #
+# THE PROMPT-CONTENT TESTS
+#
+# tests/KyberWeave.PromptContent.Tests holds the tests that assert the wording of skills, agents and
+# instructions. They run with the policy tests, under the same condition. The class list does not name
+# them, so with no filter the whole project runs; a --class or --method filter applies to it as it does
+# to the others.
+#
 # WHAT MAKES THE EXCLUDED CLASSES SLOW
 #
 # Not process spawning: it is filesystem work, chiefly path canonicalisation that lists
@@ -63,6 +70,7 @@ cd "${repo_root}"
 CONFIGURATION=Release
 TEST_DLL="tests/KyberWeave.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Tests.dll"
 POLICY_TEST_DLL="tests/KyberWeave.RepoPolicy.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.RepoPolicy.Tests.dll"
+PROMPT_TEST_DLL="tests/KyberWeave.PromptContent.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.PromptContent.Tests.dll"
 CLASS_LIST="scripts/fast-loop-classes.txt"
 # The two policy tests that read source text. A C#-only edit can trip them (an unlisted process
 # spawn, a banned upstream name), and they only read files, so they run on every .NET loop.
@@ -281,6 +289,9 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
   step "build (Release, warnings-as-errors, AnalysisMode=all)"
   dotnet build KyberWeave.sln -c "${CONFIGURATION}"
 
+  # The user's filter, if any, before the class list is added: the prompt-content project takes it
+  # alone, so with the class list it runs whole.
+  prompt_args=("${test_args[@]+"${test_args[@]}"}")
   if [[ ${#test_args[@]} -eq 0 ]]; then
     while IFS= read -r class || [[ -n "${class}" ]]; do
       class="${class%$'\r'}"
@@ -309,8 +320,9 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
   policy_status=0
   dotnet "${TEST_DLL}" "${test_args[@]+"${test_args[@]}"}" | tee "${test_log}" || product_status=$?
   if [[ "${needs_policy}" -eq 1 ]]; then
-    step "repository-policy tests (same filter)"
+    step "repository-policy and prompt-content tests (same filter)"
     dotnet "${POLICY_TEST_DLL}" "${test_args[@]+"${test_args[@]}"}" | tee -a "${test_log}" || policy_status=$?
+    dotnet "${PROMPT_TEST_DLL}" "${prompt_args[@]+"${prompt_args[@]}"}" | tee -a "${test_log}" || policy_status=$?
   else
     # Checked on its own: the product suite's total must not stand in for a scan run that matched nothing.
     step "repository-policy source scans"

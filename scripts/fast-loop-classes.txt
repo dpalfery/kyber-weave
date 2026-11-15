@@ -29,14 +29,12 @@ KyberWeave.Tests.ReviewConfigTests
 KyberWeave.Tests.SquadLockV2Tests
 KyberWeave.Tests.ApmManifestGuardTests
 KyberWeave.Tests.ClaimExtractionTests
-KyberWeave.Tests.SquadAutonomyContractTests
 KyberWeave.Tests.DocDriftLinterTests
 KyberWeave.Tests.DocGovernanceTests
 KyberWeave.Tests.CapabilityDegradationsTests
 KyberWeave.Tests.GateCatalogueResourceTests
 KyberWeave.Tests.SquadInstanceLinkPlannerTests
 KyberWeave.Tests.ReviewGateKeysCliWarningTests
-KyberWeave.Tests.ReviewGuidanceCouncilContractTests
 KyberWeave.Tests.AgentSpecValidatorTests
 KyberWeave.Tests.SquadHarnessLauncherTests
 KyberWeave.Tests.DocumentIndexHostSymlinkContainmentTests
@@ -47,7 +45,6 @@ KyberWeave.Tests.SquadRetiredSkillsTests
 KyberWeave.Tests.CoverageCollectorTests
 KyberWeave.Tests.DocGraphProjectionTests
 KyberWeave.Tests.ZCodeMcpConfigurationTests
-KyberWeave.Tests.SquadSpecGateCollapseTests
 KyberWeave.Tests.TitleScoringTests
 KyberWeave.Tests.OntologyConfigTests
 KyberWeave.Tests.SquadConfigurationTests
