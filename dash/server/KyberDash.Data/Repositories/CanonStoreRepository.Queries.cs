@@ -9,6 +9,51 @@ namespace KyberDash.Data.Repositories;
 /// <summary>Read-side SQL and row mapping for <see cref="CanonStoreRepository"/>.</summary>
 public partial class CanonStoreRepository
 {
+    // A stored value is untrusted: a corrupt row must not abort the whole listing, so each read
+    // that cannot be represented falls back to the DTO's zero or absent value.
+    private static int IntOrZero(string text) =>
+        int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value) ? value : 0;
+
+    private static int? IntOrNull(string text) =>
+        int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value) ? value : null;
+
+    private static long LongOrZero(string text) =>
+        long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out long value) ? value : 0;
+
+    private static long? LongOrNull(string text) =>
+        long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out long value) ? value : null;
+
+    private static double DoubleOrZero(string text) =>
+        double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out double value) && double.IsFinite(value)
+            ? value
+            : 0d;
+
+    /// <summary>
+    /// Decodes one stored column given its <c>typeof()</c> marker: a zlib blob when the marker says
+    /// <c>blob</c>, otherwise hex-encoded text. Returns <see langword="false"/> for tampered hex or a
+    /// blob that is not zlib, so the caller can skip that row instead of failing the read.
+    /// </summary>
+    private static bool TryDecodeStoredColumn(string typeMarker, string hex, out string text)
+    {
+        try
+        {
+            text = string.Equals(typeMarker, "blob", StringComparison.Ordinal)
+                ? CanonCompressedColumn.Decompress(Convert.FromHexString(hex))
+                : DecodeHexText(hex);
+            return true;
+        }
+        catch (FormatException)
+        {
+            text = string.Empty;
+            return false;
+        }
+        catch (InvalidDataException)
+        {
+            text = string.Empty;
+            return false;
+        }
+    }
+
     private IReadOnlyList<CanonicalRecord> QueryRecords(string whereAndOrderClause)
     {
         string output = ExecuteSqlite(
@@ -60,7 +105,7 @@ public partial class CanonStoreRepository
         string op = DecodeHexText(cols[10]);
         string kind = DecodeHexText(cols[11]);
         string timestamp = DecodeHexText(cols[12]);
-        long durationMs = long.Parse(cols[13], NumberStyles.Integer, CultureInfo.InvariantCulture);
+        long durationMs = LongOrZero(cols[13]);
         string status = DecodeHexText(cols[14]);
         TokenUsage tokens = JsonSerializer.Deserialize<TokenUsage>(DecodeHexText(cols[15]), RecordJsonOptions)
             ?? throw new InvalidOperationException($"corrupt tokens_json for span {recordSpanId}.");
@@ -74,26 +119,16 @@ public partial class CanonStoreRepository
             : JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(DecodeHexText(cols[19]), RecordJsonOptions);
 
         IReadOnlyList<ContentPart>? parts = null;
-        if (cols[20] != "null")
-        {
-            string partsJson = cols[20] == "blob"
-                ? CanonCompressedColumn.Decompress(Convert.FromHexString(cols[21]))
-                : DecodeHexText(cols[21]);
+        if (cols[20] != "null" && TryDecodeStoredColumn(cols[20], cols[21], out string partsJson))
             parts = JsonSerializer.Deserialize<List<ContentPart>>(partsJson, RecordJsonOptions);
-        }
 
         IReadOnlyDictionary<string, string> content = parts is null
             ? storedContent
             : MergeContent(CanonValidation.ContentFromParts(parts), storedContent);
 
         IReadOnlyDictionary<string, JsonElement>? raw = null;
-        if (cols[23] != "null")
-        {
-            string rawJson = cols[23] == "blob"
-                ? CanonCompressedColumn.Decompress(Convert.FromHexString(cols[22]))
-                : DecodeHexText(cols[22]);
+        if (cols[23] != "null" && TryDecodeStoredColumn(cols[23], cols[22], out string rawJson))
             raw = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(rawJson, RecordJsonOptions);
-        }
 
         return new CanonicalRecord
         {
@@ -175,7 +210,7 @@ public partial class CanonStoreRepository
             string? started = cols[13] == "null" ? null : DecodeHexText(cols[14]);
             string? ended = cols[15] == "null" ? null : DecodeHexText(cols[16]);
             string? summaryJson = cols[17] == "null" ? null : DecodeHexText(cols[18]);
-            int? problemsCount = cols[19] == "null" ? null : int.Parse(cols[20], NumberStyles.Integer, CultureInfo.InvariantCulture);
+            int? problemsCount = cols[19] == "null" ? null : IntOrNull(cols[20]);
             string? contextLimitSource = cols[21] == "null" ? null : DecodeHexText(cols[22]);
             string payloadText = DecodeHexText(cols[23]);
 
@@ -251,9 +286,8 @@ public partial class CanonStoreRepository
                 continue;
 
             string sessionId = DecodeHexText(cols[0]);
-            string turnJson = cols[1] == "blob"
-                ? CanonCompressedColumn.Decompress(Convert.FromHexString(cols[2]))
-                : DecodeHexText(cols[2]);
+            if (!TryDecodeStoredColumn(cols[1], cols[2], out string turnJson))
+                continue;
 
             try
             {
@@ -414,7 +448,7 @@ public partial class CanonStoreRepository
         string confidence = DecodeHexText(cols[4]);
         long? estimatedWasteTokens = cols[5] == "null"
             ? null
-            : long.Parse(cols[6], NumberStyles.Integer, CultureInfo.InvariantCulture);
+            : LongOrNull(cols[6]);
         string recommendation = DecodeHexText(cols[7]);
         string errorBarRaw = DecodeHexText(cols[8]);
         FindingErrorBar? errorBar = errorBarRaw == "null"
@@ -426,7 +460,7 @@ public partial class CanonStoreRepository
         string outcomeRiskCaveat = DecodeHexText(cols[10]);
         string? runId = cols[11] == "null" ? null : DecodeHexText(cols[12]);
         string? sessionId = cols[13] == "null" ? null : DecodeHexText(cols[14]);
-        double rankScore = double.Parse(cols[15], NumberStyles.Float, CultureInfo.InvariantCulture);
+        double rankScore = DoubleOrZero(cols[15]);
 
         Dictionary<string, object?>? payloadDict = null;
         string? measurementClass = null;
@@ -562,7 +596,7 @@ public partial class CanonStoreRepository
                 WorkingDirectory: cols[7] == "null" ? null : DecodeHexText(cols[8]),
                 Started: cols[9] == "null" ? null : DecodeHexText(cols[10]),
                 Ended: cols[11] == "null" ? null : DecodeHexText(cols[12]),
-                ExecutionCount: int.Parse(cols[13], NumberStyles.Integer, CultureInfo.InvariantCulture),
+                ExecutionCount: IntOrZero(cols[13]),
                 Payload: payload));
         }
 
@@ -647,7 +681,7 @@ public partial class CanonStoreRepository
 
             rows.Add(new HarnessRollupRow(
                 Harness: DecodeHexText(cols[0]),
-                SampleCount: int.Parse(cols[1], NumberStyles.Integer, CultureInfo.InvariantCulture),
+                SampleCount: IntOrZero(cols[1]),
                 ContextPressureMedian: ParseNullableDouble(cols[2], cols[3]),
                 ContextPressureP95: ParseNullableDouble(cols[4], cols[5]),
                 CacheHitRate: ParseNullableDouble(cols[6], cols[7]),
@@ -686,8 +720,11 @@ public partial class CanonStoreRepository
             if (cols.Length < 15)
                 continue;
 
+            if (!int.TryParse(cols[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out int problemId))
+                continue;
+
             rows.Add(new StoredProblemRow(
-                Id: int.Parse(cols[0], NumberStyles.Integer, CultureInfo.InvariantCulture),
+                Id: problemId,
                 SpanId: DecodeHexOrEmpty(cols[1]),
                 Severity: DecodeHexText(cols[2]),
                 Code: DecodeHexText(cols[3]),
@@ -786,8 +823,8 @@ public partial class CanonStoreRepository
                 LastSuccessUtc: cols[11] == "null" ? null : DecodeHexText(cols[12]),
                 LastStatus: DecodeHexText(cols[13]),
                 LastErrorCode: cols[14] == "null" ? null : DecodeHexText(cols[15]),
-                UnitCount: int.Parse(cols[16], NumberStyles.Integer, CultureInfo.InvariantCulture),
-                RecordCount: int.Parse(cols[17], NumberStyles.Integer, CultureInfo.InvariantCulture)));
+                UnitCount: IntOrZero(cols[16]),
+                RecordCount: IntOrZero(cols[17])));
         }
 
         return rows;
@@ -818,14 +855,14 @@ public partial class CanonStoreRepository
 
             int? weeks = cols[9] == "null"
                 ? null
-                : CanonSchema.NormalizeHistoryWeeks(long.Parse(cols[10], NumberStyles.Integer, CultureInfo.InvariantCulture));
+                : CanonSchema.NormalizeHistoryWeeks(LongOrNull(cols[10]) ?? 0);
 
             rows.Add(new RefreshRunRow(
                 Id: DecodeHexText(cols[0]),
                 StartedAt: DecodeHexText(cols[1]),
                 CompletedAt: cols[2] == "null" ? null : DecodeHexText(cols[3]),
                 Status: DecodeHexText(cols[4]),
-                Pid: int.Parse(cols[5], NumberStyles.Integer, CultureInfo.InvariantCulture),
+                Pid: IntOrZero(cols[5]),
                 Trigger: DecodeHexText(cols[6]),
                 Summary: cols[7] == "null" ? null : DecodeHexText(cols[8]),
                 HistoryWeeks: weeks));
@@ -989,6 +1026,13 @@ public partial class CanonStoreRepository
         value.HasValue && double.IsFinite(value.Value)
             ? value.Value.ToString("G17", CultureInfo.InvariantCulture)
             : "NULL";
+
+    /// <summary>
+    /// Renders a non-nullable REAL column. A non-finite value has no SQL literal and would make the
+    /// whole batch throw, so it is written as 0.
+    /// </summary>
+    private static string RequiredDoubleSql(double value) =>
+        (double.IsFinite(value) ? value : 0d).ToString("G17", CultureInfo.InvariantCulture);
 
     private static double? ParseNullableDouble(string typeCol, string valCol)
     {

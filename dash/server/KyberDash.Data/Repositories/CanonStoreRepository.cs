@@ -505,10 +505,16 @@ CultureInfo.InvariantCulture,
             if (cols.Length < 4)
                 continue;
 
+            if (!int.TryParse(cols[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out int ingestId)
+                || !int.TryParse(cols[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out int ingestCount))
+            {
+                continue;
+            }
+
             entries.Add(new IngestLogEntry(
-                Id: int.Parse(cols[0], NumberStyles.Integer, CultureInfo.InvariantCulture),
+                Id: ingestId,
                 Source: DecodeHexText(cols[1]),
-                Count: int.Parse(cols[2], NumberStyles.Integer, CultureInfo.InvariantCulture),
+                Count: ingestCount,
                 Timestamp: DecodeHexText(cols[3])));
         }
 
@@ -684,9 +690,8 @@ CultureInfo.InvariantCulture,
             if (cols.Length < 3)
                 continue;
 
-            string turnJson = string.Equals(cols[1], "blob", StringComparison.Ordinal)
-                ? CanonCompressedColumn.Decompress(Convert.FromHexString(cols[2]))
-                : DecodeHexText(cols[2]);
+            if (!TryDecodeStoredColumn(cols[1], cols[2], out string turnJson))
+                continue;
 
             turns.Add((int.Parse(cols[0], NumberStyles.Integer, CultureInfo.InvariantCulture), turnJson));
         }
@@ -849,7 +854,7 @@ CultureInfo.InvariantCulture,
                     $"{TextExpr(finding.Id)}, {TextExpr(finding.DetectorId)}, {TextExpr(finding.Title)}, {TextExpr(finding.Mechanism)}, " +
                     $"{TextExpr(finding.Confidence)}, {wasteSql}, {TextExpr(finding.Recommendation)}, {TextExpr(errorBarJson)}, " +
                     $"{TextExpr(evidenceLinksJson)}, {TextExpr(finding.OutcomeRiskCaveat)}, {NullableTextExpr(finding.RunId)}, " +
-                    $"{NullableTextExpr(finding.SessionId)}, {finding.RankScore.ToString("G17", CultureInfo.InvariantCulture)}, " +
+                    $"{NullableTextExpr(finding.SessionId)}, {RequiredDoubleSql(finding.RankScore)}, " +
                     $"{NullableTextExpr(payloadJson)});";
                 script.AppendLine(sql);
             }
@@ -1037,7 +1042,7 @@ CultureInfo.InvariantCulture,
             "created_at, comparison_run_id, observed_delta_tokens, calibration_score, payload) VALUES (" +
             $"{TextExpr(prediction.Id)}, {TextExpr(prediction.FindingId)}, {TextExpr(prediction.RunId)}, " +
             $"{prediction.PredictedWasteTokens.ToString(CultureInfo.InvariantCulture)}, " +
-            $"{prediction.Confidence.ToString("G17", CultureInfo.InvariantCulture)}, {NullableTextExpr(prediction.ConfidenceTier)}, " +
+            $"{RequiredDoubleSql(prediction.Confidence)}, {NullableTextExpr(prediction.ConfidenceTier)}, " +
             $"{NullableTextExpr(errorBarJson)}, {TextExpr(prediction.CreatedAt)}, {NullableTextExpr(prediction.ComparisonRunId)}, " +
             $"{observedSql}, {NullableDoubleSql(prediction.CalibrationScore)}, {NullableTextExpr(payloadJson)});";
 
@@ -1743,9 +1748,8 @@ CultureInfo.InvariantCulture,
             if (cols.Length < 2)
                 continue;
 
-            string turnJson = string.Equals(cols[0], "blob", StringComparison.Ordinal)
-                ? CanonCompressedColumn.Decompress(Convert.FromHexString(cols[1]))
-                : DecodeHexText(cols[1]);
+            if (!TryDecodeStoredColumn(cols[0], cols[1], out string turnJson))
+                continue;
 
             try
             {
@@ -1785,9 +1789,8 @@ CultureInfo.InvariantCulture,
                 if (cols.Length < 2)
                     continue;
 
-                string turnJson = string.Equals(cols[0], "blob", StringComparison.Ordinal)
-                    ? CanonCompressedColumn.Decompress(Convert.FromHexString(cols[1]))
-                    : DecodeHexText(cols[1]);
+                if (!TryDecodeStoredColumn(cols[0], cols[1], out string turnJson))
+                    continue;
 
                 try
                 {
@@ -1837,13 +1840,24 @@ CultureInfo.InvariantCulture,
         return ExecuteScalarInt($"SELECT COUNT(*) FROM quarantine{where};");
     }
 
+    private static string LimitOffsetSql(int? limit, int? offset)
+    {
+        if (!limit.HasValue && !offset.HasValue)
+            return string.Empty;
+
+        // SQLite reads LIMIT -1 as "no limit", so an offset given without a limit still pages.
+        string limitText = limit.HasValue
+            ? Math.Max(1, limit.Value).ToString(CultureInfo.InvariantCulture)
+            : "-1";
+        string offsetText = Math.Max(0, offset ?? 0).ToString(CultureInfo.InvariantCulture);
+        return $" LIMIT {limitText} OFFSET {offsetText}";
+    }
+
     /// <inheritdoc />
     public IReadOnlyList<QuarantineRow> ListQuarantinePage(string? harness = null, int? limit = null, int? offset = null)
     {
         string where = string.IsNullOrWhiteSpace(harness) ? string.Empty : $"WHERE harness = {TextExpr(harness.Trim())} ";
-        string limitSql = limit.HasValue
-            ? $" LIMIT {Math.Max(1, limit.Value).ToString(CultureInfo.InvariantCulture)} OFFSET {Math.Max(0, offset ?? 0).ToString(CultureInfo.InvariantCulture)}"
-            : string.Empty;
+        string limitSql = LimitOffsetSql(limit, offset);
 
         return QueryQuarantine($"{where}ORDER BY timestamp DESC, span_id ASC{limitSql}");
     }
@@ -1862,9 +1876,7 @@ CultureInfo.InvariantCulture,
     public IReadOnlyList<StoredProblemRow> ListProblems(string? harness = null, int? limit = null, int? offset = null)
     {
         string where = string.IsNullOrWhiteSpace(harness) ? string.Empty : $"WHERE harness = {TextExpr(harness.Trim())} ";
-        string limitSql = limit.HasValue
-            ? $" LIMIT {Math.Max(1, limit.Value).ToString(CultureInfo.InvariantCulture)} OFFSET {Math.Max(0, offset ?? 0).ToString(CultureInfo.InvariantCulture)}"
-            : string.Empty;
+        string limitSql = LimitOffsetSql(limit, offset);
 
         return QueryStoredProblems($"{where}ORDER BY id DESC{limitSql}");
     }
@@ -1913,8 +1925,13 @@ CultureInfo.InvariantCulture,
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<CanonicalRecord> ListOtlpRecords() =>
-        QueryRecords("WHERE span_id NOT LIKE 'synth:%' ORDER BY timestamp");
+    public IReadOnlyList<CanonicalRecord> ListOtlpRecords(string? coveredFromUtc = null, string? coveredThroughUtc = null)
+    {
+        string window = string.Concat(
+            string.IsNullOrWhiteSpace(coveredFromUtc) ? string.Empty : $" AND timestamp >= {TextExpr(coveredFromUtc)}",
+            string.IsNullOrWhiteSpace(coveredThroughUtc) ? string.Empty : $" AND timestamp <= {TextExpr(coveredThroughUtc)}");
+        return QueryRecords($"WHERE span_id NOT LIKE 'synth:%'{window} ORDER BY timestamp");
+    }
 
     /// <inheritdoc />
     public void CommitSourceUnit(
