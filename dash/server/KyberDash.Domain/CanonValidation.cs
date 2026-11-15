@@ -120,9 +120,13 @@ public static class CanonValidation
         if (json.Length <= MaxQuarantineRawPayloadChars)
             return json;
 
+        int cut = MaxQuarantineRawPayloadChars;
+        if (cut > 0 && char.IsHighSurrogate(json[cut - 1]))
+            cut--;
+
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"{json[..MaxQuarantineRawPayloadChars]}\n...[truncated: stored {MaxQuarantineRawPayloadChars} of {json.Length} characters]");
+            $"{json[..cut]}\n...[truncated: stored {cut} of {json.Length} characters]");
     }
 
     /// <summary>
@@ -182,7 +186,9 @@ public static class CanonValidation
                 location);
         }
 
-        long inputSum = tokens.FreshInput + tokens.CacheRead + tokens.CacheCreation;
+        // Every class is non-negative by the guards above, so the sum of three longs can exceed
+        // long.MaxValue. Sum in decimal, which holds it exactly and cannot wrap.
+        decimal inputSum = (decimal)tokens.FreshInput + tokens.CacheRead + tokens.CacheCreation;
         if (inputSum != tokens.ReportedInput)
         {
             return new Problem(
