@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO.Compression;
 using System.Text;
 
@@ -33,15 +34,32 @@ public static class CanonCompressedColumn
         return CompressBytes(Encoding.UTF8.GetBytes(json));
     }
 
+    /// <summary>Maximum decompressed size accepted from a zlib column (64 MiB).</summary>
+    public const int MaxDecompressedBytes = 64 * 1024 * 1024;
+
     /// <summary>
-    /// Decompresses RFC 1950 zlib bytes into a UTF-8 JSON string.
+    /// Decompresses RFC 1950 zlib bytes into a UTF-8 JSON string, refusing output larger than
+    /// <see cref="MaxDecompressedBytes"/> so a small blob cannot expand without bound.
     /// </summary>
+    /// <exception cref="InvalidDataException">The column expands past <see cref="MaxDecompressedBytes"/>.</exception>
     public static string Decompress(ReadOnlySpan<byte> deflated)
     {
         using MemoryStream input = new(deflated.ToArray());
         using ZLibStream zlib = new(input, CompressionMode.Decompress);
         using MemoryStream output = new();
-        zlib.CopyTo(output);
+        byte[] buffer = new byte[81920];
+        int read;
+        while ((read = zlib.Read(buffer, 0, buffer.Length)) > 0)
+        {
+            if (output.Length + read > MaxDecompressedBytes)
+            {
+                throw new InvalidDataException(
+                    string.Create(CultureInfo.InvariantCulture, $"a compressed column expands past the {MaxDecompressedBytes}-byte limit"));
+            }
+
+            output.Write(buffer, 0, read);
+        }
+
         return Encoding.UTF8.GetString(output.GetBuffer(), 0, (int)output.Length);
     }
 
