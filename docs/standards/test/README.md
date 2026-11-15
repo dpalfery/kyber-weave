@@ -130,6 +130,12 @@ its words ([ADR 0073](../../adr/0073-prose-rules-are-graded-by-meaning-not-pinne
 - **No phrase pins, forbidden-phrase pins or hash pins on prose.** A test that asserts a sentence, or a
   word from one, breaks on every rewording and says nothing about whether the rule is still stated.
 
+**Where the remaining wording checks live.** Classes that still assert the text of skills, agents and
+instructions are in [`tests/KyberWeave.PromptContent.Tests`](../../../tests/KyberWeave.PromptContent.Tests/AGENTS.md),
+not in `tests/KyberWeave.Tests`, so the product suite measures behaviour only. They are scheduled to become
+eval-style checks, so do not add new wording pins there. The repository-policy project
+(`tests/KyberWeave.RepoPolicy.Tests`) keeps the checks on scripts, workflows, gate configuration and docs.
+
 *Stabilisation, from 2026-11-13:* the last phrase pins are deleted, and a prose change does not need a
 new catalog rule. The catalog runs as a net at merge points; a rule whose subject is deleted is retired,
 and a moved rule's home is repointed. Rules for prose written in this period are added in the later

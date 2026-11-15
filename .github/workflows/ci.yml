@@ -249,6 +249,17 @@ jobs:
           --report-trx-filename repo-policy.trx
           --results-directory TestResults
 
+      # The prompt-content tests: assertions on the wording of skills, agents and instructions.
+      # Their own project, so the product suite above measures behaviour, not prose.
+      - name: Test (prompt content)
+        run: >
+          dotnet test tests/KyberWeave.PromptContent.Tests/KyberWeave.PromptContent.Tests.csproj
+          -c ${{ env.CONFIGURATION }}
+          --no-build
+          --report-trx
+          --report-trx-filename prompt-content.trx
+          --results-directory TestResults
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
