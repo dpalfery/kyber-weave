@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Processes;
+using KyberWeave.Domain.Doctor;
 
 namespace KyberWeave.Core.Doctor;
 

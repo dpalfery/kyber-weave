@@ -4,6 +4,7 @@ using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Domain.Doctor;
 using KyberWeave.Core.Processes;
 
 namespace KyberWeave.Mcp;

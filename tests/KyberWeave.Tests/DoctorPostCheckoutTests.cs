@@ -1,5 +1,6 @@
 using KyberWeave.Cli.Commands.Doctor;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Domain.Doctor;
 using KyberWeave.Core.Processes;
 using KyberWeave.Tests.Fakes;
 using Xunit;

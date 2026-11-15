@@ -1,4 +1,4 @@
-namespace KyberWeave.Core.Doctor;
+namespace KyberWeave.Domain.Doctor;
 
 /// <summary>The outcome of one doctor run.</summary>
 /// <param name="Root">The resolved repository root, or the path the run was asked about when it refused.</param>

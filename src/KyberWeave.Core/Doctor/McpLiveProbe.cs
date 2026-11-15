@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Processes;
+using KyberWeave.Domain.Doctor;
 
 namespace KyberWeave.Core.Doctor;
 

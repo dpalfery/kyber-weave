@@ -1,4 +1,4 @@
-namespace KyberWeave.Core.Doctor;
+namespace KyberWeave.Domain.Doctor;
 
 /// <summary>Which tracked files a CodeGraph index run restores after it writes them.</summary>
 public enum CodeGraphRestore

@@ -1,3 +1,5 @@
+using KyberWeave.Domain.Doctor;
+
 namespace KyberWeave.Core.Doctor;
 
 /// <summary>

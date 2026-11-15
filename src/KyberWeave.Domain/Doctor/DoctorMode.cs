@@ -1,4 +1,4 @@
-namespace KyberWeave.Core.Doctor;
+namespace KyberWeave.Domain.Doctor;
 
 /// <summary>Whether a doctor run may change the repository's CodeGraph index, and how far it goes to leave it usable.</summary>
 public enum DoctorMode

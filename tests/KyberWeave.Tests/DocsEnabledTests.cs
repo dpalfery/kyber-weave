@@ -1,5 +1,6 @@
 using Xunit;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Domain.Doctor;
 
 namespace KyberWeave.Tests;
 

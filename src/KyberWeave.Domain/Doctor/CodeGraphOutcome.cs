@@ -1,4 +1,4 @@
-namespace KyberWeave.Core.Doctor;
+namespace KyberWeave.Domain.Doctor;
 
 /// <summary>The outcome of the CodeGraph side of a doctor run.</summary>
 /// <param name="Checks">The <c>codegraph.*</c> checks, in order.</param>

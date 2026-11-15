@@ -1,4 +1,4 @@
-namespace KyberWeave.Core.Doctor;
+namespace KyberWeave.Domain.Doctor;
 
 /// <summary>One named check and its outcome.</summary>
 /// <param name="Id">The stable check id, such as <c>codegraph.index</c> or <c>mcp.root</c>. Agents branch on it.</param>

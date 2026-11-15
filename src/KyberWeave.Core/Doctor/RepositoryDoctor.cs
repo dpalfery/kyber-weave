@@ -3,8 +3,9 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Configuration;
-using KyberWeave.Domain.CopilotPrompt;
 using KyberWeave.Core.Processes;
+using KyberWeave.Domain.CopilotPrompt;
+using KyberWeave.Domain.Doctor;
 
 namespace KyberWeave.Core.Doctor;
 

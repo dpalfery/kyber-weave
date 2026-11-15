@@ -8,6 +8,7 @@ using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Domain.Doctor;
 using KyberWeave.Core.Processes;
 using KyberWeave.Data.CodeGraph;
 using KyberWeave.Mcp;

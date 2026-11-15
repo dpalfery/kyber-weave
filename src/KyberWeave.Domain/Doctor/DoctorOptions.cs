@@ -1,4 +1,4 @@
-namespace KyberWeave.Core.Doctor;
+namespace KyberWeave.Domain.Doctor;
 
 /// <summary>The budgets and executable names one doctor run uses.</summary>
 /// <param name="IndexTimeout">

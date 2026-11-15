@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using KyberWeave.Domain.CopilotPrompt;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Domain.Doctor;
 using Xunit;
 
 namespace KyberWeave.Tests.CopilotPrompt;
