@@ -1580,8 +1580,9 @@ layers now guard against a repeat:
   injects inert spawners and keeps state under the test's temp root.
 
 A fourth, separate concern is load rather than runaway processes: several harnesses on one machine
-can each start a full `dotnet test` run at the same moment. Full suite runs take turns through a
-machine-wide test slot, shared by every process of one user account ([Taking turns: the test slot](#taking-turns-the-test-slot)).
+can each start a full `dotnet test` run at the same moment. The declared gates and plain `dotnet test`
+runs do not queue, so concurrent full runs overlap; the machine-wide test slot is opt-in, taken only
+by a caller that passes `--slot` ([Taking turns: the test slot](#taking-turns-the-test-slot)).
 
 **Rule: every local KyberDash and tray test, gate and e2e command runs through the watchdog, from the repository root; `.NET` commands run directly via `dotnet`.**
 Do not start the dashboard (`kyberdash web`, `npm run dev -- web`) to run a test.
