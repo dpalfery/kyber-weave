@@ -24,27 +24,38 @@ public static class CopilotOverrideSettings
     /// Reads one VS Code settings file, telling a missing file apart from one that is present but unusable.
     /// </summary>
     /// <param name="settingsFile">The settings file path.</param>
+    /// <param name="isDirectory">Reports whether the path names a directory.</param>
+    /// <param name="readAllBytes">Reads the file's bytes; called only when the path is present.</param>
+    /// <param name="isPresent">
+    /// Reports whether the path names a readable file, resolving a link to its final target. A link whose target does
+    /// not exist is absent.
+    /// </param>
     /// <returns>The bytes; or neither bytes nor error when the file is missing; or the reason it cannot be read.</returns>
     /// <remarks>
-    /// A symbolic link whose final target does not exist is missing: <see cref="File.Exists(string)"/> is true for it,
-    /// but there is nothing to read, and a write goes through it. A directory at the path is present but unusable.
-    /// Every probe and the read itself are guarded, so an IO or permission failure comes back as
-    /// <see cref="SettingsFileRead.Error"/> for the caller to report, never as a crash. The install commands and the
-    /// doctor probe both read through here, so they agree on what they see.
+    /// A symbolic link whose final target does not exist is missing: it exists as a link, but there is nothing to
+    /// read, and a write goes through it. A directory at the path is present but unusable. Every probe and the read
+    /// itself are guarded, so an IO or permission failure comes back as <see cref="SettingsFileRead.Error"/> for the
+    /// caller to report, never as a crash. The install commands and the doctor probe both read through here, so they
+    /// agree on what they see.
     /// </remarks>
-    public static SettingsFileRead ReadFile(string settingsFile)
+    public static SettingsFileRead ReadFile(
+        string settingsFile,
+        Func<string, bool> isDirectory,
+        Func<string, bool> isPresent,
+        Func<string, byte[]> readAllBytes)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(settingsFile);
+        ArgumentNullException.ThrowIfNull(isDirectory);
+        ArgumentNullException.ThrowIfNull(isPresent);
+        ArgumentNullException.ThrowIfNull(readAllBytes);
         try
         {
-            if (Directory.Exists(settingsFile))
+            if (isDirectory(settingsFile))
                 return new SettingsFileRead(null, "the path is a directory, not a file");
 
-            FileInfo info = new(settingsFile);
-            bool present = info.LinkTarget is null
-                ? info.Exists
-                : info.ResolveLinkTarget(returnFinalTarget: true) is { Exists: true };
-            return present ? new SettingsFileRead(File.ReadAllBytes(settingsFile), null) : new SettingsFileRead(null, null);
+            return isPresent(settingsFile)
+                ? new SettingsFileRead(readAllBytes(settingsFile), null)
+                : new SettingsFileRead(null, null);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {

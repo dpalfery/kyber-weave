@@ -2,9 +2,8 @@ using System.ComponentModel;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Processes;
-using KyberWeave.Domain.Doctor;
 
-namespace KyberWeave.Core.Doctor;
+namespace KyberWeave.Domain.Doctor;
 
 /// <summary>
 ///     Proves the Kyber-Weave docs MCP server answers for this checkout, over a real stdio session.

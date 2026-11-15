@@ -2,9 +2,10 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Cli.Commands;
-using KyberWeave.Domain.CopilotPrompt;
 using KyberWeave.Core.Docs.Mcp;
+using KyberWeave.Core.Doctor;
 using KyberWeave.Core.FileSystem;
+using KyberWeave.Domain.CopilotPrompt;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -99,7 +100,7 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
         foreach (VsCodeFlavour flavour in targets)
         {
             string file = CopilotPromptCommandSupport.SettingsFileOf(flavour, environment);
-            SettingsFileRead read = CopilotOverrideSettings.ReadFile(file);
+            SettingsFileRead read = DoctorFileSystem.ReadSettingsFile(file);
             if (read.Error is not null)
             {
                 refusals.Add($"{file} could not be read, so it was left unchanged: {read.Error}");
@@ -231,7 +232,7 @@ public sealed class CopilotPromptUninstallCommand : Command<CopilotPromptSetting
         foreach (VsCodeFlavour flavour in CopilotPromptCommandSupport.DetectedTargets(environment, requested))
         {
             string file = CopilotPromptCommandSupport.SettingsFileOf(flavour, environment);
-            SettingsFileRead read = CopilotOverrideSettings.ReadFile(file);
+            SettingsFileRead read = DoctorFileSystem.ReadSettingsFile(file);
             if (read.Error is not null)
             {
                 refusals.Add($"{file} could not be read, so it was left unchanged: {read.Error}");
@@ -373,7 +374,7 @@ public sealed class CopilotPromptStatusCommand : Command<CopilotPromptSettings>
             }
 
             string file = CopilotPromptCommandSupport.SettingsFileOf(flavour, environment);
-            SettingsFileRead read = CopilotOverrideSettings.ReadFile(file);
+            SettingsFileRead read = DoctorFileSystem.ReadSettingsFile(file);
             if (read.Error is not null)
             {
                 CopilotPromptCommandSupport.Say($"{label}: {Markup.Escape(file)} could not be read: {Markup.Escape(read.Error)}");

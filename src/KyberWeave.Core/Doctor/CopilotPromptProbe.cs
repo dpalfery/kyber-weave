@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Domain.CopilotPrompt;
 using KyberWeave.Domain.Doctor;
 
@@ -17,9 +18,6 @@ public static partial class CopilotPromptProbe
     private const int MaximumLogDepth = 8;
     private const long LogTailBytes = 4L * 1024 * 1024;
 
-    /// <summary>Lists the directory's entries one level at a time; a link is not followed. See <c>docs/standards/csharp</c>.</summary>
-    private static readonly EnumerationOptions OneLevel = new() { RecurseSubdirectories = false, AttributesToSkip = 0 };
-
     /// <summary>
     /// Runs the Copilot system-prompt checks for one user.
     /// </summary>
@@ -28,18 +26,27 @@ public static partial class CopilotPromptProbe
     /// <param name="appDataDirectory">The roaming application-data directory on Windows; may be null elsewhere.</param>
     /// <param name="platform">The operating system whose VS Code layout applies.</param>
     /// <param name="xdgConfigHome">The <c>XDG_CONFIG_HOME</c> value, which moves the VS Code user data on Linux.</param>
+    /// <param name="fileSystem">Reads the file system. Production registers the physical adapter; a test injects a fake.</param>
     /// <returns>The checks in report order. Empty when the override is not in use.</returns>
     /// <remarks>
     /// Without an installed prompt file there is nothing to check, so a repository that never opted in sees no
     /// new output. In <see cref="DoctorMode.Ensure"/> every failure becomes a warning that passes, as the other
     /// doctor checks do for a repository that opted out of stopping.
     /// </remarks>
-    public static IReadOnlyList<DoctorCheck> Run(DoctorMode mode, string homeDirectory, string? appDataDirectory, OSPlatform platform, string? xdgConfigHome = null)
+    public static IReadOnlyList<DoctorCheck> Run(
+        DoctorMode mode,
+        string homeDirectory,
+        string? appDataDirectory,
+        OSPlatform platform,
+        string? xdgConfigHome = null,
+        IDoctorFileSystem? fileSystem = null)
     {
         ArgumentNullException.ThrowIfNull(homeDirectory);
 
+        IDoctorFileSystem files = fileSystem ?? DoctorFileSystem.Default;
+
         string promptPath = CopilotPromptFile.InstalledPath(homeDirectory);
-        if (!File.Exists(promptPath))
+        if (!files.FileExists(promptPath))
             return [];
 
         List<DoctorCheck> checks = [];
@@ -49,7 +56,11 @@ public static partial class CopilotPromptProbe
         {
             string settingsFile = VsCodeUserSettingsPaths.SettingsFile(flavour, homeDirectory, appDataDirectory, platform, xdgConfigHome);
             string label = flavour == VsCodeFlavour.Insiders ? "insiders" : "stable";
-            SettingsFileRead read = CopilotOverrideSettings.ReadFile(settingsFile);
+            SettingsFileRead read = CopilotOverrideSettings.ReadFile(
+                settingsFile,
+                files.DirectoryExists,
+                files.IsPresentFile,
+                files.ReadAllBytes);
             if (read.Error is not null)
             {
                 // Present but unusable is its own fault: "no settings file points at it" would send the person to reinstall.
@@ -81,8 +92,8 @@ public static partial class CopilotPromptProbe
             anyFlavourPoints = true;
             string userData = VsCodeUserSettingsPaths.UserDataDirectory(flavour, homeDirectory, appDataDirectory, platform, xdgConfigHome);
             checks.Add(new DoctorCheck($"copilot.prompt.{label}.setting", true, null, null));
-            checks.Add(FileCheck(label, promptPath));
-            checks.Add(LogCheck(label, userData));
+            checks.Add(FileCheck(label, promptPath, files));
+            checks.Add(LogCheck(label, userData, files));
         }
 
         if (!anyFlavourPoints && !anyUnreadable)
@@ -106,13 +117,13 @@ public static partial class CopilotPromptProbe
         new(id, true, $"warning: {reason}", null);
 
     /// <summary>Checks that the installed prompt file is readable and valid YAML with the allowed keys.</summary>
-    private static DoctorCheck FileCheck(string label, string promptPath)
+    private static DoctorCheck FileCheck(string label, string promptPath, IDoctorFileSystem files)
     {
         string id = $"copilot.prompt.{label}.file";
         string text;
         try
         {
-            text = File.ReadAllText(promptPath);
+            text = files.ReadAllText(promptPath);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -132,16 +143,16 @@ public static partial class CopilotPromptProbe
     /// VS Code logs the mode it actually applied, which is the only proof the override is live: the settings file
     /// can be right while the file it names is ignored. A log that does not yet hold the line is inconclusive.
     /// </remarks>
-    private static DoctorCheck LogCheck(string label, string userDataDirectory)
+    private static DoctorCheck LogCheck(string label, string userDataDirectory, IDoctorFileSystem files)
     {
         string id = $"copilot.prompt.{label}.log";
         try
         {
-            string? newest = NewestLogFolder(Path.Combine(userDataDirectory, LogFolderName));
+            string? newest = NewestLogFolder(Path.Combine(userDataDirectory, LogFolderName), files);
             if (newest is null)
                 return Inconclusive(id, "no AgentHost log folder was found, so the prompt in use is not proven");
 
-            string? mode = LastResolvedMode(AgentHostLogs(newest));
+            string? mode = LastResolvedMode(AgentHostLogs(newest, files), files);
             if (mode is null)
                 return Inconclusive(id, "the newest log has no 'Resolved system message' line yet");
 
@@ -157,16 +168,16 @@ public static partial class CopilotPromptProbe
     }
 
     /// <summary>The timestamp folder with the greatest name. The names sort chronologically, so the newest wins.</summary>
-    private static string? NewestLogFolder(string logsRoot)
+    private static string? NewestLogFolder(string logsRoot, IDoctorFileSystem files)
     {
-        if (!Directory.Exists(logsRoot))
+        if (!files.DirectoryExists(logsRoot))
             return null;
 
         string? newest = null;
-        foreach (FileSystemInfo entry in new DirectoryInfo(logsRoot).EnumerateFileSystemInfos("*", OneLevel))
+        foreach (DoctorDirectoryEntry entry in files.ListEntries(logsRoot))
         {
             // A link is skipped, not followed: the log root must not send the probe outside the user-data directory.
-            if (entry is not DirectoryInfo || entry.LinkTarget is not null)
+            if (!entry.IsDirectory || entry.IsLink)
                 continue;
             if (newest is null || string.CompareOrdinal(entry.Name, newest) > 0)
                 newest = entry.Name;
@@ -176,7 +187,7 @@ public static partial class CopilotPromptProbe
     }
 
     /// <summary>Every <c>agenthost*.log</c> under the folder, at any depth, in path order. Links are not followed.</summary>
-    private static List<string> AgentHostLogs(string root)
+    private static List<string> AgentHostLogs(string root, IDoctorFileSystem files)
     {
         List<string> found = [];
         Stack<(string Folder, int Depth)> pending = new();
@@ -184,18 +195,18 @@ public static partial class CopilotPromptProbe
         while (pending.Count > 0)
         {
             (string folder, int depth) = pending.Pop();
-            foreach (FileSystemInfo entry in new DirectoryInfo(folder).EnumerateFileSystemInfos("*", OneLevel))
+            foreach (DoctorDirectoryEntry entry in files.ListEntries(folder))
             {
-                if (entry.LinkTarget is not null)
+                if (entry.IsLink)
                     continue;
-                if (entry is DirectoryInfo)
+                if (entry.IsDirectory)
                 {
                     if (depth < MaximumLogDepth)
-                        pending.Push((entry.FullName, depth + 1));
+                        pending.Push((entry.FullPath, depth + 1));
                 }
                 else if (IsAgentHostLog(entry.Name))
                 {
-                    found.Add(entry.FullName);
+                    found.Add(entry.FullPath);
                 }
             }
         }
@@ -216,11 +227,11 @@ public static partial class CopilotPromptProbe
     /// last <see cref="LogTailBytes"/> of a file is read. A file that was cut and has no match in its tail stops the
     /// search with null: its mode line may sit before the tail, so an older file's mode would be stale.
     /// </remarks>
-    private static string? LastResolvedMode(IReadOnlyList<string> logFiles)
+    private static string? LastResolvedMode(IReadOnlyList<string> logFiles, IDoctorFileSystem files)
     {
         for (int index = logFiles.Count - 1; index >= 0; index--)
         {
-            string? mode = LastModeInTail(logFiles[index], out bool cut);
+            string? mode = LastModeInTail(logFiles[index], files, out bool cut);
             if (mode is not null)
                 return mode;
             if (cut)
@@ -233,20 +244,11 @@ public static partial class CopilotPromptProbe
     /// <summary>
     /// The last <c>mode=</c> token in the final <see cref="LogTailBytes"/> of one log, streamed line by line.
     /// </summary>
-    /// <remarks>VS Code holds the log open for writing, so the file is opened with read-write sharing.</remarks>
-    private static string? LastModeInTail(string file, out bool cut)
+    private static string? LastModeInTail(string file, IDoctorFileSystem files, out bool cut)
     {
-        using FileStream stream = new(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-        cut = stream.Length > LogTailBytes;
-        bool partialFirstLine = false;
-        if (cut)
-        {
-            // The first line is partial only when the byte before the tail is not a line break.
-            stream.Seek(-LogTailBytes - 1, SeekOrigin.End);
-            partialFirstLine = stream.ReadByte() != '\n';
-        }
-
-        using StreamReader reader = new(stream);
+        string tail = files.ReadTail(file, LogTailBytes, out bool partialFirstLine);
+        cut = partialFirstLine;
+        using StringReader reader = new(tail);
         if (partialFirstLine)
             reader.ReadLine();
 

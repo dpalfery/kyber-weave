@@ -92,7 +92,7 @@ public static class RepositoryDoctor
             checks = [.. checks, .. CopilotPromptProbe.Run(mode, home, environment("APPDATA"), CurrentPlatform(), environment("XDG_CONFIG_HOME"))];
 
         // Advisory only: a passing check with a warning, in every mode, so it never changes the exit code.
-        checks = [.. checks, .. CopilotLargeOutputProbe.Run(repositoryRoot, home, environment)];
+        checks = [.. checks, .. CopilotLargeOutputProbe.Run(repositoryRoot, home, environment, Directory.Exists, File.Exists)];
 
         int exitCode = codegraph.BinaryMissing
             ? 3

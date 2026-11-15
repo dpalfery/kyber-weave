@@ -4,33 +4,6 @@ using KyberWeave.Domain.Doctor;
 
 namespace KyberWeave.Core.Doctor;
 
-/// <summary>The state a repository tree's CodeGraph index is in after <see cref="WorktreeIndexGuard.Ensure"/>.</summary>
-public enum WorktreeIndexStatus
-{
-    /// <summary>The index exists and answers.</summary>
-    Ready,
-
-    /// <summary>The repository has no governed docs, so it has no index to keep.</summary>
-    NotGoverned,
-
-    /// <summary>The <c>codegraph</c> executable is not on PATH.</summary>
-    BinaryMissing,
-
-    /// <summary>The index could not be created, synced or proved.</summary>
-    Failed,
-}
-
-/// <summary>The result of ensuring one tree's CodeGraph index.</summary>
-/// <param name="Status">The index state.</param>
-/// <param name="Created">True when this call created the index with <c>codegraph init</c> and it is ready now.</param>
-/// <param name="StopsRun">True when the caller must stop: the index is unusable and the repository stops on tool failure.</param>
-/// <param name="Checks">The <c>codegraph.*</c> checks, in order, for the caller to report.</param>
-public sealed record WorktreeIndexOutcome(
-    WorktreeIndexStatus Status,
-    bool Created,
-    bool StopsRun,
-    IReadOnlyList<DoctorCheck> Checks);
-
 /// <summary>
 ///     Makes sure a repository tree has a usable CodeGraph index before a run or a review works in it.
 /// </summary>

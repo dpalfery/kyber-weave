@@ -1,6 +1,4 @@
-using KyberWeave.Domain.Doctor;
-
-namespace KyberWeave.Core.Doctor;
+namespace KyberWeave.Domain.Doctor;
 
 /// <summary>
 ///     Advisory doctor check: whether GitHub Copilot CLI is set to keep large tool results inline, so the code index
@@ -38,13 +36,22 @@ public static class CopilotLargeOutputProbe
     /// <param name="repositoryRoot">The repository root, whose Copilot files show the Copilot target is installed.</param>
     /// <param name="home">The user's home directory, or null when the environment names none.</param>
     /// <param name="environment">Reads one environment variable.</param>
+    /// <param name="directoryExists">Reports whether a directory exists. Injected so this stays free of I/O.</param>
+    /// <param name="fileExists">Reports whether a file exists. Injected so this stays free of I/O.</param>
     /// <returns>One check, or none when Copilot CLI is not in use.</returns>
-    public static IReadOnlyList<DoctorCheck> Run(string repositoryRoot, string? home, Func<string, string?> environment)
+    public static IReadOnlyList<DoctorCheck> Run(
+        string repositoryRoot,
+        string? home,
+        Func<string, string?> environment,
+        Func<string, bool> directoryExists,
+        Func<string, bool> fileExists)
     {
         ArgumentNullException.ThrowIfNull(repositoryRoot);
         ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(directoryExists);
+        ArgumentNullException.ThrowIfNull(fileExists);
 
-        if (!CopilotInUse(repositoryRoot, home, environment))
+        if (!CopilotInUse(repositoryRoot, home, environment, directoryExists, fileExists))
             return [];
 
         string? raw = environment(VariableName);
@@ -67,16 +74,21 @@ public static class CopilotLargeOutputProbe
     ///     Whether the Copilot target is in use: the user has a Copilot CLI home directory, or this repository holds
     ///     the files the Squad Copilot target installs.
     /// </summary>
-    private static bool CopilotInUse(string repositoryRoot, string? home, Func<string, string?> environment)
+    private static bool CopilotInUse(
+        string repositoryRoot,
+        string? home,
+        Func<string, string?> environment,
+        Func<string, bool> directoryExists,
+        Func<string, bool> fileExists)
     {
         string? copilotHome = environment("COPILOT_HOME");
-        if (!string.IsNullOrWhiteSpace(copilotHome) && Directory.Exists(copilotHome))
+        if (!string.IsNullOrWhiteSpace(copilotHome) && directoryExists(copilotHome))
             return true;
 
-        if (!string.IsNullOrWhiteSpace(home) && Directory.Exists(Path.Combine(home, ".copilot")))
+        if (!string.IsNullOrWhiteSpace(home) && directoryExists(Path.Combine(home, ".copilot")))
             return true;
 
-        return Directory.Exists(Path.Combine(repositoryRoot, ".github", "agents"))
-            || File.Exists(Path.Combine(repositoryRoot, ".github", "copilot-instructions.md"));
+        return directoryExists(Path.Combine(repositoryRoot, ".github", "agents"))
+            || fileExists(Path.Combine(repositoryRoot, ".github", "copilot-instructions.md"));
     }
 }
