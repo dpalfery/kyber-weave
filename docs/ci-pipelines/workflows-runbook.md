@@ -222,10 +222,11 @@ enforces the per-harness completeness predicate continuously:
   configuration the job loads, so `dash/playwright.config.ts` — whose
   `webServer` targets the live host — stays unloaded. The spec boots and tears down its own
   isolated C# engine, so the job fails when the run leaves its server behind.
-- **Leftover step:** a job that starts a server, a watcher or a browser ends with an
-  `if: always()` step that records the job's start epoch in its first step and reports any
-  process still running after that epoch. The retired `scripts/proc-guard.sh check-leftovers`
-  helper is gone; the step states its own check in the workflow.
+- **Leftover processes:** no job carries a leftover-process step any more. The
+  `scripts/proc-guard.sh check-leftovers` helper and the workflow steps that replaced it went
+  with the Node engine, which was the only thing spawning recursive children. The .NET jobs end
+  with `dotnet build-server shutdown` (`if: always()`) instead, and the conformance spec tears
+  down the isolated engine it booted and fails the job when that server is still running.
 
 Local equivalent (must stay GREEN; the command runs directly, with no wrapper — see
 [Running tests safely](../dash/runbook.md#running-tests-safely)):
@@ -234,26 +235,27 @@ Local equivalent (must stay GREEN; the command runs directly, with no wrapper �
 npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/harness-collection.spec.ts
 ```
 
-### Leftover-process steps in `ts-gates`, `dash-e2e` and `build-test`
+### Process cleanup steps in `dash-e2e` and `build-test`
 
-Three jobs in `ci.yml` end with the same leftover step. Each records the job's start
-epoch in its first step and fails when a process it left behind is still running:
+No job inspects the process table for leftovers: there is no wrapper, no start-epoch marker
+and no `check-leftovers` step in `ci.yml`. The two jobs that build .NET end with the same
+`if: always()` step, `dotnet build-server shutdown`, because the MSBuild and `VBCSCompiler`
+servers outlive every build by design:
 
-| Job | Test steps before the leftover step | Notes |
-|---|---|---|
-| `ts-gates` | `npm test` (dash), the lint and reachability gates, and the tray UI test | Dash and tray TypeScript gates. |
-| `dash-e2e` | `npx --prefix dash playwright test --config dash/playwright.isolated.config.ts …` | The only Playwright invocation in CI. |
-| `build-test` | `dotnet test`, then `dotnet build-server shutdown` | The shutdown stops the MSBuild and `VBCSCompiler` servers, which outlive every build by design, so they are not counted as leftovers. |
+| Job | Steps before the shutdown |
+|---|---|
+| `dash-e2e` | `npx --prefix dash playwright test --config dash/playwright.isolated.config.ts …`, the only Playwright invocation in CI |
+| `build-test` | `dotnet format`, `dotnet build`, `dotnet test`, `dotnet pack` |
 
-The step lists orphaned processes (parent PID 1) whose command
-line contains the workspace path and that started after the job began. The runner's own
-processes do not carry the workspace path, so they are not counted. The check is POSIX-only;
-these three jobs run on `ubuntu-latest`.
+`ts-gates` starts no long-lived server, so it needs no cleanup step. `dash-e2e` also fails on
+its own terms when the isolated C# engine it booted is still running at teardown, because the
+spec stops that engine and waits for it to empty.
 
 The CI test steps call their tools directly, and so do local runs: nothing wraps them any more,
-because the retired watchdog and process ledger went with the Node engine. The leftover step above
-is the CI backstop, and `kyber-weave review gates` is what refuses a full-suite gate outside the
-council (see the review council architecture).
+because the retired watchdog and process ledger went with the Node engine. `kyber-weave review
+gates` is what refuses a full-suite gate outside the council (see the review council
+architecture). A run that hangs is stopped by you or by the tool's own timeout; there is no
+absolute process cap.
 
 `dash-e2e` runs only `harness-collection.spec.ts`. `refresh-filters.spec.ts` is in the isolated
 config but not in CI, and the other Playwright specs have no sanctioned invocation. That gap is
