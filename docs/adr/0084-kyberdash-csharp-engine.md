@@ -57,5 +57,5 @@ Decision 5 of [ADR 0020](0020-kyberdash-one-time-fork.md) anticipated moving the
 ## Consequences
 
 - `dash/server/` is one solution split along Clean Architecture lines, and `KyberDash.Presentation.Tests` holds the assembly boundaries while every parity suite runs directly under `dotnet test` with no Node harness wrapper or process watchdog to install or run.
-- `dash/` retains the React web dashboard (`dash/web/`), the Tauri tray (`dash/tray/`), Playwright UI end-to-end tests, the packed web asset/smoke scripts (`dash/scripts/`), and the retired TypeScript engine kept read-only under `dash/archived/`.
+- `dash/` retains the React web dashboard (`dash/web/`), the Tauri tray (`dash/tray/`), Playwright UI end-to-end tests, and the packed web asset/smoke scripts (`dash/scripts/`). The retired TypeScript engine is not kept beside it: it is preserved by git history, so no build, scan or review target has to exclude a snapshot of code that cannot run.
 - Release and local packaging produce self-contained `.NET 10` single-file binaries for `kyberdash`, `kyberdash-api`, and `kyberdash-mcp` across `linux-x64`, `linux-arm64`, `osx-x64`/`darwin-x64`, `osx-arm64`/`darwin-arm64`, and `win-x64` without Node SEA or `postject`.

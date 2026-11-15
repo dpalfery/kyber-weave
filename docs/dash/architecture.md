@@ -194,8 +194,8 @@ edited on its merits, under the repository's gates.
 
 The former `dash/kyber/**` and `dash/src/**` TypeScript engine trees — along with the Electron desktop app,
 the inherited Windows tray, the macOS menu-bar bundle, and the Ink TUI — were retired and replaced by
-the C# Clean Architecture solution under `dash/server/**`; the retired engine is kept read-only under
-`dash/archived/**`, and the table above is the whole current layout.
+the C# Clean Architecture solution under `dash/server/**`. No copy of the retired engine is kept in the
+tree; git history holds it, so the table above is the whole current layout.
 
 ## Ingest layer
 
@@ -2015,11 +2015,11 @@ receiver child spawns ([ADR 0047](../adr/0047-kyberdash-self-spawns-through-one-
   `dash/playwright.isolated.config.ts` (`harness-collection.spec.ts`, `workers: 1`), and the spec
   boots and tears down its own C# engine.
 - **No wrapper and no process cap any more:** `scripts/proc-guard.sh`, the absolute process-cap
-  watchdog, and the JS process ledger it worked with (`dash/tests/setup/process-ledger.ts`, now kept
-  read-only under `dash/archived/tests/setup/`) were retired with the Node engine, once nothing under
-  `dash/server/` spawned recursive `job` or `receiver` children. Commands run directly, and the
-  static allow-list above is the bound on the process sites that remain. The retired guard's
-  residuals are kept for provenance at
+  watchdog, and the JS process ledger it worked with (`dash/tests/setup/process-ledger.ts`) were
+  retired with the Node engine, once nothing under `dash/server/` spawned recursive `job` or
+  `receiver` children, and the retired engine is no longer kept in the tree. Commands run directly,
+  and the static allow-list above is the bound on the process sites that remain. The retired guard's
+  residuals are recorded at
   [the archived spawn-guard residuals todo](../archive/todo/kyberdash-spawn-guard-residuals.md).
 
 **.NET side of the audit.** The .NET project runs the same kind of audit over `tests/KyberWeave.Tests`,

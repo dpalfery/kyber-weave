@@ -29,8 +29,8 @@ under OS locks (`EngineOwner` over `engine.sock` and `JobsLease` over `jobs.lock
 The 2026-11-15 update retires two safeguards this ADR originally introduced for the TypeScript
 engine: the process ledger (`dash/tests/setup/process-ledger.ts`) and the
 `scripts/proc-guard.sh` watchdog. Both existed to cap and reap the recursive Node child processes
-that engine started, and both were removed with those children; the ledger's files are kept
-read-only under `dash/archived/tests/setup/`. The active safeguards are now `EngineOwner`,
+that engine started, and both were removed with those children; the retired engine, ledger included,
+is gone from the tree and lives in git history. The active safeguards are now `EngineOwner`,
 `JobsLease`, the in-process `JobSchedulerService` and `OtlpCollectorService`, and the static
 spawn-site audit in `ProcessSpawnSitesTests`.
 
