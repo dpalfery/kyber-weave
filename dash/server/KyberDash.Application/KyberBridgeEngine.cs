@@ -414,8 +414,10 @@ public class KyberBridgeEngine
             budget = ContentResponseBudget,
             totalBytes,
             preview = TruncateUtf8(rawJson, ContentResponseBudget),
-            parts = chunks,
-            items = chunks,
+            // A truncated answer must stay inside the budget, so it withholds the full arrays and
+            // carries the preview instead.
+            parts = Array.Empty<object>(),
+            items = Array.Empty<object>(),
         }, CamelCaseJsonOptions);
     }
 
