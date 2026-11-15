@@ -173,7 +173,8 @@ public class BoundedIngestWriter
                 spanQueue.Enqueue((spans[index], index == 0 ? wireBytes : 0L));
             }
 
-            queuedBytes += wireBytes;
+            if (spans.Count > 0)
+                queuedBytes += wireBytes;
             return new IngestAdmissionResult(true, 200);
         }
     }
@@ -207,12 +208,15 @@ public class BoundedIngestWriter
                 return new IngestAdmissionResult(false, 503, RetryAfterSeconds, "Ingest backlog is full; retry after backoff.");
             }
 
-            foreach (OtlpLog log in logs)
+            // Same accounting as spans: charge the request against its first item so the drain
+            // releases exactly the bytes admission charged.
+            for (int index = 0; index < logs.Count; index++)
             {
-                logQueue.Enqueue((log, 0L));
+                logQueue.Enqueue((logs[index], index == 0 ? wireBytes : 0L));
             }
 
-            queuedBytes += wireBytes;
+            if (logs.Count > 0)
+                queuedBytes += wireBytes;
             return new IngestAdmissionResult(true, 200);
         }
     }
@@ -246,12 +250,13 @@ public class BoundedIngestWriter
                 return new IngestAdmissionResult(false, 503, RetryAfterSeconds, "Ingest backlog is full; retry after backoff.");
             }
 
-            foreach (OtlpMetric metric in metrics)
+            for (int index = 0; index < metrics.Count; index++)
             {
-                metricQueue.Enqueue((metric, 0L));
+                metricQueue.Enqueue((metrics[index], index == 0 ? wireBytes : 0L));
             }
 
-            queuedBytes += wireBytes;
+            if (metrics.Count > 0)
+                queuedBytes += wireBytes;
             return new IngestAdmissionResult(true, 200);
         }
     }
@@ -312,14 +317,19 @@ public class BoundedIngestWriter
             }
 
             List<OtlpLog> logs = [];
+            long drainedLogBytes = 0L;
             lock (stateGate)
             {
                 while (logQueue.Count > 0)
                 {
-                    logs.Add(logQueue.Dequeue().Log);
+                    (OtlpLog log, long bytes) = logQueue.Dequeue();
+                    logs.Add(log);
+                    drainedLogBytes += bytes;
                 }
 
                 inflightLogs += logs.Count;
+                inflightBytes += drainedLogBytes;
+                queuedBytes -= drainedLogBytes;
             }
 
             try
@@ -334,18 +344,24 @@ public class BoundedIngestWriter
                 lock (stateGate)
                 {
                     inflightLogs -= logs.Count;
+                    inflightBytes -= drainedLogBytes;
                 }
             }
 
             List<OtlpMetric> metrics = [];
+            long drainedMetricBytes = 0L;
             lock (stateGate)
             {
                 while (metricQueue.Count > 0)
                 {
-                    metrics.Add(metricQueue.Dequeue().Metric);
+                    (OtlpMetric metric, long bytes) = metricQueue.Dequeue();
+                    metrics.Add(metric);
+                    drainedMetricBytes += bytes;
                 }
 
                 inflightMetrics += metrics.Count;
+                inflightBytes += drainedMetricBytes;
+                queuedBytes -= drainedMetricBytes;
             }
 
             try
@@ -360,6 +376,7 @@ public class BoundedIngestWriter
                 lock (stateGate)
                 {
                     inflightMetrics -= metrics.Count;
+                    inflightBytes -= drainedMetricBytes;
                 }
             }
 
