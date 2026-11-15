@@ -63,6 +63,7 @@
         "type": "Project",
         "dependencies": {
           "KyberWeave.Core": "[0.1.0, )",
+          "KyberWeave.Domain": "[0.1.0, )",
           "Markdig": "[1.5.1, )",
           "YamlDotNet": "[18.1.0, )"
         }
@@ -86,7 +87,8 @@
       "kyberweave.domain": {
         "type": "Project",
         "dependencies": {
-          "KyberWeave.Kernel": "[0.1.0, )"
+          "KyberWeave.Kernel": "[0.1.0, )",
+          "Markdig": "[1.5.1, )"
         }
       },
       "kyberweave.kernel": {
