@@ -258,7 +258,7 @@ public sealed class ProcGuardScriptTests
         {
             if (tokens[index] == "dotnet" &&
                 (tokens[index + 1] == "test" ||
-                 tokens[index + 1].Contains("TEST_DLL", StringComparison.Ordinal)))
+                 tokens[index + 1] is "\"${TEST_DLL}\"" or "\"${POLICY_TEST_DLL}\""))
             {
                 return true;
             }
