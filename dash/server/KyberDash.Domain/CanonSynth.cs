@@ -104,7 +104,7 @@ public record ParsedProviderCall
 public record SourceRecordProvenance(
     [property: JsonPropertyName("harnessId")] string HarnessId,
     [property: JsonPropertyName("sourceKey")] string SourceKey,
-    [property: JsonPropertyName("nativeSessionId")] string NativeSessionId,
+    [property: JsonPropertyName("nativeSessionId"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? NativeSessionId,
     [property: JsonPropertyName("nativeRecordId")] string NativeRecordId,
     [property: JsonPropertyName("recordDigest"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? RecordDigest = null,
     [property: JsonPropertyName("sourceRevision"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SourceRevision = null,
@@ -380,14 +380,18 @@ public static class CanonSynth
         return !string.IsNullOrEmpty(envelope?.HarnessId) ? envelope.HarnessId : call.Provider;
     }
 
-    /// <summary>Returns the native session identifier for <paramref name="call"/> and optional <paramref name="envelope"/>.</summary>
-    public static string NativeSessionIdFor(ParsedProviderCall call, SourceRecordEnvelope? envelope = null)
+    /// <summary>
+    /// Returns the native session identifier for <paramref name="call"/>, or <see langword="null"/>
+    /// when neither the envelope nor the call carries one. Absence stays absent: a fabricated
+    /// placeholder would make distinct anonymous calls share one session identity.
+    /// </summary>
+    public static string? NativeSessionIdFor(ParsedProviderCall call, SourceRecordEnvelope? envelope = null)
     {
         ArgumentNullException.ThrowIfNull(call);
         if (!string.IsNullOrEmpty(envelope?.NativeSessionId))
             return envelope.NativeSessionId;
 
-        return call.SessionId ?? "null";
+        return string.IsNullOrEmpty(call.SessionId) ? null : call.SessionId;
     }
 
     /// <summary>
@@ -438,11 +442,13 @@ public static class CanonSynth
     {
         ArgumentNullException.ThrowIfNull(call);
         string harnessId = HarnessIdFor(call, envelope);
-        string nativeSessionId = NativeSessionIdFor(call, envelope);
+        string? nativeSessionId = NativeSessionIdFor(call, envelope);
         (string nativeRecordId, string? recordDigest) = NativeRecordIdentity(call, envelope, ordinal);
         return new SourceRecordProvenance(
             HarnessId: harnessId,
-            SourceKey: !string.IsNullOrEmpty(envelope?.SourceKey) ? envelope.SourceKey : $"{harnessId}:{nativeSessionId}",
+            SourceKey: !string.IsNullOrEmpty(envelope?.SourceKey)
+                ? envelope.SourceKey
+                : $"{harnessId}:{nativeSessionId ?? string.Empty}",
             NativeSessionId: nativeSessionId,
             NativeRecordId: nativeRecordId,
             RecordDigest: recordDigest,
@@ -493,7 +499,15 @@ public static class CanonSynth
     public static string TraceIdFor(ParsedProviderCall call, SourceRecordEnvelope? envelope = null)
     {
         ArgumentNullException.ThrowIfNull(call);
-        return $"{SynthSpanPrefix}{HarnessIdFor(call, envelope)}:{NativeSessionIdFor(call, envelope)}";
+        string harnessId = HarnessIdFor(call, envelope);
+        string? nativeSessionId = NativeSessionIdFor(call, envelope);
+        if (!string.IsNullOrEmpty(nativeSessionId))
+            return $"{SynthSpanPrefix}{harnessId}:{nativeSessionId}";
+
+        // With no session identity there is nothing to group by, so key the trace on the record:
+        // sharing one empty-session trace would merge unrelated anonymous calls.
+        (string nativeRecordId, _) = NativeRecordIdentity(call, envelope);
+        return $"{SynthSpanPrefix}{harnessId}:~{nativeRecordId}";
     }
 
     /// <summary>Returns <c>synth:&lt;harnessId&gt;:&lt;nativeSessionId&gt;:&lt;nativeRecordId&gt;</c> span identifier.</summary>
@@ -685,7 +699,7 @@ public static class CanonSynth
 
         TokenUsage tokens = FoldExclusiveReasoning(converted, call.Provider);
         string harness = HarnessIdFor(call, envelope);
-        string sessionId = NativeSessionIdFor(call, envelope);
+        string? sessionId = NativeSessionIdFor(call, envelope);
         SourceRecordProvenance provenance = ProvenanceFor(call, envelope, ordinal);
 
         HashSet<string> carriedKeys = new(StringComparer.Ordinal);
@@ -1428,6 +1442,17 @@ public static class CanonSynth
         cluster.Clear();
     }
 
+    private static T? MaxPresent<T>(T? left, T? right)
+        where T : struct, IComparable<T>
+    {
+        if (left is null)
+            return right;
+        if (right is null)
+            return left;
+
+        return left.Value.CompareTo(right.Value) >= 0 ? left : right;
+    }
+
     private static ParsedProviderCall MergeParsedCalls(ParsedProviderCall keeper, ParsedProviderCall donor)
     {
         string[] tools = (keeper.Tools ?? []).Concat(donor.Tools ?? []).Distinct(StringComparer.Ordinal).ToArray();
@@ -1442,8 +1467,9 @@ public static class CanonSynth
             ToolSequence = sequence.Length > 0 ? sequence : null,
             Skills = skills.Length > 0 ? skills : null,
             SkillsListed = keeper.SkillsListed ?? donor.SkillsListed,
-            WebSearchRequests = Math.Max(keeper.WebSearchRequests ?? 0, donor.WebSearchRequests ?? 0),
-            ActiveDurationMs = Math.Max(keeper.ActiveDurationMs ?? 0L, donor.ActiveDurationMs ?? 0L),
+            // An absent counter is not a measured zero: keep it absent unless the other side measured it.
+            WebSearchRequests = MaxPresent(keeper.WebSearchRequests, donor.WebSearchRequests),
+            ActiveDurationMs = MaxPresent(keeper.ActiveDurationMs, donor.ActiveDurationMs),
         };
     }
 
@@ -1536,7 +1562,9 @@ public static class CanonSynth
         if (!DateTimeOffset.TryParse(left, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTimeOffset dtLeft)
             || !DateTimeOffset.TryParse(right, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTimeOffset dtRight))
         {
-            return 0;
+            // An unreadable timestamp says nothing about closeness, so it must never be treated as
+            // "same instant": that would collapse unrelated turns.
+            return long.MaxValue;
         }
 
         return (long)Math.Abs((dtRight - dtLeft).TotalMilliseconds);
