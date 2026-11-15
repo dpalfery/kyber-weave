@@ -23,13 +23,6 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.14" />
   </ItemGroup>
 
-  <ItemGroup>
-    <InternalsVisibleTo Include="KyberWeave.Tests" />
-    <InternalsVisibleTo Include="KyberWeave.Core" />
-    <InternalsVisibleTo Include="KyberWeave.Core.Docs" />
-    <InternalsVisibleTo Include="KyberWeave.Core.Squad" />
-  </ItemGroup>
-
   <!-- Each area owns one Areas\<Area>.props for its resources and package references, so parallel moves never edit the same lines. -->
   <Import Project="Areas\*.props" />
 

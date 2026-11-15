@@ -16,10 +16,10 @@ public static class ServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        services.TryAddSingleton<IFileSystem, PhysicalFileSystem>();
-        services.TryAddSingleton<IProcessRunner, KernelProcessRunner>();
-        services.TryAddSingleton<IHooksConfigSource, YamlHooksConfigSource>();
-        services.TryAddSingleton<ITestClassResolver, ConventionTestClassResolver>();
+        services.TryAddSingleton<IFileSystem>(_ => new PhysicalFileSystem());
+        services.TryAddSingleton<IProcessRunner>(_ => new KernelProcessRunner());
+        services.TryAddSingleton<IHooksConfigSource>(sp => new YamlHooksConfigSource(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<ITestClassResolver>(sp => new ConventionTestClassResolver(sp.GetRequiredService<IFileSystem>()));
         return services;
     }
 }
