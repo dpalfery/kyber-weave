@@ -128,4 +128,37 @@ public sealed class HookRouterTests
 
         Assert.Equal(["a", "b", "t"], plan.Select(p => p.RuleId));
     }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("  ")]
+    [InlineData("/etc/passwd")]
+    [InlineData("../escape.cs")]
+    [InlineData("src/../../escape.cs")]
+    public void RejectsAnUnusableRelativePath(string path)
+    {
+        _ = Assert.ThrowsAny<ArgumentException>(() => HookRouter.MatchingRules(HooksDefaults.Config, path));
+        _ = Assert.ThrowsAny<ArgumentException>(() => HookRouter.Plan(HooksDefaults.Config, path, Facts));
+    }
+
+    [Fact]
+    public void RejectsANullRelativePath() =>
+        _ = Assert.Throws<ArgumentNullException>(() => HookRouter.MatchingRules(HooksDefaults.Config, null!));
+
+    [Fact]
+    public void NormalizesDotSegmentsBeforeMatchingAndExpanding()
+    {
+        IReadOnlyList<PlannedCommand> plan = HookRouter.Plan(HooksDefaults.Config, "src/./Other/../App/Foo.cs", Facts);
+
+        Assert.Contains("src/App/Foo.cs", plan[0].Argv);
+    }
+
+    [Fact]
+    public void LeavesOutARuleWhoseTestClassesTokenIsEmbeddedInALargerArgument()
+    {
+        HookRule rule = new("embedded", HookRuleKind.Test, ["**/*.cs"], [], ["dotnet", "test", "--filter={testClasses}"], 30, true, true);
+        HooksConfig config = HooksDefaults.Config with { Rules = [rule] };
+
+        Assert.Empty(HookRouter.Plan(config, "src/App/Foo.cs", Facts));
+    }
 }

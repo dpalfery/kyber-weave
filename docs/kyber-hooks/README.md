@@ -116,7 +116,8 @@ A rule has these keys:
 
 Tokens in `run`: `{file}`, `{marker}`, `{project}` and `{target}` (the project, else the marker), all
 repository-relative, `{root}` (absolute repository root), `{testProject}` (the test project holding the covering tests), and a standalone
-`{testClasses}` argument, which expands to one argument per class. Commands run from the repository
+`{testClasses}` argument, which expands to one argument per class. `{testClasses}` is not expanded inside a longer
+argument such as `--filter={testClasses}`; a rule written that way never runs. Commands run from the repository
 root. A new rule (an id that is not built in) must set `kind`, `include` and `run`.
 
 Unknown keys, wrong value types and incomplete new rules produce a warning in the feedback and are

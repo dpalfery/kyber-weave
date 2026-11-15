@@ -9,7 +9,7 @@ namespace KyberWeave.Domain.Hooks;
 /// The command as an argument list. Tokens: <c>{file}</c>, <c>{marker}</c> (the nearest solution), <c>{project}</c> (the nearest project) and
 /// <c>{target}</c> (the project, else the solution) are repository-relative paths, <c>{root}</c> is the absolute repository root, <c>{testProject}</c> is the test
 /// project that holds the covering tests, and a standalone <c>{testClasses}</c> argument expands to one
-/// argument per fully qualified test class.
+/// argument per fully qualified test class; the token is not expanded inside a larger argument such as <c>--filter={testClasses}</c>, and a rule that uses it that way is never run.
 /// </param>
 /// <param name="TimeoutSeconds">Longest the command may run.</param>
 /// <param name="Blocking">Whether a failure makes the hook exit 2 so the agent sees it.</param>

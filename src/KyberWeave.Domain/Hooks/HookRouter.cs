@@ -9,10 +9,12 @@ public static class HookRouter
     /// <param name="config">The effective config.</param>
     /// <param name="relativePath">The repository-relative changed file.</param>
     /// <returns>The matching rules in config order, so callers can skip work that only some kinds need.</returns>
+    /// <exception cref="ArgumentException"><paramref name="relativePath"/> is empty, absolute, or climbs out of the repository with <c>..</c>.</exception>
     public static IReadOnlyList<HookRule> MatchingRules(HooksConfig config, string relativePath)
     {
         ArgumentNullException.ThrowIfNull(config);
-        return [.. config.Rules.Where(r => Matches(r, relativePath))];
+        string path = Normalize(relativePath);
+        return [.. config.Rules.Where(r => Matches(r, path))];
     }
 
     /// <summary>Plans the commands for a changed file.</summary>
@@ -20,6 +22,7 @@ public static class HookRouter
     /// <param name="relativePath">The repository-relative changed file.</param>
     /// <param name="facts">The project facts for the file.</param>
     /// <returns>The commands from <see cref="Plan(IReadOnlyList{HookRule}, string, ProjectFacts)"/> for the matching rules.</returns>
+    /// <exception cref="ArgumentException"><paramref name="relativePath"/> is empty, absolute, or climbs out of the repository with <c>..</c>.</exception>
     public static IReadOnlyList<PlannedCommand> Plan(HooksConfig config, string relativePath, ProjectFacts facts) =>
         Plan(MatchingRules(config, relativePath), relativePath, facts);
 
@@ -29,12 +32,15 @@ public static class HookRouter
     /// <param name="facts">The project facts for the file.</param>
     /// <returns>
     /// Commands in order: lint rules first, then test rules, each in config order. A rule is left out when a token
-    /// it uses has no value for this file.
+    /// it uses has no value for this file, or when <c>{testClasses}</c> appears inside a larger argument instead of
+    /// standing alone.
     /// </returns>
+    /// <exception cref="ArgumentException"><paramref name="relativePath"/> is empty, absolute, or climbs out of the repository with <c>..</c>.</exception>
     public static IReadOnlyList<PlannedCommand> Plan(IReadOnlyList<HookRule> matchingRules, string relativePath, ProjectFacts facts)
     {
         ArgumentNullException.ThrowIfNull(matchingRules);
         ArgumentNullException.ThrowIfNull(facts);
+        relativePath = Normalize(relativePath);
 
         List<PlannedCommand> planned = [];
         foreach (HookRule rule in matchingRules.Where(r => r.Kind == HookRuleKind.Lint).Concat(matchingRules.Where(r => r.Kind == HookRuleKind.Test)))
@@ -46,6 +52,39 @@ public static class HookRouter
         }
 
         return planned;
+    }
+
+    private static string Normalize(string relativePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
+
+        string unified = relativePath.Replace('\\', '/');
+        if (unified.StartsWith('/') || Path.IsPathRooted(relativePath) || Path.IsPathFullyQualified(relativePath))
+        {
+            throw new ArgumentException("The path must be relative to the repository root.", nameof(relativePath));
+        }
+
+        List<string> segments = [];
+        foreach (string segment in unified.Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (segment == "..")
+            {
+                if (segments.Count == 0)
+                {
+                    throw new ArgumentException("The path must stay inside the repository root.", nameof(relativePath));
+                }
+
+                segments.RemoveAt(segments.Count - 1);
+            }
+            else if (segment != ".")
+            {
+                segments.Add(segment);
+            }
+        }
+
+        return segments.Count == 0
+            ? throw new ArgumentException("The path must name a file.", nameof(relativePath))
+            : string.Join('/', segments);
     }
 
     private static bool Matches(HookRule rule, string path) =>
@@ -68,6 +107,11 @@ public static class HookRouter
 
                 argv.AddRange(facts.TestClasses);
                 continue;
+            }
+
+            if (arg.Contains("{testClasses}", StringComparison.Ordinal))
+            {
+                return false;
             }
 
             string expanded = arg
