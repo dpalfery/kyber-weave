@@ -20,6 +20,17 @@ public sealed class PathContainmentTests
     }
 
     [Fact]
+    public void ComparesCaseSensitivelyOnLinux()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Skip("the case-sensitivity expectation is for Linux only");
+        }
+
+        Assert.False(PathContainment.IsWithin("/repo", "/REPO/a.cs"));
+    }
+
+    [Fact]
     public void RejectsDotDotTraversalOutOfTheDirectory()
     {
         string dir = Path.GetFullPath("/repo");
