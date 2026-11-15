@@ -28,14 +28,15 @@ public sealed class LayerReferenceTests
     };
 
     /// <summary>Entry apps that exist today. Each may reference these layers and nothing else new.</summary>
-    public static TheoryData<string> EntryApps => new() { "KyberWeave.Cli", "KyberWeave.Mcp", "KyberWeave.Arbiter" };
+    public static TheoryData<string> EntryApps => new() { "KyberWeave.Cli", "KyberWeave.Mcp", "KyberWeave.Arbiter", "KyberWeave.Hooks" };
 
     /// <summary>Legacy references an entry app still holds. Remove an entry when the reference is dropped; never add one.</summary>
     private static readonly Dictionary<string, string[]> LegacyReferenceBaseline = new(StringComparer.Ordinal)
     {
         ["KyberWeave.Cli"] = ["KyberWeave.Core", "KyberWeave.Core.Docs", "KyberWeave.Core.Squad"],
         ["KyberWeave.Mcp"] = ["KyberWeave.Core", "KyberWeave.Core.Docs"],
-        ["KyberWeave.Arbiter"] = ["KyberWeave.Core"]
+        ["KyberWeave.Arbiter"] = ["KyberWeave.Core"],
+        ["KyberWeave.Hooks"] = []
     };
 
     [Theory]
