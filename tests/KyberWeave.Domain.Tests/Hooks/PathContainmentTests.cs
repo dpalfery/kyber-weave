@@ -33,8 +33,13 @@ public sealed class PathContainmentTests
     [Theory]
     [InlineData(StringComparison.Ordinal, false)]
     [InlineData(StringComparison.OrdinalIgnoreCase, true)]
-    public void AppliesTheGivenComparison(StringComparison comparison, bool expected) =>
-        Assert.Equal(expected, PathContainment.IsWithinUsing("/repo", "/REPO/a.cs", comparison));
+    public void AppliesTheGivenComparison(StringComparison comparison, bool expected)
+    {
+        string root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "kw-containment"));
+        string recased = Path.Combine(root.ToUpperInvariant(), "a.cs");
+
+        Assert.Equal(expected, PathContainment.IsWithinUsing(root, recased, comparison));
+    }
 
     [Fact]
     public void RejectsDotDotTraversalOutOfTheDirectory()
