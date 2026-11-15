@@ -138,7 +138,8 @@ public sealed class EditHookService(
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                notes.Add($"rule '{command.RuleId}' could not run ({ex.Message}).");
+                string cause = ex.InnerException is { } inner ? $"; caused by {inner.GetType().Name}: {inner.Message}" : string.Empty;
+                notes.Add($"rule '{command.RuleId}' could not run ({ex.GetType().Name}: {ex.Message}{cause}).");
                 continue;
             }
 

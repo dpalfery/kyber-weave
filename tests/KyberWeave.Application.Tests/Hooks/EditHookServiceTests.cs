@@ -204,6 +204,20 @@ public sealed class EditHookServiceTests
 
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("could not run", result.Feedback, StringComparison.Ordinal);
+        Assert.Contains("IOException: dotnet not found", result.Feedback, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StartFailureNoteNamesTheInnerCause()
+    {
+        (EditHookService service, FakeProcessRunner runner, _) = Build();
+        runner.Respond = _ => throw new FileNotFoundException("command not found: dotnet", new UnauthorizedAccessException("permission denied"));
+
+        HookResult result = await service.RunAsync(Edit, CancellationToken.None);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("FileNotFoundException: command not found: dotnet", result.Feedback, StringComparison.Ordinal);
+        Assert.Contains("caused by UnauthorizedAccessException: permission denied", result.Feedback, StringComparison.Ordinal);
     }
 
     [Fact]
