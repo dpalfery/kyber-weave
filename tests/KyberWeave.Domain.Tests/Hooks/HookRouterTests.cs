@@ -65,6 +65,28 @@ public sealed class HookRouterTests
     }
 
     [Fact]
+    public void ReportsARuleThatEmbedsTestClassesInsideALargerArgument()
+    {
+        HookRule rule = new("embedded", HookRuleKind.Test, ["**"], [], ["dotnet", "--filter-class={testClasses}"], 10, true, true);
+        List<string> notes = [];
+
+        IReadOnlyList<PlannedCommand> plan = HookRouter.Plan([rule], "f", Facts, notes);
+
+        Assert.Empty(plan);
+        Assert.Equal(["rule 'embedded' was not run: {testClasses} must be a whole argument, not part of a longer one."], notes);
+    }
+
+    [Fact]
+    public void AddsNoNoteForAMissingTestClassValue()
+    {
+        List<string> notes = [];
+
+        _ = HookRouter.Plan(HookRouter.MatchingRules(WithTestsOn(), "src/App/Foo.cs"), "src/App/Foo.cs", Facts with { TestClasses = [], TestProject = null }, notes);
+
+        Assert.Empty(notes);
+    }
+
+    [Fact]
     public void FallsBackToTheSolutionWhenThereIsNoProject()
     {
         PlannedCommand first = HookRouter.Plan(HooksDefaults.Config, "src/App/Foo.cs", Facts with { Project = null })[0];

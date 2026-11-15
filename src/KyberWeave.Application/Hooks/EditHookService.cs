@@ -77,8 +77,9 @@ public sealed class EditHookService(
             tests.ProjectPath,
             tests.Classes);
 
-        IReadOnlyList<PlannedCommand> plan = HookRouter.Plan(matching, relative, facts);
-        if (plan.Count == 0)
+        List<string> notes = [.. config.Warnings];
+        IReadOnlyList<PlannedCommand> plan = HookRouter.Plan(matching, relative, facts, notes);
+        if (plan.Count == 0 && notes.Count == config.Warnings.Count)
         {
             return HookResult.Silent;
         }
@@ -87,7 +88,6 @@ public sealed class EditHookService(
         using CancellationTokenSource limitTimer = new(budget + Grace, timeProvider);
         using CancellationTokenSource hookLimit = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, limitTimer.Token);
 
-        List<string> notes = [.. config.Warnings];
         if (tests.Note is not null)
         {
             notes.Add(tests.Note);

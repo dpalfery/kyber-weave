@@ -21,7 +21,7 @@ public static class HookRouter
     /// <param name="config">The effective config.</param>
     /// <param name="relativePath">The repository-relative changed file.</param>
     /// <param name="facts">The project facts for the file.</param>
-    /// <returns>The commands from <see cref="Plan(IReadOnlyList{HookRule}, string, ProjectFacts)"/> for the matching rules.</returns>
+    /// <returns>The commands from <see cref="Plan(IReadOnlyList{HookRule}, string, ProjectFacts, ICollection{string}?)"/> for the matching rules.</returns>
     /// <exception cref="ArgumentException"><paramref name="relativePath"/> is empty, absolute, or climbs out of the repository with <c>..</c>.</exception>
     public static IReadOnlyList<PlannedCommand> Plan(HooksConfig config, string relativePath, ProjectFacts facts) =>
         Plan(MatchingRules(config, relativePath), relativePath, facts);
@@ -30,13 +30,14 @@ public static class HookRouter
     /// <param name="matchingRules">The rules from <see cref="MatchingRules"/>.</param>
     /// <param name="relativePath">The repository-relative changed file.</param>
     /// <param name="facts">The project facts for the file.</param>
+    /// <param name="notes">When given, receives one line for each rule left out because <c>{testClasses}</c> is embedded in a larger argument.</param>
     /// <returns>
     /// Commands in order: lint rules first, then test rules, each in config order. A rule is left out when a token
     /// it uses has no value for this file, or when <c>{testClasses}</c> appears inside a larger argument instead of
     /// standing alone.
     /// </returns>
     /// <exception cref="ArgumentException"><paramref name="relativePath"/> is empty, absolute, or climbs out of the repository with <c>..</c>.</exception>
-    public static IReadOnlyList<PlannedCommand> Plan(IReadOnlyList<HookRule> matchingRules, string relativePath, ProjectFacts facts)
+    public static IReadOnlyList<PlannedCommand> Plan(IReadOnlyList<HookRule> matchingRules, string relativePath, ProjectFacts facts, ICollection<string>? notes = null)
     {
         ArgumentNullException.ThrowIfNull(matchingRules);
         ArgumentNullException.ThrowIfNull(facts);
@@ -48,6 +49,10 @@ public static class HookRouter
             if (TryExpand(rule.Run, relativePath, facts, out List<string>? argv))
             {
                 planned.Add(new PlannedCommand(rule.Id, rule.Kind, argv, rule.TimeoutSeconds, rule.Blocking));
+            }
+            else if (notes is not null && rule.Run.Any(HasEmbeddedTestClasses))
+            {
+                notes.Add($"rule '{rule.Id}' was not run: {{testClasses}} must be a whole argument, not part of a longer one.");
             }
         }
 
@@ -109,7 +114,7 @@ public static class HookRouter
                 continue;
             }
 
-            if (arg.Contains("{testClasses}", StringComparison.Ordinal))
+            if (HasEmbeddedTestClasses(arg))
             {
                 return false;
             }
@@ -130,6 +135,9 @@ public static class HookRouter
 
         return true;
     }
+
+    private static bool HasEmbeddedTestClasses(string arg) =>
+        arg != "{testClasses}" && arg.Contains("{testClasses}", StringComparison.Ordinal);
 
     private static bool TryReplace(ref string text, string token, string? value)
     {
