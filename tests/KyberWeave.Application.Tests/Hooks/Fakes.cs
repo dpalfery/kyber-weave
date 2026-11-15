@@ -55,9 +55,24 @@ internal sealed class FakeTestClassResolver(TestClassResolution result) : ITestC
 
 internal sealed class FakeClock : TimeProvider
 {
+    private readonly List<FakeTimer> timers = [];
     private long ticks;
 
-    public void Advance(TimeSpan by) => ticks += (long)(by.TotalSeconds * Stopwatch.Frequency);
+    public void Advance(TimeSpan by)
+    {
+        ticks += (long)(by.TotalSeconds * Stopwatch.Frequency);
+        foreach (FakeTimer timer in timers.Where(t => t.Due is { } due && due <= ticks).ToList())
+        {
+            timer.Fire();
+        }
+    }
+
+    public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+    {
+        FakeTimer timer = new(callback, state, ticks + (long)(dueTime.TotalSeconds * Stopwatch.Frequency));
+        timers.Add(timer);
+        return timer;
+    }
 
     public override long GetTimestamp() => ticks;
 
@@ -78,4 +93,23 @@ internal sealed class FakeProcessRunner(FakeClock clock) : IProcessRunner
         clock.Advance(CostPerRun);
         return Task.FromResult(Respond(argv));
     }
+}
+
+internal sealed class FakeTimer(TimerCallback callback, object? state, long due) : ITimer
+{
+    public long? Due { get; private set; } = due;
+
+    public void Fire()
+    {
+        Due = null;
+        callback(state);
+    }
+
+    public bool Change(TimeSpan dueTime, TimeSpan period) => true;
+
+    public void Dispose()
+    {
+    }
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

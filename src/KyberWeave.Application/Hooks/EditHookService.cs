@@ -78,27 +78,35 @@ public sealed class EditHookService(
         }
 
         TimeSpan budget = TimeSpan.FromSeconds(config.TimeBudgetSeconds);
-        using CancellationTokenSource hookLimit = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        hookLimit.CancelAfter(budget + Grace);
+        using CancellationTokenSource limitTimer = new(budget + Grace, timeProvider);
+        using CancellationTokenSource hookLimit = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, limitTimer.Token);
 
         List<string> notes = [.. config.Warnings];
-        List<RuleOutcome> outcomes = await RunPlanAsync(plan, config, root, budget, notes, hookLimit.Token).ConfigureAwait(false);
+        List<RuleOutcome> outcomes = [];
+        try
+        {
+            await RunPlanAsync(plan, config, root, budget, outcomes, notes, hookLimit.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (limitTimer.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            notes.Add("the hook's own time limit was reached; the remaining check(s) were skipped for time.");
+        }
 
         string feedback = HookFeedbackFormatter.Format(relative, outcomes, notes, config.MaxOutputLines, config.MaxOutputBytes);
         bool blocked = outcomes.Any(o => o.Failed && o.Blocking);
         return new HookResult(blocked ? 2 : 0, feedback);
     }
 
-    private async Task<List<RuleOutcome>> RunPlanAsync(
+    private async Task RunPlanAsync(
         IReadOnlyList<PlannedCommand> plan,
         HooksConfig config,
         string root,
         TimeSpan budget,
+        List<RuleOutcome> outcomes,
         List<string> notes,
         CancellationToken cancellationToken)
     {
         long start = timeProvider.GetTimestamp();
-        List<RuleOutcome> outcomes = [];
         for (int i = 0; i < plan.Count; i++)
         {
             PlannedCommand command = plan[i];
@@ -128,7 +136,5 @@ public sealed class EditHookService(
                 break;
             }
         }
-
-        return outcomes;
     }
 }

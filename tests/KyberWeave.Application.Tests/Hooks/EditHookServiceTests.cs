@@ -171,6 +171,29 @@ public sealed class EditHookServiceTests
     }
 
     [Fact]
+    public async Task HookTimeLimitMidPlanKeepsTheBlockingFailureAlreadyCollected()
+    {
+        (EditHookService service, FakeProcessRunner runner, _) = Build();
+        runner.Respond = argv =>
+        {
+            if (runner.Calls.Count == 1)
+            {
+                return new ProcessRunResult(2, "Foo.cs: first rule failed", false);
+            }
+
+            clock.Advance(TimeSpan.FromSeconds(40));
+            throw new OperationCanceledException();
+        };
+
+        HookResult result = await service.RunAsync(Edit, CancellationToken.None);
+
+        Assert.Equal(2, result.ExitCode);
+        Assert.Contains("first rule failed", result.Feedback, StringComparison.Ordinal);
+        Assert.Contains("skipped for time", result.Feedback, StringComparison.Ordinal);
+        Assert.Equal(2, runner.Calls.Count);
+    }
+
+    [Fact]
     public async Task TestsAreOffByDefaultAndTheResolverIsNotEvenAsked()
     {
         (EditHookService service, FakeProcessRunner runner, FakeTestClassResolver resolver) = Build();
