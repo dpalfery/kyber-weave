@@ -846,6 +846,13 @@ public static partial class OtlpCollector
 
     private static byte[] Base64ToBytes(string value, string where)
     {
+        return TryBase64ToBytes(value, out byte[] bytes)
+            ? bytes
+            : throw new OtlpDecodeException($"{where} is neither hex nor base64");
+    }
+
+    private static bool TryBase64ToBytes(string value, out byte[] bytes)
+    {
         string normalized = value.Replace('-', '+').Replace('_', '/');
         int mod = normalized.Length % 4;
         if (mod != 0)
@@ -853,11 +860,13 @@ public static partial class OtlpCollector
 
         try
         {
-            return Convert.FromBase64String(normalized);
+            bytes = Convert.FromBase64String(normalized);
+            return true;
         }
-        catch (FormatException exception)
+        catch (FormatException)
         {
-            throw new OtlpDecodeException($"{where} is neither hex nor base64", exception);
+            bytes = [];
+            return false;
         }
     }
 
@@ -886,10 +895,24 @@ public static partial class OtlpCollector
 
     private static string NanosToIsoTimestamp(BigInteger nanos)
     {
-        long millis = (long)(nanos / 1_000_000);
-        return DateTimeOffset.FromUnixTimeMilliseconds(millis)
-            .UtcDateTime
-            .ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
+        BigInteger millis = nanos / 1_000_000;
+        if (millis < long.MinValue || millis > long.MaxValue)
+        {
+            throw new OtlpDecodeException(
+                "a nanosecond timestamp is outside the range a 64-bit millisecond count can hold");
+        }
+
+        try
+        {
+            return DateTimeOffset.FromUnixTimeMilliseconds((long)millis)
+                .UtcDateTime
+                .ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
+        }
+        catch (ArgumentOutOfRangeException exception)
+        {
+            throw new OtlpDecodeException(
+                "a nanosecond timestamp is outside the range a calendar instant can represent", exception);
+        }
     }
 
     private static Dictionary<string, JsonElement> AttributesFromJson(JsonElement raw, string where)
@@ -946,6 +969,9 @@ public static partial class OtlpCollector
         if (value.TryGetProperty("intValue", out JsonElement intEl))
         {
             BigInteger parsed = NanosToBigInt(intEl, $"{where}.intValue");
+            if (parsed < long.MinValue || parsed > long.MaxValue)
+                throw new OtlpDecodeException($"{where}.intValue is outside the signed 64-bit range");
+
             return JsonSerializer.SerializeToElement((long)parsed);
         }
 
@@ -990,10 +1016,15 @@ public static partial class OtlpCollector
                 throw new OtlpDecodeException($"{where}.bytesValue must be a base64 string");
 
             string rawBytes = bytesEl.GetString() ?? string.Empty;
-            string hex = rawBytes.Length % 2 == 0 && (rawBytes.Length == 0 || HexOnlyRegex().IsMatch(rawBytes))
-                ? Convert.ToHexStringLower(Convert.FromHexString(rawBytes))
-                : Convert.ToHexStringLower(Base64ToBytes(rawBytes, where));
-            return JsonSerializer.SerializeToElement(hex);
+            // The protobuf JSON mapping encodes bytesValue as base64. Decode it that way first, so
+            // a base64 value that happens to use only hex digits is not read as hex bytes.
+            if (TryBase64ToBytes(rawBytes, out byte[] decoded))
+                return JsonSerializer.SerializeToElement(Convert.ToHexStringLower(decoded));
+
+            if (rawBytes.Length % 2 == 0 && HexOnlyRegex().IsMatch(rawBytes))
+                return JsonSerializer.SerializeToElement(Convert.ToHexStringLower(Convert.FromHexString(rawBytes)));
+
+            throw new OtlpDecodeException($"{where}.bytesValue is neither base64 nor hex");
         }
 
         throw new OtlpDecodeException(
