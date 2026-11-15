@@ -143,19 +143,16 @@ public class TranscriptReaderRepository : ITranscriptReaderRepository
             bool hasUsage = group.InputTokens != 0 || group.OutputTokens != 0 || group.CacheReadTokens != 0 || group.CacheCreationTokens != 0;
             if (!hasUsage)
             {
-                // A transcript tail (tool results after the last usage line) belongs to the call
-                // before it, so attach its parts there rather than dropping them.
-                if (group.Turn.Parts.Count > 0 && envelopes.Count > 0)
+                // A transcript tail (tool calls and results after the last usage line) belongs to
+                // the call before it, so merge everything it carries there rather than dropping it.
+                if (envelopes.Count > 0 && HasTurnContent(group.Turn))
                 {
                     SourceRecordEnvelope previous = envelopes[^1];
                     if (previous.ReaderTurn is { } previousTurn)
                     {
                         envelopes[^1] = previous with
                         {
-                            ReaderTurn = previousTurn with
-                            {
-                                Parts = [.. previousTurn.Parts, .. group.Turn.Parts],
-                            },
+                            ReaderTurn = MergeTailTurn(previousTurn, group.Turn),
                         };
                     }
                 }
@@ -261,6 +258,43 @@ public class TranscriptReaderRepository : ITranscriptReaderRepository
 
     private static string NowIso() =>
         DateTimeOffset.UtcNow.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
+
+    /// <summary>True when a usage-less turn still carries content worth keeping.</summary>
+    private static bool HasTurnContent(ReaderTurn turn) =>
+        turn.Parts.Count > 0 || turn.ToolCalls is { Count: > 0 } || turn.ToolResults is { Count: > 0 };
+
+    /// <summary>
+    /// Folds a usage-less tail turn into the call before it: same call, more content, and the
+    /// scalar fields the earlier turn already stated won.
+    /// </summary>
+    private static ReaderTurn MergeTailTurn(ReaderTurn head, ReaderTurn tail) =>
+        head with
+        {
+            Parts = [.. head.Parts, .. tail.Parts],
+            ToolCalls = Concat(head.ToolCalls, tail.ToolCalls),
+            ToolResults = Concat(head.ToolResults, tail.ToolResults),
+            ToolsOffered = ConcatDistinct(head.ToolsOffered, tail.ToolsOffered),
+        };
+
+    private static IReadOnlyList<T>? Concat<T>(IReadOnlyList<T>? first, IReadOnlyList<T>? second)
+    {
+        if (first is null || first.Count == 0)
+            return second is { Count: > 0 } ? second : first;
+        if (second is null || second.Count == 0)
+            return first;
+
+        return [.. first, .. second];
+    }
+
+    private static IReadOnlyList<string>? ConcatDistinct(IReadOnlyList<string>? first, IReadOnlyList<string>? second)
+    {
+        if (first is null || first.Count == 0)
+            return second is { Count: > 0 } ? second : first;
+        if (second is null || second.Count == 0)
+            return first;
+
+        return [.. first.Concat(second).Distinct(StringComparer.Ordinal)];
+    }
 
     private static IEnumerable<RefreshSourceInput> DiscoverRoot(
         string root,
