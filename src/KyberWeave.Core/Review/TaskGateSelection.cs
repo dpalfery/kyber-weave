@@ -424,7 +424,7 @@ public static class TaskGateSelection
                 if (!IsWithin(full, target))
                     return true;
             }
-            catch (IOException)
+            catch (Exception exception) when (FileFailure.Is(exception))
             {
                 return true;
             }

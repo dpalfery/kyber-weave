@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using System.Security;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
@@ -30,6 +31,50 @@ public sealed class FileFailureGuardTests : IDisposable
         Assert.All(failures, failure => Assert.True(FileFailure.Is(failure), failure.GetType().Name));
         Assert.False(FileFailure.Is(new InvalidOperationException()));
         Assert.False(FileFailure.Is(new InvalidDataException()));
+    }
+
+    [Fact]
+    public void ABadReadLimitIsAProgrammingErrorNotAFileFailure()
+    {
+        string path = Path.Combine(_temp.Path, "any.txt");
+        File.WriteAllText(path, "x");
+
+        ArgumentOutOfRangeException negative = Assert.Throws<ArgumentOutOfRangeException>(() => BoundedFileReader.ReadAllText(path, -1));
+        ArgumentOutOfRangeException tooLarge = Assert.Throws<ArgumentOutOfRangeException>(
+            () => BoundedFileReader.ReadAllText(path, BoundedFileReader.MaxLimitBytes + 1));
+
+        Assert.False(FileFailure.Is(negative));
+        Assert.False(FileFailure.Is(tooLarge));
+        Assert.True(FileFailure.Is(new ArgumentNullException("path")));
+    }
+
+    [Fact]
+    [UnsupportedOSPlatform("windows")]
+    public async Task AStoresDirectoryThatCannotBeListedStillStoresTheItem()
+    {
+        Assert.SkipWhen(
+            OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess,
+            "Unix file modes are not enforced on Windows or for a privileged user, so an unlistable directory cannot be simulated.");
+
+        string arbiter = Path.Combine(_temp.Path, "arbiter");
+        string stores = Path.Combine(arbiter, "stores");
+        ArbiterRunStore store = new(arbiter);
+        Assert.Equal(ArbiterStoreStatus.Stored, await store.AppendFindingAsync("RUN-A", "first"));
+
+        // Execute without read: the store directory can be entered but not enumerated, so the sweep's listing throws.
+        File.SetUnixFileMode(stores, UnixFileMode.UserExecute);
+        try
+        {
+            ArbiterStoreStatus status = await store.AppendFindingAsync("RUN-A", "second");
+
+            Assert.Equal(ArbiterStoreStatus.Stored, status);
+        }
+        finally
+        {
+            File.SetUnixFileMode(stores, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        Assert.Equal(["first", "second"], store.ReadFindings("RUN-A"));
     }
 
     [Fact]
