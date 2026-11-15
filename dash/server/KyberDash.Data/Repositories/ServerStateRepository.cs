@@ -32,7 +32,12 @@ public class ServerStateRepository : IServerStateRepository, IEngineDescriptorPu
     public const string StateDirectoryEnvironmentVariable = "KYBERDASH_STATE_DIR";
 
 
-    private const int EngineQueryTimeoutMs = 1500;
+    /// <summary>
+    /// Budget for one engine IPC round trip, a loopback unix-socket request to a process on this
+    /// host. It answers in milliseconds when idle; the budget is generous so a heavily loaded
+    /// machine cannot turn a live engine into "not running".
+    /// </summary>
+    private const int EngineQueryTimeoutMs = 5000;
 
     /// <summary>Serializer options used for <c>engine.json</c> and the engine IPC replies.</summary>
     internal static readonly JsonSerializerOptions EngineJsonOptions = new()
