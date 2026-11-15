@@ -797,11 +797,11 @@ Requires .NET SDK 10 (pinned in `global.json`).
 ```bash
 dotnet restore KyberWeave.sln
 dotnet build KyberWeave.sln -c Release
-scripts/proc-guard.sh run --slot dotnet-test -- dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
+dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build
 ```
 
-Run the test command through `scripts/proc-guard.sh run --`, the process watchdog. `--slot dotnet-test`
-makes a full run wait its turn when another full run is already using the machine. See
+`.NET` commands run directly via `dotnet` so Roslyn/MSBuild build servers stay warm. KyberDash (`dash/`)
+and tray test runs continue to use `scripts/proc-guard.sh run --`, the process watchdog; see
 [Running tests safely](dash/runbook.md#running-tests-safely).
 
 ## Related

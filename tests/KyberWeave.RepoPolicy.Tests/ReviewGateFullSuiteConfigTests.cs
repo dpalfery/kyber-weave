@@ -12,9 +12,10 @@ namespace KyberWeave.Tests;
 /// <para>
 /// A gate with <c>full-suite: true</c> is one that runs the whole product suite, so <c>kyber-weave review gates</c>
 /// refuses it unless the caller passes <c>--council</c> (or the terminal is interactive). The key is set on exactly
-/// <c>test</c>, <c>ts-test</c> and <c>cargo-test</c>. The <c>test</c> and <c>ts-test</c> argv pass <c>--council</c>
-/// to <c>scripts/proc-guard.sh run</c>, which needs it to admit the full run. The CI template passes <c>--council</c>
-/// to <c>review gates</c>, because CI is the other caller allowed to run the full suite.
+/// <c>test</c>, <c>ts-test</c> and <c>cargo-test</c>. The watchdog-wrapped <c>ts-test</c> argv passes <c>--council</c>
+/// to <c>scripts/proc-guard.sh run</c>, which needs it to admit the full run, while <c>test</c> runs
+/// <c>dotnet test</c> directly without <c>proc-guard.sh</c>. The CI template passes <c>--council</c> to
+/// <c>review gates</c>, because CI is the other caller allowed to run the full suite.
 /// </para>
 /// <para>
 /// A gate that runs an npm script under <c>dash/</c> needs <c>dash/node_modules</c> first, and says so with
@@ -67,15 +68,15 @@ public sealed class ReviewGateFullSuiteConfigTests
     }
 
     /// <summary>
-    /// The <c>test</c> and <c>ts-test</c> gates pass <c>--council</c> after <c>run</c> and before the <c>--</c> separator,
+    /// The watchdog-wrapped <c>ts-test</c> gate passes <c>--council</c> after <c>run</c> and before the <c>--</c> separator,
     /// so the watchdog consumes it and admits the full run.
     /// </summary>
     /// <remarks>
     /// Placed after <c>--</c> the flag would reach the test runner, which does not know it. Placed before <c>run</c> the
-    /// watchdog would not see it as a flag at all.
+    /// watchdog would not see it as a flag at all. The <c>.NET</c> <c>test</c> gate runs <c>dotnet test</c> directly and
+    /// is guarded at the gate level by <c>full-suite: true</c>.
     /// </remarks>
     [Theory]
-    [InlineData("test")]
     [InlineData("ts-test")]
     public void FullSuiteProcGuardArgvCarriesCouncilAfterRunAndBeforeTheSeparator(string gateId)
     {

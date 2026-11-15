@@ -48,13 +48,11 @@
 # Tests now skip fsync (SquadTestDurability) and the lookup is cheaper, which took the
 # full suite from ~14 minutes to ~89s. Keep $TMPDIR clean; a crowded one slows these again.
 #
-# FULL RUNS TAKE TURNS ON A SHARED MACHINE
+# .NET RUNS DIRECTLY; WATCHDOG GUARDS KYBERDASH AND TRAY
 #
-# One full run saturates every core, and several agent harnesses can start one at the same
-# time. Full runs therefore take the machine-wide `dotnet-test` slot (`proc-guard.sh run --slot`):
-# a second one queues, names the holder, and runs when the first ends. `--full` gets it from the
-# declared `test` gate; `--regenerate` passes the slot itself. The fast tier and `--class` /
-# `--method` runs are partial, so they never queue, and neither do the build and format steps.
+# .NET test, build, and format steps run directly via `dotnet` so Roslyn/MSBuild build servers
+# stay warm instead of being torn down by `scripts/proc-guard.sh`. KyberDash (`dash/`) and
+# tray UI (`dash/tray/ui`) commands continue to run through `scripts/proc-guard.sh run --`.
 
 set -euo pipefail
 
@@ -146,10 +144,11 @@ if [[ "${1:-}" == "--regenerate" ]]; then
     step "collecting per-test timings (this takes ~90 seconds)"
     timings=("$(mktemp "${TMPDIR:-/tmp}/kw-timings.XXXXXX")" "$(mktemp "${TMPDIR:-/tmp}/kw-timings.XXXXXX")")
     generated_timings=("${timings[@]}")
-    # Waits as long as the declared `test` gate does (--slot-wait 900): same slot, same bound.
+    # Accepted risk: these full-suite timing runs have no watchdog cap, leftover check or slot queue,
+    # so a runaway run is bounded only by the caller. Run `--regenerate` alone on the machine.
     # One list covers both test projects: the classes share a namespace, so a name means one test.
-    scripts/proc-guard.sh run --slot dotnet-test --slot-wait 900 -- dotnet "${TEST_DLL}" -xml "${timings[0]}" >/dev/null
-    scripts/proc-guard.sh run --slot dotnet-test --slot-wait 900 -- dotnet "${POLICY_TEST_DLL}" -xml "${timings[1]}" >/dev/null
+    dotnet "${TEST_DLL}" -xml "${timings[0]}" >/dev/null
+    dotnet "${POLICY_TEST_DLL}" -xml "${timings[1]}" >/dev/null
   fi
   python3 - "${CLASS_LIST}" "${timings[@]}" <<'PY'
 import sys, xml.etree.ElementTree as ET
@@ -305,15 +304,15 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
   test_log="$(mktemp "${TMPDIR:-/tmp}/kw-fast-loop.XXXXXX")"
   product_status=0
   policy_status=0
-  scripts/proc-guard.sh run -- dotnet "${TEST_DLL}" "${test_args[@]+"${test_args[@]}"}" | tee "${test_log}" || product_status=$?
+  dotnet "${TEST_DLL}" "${test_args[@]+"${test_args[@]}"}" | tee "${test_log}" || product_status=$?
   if [[ "${needs_policy}" -eq 1 ]]; then
     step "repository-policy tests (same filter)"
-    scripts/proc-guard.sh run -- dotnet "${POLICY_TEST_DLL}" "${test_args[@]+"${test_args[@]}"}" | tee -a "${test_log}" || policy_status=$?
+    dotnet "${POLICY_TEST_DLL}" "${test_args[@]+"${test_args[@]}"}" | tee -a "${test_log}" || policy_status=$?
   else
     # Checked on its own: the product suite's total must not stand in for a scan run that matched nothing.
     step "repository-policy source scans"
     scan_log="$(mktemp "${TMPDIR:-/tmp}/kw-fast-loop-scans.XXXXXX")"
-    scripts/proc-guard.sh run -- dotnet "${POLICY_TEST_DLL}" "${POLICY_SOURCE_SCANS[@]}" | tee "${scan_log}" || policy_status=$?
+    dotnet "${POLICY_TEST_DLL}" "${POLICY_SOURCE_SCANS[@]}" | tee "${scan_log}" || policy_status=$?
     # A scan run that matched nothing is a policy failure, reported with the product status below.
     if [[ "${policy_status}" -eq 0 ]] && ! sed $'s/\x1b\\[[0-9;]*m//g' "${scan_log}" | grep -Eq 'Total: [1-9][0-9]*,'; then
       printf 'the policy source scans ran no tests; check POLICY_SOURCE_SCANS\n' >&2

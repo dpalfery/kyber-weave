@@ -52,13 +52,13 @@ run reports a non-zero test count. The commands for each area:
 - KyberDash: [`dash/AGENTS.md`](dash/AGENTS.md#gates)
 - Tray UI and tray crate: [`dash/tray/AGENTS.md`](dash/tray/AGENTS.md#gates)
 
-**Every local test, gate and e2e command runs through the process watchdog.** From the
-repository root, wrap it as `scripts/proc-guard.sh run -- <command>`. The watchdog kills the
-command's process tree at an absolute cap (exit 86) and fails a run that leaves children
-behind (exit 87). The caps change only by flag (`--max-node`, `--max-tree`), never by environment
-variable. `fast-loop.sh` already wraps its test and gate calls. The `test` gate takes `--slot dotnet-test`, so
-overlapping full runs on one machine queue (exit 88 if the wait runs out) instead of piling onto its
-cores; partial runs, builds and format checks never take a slot. Playwright runs only with
+**KyberDash and tray tests, gates and e2e commands run through the process watchdog; `.NET` runs
+directly via `dotnet`.** Run `.NET` build, test and format commands directly so Roslyn/MSBuild build
+servers stay warm. For KyberDash (`dash/`) and tray (`dash/tray/`) commands from the repository
+root, wrap as `scripts/proc-guard.sh run -- <command>`. The watchdog kills the command's process
+tree at an absolute cap (exit 86) and fails a run that leaves children behind (exit 87). The caps
+change only by flag (`--max-node`, `--max-tree`), never by environment variable. `fast-loop.sh`
+wraps its dash/tray calls and runs `.NET` directly. Playwright runs only with
 `--config dash/playwright.isolated.config.ts`, and never start the dashboard to run a test. See
 [Running tests safely](docs/dash/runbook.md#running-tests-safely) and
 [ADR 0047](docs/adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint.md).
@@ -84,9 +84,10 @@ are not run: each is reported as a refused blocking failure (`KW-REVIEW-033`, ex
 here", not a code finding. Only the `code-reviewer` council and CI pass `--council`. A scoped run still
 runs the other gates; with `--all` a refused full-suite gate ends the run at once, with no gate started.
 
-Run any test or build command you start yourself through `scripts/proc-guard.sh run --`. The
-`dotnet test` gates (`test`, `test-policy`) and the dash `ts-test` gate in [`.kyber-weave/kyber-weave.yml`](.kyber-weave/kyber-weave.yml)
-already run through it. Council gates skip gates whose `include` does not match changed files (`KW-REVIEW-026`);
+Run any KyberDash/tray test or e2e command you start yourself through `scripts/proc-guard.sh run --`,
+and run `.NET` commands directly via `dotnet`. In [`.kyber-weave/kyber-weave.yml`](.kyber-weave/kyber-weave.yml),
+the dash `ts-test` gate runs through `scripts/proc-guard.sh run --`, while `dotnet test` gates
+(`test`, `test-policy`) run directly via `dotnet`. Council gates skip gates whose `include` does not match changed files (`KW-REVIEW-026`);
 see [`docs/code-review/architecture.md`](docs/code-review/architecture.md). Format, build,
 test, and skill argv are the `review.gates` entries in
 [`.kyber-weave/kyber-weave.yml`](.kyber-weave/kyber-weave.yml). There is no separate
