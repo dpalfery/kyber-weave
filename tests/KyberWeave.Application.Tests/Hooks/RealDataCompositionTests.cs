@@ -189,6 +189,44 @@ public sealed class RealDataCompositionTests : IDisposable
             runner.Calls[^1].Argv);
     }
 
+    [Fact]
+    public void SameNamedClassInTwoProjectsKeepsTheFirstProjectAndSaysTheOtherWasNotRun()
+    {
+        _ = Repository();
+        _ = Write("tests/B.Tests/B.Tests.csproj", "<Project />");
+        _ = Write("tests/B.Tests/FooTests.cs", "namespace B.Tests;\npublic sealed class FooTests {}");
+        _ = Write("tests/A.Tests/A.Tests.csproj", "<Project />");
+        _ = Write("tests/A.Tests/FooTests.cs", "namespace A.Tests;\npublic sealed class FooTests {}");
+        using ServiceProvider provider = Provider(new FakeProcessRunner(clock));
+
+        TestClassResolution result = provider.GetRequiredService<ITestClassResolver>().Resolve(root.FullName, "src/App/Foo.cs");
+
+        Assert.Equal("tests/A.Tests/A.Tests.csproj", result.ProjectPath);
+        Assert.Equal(["A.Tests.FooTests"], result.Classes);
+        Assert.Contains("tests/B.Tests/B.Tests.csproj", result.Note, StringComparison.Ordinal);
+        Assert.Contains("not run", result.Note, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UnreadableTestFileIsSkippedInsteadOfFailingTheResolution()
+    {
+        FakeFileSystem files = new FakeFileSystem()
+            .WithFile("tests/A.Tests/A.Tests.csproj")
+            .WithUnreadableFile("tests/A.Tests/FooTests.cs")
+            .WithFile("tests/B.Tests/B.Tests.csproj")
+            .WithFile("tests/B.Tests/FooTests.cs", "namespace B.Tests;\npublic sealed class FooTests {}");
+        ServiceCollection services = [];
+        _ = services.AddSingleton<IFileSystem>(files);
+        _ = services.AddWeaveApplication();
+        using ServiceProvider provider = services.BuildServiceProvider();
+
+        TestClassResolution result = provider.GetRequiredService<ITestClassResolver>().Resolve(FakeFileSystem.Root, "src/App/Foo.cs");
+
+        Assert.Equal("tests/B.Tests/B.Tests.csproj", result.ProjectPath);
+        Assert.Equal(["B.Tests.FooTests"], result.Classes);
+        Assert.Null(result.Note);
+    }
+
     private sealed class ResolutionComparer : IEqualityComparer<TestClassResolution>
     {
         public bool Equals(TestClassResolution? x, TestClassResolution? y) =>

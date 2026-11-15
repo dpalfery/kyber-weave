@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Domain.Hooks;
 
 namespace KyberWeave.Data.Hooks;
 
@@ -19,7 +20,16 @@ internal sealed partial class ConventionTestClassResolver(IFileSystem fileSystem
         List<(string Class, string Project)> found = [];
         foreach (string file in fileSystem.EnumerateFiles(repositoryRoot, testClass + ".cs", recursive: true).Order(StringComparer.Ordinal))
         {
-            string? name = QualifiedName(fileSystem.ReadAllText(file), testClass);
+            string? name;
+            try
+            {
+                name = QualifiedName(fileSystem.ReadAllText(file), testClass);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or RegexMatchTimeoutException)
+            {
+                continue;
+            }
+
             string? project = name is null ? null : NearestProject(Path.GetDirectoryName(file), repositoryRoot);
             if (name is not null && project is not null)
             {
@@ -32,10 +42,13 @@ internal sealed partial class ConventionTestClassResolver(IFileSystem fileSystem
             return TestClassResolution.None;
         }
 
-        string first = found[0].Project;
+        string first = found.Select(f => f.Project).Order(StringComparer.Ordinal).First();
+        List<string> others = [.. found.Select(f => f.Project).Where(p => p != first).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)
+            .Select(p => Path.GetRelativePath(repositoryRoot, p).Replace('\\', '/'))];
         return new TestClassResolution(
-            [.. found.Where(f => f.Project == first).Select(f => f.Class).Distinct(StringComparer.Ordinal)],
-            Path.GetRelativePath(repositoryRoot, first).Replace('\\', '/'));
+            [.. found.Where(f => f.Project == first).Select(f => f.Class).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)],
+            Path.GetRelativePath(repositoryRoot, first).Replace('\\', '/'),
+            others.Count == 0 ? null : $"test class {testClass} also exists in {string.Join(", ", others)}; those projects were not run.");
     }
 
     private static string? QualifiedName(string source, string className)
@@ -51,9 +64,9 @@ internal sealed partial class ConventionTestClassResolver(IFileSystem fileSystem
 
     private string? NearestProject(string? directory, string root)
     {
-        while (directory is not null && directory.StartsWith(root, StringComparison.Ordinal))
+        while (directory is not null && PathContainment.IsWithin(root, directory))
         {
-            string? project = fileSystem.EnumerateFiles(directory, "*.csproj", recursive: false).FirstOrDefault();
+            string? project = fileSystem.EnumerateFiles(directory, "*.csproj", recursive: false).Order(StringComparer.Ordinal).FirstOrDefault();
             if (project is not null)
             {
                 return project;

@@ -222,6 +222,18 @@ public sealed class EditHookServiceTests
     }
 
     [Fact]
+    public async Task ResolverNoteReachesTheFeedback()
+    {
+        config = Enable(config, "dotnet-test");
+        tests = tests with { Note = "test class FooTests also exists in tests/B/B.csproj; those projects were not run." };
+        (EditHookService service, _, _) = Build();
+
+        HookResult result = await service.RunAsync(Edit, CancellationToken.None);
+
+        Assert.Contains("tests/B/B.csproj", result.Feedback, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task EnabledTestRuleIsSkippedWhenNoTestClassCoversTheFile()
     {
         config = Enable(config, "dotnet-test");

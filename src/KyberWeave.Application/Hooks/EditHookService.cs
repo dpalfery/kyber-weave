@@ -82,6 +82,11 @@ public sealed class EditHookService(
         using CancellationTokenSource hookLimit = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, limitTimer.Token);
 
         List<string> notes = [.. config.Warnings];
+        if (tests.Note is not null)
+        {
+            notes.Add(tests.Note);
+        }
+
         List<RuleOutcome> outcomes = [];
         try
         {

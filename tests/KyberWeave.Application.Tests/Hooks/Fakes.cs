@@ -8,6 +8,7 @@ internal sealed class FakeFileSystem : IFileSystem
 {
     private readonly Dictionary<string, string> files = new(StringComparer.Ordinal);
     private readonly HashSet<string> directories = new(StringComparer.Ordinal);
+    private readonly HashSet<string> unreadable = new(StringComparer.Ordinal);
 
     public static string Root { get; } = Path.GetFullPath("/repo");
 
@@ -25,11 +26,18 @@ internal sealed class FakeFileSystem : IFileSystem
         return this;
     }
 
+    public FakeFileSystem WithUnreadableFile(string relative)
+    {
+        _ = WithFile(relative);
+        _ = unreadable.Add(Abs(relative));
+        return this;
+    }
+
     public bool FileExists(string path) => files.ContainsKey(path);
 
     public bool DirectoryExists(string path) => directories.Contains(path);
 
-    public string ReadAllText(string path) => files[path];
+    public string ReadAllText(string path) => unreadable.Contains(path) ? throw new UnauthorizedAccessException(path) : files[path];
 
     public IEnumerable<string> EnumerateFiles(string directory, string searchPattern, bool recursive) =>
         files.Keys.Where(f =>
