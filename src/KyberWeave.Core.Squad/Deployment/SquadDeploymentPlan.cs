@@ -764,6 +764,8 @@ public sealed class SquadDeploymentPlan
             Layout = retainedLayout,
             Schema = retainedSchema,
             Degradations = onlyTargetToken is null
+                  || retained.Any(f => string.Equals(f.Target, onlyTargetToken, StringComparison.Ordinal))
+                  || retainedBlocks.Any(b => string.Equals(b.Target, onlyTargetToken, StringComparison.Ordinal))
                 ? receipt.Degradations
                 : [.. receipt.Degradations.Where(d => !string.Equals(d.Target, onlyTargetToken, StringComparison.Ordinal))]
         };
