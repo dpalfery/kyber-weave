@@ -60,6 +60,23 @@ function waitForListeningUrl(child) {
   })
 }
 
+async function stopChild(child) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return
+  await new Promise((resolve) => {
+    const forceTimer = setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+    }, 2_000)
+    forceTimer.unref()
+    const settle = () => {
+      clearTimeout(forceTimer)
+      resolve(undefined)
+    }
+    child.once('exit', settle)
+    child.once('error', settle)
+    child.kill('SIGTERM')
+  })
+}
+
 async function main() {
   const [binary, ...extraArgs] = process.argv.slice(2)
   if (!binary) {
@@ -75,7 +92,13 @@ async function main() {
   let timedOut = false
   const timeout = setTimeout(() => {
     timedOut = true
-    if (child && !child.killed) child.kill('SIGKILL')
+    if (child && !child.killed) {
+      child.kill('SIGTERM')
+      const killTimer = setTimeout(() => {
+        if (child && child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+      }, 1_000)
+      killTimer.unref()
+    }
   }, OVERALL_TIMEOUT_MS)
 
   try {
@@ -118,7 +141,7 @@ async function main() {
     process.exitCode = 1
   } finally {
     clearTimeout(timeout)
-    if (child && !child.killed) child.kill('SIGKILL')
+    await stopChild(child)
     await rm(tempHome, { recursive: true, force: true })
   }
 }

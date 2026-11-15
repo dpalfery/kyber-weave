@@ -16,10 +16,10 @@
 # packaging is the whole point: the self-update failure this exists to catch only
 # reproduces against a real single-file host, never under `dotnet run`.
 #
-# The KyberDash archive is the Node single-executable the `build-kyberdash` job makes,
-# built the same way for this machine's RID. It needs node and npm on PATH and downloads
-# a prebuilt Node from nodejs.org, cached under <out>/.cache. The local server ignores
-# that directory.
+# The KyberDash archive packages the single-file .NET binaries of
+# `dash/server/KyberDash.{Cli,Api,Mcp}` with the React SPA packed into
+# `dash/dist-sea/web.json` and embedded at publish time, matching the `build-kyberdash`
+# job. It needs node and npm on PATH.
 #
 # Options:
 #   --version <v>   version stamped into the binaries and asset names (required)
@@ -83,9 +83,6 @@ cleanup() {
     # Defined later; guard so an early failure does not trip `set -u`.
     if [ "$(type -t restore_locks 2>/dev/null || true)" = "function" ]; then
         restore_locks
-    fi
-    if [ "$(type -t restore_dash_manifest 2>/dev/null || true)" = "function" ]; then
-        restore_dash_manifest
     fi
 }
 trap cleanup EXIT INT TERM
@@ -160,24 +157,9 @@ fi
 
 # ------------------------------------------------------------------- KyberDash
 
-# release.yml's `build-kyberdash` job is the authority for these steps. ReleaseTests pins
-# the fuse, the postject package, and dash/.nvmrc to that job, so a change there that is
-# not made here fails a test rather than a release. Three things differ, and all are local
-# concerns. The SEA blob is written by the downloaded Node rather than the runner's, so the
-# host's own Node version does not matter. The Node archive is checked against nodejs.org's
-# SHASUMS256.txt, because it is cached between runs. And dash/package.json is put back
-# after `npm version` stamps it.
-NODE_SEA_FUSE="NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2"
-POSTJECT_PACKAGE="postject@1.0.0-alpha.6"
-
-DASH_MANIFEST_BACKUP=""
-restore_dash_manifest() {
-    [ -n "$DASH_MANIFEST_BACKUP" ] || return 0
-    cp "${DASH_MANIFEST_BACKUP}/package.json" "${SOURCE_ROOT}/dash/package.json"
-    cp "${DASH_MANIFEST_BACKUP}/package-lock.json" "${SOURCE_ROOT}/dash/package-lock.json"
-    rm -rf "$DASH_MANIFEST_BACKUP"
-    DASH_MANIFEST_BACKUP=""
-}
+# release.yml's `build-kyberdash` job is the authority for these steps. ReleaseTests
+# pins the single-file publish flags, web dashboard pack, codesign, and smoke scripts
+# to that job, so a change there that is not made here fails a test rather than a release.
 
 # Runs a noisy step with its output held back, and shows it only if the step fails.
 quietly() {
@@ -186,19 +168,6 @@ quietly() {
         cat "$step_log" >&2
         die "failed: $*"
     fi
-}
-
-# Downloads into the cache under a temporary name, so an interrupted transfer never
-# leaves a truncated file where the next run would trust it. Retried, because CI runs this
-# on every pull request, and one dropped connection to nodejs.org should not fail the
-# merge gate.
-fetch_cached() {
-    url="$1"
-    target="$2"
-    [ -f "$target" ] && return 0
-    curl -fsSL --retry 3 --retry-delay 2 --retry-connrefused -o "${target}.part" "$url" \
-        || die "could not download ${url}"
-    mv "${target}.part" "$target"
 }
 
 build_kyberdash() {
@@ -214,112 +183,61 @@ build_kyberdash() {
     esac
     kyberdash_rid="${node_platform}-${node_arch}"
     command -v npm >/dev/null 2>&1 || die "building kyberdash needs npm on PATH; pass --no-kyberdash to skip it"
-    [ -f "${dash}/.nvmrc" ] || die "${dash}/.nvmrc is missing, so there is no Node version to build with"
+    command -v node >/dev/null 2>&1 || die "building kyberdash needs node on PATH; pass --no-kyberdash to skip it"
+    log "building kyberdash ${VERSION} (${kyberdash_rid})"
 
-    node_version="$(tr -d '[:space:]' < "${dash}/.nvmrc")"
-    node_version="${node_version#v}"
-    log "building kyberdash ${VERSION} (${kyberdash_rid}, Node ${node_version})"
+    mkdir -p "${stage}/out"
 
-    cache="${OUT}/.cache/node-v${node_version}"
-    mkdir -p "$cache" "${stage}/node" "${stage}/out"
-    tarball="node-v${node_version}-${node_platform}-${node_arch}.tar.xz"
-    base="https://nodejs.org/dist/v${node_version}"
-    fetch_cached "${base}/SHASUMS256.txt" "${cache}/SHASUMS256.txt"
-    fetch_cached "${base}/${tarball}" "${cache}/${tarball}"
-
-    # Neither cached file is trusted after a failure, so both are removed either way. The
-    # messages differ because the fixes do: a mismatch is a bad download that a rerun
-    # replaces, and a missing entry means the name asked for does not exist.
-    expected="$(awk -v name="$tarball" '$2 == name { print $1 }' "${cache}/SHASUMS256.txt")"
-    actual="$($SHA_CMD "${cache}/${tarball}" | awk '{ print $1 }')"
-    if [ -z "$expected" ]; then
-        rm -f "${cache}/${tarball}" "${cache}/SHASUMS256.txt"
-        die "nodejs.org's SHASUMS256.txt for v${node_version} lists no ${tarball}; check the version in dash/.nvmrc"
-    fi
-    if [ "$expected" != "$actual" ]; then
-        rm -f "${cache}/${tarball}" "${cache}/SHASUMS256.txt"
-        die "${tarball} failed its checksum (expected ${expected}, got ${actual}); the cached copy was removed, so rerun"
-    fi
-
-    tar -xJf "${cache}/${tarball}" -C "${stage}/node" --strip-components=1
-    node_bin="${stage}/node/bin/node"
-    node_error="$("$node_bin" --version 2>&1)" \
-        || die "the Node for ${kyberdash_rid} does not run on this machine (${node_error}); pass --no-kyberdash"
-
-    # `npm version` rewrites the manifest and lockfile, which a worktree build throws
-    # away with the worktree and a working-tree build must put back.
-    if [ -z "$REF" ]; then
-        DASH_MANIFEST_BACKUP="$(mktemp -d "${TMPDIR:-/tmp}/kw-dash-manifest-XXXXXX")"
-        cp "${dash}/package.json" "${dash}/package-lock.json" "$DASH_MANIFEST_BACKUP/"
-    fi
     (
         cd "$dash"
-        quietly npm ci --no-audit --no-fund
-        quietly npm version "$VERSION" --no-git-tag-version --allow-same-version
-        quietly npx tsup --config tsup.sea.config.ts
-        # Issue #157 defect 1 (D1-A): build and pack the web dashboard too, so the SEA
-        # blob below can embed it as the web.json asset. Mirrors build-kyberdash's
-        # "Bundle dash CLI" step in release.yml.
         quietly npm --prefix web ci --no-audit --no-fund
         quietly npm --prefix web run build
         quietly node scripts/pack-sea-web.mjs dist/dash dist-sea/web.json
     )
-    [ -f "${dash}/dist-sea/main.js" ] || die "tsup did not emit dist-sea/main.js"
     [ -f "${dash}/dist-sea/web.json" ] || die "pack-sea-web did not emit dist-sea/web.json"
 
-    # The main script is the CommonJS shim. The ESM bundle and the stamped package.json
-    # ride along as assets; tsup.sea.config.ts and src/sea-shim.cjs say why.
-    cat > "${stage}/sea-config.json" <<EOF
-{
-  "main": "${dash}/src/sea-shim.cjs",
-  "output": "${stage}/sea-prep.blob",
-  "useSnapshot": false,
-  "disableExperimentalSEAWarning": true,
-  "assets": {
-    "main.js": "${dash}/dist-sea/main.js",
-    "web.json": "${dash}/dist-sea/web.json",
-    "package.json": "${dash}/package.json"
-  }
-}
-EOF
-    quietly "$node_bin" --experimental-sea-config "${stage}/sea-config.json"
-    restore_dash_manifest
+    for proj in \
+        "${dash}/server/KyberDash.Cli/KyberDash.Cli.csproj" \
+        "${dash}/server/KyberDash.Api/KyberDash.Api.csproj" \
+        "${dash}/server/KyberDash.Mcp/KyberDash.Mcp.csproj"; do
+        dotnet publish "$proj" \
+            -c "$CONFIGURATION" \
+            -r "$RID" \
+            --self-contained true \
+            -p:PublishSingleFile=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:DebugType=None \
+            -p:DebugSymbols=false \
+            -p:Version="$VERSION" \
+            -o "${stage}/out" \
+            --nologo -v quiet >/dev/null
+    done
 
     binary="${stage}/out/kyberdash"
-    cp "$node_bin" "$binary"
-    chmod 755 "$binary"
-    postject_args=(--sentinel-fuse "$NODE_SEA_FUSE")
-    if [ "$node_platform" = "darwin" ]; then
-        postject_args+=(--macho-segment-name NODE_SEA)
-    fi
-    quietly npm exec --yes --package="$POSTJECT_PACKAGE" -- \
-        postject "$binary" NODE_SEA_BLOB "${stage}/sea-prep.blob" "${postject_args[@]}"
+    api_binary="${stage}/out/kyberdash-api"
+    mcp_binary="${stage}/out/kyberdash-mcp"
+    for bin in "$binary" "$api_binary" "$mcp_binary"; do
+        [ -f "$bin" ] || die "kyberdash binary missing at ${bin}"
+        chmod 755 "$bin"
+        if [ "$node_platform" = "darwin" ]; then
+            command -v codesign >/dev/null 2>&1 || die "a darwin kyberdash must be ad-hoc signed; build it on macOS"
+            codesign --sign - --force "$bin"
+            codesign --verify --verbose "$bin" || true
+            xattr -c "$bin" 2>/dev/null || true
+        fi
+    done
 
-    # postject invalidates the embedded signature; macOS will not run the binary until it
-    # is re-signed.
-    if [ "$node_platform" = "darwin" ]; then
-        command -v codesign >/dev/null 2>&1 || die "a darwin kyberdash must be ad-hoc signed; build it on macOS"
-        codesign --sign - --force "$binary"
-        codesign --verify --verbose "$binary" || true
-        xattr -c "$binary" 2>/dev/null || true
-    fi
-
-    # A corrupt blob or a failed inject still yields a Node binary, which answers
-    # --version with Node's version rather than ours.
     reported="$("$binary" --version 2>&1)" || die "kyberdash --version failed: ${reported}"
     [ "$reported" = "$VERSION" ] || die "kyberdash reports '${reported}', expected '${VERSION}'"
 
-    # Issue #157 defect 1 (D1-A): the embedded dashboard must serve the SPA, not the
-    # "not built" page, now that the blob above is injected and runnable.
+    # Verify the embedded dashboard serves the SPA, not the "not built" page.
     quietly node "${dash}/scripts/sea-web-smoke.mjs" "$binary"
 
-    # The MCP command is a second released-shape entry point. It must load the
-    # SDK from the SEA rather than a checkout's node_modules, and its fixture
-    # stays on loopback with an isolated HOME/state directory.
+    # Verify the MCP command speaks JSON-RPC over stdio and reaches the loopback fixture.
     quietly node "${dash}/scripts/sea-mcp-smoke.mjs" "$binary"
 
     cp "${dash}/THIRD_PARTY_NOTICES.md" "${stage}/out/THIRD_PARTY_NOTICES.md"
-    tar -C "${stage}/out" -czf "${DEST}/kyberdash-${kyberdash_rid}.tar.gz" kyberdash THIRD_PARTY_NOTICES.md
+    tar -C "${stage}/out" -czf "${DEST}/kyberdash-${kyberdash_rid}.tar.gz" kyberdash kyberdash-api kyberdash-mcp THIRD_PARTY_NOTICES.md
 }
 
 if [ -z "$NO_KYBERDASH" ]; then
@@ -356,7 +274,7 @@ bash "${SOURCE_ROOT}/scripts/generate-sbom.sh" "$DEST" "$VERSION"
 # Per-artifact SBOMs (issue #417): one <archive-stem>.cdx.json per published
 # archive in DEST, via the shared pinned-Syft generator. Runs after the
 # aggregate SBOM and before the manifest below, so `$SHA_CMD *` covers both
-# the aggregate and the per-artifact SBOMs. Single-file .NET and Node SEA
+# the aggregate and the per-artifact SBOMs. Single-file .NET
 # not-measured markers stay in the generator; nothing is special-cased here.
 log "generating per-artifact SBOMs for ${VERSION}"
 bash "${SOURCE_ROOT}/scripts/generate-artifact-sboms.sh" "$DEST" "$VERSION"

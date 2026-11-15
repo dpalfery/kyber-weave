@@ -14,17 +14,17 @@ How TypeScript is written in this repository. Agents and skills resolve this doc
 `<typescript-coding-standard>` in the repository root [`AGENTS.md`](../../../AGENTS.md), so
 what it says here outranks the defaults a portable agent shipped with.
 
-This standard covers TypeScript in KyberDash's Node engine, web dashboard, and tray UI,
-including TSX. It records local decisions rather than summarizing the language or establishing
-a separate React architecture standard. The shared application and display-layer boundaries
-remain defined by [KyberDash architecture](../../dash/architecture.md) and the
+This standard covers TypeScript in KyberDash's web dashboard, tray UI, and Playwright/packaging
+scripts, including TSX. It records local decisions rather than summarizing the language or
+establishing a separate React architecture standard. The shared C# application and display-layer
+boundaries remain defined by [KyberDash architecture](../../dash/architecture.md) and the
 [display-layer rule](../../rules/kyberdash-display-layer.md).
 
 ## Types at boundaries
 
 Parsers fail closed (KW-STD-INPUT-001). Code that parses or converts a value from outside the process refuses any input it does not recognise, with an error or diagnostic that names the input; it never silently drops, defaults or coerces it. The one exception is an unknown field in a format whose specification says to ignore unknown fields, and the code names that specification where it skips the field.
 
-All three TypeScript projects enable `strict`. Keep values typed through their full path;
+The TypeScript projects (`dash` and `dash/tray/ui`) enable `strict`. Keep values typed through their full path;
 explicit `any` is an ESLint error. At an untrusted boundary—JSON, files, SQLite rows, IPC, or
 HTTP—start with `unknown` and validate or narrow it before use. Use a runtime schema where a
 payload contract needs validation; a TypeScript annotation alone does not validate data at
@@ -65,17 +65,9 @@ make the limitation explicit in its contract.
 
 ## Runtime and modules
 
-KyberDash targets Node.js `>=22.13.0` and uses ESM. Prefer `node:`-prefixed imports
-for Node built-ins in new code; much of the existing tree uses bare `'fs'`/`'path'`
-specifiers, which resolve to the same modules — do not churn existing imports to match.
-
-The engine TypeScript configuration uses `ESNext` modules with `bundler` resolution;
-follow the surrounding project convention for relative `.js` specifiers in source imports.
-Use type-only imports when a dependency is needed only for types.
-
-The launcher at `dash/src/launcher.ts` must remain parseable by Node 18 so it can report the
-runtime requirement before starting the application. Keep the launcher free of static
-imports; load runtime-dependent modules only after its version guard.
+KyberDash web, tray UI, and script tooling target Node.js `>=22.13.0` and use ESM (`node:`-prefixed
+imports for Node built-ins in scripts and test helpers). Use type-only imports when a dependency
+is needed only for types.
 
 Use existing dependencies for existing capabilities. A new dependency or drive-by version
 upgrade needs a concrete reason tied to the change; do not add a package merely to avoid a

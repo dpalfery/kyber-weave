@@ -8,8 +8,8 @@
 //!
 //! `open_view` is the one command that takes a path from the webview and turns
 //! it into a URL, so it is the one that validates. The route table is
-//! `src/server/view-paths.json`, embedded with `include_str!` and matched the
-//! same way `src/server/view-paths.ts` matches it: the CLI's `--view`, the web
+//! `web/src/lib/view-paths.json`, embedded with `include_str!` and matched the
+//! same way the API server (`KyberDash.Api`) matches it: the CLI's `--view`, the web
 //! router and this command have to accept exactly the same paths, or a report
 //! that tells the user to run `kyberdash web --view finding/<id>` names a view
 //! the tray then refuses.
@@ -22,8 +22,8 @@ use crate::cli::SetupState;
 use crate::settings::TraySettings;
 use crate::supervisor::ServerPhase;
 
-/// The route table, shared with the CLI and the web router.
-const VIEW_PATHS_JSON: &str = include_str!("../../../src/server/view-paths.json");
+/// The route table, shared with the CLI, the API server, and the web router.
+const VIEW_PATHS_JSON: &str = include_str!("../../../web/src/lib/view-paths.json");
 
 /// The design's `ViewState.phase`. `Setup` is the arm the supervisor has no
 /// opinion about: it means the CLI itself is missing or too old (6.7), which is

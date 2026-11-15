@@ -226,13 +226,19 @@ stage_dotnet() {
         rm -rf "$lock_backup"
     }
 
-    local project
-    for project in KyberWeave.Cli KyberWeave.Mcp; do
+    local project_path project
+    for project_path in \
+        "src/KyberWeave.Cli/KyberWeave.Cli.csproj" \
+        "src/KyberWeave.Mcp/KyberWeave.Mcp.csproj" \
+        "dash/server/KyberDash.Cli/KyberDash.Cli.csproj" \
+        "dash/server/KyberDash.Api/KyberDash.Api.csproj" \
+        "dash/server/KyberDash.Mcp/KyberDash.Mcp.csproj"; do
+        project="$(basename "$project_path" .csproj)"
         log "staging ${project} for .NET cataloging (framework-dependent, non-single-file)"
         # Framework-dependent and non-single-file on purpose: a single-file publish
         # folds the dependency closure into the executable and emits no readable
         # deps.json, and a self-contained one adds the runtime packs as packages.
-        dotnet publish "${REPO_ROOT}/src/${project}/${project}.csproj" \
+        dotnet publish "${REPO_ROOT}/${project_path}" \
             -c Release \
             --self-contained false \
             -p:PublishSingleFile=false \
@@ -247,7 +253,7 @@ stage_dotnet() {
     restore_locks
 
     local deps
-    for project in KyberWeave.Cli KyberWeave.Mcp; do
+    for project in KyberWeave.Cli KyberWeave.Mcp KyberDash.Cli KyberDash.Api KyberDash.Mcp; do
         mkdir -p "${STAGING_DIR}/${project}"
         find "${PUBLISH_DIR}/${project}" -maxdepth 1 -name '*.deps.json' -exec cp {} "${STAGING_DIR}/${project}/" \;
     done

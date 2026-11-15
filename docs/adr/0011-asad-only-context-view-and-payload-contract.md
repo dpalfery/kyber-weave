@@ -23,7 +23,7 @@ Harness coverage is uneven. Some sources supply counters without schemas, some s
 
 1. **ASAD is the only Context view.** Every harness uses one session-row and one expanded `AgentSessionDashboard`. TreeTable, SessionDetails, and any toggle between them are not part of the Context page.
 2. **The dashboard ships complete.** Session overview, per-turn token spend, context composition, tool/schema cost, execution timeline, cost/token accounting, caveat banners, and the full-content inspector drawer. Layout, view order, and captions come from ASAD; visual language is KyberDash's.
-3. **The ASAD payload is the store's contract.** `buildSessionRow` / `CanonStore.getSessionPayload` emit that JSON-safe shape directly. `GET /api/kyber/session/:id` serves it without an adapter layer between store and view.
+3. **The ASAD payload is the store's contract.** `buildSessionRow` / `CanonStore.getSessionPayload` (now `KyberBridgeEngine` over `ICanonStoreRepository.GetSessionTurnPayload` in the C# engine, [ADR 0084](0084-kyberdash-csharp-engine.md)) emit that JSON-safe shape directly. `GET /api/kyber/session/:id` serves it without an adapter layer between store and view.
 4. **Every named harness is in scope.** Claude Code, Antigravity/agy, Copilot (extension, CLI, coding agent), Codex, pi, opencode, Cursor, and Kilo. A harness that cannot yet be collected is recorded as *not measurable with a reason*, never as absent or as a measured zero.
 
 ## Alternatives Considered

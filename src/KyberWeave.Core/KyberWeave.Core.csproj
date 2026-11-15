@@ -66,12 +66,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Bundled published-pricing tables shared with KyberDash so C# and TS price turns identically. -->
-    <EmbeddedResource Include="..\..\dash\src\pricing\data\litellm-snapshot.json" LogicalName="Dash.litellm-snapshot.json" />
-    <EmbeddedResource Include="..\..\dash\src\pricing\data\pricing-fallback.json" LogicalName="Dash.pricing-fallback.json" />
-  </ItemGroup>
-
-  <ItemGroup>
     <!--
       Compile-time only, and PrivateAssets="all" keeps it out of the shipped nupkg's
       dependency graph: consumers of KyberWeave.Core still take only Markdig and YamlDotNet.

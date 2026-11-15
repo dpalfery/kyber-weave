@@ -1,7 +1,10 @@
 # KyberDash
 
-The KyberDash source: the `kyberdash` CLI, its ingest and analysis engine, the web dashboard,
-and the tray. Documentation lives in the repository's governed corpus, not here:
+The KyberDash UI and tray tree: the web dashboard (`dash/web/`), the Tauri tray
+(`dash/tray/`), Playwright UI tests (`dash/e2e/`), and web asset packaging scripts
+(`dash/scripts/`). The C# collector, canonical store, analysis engine, and the `kyberdash`
+CLI/API/MCP hosts live in the Clean Architecture solution `dash/server/KyberDash.sln`.
+Documentation lives in the repository's governed corpus, not here:
 
 - [KyberDash overview](../docs/dash/README.md)
 - [Architecture](../docs/dash/architecture.md)

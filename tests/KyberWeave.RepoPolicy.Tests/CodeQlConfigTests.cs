@@ -6,9 +6,9 @@ using YamlDotNet.RepresentationModel;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// The CodeQL configuration clears one deliberate alert by rule id, never by path, and says
-/// why. Pinning the parsed shape keeps that decision visible in review and stops it drifting
-/// into the path-scoped exclusion ADR 0020 retired.
+/// The CodeQL configuration leaves every query rule and path active — no path-scoped
+/// exclusions (retired in ADR 0020) and no rule filters remain now that the live-gate
+/// script has been retired alongside the TypeScript engine cutover.
 /// </summary>
 public sealed partial class CodeQlConfigTests
 {
@@ -16,17 +16,12 @@ public sealed partial class CodeQlConfigTests
         KyberWeaveTestPaths.ToolRoot, ".github", "codeql", "codeql-config.yml");
 
     [Fact]
-    public void CodeQlConfigExcludesExactlyTheEvidenceWriteRule()
+    public void CodeQlConfigHasNoRuleFilters()
     {
         YamlMappingNode root = LoadRoot();
 
-        YamlSequenceNode filters = Assert.IsType<YamlSequenceNode>(Require(root, "query-filters"));
-        YamlMappingNode filter = Assert.IsType<YamlMappingNode>(Assert.Single(filters.Children));
-        Assert.Single(filter.Children);
-        YamlMappingNode exclude = Assert.IsType<YamlMappingNode>(Require(filter, "exclude"));
-
-        Assert.Single(exclude.Children);
-        Assert.Equal("js/http-to-file-access", Scalar(exclude, "id"));
+        IEnumerable<string?> keys = root.Children.Keys.Select(key => (key as YamlScalarNode)?.Value);
+        Assert.DoesNotContain("query-filters", keys);
     }
 
     [Fact]
@@ -71,18 +66,4 @@ public sealed partial class CodeQlConfigTests
         Assert.Single(stream.Documents);
         return Assert.IsType<YamlMappingNode>(stream.Documents[0].RootNode);
     }
-
-    private static YamlNode Require(YamlMappingNode mapping, string key)
-    {
-        foreach (KeyValuePair<YamlNode, YamlNode> entry in mapping.Children)
-        {
-            if (entry.Key is YamlScalarNode { Value: { } name } && string.Equals(name, key, StringComparison.Ordinal))
-                return entry.Value;
-        }
-
-        throw new Xunit.Sdk.XunitException($"'{key}' is missing from {ConfigPath}.");
-    }
-
-    private static string? Scalar(YamlMappingNode mapping, string key) =>
-        Require(mapping, key) is YamlScalarNode scalar ? scalar.Value : null;
 }

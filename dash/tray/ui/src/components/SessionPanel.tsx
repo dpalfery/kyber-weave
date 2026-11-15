@@ -7,7 +7,7 @@
  * hiding it would make the bar look complete when it is not.
  */
 
-import type { ContextReport } from '../../../../src/analysis/report/types.ts'
+import type { ContextReport } from '../report-types.ts'
 import { BUCKET_LABELS, BUCKET_ORDER, percent, tokens } from '../format'
 
 type Props = {

@@ -79,16 +79,18 @@ therefore takes the current code as a one-time fork.
    - Each source declares per-metric measurability, so an absent figure is never rendered
      as zero.
 
-4. **Distribution stays on the repository's one install path** (restated from ADR 0006).
-   `scripts/install.sh` places self-contained Node SEA binaries for the five stable runtime
-   identifiers. The package is renamed `kyberdash` but is not published to npm.
+4. **Distribution stays on the repository's one install path** (restated from ADR 0006; packaging amended 2026-11-15 by [ADR 0084](0084-kyberdash-csharp-engine.md)).
+   `scripts/install.sh` places self-contained single-file binaries for the five runtime
+   identifiers (`darwin-arm64`, `darwin-x64`, `linux-arm64`, `linux-x64`, `win-x64`). The
+   Node `dash/package.json` workspace is not published to npm.
 
 5. **The engine is ported to C# on .NET 10 ([ADR 0084](0084-kyberdash-csharp-engine.md)).**
    Every surface continues to read the engine through one canonical store (`canon.db`) and
    one `/api/kyber/*` REST seam ([ADR 0033](0033-kyberdash-surfaces-are-display-layers.md)),
    while the collector, store, projection, analysis pipeline, HTTP/OTLP server, in-process
-   job host, and fallback synthesizers run under `src/KyberWeave.Core/Dash/`
-   (`KyberWeave.Core.Dash`). Amended 2026-11-15 by [ADR 0084](0084-kyberdash-csharp-engine.md),
+   job host, and fallback synthesizers run under `dash/server/`
+   (`KyberDash.sln`: `KyberDash.Domain`, `KyberDash.Contracts`, `KyberDash.Data`, and
+   `KyberDash.Application`). Amended 2026-11-15 by [ADR 0084](0084-kyberdash-csharp-engine.md),
    which supersedes the original TypeScript-only retention.
 
 ## Alternatives Considered

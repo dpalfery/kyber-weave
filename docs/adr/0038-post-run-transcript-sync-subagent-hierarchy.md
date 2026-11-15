@@ -46,7 +46,7 @@ Subagents are projected during session build (`dash/src/canon/sessions.ts`) into
 
 To provide complete spend visibility while strictly preventing double counting:
 - Derived session rows persist only their own granular, unaggregated counters (`turn_count`, `request_count`, `total_input`, `total_output`, `cost_usd`) in their respective `payload.summary` blocks.
-- On read (`KyberBridge.listSessions` in `dash/src/server/bridge.ts`), child subagent sessions whose parent exists in the store are omitted from the top-level list and nested into their parent session's `subagents` array.
+- On read (`KyberBridge.listSessions` in `dash/src/server/bridge.ts`; now `KyberBridgeEngine` in the C# engine, [ADR 0084](0084-kyberdash-csharp-engine.md)), child subagent sessions whose parent exists in the store are omitted from the top-level list and nested into their parent session's `subagents` array.
 - Parent sessions carry a read-time `rollup` object that aggregates spend across the parent and all nested children:
   $$\text{rollup.metric} = \text{parent.metric} + \sum_{c \in \text{subagents}} c\text{.metric}$$
 - The rollup is recursive and leaf-first. The projection builds a subagent row from a subset of the records its parent row is built from, so the parent's counters already contain it: such a row carries `payload.summary.included_in_parent = true` and the rollup does not add it (or anything beneath it) a second time. Only independent children are summed. A parent cycle in stored ancestry is not attached.

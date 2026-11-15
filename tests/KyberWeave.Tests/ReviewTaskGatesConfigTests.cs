@@ -741,7 +741,7 @@ public sealed class ReviewTaskGatesConfigTests
 
         string[] shouldNotMatch =
         [
-            "dash/src/index.ts",
+            "dash/web/src/main.tsx",
             "docs/README.md"
         ];
 
@@ -796,7 +796,7 @@ public sealed class ReviewTaskGatesConfigTests
             "products/kyber-squad/agents/conductor.md",
             "REVIEW.md",
             "docs/README.md",
-            "dash/src/index.ts"
+            "dash/web/src/main.tsx"
         ];
 
         foreach (string id in gateIds)

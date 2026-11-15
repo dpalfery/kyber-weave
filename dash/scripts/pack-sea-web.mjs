@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Packs a built web directory (dash/dist/dash, web/vite.config.ts's outDir) into the
-// single-file asset the SEA release build embeds and `dash/src/cli/web.ts` serves from
-// memory (D1-A, docs/plans/2026-09-28-kyberdash-sea-release-integrity.md).
+// single-file asset that dash/server/KyberDash.Api embeds as an embedded resource
+// (KyberDash.Api.web.json) and serves from memory.
 //
 // The asset format is `{"format":"kyberdash-web/1","files":{"<posix relative
 // path>":"<base64>"}}`, with keys sorted so the blob is reproducible across builds of the

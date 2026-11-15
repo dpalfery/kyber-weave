@@ -8,7 +8,7 @@
  * acted on, and a popover that paraphrased it would be inventing advice.
  */
 
-import type { ContextReport } from '../../../../src/analysis/report/types.ts'
+import type { ContextReport } from '../report-types.ts'
 import { tokens } from '../format'
 
 /** R8.4. */

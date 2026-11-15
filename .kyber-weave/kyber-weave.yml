@@ -227,6 +227,25 @@ review:
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, review, duplicates, ., --out, artifacts/duplicates.json]
       blocking: true
 
+    # Clean-Architecture C# KyberDash server and unit/integration tests live under dash/server{,.tests}/
+    # in their own solution. Runs dotnet directly (never through proc-guard.sh).
+    - id: dash-server-format-whitespace
+      include: &dash-server-paths ["dash/server/**", "dash/server.tests/**", "Directory.Build.props", ".editorconfig", "global.json", "**/NuGet.config"]
+      run: [dotnet, format, dash/server/KyberDash.sln, whitespace, --verify-no-changes, -v, minimal]
+      blocking: true
+    - id: dash-server-format-style
+      include: *dash-server-paths
+      run: [dotnet, format, dash/server/KyberDash.sln, style, --verify-no-changes, --severity, warn, -v, minimal]
+      blocking: true
+    - id: dash-server-build
+      include: *dash-server-paths
+      run: [dotnet, build, dash/server/KyberDash.sln, -c, Release, --no-incremental, -nr:false, -p:UseSharedCompilation=false]
+      blocking: true
+    - id: dash-server-test
+      include: *dash-server-paths
+      run: [dotnet, test, dash/server/KyberDash.sln, -c, Release, --no-build]
+      blocking: true
+
     # TypeScript gates for KyberDash under dash/. They are the counterpart to
     # the dotnet gates above — checks that run the same command a local
     # contributor runs, behind the same argv-only contract the rest of the
@@ -453,7 +472,7 @@ review:
     react-dev:
       - &dash-typecheck
         id: dash-typecheck
-        include: &dash-paths ["dash/src/**", "dash/tests/**", "dash/web/**", "dash/e2e/**", "dash/scripts/**", "dash/*.ts", "dash/*.js", "dash/*.mjs", "dash/*.json"]
+        include: &dash-paths ["dash/tests/**", "dash/web/**", "dash/e2e/**", "dash/scripts/**", "dash/*.ts", "dash/*.js", "dash/*.mjs", "dash/*.json"]
         run: [npm, run, --prefix, dash, typecheck]
       - &dash-lint
         id: dash-lint

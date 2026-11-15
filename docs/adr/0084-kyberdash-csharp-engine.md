@@ -9,14 +9,14 @@ component: KyberDash
 decided-by: []
 supersedes: []
 code-refs:
-  - CanonStore
-  - CanonSessionProjector
+  - CanonStoreRepository
+  - CanonSessionProjectorEngine
   - OtlpCollector
   - BoundedIngestWriter
-  - KyberApiServer
-  - KyberJobHost
+  - DashEndpointMappings
+  - JobSchedulerService
   - CanonSynth
-  - CanonRefresh
+  - CanonRefreshEngine
 ---
 
 # ADR 0084: KyberDash collector, canonical store, and engine ported to C# on .NET 10
@@ -37,15 +37,16 @@ Decision 5 of [ADR 0020](0020-kyberdash-one-time-fork.md) anticipated moving the
 
 ## Decision
 
-1. **The KyberDash collector, canonical SQLite store, analysis pipeline, HTTP/OTLP server, in-process job host, and fallback synthesizers are implemented in C# on .NET 10 under `src/KyberWeave.Core/Dash/` (`KyberWeave.Core.Dash`).**
-   - Storage (`CanonDbPath`, `CanonSchema`, `CanonCompressedColumn`, `CanonStore`) targets schema version 24 (`SCHEMA_VERSION = 24`) using bounded `ProcessRunner` invocations of the system `sqlite3` CLI (matching `CodeGraphResolverAdapter` and `SqliteAnalysisPersistence`).
-   - Incremental projection (`CanonSessionProjector`, plus dirty-key tracking in `projection_dirty_sessions` and `projection_session_key_map`) recomputes only dirty session keys when schema, detector, parser, and pricing fingerprints match.
-   - OTLP collection and primary harness normalization (`CanonValidation`, `CanonAdapters`, `CanonIngest`, `OtlpCollector`, `BoundedIngestWriter`) enforce 64 MiB request and 256 MiB pending backlog caps, 64 KiB UTF-8-safe content truncation, two-pass trace source inheritance, and `quarantine`/`problems`/`ingest_log` auditing.
-   - Pricing, token memoization, context reduction, and findings (`CanonPricing`, `CanonTokenCache`, `CanonContextAnalysis`, `CanonFindings`) keep `o200k` cache memoization and diagnostic schemas unchanged.
-   - Loopback transport and scheduling (`LoopbackHttpHost`, `OtlpHttpServer`, `KyberApiServer`, `KyberBridge`, `KyberJobHost`, `CanonSettings`, `CanonClean`, `CanonRollups`) run in-process over `jobs.lock` and atomic `server.json` publication while exposing the `/api/kyber/*`, `/api/events`, and `/v1/*` wire contracts.
-   - Fallback synthesis, OTLP-precedence deduplication, streaming JSONL transcript reading, checkpointed commit units, and 14-day rolling content retention (`CanonSynth`, `CanonSynthDedup`, `CanonTranscriptReaders`, `CanonRefresh`) complete parity across all local history paths.
+1. **The KyberDash collector, canonical SQLite store, analysis pipeline, HTTP/OTLP server, in-process job host, and fallback synthesizers are implemented in C# on .NET 10 under `dash/server/`, one Clean Architecture solution (`dash/server/KyberDash.sln`).**
+   - The engine is layered: `KyberDash.Core` (shared primitives), `KyberDash.Domain` (canonical models and pure analysis), `KyberDash.Contracts` (service and repository interfaces), `KyberDash.Data` (the `sqlite3`-backed repositories), and `KyberDash.Application` (pipelines and hosted services). `KyberDash.Presentation.Tests` pins the dependency direction.
+   - Storage (`CanonDbPath`, `CanonSchema`, `CanonCompressedColumn`, `CanonStoreRepository`) targets schema version 24 (`SCHEMA_VERSION = 24`) using bounded `ProcessRunner` invocations of the system `sqlite3` CLI (matching `CodeGraphResolverAdapter` and `SqliteAnalysisPersistence`).
+   - Incremental projection (`CanonSessionProjectorEngine`, plus dirty-key tracking in `projection_dirty_sessions` and `projection_session_key_map`) recomputes only dirty session keys when schema, detector, parser, and pricing fingerprints match.
+   - OTLP collection and primary harness normalization (`CanonValidation`, `CanonAdapters`, `CanonIngestPipeline`, `OtlpCollector`, `BoundedIngestWriter`) enforce 64 MiB request and 256 MiB pending backlog caps, 64 KiB UTF-8-safe content truncation, two-pass trace source inheritance, and `quarantine`/`problems`/`ingest_log` auditing.
+   - Pricing, token memoization, context reduction, and findings (`CanonPricing`, `CachedTokenCounter`, `CanonContextAnalysis`, `CanonFindings`) keep `o200k` cache memoization and diagnostic schemas unchanged. The embedded pricing snapshots live under `dash/server/KyberDash.Data/Pricing/`.
+   - Loopback transport and scheduling (`OtlpCollectorService` and `OtlpEndpointMappings`, `DashEndpointMappings`, `KyberBridgeEngine`, `JobSchedulerService`, `SettingsService`, `CleanService`, `CanonRollupsEngine`) run in-process over `jobs.lock` and atomic `server.json` publication while exposing the `/api/kyber/*`, `/api/events`, and `/v1/*` wire contracts.
+   - Fallback synthesis, OTLP-precedence deduplication, streaming JSONL transcript reading, checkpointed commit units, and 14-day rolling content retention (`CanonSynth`, `CanonSynthDedup`, `TranscriptReaderRepository`, `CanonRefreshEngine`) complete parity across all local history paths.
 2. **`dash/web/` and `dash/tray/` stay display layers with unchanged schemas and REST contracts** ([ADR 0033](0033-kyberdash-surfaces-are-display-layers.md)).
-3. **Downstream `kyberdash` CLI/MCP/tray entrypoint switchover and retirement of Node SEA packaging stay decoupled** from the engine port and are tracked in [kyberdash-cli-switchover-and-node-sea-retirement.md](../todo/kyberdash-cli-switchover-and-node-sea-retirement.md).
+3. **The released KyberDash binaries build from `dash/server/` (`.NET 10` single-file publish), and the TypeScript engine (`dash/src/`) plus Node SEA packaging are retired.** Three presentation hosts share the engine: `KyberDash.Cli` (`kyberdash`: CLI router, reporter, diagnostics, menubar, e2e-seed launcher), `KyberDash.Api` (`kyberdash-api`: the loopback `/api/kyber/*` server and OTLP collector, embedding the packed `dash/dist-sea/web.json` as the `KyberDash.Api.web.json` resource), and `KyberDash.Mcp` (`kyberdash-mcp`: the stdio MCP analytics server).
 
 ## Alternatives Considered
 
@@ -55,5 +56,6 @@ Decision 5 of [ADR 0020](0020-kyberdash-one-time-fork.md) anticipated moving the
 
 ## Consequences
 
-- `KyberWeave.Core.Dash` preserves `CoreAssemblySplitTests` assembly boundaries while putting every parity suite directly under `dotnet test` without requiring the Node `proc-guard.sh` harness wrapper.
-- Until [the CLI/SEA cutover todo](../todo/kyberdash-cli-switchover-and-node-sea-retirement.md) completes, the released `kyberdash` executable and Node SEA packaging remain live under `dash/`.
+- `dash/server/` is one solution split along Clean Architecture lines, and `KyberDash.Presentation.Tests` holds the assembly boundaries while every parity suite runs directly under `dotnet test` without requiring the Node `proc-guard.sh` harness wrapper.
+- `dash/` retains the React web dashboard (`dash/web/`), the Tauri tray (`dash/tray/`), Playwright UI end-to-end tests, the packed web asset/smoke scripts (`dash/scripts/`), and the retired TypeScript engine kept read-only under `dash/archived/`.
+- Release and local packaging produce self-contained `.NET 10` single-file binaries for `kyberdash`, `kyberdash-api`, and `kyberdash-mcp` across `linux-x64`, `linux-arm64`, `osx-x64`/`darwin-x64`, `osx-arm64`/`darwin-arm64`, and `win-x64` without Node SEA or `postject`.

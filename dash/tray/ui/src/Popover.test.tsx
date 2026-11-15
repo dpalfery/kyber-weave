@@ -11,14 +11,14 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 
-import empty from '../../../src/analysis/report/fixtures/empty.json' with { type: 'json' }
-import full from '../../../src/analysis/report/fixtures/full.json' with { type: 'json' }
-import mixedBasisCost from '../../../src/analysis/report/fixtures/mixed-basis-cost.json' with { type: 'json' }
-import noFindings from '../../../src/analysis/report/fixtures/no-findings.json' with { type: 'json' }
+import empty from './fixtures/report/empty.json' with { type: 'json' }
+import full from './fixtures/report/full.json' with { type: 'json' }
+import mixedBasisCost from './fixtures/report/mixed-basis-cost.json' with { type: 'json' }
+import noFindings from './fixtures/report/no-findings.json' with { type: 'json' }
 import partialMeasurability from './__fixtures__/partial-measurability.json' with { type: 'json' }
-import stale from '../../../src/analysis/report/fixtures/stale.json' with { type: 'json' }
-import unmeasurablePressure from '../../../src/analysis/report/fixtures/unmeasurable-pressure.json' with { type: 'json' }
-import type { ContextReport } from '../../../src/analysis/report/types.ts'
+import stale from './fixtures/report/stale.json' with { type: 'json' }
+import unmeasurablePressure from './fixtures/report/unmeasurable-pressure.json' with { type: 'json' }
+import type { ContextReport } from './report-types.ts'
 
 import { Popover } from './Popover'
 import { MAX_FINDINGS } from './components/FindingsList'

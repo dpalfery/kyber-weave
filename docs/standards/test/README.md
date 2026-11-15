@@ -215,24 +215,17 @@ two static audits (below) keep the list of such sites honest.
    its own stdin is a terminal, so a command that reads the terminal does not stop; `--tty` keeps
    the terminal and is risky. From an agent tool keep `--timeout` at or below 540 seconds, because
    a longer foreground command is moved to the background.
-7. **Never start the dashboard from a test.** Use the e2e boot seams in `dash/e2e/boot-dashboard.ts`.
+7. **Never start the dashboard from a test.** Use the e2e boot seams in `dash/e2e/harness-collection-boot.ts` and `dash/e2e/factory-replay-boot.ts`.
 
-**The allow-list (dash).** `dash/tests/spawn-sites.allowlist.ts` lists every `child_process`
-spawn, exec and fork call, every `new Worker`, and every Playwright `webServer` under `dash/`. Each
-entry gives the file, the API name, the `bound` and a `note`. The `bound` says how the site is
-limited: a timeout, a tree kill, a single owned child closed on exit, an `afterEach` kill, an
-injected fake, or a bounded external tool. A site with no limit is written with "NO TIMEOUT" in its
-bound and listed as a follow-up. That wording records a residual; it is not a bound.
-`dash/tests/spawn-sites.test.ts` fails on any site with no entry, on any entry that matches no site,
-and on any empty bound. An entry covers one file and one API name, so
-review each new site against the bound it inherits.
-
-**The allow-list (.NET).** `ProcessSpawnSitesTests` scans two roots: `tests/KyberWeave.Tests`
-(C# and shell) and `src/` (C#). It matches `Process.Start`, `new Process`, `new ProcessStartInfo`,
-`ProcessRunner.Run` and `BuildStartInfo`. `tests/KyberWeave.Tests/Fixtures/spawn-sites-allowlist.json`
-keys each entry by root-prefixed file (`tests/...` or `src/...`), normalized line text and count,
-with a `bound`. The test fails on any unlisted start, with a root-prefixed file and line, and on any
-stale entry. Use the `ProcessRunner` test helper, which kills the child tree at its timeout. A raw
+**The allow-list (.NET and repo scripts).** `ProcessSpawnSitesTests` in
+`tests/KyberWeave.RepoPolicy.Tests/ProcessSpawnSitesTests.cs` scans three roots:
+`tests/KyberWeave.Tests`, `tests/KyberWeave.RepoPolicy.Tests` (C# and shell), and `src/` (C#).
+It matches `Process.Start`, `new Process`, `new ProcessStartInfo`, `ProcessRunner.Run`,
+`ProcessRunner.RunInteractive`, and `BuildStartInfo`.
+`tests/KyberWeave.RepoPolicy.Tests/Fixtures/spawn-sites-allowlist.json` keys each entry by
+root-prefixed file (`tests/...` or `src/...`), normalized line text and count, with a `bound`.
+The test fails on any unlisted start, with a root-prefixed file and line, and on any stale entry.
+Use the `ProcessRunner` test helper, which kills the child tree at its timeout. A raw
 `Process.Start` needs its own timeout and a `Kill(entireProcessTree: true)` in a `finally`.
 
 **Production .NET starts carry bounds too.** The shared process executor defaults to 60 s, and the

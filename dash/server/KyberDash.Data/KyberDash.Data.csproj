@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>KyberDash.Data</RootNamespace>
+    <Version>0.21.0</Version>
+    <Authors>KyberWeave</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.14" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Pricing\litellm-snapshot.json" LogicalName="KyberDash.Data.Pricing.litellm-snapshot.json" />
+    <EmbeddedResource Include="Pricing\pricing-fallback.json" LogicalName="KyberDash.Data.Pricing.pricing-fallback.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\KyberDash.Contracts\KyberDash.Contracts.csproj" />
+    <ProjectReference Include="..\KyberDash.Core\KyberDash.Core.csproj" />
+    <ProjectReference Include="..\KyberDash.Domain\KyberDash.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

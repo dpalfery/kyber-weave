@@ -392,7 +392,7 @@ describe('SessionCostPanel: per-model breakdown (byModel)', () => {
 // Architecture rule R1: the web dashboard is a display layer. The cost-basis
 // mismatch is decided on the server and arrives on the payload as
 // `costBasisMismatch` — `null`, or an object `{ code, message, bases,
-// totalsByBasis }` (pinned in src/server/session-cost-mismatch.test.ts). The
+// totalsByBasis }` (pinned in KyberDash.Application tests). The
 // panel renders that message and must not import `sumCosts` to reach the same
 // answer itself.
 //

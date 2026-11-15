@@ -42,7 +42,7 @@ assets first appear in `0.1.7-rc.9` and the installer skips KyberDash on any rel
 that floor. Verify the download against the published checksums before running it — the same
 procedure as the CLI, documented in
 [Verifying a download](../install.md#verifying-a-download). For the full set of installer
-flags, the Node SEA RID names, and how `kyber-weave update` treats an installed `kyberdash`,
+flags, the `kyberdash-<rid>` asset names, and how `kyber-weave update` treats an installed `kyberdash`,
 see [KyberDash and the version floor](../install.md#kyberdash-and-the-version-floor).
 
 To skip KyberDash and install only the CLI, pass `--no-kyberdash`.

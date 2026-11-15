@@ -767,11 +767,11 @@ if [ -n "${INSTALL_ARBITER}" ]; then
     verify_and_extract "kyber-weave-arbiter-${RID}.tar.gz"
 fi
 
-# KyberDash is a Node SEA single-executable shipping per spec D7. The artifact
-# archive is the KyberDash RID, not the Kyber-Weave RID, because the Node SEA
-# stable set uses darwin-* for macOS while .NET uses osx-*. Same SHA256SUMS.txt
-# from the GitHub Release covers all assets; an unverified KyberDash would
-# surface as a missing entry or hash mismatch and abort the install.
+# KyberDash ships as single-file .NET binaries (kyberdash plus optional sibling
+# kyberdash-api and kyberdash-mcp hosts) keyed by KyberDash RID (darwin-* on macOS,
+# linux-* / win-x64 elsewhere). Same SHA256SUMS.txt from the GitHub Release covers all
+# assets; an unverified KyberDash would surface as a missing entry or hash mismatch
+# and abort the install.
 if [ -n "${INSTALL_KYBERDASH}" ]; then
     verify_and_extract "kyberdash-${KYBERDASH_RID}.tar.gz"
 fi
@@ -798,6 +798,12 @@ if [ -n "${INSTALL_ARBITER}" ]; then
 fi
 if [ -n "${INSTALL_KYBERDASH}" ]; then
     install_binary "kyberdash"
+    # Split Clean-Architecture KyberDash archives ship sibling api and mcp hosts alongside kyberdash.
+    for sibling in kyberdash-api kyberdash-mcp; do
+        if [ -f "${TMPDIR_KW}/${sibling}" ]; then
+            install_binary "$sibling"
+        fi
+    done
 fi
 
 # macOS quarantines files downloaded by some tools; clear it if xattr exists.
@@ -808,7 +814,12 @@ if [ "${RID%%-*}" = "osx" ] && command -v xattr >/dev/null 2>&1; then
     xattr -d com.apple.quarantine "${INSTALL_DIR}/kyber-weave" 2>/dev/null || true
     [ -n "$NO_MCP" ] || xattr -d com.apple.quarantine "${INSTALL_DIR}/kyber-weave-mcp" 2>/dev/null || true
     [ -n "${INSTALL_ARBITER}" ] && xattr -d com.apple.quarantine "${INSTALL_DIR}/kyber-weave-arbiter" 2>/dev/null || true
-    [ -n "${INSTALL_KYBERDASH}" ] && xattr -d com.apple.quarantine "${INSTALL_DIR}/kyberdash" 2>/dev/null || true
+    if [ -n "${INSTALL_KYBERDASH}" ]; then
+        xattr -d com.apple.quarantine "${INSTALL_DIR}/kyberdash" 2>/dev/null || true
+        for sibling in kyberdash-api kyberdash-mcp; do
+            [ -f "${INSTALL_DIR}/${sibling}" ] && xattr -d com.apple.quarantine "${INSTALL_DIR}/${sibling}" 2>/dev/null || true
+        done
+    fi
 fi
 
 log "installed kyber-weave ${VERSION} → ${INSTALL_DIR}/kyber-weave"

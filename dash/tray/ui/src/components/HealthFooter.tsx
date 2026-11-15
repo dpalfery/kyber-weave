@@ -10,7 +10,7 @@
  * R14.2). Never in the panels above, and never something a reader meets first.
  */
 
-import type { ContextReport } from '../../../../src/analysis/report/types.ts'
+import type { ContextReport } from '../report-types.ts'
 import type { CoverageDoc, ReceiverStatus, RefreshInfo } from '../viewState'
 import { formatAge, formatMeasured } from '../format'
 

@@ -74,8 +74,8 @@ and are not blended with other dimensions.
 
 ## Verification & Conformance
 
-- UI component test suites (`dash/src/components/kyber/Scorecard.test.tsx`) assert that rendered
+- UI component test suites (`dash/web/src/components/analysis/Scorecard.test.tsx`) assert that rendered
   markup contains no composite score elements, aggregate percentages, or letter grades anywhere
   in the DOM.
-- REST API contracts (`dash/kyber/server/routes.ts`) ensure harness rollups and run summaries emit
+- REST API contracts (`dash/server/KyberDash.Api/Endpoints/DashEndpointMappings.cs` and `dash/server/KyberDash.Application/KyberBridgeEngine.cs`) ensure harness rollups and run summaries emit
   independent dimension objects rather than scalar efficiency indexes.

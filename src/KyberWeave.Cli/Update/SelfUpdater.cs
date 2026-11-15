@@ -23,6 +23,7 @@ internal sealed class SelfUpdater : IDisposable
     private const string CliBaseName = "kyber-weave";
     private const string McpBaseName = "kyber-weave-mcp";
     private const string KyberDashBaseName = "kyberdash";
+    private static readonly string[] KyberDashSiblingBaseNames = ["kyberdash-api", "kyberdash-mcp"];
     private const string ArbiterBaseName = "kyber-weave-arbiter";
 
     /// <summary>
@@ -226,11 +227,10 @@ internal sealed class SelfUpdater : IDisposable
             if (!options.NoMcp)
                 staged.Add(StageBinary(McpBaseName, _host.Rid, tag, windows, sums, work.FullName));
 
-            // KyberDash carries the Node SEA RID, not this host's .NET RID.
+            // KyberDash carries its own RID (darwin-* on macOS, matching linux-*/win-x64 elsewhere).
             if (ShouldUpdateKyberDash(options, version, windows))
             {
-                staged.Add(StageBinary(
-                    KyberDashBaseName,
+                staged.AddRange(StageKyberDashBinaries(
                     PlatformRid.KyberDashRid(_host.Rid),
                     tag,
                     windows,
@@ -1099,6 +1099,47 @@ internal sealed class SelfUpdater : IDisposable
         string sums,
         string workDirectory)
     {
+        string extractDir = DownloadAndExtractArchive(baseName, rid, tag, windows, sums, workDirectory);
+        string extractedName = BinaryInstaller.InstalledFileName(baseName, windows);
+        string extractedPath = FindExtractedBinary(extractDir, extractedName);
+        string destination = Path.Combine(_host.InstallDirectory, extractedName);
+        return (baseName, extractedPath, destination);
+    }
+
+    private List<(string BaseName, string ExtractedPath, string Destination)> StageKyberDashBinaries(
+        string rid,
+        string tag,
+        bool windows,
+        string sums,
+        string workDirectory)
+    {
+        string extractDir = DownloadAndExtractArchive(KyberDashBaseName, rid, tag, windows, sums, workDirectory);
+        string cliName = BinaryInstaller.InstalledFileName(KyberDashBaseName, windows);
+        List<(string BaseName, string ExtractedPath, string Destination)> staged =
+        [
+            (KyberDashBaseName, FindExtractedBinary(extractDir, cliName), Path.Combine(_host.InstallDirectory, cliName))
+        ];
+
+        // Split Clean-Architecture KyberDash archives ship sibling api and mcp hosts alongside kyberdash.
+        foreach (string siblingBaseName in KyberDashSiblingBaseNames)
+        {
+            string siblingName = BinaryInstaller.InstalledFileName(siblingBaseName, windows);
+            string? siblingPath = TryFindExtractedBinary(extractDir, siblingName);
+            if (siblingPath is not null)
+                staged.Add((siblingBaseName, siblingPath, Path.Combine(_host.InstallDirectory, siblingName)));
+        }
+
+        return staged;
+    }
+
+    private string DownloadAndExtractArchive(
+        string baseName,
+        string rid,
+        string tag,
+        bool windows,
+        string sums,
+        string workDirectory)
+    {
         string archiveName = BinaryInstaller.ArchiveName(baseName, rid);
         string archivePath = Path.Combine(workDirectory, archiveName);
         _log($"downloading {archiveName}…");
@@ -1112,11 +1153,7 @@ internal sealed class SelfUpdater : IDisposable
 
         string extractDir = Path.Combine(workDirectory, baseName + "-extract");
         BinaryInstaller.ExtractArchive(archivePath, extractDir, windows);
-
-        string extractedName = BinaryInstaller.InstalledFileName(baseName, windows);
-        string extractedPath = FindExtractedBinary(extractDir, extractedName);
-        string destination = Path.Combine(_host.InstallDirectory, extractedName);
-        return (baseName, extractedPath, destination);
+        return extractDir;
     }
 
     private void CommitBinary(
@@ -1245,16 +1282,17 @@ internal sealed class SelfUpdater : IDisposable
         }
     }
 
-    private static string FindExtractedBinary(string extractDir, string fileName)
+    private static string FindExtractedBinary(string extractDir, string fileName) =>
+        TryFindExtractedBinary(extractDir, fileName)
+        ?? throw new SelfUpdateException($"archive did not contain {fileName}");
+
+    private static string? TryFindExtractedBinary(string extractDir, string fileName)
     {
         string direct = Path.Combine(extractDir, fileName);
         if (File.Exists(direct))
             return direct;
 
         string[] matches = Directory.GetFiles(extractDir, fileName, SearchOption.AllDirectories);
-        if (matches.Length == 1)
-            return matches[0];
-
-        throw new SelfUpdateException($"archive did not contain {fileName}");
+        return matches.Length == 1 ? matches[0] : null;
     }
 }

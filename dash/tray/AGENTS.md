@@ -6,13 +6,14 @@ The tray is a **display layer** ([`dash/AGENTS.md`](../AGENTS.md)).
 
 > **THE TRAY AND THE WEB DASHBOARD ARE DISPLAY LAYERS. NEITHER CONTAINS ISOLATED FEATURE
 > LOGIC, SCHEDULERS OR JOBS. ALL LOGIC AND JOBS (REFRESH SCHEDULING, CLEAN, IMPORT, PAUSE)
-> LIVE IN THE SHARED KYBERDASH APPLICATION (THE CLI ENGINE AND THE `kyberdash web` SERVER
-> BUILT FROM IT) THAT BOTH SURFACES SHARE. BOTH SURFACES USE ONE DATASTORE (canon.db,
-> resolved by dash/src/canon/paths.ts resolveCanonDbPath) AND ONE API LAYER
-> (/api/kyber/*). NO AGENT OR DESIGN MAY VIOLATE THIS.**
+> LIVE IN THE SHARED KYBERDASH C# APPLICATION (`dash/server/`, INCLUDING THE ENGINE, THE
+> `kyberdash` CLI, AND THE `kyberdash web` SERVER) THAT BOTH SURFACES SHARE. BOTH SURFACES USE
+> ONE DATASTORE (`canon.db`, resolved by `KyberDash.Domain.CanonDbPath.Resolve`) AND ONE API
+> LAYER (`/api/kyber/*`). NO AGENT OR DESIGN MAY VIOLATE THIS.**
 
 Rule text and checklist: [`docs/rules/kyberdash-display-layer.md`](../../../docs/rules/kyberdash-display-layer.md).
-Decision: [ADR 0033](../../../docs/adr/0033-kyberdash-surfaces-are-display-layers.md).
+Decision: [ADR 0033](../../../docs/adr/0033-kyberdash-surfaces-are-display-layers.md) and
+[ADR 0084](../../../docs/adr/0084-kyberdash-csharp-engine.md).
 Architecture: [`docs/dash/architecture.md`](../../../docs/dash/architecture.md).
 
 ## Allowed here
@@ -30,15 +31,13 @@ Architecture: [`docs/dash/architecture.md`](../../../docs/dash/architecture.md).
 - A scheduler, a cadence or "is it due" check, or any timer that stands in for one. Polling
   to repaint the popover is display work; scheduling a job is not.
 - Spawning CLI children to do a job (`refresh`, `clean`, `import-history`, `settings`,
-  `otel`) — that is `JobHost` and `ReceiverHost` in `dash/src/jobs/**`, hosted by the
-  server. `supervisor.rs` launching the server is the one legitimate process launch.
+  `otel`) — that is `JobSchedulerService` in
+  `dash/server/KyberDash.Application/Services/JobSchedulerService.cs` and `OtlpCollectorService`
+  in `dash/server/KyberDash.Application/Services/OtlpCollectorService.cs`, hosted by the
+  `kyberdash web` server. `supervisor.rs` launching the server is the one legitimate process launch.
 - Hosting the OTLP receiver, or a tray-local copy of any setting that belongs in
-  `canon.db` metadata (`dash/src/settings/shared-settings.ts`).
-- Value imports from `dash/src/**` in `dash/tray/ui/src/**` beyond the commented allowlist
-  in `dash/src/architecture/display-layer.test.ts`; `import type` is always fine.
-- Computing a domain result in the popover.
-
-`dash/src/architecture/display-layer.test.ts` enforces all of this and runs in the test gate.
+  `canon.db` metadata (`SettingsService` / `CanonStoreRepository`).
+- Computing a domain result in the popover UI (`dash/tray/ui/src/**`).
 
 ## Gates
 

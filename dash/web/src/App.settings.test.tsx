@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
-import statusMixed from '../../src/server/fixtures/capture-api/status-mixed.json'
+import statusMixed from './fixtures/capture-api/status-mixed.json'
 import { App } from './App.js'
 
 function stubFetch(): { urls: string[] } {

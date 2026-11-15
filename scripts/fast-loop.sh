@@ -201,6 +201,7 @@ esac
 # Component routing: if --class or --method was supplied, focus on .NET and docs validate.
 # Otherwise, inspect changed workspace paths to run targeted fast checks.
 needs_dotnet=0
+needs_dash_server=0
 needs_dash=0
 needs_tray_ui=0
 needs_rust=0
@@ -236,6 +237,9 @@ else
         dash/tray/ui/*)
           needs_tray_ui=1
           needs_dash=1
+          ;;
+        dash/server/* | dash/server.tests/*)
+          needs_dash_server=1
           ;;
         dash/*.md | docs/*)
           needs_docs=1
@@ -329,6 +333,17 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
 
   step "format (whitespace)"
   dotnet format KyberWeave.sln whitespace --verify-no-changes --no-restore -v minimal
+fi
+
+if [[ "${needs_dash_server}" -eq 1 ]]; then
+  step "kyberdash server build (Release, warnings-as-errors)"
+  dotnet build dash/server/KyberDash.sln -c "${CONFIGURATION}"
+
+  step "kyberdash server format (whitespace)"
+  dotnet format dash/server/KyberDash.sln whitespace --verify-no-changes --no-restore -v minimal
+
+  step "kyberdash server tests"
+  dotnet test dash/server/KyberDash.sln -c "${CONFIGURATION}" --no-build
 fi
 
 if [[ "${needs_docs}" -eq 1 ]]; then

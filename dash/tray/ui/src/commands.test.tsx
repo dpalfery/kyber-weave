@@ -16,8 +16,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 
-import full from '../../../src/analysis/report/fixtures/full.json' with { type: 'json' }
-import type { ContextReport } from '../../../src/analysis/report/types.ts'
+import full from './fixtures/report/full.json' with { type: 'json' }
+import type { ContextReport } from './report-types.ts'
 
 import { App } from './App'
 import { Actions } from './components/Actions'

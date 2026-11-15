@@ -602,9 +602,9 @@ public sealed class SbomTests
     ///
     /// The marker assertions pin the <c>kyber-weave:sbom:not-measured</c>
     /// contract from <c>scripts/generate-artifact-sboms.sh</c> and
-    /// <c>docs/install.md</c>: single-file .NET publishes carry
-    /// <c>dotnet-single-file</c>, Node SEA blobs carry <c>node-sea</c>
-    /// alongside their file catalogue entry, Tauri bundles carry
+    /// <c>docs/install.md</c>: single-file .NET publishes (<c>kyber-weave</c>,
+    /// <c>kyber-weave-mcp</c>, and <c>kyberdash</c>) carry
+    /// <c>dotnet-single-file</c> alongside their file catalogue entry, Tauri bundles carry
     /// <c>tauri-bundle</c>, and Squad-like skill zips carry no marker
     /// because their file list is their content.
     ///
@@ -668,11 +668,11 @@ public sealed class SbomTests
                 "kyber-weave SBOM must carry kyber-weave:sbom:not-measured=dotnet-single-file but carried "
                 + (dotnetMarker ?? "<none>") + ".");
 
-            string? nodeSeaMarker = ReadNotMeasuredMarker(Path.Combine(dir, "kyberdash-test-x64.cdx.json"));
+            string? kyberdashMarker = ReadNotMeasuredMarker(Path.Combine(dir, "kyberdash-test-x64.cdx.json"));
             Assert.True(
-                string.Equals(nodeSeaMarker, "node-sea", StringComparison.Ordinal),
-                "kyberdash SBOM must carry kyber-weave:sbom:not-measured=node-sea but carried "
-                + (nodeSeaMarker ?? "<none>") + ".");
+                string.Equals(kyberdashMarker, "dotnet-single-file", StringComparison.Ordinal),
+                "kyberdash SBOM must carry kyber-weave:sbom:not-measured=dotnet-single-file but carried "
+                + (kyberdashMarker ?? "<none>") + ".");
 
             string squadSbomPath = Path.Combine(dir, "kyber-squad-test-0.1.0.cdx.json");
             string squadContent = File.ReadAllText(squadSbomPath);

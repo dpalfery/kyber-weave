@@ -1,7 +1,6 @@
 import { useMemo } from 'react'
 import { cn } from '../lib/utils.js'
-import { renderCost } from '../../../src/canon/cost.js'
-import type { CostBasis, CostBlock, CostStatus } from '../../../src/canon/types.js'
+import { renderCost, type CostBasis, type CostBlock, type CostStatus } from '../lib/cost.js'
 import type { KyberCostBasisMismatch } from '../lib/kyberApi.js'
 
 export type { CostBasis, CostBlock, CostStatus }

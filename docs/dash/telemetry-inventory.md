@@ -32,9 +32,12 @@ filter. A Gemini selector **label** may remain in the UI.
 ## Collector and canonical-record contract
 
 **[VERIFIED]** The local receiver accepts JSON and protobuf across `POST /v1/traces`, `POST /v1/logs`, and `POST /v1/metrics`. Non-model spans are quarantined at ingest and cannot create derived
-sessions. A log correlates by `(trace_id, span_id)`, then by session and bounded timestamp
-window; it enriches one existing span-shaped record, is idempotent, and is quarantined if
-it remains unmatched. Claude Code request-body logs follow a stricter rule, described in
+sessions. In the C# engine a log is decoded, given a deterministic `OtlpCollector.DeriveLogId`, and
+written to `pending_logs` (`CanonStoreRepository.StorePendingLogs`); nothing correlates it with a
+record afterwards. The retired TypeScript engine correlated a log by `(trace_id, span_id)`, then by
+session and bounded timestamp window, enriched one existing span-shaped record, and quarantined an
+unmatched log; that matcher is not part of the C# engine. Claude Code request-body logs followed a
+stricter rule, described in
 [Claude request-body correlation](#claude-request-body-correlation). These are the durable decisions in [ADR 0009](../adr/0009-multi-signal-ingestion-span-shaped-record.md).
 The Context **view** contract — ASAD only, payload from `canon.db`, harnesses in scope with
 reasons rather than zeros — is [ADR 0011](../adr/0011-asad-only-context-view-and-payload-contract.md).
@@ -43,7 +46,7 @@ That view is reached from the **Sessions** rail, not a Context tab.
 **[VERIFIED]** The `canon.db` session projection emits the ASAD payload directly and is
 rebuilt from canonical records. For a turn present in both OTLP and a dot-folder source,
 counters come from OTLP; file-derived parts are used only when the OTLP record has no parts.
-Values are never summed across the two sources. `KyberBridge` reads `canon.db` only;
+Values are never summed across the two sources. `KyberBridgeEngine` reads `canon.db` only;
 `AGENTDASH_DB` / `KYBER_DB` cannot expose a legacy Python `sessions.db`.
 
 ## Verified harness outcomes

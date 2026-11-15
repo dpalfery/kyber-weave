@@ -488,8 +488,8 @@ public sealed class ReleaseTests
 
     /// <summary>
     /// The asset names the <c>build-tray</c> job publishes, which are the same
-    /// names <c>trayArtifactName</c> in <c>dash/src/install/origin.ts</c> asks
-    /// for. A rename on either side leaves `kyberdash menubar` downloading an
+    /// names <c>TrayArtifactName</c> in <c>dash/server/KyberDash.Application/Services/MenubarService.cs</c>
+    /// asks for. A rename on either side leaves `kyberdash menubar` downloading an
     /// asset the release does not carry, and nothing else would catch it.
     /// </summary>
     private static readonly string[] TrayAssetNames =
@@ -537,7 +537,13 @@ public sealed class ReleaseTests
 
         // And the installer still asks for exactly these.
         string origin = File.ReadAllText(
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "dash", "src", "install", "origin.ts"));
+            Path.Combine(
+                KyberWeaveTestPaths.ToolRoot,
+                "dash",
+                "server",
+                "KyberDash.Application",
+                "Services",
+                "MenubarService.cs"));
         Assert.Contains("kyberdash-tray-darwin-", origin, StringComparison.Ordinal);
         Assert.Contains("kyberdash-tray-win-x64-setup.exe", origin, StringComparison.Ordinal);
     }
@@ -595,37 +601,27 @@ public sealed class ReleaseTests
         string job = ReadBuildKyberDashJob();
         string local = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "release-local.sh"));
 
-        // release-local.sh reads its Node version from dash/.nvmrc rather than repeating it.
         Match nodeVersion = Regex.Match(job, "NODE_VERSION: \"([^\"]+)\"");
         Assert.True(nodeVersion.Success, "build-kyberdash no longer pins NODE_VERSION.");
         string nvmrc = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "dash", ".nvmrc")).Trim()
             .TrimStart('v');
         Assert.True(
             nodeVersion.Groups[1].Value == nvmrc,
-            $"build-kyberdash builds on Node {nodeVersion.Groups[1].Value} but dash/.nvmrc, which the local build reads, says {nvmrc}.");
-
-        Match fuse = Regex.Match(job, "--sentinel-fuse (NODE_SEA_FUSE_[0-9a-f]+)");
-        Match postject = Regex.Match(job, "(postject@[0-9A-Za-z.-]+)");
-        Assert.True(fuse.Success, "build-kyberdash no longer names a sentinel fuse.");
-        Assert.True(postject.Success, "build-kyberdash no longer pins a postject version.");
+            $"build-kyberdash builds on Node {nodeVersion.Groups[1].Value} but dash/.nvmrc says {nvmrc}.");
 
         string[] shared =
         [
-            fuse.Groups[1].Value,
-            postject.Groups[1].Value,
-            "--macho-segment-name NODE_SEA",
-            "tsup --config tsup.sea.config.ts",
-            "src/sea-shim.cjs",
-            "\"useSnapshot\": false",
-            "\"disableExperimentalSEAWarning\": true",
-            "\"main.js\":",
-            "\"package.json\":",
+            "KyberDash.Cli.csproj",
+            "KyberDash.Api.csproj",
+            "KyberDash.Mcp.csproj",
+            "-p:PublishSingleFile=true",
+            "-p:IncludeNativeLibrariesForSelfExtract=true",
             "codesign --sign - --force",
             "THIRD_PARTY_NOTICES.md",
             "npm --prefix web ci",
             "npm --prefix web run build",
             "scripts/pack-sea-web.mjs",
-            "\"web.json\":",
+            "dist-sea/web.json",
             "scripts/sea-web-smoke.mjs",
             "scripts/sea-mcp-smoke.mjs"
         ];
@@ -641,9 +637,10 @@ public sealed class ReleaseTests
 
     /// <summary>
     /// Issue #157, defect 1: the web dashboard is embedded in the released binary.
-    /// The release job and release-local.sh must build, embed, and smoke-test the dashboard
-    /// in the correct order: tsup comes first, then web build, then pack, then SEA config.
-    /// The smoke test runs after the blob is injected.
+    /// The release job and release-local.sh must build, pack, embed, and smoke-test the dashboard
+    /// in the correct order: web build comes first, then pack, then single-file publish of
+    /// <c>KyberDash.Cli.csproj</c>, <c>KyberDash.Api.csproj</c>, and <c>KyberDash.Mcp.csproj</c>,
+    /// then the smoke test.
     /// </summary>
     [Fact]
     public void BuildKyberDashEmbedsTheWebDashboard()
@@ -744,28 +741,11 @@ public sealed class ReleaseTests
         IEnumerable<string> filtered = lines.Where(line => !line.TrimStart().StartsWith('#'));
         string textNoComments = string.Join("\n", filtered);
 
-        // Check ordering:
-        // tsup comes before web run build.
-        int tsupIndex = textNoComments.IndexOf("tsup --config tsup.sea.config.ts", StringComparison.Ordinal);
-        if (tsupIndex < 0)
-        {
-            violations.Add(
-                $"{label}: 'tsup --config tsup.sea.config.ts' not found; the dashboard embedding order starts there.");
-            return;
-        }
-
         int webBuildIndex = textNoComments.IndexOf("npm --prefix web run build", StringComparison.Ordinal);
         if (webBuildIndex < 0)
         {
             violations.Add(
-                $"{label}: 'npm --prefix web run build' not found; add it to the 'Bundle dash CLI' step after tsup.");
-            return;
-        }
-
-        if (tsupIndex >= webBuildIndex)
-        {
-            violations.Add(
-                $"{label}: 'tsup --config tsup.sea.config.ts' must come before 'npm --prefix web run build'. Make the same change there.");
+                $"{label}: 'npm --prefix web run build' not found; add it before packing web assets.");
             return;
         }
 
@@ -785,40 +765,42 @@ public sealed class ReleaseTests
             return;
         }
 
-        // pack-sea-web.mjs comes before --experimental-sea-config
-        int seaConfigIndex = textNoComments.IndexOf("--experimental-sea-config", StringComparison.Ordinal);
-        if (seaConfigIndex < 0)
+        // pack-sea-web.mjs comes before single-file publishes of the KyberDash hosts
+        string[] publishProjects = ["KyberDash.Cli.csproj", "KyberDash.Api.csproj", "KyberDash.Mcp.csproj"];
+        int earliestPublishIndex = int.MaxValue;
+        int latestPublishIndex = -1;
+        foreach (string project in publishProjects)
         {
-            violations.Add($"{label}: '--experimental-sea-config' not found.");
-            return;
+            int idx = textNoComments.IndexOf(project, StringComparison.Ordinal);
+            if (idx < 0)
+            {
+                violations.Add($"{label}: '{project}' not found.");
+                return;
+            }
+
+            earliestPublishIndex = Math.Min(earliestPublishIndex, idx);
+            latestPublishIndex = Math.Max(latestPublishIndex, idx);
         }
 
-        if (packIndex >= seaConfigIndex)
+        if (packIndex >= earliestPublishIndex)
         {
             violations.Add(
-                $"{label}: 'scripts/pack-sea-web.mjs' must come before '--experimental-sea-config'. Make the same change there.");
+                $"{label}: 'scripts/pack-sea-web.mjs' must come before KyberDash single-file publishes. Make the same change there.");
             return;
         }
 
-        // Check sea-web-smoke.mjs comes after NODE_SEA_BLOB injection
-        int blobIndex = textNoComments.IndexOf("NODE_SEA_BLOB", StringComparison.Ordinal);
-        if (blobIndex < 0)
-        {
-            violations.Add($"{label}: 'NODE_SEA_BLOB' not found.");
-            return;
-        }
-
+        // Check sea-web-smoke.mjs comes after all KyberDash single-file publishes
         int smokeIndex = textNoComments.IndexOf("scripts/sea-web-smoke.mjs", StringComparison.Ordinal);
         if (smokeIndex < 0)
         {
-            violations.Add($"{label}: 'scripts/sea-web-smoke.mjs' not found; add it after the blob injection.");
+            violations.Add($"{label}: 'scripts/sea-web-smoke.mjs' not found; add it after the publish step.");
             return;
         }
 
-        if (blobIndex >= smokeIndex)
+        if (latestPublishIndex >= smokeIndex)
         {
             violations.Add(
-                $"{label}: 'scripts/sea-web-smoke.mjs' must come after 'NODE_SEA_BLOB' injection. Make the same change there.");
+                $"{label}: 'scripts/sea-web-smoke.mjs' must come after KyberDash single-file publishes. Make the same change there.");
             return;
         }
 
@@ -849,20 +831,25 @@ public sealed class ReleaseTests
         Assert.True(
             releaseTar.Success,
             "release.yml tar archive: the destination-path regex does not match the real, quoted command line.");
-        Assert.Equal("\"kyberdash${EXE}\" THIRD_PARTY_NOTICES.md", releaseTar.Groups[2].Value.Trim());
+        Assert.Equal(
+            "\"kyberdash${EXE}\" \"kyberdash-api${EXE}\" \"kyberdash-mcp${EXE}\" THIRD_PARTY_NOTICES.md",
+            releaseTar.Groups[2].Value.Trim());
 
         Match releaseZip = ZipArchiveOperandsRegex.Match(job);
         Assert.True(
             releaseZip.Success,
             "release.yml zip archive: the destination-path regex does not match the real, quoted command line.");
         Assert.Equal(
-            "\"${FINAL_BIN}\" \"${BIN_DIR}/THIRD_PARTY_NOTICES.md\"", releaseZip.Groups[2].Value.Trim());
+            "\"${FINAL_BIN}\" \"${API_BIN}\" \"${MCP_BIN}\" \"${BIN_DIR}/THIRD_PARTY_NOTICES.md\"",
+            releaseZip.Groups[2].Value.Trim());
 
         Match localTar = TarArchiveOperandsRegex.Match(local);
         Assert.True(
             localTar.Success,
             "release-local.sh tar archive: the destination-path regex does not match the real, quoted command line.");
-        Assert.Equal("kyberdash THIRD_PARTY_NOTICES.md", localTar.Groups[2].Value.Trim());
+        Assert.Equal(
+            "kyberdash kyberdash-api kyberdash-mcp THIRD_PARTY_NOTICES.md",
+            localTar.Groups[2].Value.Trim());
     }
 
     /// <summary>Strips comment lines the same way <see cref="AssertEmbedsWebDashboard"/> does.</summary>
@@ -899,109 +886,53 @@ public sealed class ReleaseTests
     {
         if (label == "release.yml")
         {
-            // Check tar command: tar -C "${BIN_DIR}" -czf "${BIN_DIR}/kyberdash-${RID}.tar.gz" "kyberdash${EXE}" THIRD_PARTY_NOTICES.md
-            // The destination path is quoted, so a closing " sits before the whitespace that
-            // separates it from the operand list; "? tolerates that quote without requiring it.
-            Match tarMatch = TarArchiveOperandsRegex.Match(text);
-            if (tarMatch.Success)
-            {
-                string operands = tarMatch.Groups[2].Value.Trim();
-                string[] parts = operands.Split(OperandsSeparators, StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length == 2)
-                {
-                    // Trim quotes from operands
-                    string op1 = parts[0].Trim('"');
-                    string op2 = parts[1].Trim('"');
-                    if (op1 != "kyberdash${EXE}" || op2 != "THIRD_PARTY_NOTICES.md")
-                    {
-                        violations.Add(
-                            $"{label} tar archive: expected operands [\"kyberdash${{EXE}}\", \"THIRD_PARTY_NOTICES.md\"] but got [\"{op1}\", \"{op2}\"]. Update this list with the job.");
-                    }
-                }
-                else
-                {
-                    // Exactly two operands are expected — the binary and THIRD_PARTY_NOTICES.md, nothing
-                    // more. A third operand (e.g. a stray debug-symbols file) must fail here rather than
-                    // silently widening the archive contract that install.sh and SelfUpdater.cs rely on.
-                    violations.Add(
-                        $"{label} tar archive: expected exactly 2 operands [\"kyberdash${{EXE}}\", \"THIRD_PARTY_NOTICES.md\"] but got {parts.Length} (\"{operands}\"). Update this list with the job.");
-                }
-            }
-            else
-            {
-                // A non-matching regex must not silently skip the operand check above: that is
-                // exactly the defect this test project already regressed on once (Issue #157).
-                violations.Add(
-                    $"{label} tar archive: destination-path regex did not match; the operand check below it did not run.");
-            }
-
-            // Check zip command: zip -9 -j "${BIN_DIR}/kyberdash-${RID}.zip" "${FINAL_BIN}" "${BIN_DIR}/THIRD_PARTY_NOTICES.md"
-            // The destination path is quoted; "? tolerates the closing quote the same way as tar above.
-            Match zipMatch = ZipArchiveOperandsRegex.Match(text);
-            if (zipMatch.Success)
-            {
-                string operands = zipMatch.Groups[2].Value.Trim();
-                string[] parts = operands.Split(OperandsSeparators, StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length == 2)
-                {
-                    // Trim quotes from operands
-                    string op1 = parts[0].Trim('"');
-                    string op2 = parts[1].Trim('"');
-                    if (op1 != "${FINAL_BIN}" || op2 != "${BIN_DIR}/THIRD_PARTY_NOTICES.md")
-                    {
-                        violations.Add(
-                            $"{label} zip archive: expected operands [\"${{FINAL_BIN}}\", \"${{BIN_DIR}}/THIRD_PARTY_NOTICES.md\"] but got [\"{op1}\", \"{op2}\"]. Update this list with the job.");
-                    }
-                }
-                else
-                {
-                    // Exactly two operands are expected — the binary and THIRD_PARTY_NOTICES.md, nothing
-                    // more. A third operand (e.g. a stray debug-symbols file) must fail here rather than
-                    // silently widening the archive contract that install.sh and SelfUpdater.cs rely on.
-                    violations.Add(
-                        $"{label} zip archive: expected exactly 2 operands [\"${{FINAL_BIN}}\", \"${{BIN_DIR}}/THIRD_PARTY_NOTICES.md\"] but got {parts.Length} (\"{operands}\"). Update this list with the job.");
-                }
-            }
-            else
-            {
-                violations.Add(
-                    $"{label} zip archive: destination-path regex did not match; the operand check below it did not run.");
-            }
+            AssertExpectedArchiveOperands(
+                TarArchiveOperandsRegex.Match(text),
+                $"{label} tar archive",
+                ["kyberdash${EXE}", "kyberdash-api${EXE}", "kyberdash-mcp${EXE}", "THIRD_PARTY_NOTICES.md"],
+                "Update this list with the job.",
+                violations);
+            AssertExpectedArchiveOperands(
+                ZipArchiveOperandsRegex.Match(text),
+                $"{label} zip archive",
+                ["${FINAL_BIN}", "${API_BIN}", "${MCP_BIN}", "${BIN_DIR}/THIRD_PARTY_NOTICES.md"],
+                "Update this list with the job.",
+                violations);
         }
         else if (label == "release-local.sh")
         {
-            // Check tar command: tar -C "${stage}/out" -czf "${DEST}/kyberdash-${kyberdash_rid}.tar.gz" kyberdash THIRD_PARTY_NOTICES.md
-            // The destination path is quoted; "? tolerates the closing quote the same way as above.
-            Match tarMatch = TarArchiveOperandsRegex.Match(text);
-            if (tarMatch.Success)
-            {
-                string operands = tarMatch.Groups[2].Value.Trim();
-                string[] parts = operands.Split(OperandsSeparators, StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length == 2)
-                {
-                    // Trim quotes from operands
-                    string op1 = parts[0].Trim('"');
-                    string op2 = parts[1].Trim('"');
-                    if (op1 != "kyberdash" || op2 != "THIRD_PARTY_NOTICES.md")
-                    {
-                        violations.Add(
-                            $"{label} tar archive: expected operands [\"kyberdash\", \"THIRD_PARTY_NOTICES.md\"] but got [\"{op1}\", \"{op2}\"]. Make the same change there.");
-                    }
-                }
-                else
-                {
-                    // Exactly two operands are expected — the binary and THIRD_PARTY_NOTICES.md, nothing
-                    // more. A third operand (e.g. a stray debug-symbols file) must fail here rather than
-                    // silently widening the archive contract that install.sh and SelfUpdater.cs rely on.
-                    violations.Add(
-                        $"{label} tar archive: expected exactly 2 operands [\"kyberdash\", \"THIRD_PARTY_NOTICES.md\"] but got {parts.Length} (\"{operands}\"). Make the same change there.");
-                }
-            }
-            else
-            {
-                violations.Add(
-                    $"{label} tar archive: destination-path regex did not match; the operand check below it did not run.");
-            }
+            AssertExpectedArchiveOperands(
+                TarArchiveOperandsRegex.Match(text),
+                $"{label} tar archive",
+                ["kyberdash", "kyberdash-api", "kyberdash-mcp", "THIRD_PARTY_NOTICES.md"],
+                "Make the same change there.",
+                violations);
+        }
+    }
+
+    private static void AssertExpectedArchiveOperands(
+        Match match,
+        string subject,
+        IReadOnlyList<string> expectedOperands,
+        string remediation,
+        List<string> violations)
+    {
+        if (!match.Success)
+        {
+            // A non-matching regex must not silently skip the operand check above: that is
+            // exactly the defect this test project already regressed on once (Issue #157).
+            violations.Add($"{subject}: destination-path regex did not match; the operand check below it did not run.");
+            return;
+        }
+
+        string operands = match.Groups[2].Value.Trim();
+        string[] actual = [.. operands.Split(OperandsSeparators, StringSplitOptions.RemoveEmptyEntries).Select(p => p.Trim('"'))];
+        string expectedList = string.Join(", ", expectedOperands.Select(o => $"\"{o}\""));
+        if (actual.Length != expectedOperands.Count || !actual.SequenceEqual(expectedOperands, StringComparer.Ordinal))
+        {
+            string actualList = string.Join(", ", actual.Select(o => $"\"{o}\""));
+            violations.Add(
+                $"{subject}: expected {expectedOperands.Count} operands [{expectedList}] but got {actual.Length} [{actualList}] (\"{operands}\"). {remediation}");
         }
     }
 

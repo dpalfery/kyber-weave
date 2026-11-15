@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { render, cleanup } from '@testing-library/react'
 
-import statusMixed from '../../../../src/server/fixtures/capture-api/status-mixed.json'
+import statusMixed from '../../fixtures/capture-api/status-mixed.json'
 import type { KyberCaptureHarness } from '../../lib/kyberApi.js'
 import { HarnessCollectionList, decideRow } from './HarnessCollectionList.js'
 import { screen } from '@testing-library/react'

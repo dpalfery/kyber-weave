@@ -291,10 +291,10 @@ root["purl"] = "pkg:generic/%s@%s" % (stem, version)
 # an additional not-measured marker rather than a quietly incomplete package
 # list:
 #
-#   * kyber-weave-* / kyber-weave-mcp-* are single-file .NET publishes: the
-#     closure is folded into the executable, so no package cataloger can read it.
-#   * kyberdash-* are Node SEA blobs: the runtime and dashboard are bundled, so
-#     the bytes are listed as files AND the document states runtime coverage was
+#   * kyber-weave-* / kyber-weave-mcp-* / kyberdash-* are single-file .NET publishes:
+#     the closure is folded into the executable, so no package cataloger can read it.
+#     kyberdash-* embeds the packed web dashboard assets alongside the .NET closure,
+#     so the bytes are listed as files AND the document states runtime coverage was
 #     not measurable (both catalogue entry and marker, never one instead of the
 #     other).
 #   * kyberdash-tray-* are Tauri bundles/installers: opaque binaries, same story.
@@ -307,7 +307,7 @@ def not_measured_reason(name):
     if name.startswith("kyberdash-tray-"):
         return "tauri-bundle"
     if name.startswith("kyberdash-"):
-        return "node-sea"
+        return "dotnet-single-file"
     return None
 
 metadata.setdefault("properties", [])

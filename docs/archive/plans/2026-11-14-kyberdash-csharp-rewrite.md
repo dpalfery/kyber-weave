@@ -49,10 +49,10 @@ decided-by:
 
 | ID | Durable item | Target component | Target doc-type | Target document |
 |---|---|---|---|---|
-| H1 | Decision moving the KyberDash collector and engine from TypeScript/Node SEA to C# on .NET 10 (superseding ADR 0020 Decision 5) | KyberDash | `adr` | [ADR 0084](../adr/0084-kyberdash-csharp-engine.md) |
-| H2 | C# `CanonStore`, incremental dirty-session projection, `OtlpCollector`, `BoundedIngestWriter`, `KyberJobHost`, `KyberApiServer`, and `CanonSynth` design | KyberDash | `architecture` | [KyberDash architecture](../dash/architecture.md) |
-| H3 | Local build and targeted parity test verification for `KyberWeave.Core.Dash` | KyberDash | `runbook` | [KyberDash runbook](../dash/runbook.md) |
-| H4 | Follow-up CLI/MCP/tray entrypoint switchover and Node SEA packaging retirement | KyberDash | `todo` | [kyberdash-cli-switchover-and-node-sea-retirement.md](../todo/kyberdash-cli-switchover-and-node-sea-retirement.md) |
+| H1 | Decision moving the KyberDash collector and engine from TypeScript/Node SEA to C# on .NET 10 (superseding ADR 0020 Decision 5) | KyberDash | `adr` | [ADR 0084](../../adr/0084-kyberdash-csharp-engine.md) |
+| H2 | C# `CanonStore`, incremental dirty-session projection, `OtlpCollector`, `BoundedIngestWriter`, `KyberJobHost`, `KyberApiServer`, and `CanonSynth` design | KyberDash | `architecture` | [KyberDash architecture](../../dash/architecture.md) |
+| H3 | Local build and targeted parity test verification for `KyberWeave.Core.Dash` | KyberDash | `runbook` | [KyberDash runbook](../../dash/runbook.md) |
+| H4 | Entrypoint cutover (`src/KyberWeave.Dash/` single-file host), removal of `dash/src/`, and retirement of Node SEA packaging | KyberDash | `adr` | [ADR 0084](../../adr/0084-kyberdash-csharp-engine.md) |
 
 ## Architecture and Phased Slice Breakdown
 
@@ -91,7 +91,7 @@ Each slice below will be executed under its own single-PR plan (created, execute
 
 5. **Slice 5 — Fallback Transcript Synthesizers, Deduplication, Streaming Readers & Checkpointed Refresh (Implemented in current branch)**
    - Implemented `CanonSynth.cs`, `CanonSynthDedup.cs`, `CanonTranscriptReaders.cs`, `CanonRefresh.cs`, and extended `CanonStore.ServerQueries.cs` (`CommitSourceUnit`, `PurgeContentBefore`, `source_checkpoint`, `record_provenance`, `refresh_run`) plus `KyberJobHost` 14-day rolling retention integration.
-   - Verified with `CanonSynthParityTests` in `tests/KyberWeave.Tests/Dash/` (Node SEA packaging changes remain deferred under out-of-scope release build configuration until downstream binary switchover).
+   - Verified with `CanonSynthParityTests` in `tests/KyberWeave.Tests/Dash/` (followed by the unit cutover in `src/KyberWeave.Dash/` retiring `dash/src/` and Node SEA packaging).
 
 ## Slice 1 Tasks (Completed)
 
@@ -126,4 +126,4 @@ Each slice below will be executed under its own single-PR plan (created, execute
 | D1, D5, H1 | [ADR 0084](../../adr/0084-kyberdash-csharp-engine.md); [ADR 0020](../../adr/0020-kyberdash-one-time-fork.md) | [ADR 0084](../../adr/0084-kyberdash-csharp-engine.md) |
 | D2, D3, D4, H2 | [KyberDash architecture](../../dash/architecture.md) | [ADR 0084](../../adr/0084-kyberdash-csharp-engine.md) |
 | H3 | [KyberDash runbook](../../dash/runbook.md) | no ADR — ADR waiver: operator build and verification commands for the C# engine decided in ADR 0084 |
-| H4, RESIDUAL | [kyberdash-cli-switchover-and-node-sea-retirement.md](../../todo/kyberdash-cli-switchover-and-node-sea-retirement.md) | no ADR — ADR waiver: tracks follow-up CLI/Tray entrypoint cutover and Node SEA build retirement |
+| H4, RESIDUAL | [ADR 0084](../../adr/0084-kyberdash-csharp-engine.md); [Distribution and release flow](../../distribution.md) | [ADR 0084](../../adr/0084-kyberdash-csharp-engine.md) |

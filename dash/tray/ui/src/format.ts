@@ -7,8 +7,8 @@
  * disagree about what an unmeasurable figure looks like.
  */
 
-import { formatMeasured, NOT_MEASURABLE } from '../../../src/analysis/report/types.ts'
-import type { BucketKey, Measured } from '../../../src/analysis/report/types.ts'
+import { formatMeasured, NOT_MEASURABLE } from './report-types.ts'
+import type { BucketKey, Measured } from './report-types.ts'
 
 export { formatMeasured, NOT_MEASURABLE }
 

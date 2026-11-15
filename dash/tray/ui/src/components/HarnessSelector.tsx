@@ -5,7 +5,7 @@
  * who does not check it first can misread every figure under it.
  */
 
-import type { ContextReport } from '../../../../src/analysis/report/types.ts'
+import type { ContextReport } from '../report-types.ts'
 
 type Props = {
   report: ContextReport | null

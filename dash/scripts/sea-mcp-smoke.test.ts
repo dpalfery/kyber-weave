@@ -102,14 +102,18 @@ describe('sea-mcp-smoke - staged binary MCP release contract', () => {
     expect(code.slice(0, finallyIndex)).toContain('closed')
   }, TEST_TIMEOUT_MS)
 
-  it('is wired into the local release build after the SEA blob injection', async () => {
+  it('is wired into the local release build after publishing kyberdash', async () => {
     const local = await readFile(join(scriptDir, '..', '..', 'scripts', 'release-local.sh'), 'utf8')
     const code = local.split('\n').filter((line) => !line.trimStart().startsWith('#')).join('\n')
-    const blobIndex = code.indexOf('NODE_SEA_BLOB')
-    expect(blobIndex, 'release-local.sh has no NODE_SEA_BLOB injection').toBeGreaterThanOrEqual(0)
+    const publishIndex = code.indexOf('KyberDash.Cli.csproj')
+    const mcpPublishIndex = code.indexOf('KyberDash.Mcp.csproj')
+    expect(publishIndex, 'release-local.sh does not publish KyberDash.Cli.csproj').toBeGreaterThanOrEqual(0)
+    expect(mcpPublishIndex, 'release-local.sh does not publish KyberDash.Mcp.csproj').toBeGreaterThanOrEqual(0)
     const smokeIndex = code.indexOf('scripts/sea-mcp-smoke.mjs')
     expect(smokeIndex, 'release-local.sh does not wire scripts/sea-mcp-smoke.mjs').toBeGreaterThanOrEqual(0)
-    expect(smokeIndex, 'sea-mcp-smoke must run after the blob injection').toBeGreaterThan(blobIndex)
+    expect(smokeIndex, 'sea-mcp-smoke must run after publishing KyberDash.Cli and KyberDash.Mcp').toBeGreaterThan(
+      Math.max(publishIndex, mcpPublishIndex),
+    )
   }, TEST_TIMEOUT_MS)
 
   async function writeStandIn(mode: string): Promise<void> {
