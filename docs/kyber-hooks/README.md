@@ -75,6 +75,8 @@ go to stderr; Claude Code shows stderr to the agent only on exit 2.
 
 Path checks compare normalized paths and do not resolve symbolic links, so a symlink under the project is checked by its own path; the effect is that a format check may run on a file the agent could already edit.
 
+Path case sensitivity follows the operating system, not the volume: checks ignore case on Windows and macOS and are case-sensitive elsewhere, because the Domain layer does no I/O and cannot ask the file system, so a case-sensitive macOS volume or a case-insensitive Linux mount can disagree with the check.
+
 ## Built-in rules
 
 | Id | Kind | On by default | Runs |
