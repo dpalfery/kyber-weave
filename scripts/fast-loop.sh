@@ -144,6 +144,8 @@ if [[ "${1:-}" == "--regenerate" ]]; then
     step "collecting per-test timings (this takes ~90 seconds)"
     timings=("$(mktemp "${TMPDIR:-/tmp}/kw-timings.XXXXXX")" "$(mktemp "${TMPDIR:-/tmp}/kw-timings.XXXXXX")")
     generated_timings=("${timings[@]}")
+    # Accepted risk: these full-suite timing runs have no watchdog cap, leftover check or slot queue,
+    # so a runaway run is bounded only by the caller. Run `--regenerate` alone on the machine.
     # One list covers both test projects: the classes share a namespace, so a name means one test.
     dotnet "${TEST_DLL}" -xml "${timings[0]}" >/dev/null
     dotnet "${POLICY_TEST_DLL}" -xml "${timings[1]}" >/dev/null
