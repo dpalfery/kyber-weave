@@ -4,7 +4,7 @@ namespace KyberWeave.Core.CodeGraph;
 /// Port over a CodeGraph index: symbol and route lookups used by drift, export, and retrieval.
 /// </summary>
 /// <remarks>
-/// Hosts inject a concrete adapter (typically <see cref="CodeGraphResolverAdapter"/>).
+/// Hosts inject a concrete adapter (typically <c>CodeGraphResolverAdapter</c>).
 /// Tests inject fakes so drift and join behaviour can be driven without sqlite3.
 /// </remarks>
 public interface ICodeGraphResolver
