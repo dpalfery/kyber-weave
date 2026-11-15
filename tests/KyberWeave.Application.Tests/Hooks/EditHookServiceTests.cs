@@ -50,6 +50,18 @@ public sealed class EditHookServiceTests
     }
 
     [Fact]
+    public async Task NearestGitRootWinsOverANestedKyberWeaveDirectory()
+    {
+        _ = fileSystem.WithDirectory("src/App/.kyber-weave");
+        (EditHookService service, FakeProcessRunner runner, _) = Build();
+
+        _ = await service.RunAsync(Edit, CancellationToken.None);
+
+        Assert.All(runner.Calls, c => Assert.Equal(FakeFileSystem.Root, c.Cwd));
+        Assert.Equal(2, runner.Calls.Count);
+    }
+
+    [Fact]
     public async Task SuccessIsSilent()
     {
         (EditHookService service, _, _) = Build();

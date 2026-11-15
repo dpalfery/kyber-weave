@@ -1,4 +1,5 @@
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Domain.Hooks;
 
 namespace KyberWeave.Application.Hooks;
 
@@ -9,20 +10,22 @@ internal static class ProjectLocator
 
     public static string? FindRepositoryRoot(IFileSystem fileSystem, string startDirectory)
     {
-        string? directory = startDirectory;
-        while (directory is not null)
+        string? fallback = null;
+        for (string? directory = startDirectory; directory is not null; directory = Path.GetDirectoryName(directory))
         {
             string git = Path.Combine(directory, ".git");
-            if (fileSystem.DirectoryExists(git) || fileSystem.FileExists(git)
-                || fileSystem.DirectoryExists(Path.Combine(directory, ".kyber-weave")))
+            if (fileSystem.DirectoryExists(git) || fileSystem.FileExists(git))
             {
                 return directory;
             }
 
-            directory = Path.GetDirectoryName(directory);
+            if (fallback is null && fileSystem.DirectoryExists(Path.Combine(directory, ".kyber-weave")))
+            {
+                fallback = directory;
+            }
         }
 
-        return null;
+        return fallback;
     }
 
     public static string? FindMarker(IFileSystem fileSystem, string root, string fileDirectory) =>
@@ -34,7 +37,7 @@ internal static class ProjectLocator
     private static string? FindUp(IFileSystem fileSystem, string root, string startDirectory, string[] patterns)
     {
         string? directory = startDirectory;
-        while (directory is not null && directory.StartsWith(root, StringComparison.Ordinal))
+        while (directory is not null && PathContainment.IsWithin(root, directory))
         {
             foreach (string pattern in patterns)
             {

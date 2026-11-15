@@ -38,6 +38,20 @@ public sealed class RealDataCompositionTests : IDisposable
     }
 
     [Fact]
+    public async Task KyberWeaveDirectoryMarksTheRootOnlyWhenNoGitExistsAbove()
+    {
+        _ = Directory.CreateDirectory(Path.Combine(root.FullName, ".kyber-weave"));
+        _ = Write("src/App/App.csproj", "<Project />");
+        string file = Write("src/App/Foo.cs", "class Foo {}");
+        FakeProcessRunner runner = new(clock);
+        using ServiceProvider provider = Provider(runner);
+
+        _ = await provider.GetRequiredService<IEditHookService>().RunAsync(new HookEditEvent(file, root.FullName), CancellationToken.None);
+
+        Assert.Equal(root.FullName, runner.Calls[0].Cwd);
+    }
+
+    [Fact]
     public async Task MissingExecutableIsReportedAsCommandNotFoundAndNeverBlocks()
     {
         string file = Repository();
