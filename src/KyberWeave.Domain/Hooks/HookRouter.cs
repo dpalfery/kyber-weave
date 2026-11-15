@@ -5,32 +5,39 @@ namespace KyberWeave.Domain.Hooks;
 /// <summary>Chooses the commands that apply to one changed file.</summary>
 public static class HookRouter
 {
-    /// <summary>Gets whether any enabled rule of <paramref name="kind"/> matches the path by glob alone.</summary>
+    /// <summary>Gets the enabled rules whose globs match a changed file.</summary>
     /// <param name="config">The effective config.</param>
-    /// <param name="kind">The rule kind to look for.</param>
     /// <param name="relativePath">The repository-relative changed file.</param>
-    /// <returns>True when a matching rule exists, so callers can skip work that only that kind needs.</returns>
-    public static bool AnyRuleMatches(HooksConfig config, HookRuleKind kind, string relativePath)
+    /// <returns>The matching rules in config order, so callers can skip work that only some kinds need.</returns>
+    public static IReadOnlyList<HookRule> MatchingRules(HooksConfig config, string relativePath)
     {
         ArgumentNullException.ThrowIfNull(config);
-        return config.Rules.Any(r => Matches(r, relativePath) && r.Kind == kind);
+        return [.. config.Rules.Where(r => Matches(r, relativePath))];
     }
 
     /// <summary>Plans the commands for a changed file.</summary>
     /// <param name="config">The effective config.</param>
     /// <param name="relativePath">The repository-relative changed file.</param>
     /// <param name="facts">The project facts for the file.</param>
+    /// <returns>The commands from <see cref="Plan(IReadOnlyList{HookRule}, string, ProjectFacts)"/> for the matching rules.</returns>
+    public static IReadOnlyList<PlannedCommand> Plan(HooksConfig config, string relativePath, ProjectFacts facts) =>
+        Plan(MatchingRules(config, relativePath), relativePath, facts);
+
+    /// <summary>Plans the commands for rules that already matched a changed file.</summary>
+    /// <param name="matchingRules">The rules from <see cref="MatchingRules"/>.</param>
+    /// <param name="relativePath">The repository-relative changed file.</param>
+    /// <param name="facts">The project facts for the file.</param>
     /// <returns>
-    /// Commands in order: lint rules first, then test rules, each in config order. A rule is left out when it is
-    /// disabled, its globs do not match, or a token it uses has no value for this file.
+    /// Commands in order: lint rules first, then test rules, each in config order. A rule is left out when a token
+    /// it uses has no value for this file.
     /// </returns>
-    public static IReadOnlyList<PlannedCommand> Plan(HooksConfig config, string relativePath, ProjectFacts facts)
+    public static IReadOnlyList<PlannedCommand> Plan(IReadOnlyList<HookRule> matchingRules, string relativePath, ProjectFacts facts)
     {
-        ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(matchingRules);
         ArgumentNullException.ThrowIfNull(facts);
 
         List<PlannedCommand> planned = [];
-        foreach (HookRule rule in config.Rules.Where(r => Matches(r, relativePath)).OrderBy(r => r.Kind))
+        foreach (HookRule rule in matchingRules.Where(r => r.Kind == HookRuleKind.Lint).Concat(matchingRules.Where(r => r.Kind == HookRuleKind.Test)))
         {
             if (TryExpand(rule.Run, relativePath, facts, out List<string>? argv))
             {

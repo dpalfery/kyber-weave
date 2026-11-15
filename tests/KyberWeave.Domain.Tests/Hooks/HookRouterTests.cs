@@ -99,6 +99,25 @@ public sealed class HookRouterTests
     }
 
     [Fact]
+    public void MatchingRulesListsOnlyEnabledRulesWhoseGlobsMatch()
+    {
+        Assert.Equal(["dotnet-format-whitespace", "dotnet-format-style"], HookRouter.MatchingRules(HooksDefaults.Config, "src/App/Foo.cs").Select(r => r.Id));
+        Assert.Equal(["dotnet-format-whitespace", "dotnet-format-style", "dotnet-test"], HookRouter.MatchingRules(WithTestsOn(), "src/App/Foo.cs").Select(r => r.Id));
+        Assert.Empty(HookRouter.MatchingRules(WithTestsOn(), "docs/readme.md"));
+    }
+
+    [Fact]
+    public void PlacesLintBeforeTestsEvenWhenTheConfigListsATestFirst()
+    {
+        HookRule t = new("t", HookRuleKind.Test, ["**"], [], ["y"], 5, true, true);
+        HookRule a = new("a", HookRuleKind.Lint, ["**"], [], ["x"], 5, true, true);
+
+        IReadOnlyList<PlannedCommand> plan = HookRouter.Plan(new HooksConfig(30, false, 30, 3000, [t, a], []), "f", Facts);
+
+        Assert.Equal(["a", "t"], plan.Select(p => p.RuleId));
+    }
+
+    [Fact]
     public void KeepsConfigOrderWithinAKind()
     {
         HookRule a = new("a", HookRuleKind.Lint, ["**"], [], ["x"], 5, true, true);

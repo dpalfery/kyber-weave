@@ -55,13 +55,13 @@ public sealed class EditHookService(
         }
 
         HooksConfig config = configSource.Load(root);
-        if (!HookRouter.AnyRuleMatches(config, HookRuleKind.Lint, relative)
-            && !HookRouter.AnyRuleMatches(config, HookRuleKind.Test, relative))
+        IReadOnlyList<HookRule> matching = HookRouter.MatchingRules(config, relative);
+        if (matching.Count == 0)
         {
             return HookResult.Silent;
         }
 
-        TestClassResolution tests = HookRouter.AnyRuleMatches(config, HookRuleKind.Test, relative)
+        TestClassResolution tests = matching.Any(r => r.Kind == HookRuleKind.Test)
             ? testClassResolver.Resolve(root, relative)
             : TestClassResolution.None;
         ProjectFacts facts = new(
@@ -71,7 +71,7 @@ public sealed class EditHookService(
             tests.ProjectPath,
             tests.Classes);
 
-        IReadOnlyList<PlannedCommand> plan = HookRouter.Plan(config, relative, facts);
+        IReadOnlyList<PlannedCommand> plan = HookRouter.Plan(matching, relative, facts);
         if (plan.Count == 0)
         {
             return HookResult.Silent;
