@@ -9,6 +9,7 @@ namespace KyberWeave.Data.Hooks;
 internal sealed class KernelProcessRunner : IProcessRunner
 {
     private const long MaxOutputBytes = 4 * 1024 * 1024;
+    private const int MissingExecutableErrorCode = 2;
 
     public Task<ProcessRunResult> RunAsync(
         IReadOnlyList<string> argv,
@@ -27,6 +28,11 @@ internal sealed class KernelProcessRunner : IProcessRunner
 
     private static ProcessRunResult Run(IReadOnlyList<string> argv, string workingDirectory, TimeSpan timeout, CancellationToken cancellationToken)
     {
+        if (!Directory.Exists(workingDirectory))
+        {
+            throw new DirectoryNotFoundException($"working directory not found: {workingDirectory}");
+        }
+
         ProcessStartInfo startInfo = new(argv[0])
         {
             WorkingDirectory = workingDirectory,
@@ -45,7 +51,7 @@ internal sealed class KernelProcessRunner : IProcessRunner
             ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, timeout, MaxOutputBytes, cancellationToken);
             return new ProcessRunResult(result.ExitCode, result.StandardOutput + result.StandardError, TimedOut: false);
         }
-        catch (Exception ex) when (ex is Win32Exception or FileNotFoundException or DirectoryNotFoundException)
+        catch (Exception ex) when (IsMissingExecutable(ex))
         {
             throw new FileNotFoundException($"command not found: {argv[0]}", argv[0], ex);
         }
@@ -58,4 +64,7 @@ internal sealed class KernelProcessRunner : IProcessRunner
             return new ProcessRunResult(-1, ex.Message, TimedOut: false);
         }
     }
+
+    private static bool IsMissingExecutable(Exception ex) =>
+        ex is FileNotFoundException || (ex is Win32Exception win32 && win32.NativeErrorCode == MissingExecutableErrorCode);
 }
