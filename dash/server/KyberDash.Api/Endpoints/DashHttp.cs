@@ -19,6 +19,9 @@ namespace KyberDash.Api.Endpoints;
 /// </remarks>
 internal static class DashHttp
 {
+    /// <summary>Maximum JSON request body accepted by the mutation endpoints (1 MiB).</summary>
+    public const int DefaultMaxJsonBodyBytes = 1024 * 1024;
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     /// <summary>
@@ -73,9 +76,29 @@ internal static class DashHttp
 
     /// <summary>Reads a whole number query value when it is positive.</summary>
     public static int? OptionalPositiveInt(IQueryCollection query, string key) =>
-        int.TryParse(query[key].ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out int value) && value > 0
-            ? value
-            : null;
+        OptionalPositiveInt(query, key, out _);
+
+    /// <summary>
+    /// Reads a whole number query value when it is positive. <paramref name="invalid"/> reports that
+    /// the value was present but not a positive whole number, so a caller can answer 400 instead of
+    /// treating it as absent and reading without a bound.
+    /// </summary>
+    public static int? OptionalPositiveInt(IQueryCollection query, string key, out bool invalid)
+    {
+        invalid = false;
+        if (!query.TryGetValue(key, out Microsoft.Extensions.Primitives.StringValues values))
+            return null;
+
+        string raw = values.ToString();
+        if (string.IsNullOrWhiteSpace(raw))
+            return null;
+
+        if (int.TryParse(raw, NumberStyles.None, CultureInfo.InvariantCulture, out int value) && value > 0)
+            return value;
+
+        invalid = true;
+        return null;
+    }
 
     /// <summary>Reads a query value, treating a missing or blank entry as absent.</summary>
     public static string? OptionalQueryString(IQueryCollection query, string key)
@@ -121,18 +144,33 @@ internal static class DashHttp
 
     /// <summary>
     /// Reads a JSON request body. Returns <see langword="false"/> with a 400 response when the body
-    /// is empty or malformed, matching the engine's existing response text.
+    /// is empty or malformed, or a 413 when it exceeds <paramref name="maxBytes"/>, matching the
+    /// engine's existing response text.
     /// </summary>
     public static async Task<(bool Ok, JsonElement Body, IResult? Failure)> ReadJsonBodyAsync(
         HttpRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        long maxBytes = DefaultMaxJsonBodyBytes)
     {
         ArgumentNullException.ThrowIfNull(request);
 
         byte[] bytes;
         using (MemoryStream buffer = new())
         {
-            await request.Body.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
+            byte[] chunk = new byte[81920];
+            int read;
+            while ((read = await request.Body.ReadAsync(chunk, cancellationToken).ConfigureAwait(false)) > 0)
+            {
+                if (buffer.Length + read > maxBytes)
+                {
+                    return (false, default, Error(
+                        StatusCodes.Status413PayloadTooLarge,
+                        string.Create(CultureInfo.InvariantCulture, $"Request body exceeds the {maxBytes} byte limit")));
+                }
+
+                await buffer.WriteAsync(chunk.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+            }
+
             bytes = buffer.ToArray();
         }
 

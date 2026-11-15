@@ -90,6 +90,13 @@ public class CaptureService : ICaptureService
         bool? receiverHosted = ReadOptionalBoolean(body, "receiverHosted");
         bool? contentCapture = ReadOptionalBoolean(body, "contentCapture");
 
+        if (!receiverHosted.HasValue && !contentCapture.HasValue)
+        {
+            throw new DashValidationException(
+                "CAPTURE_INVALID",
+                "Capture update must name receiverHosted or contentCapture");
+        }
+
         if (receiverHosted.HasValue)
         {
             settings.WriteBooleanSetting(SettingsService.ReceiverHostedKey, receiverHosted.Value);

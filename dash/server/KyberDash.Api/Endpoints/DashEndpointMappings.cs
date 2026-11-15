@@ -179,7 +179,10 @@ public static class DashEndpointMappings
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
 
-        int? limit = DashHttp.OptionalPositiveInt(request.Query, "limit");
+        int? limit = DashHttp.OptionalPositiveInt(request.Query, "limit", out bool invalidLimit);
+        if (invalidLimit)
+            return DashHttp.Error(StatusCodes.Status400BadRequest, "limit must be a positive whole number");
+
         string? harness = request.Query.TryGetValue("harness", out Microsoft.Extensions.Primitives.StringValues h) ? h.ToString() : null;
         return await Task.Run<IResult>(
             () => DashHttp.NoStoreJson(StatusCodes.Status200OK, new { sessions = query.GetSessions(limit, harness) }),
@@ -240,7 +243,12 @@ public static class DashEndpointMappings
         if (!int.TryParse(index, NumberStyles.None, CultureInfo.InvariantCulture, out int turnIndex))
             return DashHttp.Error(StatusCodes.Status400BadRequest, "Invalid turn index");
 
-        int budget = DashHttp.OptionalPositiveInt(request.Query, "budget") ?? DefaultSessionContentBudget;
+        // The response budget caps what this endpoint may return, so an oversized request cannot
+        // talk it into a bigger body.
+        int budget = Math.Clamp(
+            DashHttp.OptionalPositiveInt(request.Query, "budget") ?? DefaultSessionContentBudget,
+            1,
+            DefaultSessionContentBudget);
         bool full = DashHttp.IsTruthy(DashHttp.OptionalQueryString(request.Query, "full"));
         return await Task.Run<IResult>(
             () => DashHttp.FromNullableJson(query.GetTurnContent(id, turnIndex, budget, full), "Turn not found"),
@@ -358,7 +366,10 @@ public static class DashEndpointMappings
         string? harness = DashHttp.OptionalQueryString(request.Query, "harness");
         string? sessionId = DashHttp.OptionalQueryString(request.Query, "session");
         string? runId = DashHttp.OptionalQueryString(request.Query, "run");
-        int limit = DashHttp.OptionalPositiveInt(request.Query, "limit") ?? 50;
+        int limit = DashHttp.OptionalPositiveInt(request.Query, "limit", out bool invalidLimit) ?? 50;
+        if (invalidLimit)
+            return DashHttp.Error(StatusCodes.Status400BadRequest, "limit must be a positive whole number");
+
         return await Task.Run<IResult>(
             () => DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetReport(harness, sessionId, runId, limit)),
             cancellationToken).ConfigureAwait(false);
@@ -562,7 +573,15 @@ public static class DashEndpointMappings
         if (!ok)
             return failure!;
 
-        capture.ConfigureCapture(body, runtime.StateDirectory);
+        try
+        {
+            capture.ConfigureCapture(body, runtime.StateDirectory);
+        }
+        catch (DashValidationException ex)
+        {
+            return DashHttp.Error(StatusCodes.Status400BadRequest, ex.Message);
+        }
+
         SettingsView updated = settings.GetSettings();
         return DashHttp.NoStoreJson(StatusCodes.Status200OK, new { ok = true, receiverHosted = updated.ReceiverHosted });
     }
@@ -798,19 +817,32 @@ public static class DashEndpointMappings
         if (!HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsHead(context.Request.Method))
             return DashHttp.Error(StatusCodes.Status405MethodNotAllowed, "Method Not Allowed");
 
-        WebAssetDocument? document = await Task.Run(
-            () => assets.TryResolveAsset(path, runtime.DashboardDirectory),
-            cancellationToken).ConfigureAwait(false);
+        WebAssetDocument? document;
+        try
+        {
+            document = await Task.Run(
+                () => assets.TryResolveAsset(path, runtime.DashboardDirectory),
+                cancellationToken).ConfigureAwait(false);
+
+            // A request for a file must be answered with that file or with 404: the asset service
+            // answers an unknown key with index.html, and handing HTML to an import of
+            // `/assets/index-*.js` stops the dashboard before it renders. A client-side route has no
+            // file name, so it still receives the app shell below.
+            if (document is not null
+                && IsFileName(path)
+                && !string.Equals(document.ResolvedPath, NormalizeAssetKey(path), StringComparison.Ordinal))
+            {
+                return DashHttp.Error(StatusCodes.Status404NotFound, "Not found");
+            }
+        }
+        catch (UriFormatException)
+        {
+            // A malformed escape such as /%ZZ is the client's error, not a fault of this host.
+            return DashHttp.Error(StatusCodes.Status400BadRequest, "Malformed request path");
+        }
 
         if (document is null)
             return NotBuiltResult();
-
-        // A request for a file must be answered with that file or with 404: the asset service
-        // answers an unknown key with index.html, and handing HTML to an import of
-        // `/assets/index-*.js` stops the dashboard before it renders. A client-side route has no
-        // file name, so it still receives the app shell below.
-        if (IsFileName(path) && !string.Equals(document.ResolvedPath, NormalizeAssetKey(path), StringComparison.Ordinal))
-            return DashHttp.Error(StatusCodes.Status404NotFound, "Not found");
 
         bool isDocument = string.Equals(path, "/", StringComparison.Ordinal)
             || string.Equals(Path.GetExtension(path), ".html", StringComparison.OrdinalIgnoreCase);
