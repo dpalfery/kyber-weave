@@ -1071,20 +1071,21 @@ public sealed class SquadCliCommandTests : IDisposable
             SeedCodexAndCursorProject("uninstall-invalid-harness-input");
         SquadUninstallCommand command = new SquadUninstallCommand(userPaths);
 
-        SquadUninstallSettings[] invalid =
+        (SquadUninstallSettings Settings, string ExpectedMessage)[] invalid =
         [
-            new() { Harness = "nope", Project = true, PathOption = targetDir },
-            new() { Harness = "all", Project = true, PathOption = targetDir },
-            new() { Harness = "claude", Project = true, PathOption = targetDir },
-            new() { Harness = "cursor", Project = true, Global = true, PathOption = targetDir },
-            new() { Harness = "cursor", PathOption = targetDir },
-            new() { Harness = "cursor" }
+            (new() { Harness = "nope", Project = true, PathOption = targetDir }, "nope"),
+            (new() { Harness = "all", Project = true, PathOption = targetDir }, "exactly one harness"),
+            (new() { Harness = "claude", Project = true, PathOption = targetDir }, "'claude' is not installed"),
+            (new() { Harness = "cursor", Project = true, Global = true, PathOption = targetDir }, "mutually exclusive"),
+            (new() { Harness = "cursor", PathOption = targetDir }, "--path is only valid with --project"),
+            (new() { Harness = "cursor" }, "'cursor' is not installed in the global deployment")
         ];
 
-        foreach (SquadUninstallSettings settings in invalid)
+        foreach ((SquadUninstallSettings settings, string expectedMessage) in invalid)
         {
             CommandExecution execution = Capture(() => command.Execute(null!, settings));
             Assert.Equal(2, execution.ExitCode);
+            Assert.Contains(expectedMessage, execution.Output, StringComparison.OrdinalIgnoreCase);
         }
 
         Assert.True(File.Exists(codexFile));
