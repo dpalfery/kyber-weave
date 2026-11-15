@@ -6,22 +6,19 @@ namespace KyberWeave.Domain.Tests.Hooks;
 public sealed class ClaudeHookEventParserTests
 {
     [Fact]
-    public void ReadsFilePathCwdAndToolName()
+    public void ReadsFilePathAndCwd()
     {
         const string json = """
             {"hook_event_name":"PostToolUse","tool_name":"Edit","cwd":"/repo","tool_input":{"file_path":"/repo/src/A.cs","old_string":"x"}}
             """;
 
-        Assert.True(ClaudeHookEventParser.TryParse(json, out HookEditEvent? edit));
-        Assert.Equal(new HookEditEvent("/repo/src/A.cs", "/repo", "Edit"), edit);
+        Assert.Equal(new HookEditEvent("/repo/src/A.cs", "/repo"), ClaudeHookEventParser.Parse(json));
     }
 
     [Fact]
     public void AcceptsAMissingCwd()
     {
-        Assert.True(ClaudeHookEventParser.TryParse("""{"tool_input":{"file_path":"a.cs"}}""", out HookEditEvent? edit));
-        Assert.Equal(string.Empty, edit!.Cwd);
-        Assert.Null(edit.ToolName);
+        Assert.Equal(new HookEditEvent("a.cs", string.Empty), ClaudeHookEventParser.Parse("""{"tool_input":{"file_path":"a.cs"}}"""));
     }
 
     [Theory]
@@ -34,7 +31,6 @@ public sealed class ClaudeHookEventParserTests
     [InlineData("""{"cwd":"/repo"}""")]
     public void RejectsInputWithoutAFilePath(string json)
     {
-        Assert.False(ClaudeHookEventParser.TryParse(json, out HookEditEvent? edit));
-        Assert.Null(edit);
+        Assert.Null(ClaudeHookEventParser.Parse(json));
     }
 }

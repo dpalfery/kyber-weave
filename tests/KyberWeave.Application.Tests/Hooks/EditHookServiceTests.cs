@@ -7,7 +7,7 @@ namespace KyberWeave.Application.Tests.Hooks;
 
 public sealed class EditHookServiceTests
 {
-    private static readonly HookEditEvent Edit = new(FakeFileSystem.Abs("src/App/Foo.cs"), FakeFileSystem.Root, "Edit");
+    private static readonly HookEditEvent Edit = new(FakeFileSystem.Abs("src/App/Foo.cs"), FakeFileSystem.Root);
 
     private readonly FakeClock clock = new();
     private readonly FakeFileSystem fileSystem = new FakeFileSystem()
@@ -102,7 +102,7 @@ public sealed class EditHookServiceTests
     {
         (EditHookService service, FakeProcessRunner runner, _) = Build();
 
-        _ = await service.RunAsync(new HookEditEvent("src/App/Foo.cs", FakeFileSystem.Root, null), CancellationToken.None);
+        _ = await service.RunAsync(new HookEditEvent("src/App/Foo.cs", FakeFileSystem.Root), CancellationToken.None);
 
         Assert.Equal(2, runner.Calls.Count);
     }

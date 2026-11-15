@@ -5,16 +5,14 @@ namespace KyberWeave.Domain.Hooks;
 /// <summary>Reads the Claude Code PostToolUse hook JSON.</summary>
 public static class ClaudeHookEventParser
 {
-    /// <summary>Tries to read an edit event from hook JSON.</summary>
+    /// <summary>Reads an edit event from hook JSON.</summary>
     /// <param name="json">The text Claude Code wrote to the hook's stdin.</param>
-    /// <param name="edit">The event when parsing succeeds.</param>
-    /// <returns>True when the JSON names a file in <c>tool_input.file_path</c>.</returns>
-    public static bool TryParse(string json, out HookEditEvent? edit)
+    /// <returns>The event, or null when the JSON does not name a file in <c>tool_input.file_path</c>.</returns>
+    public static HookEditEvent? Parse(string json)
     {
-        edit = null;
         if (string.IsNullOrWhiteSpace(json))
         {
-            return false;
+            return null;
         }
 
         try
@@ -23,27 +21,24 @@ public static class ClaudeHookEventParser
             JsonElement root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object
                 || !root.TryGetProperty("tool_input", out JsonElement input)
-                || input.ValueKind != JsonValueKind.Object
-                || !input.TryGetProperty("file_path", out JsonElement path)
-                || path.ValueKind != JsonValueKind.String
-                || string.IsNullOrWhiteSpace(path.GetString()))
+                || StringProperty(input, "file_path") is not { } path
+                || string.IsNullOrWhiteSpace(path))
             {
-                return false;
+                return null;
             }
 
-            string cwd = root.TryGetProperty("cwd", out JsonElement cwdElement) && cwdElement.ValueKind == JsonValueKind.String
-                ? cwdElement.GetString() ?? string.Empty
-                : string.Empty;
-            string? tool = root.TryGetProperty("tool_name", out JsonElement toolElement) && toolElement.ValueKind == JsonValueKind.String
-                ? toolElement.GetString()
-                : null;
-
-            edit = new HookEditEvent(path.GetString()!, cwd, tool);
-            return true;
+            return new HookEditEvent(path, StringProperty(root, "cwd") ?? string.Empty);
         }
         catch (JsonException)
         {
-            return false;
+            return null;
         }
     }
+
+    private static string? StringProperty(JsonElement element, string name) =>
+        element.ValueKind == JsonValueKind.Object
+        && element.TryGetProperty(name, out JsonElement value)
+        && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
 }

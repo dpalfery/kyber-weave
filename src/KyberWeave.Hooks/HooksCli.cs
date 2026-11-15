@@ -38,7 +38,7 @@ internal static class HooksCli
         }
 
         string json = await stdin.ReadToEndAsync().ConfigureAwait(false);
-        if (!ClaudeHookEventParser.TryParse(json, out HookEditEvent? edit) || edit is null)
+        if (ClaudeHookEventParser.Parse(json) is not { } edit)
         {
             return 0;
         }

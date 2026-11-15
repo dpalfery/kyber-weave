@@ -44,7 +44,7 @@ public sealed class RealDataCompositionTests : IDisposable
         FakeProcessRunner runner = new(clock);
         using ServiceProvider provider = Provider(runner);
 
-        HookResult result = await provider.GetRequiredService<IEditHookService>().RunAsync(new HookEditEvent(file, root.FullName, "Write"), CancellationToken.None);
+        HookResult result = await provider.GetRequiredService<IEditHookService>().RunAsync(new HookEditEvent(file, root.FullName), CancellationToken.None);
 
         Assert.Equal(HookResult.Silent, result);
         Assert.Equal(["dotnet", "format", "src/App/App.csproj", "whitespace", "--verify-no-changes", "--include", "src/App/Foo.cs", "-v", "minimal"], runner.Calls[0].Argv);
@@ -74,7 +74,7 @@ public sealed class RealDataCompositionTests : IDisposable
 
         IHooksConfigSource source = provider.GetRequiredService<IHooksConfigSource>();
         HooksConfig config = source.Load(root.FullName);
-        HookResult result = await provider.GetRequiredService<IEditHookService>().RunAsync(new HookEditEvent(file, root.FullName, null), CancellationToken.None);
+        HookResult result = await provider.GetRequiredService<IEditHookService>().RunAsync(new HookEditEvent(file, root.FullName), CancellationToken.None);
 
         Assert.Equal(10, config.TimeBudgetSeconds);
         Assert.False(config.Rules.Single(r => r.Id == "dotnet-format-style").Enabled);
@@ -94,7 +94,7 @@ public sealed class RealDataCompositionTests : IDisposable
         FakeProcessRunner runner = new(clock);
         using ServiceProvider provider = Provider(runner);
 
-        HookResult result = await provider.GetRequiredService<IEditHookService>().RunAsync(new HookEditEvent(file, root.FullName, null), CancellationToken.None);
+        HookResult result = await provider.GetRequiredService<IEditHookService>().RunAsync(new HookEditEvent(file, root.FullName), CancellationToken.None);
 
         Assert.Equal(0, result.ExitCode);
         Assert.Empty(runner.Calls);
@@ -115,7 +115,7 @@ public sealed class RealDataCompositionTests : IDisposable
         Assert.Equal(new TestClassResolution(["App.Tests.FooTests"], "tests/App.Tests/App.Tests.csproj"), resolver.Resolve(root.FullName, "src/App/Foo.cs"), new ResolutionComparer());
         Assert.Equal(TestClassResolution.None, resolver.Resolve(root.FullName, "src/App/Bar.cs"), new ResolutionComparer());
 
-        _ = await provider.GetRequiredService<IEditHookService>().RunAsync(new HookEditEvent(file, root.FullName, null), CancellationToken.None);
+        _ = await provider.GetRequiredService<IEditHookService>().RunAsync(new HookEditEvent(file, root.FullName), CancellationToken.None);
 
         Assert.Equal(
             ["dotnet", "test", "--project", "tests/App.Tests/App.Tests.csproj", "-c", "Release", "--filter-class", "App.Tests.FooTests"],
