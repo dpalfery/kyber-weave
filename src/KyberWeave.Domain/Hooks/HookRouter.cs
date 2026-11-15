@@ -21,10 +21,11 @@ public static class HookRouter
     /// <param name="config">The effective config.</param>
     /// <param name="relativePath">The repository-relative changed file.</param>
     /// <param name="facts">The project facts for the file.</param>
+    /// <param name="notes">When given, receives one line for each rule left out because <c>{testClasses}</c> is embedded in a larger argument.</param>
     /// <returns>The commands from <see cref="Plan(IReadOnlyList{HookRule}, string, ProjectFacts, ICollection{string}?)"/> for the matching rules.</returns>
     /// <exception cref="ArgumentException"><paramref name="relativePath"/> is empty, absolute, or climbs out of the repository with <c>..</c>.</exception>
-    public static IReadOnlyList<PlannedCommand> Plan(HooksConfig config, string relativePath, ProjectFacts facts) =>
-        Plan(MatchingRules(config, relativePath), relativePath, facts);
+    public static IReadOnlyList<PlannedCommand> Plan(HooksConfig config, string relativePath, ProjectFacts facts, ICollection<string>? notes = null) =>
+        Plan(MatchingRules(config, relativePath), relativePath, facts, notes);
 
     /// <summary>Plans the commands for rules that already matched a changed file.</summary>
     /// <param name="matchingRules">The rules from <see cref="MatchingRules"/>.</param>

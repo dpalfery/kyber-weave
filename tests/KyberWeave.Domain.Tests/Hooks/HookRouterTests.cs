@@ -77,6 +77,17 @@ public sealed class HookRouterTests
     }
 
     [Fact]
+    public void ReportsAnEmbeddedRuleThroughTheConfigOverloadToo()
+    {
+        HookRule rule = new("embedded", HookRuleKind.Test, ["**"], [], ["dotnet", "--filter-class={testClasses}"], 10, true, true);
+        List<string> notes = [];
+
+        _ = HookRouter.Plan(new HooksConfig(30, false, 30, 3000, [rule], []), "f", Facts, notes);
+
+        Assert.Contains("rule 'embedded' was not run", Assert.Single(notes), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AddsNoNoteForAMissingTestClassValue()
     {
         List<string> notes = [];
