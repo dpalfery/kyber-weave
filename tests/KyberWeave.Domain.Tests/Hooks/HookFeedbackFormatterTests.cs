@@ -41,6 +41,22 @@ public sealed class HookFeedbackFormatterTests
     }
 
     [Fact]
+    public void KeepsAPrefixOfAnOverlongFirstLine()
+    {
+        string trimmed = HookFeedbackFormatter.Trim(new string('a', 50) + "\nsecond", 10, 12);
+
+        Assert.Equal(new string('a', 11) + "...\n... 1 more line(s) not shown", trimmed);
+    }
+
+    [Fact]
+    public void CutsAnOverlongFirstLineOnACharacterBoundary()
+    {
+        string trimmed = HookFeedbackFormatter.Trim("ééééééé", 10, 6);
+
+        Assert.Equal("éé...", trimmed);
+    }
+
+    [Fact]
     public void ReportsATimeoutWithoutOutputAndAppendsWarnings()
     {
         RuleOutcome timeout = new("slow", HookRuleKind.Lint, true, -1, true, "partial");

@@ -71,6 +71,15 @@ public static class HookFeedbackFormatter
             bytes += size;
         }
 
+        if (kept.Count == 0 && lines.Length > 0 && maxLines > 0)
+        {
+            string prefix = PrefixWithin(lines[0].TrimEnd(), maxBytes - 1);
+            if (prefix.Length > 0)
+            {
+                kept.Add(prefix + "...");
+            }
+        }
+
         int cut = lines.Length - kept.Count;
         if (cut > 0)
         {
@@ -78,5 +87,23 @@ public static class HookFeedbackFormatter
         }
 
         return string.Join('\n', kept);
+    }
+
+    private static string PrefixWithin(string text, int maxBytes)
+    {
+        int length = 0;
+        int bytes = 0;
+        foreach (Rune rune in text.EnumerateRunes())
+        {
+            bytes += rune.Utf8SequenceLength;
+            if (bytes > maxBytes)
+            {
+                break;
+            }
+
+            length += rune.Utf16SequenceLength;
+        }
+
+        return text[..length];
     }
 }
