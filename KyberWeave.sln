@@ -43,6 +43,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KyberWeave.Application.Test
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KyberWeave.Hooks.Tests", "tests\KyberWeave.Hooks.Tests\KyberWeave.Hooks.Tests.csproj", "{8C7E8EFB-E0F5-4B82-82C3-CEE4627259F0}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KyberWeave.PromptContent.Tests", "tests\KyberWeave.PromptContent.Tests\KyberWeave.PromptContent.Tests.csproj", "{C2BDA7C6-25FC-4739-9441-EFD8CDF6BEC3}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -269,6 +271,18 @@ Global
 		{8C7E8EFB-E0F5-4B82-82C3-CEE4627259F0}.Release|x64.Build.0 = Release|Any CPU
 		{8C7E8EFB-E0F5-4B82-82C3-CEE4627259F0}.Release|x86.ActiveCfg = Release|Any CPU
 		{8C7E8EFB-E0F5-4B82-82C3-CEE4627259F0}.Release|x86.Build.0 = Release|Any CPU
+		{C2BDA7C6-25FC-4739-9441-EFD8CDF6BEC3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C2BDA7C6-25FC-4739-9441-EFD8CDF6BEC3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C2BDA7C6-25FC-4739-9441-EFD8CDF6BEC3}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{C2BDA7C6-25FC-4739-9441-EFD8CDF6BEC3}.Debug|x64.Build.0 = Debug|Any CPU
+		{C2BDA7C6-25FC-4739-9441-EFD8CDF6BEC3}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{C2BDA7C6-25FC-4739-9441-EFD8CDF6BEC3}.Debug|x86.Build.0 = Debug|Any CPU
+		{C2BDA7C6-25FC-4739-9441-EFD8CDF6BEC3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C2BDA7C6-25FC-4739-9441-EFD8CDF6BEC3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C2BDA7C6-25FC-4739-9441-EFD8CDF6BEC3}.Release|x64.ActiveCfg = Release|Any CPU
+		{C2BDA7C6-25FC-4739-9441-EFD8CDF6BEC3}.Release|x64.Build.0 = Release|Any CPU
+		{C2BDA7C6-25FC-4739-9441-EFD8CDF6BEC3}.Release|x86.ActiveCfg = Release|Any CPU
+		{C2BDA7C6-25FC-4739-9441-EFD8CDF6BEC3}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -292,5 +306,6 @@ Global
 		{0985A80D-5D3B-4A50-A5D9-35CA74CB008E} = {81C34469-9A7E-45C2-9A33-AF57845E66AB}
 		{3DDD73BF-29B2-40E2-849D-9FECFEA8394C} = {81C34469-9A7E-45C2-9A33-AF57845E66AB}
 		{8C7E8EFB-E0F5-4B82-82C3-CEE4627259F0} = {81C34469-9A7E-45C2-9A33-AF57845E66AB}
+		{C2BDA7C6-25FC-4739-9441-EFD8CDF6BEC3} = {81C34469-9A7E-45C2-9A33-AF57845E66AB}
 	EndGlobalSection
 EndGlobal
