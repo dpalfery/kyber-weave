@@ -64,6 +64,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\KyberWeave.Core\KyberWeave.Core.csproj" />
+    <ProjectReference Include="..\KyberWeave.Domain\KyberWeave.Domain.csproj" />
   </ItemGroup>
 
 </Project>
