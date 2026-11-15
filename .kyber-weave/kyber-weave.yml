@@ -71,6 +71,11 @@ review:
     # would come from binaries the suite did not actually gate.
     # Runs `dotnet test` directly (`scripts/proc-guard.sh` is reserved for KyberDash/tray suites so
     # .NET retains warm Roslyn/MSBuild build servers and avoids watchdog teardown overhead).
+    # Accepted risk: with no `--slot`, no `--max-tree`/`--max-node` cap and no leftover check, two
+    # `kyber-weave review gates --council` processes on one host run their full suites at the same
+    # time and can slow each other and flake load-sensitive classes. The review runner's
+    # `timeout-seconds` is the only bound. Wrap the run in `scripts/proc-guard.sh run --slot` to
+    # queue it again.
     - id: test
       include: *net-test-paths
       run: [dotnet, test, tests/KyberWeave.Tests/KyberWeave.Tests.csproj, -c, Release, --no-build, --coverlet, --coverlet-output-format, cobertura, --results-directory, artifacts/coverage]
