@@ -696,14 +696,14 @@ public sealed class SquadDeploymentPlan
         string? onlyTargetToken = onlyTarget is { } only ? SquadTargetCatalog.GetToken(only) : null;
         foreach (SquadOwnedFile owned in receipt.Files)
         {
+            if (IsOwnedBySiblingReceipt(siblingGlobalReceipts, owned.Target, owned.RelativePath))
+                continue;
+
             if (onlyTargetToken is not null && !string.Equals(owned.Target, onlyTargetToken, StringComparison.Ordinal))
             {
                 retained.Add(owned);
                 continue;
             }
-
-            if (IsOwnedBySiblingReceipt(siblingGlobalReceipts, owned.Target, owned.RelativePath))
-                continue;
 
             string fullPath = ResolvePhysicalPath(
                 scope, root, globalRoots, owned.Target, owned.RelativePath, isSingleRootLayout);
