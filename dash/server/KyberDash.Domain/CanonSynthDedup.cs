@@ -64,15 +64,16 @@ public static class CanonSynthDedup
         if (CanonSynth.IsExcludedHarness(record.Harness))
             return null;
 
-        string? sessionId = !string.IsNullOrEmpty(record.SessionId)
-            ? record.SessionId
-            : RawSessionId(record);
+        string? sessionId = SessionIdOf(record);
         string? nativeRecordId = NativeRecordIdOf(record);
         if (string.IsNullOrEmpty(sessionId) || string.IsNullOrEmpty(nativeRecordId))
             return null;
 
         return $"{record.Harness}:{sessionId}:{nativeRecordId}";
     }
+
+    private static string? SessionIdOf(CanonicalRecord record) =>
+        !string.IsNullOrEmpty(record.SessionId) ? record.SessionId : RawSessionId(record);
 
     /// <summary>
     /// Joins one OTLP record with one file-synthesized record: keeps OTLP counters/cost and fills
@@ -237,7 +238,7 @@ public static class CanonSynthDedup
             Code: DedupDisagreementCode,
             Message: message,
             Location: key,
-            SessionId: key,
+            SessionId: SessionIdOf(otlpRecords[0]) ?? SessionIdOf(fileRecords[0]),
             Harness: harness,
             Timestamp: timestamp));
     }
