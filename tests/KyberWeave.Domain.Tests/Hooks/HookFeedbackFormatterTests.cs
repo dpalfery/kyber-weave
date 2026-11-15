@@ -40,6 +40,31 @@ public sealed class HookFeedbackFormatterTests
         Assert.Equal("aaaaaaaaa\nbbbbbbbbb\n... 1 more line(s) not shown", trimmed);
     }
 
+    [Theory]
+    [InlineData(0, 100)]
+    [InlineData(5, 0)]
+    [InlineData(-1, -1)]
+    public void KeepsNothingButCountsLinesWhenALimitIsNotPositive(int maxLines, int maxBytes) =>
+        Assert.Equal("... 3 more line(s) not shown", HookFeedbackFormatter.Trim("a\r\nb\n\nc", maxLines, maxBytes));
+
+    [Fact]
+    public void CapsAHugeOutputWithoutLosingTheLineCount()
+    {
+        string output = string.Concat(Enumerable.Range(1, 200_000).Select(i => $"line {i}\n"));
+
+        string trimmed = HookFeedbackFormatter.Trim(output, 2, 3000);
+
+        Assert.Equal("line 1\nline 2\n... 199998 more line(s) not shown", trimmed);
+    }
+
+    [Fact]
+    public void DoesNotKeepALineThatTheByteWindowCutInHalf()
+    {
+        string trimmed = HookFeedbackFormatter.Trim("ab\n" + new string('x', 10_000), 10, 20);
+
+        Assert.Equal("ab\n... 1 more line(s) not shown", trimmed);
+    }
+
     [Fact]
     public void KeepsAPrefixOfAnOverlongFirstLine()
     {
