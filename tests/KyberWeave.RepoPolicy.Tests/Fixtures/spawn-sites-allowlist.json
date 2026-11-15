@@ -758,13 +758,13 @@
       "bound": "Builds only; nothing starts on this line. Started by ProcessRunner.Run at AnalysisCacheSafety.cs:119 with GitTimeout = 60 s."
     },
     {
-      "file": "src/KyberWeave.Core/Processes/ProcessRunner.cs",
+      "file": "src/KyberWeave.Kernel/Processes/ProcessRunner.cs",
       "text": "using Process process = Process.Start(CreateSafeStartInfo(startInfo))",
       "count": 1,
       "bound": "CONDITIONAL: bounded only when the caller passes a timeout to ProcessRunner.Run. On expiry the process tree is killed and the post-kill wait is capped at 5 s. Every production caller now passes a timeout except RunInteractive (ProcessRunner.cs:177), which is unbounded by design and listed there."
     },
     {
-      "file": "src/KyberWeave.Core/Processes/ProcessRunner.cs",
+      "file": "src/KyberWeave.Kernel/Processes/ProcessRunner.cs",
       "text": "ProcessStartInfo safe = new(startInfo.FileName)",
       "count": 1,
       "bound": "Builds only; nothing starts on this line. The copy is started by Process.Start at ProcessRunner.cs:59."
@@ -902,7 +902,7 @@
       "bound": "ProcessRunner.Run with SqliteVersionProbeTimeout = 30 s (SqliteAnalysisPersistence.cs:38); the tree is killed on expiry."
     },
     {
-      "file": "src/KyberWeave.Core/Processes/ProcessRunner.cs",
+      "file": "src/KyberWeave.Kernel/Processes/ProcessRunner.cs",
       "text": "using Process process = Process.Start(startInfo)",
       "count": 1,
       "bound": "unbounded by design: user-attended interactive harness session (`squad run`); ends when the user ends it; a timeout would kill the live session; child inherits the console."
@@ -938,13 +938,13 @@
       "bound": "Builds the git rev-parse start info only; runs through IProcessExecutor, bounded by its timeout (ProcessExecutor kills the tree on expiry)."
     },
     {
-      "file": "src/KyberWeave.Core/Processes/StdioSession.cs",
+      "file": "src/KyberWeave.Kernel/Processes/StdioSession.cs",
       "text": "ProcessStartInfo startInfo = new(fileName)",
       "count": 1,
       "bound": "The session's own start info, passed through ProcessRunner.CreateSafeStartInfo; the child is bounded by the session budget and killed in Dispose on every path."
     },
     {
-      "file": "src/KyberWeave.Core/Processes/StdioSession.cs",
+      "file": "src/KyberWeave.Kernel/Processes/StdioSession.cs",
       "text": "_process = Process.Start(ProcessRunner.CreateSafeStartInfo(startInfo))",
       "count": 1,
       "bound": "The only Process.Start for the stdio session; the child is killed through ProcessRunner.TryKillTree in Dispose on every path, and its reads are bounded by the session budget."

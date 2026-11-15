@@ -42,7 +42,11 @@
         }
       },
       "kyberweave.kernel": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "Markdig": "[1.5.1, )",
+          "YamlDotNet": "[18.1.0, )"
+        }
       }
     }
   }
