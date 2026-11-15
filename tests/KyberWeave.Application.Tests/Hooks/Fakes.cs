@@ -1,0 +1,81 @@
+using System.Diagnostics;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Domain.Hooks;
+
+namespace KyberWeave.Application.Tests.Hooks;
+
+internal sealed class FakeFileSystem : IFileSystem
+{
+    private readonly Dictionary<string, string> files = new(StringComparer.Ordinal);
+    private readonly HashSet<string> directories = new(StringComparer.Ordinal);
+
+    public static string Root { get; } = Path.GetFullPath("/repo");
+
+    public static string Abs(string relative) => Path.GetFullPath(Path.Combine(Root, relative));
+
+    public FakeFileSystem WithFile(string relative, string content = "")
+    {
+        files[Abs(relative)] = content;
+        return this;
+    }
+
+    public FakeFileSystem WithDirectory(string relative)
+    {
+        _ = directories.Add(Abs(relative));
+        return this;
+    }
+
+    public bool FileExists(string path) => files.ContainsKey(path);
+
+    public bool DirectoryExists(string path) => directories.Contains(path);
+
+    public string ReadAllText(string path) => files[path];
+
+    public IEnumerable<string> EnumerateFiles(string directory, string searchPattern, bool recursive) =>
+        files.Keys.Where(f =>
+            (recursive ? f.StartsWith(directory, StringComparison.Ordinal) : Path.GetDirectoryName(f) == directory)
+            && (searchPattern.StartsWith('*') ? f.EndsWith(searchPattern[1..], StringComparison.Ordinal) : Path.GetFileName(f) == searchPattern));
+}
+
+internal sealed class FakeConfigSource(HooksConfig? config, Exception? failure = null) : IHooksConfigSource
+{
+    public HooksConfig Load(string repositoryRoot) => failure is not null ? throw failure : config!;
+}
+
+internal sealed class FakeTestClassResolver(TestClassResolution result) : ITestClassResolver
+{
+    public int Calls { get; private set; }
+
+    public TestClassResolution Resolve(string repositoryRoot, string relativePath)
+    {
+        Calls++;
+        return result;
+    }
+}
+
+internal sealed class FakeClock : TimeProvider
+{
+    private long ticks;
+
+    public void Advance(TimeSpan by) => ticks += (long)(by.TotalSeconds * Stopwatch.Frequency);
+
+    public override long GetTimestamp() => ticks;
+
+    public override long TimestampFrequency => Stopwatch.Frequency;
+}
+
+internal sealed class FakeProcessRunner(FakeClock clock) : IProcessRunner
+{
+    public List<(IReadOnlyList<string> Argv, string Cwd, TimeSpan Timeout)> Calls { get; } = [];
+
+    public Func<IReadOnlyList<string>, ProcessRunResult> Respond { get; set; } = _ => new ProcessRunResult(0, string.Empty, false);
+
+    public TimeSpan CostPerRun { get; set; }
+
+    public Task<ProcessRunResult> RunAsync(IReadOnlyList<string> argv, string workingDirectory, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        Calls.Add((argv, workingDirectory, timeout));
+        clock.Advance(CostPerRun);
+        return Task.FromResult(Respond(argv));
+    }
+}
