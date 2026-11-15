@@ -79,6 +79,8 @@ go to stderr; Claude Code shows stderr to the agent only on exit 2.
 | `dotnet-format-style` | lint | yes | `dotnet format {target} style --verify-no-changes --severity warn --include {file} -v minimal` |
 | `dotnet-test` | test | no | `dotnet test --project {testProject} -c Release --filter-class {testClasses}` |
 
+The `--filter-class` form needs the Microsoft Testing Platform runner (set `test.runner` in `global.json`); the classic VSTest runner has no such option.
+
 The format rules match `**/*.cs`, `**/*.csproj` and `**/*.props` and skip `bin` and `obj`.
 `{target}` is the nearest project file above the file, or the nearest solution when there is none;
 formatting one project is much faster than formatting the whole solution. `{marker}` is the nearest
@@ -147,7 +149,7 @@ rules:
     kind: lint
     include: ["dash/**/*.ts", "dash/**/*.tsx"]
     exclude: ["**/node_modules/**"]
-    run: [bash, scripts/proc-guard.sh, npx, --prefix, dash, eslint, "{file}"]
+    run: [npx, --prefix, dash, eslint, "{file}"]
     timeout-seconds: 20
   - id: tray-rustfmt
     kind: lint
