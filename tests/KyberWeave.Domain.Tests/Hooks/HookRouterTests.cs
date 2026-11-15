@@ -28,6 +28,16 @@ public sealed class HookRouterTests
     public void ExcludesBuildOutput() =>
         Assert.Empty(HookRouter.Plan(HooksDefaults.Config, "src/App/obj/Debug/Gen.cs", Facts));
 
+    [Theory]
+    [InlineData("src/App/Foo.CS")]
+    [InlineData("src\\App\\Foo.cs")]
+    public void MatchesGlobsIgnoringCaseAndSeparatorStyle(string path) =>
+        Assert.NotEmpty(HookRouter.Plan(HooksDefaults.Config, path, Facts));
+
+    [Fact]
+    public void ExcludesBuildOutputIgnoringCase() =>
+        Assert.Empty(HookRouter.Plan(HooksDefaults.Config, "src/App/OBJ/Debug/Gen.cs", Facts));
+
     [Fact]
     public void SkipsATestRuleThatIsOffByDefault() =>
         Assert.DoesNotContain(HookRouter.Plan(HooksDefaults.Config, "src/App/Foo.cs", Facts), p => p.Kind == HookRuleKind.Test);

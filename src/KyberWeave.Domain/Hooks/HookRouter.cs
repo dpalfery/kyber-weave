@@ -1,3 +1,5 @@
+using KyberWeave.Core.Review;
+
 namespace KyberWeave.Domain.Hooks;
 
 /// <summary>Chooses the commands that apply to one changed file.</summary>
@@ -42,8 +44,8 @@ public static class HookRouter
     private static bool Matches(HookRule rule, string path) =>
         rule.Enabled
         && rule.Run.Count > 0
-        && GlobMatcher.IsMatchAny(rule.Include, path)
-        && !GlobMatcher.IsMatchAny(rule.Exclude, path);
+        && rule.Include.Any(pattern => PathGlob.IsMatch(pattern, path))
+        && !rule.Exclude.Any(pattern => PathGlob.IsMatch(pattern, path));
 
     private static bool TryExpand(IReadOnlyList<string> run, string file, ProjectFacts facts, out List<string> argv)
     {
