@@ -522,6 +522,34 @@ public sealed class PlanFinalizeTests
         Assert.Equal("// the repository's existing source", Read(fixture, "src/Placeholder.cs"));
     }
 
+    [Theory]
+    [InlineData(PlanTaskFileProbe.PlanPath)]
+    [InlineData(PlanTaskFileProbe.PlanIndexPath)]
+    public void ALinkAtThePlanOrIndexPathIsRefusedAndNothingIsWrittenThroughIt(string linkedPath)
+    {
+        using DocFixture fixture = Repository();
+        string linked = Absolute(fixture, linkedPath);
+        string target = Path.Combine(fixture.Root, "owner-copy.md");
+        string before = File.ReadAllText(linked);
+        File.Move(linked, target);
+        try
+        {
+            File.CreateSymbolicLink(linked, target);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            Assert.Skip("Symbolic-link creation is not available here; the link refusal was not run.");
+        }
+
+        (int exit, string output) = Run(fixture);
+
+        Assert.Equal(1, exit);
+        Assert.Contains("KW-DOC-FINALIZE-005", output, StringComparison.Ordinal);
+        Assert.Contains("is a symbolic link", output, StringComparison.Ordinal);
+        Assert.Equal(before, File.ReadAllText(target));
+        Assert.False(Exists(fixture, PlanTaskFileProbe.TaskFilePath));
+    }
+
     [Fact]
     public void RestoreLeavesADanglingLinkAtTheTaskFilePathAlone()
     {

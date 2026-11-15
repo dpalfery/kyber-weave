@@ -116,6 +116,35 @@ public sealed class DocsCloseoutCommandTests
     private static bool Exists(DocFixture fixture, string relative) =>
         File.Exists(Path.Combine(fixture.Root, relative.Replace('/', Path.DirectorySeparatorChar)));
 
+    [Theory]
+    [InlineData(PlanIndex)]
+    [InlineData(Inventory)]
+    public void ALinkAtAnIndexPathIsRefusedAndNothingMoves(string linkedPath)
+    {
+        using DocFixture fixture = Repository();
+        string linked = Path.Combine(fixture.Root, linkedPath.Replace('/', Path.DirectorySeparatorChar));
+        string target = Path.Combine(fixture.Root, "owner-copy.md");
+        string before = File.ReadAllText(linked);
+        File.Move(linked, target);
+        try
+        {
+            File.CreateSymbolicLink(linked, target);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            Assert.Skip("Symbolic-link creation is not available here; the link refusal was not run.");
+        }
+
+        (int exit, string output) = Run(fixture, archive: true);
+
+        Assert.Equal(1, exit);
+        Assert.Contains("KW-DOC-CLOSEOUT-003", output, StringComparison.Ordinal);
+        Assert.Contains("is a symbolic link", output, StringComparison.Ordinal);
+        Assert.Equal(before, File.ReadAllText(target));
+        Assert.True(Exists(fixture, Plan));
+        Assert.False(Exists(fixture, Archived));
+    }
+
     [Fact]
     public void ArchivingMovesThePlanSetsItsStatusRemovesTheTaskFileAndUpdatesBothIndexes()
     {

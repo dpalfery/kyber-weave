@@ -84,6 +84,25 @@ public sealed class ReviewDecisionModelTests : IDisposable
     }
 
     [Fact]
+    public async Task TwoProviderFaultsKeepTheCauseOfTheFirst()
+    {
+        FakeProvider provider = new()
+        {
+            ThrowsFor = rule => rule.Ask!.InstructionsFrom == "lens:security"
+                ? new TimeoutException("first")
+                : new IOException("second")
+        };
+        ReviewDecisionModel model = Model(provider);
+
+        await ReviewLensApplicability.NotApplicableAsync(model, ["security", "performance"], "x");
+
+        string summary = model.SummaryLine([])!;
+        Assert.Equal(2, provider.Calls);
+        Assert.Contains("(TimeoutException)", summary, StringComparison.Ordinal);
+        Assert.DoesNotContain("IOException", summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AFaultWithNoExceptionStillSaysItStoppedWithoutAType()
     {
         ReviewDecisionModel model = Model(new FakeProvider { Fault = true });
@@ -791,6 +810,9 @@ public sealed class ReviewDecisionModelTests : IDisposable
         /// <summary>When set, the provider call raises it, as a transport failure does.</summary>
         public Exception? Throws { get; init; }
 
+        /// <summary>When set, the exception to raise for the question's rule, or null to answer normally.</summary>
+        public Func<ArbiterRule, Exception?>? ThrowsFor { get; init; }
+
         private readonly Lock _gate = new();
 
         public int Calls { get; private set; }
@@ -812,6 +834,9 @@ public sealed class ReviewDecisionModelTests : IDisposable
 
             if (Throws is not null)
                 throw Throws;
+
+            if (ThrowsFor?.Invoke(rules[0]) is { } thrown)
+                throw thrown;
 
             Dictionary<string, string> answers = new(StringComparer.Ordinal);
             Dictionary<string, ArbiterStep1Score> scores = new(StringComparer.Ordinal);
