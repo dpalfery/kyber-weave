@@ -11,6 +11,8 @@ internal sealed class YamlHooksConfigSource(IFileSystem fileSystem) : IHooksConf
     private static readonly string[] TopKeys = ["time-budget-seconds", "stop-on-first-blocking", "max-output-lines", "max-output-bytes", "rules"];
     private static readonly string[] RuleKeys = ["id", "kind", "include", "exclude", "run", "timeout-seconds", "blocking", "enabled"];
 
+    private static readonly string[] ListKeys = ["include", "exclude", "run"];
+
     private static readonly IDeserializer Deserializer = new DeserializerBuilder().Build();
 
     private static readonly Reader<int?> PositiveInt = new(
@@ -100,6 +102,15 @@ internal sealed class YamlHooksConfigSource(IFileSystem fileSystem) : IHooksConf
         foreach (string key in UnknownKeys(map, RuleKeys))
         {
             warnings.Add($"{scope}: unknown key '{key}' ignored.");
+        }
+
+        foreach (string key in ListKeys)
+        {
+            if (map.TryGetValue(key, out object? value) && value is List<object> items && items.Any(item => item is null or Dictionary<object, object> or List<object>))
+            {
+                warnings.Add($"{scope}: '{key}' must hold only plain values (no mappings, lists or empty items), so the rule was ignored.");
+                return null;
+            }
         }
 
         HookRuleKind? kind = null;

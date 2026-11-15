@@ -167,6 +167,26 @@ public sealed class RealDataCompositionTests : IDisposable
         Assert.Contains(config.Warnings, w => w.Contains("'time-budget-seconds' must be a positive whole number", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [InlineData("include: [{a: b}]")]
+    [InlineData("include: [[\"**/*.ts\"]]")]
+    [InlineData("exclude: [null]")]
+    [InlineData("run: [tool, {x: y}]")]
+    public void NonScalarListItemRejectsTheRuleWithAWarning(string field)
+    {
+        _ = Repository();
+        _ = Write(
+            ".kyber-weave/hooks.yml",
+            $"rules:\n  - id: bad-rule\n    kind: lint\n    include: [\"**/*.ts\"]\n    run: [tool]\n    {field}\n  - id: good-rule\n    kind: lint\n    include: [\"**/*.ts\"]\n    run: [tool]\n");
+        using ServiceProvider provider = Provider(new FakeProcessRunner(clock));
+
+        HooksConfig config = provider.GetRequiredService<IHooksConfigSource>().Load(root.FullName);
+
+        Assert.DoesNotContain(config.Rules, r => r.Id == "bad-rule");
+        Assert.Contains(config.Rules, r => r.Id == "good-rule");
+        Assert.Contains(config.Warnings, w => w.Contains("rule 'bad-rule'", StringComparison.Ordinal) && w.Contains("plain values", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task MalformedConfigFailsOpen()
     {
