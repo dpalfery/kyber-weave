@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Arbiter.Stores;
 
@@ -24,7 +25,7 @@ public enum ArbiterStoreStatus
 }
 
 /// <summary>
-/// Holds the text of review findings and worker failures under <c>&lt;arbiter-dir&gt;/stores/</c>,
+/// Holds the text of review findings, worker failures and the tails of worker returns under <c>&lt;arbiter-dir&gt;/stores/</c>,
 /// outside the decision log and the ledger, so a rule can read a finding back without the decision
 /// log ever carrying its text.
 /// </summary>
@@ -45,6 +46,29 @@ public sealed class ArbiterRunStore
     private const string StoresDirectoryName = "stores";
     private const string FindingsFileName = "findings.jsonl";
     private const string FailuresFileName = "failures.jsonl";
+    private const string ReturnsFileName = "returns.jsonl";
+
+    /// <summary>
+    /// The most bytes of a plan's returns file one read looks at, taken from the end. An active plan's file is never
+    /// swept, so reading all of it would make every evaluation cost more as the plan ages; the newest returns are
+    /// the only ones a caller wants.
+    /// </summary>
+    internal const long MaxReturnsReadBytes = 1024 * 1024;
+
+    /// <summary>
+    /// The most bytes of a plan's failures file one read looks at, taken from the end. The only consumer takes the
+    /// latest stored failure of one cluster, so the newest items are all it needs; a cluster whose last failure is
+    /// older than the window reads as a first failure.
+    /// </summary>
+    internal const long MaxFailuresReadBytes = 1024 * 1024;
+
+    /// <summary>
+    /// The most bytes of a review run's findings file one read looks at, taken from the end. The consumers look up
+    /// the stored item of one finding and the few findings stored just before it, and a refutation runs soon after
+    /// its finding is stored, so the newest items are the ones that matter. Sized at 2 MiB, enough for about 130
+    /// items of the largest permitted size and many times that at a typical size.
+    /// </summary>
+    internal const long MaxFindingsReadBytes = 2 * 1024 * 1024;
 
     /// <summary>
     /// The longest retention the sweep honours: ten years. A larger configured value is clamped to this, because a
@@ -58,13 +82,29 @@ public sealed class ArbiterRunStore
     private readonly string _storesDirectory;
     private readonly ArbiterStoreOptions _options;
     private readonly Func<DateTimeOffset> _clock;
+    private readonly Func<DirectoryInfo, DateTime> _newestItemTime;
 
     /// <summary>Creates a store rooted at <c>&lt;arbiter-dir&gt;/stores</c>.</summary>
     /// <param name="arbiterDirectory">The Arbiter directory the stores sit under.</param>
     /// <param name="options">The size and retention limits; the shipped defaults when null.</param>
     /// <param name="clock">The clock retention is measured against; the system clock when null.</param>
     public ArbiterRunStore(string arbiterDirectory, ArbiterStoreOptions? options = null, Func<DateTimeOffset>? clock = null)
+        : this(arbiterDirectory, options, clock, null)
     {
+    }
+
+    /// <summary>Creates a store whose sweep reads a sibling directory's age through <paramref name="newestItemTime"/>.</summary>
+    /// <param name="arbiterDirectory">The Arbiter directory the stores sit under.</param>
+    /// <param name="options">The size and retention limits; the shipped defaults when null.</param>
+    /// <param name="clock">The clock retention is measured against; the system clock when null.</param>
+    /// <param name="newestItemTime">Reads when a sibling directory was last written; the file system when null. Lets a test make that read fail.</param>
+    internal ArbiterRunStore(
+        string arbiterDirectory,
+        ArbiterStoreOptions? options,
+        Func<DateTimeOffset>? clock,
+        Func<DirectoryInfo, DateTime>? newestItemTime)
+    {
+        _newestItemTime = newestItemTime ?? NewestItemTimeUtc;
         ArgumentNullException.ThrowIfNull(arbiterDirectory);
         _storesDirectory = Path.Combine(arbiterDirectory, StoresDirectoryName);
         _options = options ?? new ArbiterStoreOptions();
@@ -139,7 +179,43 @@ public sealed class ArbiterRunStore
     public IReadOnlyList<string> ReadFailures(string? planFile, string? planDigest, string? session)
     {
         string path = Path.Combine(FailureDirectory(planFile, planDigest, session), FailuresFileName);
-        return ReadItems(path);
+        return ReadItems(path, MaxFailuresReadBytes);
+    }
+
+    /// <summary>
+    /// Appends the tail of one worker's return to the store of its plan, so a later dispatch's model question can
+    /// read what the worker reported rather than only the markers the ledger parsed from it.
+    /// </summary>
+    /// <param name="planFile">The plan file the return's dispatch named.</param>
+    /// <param name="text">The stored text: the task, the target and the report tail.</param>
+    /// <param name="ct">Cancels the append.</param>
+    /// <returns>Whether the item was stored, refused for size, or the store was unavailable.</returns>
+    public Task<ArbiterStoreStatus> AppendReturnAsync(string planFile, string text, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(planFile);
+        ArgumentNullException.ThrowIfNull(text);
+        return AppendAsync(ReturnsDirectory(planFile), ReturnsFileName, text, ct);
+    }
+
+    /// <summary>Reads the return tails stored for a plan, oldest first; empty when none or unreadable.</summary>
+    /// <param name="planFile">The plan file the returns belong to.</param>
+    /// <returns>The stored texts, in append order.</returns>
+    public IReadOnlyList<string> ReadReturns(string planFile)
+    {
+        ArgumentNullException.ThrowIfNull(planFile);
+        return ReadItems(Path.Combine(ReturnsDirectory(planFile), ReturnsFileName), MaxReturnsReadBytes);
+    }
+
+    /// <summary>Keyed by the plan file alone, so an amended plan still sees the returns made before the amendment.</summary>
+    private string ReturnsDirectory(string planFile)
+    {
+        string normalized = planFile.Trim().Replace('\\', '/');
+        if (normalized.StartsWith("./", StringComparison.Ordinal))
+        {
+            normalized = normalized[2..];
+        }
+
+        return Path.Combine(_storesDirectory, "returns-" + Digest(normalized));
     }
 
     private string FailureDirectory(string? planFile, string? planDigest, string? session)
@@ -163,7 +239,7 @@ public sealed class ArbiterRunStore
     {
         ArgumentNullException.ThrowIfNull(reviewRun);
         string path = Path.Combine(ReviewDirectory(reviewRun), FindingsFileName);
-        return ReadItems(path);
+        return ReadItems(path, MaxFindingsReadBytes);
     }
 
     private async Task<ArbiterStoreStatus> AppendAsync(string directory, string fileName, string text, CancellationToken ct)
@@ -181,11 +257,7 @@ public sealed class ArbiterRunStore
             await ArbiterLogFiles.AppendLineAsync(directory, fileName, line, ct);
             return ArbiterStoreStatus.Stored;
         }
-        catch (IOException)
-        {
-            return ArbiterStoreStatus.Unavailable;
-        }
-        catch (UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             return ArbiterStoreStatus.Unavailable;
         }
@@ -206,33 +278,42 @@ public sealed class ArbiterRunStore
         TimeSpan retain = TimeSpan.FromDays(Math.Clamp(_options.RetainDays, 1, MaxRetainDays));
         string keep = Path.GetFullPath(keepDirectory);
         DirectoryInfo root = new(_storesDirectory);
-        EnumerationOptions options = new() { RecurseSubdirectories = false, AttributesToSkip = 0 };
-        foreach (FileSystemInfo entry in root.EnumerateFileSystemInfos("*", options))
+        // IgnoreInaccessible is off so an unlistable stores directory is reported to the catch below instead of being
+        // silently read as empty: the outcome is the same, but the failure is handled in one place.
+        EnumerationOptions options = new() { RecurseSubdirectories = false, AttributesToSkip = 0, IgnoreInaccessible = false };
+        try
         {
-            if (entry.LinkTarget is not null
-                || entry is not DirectoryInfo directory
-                || string.Equals(Path.GetFullPath(directory.FullName), keep, StringComparison.Ordinal))
+            foreach (FileSystemInfo entry in root.EnumerateFileSystemInfos("*", options))
             {
-                continue;
+                SweepEntry(entry, keep, now, retain);
             }
+        }
+        catch (Exception exception) when (FileFailure.Is(exception))
+        {
+            // The sweep is best effort: an unreadable stores directory is left for a later append, and the item
+            // being appended is still stored.
+        }
+    }
 
-            if (now - NewestItemTimeUtc(directory) <= retain)
-            {
-                continue;
-            }
+    private void SweepEntry(FileSystemInfo entry, string keep, DateTimeOffset now, TimeSpan retain)
+    {
+        if (entry.LinkTarget is not null
+            || entry is not DirectoryInfo directory
+            || string.Equals(Path.GetFullPath(directory.FullName), keep, StringComparison.Ordinal))
+        {
+            return;
+        }
 
-            try
+        try
+        {
+            if (now - _newestItemTime(directory) > retain)
             {
                 directory.Delete(recursive: true);
             }
-            catch (IOException)
-            {
-                // Left for a later append; see the type remarks.
-            }
-            catch (UnauthorizedAccessException)
-            {
-                // Left for a later append; see the type remarks.
-            }
+        }
+        catch (Exception exception) when (FileFailure.Is(exception))
+        {
+            // One unreadable or undeletable sibling is left for a later append; see the type remarks.
         }
     }
 
@@ -261,35 +342,30 @@ public sealed class ArbiterRunStore
         return newest ?? directory.LastWriteTimeUtc;
     }
 
-    private static IReadOnlyList<string> ReadItems(string path)
+    /// <summary>
+    /// Reads the items of <paramref name="path"/>, looking only at its last <paramref name="tailBytes"/> bytes. There
+    /// is no default: every caller names the window its consumers need, so a new caller cannot read a file that only
+    /// grows in full.
+    /// </summary>
+    /// <remarks>
+    /// When the file is longer than the window, the read starts at the window's first byte. That byte starts an item
+    /// only when the byte before it is a newline (an item is one line, its own newlines escaped); otherwise the
+    /// first line is the end of an item cut by the seek and is dropped, so a whole item is never lost.
+    /// A missing file reads as empty.
+    /// </remarks>
+    internal static IReadOnlyList<string> ReadItems(string path, long tailBytes)
     {
-        if (!File.Exists(path))
+        List<string> items = [];
+        foreach (string line in ArbiterLogFiles.ReadTailLines(path, tailBytes, keepUnterminatedFinalLine: true))
         {
-            return [];
-        }
-
-        try
-        {
-            List<string> items = [];
-            foreach (string line in File.ReadLines(path))
+            StoredItem? item = TryDeserialize(line);
+            if (item is not null)
             {
-                StoredItem? item = TryDeserialize(line);
-                if (item is not null)
-                {
-                    items.Add(item.Text);
-                }
+                items.Add(item.Text);
             }
+        }
 
-            return items;
-        }
-        catch (IOException)
-        {
-            return [];
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return [];
-        }
+        return items;
     }
 
     private static StoredItem? TryDeserialize(string line)

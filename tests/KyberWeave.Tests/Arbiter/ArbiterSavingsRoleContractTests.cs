@@ -31,11 +31,9 @@ public sealed class ArbiterSavingsRoleContractTests
 
         // Review: the run header, and the two ways a finding is withheld from the worker.
         ["agents/code-reviewer.md", "REVIEW_RUN"],
-        ["agents/code-reviewer.md", "ARBITER_DROPPED"],
-        ["agents/code-reviewer.md", "ARBITER_DUPLICATE"],
+        ["agents/code-reviewer.md", "KW-REVIEW-055"],
         ["skills/code-review/SKILL.md", "REVIEW_RUN"],
-        ["skills/code-review/SKILL.md", "ARBITER_DROPPED"],
-        ["skills/code-review/SKILL.md", "ARBITER_DUPLICATE"],
+        ["skills/code-review/SKILL.md", "KW-REVIEW-055"],
 
         // Docs-impact shortcut: a docs-dev dispatch that says it needs no documentation change.
         ["agents/docs-dev.md", "DOCS-IMPACT: true"],

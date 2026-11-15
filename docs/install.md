@@ -56,7 +56,12 @@ post-install add-on, not a peer path. Everything else is deliberately unsupporte
 | Release `.zip` | Windows | [download and verify](#verifying-a-download) |
 | KyberDash tray (post-install add-on) | macOS, Windows | `kyberdash menubar`, or `install.sh --with-menubar` on macOS |
 
-After installing, run [Verify](#verify), then read [Updating](#updating). Configuration
+After installing, run [Verify](#verify), then read [Updating](#updating). For a guided setup
+of a machine and a repository, deploy the squad for your harness
+(`kyber-weave squad install --global --target <harness>`), then ask your agent to run the
+`kw-onboarding` skill: it runs the doctor, wires the docs and code-index MCP servers, installs
+the squad and Arbiter hooks for the harnesses you choose, and walks the settings with you
+([Kyber-Squad adoption guide](kyber-squad/onboarding.md)). Configuration
 splits the same way as the products: [Configuration](configuration.md) for Kyber-Weave, and
 [KyberDash configure](dash/onboarding.md#configure) for KyberDash.
 
@@ -577,6 +582,13 @@ deployed target tree, and about a deployment receipt that still claims its
 files, in both cases printing the delete-then-`squad update` steps and pointing
 at the Kyber-Docs skills (`kyber-docs-*`, see `kyber-docs-onboarding-and-assessment`).
 
+It also warns (`KW-SQUAD-SHADOW-001`, exit code unchanged) when a skill folder the repository keeps
+for itself, in any location a renderer writes skills to (`.agents/skills`, `.github/skills`,
+`.claude/skills`, ...), has the same name as an installed squad skill but different content. Workers
+may load that project copy instead of the installed one. The warning names both paths; delete the
+project copy, or re-run `squad install` for the project. A copy that differs only in frontmatter or
+line endings is not reported.
+
 ### Renamed MCP servers and tools
 
 **This is a breaking change.** The three MCP servers are configured under new keys, and their
@@ -749,6 +761,11 @@ same skills.
 index** at `.codegraph/codegraph.db`. CodeGraph is a separate, host-owned tool;
 Kyber-Weave opens that index read-only and never creates or writes it. The `sqlite3` CLI
 must also be on PATH.
+
+On GitHub Copilot CLI, also raise its large-output limit so CodeGraph answers are shown to the agent
+instead of saved to a file: `export COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES=32000` (PowerShell:
+`$env:COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES = "32000"`), set in the environment Copilot CLI starts from.
+`kyber-weave doctor` checks it. See [the runbook](docgraph/mcp-runbook.md#the-copilot-cli-large-output-limit).
 
 ## Installing in CI
 

@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Text;
 
 namespace KyberWeave.Core.RunStart;
 
@@ -104,6 +105,27 @@ public static partial class RunStartPlanner
         return true;
     }
 
+    /// <summary>
+    ///     The refusal for a type that is not a conventional-commit type: the valid types, the closest one when
+    ///     the value looks like a typo of it, and the defaults, because a run is named for what it commits.
+    /// </summary>
+    private static string TypeRefusal(string? type)
+    {
+        string given = type?.Trim() ?? string.Empty;
+        string? closest = given.Length == 0
+            ? null
+            : ConventionalTypes
+                .Select(candidate => (candidate, distance: StringDistance.Levenshtein(given, candidate, ignoreCase: true)))
+                .Where(pair => pair.distance <= 2
+                               || given.StartsWith(pair.candidate, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(pair => pair.distance)
+                .Select(pair => pair.candidate)
+                .FirstOrDefault();
+        string suggestion = closest is null ? string.Empty : $" Did you mean '{closest}'?";
+        return $"Type '{type}' is not a conventional-commit type. Use one of: {string.Join(", ", ConventionalTypes)}." +
+               $"{suggestion} A feature is 'feat' and a defect is 'fix'.";
+    }
+
     /// <summary>Whether <paramref name="type" /> is a conventional-commit type.</summary>
     public static bool IsConventionalType(string? type)
     {
@@ -149,9 +171,7 @@ public static partial class RunStartPlanner
 
         if (!IsConventionalType(type))
         {
-            refusal =
-                $"Type '{type}' is not a conventional-commit type. Use one of: " +
-                $"{string.Join(", ", ConventionalTypes)}.";
+            refusal = TypeRefusal(type);
             return false;
         }
 

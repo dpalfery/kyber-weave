@@ -46,7 +46,7 @@ standard names a command, run that one; the shapes below are what it usually tak
 | Typecheck | `npm run typecheck` (`tsc --noEmit` per tsconfig) | Exit 0 |
 | Lint | `npm run lint` (`eslint .`) | Exit 0, no new suppression without a reason |
 | Build | `npm run build` | Exit 0 |
-| Test | `npx vitest run <path>` (or the declared runner, limited to the changed area) | Exit 0 with a non-zero test count — authored by `test-dev`; run the tests covering your change to prove you broke nothing, and never run the full test suite: the review council and CI run it |
+| Test | `npx vitest run <path>` (or the declared runner, limited to the changed area) | Exit 0 with a non-zero test count — written by you with the change; run them with the one command in the `testing` skill, and never run the full test suite: the review council and CI run it |
 
 A repository may declare more (a reachability check, a bundle-size check, a separate test
 command for slow or serialized suites). Run every gate the standard lists for the package you

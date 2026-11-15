@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using KyberWeave.Core.Processes;
+using KyberWeave.Core.RunStart;
 using Xunit;
 using Xunit.Sdk;
 
@@ -145,6 +146,27 @@ public sealed class RunStartPlannerTests : IDisposable
             $"A checkout already in use must get the new branch in its own worktree, but the worktree " +
             $"count went from {worktreesBefore} to {_probe.WorktreeCount()}.");
         Assert.Contains(Branch, _probe.WorktreeBranches(), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     The record the real command writes is the one <c>KW-ARB-RUN-001</c> reads: after a run start,
+    ///     in place or in a worktree, the repository counts as having a live run from either checkout.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void TheRecordItWritesSatisfiesTheRunStartGuard(bool busy)
+    {
+        if (busy)
+            _probe.AddLinkedWorktree("spare");
+        Assert.False(RunStartEvidence.Started(_probe.Root, _probe.Home));
+
+        ProbeResult result = _probe.RunStart("--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate");
+
+        Assert.True(result.ExitCode == 0, $"run start must exit 0. {result.Output}");
+        Assert.True(
+            RunStartEvidence.Started(_probe.Root, _probe.Home),
+            $"run start must leave a record the guard reads as a live run. {result.Output}");
     }
 
     /// <summary>

@@ -36,7 +36,39 @@ Rules:
   Do not fall back to CLI, `curl`, handwritten REST, or custom scripts unless the sub-file
   explicitly allows fallback for that exact step.
 
+## Choose the path
+
+- **Batch path**: use it when the run is autonomous or has no human to answer, or when the user
+  asked to fix all comments. Go to [Batch path](#batch-path-autonomous-or-fix-all).
+- **Interactive path**: use it when a human wants to decide thread by thread. Everything under
+  Workflow below is the interactive path; its permission, option, commit and reply gates apply
+  only there.
+
+## Batch path (autonomous or fix-all)
+
+No per-thread permission, option, commit or reply gates. A round of a handful of comments should
+take minutes.
+
+1. Do Phase 1 steps 1-6 once: read `AGENTS.md`, resolve the provider, fetch all threads, list the
+   inventory. Skip `resolved` and `automated/system` threads. Do not ask the permission question.
+2. Read every open thread once. Group threads that point at the same code or the same mechanism.
+   A comment that is wrong or already fixed gets a reply with the reason and no change.
+3. Fix each group with one commit, `fix: <brief issue description>`. A fix for a comment verified
+   as real ships with a test that fails without the fix; a nitpick needs none.
+4. Run only the targeted build and tests for the files you touched, and check each run reports a
+   non-zero test count. Do not run the full suite: CI runs it.
+5. Run the quick review of the `code-review` skill once over the fix delta and fix what it finds.
+   Do not loop it.
+6. Push once with local `git push`.
+7. In one batch, reply to every thread you acted on with `Fixed: <brief description>` plus the fix
+   commit hash and link, then resolve the addressed threads with
+   `<provider tool: resolve a thread>`. Threads answered as not changed get their reason and stay open.
+8. Stop. Report threads fixed, answered without a change, and still open, with the commit hashes.
+   Do not wait for a re-review.
+
 ## Workflow
+
+This section is the interactive path.
 
 ### Output Contract
 - Inventory first.
@@ -163,7 +195,7 @@ The user should provide a pull request number in `$ARGUMENTS`, optionally preced
 
 Do not read beyond Phase 1 until the permission question has been answered.
 
-If the PR contains multiple actionable comments, do not batch them together. Complete the full workflow for one comment, then move to the next comment after the current comment is resolved.
+On the interactive path, if the PR contains multiple actionable comments, do not batch them together. Complete the full workflow for one comment, then move to the next comment after the current comment is resolved.
 
 ### 1. Review & Analyze
 - Read only the selected review comment from the PR thread for the provided PR number
@@ -207,7 +239,7 @@ Which option would you like?
 - In this skill, a comment verified as real is one the session checked against the cited code and found true, and that is not a nitpick or already fixed; the session writes the test and the fix itself. A fix for a review finding verified as real ships with a test that fails without the fix, bot review rounds included; a finding classified as a nitpick needs no test.
 
 ### 3.5 Code Review
-- use the code-review.md command workflow to do a code review loops cycle until the code-reviewer agent is satisfied
+- use the code-review.md command workflow to do a code review loop until the code-reviewer agent is satisfied, bounded as the `dp-code-reviewer` skill bounds it: at most 5 cycles, and stop after 3 cycles in a row in which the findings to fix do not fall; list what is still open and continue
 - once code review passes Show the diff
 - **Get user approval before committing**
 - Treat code review as a hard gate, not a suggestion. The workflow is blocked at this phase until the reviewer passes or all review findings are fixed and re-reviewed.

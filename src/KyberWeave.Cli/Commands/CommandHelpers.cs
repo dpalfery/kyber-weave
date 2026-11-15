@@ -4,6 +4,7 @@ using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Skills.Model;
 using KyberWeave.Core.Skills.Parsing;
 using Spectre.Console;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Cli.Commands;
 
@@ -117,9 +118,14 @@ public static class CommandHelpers
         }
 
         ReportRenderer.Render(report, settings.ParsedFormat, command, subjectLabel);
-        if (settings.ParsedFormat == OutputFormat.Table)
+        OutputFormat format = settings.ParsedFormat;
+        if (format == OutputFormat.Table)
         {
             AnsiConsole.WriteLine();
+            ReportRenderer.RenderSummary(report);
+        }
+        else if (format == OutputFormat.Lines)
+        {
             ReportRenderer.RenderSummary(report);
         }
     }
@@ -190,7 +196,7 @@ public static class CommandHelpers
 
             File.WriteAllText(full, content);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex))
         {
             report.Add(new Diagnostic(
                 code,

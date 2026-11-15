@@ -1,10 +1,13 @@
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Docs.Closeout;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Cli.Commands.Arbiter;
 
@@ -25,6 +28,18 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
 
     /// <summary>An attestation listed for information; never a finding.</summary>
     public const string AttestationListed = "KW-ARB-AUDIT-005";
+
+    /// <summary>
+    /// The decision model is configured and dispatches went to implementation agents, yet no rule asked it anything:
+    /// the judgement rules did not run (ADR 0082). Silent when no model is configured.
+    /// </summary>
+    public const string NoModelEvaluations = "KW-ARB-AUDIT-006";
+
+    /// <summary>
+    /// The ledger or the decision log is longer than the window one read looks at, so its older records were not
+    /// read and what follows describes only the newest part. Also reported by <c>arbiter tune</c>.
+    /// </summary>
+    public const string LogWindowTruncated = "KW-ARB-AUDIT-007";
 
     /// <summary>
     /// Reads the ledger and the decision log under <c>artifacts/arbiter/</c> and
@@ -65,7 +80,21 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
             since = parsed;
         }
 
-        _ = config;
+        string repositoryRoot = ArbiterCommandComposition.ResolveRepositoryRoot(settings.Path);
+        PlanFilter? planFilter = null;
+        if (!string.IsNullOrWhiteSpace(settings.Plan))
+        {
+            // --plan takes the spellings the plan commands accept, so an agent that types a slug or a bare file name
+            // still matches the repository-relative path the dispatch header carried.
+            if (!PlanArguments.TryResolve(repositoryRoot, config, settings.Plan, settings.WorkingDirectory, "arbiter audit", report, out string relative))
+            {
+                CommandHelpers.Finish(report, settings, "arbiter audit", "Event");
+                return 1;
+            }
+
+            planFilter = new PlanFilter(repositoryRoot, config, relative);
+        }
+
         string arbiterDirectory = ArbiterCommandComposition.ResolveArbiterDirectory(settings.Path);
         InFlightLedger ledger = new(arbiterDirectory);
         DecisionLog decisions = new(arbiterDirectory);
@@ -74,30 +103,50 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
         IReadOnlyList<ArbiterDecisionRecord> records;
         try
         {
-            (events, int malformedEvents) = ledger.ReadAllWithDiagnostics();
-            (records, int malformedRecords) = decisions.ReadAllWithDiagnostics();
-            if (malformedEvents + malformedRecords > 0)
+            ArbiterLogRead<ArbiterLedgerEvent> ledgerRead = ledger.ReadAllWithDiagnostics();
+            ArbiterLogRead<ArbiterDecisionRecord> decisionRead = decisions.ReadAllWithDiagnostics();
+            events = ledgerRead.Records;
+            records = decisionRead.Records;
+            if (ArbiterLogProblems.Unreadable(ledgerRead, decisionRead) is { } unreadable)
+            {
+                report.Add(new Diagnostic(
+                    ArbiterEvaluator.HookErrorCode,
+                    Severity.Error,
+                    $"The arbiter log under '{arbiterDirectory}' exists but could not be read: {unreadable}",
+                    arbiterDirectory,
+                    "The audit fails closed rather than reporting an unreadable log as an empty one."));
+                CommandHelpers.Finish(report, settings, "arbiter audit", "Event");
+                return 1;
+            }
+
+            if (ledgerRead.MalformedLines + decisionRead.MalformedLines > 0)
             {
                 report.Add(new Diagnostic(
                     ArbiterEvaluator.HookErrorCode,
                     Severity.Error,
                     $"The arbiter log under '{arbiterDirectory}' holds " +
-                    $"{malformedEvents + malformedRecords} line(s) that are not a complete record.",
+                    $"{ledgerRead.MalformedLines + decisionRead.MalformedLines} line(s) that are not a complete record.",
                     arbiterDirectory,
                     "The ledger or the decision log holds a line that is not a complete record; the audit fails closed rather than reporting a partial log."));
                 CommandHelpers.Finish(report, settings, "arbiter audit", "Event");
                 return 1;
+            }
+
+            if (ArbiterLogProblems.TruncationNote(ledgerRead, decisionRead) is { } truncated)
+            {
+                report.Add(new Diagnostic(
+                    LogWindowTruncated,
+                    Severity.Warning,
+                    $"The arbiter log under '{arbiterDirectory}': {truncated}",
+                    arbiterDirectory,
+                    "Findings below describe only the newest records; older dispatches and decisions are not counted."));
             }
         }
         // A truncated, hand-edited or foreign line is malformed JSON, which throws
         // JsonException rather than an IOException. Reading the log must fail closed the
         // same way either way, or the audit crashes on the corrupt file it exists to
         // report on.
-        catch (Exception exception) when (exception is IOException
-            or UnauthorizedAccessException
-            or System.Text.Json.JsonException
-            or NotSupportedException
-            or System.IO.InvalidDataException)
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is System.Text.Json.JsonException or System.IO.InvalidDataException)
         {
             report.Add(new Diagnostic(
                 ArbiterEvaluator.HookErrorCode,
@@ -116,7 +165,7 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
 
         int reported = 0;
         foreach (ArbiterLedgerEvent ev in events
-                     .Where(e => InScope(e, settings, since))
+                     .Where(e => InScope(e, settings, since, planFilter))
                      .OrderBy(e => e.At))
         {
             CheckMissingDecision(ev, decided, report, ref reported);
@@ -126,7 +175,7 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
         }
 
         List<string> attestations = [.. events
-            .Where(e => InScope(e, settings, since) && e.Returns?.Attested is { Count: > 0 })
+            .Where(e => InScope(e, settings, since, planFilter) && e.Returns?.Attested is { Count: > 0 })
             .SelectMany(e => (e.Returns!.Attested ?? []).Select(a => (Event: e, Attested: a)))
             .Select(pair => $"event {pair.Event.Id} attested {pair.Attested}")
             .Distinct(StringComparer.Ordinal)
@@ -142,17 +191,114 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
                 "attested"));
         }
 
+        CheckModelEvaluations(config, events, records, settings, since, planFilter, report, ref reported);
+
         AnsiConsole.MarkupLine($"[grey]{reported} finding(s) over {events.Count} ledger event(s).[/]");
 
         CommandHelpers.Finish(report, settings, "arbiter audit", "Event");
         return report.HasErrors ? 1 : 0;
     }
 
+    /// <summary>
+    /// Counts the decision-model (step 1) evaluations behind the events in scope and reports
+    /// <see cref="NoModelEvaluations"/> when a model is configured, implementation agents were dispatched, and the model
+    /// was asked nothing. The count is always reported as a metric; with provider <c>none</c> the finding stays silent.
+    /// </summary>
+    private static void CheckModelEvaluations(
+        KyberWeaveConfig config,
+        IReadOnlyList<ArbiterLedgerEvent> events,
+        IReadOnlyList<ArbiterDecisionRecord> records,
+        ArbiterSettings settings,
+        DateTimeOffset? since,
+        PlanFilter? planFilter,
+        DiagnosticReport report,
+        ref int reported)
+    {
+        HashSet<string> scoped = [.. events.Where(e => InScope(e, settings, since, planFilter)).Select(e => e.Id)];
+        List<ArbiterDecisionRecord> inScope = [.. records.Where(record => scoped.Contains(record.LedgerId))];
+        // Model targeting rides every writer dispatch whether or not a plan task resolved, so its answers would mask
+        // a run whose judgement rules never ran: only the judgement rules on the other triggers count.
+        int evaluations = inScope
+            .Where(record => !string.Equals(record.Trigger, "delegate.model", StringComparison.Ordinal))
+            .Sum(record => record.Rules.Count(rule =>
+            rule.Step == 1 && !string.Equals(rule.Answer, ArbiterStep1BatchResult.NotEvaluated, StringComparison.Ordinal)));
+        int implementationDispatches = inScope
+            .Where(record => !record.Trigger.EndsWith(".returned", StringComparison.Ordinal)
+                             && string.Equals(TriggerClassifier.TargetClassFor(record.Target), "implementation", StringComparison.Ordinal))
+            .Select(record => record.LedgerId)
+            .Distinct(StringComparer.Ordinal)
+            .Count();
+        report.AddMetric("model-evaluations", evaluations);
+        report.AddMetric("implementation-dispatches", implementationDispatches);
+        AnsiConsole.MarkupLine(
+            $"[grey]{evaluations} decision-model evaluation(s) over {implementationDispatches} dispatch(es) to implementation agents.[/]");
+
+        if (evaluations > 0 || implementationDispatches == 0 || !ModelConfigured(config, report, ref reported))
+            return;
+
+        reported++;
+        report.Add(new Diagnostic(
+            NoModelEvaluations,
+            Severity.Warning,
+            $"A decision model is configured and {implementationDispatches} dispatch(es) went to implementation agents, " +
+            "but no rule asked the model anything: the Arbiter's judgement rules did not run.",
+            "arbiter",
+            Hint: "Check how those dispatches were classified in the decision log: a writer dispatch classified as " +
+                  "investigate runs only the machine-fact rules. See ADR 0082."));
+    }
+
+    internal static bool ModelConfigured(KyberWeaveConfig config, DiagnosticReport report, ref int reported)
+    {
+        string home = ArbiterCommandComposition.HomeDirectory();
+        try
+        {
+            return ArbiterUserSettings.ApplyTo(config.Arbiter.Provider, home).Kind
+                   != ArbiterProviderKind.None;
+        }
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is YamlDotNet.Core.YamlException)
+        {
+            reported++;
+            report.Add(new Diagnostic(
+                NoModelEvaluations,
+                Severity.Warning,
+                $"The user settings file '{ArbiterUserSettings.GetPath(home)}' could not be read " +
+                $"({exception.GetType().Name}: {exception.Message}), so its provider override was ignored and the " +
+                "repository's provider decided whether a decision model is configured.",
+                "arbiter",
+                Hint: "Fix or remove the user settings file, then run the audit again."));
+            return config.Arbiter.Provider.Kind != ArbiterProviderKind.None;
+        }
+    }
+
     /// <summary>Runs the command without cancellation; the entry point tests use.</summary>
     public int Execute(CommandContext context, ArbiterSettings settings) =>
         Execute(context, settings, CancellationToken.None);
 
-    private static bool InScope(ArbiterLedgerEvent ev, ArbiterSettings settings, DateTimeOffset? since)
+    /// <summary>The plan <c>--plan</c> named, resolved to its repository-relative path, and the same resolution of a ledger event's plan file.</summary>
+    private sealed class PlanFilter(string root, KyberWeaveConfig config, string relative)
+    {
+        private readonly PlanPathResolver _resolver = new(root, config);
+        private readonly Dictionary<string, string> _seen = new(StringComparer.Ordinal);
+
+        public bool Matches(string? eventPlan)
+        {
+            if (string.IsNullOrWhiteSpace(eventPlan))
+                return false;
+
+            if (!_seen.TryGetValue(eventPlan, out string? canonical))
+            {
+                PlanPathResolution resolution = _resolver.Resolve(eventPlan, root);
+                canonical = resolution.Found
+                    ? resolution.Path!
+                    : Path.GetRelativePath(root, Path.GetFullPath(eventPlan, root)).Replace('\\', '/');
+                _seen[eventPlan] = canonical;
+            }
+
+            return string.Equals(canonical, relative, StringComparison.Ordinal);
+        }
+    }
+
+    private static bool InScope(ArbiterLedgerEvent ev, ArbiterSettings settings, DateTimeOffset? since, PlanFilter? plan)
     {
         if (!string.IsNullOrWhiteSpace(settings.Session)
             && !string.Equals(ev.Session, settings.Session, StringComparison.Ordinal))
@@ -160,11 +306,8 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
             return false;
         }
 
-        if (!string.IsNullOrWhiteSpace(settings.Plan)
-            && !string.Equals(ev.Headers?.PlanFile, settings.Plan, StringComparison.Ordinal))
-        {
+        if (plan is not null && !plan.Matches(ev.Headers?.PlanFile))
             return false;
-        }
 
         if (since is not null && ev.At < since.Value)
         {

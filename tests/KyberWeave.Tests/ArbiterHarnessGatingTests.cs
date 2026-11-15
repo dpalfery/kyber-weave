@@ -67,7 +67,10 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
         Assert.DoesNotContain("Project hooks: installed", output, StringComparison.Ordinal);
         AssertLineNames(output, "Antigravity", "ungated", "kyber-weave arbiter install --project --target antigravity");
         AssertLineNames(output, "Copilot", "ungated", "kyber-weave arbiter install --project --target copilot");
-        Assert.Equal(2, CountOf(output, "KW-ARB-PROJECT-001"));
+        // One printed warning and one reported finding per ungated harness. The finding is a whole line now that
+        // redirected output is not a wrapped table.
+        Assert.Equal(2, CountOf(output, "warn KW-ARB-PROJECT-001"));
+        Assert.Equal(2, CountOf(output, "WARNING KW-ARB-PROJECT-001"));
     }
 
     /// <summary>

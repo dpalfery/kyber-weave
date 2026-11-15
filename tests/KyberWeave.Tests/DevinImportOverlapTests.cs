@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using KyberWeave.Core.Squad.Deployment;
 using Xunit;
 
@@ -194,12 +195,12 @@ public sealed class DevinImportOverlapTests : IDisposable
     /// unreadable directory is made with a file mode.
     /// </summary>
     [Fact]
+    [UnsupportedOSPlatform("windows")]
     public void Inspect_UnreadableImportedTree_ReportsTheRestInsteadOfThrowing()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
+        Assert.SkipWhen(
+            OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess,
+            "Unix file modes are not enforced on Windows, so an unreadable directory cannot be simulated; a privileged process (root) ignores the mode too, so it is skipped there as well.");
 
         string ws = Workspace();
         Skill(ws, ".devin/skills", "code-review");

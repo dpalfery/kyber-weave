@@ -142,6 +142,161 @@ public sealed class ArbiterRunStoreTests : IDisposable
 
     /// <summary>Reading a run returns exactly what was stored for that run, and nothing from another run.</summary>
     [Fact]
+    public async Task ReadingReturnsLooksOnlyAtTheTailOfAFileLargerThanTheCap()
+    {
+        ArbiterRunStore store = Store(Now, new ArbiterStoreOptions(MaxItemBytes: 16384, RetainDays: 14));
+        string body = new('x', 8000);
+        int count = (int)(ArbiterRunStore.MaxReturnsReadBytes / 8000) + 40;
+        for (int i = 0; i < count; i++)
+        {
+            Assert.Equal(ArbiterStoreStatus.Stored, await store.AppendReturnAsync("plan.md", $"task: T{i}\n{body}"));
+        }
+
+        IReadOnlyList<string> returns = store.ReadReturns("plan.md");
+
+        int expected = ItemsStartingInsideTheLastBytes("returns.jsonl", ArbiterRunStore.MaxReturnsReadBytes);
+        Assert.InRange(expected, 41, count - 1);
+        Assert.Equal(expected, returns.Count);
+        Assert.StartsWith($"task: T{count - expected}\n", returns[0], StringComparison.Ordinal);
+        Assert.StartsWith($"task: T{count - 1}\n", returns[^1], StringComparison.Ordinal);
+        Assert.All(returns, item => Assert.StartsWith("task: T", item, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// How many whole lines of the one stored file named <paramref name="fileName"/> start inside its last
+    /// <paramref name="window"/> bytes: exactly the items a read of that window is to return.
+    /// </summary>
+    private int ItemsStartingInsideTheLastBytes(string fileName, long window)
+    {
+        string file = Directory.GetFiles(ArbiterDirectory, fileName, SearchOption.AllDirectories).Single();
+        byte[] bytes = File.ReadAllBytes(file);
+        int count = bytes.Length > 0 && bytes.Length - window <= 0 ? 1 : 0;
+        for (int i = 0; i < bytes.Length - 1; i++)
+        {
+            if (bytes[i] == (byte)'\n' && i + 1 >= bytes.Length - window)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private async Task<(string Path, long[] LineStarts, long Length)> WriteFindingLinesAsync(string run, params string[] texts)
+    {
+        ArbiterRunStore store = Store(Now);
+        foreach (string text in texts)
+        {
+            Assert.Equal(ArbiterStoreStatus.Stored, await store.AppendFindingAsync(run, text));
+        }
+
+        string file = Directory.GetFiles(ArbiterDirectory, "findings.jsonl", SearchOption.AllDirectories).Single();
+        byte[] bytes = await File.ReadAllBytesAsync(file);
+        List<long> starts = [0];
+        for (int i = 0; i < bytes.Length - 1; i++)
+        {
+            if (bytes[i] == (byte)'\n')
+            {
+                starts.Add(i + 1);
+            }
+        }
+
+        return (file, [.. starts], bytes.Length);
+    }
+
+    [Fact]
+    public async Task ATailThatStartsExactlyOnALineStartKeepsThatWholeItem()
+    {
+        (string path, long[] starts, long length) = await WriteFindingLinesAsync("RUN-TAIL", "first", "second", "third");
+
+        IReadOnlyList<string> read = ArbiterRunStore.ReadItems(path, length - starts[1]);
+
+        Assert.Equal(["second", "third"], read);
+    }
+
+    [Fact]
+    public async Task ATailThatStartsMidLineDropsOnlyTheCutItem()
+    {
+        (string path, long[] starts, long length) = await WriteFindingLinesAsync("RUN-TAIL", "first", "second", "third");
+
+        IReadOnlyList<string> read = ArbiterRunStore.ReadItems(path, length - starts[1] - 3);
+
+        Assert.Equal(["third"], read);
+    }
+
+    [Fact]
+    public async Task ATailThatStartsOnTheLastByteOfTheEarlierLineDropsNothingItShouldKeep()
+    {
+        (string path, long[] starts, long length) = await WriteFindingLinesAsync("RUN-TAIL", "first", "second", "third");
+
+        // The window opens on the newline that ends "first": only that empty remainder is dropped.
+        IReadOnlyList<string> read = ArbiterRunStore.ReadItems(path, length - starts[1] + 1);
+
+        Assert.Equal(["second", "third"], read);
+    }
+
+    [Fact]
+    public async Task AFileExactlyAtTheWindowKeepsEveryItemAndOneByteOverKeepsTheRestAfterTheCutLine()
+    {
+        (string path, _, long length) = await WriteFindingLinesAsync("RUN-TAIL", "first", "second");
+
+        Assert.Equal(["first", "second"], ArbiterRunStore.ReadItems(path, length));
+        Assert.Equal(["first", "second"], ArbiterRunStore.ReadItems(path, length + 1));
+        Assert.Equal(["second"], ArbiterRunStore.ReadItems(path, length - 1));
+    }
+
+    [Fact]
+    public void AMissingFileAndANonPositiveWindowAreHandledExplicitly()
+    {
+        Assert.Empty(ArbiterRunStore.ReadItems(Path.Combine(_root, "no", "such.jsonl"), 10));
+        Assert.Throws<ArgumentOutOfRangeException>(() => ArbiterRunStore.ReadItems(Path.Combine(_root, "x.jsonl"), 0));
+    }
+
+    [Fact]
+    public async Task ReadingFindingsAndFailuresLooksOnlyAtTheirTailWindows()
+    {
+        ArbiterRunStore store = Store(Now, new ArbiterStoreOptions(MaxItemBytes: 16384, RetainDays: 14));
+        string body = new('x', 8000);
+        int findings = (int)(ArbiterRunStore.MaxFindingsReadBytes / 8000) + 40;
+        int failures = (int)(ArbiterRunStore.MaxFailuresReadBytes / 8000) + 40;
+        for (int i = 0; i < findings; i++)
+        {
+            await store.AppendFindingAsync("RUN-GROW", $"n{i}\n{body}");
+        }
+
+        for (int i = 0; i < failures; i++)
+        {
+            await store.AppendFailureAsync("plan.md", "d", null, $"n{i}\n{body}");
+        }
+
+        IReadOnlyList<string> readFindings = store.ReadFindings("RUN-GROW");
+        IReadOnlyList<string> readFailures = store.ReadFailures("plan.md", "d", null);
+
+        int expectedFindings = ItemsStartingInsideTheLastBytes("findings.jsonl", ArbiterRunStore.MaxFindingsReadBytes);
+        int expectedFailures = ItemsStartingInsideTheLastBytes("failures.jsonl", ArbiterRunStore.MaxFailuresReadBytes);
+        Assert.InRange(expectedFindings, 41, findings - 1);
+        Assert.InRange(expectedFailures, 41, failures - 1);
+        Assert.Equal(expectedFindings, readFindings.Count);
+        Assert.StartsWith($"n{findings - expectedFindings}\n", readFindings[0], StringComparison.Ordinal);
+        Assert.StartsWith($"n{findings - 1}\n", readFindings[^1], StringComparison.Ordinal);
+        Assert.Equal(expectedFailures, readFailures.Count);
+        Assert.StartsWith($"n{failures - expectedFailures}\n", readFailures[0], StringComparison.Ordinal);
+        Assert.StartsWith($"n{failures - 1}\n", readFailures[^1], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadingReturnsOfAFileUnderTheCapKeepsEveryItem()
+    {
+        ArbiterRunStore store = Store(Now);
+        for (int i = 0; i < 5; i++)
+        {
+            await store.AppendReturnAsync("plan.md", $"task: T{i}\nreport");
+        }
+
+        Assert.Equal(5, store.ReadReturns("plan.md").Count);
+    }
+
+    [Fact]
     public async Task ReadingAReviewRunReturnsOnlyItsOwnFindings()
     {
         ArbiterRunStore store = Store(Now);
@@ -260,6 +415,27 @@ public sealed class ArbiterRunStoreTests : IDisposable
 
         Assert.Equal(ArbiterStoreStatus.Unavailable, status);
         Assert.Empty(store.ReadFindings("RUN-X"));
+    }
+
+    /// <summary>
+    /// The retention sweep is best effort: one sibling store directory whose age cannot be read, as when another
+    /// process sweeps it away between the listing and the read, must not make the append report unavailable.
+    /// </summary>
+    [Fact]
+    public async Task ASiblingStoreDirectoryThatCannotBeReadDoesNotMakeTheAppendUnavailable()
+    {
+        string sibling = Path.Combine(ArbiterDirectory, "stores", "returns-vanishing");
+        Directory.CreateDirectory(sibling);
+        ArbiterRunStore store = new(
+            ArbiterDirectory,
+            null,
+            () => Now,
+            directory => throw new DirectoryNotFoundException($"'{directory.Name}' was removed during the sweep."));
+
+        ArbiterStoreStatus status = await store.AppendFindingAsync("RUN-OK", "still stored");
+
+        Assert.Equal(ArbiterStoreStatus.Stored, status);
+        Assert.Equal(["still stored"], store.ReadFindings("RUN-OK"));
     }
 
     // ---- No secrets in the decision log or the ledger (acceptance: sentinel) ----

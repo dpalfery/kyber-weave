@@ -138,6 +138,53 @@ public sealed class CitedLineCheckTests : IDisposable
         Assert.NotNull(result.Reason);
     }
 
+    /// <summary>
+    /// The cited file is read on a seat's word, so a file over the cap is never loaded: the finding is left as written
+    /// and the reason names the cap. A file of exactly the cap is still read.
+    /// </summary>
+    [Theory]
+    [InlineData(0, CitedLineKind.Relocated)]
+    [InlineData(1, CitedLineKind.Unverified)]
+    [InlineData(1_000_000, CitedLineKind.Unverified)]
+    public void AFileOverTheSizeCapIsNeverReadAndAFileAtTheCapIs(int bytesOverTheCap, CitedLineKind expected)
+    {
+        const string Head = "int a;\nint b;\n";
+        int total = checked((int)ReviewSeatInput.MaxFileBytes + bytesOverTheCap);
+        WriteRepositoryFile("src/Big.cs", Head + new string('/', total - Head.Length));
+
+        CitedLineResult result = CitedLineCheck.Check(_root, Finding("src/Big.cs", line: 99, excerpt: "int b;"));
+
+        Assert.Equal(expected, result.Kind);
+        if (expected == CitedLineKind.Unverified)
+        {
+            Assert.Contains("larger than", result.Reason, StringComparison.Ordinal);
+            Assert.Equal(99, result.Finding.Line);
+        }
+        else
+        {
+            Assert.Equal(2, result.Finding.Line);
+        }
+    }
+
+    /// <summary>An excerpt over the character or line limit is not split or scanned: the finding cannot be repaired by it.</summary>
+    [Theory]
+    [InlineData(8192, 1, true)]
+    [InlineData(8193, 1, false)]
+    [InlineData(10, 100, true)]
+    [InlineData(10, 101, false)]
+    public void AnExcerptOverTheLimitsIsNotUsedToRelocateAFinding(int width, int lines, bool relocated)
+    {
+        string anchor = new('x', width);
+        WriteRepositoryFile("src/Foo.cs", "first\n" + anchor + "\nlast\n");
+        string excerpt = string.Join('\n', Enumerable.Repeat(anchor, lines));
+
+        CitedLineResult result = CitedLineCheck.Check(_root, Finding("src/Foo.cs", line: 99, excerpt: excerpt));
+
+        Assert.Equal(relocated ? CitedLineKind.Relocated : CitedLineKind.Unresolved, result.Kind);
+        if (!relocated)
+            Assert.Contains("no excerpt", result.Reason, StringComparison.Ordinal);
+    }
+
     private static ReviewFinding Finding(string file, int line, string? excerpt) =>
         new(
             "correctness/off-by-one",

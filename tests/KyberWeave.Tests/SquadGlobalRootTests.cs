@@ -842,6 +842,67 @@ public sealed class SquadGlobalRootTests : IDisposable
             SquadFileSystemPathSemantics.IsWithin(globalRoots.ResolveGlobalRoot(SquadTarget.Pi), piPath));
     }
 
+    private (SquadLifecycleService Service, SquadStateStore Store, string Project, SquadGlobalRoots Roots, SyntheticValidSquadReleaseSource Source) GlobalService(string name)
+    {
+        string home = Path.Combine(_temp.Path, name + "-home");
+        Directory.CreateDirectory(home);
+        string project = Path.Combine(_temp.Path, name + "-project");
+        Directory.CreateDirectory(project);
+        SquadGlobalRoots roots = new(_ => null, home);
+        SquadStateStore store = new(new FakeSquadUserPaths(Path.Combine(_temp.Path, name + "-user-data")));
+        SyntheticValidSquadReleaseSource source = new();
+        return (new SquadLifecycleService(source, SquadCommandComposition.ResolveRenderer(), store, globalRoots: roots), store, project, roots, source);
+    }
+
+    [Fact]
+    public async Task InstallAsync_GlobalScope_NamingANewTargetAddsItAndKeepsTheExistingOnes()
+    {
+        (SquadLifecycleService service, SquadStateStore store, string project, SquadGlobalRoots roots, SyntheticValidSquadReleaseSource source) = GlobalService("add-target");
+        using (source)
+        {
+            await service.InstallAsync(new SquadInstallRequest(project, SquadDeploymentScope.Global, [SquadTarget.Claude], Version: "1.2.3"));
+            SquadInstallRequest addOpenCode = new(project, SquadDeploymentScope.Global, [SquadTarget.OpenCode], Version: "1.2.3");
+
+            Assert.Equal([SquadTarget.Claude, SquadTarget.OpenCode], service.EffectiveInstallTargets(addOpenCode));
+            SquadLifecycleResult added = await service.InstallAsync(addOpenCode);
+
+            Assert.True(added.Success, string.Join("; ", added.Errors ?? Array.Empty<string>()));
+            SquadReceipt receipt = store.ReadReceipt(project, SquadDeploymentScope.Global)!;
+            string[] targets = [.. receipt.Files.Select(file => file.Target).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
+            Assert.Equal(["claude", "opencode"], targets);
+            SquadOwnedFile openCodeFile = receipt.Files.First(file => file.Target == "opencode");
+            Assert.True(File.Exists(added.Plan!.ResolvePhysicalPath(openCodeFile)));
+            Assert.True(File.Exists(added.Plan.ResolvePhysicalPath(receipt.Files.First(file => file.Target == "claude"))));
+            Assert.True(SquadFileSystemPathSemantics.IsWithin(roots.ResolveGlobalRoot(SquadTarget.OpenCode), added.Plan.ResolvePhysicalPath(openCodeFile)));
+        }
+    }
+
+    [Fact]
+    public async Task InstallAsync_GlobalScope_DroppingATargetOfAnExistingInstallStillConflicts()
+    {
+        (SquadLifecycleService service, _, string project, _, SyntheticValidSquadReleaseSource source) = GlobalService("narrow-target");
+        using (source)
+        {
+            await service.InstallAsync(new SquadInstallRequest(project, SquadDeploymentScope.Global, [SquadTarget.Claude, SquadTarget.OpenCode], Version: "1.2.3"));
+
+            await Assert.ThrowsAsync<SquadDeploymentConflictException>(() => service.InstallAsync(
+                new SquadInstallRequest(project, SquadDeploymentScope.Global, [SquadTarget.OpenCode], Version: "1.2.3")));
+        }
+    }
+
+    [Fact]
+    public async Task InstallAsync_ProjectScope_NamingAnotherTargetStillConflicts()
+    {
+        (SquadLifecycleService service, _, string project, _, SyntheticValidSquadReleaseSource source) = GlobalService("project-add");
+        using (source)
+        {
+            await service.InstallAsync(new SquadInstallRequest(project, SquadDeploymentScope.Project, [SquadTarget.Claude], Version: "1.2.3"));
+
+            await Assert.ThrowsAsync<SquadDeploymentConflictException>(() => service.InstallAsync(
+                new SquadInstallRequest(project, SquadDeploymentScope.Project, [SquadTarget.OpenCode], Version: "1.2.3")));
+        }
+    }
+
     [Fact]
     public void CreateInstall_GlobalScope_RefusesPathOwnedByAnotherProjectsReceipt()
     {

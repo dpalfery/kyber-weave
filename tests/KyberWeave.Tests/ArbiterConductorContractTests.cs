@@ -3,9 +3,11 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Pins the conductor Arbiter contract (packet 7.1): the routing header block and
-/// planner markers, the worker packet instruction, escalation handling by
-/// <c>NEXT</c> and <c>REPEAT</c>, and target-neutral wording.
+/// Pins the conductor Arbiter contract's protocol tokens (packet 7.1): the routing header
+/// block and planner markers, the escalation <c>STATUS</c>, <c>NEXT</c> and <c>REPEAT</c>
+/// tokens, and target-neutral wording. The prose rules around them (whole-context packets,
+/// escalation handling, the fallback override, repository-relative paths) are graded from
+/// the prose rule catalog.
 /// </summary>
 public sealed class ArbiterConductorContractTests
 {
@@ -42,65 +44,24 @@ public sealed class ArbiterConductorContractTests
         Assert.Contains("STATUS: ARBITER_ESCALATION", contract, StringComparison.Ordinal);
         Assert.Contains("FEATURE:", contract, StringComparison.Ordinal);
         Assert.Contains("PHASE:", contract, StringComparison.Ordinal);
-        Assert.Contains("never", contract, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void WorkerPackets_AreWholeContextAndForbidPlanSpecOrTodoAccess()
-    {
-        string contract = ConductorContract;
-
-        Assert.Contains("whole context", contract, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("does not open plan", contract, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void Escalations_FollowNextAndNeverRetryUnchanged()
+    public void Escalations_NameTheStatusNextAndRepeatTokens()
     {
         string contract = ConductorContract;
 
         Assert.Contains("STATUS: ARBITER_ESCALATION", contract, StringComparison.Ordinal);
         Assert.Contains("NEXT", contract, StringComparison.Ordinal);
         Assert.Contains("REPEAT: 1", contract, StringComparison.Ordinal);
-        Assert.Contains("dispatch architect with", contract, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("run finding", contract, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("do not retry", contract, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("re-issue", contract, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("recognised marker", contract, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("malformed", contract, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void ReferenceHeaderRules_QualifyEveryDispatchWithTheFallbackOverride()
+    public void PlanFileHeaders_HaveNoInvalidPathStatus()
     {
-        // Review 20.1, item a: the references stated the header unconditionally while
-        // conductor.md allows the arbiter_evaluate_agent_dispatch_or_return fallback to replace it.
-        string referencesRoot = Path.Combine(ProductRoot, "agents", "conductor", "references");
-        foreach (string file in new[] { "plan-path.md", "spec-path.md", "intake-path.md" })
-        {
-            string text = File.ReadAllText(Path.Combine(referencesRoot, file));
-            Assert.Contains("Unless you hold `arbiter_evaluate_agent_dispatch_or_return`", text, StringComparison.Ordinal);
-        }
-
-        // The execution rules moved into the shared skill; it states the same override.
-        string execution = File.ReadAllText(
-            Path.Combine(ProductRoot, "skills", "delivery-execution", "SKILL.md"));
-        Assert.Contains("Unless you hold `arbiter_evaluate_agent_dispatch_or_return`", execution, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void PlanFileHeaders_AreRepositoryRelative()
-    {
-        // The planner refuses an absolute or escaping PLAN_FILE with plan-file-invalid, so the
-        // conductor's path rules must tell the operator to send a repository-relative path.
-        string planPath = File.ReadAllText(
-            Path.Combine(ProductRoot, "agents", "conductor", "references", "plan-path.md"));
-        string execution = File.ReadAllText(
-            Path.Combine(ProductRoot, "skills", "delivery-execution", "SKILL.md"));
-
-        Assert.Contains("repository-relative", planPath, StringComparison.Ordinal);
-        Assert.Contains("repository-relative", execution, StringComparison.Ordinal);
-        Assert.Contains("plan-file-invalid", ConductorContract, StringComparison.Ordinal);
+        // A PLAN_FILE spelled any other way is not read as a header, and the Arbiter falls back to the file on
+        // disk or its decision model (ADR 0072); there is no plan-file-invalid status for the conductor to handle.
+        Assert.DoesNotContain("plan-file-invalid", ConductorContract, StringComparison.Ordinal);
     }
 
     [Fact]

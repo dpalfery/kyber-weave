@@ -117,50 +117,6 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
             $"Malformed Antigravity hook event: unknown hook_event_name '{eventName ?? "<missing>"}'.");
     }
 
-    /// <inheritdoc/>
-    public string RenderFailClosed(string detail, string? renderedCaller, string rawStdin, string decisionId)
-    {
-        _ = rawStdin;
-        string safe = (detail ?? string.Empty)
-            .Replace("\r\n", " ", StringComparison.Ordinal)
-            .Replace('\n', ' ')
-            .Replace('\r', ' ');
-        if (string.IsNullOrWhiteSpace(safe))
-        {
-            safe = "unknown error";
-        }
-
-        // The host throws config errors with the code already prefixed; strip it so the
-        // envelope carries the code exactly once, in both ANSWER and EVIDENCE.
-        string message = safe.StartsWith(
-            HookCommand.FailClosedCode + ": ", StringComparison.Ordinal)
-            ? safe.Substring((HookCommand.FailClosedCode + ": ").Length)
-            : safe;
-        string evidence = $"{HookCommand.FailClosedCode}: {message}";
-
-        string caller = string.IsNullOrWhiteSpace(renderedCaller) ? "unidentified" : renderedCaller;
-        string trigger = string.Equals(caller, "conductor", StringComparison.Ordinal)
-            ? "delegate"
-            : "investigate";
-        string callerText = $"{caller} (antigravity)";
-        ArbiterEscalationEnvelope envelope = new(
-            trigger,
-            callerText,
-            null,
-            null,
-            null,
-            [new ArbiterEnvelopeEntry(
-                HookCommand.FailClosedCode,
-                "Did the hook host fail before evaluation completed?",
-                ArbiterAnswerText.Error(HookCommand.FailClosedCode, message),
-                evidence)],
-            string.IsNullOrWhiteSpace(decisionId) ? "unknown" : decisionId,
-            1);
-
-        // An internal error always writes the deny shape, even for a return event.
-        return RenderDeny(envelope.Render());
-    }
-
     private string HandlePre(JsonElement payload, string? tool, string caller, KyberWeaveConfig config, HookContext context)
     {
         if (!IsDispatchTool(tool))

@@ -6,7 +6,7 @@ status: current
 component: ReviewCouncil
 source-root: src/KyberWeave.Core/Review
 owner: dpalfery
-last-reviewed: 2026-11-11
+last-reviewed: 2026-11-13
 decided-by:
   - adr/0002-three-layer-review-council-verdict-engine
   - adr/0003-cross-file-duplication-and-prior-art-lenses
@@ -14,6 +14,8 @@ decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
   - adr/0064-project-knowledge-lives-in-gates-and-standards-reached-through-tools
   - adr/0069-the-review-council-loops-until-approve-and-computes-its-verdict-from-seat-output
+  - adr/0077-the-dispatching-session-seats-the-council-from-the-gate-runs-evidence
+  - adr/0079-the-reviewer-starts-its-own-seats-where-sub-agents-can-dispatch
 code-refs:
   - VerdictEngine
   - GateRunner
@@ -28,6 +30,7 @@ code-refs:
   - ReviewCatalogueCommand
   - SeatOutputParser
   - CitedLineCheck
+  - ReviewEvidence
 sections:
   "#":
     keywords:
@@ -64,7 +67,7 @@ flowchart TD
     Worker --> Gate
     Gate -->|"TASK_GATE: PASS · NONE_DECLARED · NONE_APPLICABLE"| TaskDone["task done to standard"]
     Gate -->|"FAIL or line missing · reject to the same worker"| Worker
-    Gate -->|"2 reworks per task-gate key · circuit-breaker"| Findings["per-objective findings collection"]
+    Gate -->|"3 reworks per task-gate key · circuit-breaker"| Findings["per-objective findings collection"]
     TaskDone --> Join["run join<br/>every task has cleared its gate<br/>findings collection drained"]
     Findings --> Drain["collection drain"]
     Drain -->|"residual findings"| Architect["architect — solution and plan"]
@@ -81,7 +84,7 @@ flowchart TD
 
     Scope --> GR
     Scope --> DG
-    Scope --> Council
+    Gates -->|"evidence.md · diff · gate results<br/>seats started by code-reviewer"| Council
 
     subgraph Gates["LAYER 1 — Deterministic gates (no model)"]
         direction LR
@@ -95,7 +98,7 @@ flowchart TD
         RT["review-triage ×3<br/>model-profile: fast"]
     end
 
-    Council -->|"seat files · one per lens"| Confirm["3. Adversarial confirm<br/>one batched refuter over the KW-REVIEW-046 candidates"]
+    Council -->|"seat files · one per lens"| Confirm["3. Adversarial confirm<br/>one refuter per KW-REVIEW-046 candidate, in parallel"]
     Confirm --> Adjudicate
     Gates -->|"gates.json"| Adjudicate
 
@@ -119,11 +122,29 @@ flowchart TD
     Cfg -.-> VE
 ```
 
-Gates and council start **together** — they are independent and neither waits on the other.
-Three lenses are the exception: `test-adequacy` consumes the coverage report,
-`static-analysis-triage` consumes the analyzer output, and `duplicate-implementation` consumes
-the duplicates report, so each is issued when its own gate completes rather than behind a
-barrier on all gates.
+The gates run first, and the council starts from what they recorded. The council's gate run
+writes `evidence.md` into the cycle folder beside `gates.json`: the base, the head, the diff
+(`review-diff.patch`), the changed files and every gate's result. Every seat starts from that
+file, so no seat re-runs a gate or rediscovers the change. Three lenses consume gate output:
+`test-adequacy` the coverage report, `static-analysis-triage` the analyzer output, and
+`duplicate-implementation` the duplicates report.
+
+**No seat for what a gate already proves.** `static-analysis-triage` is not seated when every
+build, lint, format and type-check gate passed, and `duplicate-implementation` is not seated when
+no duplicate cluster names a changed file; the reviewer records each with `--not-seated` and the
+report cites the gate instead. `test-adequacy` is always seated for a change with code or tests:
+whether the tests would catch the change breaking is a judgement no gate makes.
+
+**The reviewer starts its own seats.** The conductor (or `bug-crusher`) makes one review dispatch.
+`code-reviewer` runs the gates, then starts every seat itself in one parallel batch, each with its
+packet and the evidence path, and adjudicates and computes the verdict. A reviewer that holds a
+tool to start agents never applies a lens itself; only one with none applies them itself and says
+so. On a harness where a sub-agent cannot start sub-agents, the main session loads the
+`review-council` skill instead: the reviewer runs in hand-back mode and returns
+`STATUS: COUNCIL_SEATS_NEEDED` with the `review seats` dispatch blocks, the main session starts them, each
+seat writes its output to its own seat file, and the reviewer is re-invoked to adjudicate. The
+render tells each harness which path it is on. The reasons are in
+[ADR 0079](../adr/0079-the-reviewer-starts-its-own-seats-where-sub-agents-can-dispatch.md).
 
 `review duplicates` is a second command rather than a declared gate entry because its input is
 not a host command at all: it reads the repository's CodeGraph index and clusters symbols whose
@@ -195,15 +216,49 @@ flowchart LR
 ```
 
 Every council path receives this selection. Step 2 gives each seat its rows. The refuter (step 3)
-gets the same sections as the seat it challenges. On a harness that cannot delegate, such as
-Devin, `code-reviewer` applies each lens itself and uses the same selection, and the report says
-the council ran in-process. The developer's pre-push self-review gate walks the recurring defect
+gets the same sections as the seat it challenges. When a `code-reviewer` has no tool to start agents, it
+applies each lens itself and uses the same selection, and the report says the council ran
+in-process. The developer's pre-push self-review gate walks the recurring defect
 classes for the technologies present. If a host has no `REVIEW.md`, the reviewer reports that
 rather than skipping guidance silently, and the portable checks in the skill still run.
 
 **Attestation.** Each judgement finding carries `guidance:` with the REVIEW.md section ids it
 derives from. A seat that finds nothing says so in its `NO FINDINGS` sentence and names the
 sections it checked.
+
+**Severity overrides.** A host grades a class of finding its own way in the `Severity overrides`
+section of `REVIEW.md`: a table of `Id`, `Finding class`, `Severity` (`critical`, `major`, `minor` or
+`nitpick`), `Applies to` (lens and technology names; empty for every seat) and `Why`. Precedence, as
+seats and the reviewer read it: host override, then the lens's shipped severity guidance, then the
+general definitions. An override changes the grade up or down. `SeverityOverrides`
+(`src/KyberWeave.Core/Review/SeverityOverrides.cs`) is the one reader; an absent file or section is
+no rows, and rows inside an HTML comment or a code fence are examples, not rows.
+
+- **Delivery.** `review seats` writes into each packet only that seat's rows: unscoped rows, rows
+  naming its lens, and rows naming a technology a changed file belongs to, by the globs in
+  backticks in the `Technology map`'s `Files` column (a bare `*.cs` matches at any depth). A row
+  naming a lens and a technology needs both. A technology with no glob there, or a change whose
+  files git could not list, counts as present: an override that silently never reaches a seat is
+  the worse error. This is the first code that reads the technology map; the lens map is still
+  applied by the seat.
+- **Citation.** A seat that applies a row grades the finding at the row's severity and writes
+  `override: <id>` on it, a seat-schema key under the `KW-REVIEW-040` check.
+- **Enforcement.** `review verdict` applies each cited row before the nitpick drop, so the
+  overridden severity is the one every later step reads: the nitpick drop below fix level
+  `nitpick`, the verdict rules, the `fix:`/`follow-up:` routing and the loop's fix counts. A
+  finding the seat graded differently takes the row's severity. Each application is a
+  `KW-REVIEW-057` line (`'<id>': severity set by host override SO-1 (minor → major; cited by the
+  seat, which graded it differently).`), and `findings.json` records `override`, `overrideSource`
+  (`seat` or `decision model`) and `seatSeverity` when it changed. A cited id that no row has is a
+  `KW-REVIEW-057` warning and the seat's severity stands. With a decision model, each finding that
+  cites no row is matched against the rows for its lens and file
+  ([the decision model in the review commands](#the-decision-model-in-the-review-commands)).
+- **Validation.** `docs validate` reports an unknown severity (`KW-REVIEW-058`), a duplicate id
+  (`KW-REVIEW-059`), a lens or technology that does not exist (`KW-REVIEW-060`) and an empty finding
+  class or a table without its `Finding class` and `Severity` columns (`KW-REVIEW-061`), all errors;
+  at review time a bad row is left out, never a failure. `KW-REVIEW-062` is an advisory warning for
+  a row that appears, by the wording of the shipped lens file, to lower a class that lens grades
+  `critical`; the host owns that call.
 
 **Coverage gap, not a verdict input.** When a seat was given guidance and returns no
 attestation, `code-reviewer` records a council-coverage gap in the report and keeps that seat's
@@ -378,11 +433,11 @@ while the exemption stays. On the day after it lapses the finding returns on its
 ### Adversarial confirmation and refutation guardrails
 
 Step 3 sends every refutation candidate — the accepted `major` and `critical` findings the
-verdict command lists under `KW-REVIEW-046` — to **one batched** `review-lens` spawn. Its single
-`REFUTE:` header names the first candidate, because a repeated header would leave the Arbiter
-without the fact it reads; the body carries every candidate's YAML, and the refuter answers once
-per finding id. The reviewer drops each refuted finding with `--drop <id>=refuted: <reason>` and
-computes the verdict again. A verifier cycle sends only the candidates no earlier cycle refuted.
+verdict command lists under `KW-REVIEW-046` (`review verdict --candidates` lists them while other
+seats still run) — to its own `review-lens` spawn, all of them in one parallel batch. Each spawn's
+`REFUTE:` header names its finding and the body carries that finding's YAML; a refuter stopped by its
+seat budget answers `SUPPORTED`, so an unfinished refutation never drops a finding. The reviewer
+drops each refuted finding with `--drop <id>=refuted: <reason>` and computes the verdict once. A verifier cycle sends only the candidates no earlier cycle refuted.
 However, to prevent adversarial refuters from invalidating verified standards through specious dismissals, the refutation pass enforces strict **refutation guardrails**:
 - Refuters must adhere to Ground Rule 1: every finding stating a concrete failure scenario must be refuted with concrete proof of why that failure cannot occur, never an opinion or stylistic argument.
 - Refuters cannot dismiss findings under 'repo-idiom' excuses or familiarity arguments.
@@ -453,14 +508,21 @@ one artifact — its findings — and on harnesses that cannot express `ask` the
 narrows it to `deny` and the findings come back in the response instead. `network.publish`
 stays `deny`. **The role that judges a change never ships it.**
 
-`delegate` on the reviewer is what lets it fan out the council, and it is also what gives
+`delegate` on the reviewer is what lets it fan out the council; where a sub-agent cannot
+dispatch, the `review-council` skill starts its seats from the main session instead
+([ADR 0079](../adr/0079-the-reviewer-starts-its-own-seats-where-sub-agents-can-dispatch.md)).
+The grant is also what gives
 `delegate: deny` on the other subagent profiles a meaning it previously lacked: delegation is a
 per-role grant, not a property of being a subagent. The lens seats hold `deny`, so a council
-seat cannot re-enter the council.
+seat cannot re-enter the council. They hold the `review-seat` profile: read-only plus one
+write, their own seat file, which the `review-council` path needs so their findings never pass
+through the main session.
 
-### Materialized diff contract (Option A)
+### Review evidence contract
 
-Read-only council seats (`review-lens` and `review-triage`) have `process.execute: deny` and cannot execute `git diff`. Rather than granting git execution permissions across seventeen seats, `code-reviewer` materializes `git diff <base>...<head>` to task-scoped `.agent_scratchpad/<task-id>/review-diff.patch` before council fan-out, passes this path in each `review-lens` and `review-triage` packet, and removes it after the review council completes (including on failure). Seats read `.agent_scratchpad/<task-id>/review-diff.patch` via `view_file` (`filesystem.read: allow`) without executing git commands or mutating files. This preserves the strict capability lattice, prevents `index.lock` contention, and avoids redundant diff subprocess invocations across parallel seats.
+Read-only council seats (`review-lens` and `review-triage`) have `process.execute: deny` and cannot execute `git diff`. Rather than granting git execution permissions across seventeen seats, the council's gate run (`ReviewEvidence`) writes `review-diff.patch`, the diff from the merge base to the files on disk, and `evidence.md` into the cycle folder, and prints `evidence: <path>`. Untracked files are not in the patch; `evidence.md` lists them as untracked, and a seat reads them whole. Each seat's packet names `evidence.md`, and seats read it and the diff via `view_file` (`filesystem.read: allow`) without executing git commands or mutating files. The files stay with the cycle folder until the run ends. This preserves the strict capability lattice, prevents `index.lock` contention, and avoids redundant diff subprocess invocations across parallel seats.
+
+The evidence is written twice. `review seats` (`ReviewSeatsCommand`, seating in `CouncilSeating`) writes the diff and `evidence.md` with the gates marked as running, each changed file with its diff line range, and one packet per seat with the lens charter inside, so most seats start while the gates run ([ADR 0079](../adr/0079-the-reviewer-starts-its-own-seats-where-sub-agents-can-dispatch.md), decisions 6 to 9). The council's gate run then replaces `evidence.md` in one rename with every gate's result, the coverage and the `review.coverage` floor, and writes `duplicates.json`. `test-adequacy`, `static-analysis-triage` and `duplicate-implementation` read a gate's output, so they are seated after the gate run, which prints the gate-proven skips.
 
 ## Configuration
 
@@ -479,6 +541,7 @@ review:
     strictness: balanced   # lenient | balanced | strict
     # major-count-blocks: 3               # optional; overrides the strictness preset
     # min-confidence: 7                    # optional; overrides the strictness preset
+    fix-level: minor                       # critical | major | minor (default) | nitpick
     suppressions:
       - id: correctness/generated-nullable
         reason: Regenerated client, tracked separately.
@@ -493,6 +556,8 @@ strictness to every lens so a strict host receives lower-confidence findings rat
 them withheld at the source. Minor findings never block at any level, which keeps the
 autonomous-gate rule that only critical and major findings gate a change.
 
+**Fix level.** `policy.fix-level` decides what a fix round takes; each level includes the ones before it: `critical` (failed blocking gates and critical findings: data loss, a security hole, corruption, behaviour that breaks silently), `major` (also major findings: the change is wrong or fails under conditions a normal user reaches, or a file or type sits against the documented structure), `minor` (also minor findings: real but bounded, such as a narrow edge case, a misleading comment or document statement, a missing test for a stated behaviour; the default) and `nitpick` (also nitpicks: purely stylistic points with no effect on how the application operates). The default is `minor`: quality first, speed second, so the loop runs until nothing at or above the level is left. Findings below the level are not fixed: the pull request lists them under pending human review and the conductor files them as todos with the run's other follow-up work; a nitpick below the level is dropped and listed in the verdict report only. At `nitpick` the seats are told to raise nitpicks (`severity: nitpick`) and the decision model's nitpick step does not drop them. The fix level decides what is fixed, never what blocks: `strictness`, `major-count-blocks` and `min-confidence` decide that. The retired `minor-findings` key (never released) still reads: `follow-up` as `major`, `fix` as `minor`.
+
 `run` is **argv, not a command line**, because `ProcessRunner` refuses a shell and refuses a
 concatenated argument string. A host cannot express a pipeline or a redirect here — and neither
 can anything that later edits this file, nor any value arriving from a diff, a finding, or a
@@ -503,7 +568,10 @@ lens prompt. That is the injection surface closed at the point the value is writ
 `review.task-gates` is the developer exit gate's counterpart to `review.gates`: a map from an
 agent slug to that agent's ordered gates, run by `kyber-weave review gates --agent <slug>`
 against the files that agent changed. It is optional; absent, no agent has task gates and
-`--agent` reports `KW-REVIEW-027`.
+`--agent` reports `KW-REVIEW-027`. With `--task <id>` and no `--paths`, the files and the test
+classes for `{tests}` come from the task in the active plan, the report goes to the task's scratch
+folder, and each test gate prints a short result (failing tests with their first error line) with
+the full output in a log beside it; see the [command surface](../cli-command-surface.md).
 
 ```yaml
 review:
@@ -575,6 +643,36 @@ The shipped Go format gate (`gofmt -l`, council and task) sets `fail-on-output: 
 on every Go version even when it lists files, and `gofmt -d` exits 1 on a diff only from Go 1.26, so a
 gate that judged the exit code alone could not fail on older toolchains; any listed file fails this one
 on all of them.
+
+
+#### RED mode
+
+`review gates --agent <agent> --paths <files> --task <slug> --red` runs the agent's gates and judges them as a test-first
+task's failing run instead of as a pass or fail; one worker writes the tests, runs this, implements, and runs the gates again
+([ADR 0076](../adr/0076-test-first-is-one-worker-per-task.md)). The gates' output is classified by compiler diagnostic code, not
+by anyone's prose: the run is RED when tests ran and at least one failed, or when every failing gate failed only on
+missing-symbol errors (C# `CS0103`, `CS0117`, `CS0234`, `CS0246`, `CS1061`; TypeScript `TS2304`, `TS2305`, `TS2307`,
+`TS2339`) in the files the task changed. A syntax or type error, a missing symbol in a file the task did not change, a
+restore error, or tests that all pass reject it (`KW-REVIEW-052`). The accepted gates are reported as passed with the
+reason, and `KW-REVIEW-051` carries the `RED_EVIDENCE:` summary; the report, not the line, is the proof. Without `--red`, the same classifier tells a
+worker its build fails only on another task's tests' missing symbols (`KW-REVIEW-053`). Languages and test runners are records in
+`RedLanguages`, so a new one needs no change to the classifier.
+
+Once a build gate is accepted as RED on missing symbols, every later gate whose command runs tests is not run: the report records it as
+not applicable with the reason `not run — RED build (missing symbols …)`, which never counts as failed, so the report corroborates a
+`TASK_GATE: PASS` claim (`KW-ARB-GATE-REPORT-001`). A test gate that exits non-zero because tests failed is accepted as RED; zero tests
+run (the filter matched nothing, with the project the host's `review.task-gates` do not cover named), a server that did not start, a
+crashed runner or a collection error is rejected with that reason. The run ends with `TASK_GATE: PASS|FAIL …` and `RED_EVIDENCE: …` or
+`RED_REJECTED: <reason>`, then a `next:` line: the passing-run command, or what to fix first.
+
+| Runner | Tests ran and failed, read from | Zero tests | Infrastructure failures named |
+|---|---|---|---|
+| dotnet test (Microsoft.Testing.Platform and VSTest) | `total:`/`failed:` summary, `Failed!  - Failed: N` | exit code 8, "Zero tests ran", no test matches the filter | host crash, runner failure with no test |
+| Playwright | `N failed` / `N passed` lines | "No tests found" | web server timeout, port in use, connection refused, browser missing |
+| vitest, jest | `Tests  N failed`, `Tests: N failed` | "No test files found", "No tests found" | none |
+| pytest | `N failed, M passed in Xs` | exit code 5, "no tests ran" | collection error |
+| cargo test | `test result: FAILED. P passed; F failed` | `running 0 tests` | could not compile |
+| go test | `--- FAIL: TestName` | `[no test files]`, `[no tests to run]` | none |
 
 ### The tests a task gate runs
 
@@ -687,6 +785,15 @@ shipped catalogue, `include`, `os`, `working-directory`, `fail-on-output`, `full
 | `requires-paths` | no | `[]`, which requires nothing | Repository-relative paths the gate needs before it can start. When one is absent the gate does not start: it is reported under `KW-REVIEW-033` with `exitCode: -1`, `passed: false` and `outcome: "notStarted"`, at Error when the gate is blocking and at Warning otherwise, and its summary carries the install hint. Never a pass, and never `KW-REVIEW-022` |
 | `concurrent` | no | `false` | When `true`, the gate starts at its place in the declared order and runs alongside the gates declared after it instead of holding them up. Its result keeps its declared place in the report, and it is still stopped at its own `timeout-seconds` and reported as timed out. Only for a gate that neither reads nor writes what later gates produce; the runner does not check that |
 
+Gates run one after another in declaration order, except a gate marked `concurrent`. The runner cannot tell
+whether two gates share build output or a lock file, so it never overlaps gates on its own: a host that knows
+two gates are independent (a Node lint and a .NET test run, say) declares the first `concurrent`, ahead of the
+longer gates it can overlap. `review.parallelism` (default `2`) bounds the gates running at one time,
+`concurrent` or not, so marking several gates `concurrent` cannot pile them onto one machine's cores; the
+`proc-guard` machine slot a gate such as `test` takes still applies on top. A gate waits for a free slot before it
+starts, and a gate the council deadline passed while it waited is reported as not started, exactly as before. The
+report lists results in declaration order and the verdict reads the same results whatever the bound.
+
 `CouncilGateSelection` plans the run against the changed set and the host OS: a gate
 whose `os` does not match is skipped, a gate whose `include` matches no changed file is
 skipped (`KW-REVIEW-026`), and a gate with no `include` runs on every change.
@@ -787,60 +894,28 @@ flowchart TD
 Two facts about how the review is run complete the picture, and neither is enforced by the gate
 command:
 
-- **The reviewer runs its gates and stops when it cannot seat its own lenses.** Where the
-  harness cannot start subagents, `code-reviewer` reports `COUNCIL_SEATS_NEEDED` after its gates
-  finish: the status names the lenses it needs and the role each one takes, the scope, the gate
-  ids and results it already holds, and the findings whose refutation is outstanding. The
-  session above it starts those seats in parallel and re-invokes the reviewer, which still
-  adjudicates and still owns the verdict. Gates are not re-run to seat a lens.
+- **The reviewer starts its seats after its gates.** One `code-reviewer` dispatch runs the gates
+  and then every seat in parallel. Only on the `review-council` path does it report
+  `COUNCIL_SEATS_NEEDED` after its gates, for the main session to start the seats and re-invoke
+  it. Either way it adjudicates and owns the verdict, and gates are not re-run to seat a lens.
+  Nor does the reviewer run tests, deploy scripts or end-to-end suites the gates ran: it reads
+  `evidence.md`.
 - **The review runs alone, last, and in the foreground.** No documentation work and no edits
   land in the reviewed tree while it runs, and the documentation-impact review and any edit it
   causes finish before the council starts. A review racing an edit reviews a tree that no longer
   exists by the time its verdict is read.
 
-### Repository gate scoping and caching in this repository
+### Repository gate scoping in this repository
 
-This repository configures `include:` globs on all 30 council gates in `.kyber-weave/kyber-weave.yml`,
+This repository configures `include:` globs on all 36 council gates in `.kyber-weave/kyber-weave.yml`,
 partitioned by ecosystem:
 
-- **Pure C# formatting and static analysis** (`format-whitespace`, `format-style`, `inspectcode`, `duplicates`): scoped to `&net-source-paths` (`["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets", "**/*.sln*", "**/NuGet.config", "**/.editorconfig"]`).
-- **.NET build and test** (`build`, `test`): scoped to `&net-test-paths`, which extends C# source paths to cover tested non-C# repository assets and build/test configuration: `products/**` (tested by Squad canonical content, rendering, and preset tests, and verified by `KyberWeave.Core.csproj`'s pre-build SHA-256 hash guard), `REVIEW.md` (tested by review guidance council contract tests), `.kyber-weave/kyber-weave.yml`, `apm.yml`, `.apm/**`, `global.json`, `.config/dotnet-tools.json`, and `scripts/**` — while strictly excluding `dash/**` and `docs/**`. When `net-test-paths` match, the full .NET test suite runs to preserve ADR 0005 guarantees across solution dependencies.
-- **APM skill gates** (`skill-*`, 15 gates): scoped to their respective `.apm/skills/<skill-name>/**`, `src/KyberWeave.Cli/**`, and `src/KyberWeave.Core/Skills/**`.
+- **Pure C# formatting and duplicate detection** (`format-whitespace`, `format-style`, `duplicates`): scoped to `&net-source-paths` (`["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets", "**/*.sln*", "**/NuGet.config", "**/.editorconfig"]`).
+- **.NET build and test** (`build`, `test`): scoped to `&net-test-paths`, which extends C# source paths to cover tested non-C# repository assets and build/test configuration: `products/**` (tested by Squad canonical content, rendering, and preset tests, and verified by `KyberWeave.Core.csproj`'s pre-build SHA-256 hash guard), `REVIEW.md` (tested by review guidance council contract tests), `.kyber-weave/kyber-weave.yml`, `apm.yml`, `.apm/**`, `global.json`, and `scripts/**` — while strictly excluding `dash/**` and `docs/**`. When `net-test-paths` match, the full .NET test suite runs to preserve ADR 0005 guarantees across solution dependencies.
+- **APM skill gates** (`skill-*`, 21 gates): scoped to their respective `.apm/skills/<skill-name>/**`, `src/KyberWeave.Cli/**`, and `src/KyberWeave.Core/Skills/**`.
 - **Documentation gates**: `docs-validate` scoped to `["docs/**", "**/*.md", ".kyber-weave/kyber-weave.yml", "src/**"]`; `docs-drift` adds `"dash/**"` so `KyberDash` `code-refs` and `api-endpoints` drift is caught when `dash/` changes (~0.8s).
 - **TypeScript gates** (`ts-*`): scoped to `["dash/**"]` (which also keeps `display-layer.test.ts` active when `dash/tray/**` changes).
 - **Rust gates** (`cargo-*`): scoped to `["dash/tray/src-tauri/**"]`.
-
-ReSharper InspectCode (`inspectcode`) passes `--caches-home=artifacts/inspectcode-cache` (gitignored),
-persisting the AST and project caches across local runs and reducing warm inspection duration by ~35% wall-clock and ~68% CPU.
-
-The gate is declared straight after `build` and is `concurrent`, so it overlaps the test run. It passes
-`--no-build`, because `build` has already restored and compiled the tree, and `--jobs=4`, to keep load off
-the test run beside it. It declares `requires-paths` on a restore output, so run on its own on an unrestored
-tree it does not start instead of exiting zero having resolved nothing. That check proves a restore
-happened, not that it is current: a run of `--gate inspectcode` alone after package references changed
-needs `--gate build` with it.
-
-Its argv starts with `scripts/report-gate.sh`. On macOS 27.3 Beta the analyzer writes its whole report and
-then never exits, because .NET does not return from closing a listening socket while another thread is
-blocked accepting on it. The wrapper removes any report an earlier run left, then stops the analyzer once this run's report is
-complete, and exits zero. The argv names exactly one finish mode. `--ends-with <text>` (this gate) completes
-when the report ends with `</Report>` and stops once it has not changed for `--grace` seconds (default 20).
-`--contains <text>` completes when a fixed-string search of the whole report finds the text and stops
-`--grace` seconds after the text is first seen, whether or not the report keeps growing, because a log that
-keeps writing after its finish line would otherwise never settle. An optional `--timeout <seconds>` limits
-the whole run: when it elapses before the run counts as done, the wrapper stops the command's whole process
-tree, says so on standard error, and exits 124, while a run already done before the limit still passes. The
-script must stay bash 3.2 compatible, the `/bin/bash` on macOS. Its contract tests run it under `/bin/bash`, which is 3.2 only on macOS.
-A hang before the report is complete still runs to `timeout-seconds` and is reported as timed out when no
-`--timeout` is set, and a zero exit with no complete report fails.
-
-This repository's optional `cleanupcode` fix pass runs `--no-build` through this wrapper, keyed on the
-`Close solution instance` line of a `--LogFile` log, because the tool never exits on this machine and
-`--no-build` skips the pre-build step where the first hang occurs; that finish line is also written after a
-failed cleanup, so the command adds `! grep -q "Failed to run cleanup"` on the same log and fails when the
-line is present, and a finish line alone never proves the cleanup succeeded, so the task gate's verify passes
-stay the judge. The C# coding standard's `## Completion` section holds the exact command, and the wrapper
-workaround is removed once the tool exits on its own.
 
 #### Test and build gates run under the process watchdog
 
@@ -981,9 +1056,9 @@ entire point of the split.
 
 **Ahead of the council sits a layer with no model in it at all.** Each developer agent ends its
 task with the `task-gate` skill: it runs the `review.task-gates` entry for that agent (formatting,
-analyzer fixes, `cleanupcode` scoped to the changed files, build and tests), fixes what a machine
+analyzer fixes, build and tests), fixes what a machine
 can fix, and verifies. The worker reports a `TASK_GATE:` line in its digest. The conductor rejects
-a missing or `FAIL` line back to the same worker; after two reworks for the same
+a missing or `FAIL` line back to the same worker; after three reworks for the same
 `task-gate/<gate-id>` key the circuit-breaker trips and the failure enters the conductor's
 per-objective findings collection, which `architect` plans against before the end-of-run review
 runs. See [ADR 0005](../adr/0005-task-level-fast-review.md).
@@ -998,28 +1073,61 @@ rather than performing it.
 | `verifier` | Re-checks only the prior findings and the fix delta | Every review cycle after the first |
 | `full` | Forces a complete council re-scan | Selected by a person: a disputed verdict, or a stale prior review |
 
-**The review loop.** After `REQUEST_CHANGES`, every critical and major finding, and every
-failed blocking gate, goes to the worker that owns its scope; the council then re-reviews, and
-it keeps doing so until it returns `APPROVE`. Minor findings never start a cycle. Every cycle
-after the first is a `verifier` cycle: it reviews the fix delta `git diff <prior head>...<head>`,
-re-seats only the lenses that own an outstanding finding or whose predicate the delta newly
-satisfies, and passes `--prior <prior cycle folder>` so the lenses it did not re-seat keep their
-coverage. Gates re-run every cycle because their result *is* the evidence. A finding is FIXED only
+**The review loop.** The verdict prints what the fix round takes, one `fix:` line each (every
+failed blocking gate and every finding at or above `review.policy.fix-level`), what becomes follow-up work (`follow-up:`: findings
+below the fix level, and findings dropped as `pre-existing debt`), and a
+closing `fix round:` line (`KW-REVIEW-056`). Each `fix:` line goes to the worker that owns its
+scope, one dispatch per worker, after `REQUEST_CHANGES` and after an `APPROVE` alike. The council
+re-reviews until the verdict prints `fix round: none`: `review clean: proceed to archive` when
+nothing is left, or, when a cap stopped the loop, with the findings still to fix printed as
+`open:` and sent to human review. The verdict computes the caps from the cycle folders: 5 cycles, or
+3 cycles in a row in which the count of findings to fix (the `fix:` lines) does not fall, so a loop
+that only ever finds minors still trips it. Three fix rounds are reachable without either cap.
+Every cycle
+after the first is a `verifier` cycle, a fact the council's own gate run (`review gates --council`) and the read-only `kyber-weave review cycle . --task <task-id>` query both read from the finished cycle folders (those holding the verdict's `findings.json`) rather than from how a dispatch is worded: it reviews the fix delta `git diff <prior head>...<head>`,
+and `review seats` seats only the lenses that raised the findings the fix round took, plus
+`correctness` and `test-adequacy` when the fix changed anything but Markdown; only a fix delta
+of more than 300 changed lines seats every lens the delta's own files call for. It passes
+`--prior <prior cycle folder>`, so the lenses it did not re-seat keep their coverage and each
+prior finding the fix round did not take is carried into this cycle's `findings.json`. A fix round re-runs only the gates whose inputs the fix touched, because their result *is* the evidence; a gate the fix did not touch keeps the prior cycle's result. The council's gate run does this itself: in a later cycle it prints `cycle: <n> mode: verifier` with the `recheck:` findings and the `rerun:`/`carry:` gates at the top of its output, before the first gate starts, and repeats a one-line `cycle: … ran: … carried: … failed: …` summary as its last line; it runs only the `rerun:` gates, and writes each `carry:` gate's earlier passing result into `gates.json` as carried (`KW-REVIEW-048`), so the report is complete (`--full` runs every gate). `review cycle` ends with the exact command (`run:`); `--gate` runs written to one `--out` file merge into it, so gates run one at a time still add up to one report. A carried gate is one that passed and whose inputs are unchanged; the verdict applies the same rule to a gate missing from the report and refuses one whose inputs changed (`KW-REVIEW-049`). CI is the full re-check. A finding is FIXED only
 when the fix refuses its whole class: the verifier states the class in one sentence, names at
 least three other inputs of that class that the original failure scenario did not name, and
 traces each through the fix. A fix that refuses only the input the finding named leaves the
 finding open.
 
 The loop has a hard stop: 5 review cycles, or 3 cycles in a row in which the count of
-surviving critical and major findings does not fall. The findings still open are then listed in
+findings to fix (the `fix:` lines, whatever the fix level makes fixable) does not fall; `review verdict` applies it and prints
+the rest as `open:`. The findings still open are then listed in
 the pull request as pending human review, and delivery continues — a loop that is not
 converging is not going to, and the usual cause needs a person. A finding whose rework tripped
 the circuit-breaker stays open and counts toward the stop. The loop runs on the open pull
 request: ready stays decided by required CI alone.
 
 Each cycle keeps its record in `.agent_scratchpad/<task-id>/review/cycle-<n>/` — the `seats`
-folder, `gates.json`, the `findings.json` the verdict command writes, and `head` — until the run
-ends. A verdict-command refusal (`KW-REVIEW-040`, `-041`, `-042`) is the reviewer's to fix in
+folder, `gates.json`, the `findings.json` the verdict command writes, and `cycle.json` — until the run
+ends.
+
+**A recorded cycle is prior only when it belongs to this change.** The scratchpad is git-ignored, so
+a reset or clean leaves the folders of an earlier run behind, and a brand-new change could otherwise read
+another run's `cycle-2` as its own prior and carry most of its gates. `cycle.json` holds the `branch`, the
+`base` (the merge-base commit of the base ref and `HEAD`, so it names where the change forked) and the `head`
+the cycle reviewed. The gate run writes it when `--out` is in a cycle folder, and `review verdict --out` writes
+it into a cycle folder that has none; the older `head` file is read only when `cycle.json` has no head. A
+finished cycle counts as prior when it recorded all three, its `branch` equals the current branch, its `base`
+equals the current base, and its `head` is `HEAD` or an ancestor of it (`git merge-base --is-ancestor`). Any
+other cycle is ignored, listed as `ignored: <folder> — <reason>` in the output of `review gates --council`
+and `review cycle`, and the run is cycle 1 and a full review. A current branch, base or head that git cannot
+name (a detached head, no base ref) ignores every cycle, which is the safe answer. The base ref is `--base`,
+else `origin/HEAD`, else `origin/main`, `origin/master`, `main` or `master`. `review verdict --prior` applies
+the same rule to the folder it is given and refuses a foreign one (`KW-REVIEW-050`).
+
+**The review folder belongs to the worktree the command was run against.** `review gates`, `review cycle` and
+`review verdict` find the git work tree that contains their path argument (a linked worktree's `.git` file counts)
+and read `.agent_scratchpad` there, so a run in a worktree never reads the canonical checkout's folders. The
+folder is printed as an absolute path (`folder:`), and so are `prior:` and `findings:`, so the reviewer
+never resolves a relative path against a different working directory. Run from the repository's canonical checkout
+while a live run (the records `run start` writes under the operator's home, as `KW-ARB-RUN-001` reads them) works
+in a worktree of its own, the output carries one `worktree:` line naming that worktree and its review folder. A verdict-command refusal (`KW-REVIEW-040`, `-041`, `-042`) is the reviewer's to fix in
 the same cycle and never counts as one.
 
 ## Quick review, sibling sweep and seat confidence
@@ -1104,8 +1212,8 @@ Every other lens is never skipped by this rule. In particular it never skips:
 - `blast-radius-revertibility`: a rename moves callers.
 
 The rule is enforced, not shadowed. Its skips appear in the decision log like any other enforced
-answer. The rule only applies where the hook runs, and code-reviewer's `LENS:` headers are what
-let it judge each spawn.
+answer. The rule only applies where the hook runs, and the `LENS:` headers are what let it judge each
+spawn, whether code-reviewer or, on the `review-council` path, the main session dispatches it.
 
 ### Nitpick filter, duplicates and the review run (phase 3)
 
@@ -1113,20 +1221,39 @@ Every lens and refutation dispatch of one review carries `REVIEW_RUN: <id>` in i
 block, with the same id on every seat. The id keys the review's findings in a run store under
 `<arbiter-dir>/stores/`, so a later decision in the same review can read them back.
 
-- **Nitpick filter (`KW-ARB-NITPICK-001`).** A `Critical` finding, or one a failed gate corroborates,
-  is never dropped. Any other finding is asked once, and only a confident nitpick drops it. The
-  finding is set aside and the hook adds `ARBITER_DROPPED: <id> rule=KW-ARB-NITPICK-001 decision=<id>`.
-  The reviewer records it under **Dropped** in the report and does not re-raise it.
-- **Refutation of a dropped finding (`KW-ARB-NITPICK-002`).** Skipped with `verify`, so no refuter runs.
-- **Duplicate refutation (`KW-ARB-DUP-001`).** A finding that repeats an earlier finding of the same
-  review, in the same file within 20 lines, is denied as `ARBITER_DUPLICATE: <id> of <earlier id>
-  decision=<id>`. The reviewer records it under **Dropped** and does not re-raise it.
-- **Shadow.** All three rules ship in shadow. Until a rule is enforced, no finding is dropped and every
-  refuter runs; the decision log records each would-be drop or duplicate in `would-effect`.
+The nitpick, duplicate and claim questions are no longer asked by the hooks: the review commands ask
+them on the seat files' own text (next section).
+
+## The decision model in the review commands
+
+The review commands ask the Arbiter's decision model (Jev, [the decision model](../kyber-arbiter/jev-decision-model.md))
+six narrow questions, through the same client, rules and provider configuration the Arbiter uses
+([ADR 0079](../adr/0079-the-reviewer-starts-its-own-seats-where-sub-agents-can-dispatch.md), decision 10).
+It is optional: with `arbiter.provider.kind: none`, `--no-decision-model`, no key, or an unreachable
+model, nothing is asked and both commands print exactly what they printed before. A configured model
+with no key prints `decision model: not configured (...)` once. The first fault stops every later call
+of that command run. None of it needs the Arbiter's hooks or `arbiter.enabled`.
+
+| Step | Command | Rule (floor) | Effect of a confident answer |
+|---|---|---|---|
+| Lens applies | `review seats`, after the file-pattern step | `KW-ARB-LENS-001` (`noul`, P(applies) < 0.1) | Not seated, reason `decision model: not applicable (confidence x)`. `correctness`, `test-adequacy` and the lenses that read a gate's output are never asked. |
+| Duplicates | `review verdict` and `--candidates` | `KW-ARB-DUP-001` (≥ 0.9) | Findings on one file within 20 lines that name one defect are merged; the highest severity, then confidence, then evidence is kept and the merged ids are listed. |
+| Nitpicks | `review verdict` | `KW-ARB-NITPICK-001` (≥ 0.85) | A `minor` finding is dropped from the counted set and listed under "Dropped as nitpick". `major` and `critical` are never asked. |
+| Claim check | `review verdict` and `--candidates` | `KW-ARB-CLAIM-001` (≥ 0.9) | Before a refuter: the excerpt must be at the cited lines; the model reads the claim, the quote, the cited lines and the lines the evidence cites, all from the tree. `supports` → no refuter; `contradicts` or unsure → refuter as before. |
+| Severity | `review verdict` | `KW-ARB-SEVERITY-001` (≥ 0.8) | Advisory note only; the verdict keeps the seat's severity. A finding a host override graded is not asked. |
+| Severity override | `review verdict` and `--candidates`, before the nitpick drop | `KW-ARB-OVERRIDE-001` (≥ 0.85) | For a finding that cites no override, one question per `REVIEW.md` severity-override row that applies to its lens and file: does it belong to the row's class? A confident `belongs` grades it at the row's severity (`KW-REVIEW-057`, `matched by decision model, confidence x`); the most confident row wins, a tie goes to the row first in the table. Findings a host override graded are exempt from the nitpick filter. |
+
+Every question is one decision-log entry under `artifacts/arbiter`, and every effect is a
+`KW-REVIEW-055` line plus one summary line. Each question goes in its own request, four at a time: in
+a live replay two similar questions sharing one request came back near 50/50, and alone at 1.0.
+`--candidates` keeps its answers in `decision-model.json` beside the seat folder, so the verdict run
+agrees with it without asking again. `shadow: true` on `KW-ARB-NITPICK-001` or `KW-ARB-DUP-001` under
+`arbiter.rules` makes that step log only. Both are enforced by default: the question now reads the
+finding's own text, and every drop or merge is printed with its confidence.
 
 ## Current limitations
 
-All thirteen declared targets have a registered renderer. On the twelve native targets these permissions lower to their native representations and are enforced; `warp` is a fallback target whose deployed skills carry no capability enforcement, so there the council and the narrowing are instruction-only. On `devin` a subagent cannot delegate, so `code-reviewer` applies each lens itself, one at a time, runs the refutation pass itself, and says in its report that the council ran in-process, which is weaker evidence than independent seats — see
+All thirteen declared targets have a registered renderer. On the twelve native targets these permissions lower to their native representations and are enforced; `warp` is a fallback target whose deployed skills carry no capability enforcement, so there the council and the narrowing are instruction-only. On `devin` a subagent cannot delegate, so a dispatched `code-reviewer` hands its seats back to the session that dispatched it, as on every other target — see
 [rendering](../kyber-squad/architecture.md#8-rendering).
 
 There is no cost measurement and no per-repository ceiling yet. The adversarial confirmation

@@ -90,6 +90,9 @@ public static class RepositoryDoctor
         if (!string.IsNullOrWhiteSpace(home))
             checks = [.. checks, .. CopilotPromptProbe.Run(mode, home, environment("APPDATA"), CurrentPlatform(), environment("XDG_CONFIG_HOME"))];
 
+        // Advisory only: a passing check with a warning, in every mode, so it never changes the exit code.
+        checks = [.. checks, .. CopilotLargeOutputProbe.Run(repositoryRoot, home, environment)];
+
         int exitCode = codegraph.BinaryMissing
             ? 3
             : checks.Any(check => !check.Passed) ? 1 : 0;

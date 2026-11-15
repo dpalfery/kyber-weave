@@ -25,7 +25,7 @@ namespace KyberWeave.Core.CodeGraph;
 /// also faster than per-symbol querying would have been.
 /// </para>
 /// </remarks>
-public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNeighborhoodProvider, ICodeGraphSymbolEnumerator
+public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNeighborhoodProvider, ICodeGraphSymbolEnumerator, ICodeGraphIndexFreshness
 {
     private const char FieldSeparator = '\u001f';
 
@@ -48,6 +48,8 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
     private readonly List<string> _filePaths = [];
     private readonly List<CodeGraphEdge> _edges = [];
     private readonly Dictionary<string, int> _edgeDegree = new(StringComparer.Ordinal);
+    private bool _stalenessRead;
+    private string? _staleness;
 
     /// <inheritdoc />
     public bool IsAvailable { get; }
@@ -152,6 +154,53 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
                 _filePaths.Add(node.FilePath);
             }
         }
+    }
+
+    /// <inheritdoc />
+    public string? DescribeStaleness()
+    {
+        if (!IsAvailable) return null;
+        if (_stalenessRead) return _staleness;
+
+        // The checkout is the folder that holds the index folder: <root>/.codegraph/codegraph.db.
+        string? root = Path.GetDirectoryName(Path.GetDirectoryName(DatabasePath));
+        _stalenessRead = true;
+        if (root is null) return _staleness = null;
+
+        // Read on demand, and separately from the node table: only a caller that has something to
+        // explain needs it, and an index without these tables simply cannot be judged.
+        const string sql = """
+            SELECT 'file', path, CAST(modified_at AS INTEGER), node_count FROM files
+            UNION ALL
+            SELECT 'meta', key, value, '' FROM project_metadata WHERE key = 'indexed_at_commit'
+            """;
+        Dictionary<string, (long ModifiedMilliseconds, int NodeCount)> files = new(StringComparer.Ordinal);
+        string? indexedCommit = null;
+        try
+        {
+            foreach (string line in RunSqlite(sql))
+            {
+                string[] parts = line.Split(FieldSeparator);
+                if (parts.Length < 4) continue;
+                if (parts[0] == "meta")
+                {
+                    indexedCommit = parts[2].Trim();
+                    continue;
+                }
+
+                _ = long.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out long modified);
+                _ = int.TryParse(parts[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out int nodeCount);
+                files[parts[1]] = (modified, nodeCount);
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException
+                                       or System.ComponentModel.Win32Exception
+                                       or TimeoutException)
+        {
+            return _staleness = null;
+        }
+
+        return _staleness = CodeGraphIndexStaleness.Describe(root, indexedCommit, files);
     }
 
     private void IncrementDegree(string nodeId)

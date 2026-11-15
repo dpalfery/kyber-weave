@@ -125,55 +125,44 @@ public sealed class ArbiterHookHostTests
     [InlineData("{oops")]
     [InlineData("[1, 2]")]
     [InlineData("")]
-    public void Hook_MalformedStdin_BlocksFailClosed(string stdin)
+    public void Hook_MalformedStdin_AllowsAndLogsTheHookError(string stdin)
     {
         HookCommand command = CreateCommand(new ScriptedEngine());
 
-        (int exit, string stdout, _) = Run(command, "conductor", stdin);
+        (int exit, string stdout, string log) = Run(command, "conductor", stdin);
 
-        // Fail closed: exit 0 carries the block on stdout, never a pass.
+        // Fail open: the host could not decide, so the dispatch continues and the log names the code.
         Assert.Equal(0, exit);
-        using JsonDocument doc = JsonDocument.Parse(stdout);
-        JsonElement output = doc.RootElement.GetProperty("hookSpecificOutput");
-        Assert.Equal("PreToolUse", output.GetProperty("hookEventName").GetString());
-        Assert.Equal("deny", output.GetProperty("permissionDecision").GetString());
-        string reason = output.GetProperty("permissionDecisionReason").GetString() ?? string.Empty;
-        Assert.Contains(HookCommand.FailClosedCode, reason, StringComparison.Ordinal);
-        Assert.Contains("ANSWER: error", reason, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, stdout);
+        Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Hook_MissingConfigOnClassifiedEvent_Blocks()
+    public void Hook_MissingConfigOnClassifiedEvent_AllowsAndLogs()
     {
         HookCommand command = CreateCommand(
             new ScriptedEngine(),
             _ => throw new InvalidOperationException(
                 $"{HookCommand.FailClosedCode}: no .kyber-weave/kyber-weave.yml found."));
 
-        (int exit, string stdout, _) = Run(command, "conductor", Fixture("pre-agent-dispatch.json"));
+        (int exit, string stdout, string log) = Run(command, "conductor", Fixture("pre-agent-dispatch.json"));
 
         Assert.Equal(0, exit);
-        using JsonDocument doc = JsonDocument.Parse(stdout);
-        string reason = doc.RootElement
-            .GetProperty("hookSpecificOutput")
-            .GetProperty("permissionDecisionReason").GetString() ?? string.Empty;
-        Assert.Contains(HookCommand.FailClosedCode, reason, StringComparison.Ordinal);
-        Assert.Contains("ANSWER: error", reason, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, stdout);
+        Assert.Contains("no .kyber-weave/kyber-weave.yml found", log, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Hook_EngineCrashOnReturnEvent_BlocksWithTopLevelBlock()
+    public void Hook_EngineCrashOnReturnEvent_AllowsAndLogs()
     {
         ScriptedEngine engine = new() { ThrowOnPost = true };
         HookCommand command = CreateCommand(engine);
 
-        (int exit, string stdout, _) = Run(command, "conductor", Fixture("post-completed.json"));
+        (int exit, string stdout, string log) = Run(command, "conductor", Fixture("post-completed.json"));
 
         Assert.Equal(0, exit);
-        using JsonDocument doc = JsonDocument.Parse(stdout);
-        Assert.Equal("block", doc.RootElement.GetProperty("decision").GetString());
-        string reason = doc.RootElement.GetProperty("reason").GetString() ?? string.Empty;
-        Assert.Contains(HookCommand.FailClosedCode, reason, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, stdout);
+        Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -221,7 +210,8 @@ public sealed class ArbiterHookHostTests
         int exit = await Composition.DispatchAsync(
             ["hook", "--harness", "nope"], stdin, stdout, stderr);
 
-        Assert.Equal(2, exit);
+        // Exit 1, not 2: exit 2 is a block on Claude, and a usage error is no finding.
+        Assert.Equal(1, exit);
         Assert.Equal(string.Empty, stdout.ToString());
         Assert.NotEqual(string.Empty, stderr.ToString());
     }
@@ -235,7 +225,7 @@ public sealed class ArbiterHookHostTests
 
         int exit = await Composition.DispatchAsync(["hook"], stdin, stdout, stderr);
 
-        Assert.Equal(2, exit);
+        Assert.Equal(1, exit);
         Assert.Equal(string.Empty, stdout.ToString());
     }
 
@@ -262,7 +252,7 @@ public sealed class ArbiterHookHostTests
     {
         Assert.Equal(0, await Composition.DispatchAsync(
             ["--version"], TextReader.Null, TextWriter.Null, TextWriter.Null));
-        Assert.Equal(2, await Composition.DispatchAsync(
+        Assert.Equal(1, await Composition.DispatchAsync(
             ["--help"], TextReader.Null, TextWriter.Null, TextWriter.Null));
     }
 }

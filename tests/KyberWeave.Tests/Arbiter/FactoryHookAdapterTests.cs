@@ -543,18 +543,18 @@ public sealed class FactoryHookAdapterTests
     [Theory]
     [InlineData("task_name")]
     [InlineData("transcript_path")]
-    public void SubagentStop_WithAWrongTypeField_FailsClosed(string field)
+    public void SubagentStop_WithAWrongTypeField_AllowsAndLogs(string field)
     {
         ContextualEngine engine = new();
         JsonObject root = JsonNode.Parse(SubagentStop(TranscriptFixture()))!.AsObject();
         root[field] = 5;
 
-        (int exit, string stdout, _) = Run(root.ToJsonString(), null, engine);
+        (int exit, string stdout, string log) = Run(root.ToJsonString(), null, engine);
 
+        // ADR 0072: a fault the host cannot decide on allows, with the code in the log.
         Assert.Equal(0, exit);
-        Assert.Contains(HookCommand.FailClosedCode, stdout, StringComparison.Ordinal);
-        Assert.Contains("Malformed Factory hook event", stdout, StringComparison.Ordinal);
-        Assert.Equal(0, engine.PostCalls);
+        Assert.Equal(string.Empty, stdout);
+        Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -674,35 +674,29 @@ public sealed class FactoryHookAdapterTests
     }
 
     [Fact]
-    public void InternalError_WritesDenyShape()
+    public void InternalError_AllowsAndLogs()
     {
         ScriptedEngine engine = new() { ThrowOnPre = true };
 
-        (int exit, string stdout, _) = Run(Fixture("pre-task-dispatch.json"), null, engine);
+        (int exit, string stdout, string log) = Run(Fixture("pre-task-dispatch.json"), null, engine);
 
+        // ADR 0072: a fault the host cannot decide on allows, with the code in the log.
         Assert.Equal(0, exit);
-        using JsonDocument doc = JsonDocument.Parse(stdout);
-        JsonElement specific = doc.RootElement.GetProperty("hookSpecificOutput");
-        Assert.Equal("deny", specific.GetProperty("permissionDecision").GetString());
-        string reason = specific.GetProperty("permissionDecisionReason").GetString() ?? string.Empty;
-        Assert.Contains(HookCommand.FailClosedCode, reason, StringComparison.Ordinal);
-        Assert.Contains("ANSWER: error", reason, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, stdout);
+        Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void InternalError_OnReturn_AlsoWritesDenyShape()
+    public void InternalError_OnReturn_AlsoAllowsAndLogs()
     {
         ScriptedEngine engine = new() { ThrowOnPost = true };
 
-        (int exit, string stdout, _) = Run(Fixture("post-task-completed.json"), null, engine);
+        (int exit, string stdout, string log) = Run(Fixture("post-task-completed.json"), null, engine);
 
+        // ADR 0072: a fault the host cannot decide on allows, with the code in the log.
         Assert.Equal(0, exit);
-        using JsonDocument doc = JsonDocument.Parse(stdout);
-        JsonElement specific = doc.RootElement.GetProperty("hookSpecificOutput");
-        Assert.Equal("deny", specific.GetProperty("permissionDecision").GetString());
-        string reason = specific.GetProperty("permissionDecisionReason").GetString() ?? string.Empty;
-        Assert.Contains(HookCommand.FailClosedCode, reason, StringComparison.Ordinal);
-        Assert.Contains("ANSWER: error", reason, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, stdout);
+        Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
     }
 
     [Fact]

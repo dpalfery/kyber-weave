@@ -196,7 +196,7 @@ public sealed class McpAnalysisToolsTests : IDisposable
         Assert.NotNull(candidates);
         Assert.Equal(typeof(string), candidates.ReturnType);
         Assert.Equal(
-            ["kind", "cursor", "limit", "charBudget"],
+            ["kind", "cursor", "limit", "charBudget", "projectPath"],
             candidates.GetParameters().Select(parameter => parameter.Name));
         Assert.Equal(20, candidates.GetParameters()[2].DefaultValue);
         Assert.Equal(12_000, candidates.GetParameters()[3].DefaultValue);
@@ -204,7 +204,7 @@ public sealed class McpAnalysisToolsTests : IDisposable
 
         Assert.NotNull(glossary);
         Assert.Equal(typeof(string), glossary.ReturnType);
-        Assert.Equal(["term"], glossary.GetParameters().Select(parameter => parameter.Name));
+        Assert.Equal(["term", "projectPath"], glossary.GetParameters().Select(parameter => parameter.Name));
         Assert.Equal("docs_look_up_glossary_term_definition", McpToolName(glossary));
         Assert.DoesNotContain(
             typeof(DocsTools).GetMethods(

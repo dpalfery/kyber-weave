@@ -104,10 +104,11 @@ public sealed class ArbiterGlobalHookRuntimeTests
     }
 
     [Fact]
-    public async Task GlobalScope_WhenMainThreadArchitectDispatchIsUnmarked_DeniesAsTheProjectHookDoes()
+    public async Task GlobalScope_WhenMainThreadArchitectDispatchIsUnmarked_DecidesAsTheProjectHookDoes()
     {
-        // The unmarked architect dispatch is denied by KW-ARB-PLANNER-001 in project scope. The user-level
-        // hook must give the same decision document and write the same number of decisions.
+        // The unmarked architect dispatch is judged by KW-ARB-PLANNER-001 in project scope: with no model it is
+        // undecidable and proceeds (ADR 0072). The user-level hook must give the same decision document and
+        // write the same number of decisions.
         using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create();
         string payload = ArbiterGlobalHookScenario.Dispatch(scenario.ProjectRoot, ToolUseId, null, "architect", UnmarkedPrompt);
         string twinPayload = ArbiterGlobalHookScenario.Dispatch(scenario.TwinRoot, ToolUseId, null, "architect", UnmarkedPrompt);
@@ -117,7 +118,7 @@ public sealed class ArbiterGlobalHookRuntimeTests
 
         int twinLines = ArbiterGlobalHookScenario.DecisionLines(scenario.TwinRoot);
         Assert.True(twinLines > 0, "The project-scope twin must write at least one decision for an unmarked architect dispatch.");
-        Assert.Contains("KW-ARB-PLANNER-001", global.Stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"deny\"", global.Stdout, StringComparison.Ordinal);
         Assert.Equal(
             ArbiterGlobalHookScenario.WithoutDecisionId(twin.Stdout),
             ArbiterGlobalHookScenario.WithoutDecisionId(global.Stdout));

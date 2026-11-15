@@ -7,6 +7,7 @@ using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Diagnostics;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Cli.Commands.Arbiter;
 
@@ -55,27 +56,40 @@ public sealed class ArbiterTuneCommand : Command<ArbiterSettings>
         string arbiterDirectory = ArbiterCommandComposition.ResolveArbiterDirectory(settings.Path);
         IReadOnlyList<ArbiterDecisionRecord> records;
         IReadOnlyList<ArbiterLedgerEvent> events;
+        string? truncationNote;
         try
         {
-            (records, int malformedDecisions) = new DecisionLog(arbiterDirectory).ReadAllWithDiagnostics();
-            (events, int malformedEvents) = new InFlightLedger(arbiterDirectory).ReadAllWithDiagnostics();
-            if (malformedDecisions + malformedEvents > 0)
+            ArbiterLogRead<ArbiterDecisionRecord> decisionRead = new DecisionLog(arbiterDirectory).ReadAllWithDiagnostics();
+            ArbiterLogRead<ArbiterLedgerEvent> ledgerRead = new InFlightLedger(arbiterDirectory).ReadAllWithDiagnostics();
+            records = decisionRead.Records;
+            events = ledgerRead.Records;
+            if (ArbiterLogProblems.Unreadable(ledgerRead, decisionRead) is { } unreadable)
             {
                 report.Add(new Diagnostic(
                     ArbiterEvaluator.HookErrorCode,
                     Severity.Error,
-                    $"The arbiter log under '{arbiterDirectory}' holds {malformedDecisions + malformedEvents} line(s) that are not a complete record.",
+                    $"The arbiter log under '{arbiterDirectory}' exists but could not be read: {unreadable}",
+                    arbiterDirectory,
+                    "tune reads nothing partial; an unreadable log is not an empty one."));
+                CommandHelpers.Finish(report, settings, CommandName, "Event");
+                return 1;
+            }
+
+            if (decisionRead.MalformedLines + ledgerRead.MalformedLines > 0)
+            {
+                report.Add(new Diagnostic(
+                    ArbiterEvaluator.HookErrorCode,
+                    Severity.Error,
+                    $"The arbiter log under '{arbiterDirectory}' holds {decisionRead.MalformedLines + ledgerRead.MalformedLines} line(s) that are not a complete record.",
                     arbiterDirectory,
                     "tune reads nothing partial; repair or remove the malformed line, then re-run."));
                 CommandHelpers.Finish(report, settings, CommandName, "Event");
                 return 1;
             }
+
+            truncationNote = ArbiterLogProblems.TruncationNote(ledgerRead, decisionRead);
         }
-        catch (Exception exception) when (exception is IOException
-            or UnauthorizedAccessException
-            or System.Text.Json.JsonException
-            or NotSupportedException
-            or InvalidDataException)
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is System.Text.Json.JsonException or InvalidDataException)
         {
             report.Add(new Diagnostic(
                 ArbiterEvaluator.HookErrorCode,
@@ -93,10 +107,15 @@ public sealed class ArbiterTuneCommand : Command<ArbiterSettings>
         {
             if (settings.Json)
             {
-                WriteJson(tallies, thresholds, results);
+                WriteJson(tallies, thresholds, results, truncationNote);
             }
             else
             {
+                if (truncationNote is not null)
+                {
+                    AnsiConsole.WriteLine($"warning {ArbiterAuditCommand.LogWindowTruncated}: {truncationNote} The tallies below cover only the newest records.");
+                }
+
                 WriteText(tallies, thresholds, results);
             }
         });
@@ -254,7 +273,8 @@ public sealed class ArbiterTuneCommand : Command<ArbiterSettings>
     private static void WriteJson(
         IReadOnlyDictionary<string, RuleTally> tallies,
         double[] thresholds,
-        IReadOnlyDictionary<string, string> results)
+        IReadOnlyDictionary<string, string> results,
+        string? truncationNote)
     {
         List<JsonRuleReport> rules = [];
         foreach (RuleTally tally in tallies.Values.OrderBy(t => t.Id, StringComparer.Ordinal))
@@ -287,7 +307,7 @@ public sealed class ArbiterTuneCommand : Command<ArbiterSettings>
                 model));
         }
 
-        string json = JsonSerializer.Serialize(new JsonTuneReport(rules), JsonOptions);
+        string json = JsonSerializer.Serialize(new JsonTuneReport(rules, truncationNote), JsonOptions);
         AnsiConsole.WriteLine(json);
     }
 
@@ -364,7 +384,9 @@ public sealed class ArbiterTuneCommand : Command<ArbiterSettings>
 
     private sealed record ThresholdFlips(double Threshold, int Changed);
 
-    private sealed record JsonTuneReport([property: JsonPropertyName("rules")] IReadOnlyList<JsonRuleReport> Rules);
+    private sealed record JsonTuneReport(
+        [property: JsonPropertyName("rules")] IReadOnlyList<JsonRuleReport> Rules,
+        [property: JsonPropertyName("truncated")][property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Truncated);
 
     private sealed record JsonRuleReport(
         [property: JsonPropertyName("id")] string Id,

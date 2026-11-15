@@ -77,7 +77,18 @@ public sealed partial class ArchiveCloseoutValidator
     /// One error per archived entry the change touches whose closeout evidence is
     /// incomplete. Entries the change does not touch are never checked.
     /// </summary>
-    public DiagnosticReport Validate(DocumentSet live, IReadOnlyList<ChangedPath> changes)
+    public DiagnosticReport Validate(DocumentSet live, IReadOnlyList<ChangedPath> changes) =>
+        Check(live, changes, itemise: false);
+
+    /// <summary>
+    /// The same check as <see cref="Validate"/>, with one finding per failed condition instead of one per entry,
+    /// each carrying a copy-pasteable example of the fix as its hint. For a caller that fixes the entry, so it
+    /// sees everything that is missing at once.
+    /// </summary>
+    public DiagnosticReport Itemise(DocumentSet live, IReadOnlyList<ChangedPath> changes) =>
+        Check(live, changes, itemise: true);
+
+    private DiagnosticReport Check(DocumentSet live, IReadOnlyList<ChangedPath> changes, bool itemise)
     {
         ArgumentNullException.ThrowIfNull(live);
         ArgumentNullException.ThrowIfNull(changes);
@@ -115,12 +126,20 @@ public sealed partial class ArchiveCloseoutValidator
                     Hint: "Fix the archived entry path so it is a regular file inside the repository, then call docs_validate_governed_document_schema again."));
                 continue;
             }
-            List<string> failures = CheckCloseout(archived, live, byPath, todoFolder);
+            List<Failure> failures = CheckCloseout(archived, live, byPath, todoFolder);
             if (failures.Count == 0)
                 continue;
 
+            if (itemise)
+            {
+                foreach (Failure failure in failures)
+                    report.Add(new Diagnostic(MissingCloseoutEvidence, Severity.Error, failure.Message, archived.Subject, entry,
+                        Hint: $"Example: {failure.Example}"));
+                continue;
+            }
+
             List<string> conditions = failures
-                .Select(failure => failure[..failure.IndexOf(':', StringComparison.Ordinal)])
+                .Select(failure => failure.Condition)
                 .Distinct(StringComparer.Ordinal)
                 .Order(StringComparer.Ordinal)
                 .ToList();
@@ -128,7 +147,7 @@ public sealed partial class ArchiveCloseoutValidator
                 MissingCloseoutEvidence,
                 Severity.Error,
                 $"Archived '{archived.Subject}' is missing closeout evidence " +
-                $"({string.Join(", ", conditions)}): {string.Join("; ", failures)}",
+                $"({string.Join(", ", conditions)}): {string.Join("; ", failures.Select(failure => failure.Message))}",
                 archived.Subject,
                 entry,
                 "Record the closeout in Decisions, Closeout mapping, and Design harvest sections; " +
@@ -243,25 +262,41 @@ public sealed partial class ArchiveCloseoutValidator
         }
     }
 
+    /// <summary>One failed closeout condition: its tag (C1–C9), what is wrong and how to fix it, and an example of the fix.</summary>
+    private sealed record Failure(string Condition, string Message, string Example);
+
+    private static Failure Fail(string text, string example) =>
+        new(text[..text.IndexOf(':', StringComparison.Ordinal)], text, example);
+
+    private static string MappingExample(string ids) => $"| {ids} | [<document title>](../../reference/<document>.md) |";
+
+    private static string WaiverExample(string ids) => $"| {ids} | Documentation waiver — <why no lasting record is needed> |";
+
     /// <summary>Every failed closeout condition for one archived entry, each tagged C1–C9.</summary>
-    private static List<string> CheckCloseout(
+    private static List<Failure> CheckCloseout(
         DocumentModel archived,
         DocumentSet live,
         Dictionary<string, DocumentModel> byPath,
         string todoFolder)
     {
-        List<string> failures = new();
+        List<string> raw = new();
+        List<Failure> failures = new();
 
-        string? closed = CheckClosedStatus(archived);
-        if (closed is not null)
-            failures.Add(closed);
+        if (CheckClosedStatus(archived) is { } closed)
+            failures.Add(Fail(closed, "status: archived"));
 
-        string? liveBody = CheckBodyStatus(archived);
-        if (liveBody is not null)
-            failures.Add(liveBody);
+        if (CheckBodyStatus(archived) is { } liveBody)
+            failures.Add(Fail(liveBody, "**Status:** Archived, <yyyy-MM-dd>"));
 
-        List<string>? decisions = DecisionIds(archived, failures);
-        List<(string Ids, string Destination)>? mapping = MappingRows(archived, failures);
+        List<string>? decisions = DecisionIds(archived, raw);
+        foreach (string text in raw)
+            failures.Add(Fail(text, "| D1 | <question> | <answer> | Approved |  (rows of the '## Decisions' table with header '| ID | Question | Answer | Status |')"));
+        raw.Clear();
+
+        List<(string Ids, string Destination)>? mapping = MappingRows(archived, raw);
+        foreach (string text in raw)
+            failures.Add(Fail(text, MappingTableExample(decisions)));
+        raw.Clear();
 
         string scale = (archived.Frontmatter.DocumentationImpact ?? string.Empty).Trim().ToUpperInvariant();
         IReadOnlyList<string> components = archived.Frontmatter.ImpactComponents ?? [];
@@ -272,9 +307,20 @@ public sealed partial class ArchiveCloseoutValidator
         string? scaleFailure = CheckScale(archived, scale, componentScale, noDesignChange, components, mapping,
             designSection);
         if (scaleFailure is not null)
-            failures.Add(scaleFailure);
+        {
+            string example = !componentScale && !noDesignChange
+                ? "documentation-impact: extends-component  (or new-component, or no-design-change)"
+                : componentScale
+                    ? "impact-components: [\"<component named in the catalog>\"]"
+                    : "Documentation waiver — nothing survives because <reason>  (as a line under '## Design harvest')";
+            failures.Add(Fail(scaleFailure, example));
+        }
 
-        List<string>? harvest = HarvestIds(archived, componentScale, noDesignChange, designSection, failures);
+        List<string>? harvest = HarvestIds(archived, componentScale, noDesignChange, designSection, raw);
+        foreach (string text in raw)
+            failures.Add(Fail(text, noDesignChange
+                ? "## Design harvest, then the line: Documentation waiver — nothing survives because <reason>"
+                : "| H1 | <surviving design change> |  (rows of the '## Design harvest' table with header '| ID | Change |')"));
 
         if (decisions is not null && harvest is not null && mapping is not null)
         {
@@ -286,23 +332,46 @@ public sealed partial class ArchiveCloseoutValidator
                 .ToList();
             if (unmapped.Count > 0)
             {
-                failures.Add(
-                    $"C7: ids {string.Join(", ", unmapped)} are not mapped to a live governed document. " +
+                string ids = string.Join(", ", unmapped);
+                List<string> unresolved = mapping
+                    .Where(row => row.Destination.Length > 0 && !IsDocumentationWaiver(row.Destination)
+                                  && ResolvesToLiveDocument(archived.RelativePath, row.Destination, byPath) is null)
+                    .Select(row => $"'{row.Ids}' links '{row.Destination}'")
+                    .ToList();
+                string why = unresolved.Count == 0
+                    ? string.Empty
+                    : $" Mapping rows whose destination links no live governed document: {string.Join("; ", unresolved)}.";
+                failures.Add(Fail(
+                    $"C7: ids {ids} are not mapped to a live governed document. " +
                     $"Map each id in the Closeout mapping table to a relative link that resolves to a live " +
-                    $"governed document, or record a Documentation waiver for it.");
+                    $"governed document, or record a Documentation waiver for it. " +
+                    $"Write each id on its own, comma-separated: a range such as D1-D15 is one unknown id.{why}",
+                    $"{MappingExample(ids)}  or  {WaiverExample(ids)}"));
             }
 
             string? freshness = CheckImpactFreshness(
                 archived, live, components, componentScale, mapping, byPath);
             if (freshness is not null)
-                failures.Add(freshness);
+            {
+                failures.Add(Fail(freshness,
+                    "a mapped governed document whose frontmatter has component: <the impact component> and " +
+                    "last-reviewed: <a date no earlier than this plan's last-reviewed>"));
+            }
 
             string? residual = CheckResidual(archived.RelativePath, mapping, byPath, todoFolder);
             if (residual is not null)
-                failures.Add(residual);
+                failures.Add(Fail(residual, "| RESIDUAL | [follow-up todo](../../todo/<todo>.md) |"));
         }
 
         return failures;
+    }
+
+    /// <summary>A complete Closeout mapping table body for the decisions known so far.</summary>
+    private static string MappingTableExample(List<string>? decisions)
+    {
+        string ids = decisions is { Count: > 0 } ? string.Join(", ", decisions) : "D1, D2";
+        return "under '## Closeout mapping' with header '| ID | Destination |': " +
+               $"{MappingExample(ids)}  or  {WaiverExample(ids)}";
     }
 
     /// <summary>C1: an archived document is closed work, never a draft.</summary>
@@ -669,7 +738,7 @@ public sealed partial class ArchiveCloseoutValidator
     }
 
     /// <summary>Data rows of the first pipe table under <paramref name="heading"/>, if any.</summary>
-    private static List<string[]>? TableRows(DocumentModel archived, string heading)
+    internal static List<string[]>? TableRows(DocumentModel archived, string heading)
     {
         DocumentSection? section = archived.Sections
             .FirstOrDefault(candidate => string.Equals(candidate.Heading, heading, StringComparison.OrdinalIgnoreCase));

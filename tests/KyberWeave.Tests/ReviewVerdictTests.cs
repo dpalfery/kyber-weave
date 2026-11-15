@@ -21,7 +21,9 @@ public class ReviewVerdictTests
         string id = "correctness/off-by-one",
         string? excerpt = "if (i < count)",
         string? evidence = "src/Foo.cs:12",
-        string? failureScenario = "The last element is never processed.") =>
+        string? failureScenario = "The last element is never processed.",
+        string claim = "The loop bound excludes the final element.",
+        string suggestion = "Use <= or count + 1.") =>
         new(
             id,
             "correctness",
@@ -30,10 +32,10 @@ public class ReviewVerdictTests
             "src/Foo.cs",
             12,
             excerpt,
-            "The loop bound excludes the final element.",
+            claim,
             evidence,
             failureScenario,
-            "Use <= or count + 1.");
+            suggestion);
 
     private static ReviewConfig Config(ReviewPolicy? policy = null) =>
         new() { Policy = policy ?? new ReviewPolicy() };
@@ -102,6 +104,23 @@ public class ReviewVerdictTests
         Assert.Equal(ReviewVerdict.RequestChanges, outcome.Verdict);
         Assert.Equal(RiskGrade.High, outcome.Risk);
         Assert.Contains(outcome.Diagnostics, d => d.Code == VerdictEngine.CriticalFinding);
+    }
+
+    /// <summary>
+    /// A seat's claim and suggestion are untrusted text, and the critical-finding diagnostic prints both, so each is cut
+    /// to the shared limit and marked rather than printed whole.
+    /// </summary>
+    [Fact]
+    public void ACriticalFindingWithAHugeClaimAndSuggestionIsReportedClipped()
+    {
+        ReviewOutcome outcome = Evaluate([Finding(ReviewSeverity.Critical, claim: new string('c', 1_000_000), suggestion: new string('s', 1_000_000))]);
+
+        Assert.Equal(ReviewVerdict.RequestChanges, outcome.Verdict);
+        Diagnostic critical = Assert.Single(outcome.Diagnostics, d => d.Code == VerdictEngine.CriticalFinding);
+        Assert.Equal("correctness/off-by-one: ".Length + ReviewSeatInput.MaxTextCharacters + 1, critical.Message.Length);
+        Assert.EndsWith("…", critical.Message, StringComparison.Ordinal);
+        Assert.Equal(ReviewSeatInput.MaxTextCharacters + 1, critical.Hint!.Length);
+        Assert.EndsWith("…", critical.Hint, StringComparison.Ordinal);
     }
 
     [Fact]

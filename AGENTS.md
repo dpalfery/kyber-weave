@@ -91,9 +91,7 @@ see [`docs/code-review/architecture.md`](docs/code-review/architecture.md). Form
 test, and skill argv are the `review.gates` entries in
 [`.kyber-weave/kyber-weave.yml`](.kyber-weave/kyber-weave.yml). There is no separate
 restore gate: `--no-restore` is omitted on format and build, so those gates restore
-themselves. InspectCode runs in the council (`dotnet tool restore` once per clone) and
-exits zero whether or not it finds anything; the result is `artifacts/inspectcode.xml` —
-see the `resharper-clt` skill. Release/self-updater/kyberdash
+themselves. Release/self-updater/kyberdash
 build paths: `./scripts/update-loop.sh` ([`docs/distribution.md`](docs/distribution.md#verifying-a-release-locally)).
 KyberDash and tray gates: [`dash/AGENTS.md`](dash/AGENTS.md), [`dash/tray/AGENTS.md`](dash/tray/AGENTS.md).
 

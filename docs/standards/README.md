@@ -12,7 +12,9 @@ last-reviewed: 2026-11-08
 How code is written in this repository, one directory per technology. A standard is
 project-specific; the agents and skills that read it are not, which is why they resolve it
 through the configuration registry rather than carrying their own. Only standards with
-`status: current` outrank portable agent defaults; draft standards do not.
+`status: current` outrank portable agent defaults; draft standards do not. What belongs in a
+standard rather than a rule is in
+[Rules and standards](../documentation-ontology.md#rules-and-standards).
 
 This repository declares [C#](csharp/README.md), [test](test/README.md),
 [TypeScript](typescript/README.md), [Rust](rust/README.md), and [Tauri](tauri/README.md)
@@ -64,7 +66,7 @@ both return the worker's own question to put to the human rather than a confiden
 somewhere else. The property name is how a worker knows which question to ask.
 
 The tool's own contract, including its topic match and its budget, is in the
-[DocGraph MCP runbook](../docgraph/mcp-runbook.md#docs_get_coding_standard_for_technologytechnology-topic--null-charbudget--12000).
+[DocGraph MCP runbook](../docgraph/mcp-runbook.md#docs_get_coding_standard_for_technologytechnology-topic--null-charbudget--12000-projectpath--null).
 
 ## What belongs in a standard
 

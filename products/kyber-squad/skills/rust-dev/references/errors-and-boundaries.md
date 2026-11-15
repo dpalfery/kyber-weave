@@ -56,6 +56,6 @@ Enforce it rather than remembering it: the standard's clippy configuration denie
 
 - Make types and functions `pub` only when another crate needs them; `pub(crate)` otherwise.
 - Take borrowed inputs (`&str`, `&Path`, `impl AsRef<Path>`) and return owned outputs.
-- Accept dependencies (clients, clocks, writers) as parameters or trait objects so `test-dev`
+- Accept dependencies (clients, clocks, writers) as parameters or trait objects so a test
   can substitute them.
 - Mark enums other crates match on `#[non_exhaustive]` when you expect to add variants.

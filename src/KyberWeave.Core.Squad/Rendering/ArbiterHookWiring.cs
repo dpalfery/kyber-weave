@@ -282,6 +282,18 @@ public static class ArbiterHookWiring
         return $"{CommandName} guard --allow-mcp {allowedMcpServer}";
     }
 
+    /// <summary>
+    /// Builds the worker guard command line, which checks a Squad subagent's own tool calls: a write into the
+    /// canonical checkout while a run works in its own worktree.
+    /// </summary>
+    /// <param name="harnessToken">The harness token passed to <c>--harness</c>.</param>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="harnessToken"/> is not a plain token.</exception>
+    public static string WorkerGuardCommandLine(string harnessToken)
+    {
+        ValidateHarnessToken(harnessToken);
+        return $"{CommandName} worker-guard --harness {harnessToken}";
+    }
+
     private static string AppendScope(string commandLine, SquadDeploymentScope scope)
     {
         return scope == SquadDeploymentScope.Global

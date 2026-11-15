@@ -128,11 +128,13 @@ public static class ArbiterConfigLoader
             ExplicitlyEnabled = section.Enabled,
             Provider = MergeProvider(defaults.Provider, section.Provider),
             Rules = ModelTargetingRules.Apply(rules, modelTargeting.Mode),
-            OwnerFileKindMap = defaults.OwnerFileKindMap,
+            TestFilePatterns = defaults.TestFilePatterns,
             LensPaths = defaults.LensPaths,
             ModelTargeting = modelTargeting,
             Stores = MergeStores(defaults.Stores, section.Stores),
             CommentTriage = MergeCommentTriage(defaults.CommentTriage, section.CommentTriage),
+            DispatchBudget = MergeDispatchBudget(defaults.DispatchBudget, section.DispatchBudget, "dispatch-budget"),
+            SeatBudget = MergeDispatchBudget(defaults.SeatBudget, section.SeatBudget, "seat-budget"),
         };
     }
 
@@ -167,11 +169,13 @@ public static class ArbiterConfigLoader
             Global = new ArbiterGlobalConfig(targets),
             Provider = MergeProvider(ArbiterProviderConfig.DefaultNone, section?.Provider),
             Rules = merged.Rules,
-            OwnerFileKindMap = merged.OwnerFileKindMap,
+            TestFilePatterns = merged.TestFilePatterns,
             LensPaths = merged.LensPaths,
             ModelTargeting = merged.ModelTargeting,
             Stores = merged.Stores,
             CommentTriage = merged.CommentTriage,
+            DispatchBudget = merged.DispatchBudget,
+            SeatBudget = merged.SeatBudget,
         };
     }
 
@@ -246,7 +250,7 @@ public static class ArbiterConfigLoader
 
         return new ArbiterConfig
         {
-            OwnerFileKindMap = ParseOwnerMap(document.OwnerFileKindMap),
+            TestFilePatterns = document.TestFilePatterns is null ? [] : [.. document.TestFilePatterns],
             LensPaths = ParseLensPaths(document.LensPaths),
             Rules = rules,
         };
@@ -878,6 +882,27 @@ public static class ArbiterConfigLoader
         return new ArbiterStoresConfig(maxItemBytes, retainDays);
     }
 
+    private static ArbiterDispatchBudgetConfig MergeDispatchBudget(
+        ArbiterDispatchBudgetConfig defaults,
+        ArbiterDispatchBudgetYaml? section,
+        string key)
+    {
+        if (section is null)
+            return defaults;
+
+        int minutes = section.Minutes ?? defaults.Minutes;
+        int toolCalls = section.ToolCalls ?? defaults.ToolCalls;
+        int callMinutes = section.CallMinutes ?? defaults.CallMinutes;
+        if (minutes < 1 || toolCalls < 1 || callMinutes < 1)
+        {
+            throw new YamlException(
+                $"[{RuleValidator.SavingsValueInvalid}] arbiter.{key}.minutes, tool-calls and call-minutes must each be at least 1, " +
+                $"e.g. {{ minutes: {defaults.Minutes}, tool-calls: {defaults.ToolCalls}, call-minutes: {defaults.CallMinutes} }}.");
+        }
+
+        return new ArbiterDispatchBudgetConfig(minutes, toolCalls, callMinutes);
+    }
+
     private static ArbiterCommentTriageConfig MergeCommentTriage(
         ArbiterCommentTriageConfig defaults,
         ArbiterCommentTriageYaml? section)
@@ -933,15 +958,6 @@ public static class ArbiterConfigLoader
                 $"arbiter.provider.kind '{kind}' is not supported. Use none or systemone."),
         };
 
-    private static IReadOnlyList<ArbiterFileKindMapEntry> ParseOwnerMap(List<ArbiterOwnerMapYaml>? entries)
-    {
-        if (entries is null)
-            return [];
-        return entries.Select(entry => new ArbiterFileKindMapEntry(
-            entry.Patterns is null ? [] : [.. entry.Patterns],
-            entry.Owner ?? string.Empty)).ToList();
-    }
-
     private static IReadOnlyList<ArbiterLensPathEntry> ParseLensPaths(List<ArbiterLensPathYaml>? entries)
     {
         if (entries is null)
@@ -957,17 +973,9 @@ internal sealed class ArbiterDefaultRulesYaml
 {
     public List<ArbiterRuleYaml>? Rules { get; set; }
 
-    public List<ArbiterOwnerMapYaml>? OwnerFileKindMap { get; set; }
+    public List<string>? TestFilePatterns { get; set; }
 
     public List<ArbiterLensPathYaml>? LensPaths { get; set; }
-}
-
-/// <summary>One <c>owner-file-kind-map</c> row in the embedded rules.</summary>
-internal sealed class ArbiterOwnerMapYaml
-{
-    public List<string>? Patterns { get; set; }
-
-    public string? Owner { get; set; }
 }
 
 /// <summary>One <c>lens-paths</c> row in the embedded rules.</summary>

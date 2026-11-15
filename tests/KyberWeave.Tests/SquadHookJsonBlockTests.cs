@@ -319,6 +319,18 @@ public sealed class SquadHookJsonBlockTests
     }
 
     [Fact]
+    public void ClaudeWorkerGuardGroupIsSquadOwnedSoASecondSpliceReplacesIt()
+    {
+        JsonNode guard = MatcherGroup("claude", "*", "kyber-weave-arbiter worker-guard --harness claude");
+        Assert.True(SquadHookJsonBlock.IsSquadEntry(SquadHookBlockFormat.Claude, guard));
+
+        (string once, _) = SquadHookJsonBlock.SpliceContent(SquadHookBlockFormat.Claude, null, [guard.DeepClone()], []);
+        (string twice, _) = SquadHookJsonBlock.SpliceContent(SquadHookBlockFormat.Claude, once, [guard.DeepClone()], []);
+
+        Assert.Equal(once, twice);
+    }
+
+    [Fact]
     public void AntigravityGroupIsOwnedByKey()
     {
         Assert.True(SquadHookJsonBlock.IsSquadEntry(

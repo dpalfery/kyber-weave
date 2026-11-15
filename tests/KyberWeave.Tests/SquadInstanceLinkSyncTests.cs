@@ -627,6 +627,11 @@ public sealed class SquadInstanceLinkSyncTests : IDisposable
     [Fact]
     public void SyncWhenDeleteStaleFileThrowsUnauthorizedAccessExceptionReturnsWarningAndPreservesLinkRecord()
     {
+        // A root process deletes the stale file despite the read-only directory, so the warning cannot be provoked.
+        Assert.SkipWhen(
+            !OperatingSystem.IsWindows() && Environment.IsPrivilegedProcess,
+            "A privileged process (root) ignores directory modes, so a refused delete cannot be simulated.");
+
         string instanceRoot = Path.Combine(_tempDirectory.Path, "locked-instance");
         string mainHome = Path.Combine(_tempDirectory.Path, "locked-main");
         string stateDirectory = Path.Combine(_tempDirectory.Path, "locked-state");

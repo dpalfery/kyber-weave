@@ -76,6 +76,10 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
         };
 
     private static ArbiterRule Shipped(string id) =>
+        HookAskedRules.AsHookAsked(Raw(id));
+
+    /// <summary>The rule exactly as shipped, before <see cref="HookAskedRules.AsHookAsked"/>.</summary>
+    private static ArbiterRule Raw(string id) =>
         Assert.Single(
             ArbiterConfig.ProductDefaults.Rules,
             rule => string.Equals(rule.Id, id, StringComparison.Ordinal));
@@ -130,6 +134,30 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
 
         Assert.Equal(HookOutcomeKind.Allow, outcome.Kind);
         Assert.Null(outcome.Reason);
+    }
+
+    // ---- Delegate: a primary escalation is denied even when a secondary record follows it on the ledger ----
+
+    /// <summary>
+    /// A delegate escalation is written first and the model-targeting secondary after it, both under one ledger id.
+    /// The denial is rendered from the primary's record: reading the last record on the ledger rendered the secondary,
+    /// which has no escalation text, and the hook let the dispatch continue.
+    /// </summary>
+    [Fact]
+    public void ADelegateEscalationWithAModelTargetingSecondaryIsStillDenied()
+    {
+        ArbiterRule difficulty = Raw("KW-ARB-DIFFICULTY-001");
+        HookOutcome outcome = Engine(new UniformProvider("names-plan", 0.95, 0.8)).DecidePreDispatch(
+            "copilot-cli",
+            "conductor",
+            "csharp-dev",
+            "PLAN_FILE: docs/plans/cards.md\nTASK: T1\n\nOpen docs/plans/cards.md and implement task 2 from it.",
+            ConfigWith([Enforced("KW-ARB-PLANREAD-001"), difficulty]),
+            Context());
+
+        Assert.Contains(Decisions(), record => record.Trigger == "delegate.model");
+        Assert.Equal(HookOutcomeKind.Deny, outcome.Kind);
+        Assert.Contains("KW-ARB-PLANREAD-001", outcome.Reason, StringComparison.Ordinal);
     }
 
     // ---- Drop: a dropped finding is set aside, and the host is told about every drop ----

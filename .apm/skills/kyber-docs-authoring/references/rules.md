@@ -110,6 +110,12 @@ Warning, not error. The path exists but the index holds no file beneath it. Eith
 path is wrong, or the index is stale — the tool cannot tell which, which is why it does
 not fail the build.
 
+### `KW-DOC-DRIFT-004` — index older than the code
+
+One finding in place of the per-reference ones: the index was built before source files changed,
+so a renamed or new symbol looks like drift. Run `codegraph sync .` (or `kyber-weave doctor
+--ensure .`) and run drift again; findings that remain are real.
+
 ## Exit codes
 
 `docs validate` and `docs drift` exit non-zero on any **error**. Warnings and info do not

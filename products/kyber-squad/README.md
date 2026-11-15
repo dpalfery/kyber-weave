@@ -59,38 +59,35 @@ products/kyber-squad/
 │   ├── tauri-dev.md
 │   ├── test-dev.md
 │   └── typescript-dev.md
-├── skills/                             # canonical skill directories and their resources
-│   ├── app-docs-standard/
-│   ├── architecture-decision-record/
-│   ├── azure-cli/
-│   ├── azure-naming/
-│   ├── bug-crusher/
-│   ├── code-review/
-│   ├── code-review-loop/
-│   ├── create-pull-request/
-│   ├── csharp-dev/
-│   ├── csp-security/
-│   ├── dal-dev/
-│   ├── delivery-execution/
-│   ├── dp-code-reviewer/
-│   ├── github-cli/
-│   ├── github-devops/
-│   ├── go-dev/
-│   ├── kilo-review-loop/
-│   ├── lm-studio-cli/
-│   ├── maui-dev/
-│   ├── pr-review-fix-comments/
-│   ├── product-owner/
-│   ├── python-dev/
-│   ├── resharper-clt/
-│   ├── rust-dev/
-│   ├── security-review/
-│   ├── setup-dev-environment/
-│   ├── task-gate/
-│   ├── test-dev/
-│   └── typescript-dev/
-└── migration/                          # 18 import and baseline verification logs
-    └── <agent-name>.md
+└── skills/                             # canonical skill directories and their resources
+    ├── app-docs-standard/
+    ├── architecture-decision-record/
+    ├── azure-cli/
+    ├── azure-naming/
+    ├── bug-crusher/
+    ├── code-review/
+    ├── code-review-loop/
+    ├── create-pull-request/
+    ├── csharp-dev/
+    ├── csp-security/
+    ├── dal-dev/
+    ├── delivery-execution/
+    ├── dp-code-reviewer/
+    ├── github-cli/
+    ├── github-devops/
+    ├── go-dev/
+    ├── kilo-review-loop/
+    ├── lm-studio-cli/
+    ├── maui-dev/
+    ├── pr-review-fix-comments/
+    ├── product-owner/
+    ├── python-dev/
+    ├── rust-dev/
+    ├── security-review/
+    ├── setup-dev-environment/
+    ├── task-gate/
+    ├── test-dev/
+    └── typescript-dev/
 ```
 
 ---
@@ -121,7 +118,7 @@ aliases: []
 The normalized Markdown body following the second `---` delimiter is the authoritative instruction body.
 An agent body may link local Markdown resources beneath the agent's own directory (for example
 `conductor/references/*.md`); those links stay authored verbatim and resolve at the deployment
-target (see [Resource Closures](#6-resource-closures-and-progressive-disclosure)).
+target (see [Resource Closures](#5-resource-closures-and-progressive-disclosure)).
 
 ### 2. Skills (Canonical Skills)
 
@@ -147,7 +144,7 @@ beside `SKILL.md`.
 
 `task-gate` is the deterministic exit check every developer agent runs before it reports a
 task done. It runs the `kyber-weave review gates` command scoped to the task's own changed
-files, applies the fixes within a 2-cycle cap, and reports one `TASK_GATE:` digest line.
+files, applies the fixes within a 3-cycle cap, and reports one `TASK_GATE:` digest line.
 
 `delivery-execution` is the worker execution contract: how work is dispatched, verified and
 reported. Both entry points load it — `conductor` for plan- and spec-backed work, and the
@@ -155,7 +152,7 @@ reported. Both entry points load it — `conductor` for plan- and spec-backed wo
 drifting between two. It holds the ready queue and its concurrency cap, worktree and artifact
 isolation, task session continuity, test-first and standard mode, the developer exit gate and its
 six-field completion digest, the iteration circuit-breaker and failure-cluster tallies, the
-findings drain, the final review council with its `STATUS: COUNCIL_SEATS_NEEDED` handback, the
+findings drain, the final review council, the
 council review loop and its hard stop, and the plan and specification closeout.
 
 Renderers project every file an owner's Markdown links reach beside its principal output, with
@@ -170,8 +167,9 @@ resources today. Every retained resource now has a reviewed disposition in the
 non-policy content stays in its skill directory as its durable home, portable policy lives in the
 `products/kyber-squad/standards/` templates, and nothing was deleted.
 
-The six Kyber-Weave skills under `.apm/skills/` (`kyber-docs-authoring`, `kyber-docs-integrity-review`,
-`kyber-docs-onboarding-and-assessment`, `kyber-weave-cli`, `kyber-weave-model-profile`, and `spec-conductor`)
+The Kyber-Weave skills under `.apm/skills/` (`codegraph`, `kw-onboarding`, `kyber-docs-authoring`,
+`kyber-docs-integrity-review`, `kyber-docs-onboarding-and-assessment`, `kyber-weave-cli`,
+`kyber-weave-model-profile`, and `spec-conductor`)
 are authored once, in `.apm/skills/`, which stays their only source. The Kyber-Docs APM package reads that
 folder, and Kyber-Squad ships every skill in it as well. `squad pack` and the checkout release source add
 them beside the canonical skills, so every Squad deployment carries them. They are not copied into
@@ -198,17 +196,7 @@ lower it through the unoccupied-identity rule to a same-name role skill. `conduc
 orchestrator: it executes test-first by default with an explicit user opt-out to standard mode,
 and it routes plans, specifications, todos, and open requests through one intake.
 
-### 5. Migration Logs (`migration/`)
-
-The `migration/` directory contains 18 per-agent import reports recording baseline
-sources, SHA-256 hashes, retained additions, excluded harness mechanics, resolved permission
-policies, and final normalized instruction digests. `review-lens` and `review-triage` are
-canonical-only roles and therefore have no migration record. The retired test-first
-duplicates (`conductor-v3`, `architect-v3`) have no separate reports: each
-was folded into its canonical counterpart's report, which retains the retired source hash and a
-refreshed final-body digest for the consolidated instruction body.
-
-### 6. Resource Closures and Progressive Disclosure
+### 5. Resource Closures and Progressive Disclosure
 
 Every agent and skill owns an immutable, validated resource closure. Local links in the
 instruction body and in referenced Markdown are resolved recursively under the owning artifact's

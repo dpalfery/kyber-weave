@@ -227,6 +227,47 @@ public class ReviewConfigTests
     public void OutOfRangePolicyValuesAreRejected(string line, string expected) =>
         Assert.Contains(expected, Invalid($"review:\n  policy:\n    {line}\n").Message, StringComparison.Ordinal);
 
+    /// <summary>
+    /// <c>review.policy.fix-level</c> decides which severities a fix round takes: each level includes the ones before it,
+    /// the default is <c>minor</c>, and the retired <c>minor-findings</c> key reads as <c>major</c> (<c>follow-up</c>) or
+    /// <c>minor</c> (<c>fix</c>).
+    /// </summary>
+    [Theory]
+    [InlineData("review:\n  policy: {}\n", "minor", true, true, true, false)]
+    [InlineData("review:\n  policy:\n    fix-level: critical\n", "critical", true, false, false, false)]
+    [InlineData("review:\n  policy:\n    fix-level: major\n", "major", true, true, false, false)]
+    [InlineData("review:\n  policy:\n    fix-level: minor\n", "minor", true, true, true, false)]
+    [InlineData("review:\n  policy:\n    fix-level: nitpick\n", "nitpick", true, true, true, true)]
+    [InlineData("review:\n  policy:\n    minor-findings: follow-up\n", "major", true, true, false, false)]
+    [InlineData("review:\n  policy:\n    minor-findings: fix\n", "minor", true, true, true, false)]
+    [InlineData("review:\n  policy:\n    fix-level: major\n    minor-findings: fix\n", "major", true, true, false, false)]
+    public void TheFixLevelDecidesWhichSeveritiesAFixRoundTakes(
+        string yaml, string name, bool critical, bool major, bool minor, bool nitpick)
+    {
+        ReviewPolicy policy = Load(yaml).Policy;
+        ReviewFinding finding = new("security/name", "security", ReviewSeverity.Minor, 9, "src/A.cs", 1);
+
+        Assert.Equal(name, policy.FixLevelName);
+        Assert.Equal(critical, policy.FixRoundTakes(finding with { Severity = ReviewSeverity.Critical }));
+        Assert.Equal(major, policy.FixRoundTakes(finding with { Severity = ReviewSeverity.Major }));
+        Assert.Equal(minor, policy.FixRoundTakes(finding with { Severity = ReviewSeverity.Minor }));
+        Assert.Equal(nitpick, policy.FixRoundTakes(finding with { Severity = ReviewSeverity.Nitpick }));
+    }
+
+    [Fact]
+    public void AnUnknownFixLevelIsRejectedNamingTheChoices() =>
+        Assert.Contains(
+            "use critical, major, minor or nitpick",
+            Invalid("review:\n  policy:\n    fix-level: ignore\n").Message,
+            StringComparison.Ordinal);
+
+    [Fact]
+    public void AnUnknownRetiredMinorFindingsValueIsRejectedPointingAtTheNewKey() =>
+        Assert.Contains(
+            "review.policy.fix-level",
+            Invalid("review:\n  policy:\n    minor-findings: ignore\n").Message,
+            StringComparison.Ordinal);
+
     [Fact]
     public void CoverageOutsideZeroToOneHundredIsRejected() =>
         Assert.Contains(

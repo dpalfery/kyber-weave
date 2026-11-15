@@ -169,7 +169,9 @@ and the per-target table below states each vehicle; the run rule that made the g
    change plus a lost attribute, and the decision is a review obligation rather than a gate. The
    three enumerating targets would need no such decision to be widened, and that asymmetry is
    the argument for enumerating everywhere if the server's tool set ever becomes mutable rather
-   than by decision.
+   than by decision. Amended 2026-11-13: [ADR 0078](0078-the-conductor-finalizes-and-archives-plans-through-two-docs-tools.md)
+   is that decision. It adds two tools that are not `ReadOnly` and write only a plan's lifecycle
+   files, refusing any other path, and keeps them on the universal grant.
 
 6. **`conductor` receives the Copilot entry through canonical frontmatter.** Copilot's per-agent
    tool grant comes from the agent's own `copilot-tools` list, which is canonical source rather

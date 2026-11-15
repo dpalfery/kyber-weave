@@ -58,7 +58,6 @@ public sealed class ConfigRegValidator
                        || !string.IsNullOrWhiteSpace(_config.ConfigReg.Onboarding)
                        || _config.ConfigReg.StopOnToolFailure is not null
                        || _config.ConfigReg.RunBaseBranch is not null
-                       || _config.ConfigReg.RunHarnessNames is not null
                        || _config.Ontology.Intake
                        || (File.Exists(agentsFile) && ConfigRegMarkdown.ContainsBlock(File.ReadAllText(agentsFile)));
 

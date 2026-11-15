@@ -18,7 +18,7 @@ public sealed class ReviewLensCatalogueTests
     /// link keeps prose that happens to name a lens out of the count.
     /// </summary>
     private static readonly Regex LensRow = new(
-        @"^\|\s*\[(?<name>[a-z0-9-]+)\]\(references/lenses/\k<name>\.md\)",
+        @"^\|\s*\[(?<name>[a-z0-9-]+)\]\(lenses/\k<name>\.md\)",
         RegexOptions.Multiline | RegexOptions.CultureInvariant);
 
     [Fact]
@@ -30,7 +30,8 @@ public sealed class ReviewLensCatalogueTests
             "kyber-squad",
             "skills",
             "code-review",
-            "SKILL.md"));
+            "references",
+            "first-review.md"));
 
         string[] listed = LensRow.Matches(skill)
             .Select(match => match.Groups["name"].Value)

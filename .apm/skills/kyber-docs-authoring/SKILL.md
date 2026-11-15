@@ -170,7 +170,10 @@ an architecture document.
 
 A coding standard is how one technology's code is written in this repository. It is
 not a `rule`, which governs the repository whatever the language, and it is not a
-`reference`.
+`reference`. Before writing a statement into either, apply the placement test (the "Rules and
+standards" section of `<documentation-ontology>`, when that copy has one): a statement that applies to every task
+and is never OK to break is a rule; anything else goes in the standard. Each statement has
+one home.
 
 1. Read the technologies list in `<documentation-ontology>`. It is the same list as
    `ontology.technologies` in `.kyber-weave/kyber-weave.yml`. A value that is not on

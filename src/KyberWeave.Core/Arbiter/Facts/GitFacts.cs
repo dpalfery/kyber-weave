@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
 using KyberWeave.Core.Processes;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Arbiter.Facts;
 
@@ -62,6 +63,37 @@ public static class GitFacts
             workingDirectory, gitExecutable, string.Empty, "rev-parse", "--show-toplevel");
         string root = output?.Trim() ?? string.Empty;
         return string.IsNullOrWhiteSpace(root) ? null : root;
+    }
+
+    /// <summary>
+    /// The working trees of the repository at <paramref name="workingDirectory"/>, main first, from
+    /// <c>git worktree list --porcelain</c>. Empty outside a repository or when git cannot run.
+    /// </summary>
+    public static IReadOnlyList<string> ListWorktrees(string workingDirectory, string gitExecutable = "git")
+    {
+        string? output = RunGit(workingDirectory, gitExecutable, string.Empty, "worktree", "list", "--porcelain");
+        if (output is null)
+            return [];
+
+        const string Prefix = "worktree ";
+        return [.. output.Split('\n')
+            .Select(line => line.TrimEnd('\r'))
+            .Where(line => line.StartsWith(Prefix, StringComparison.Ordinal))
+            .Select(line => line[Prefix.Length..])
+            .Where(path => path.Length > 0)];
+    }
+
+    /// <summary>
+    /// Reads the repository's common git directory as an absolute path: the one directory every worktree of
+    /// a repository shares, so it names the repository whichever worktree asks.
+    /// </summary>
+    /// <returns>The directory, or <c>null</c> outside a repository.</returns>
+    public static string? GetCommonDirectory(string workingDirectory, string gitExecutable = "git")
+    {
+        string? output = RunGit(
+            workingDirectory, gitExecutable, string.Empty, "rev-parse", "--path-format=absolute", "--git-common-dir");
+        string directory = output?.Trim() ?? string.Empty;
+        return string.IsNullOrWhiteSpace(directory) ? null : directory;
     }
 
     /// <summary>Reads the current branch name.</summary>
@@ -497,10 +529,7 @@ public static class GitFacts
             ProcessResult result = ProcessRunner.Run(startInfo, standardInput);
             return result.ExitCode == 0 ? result.StandardOutput : null;
         }
-        catch (Exception ex) when (ex is Win32Exception
-            or InvalidOperationException
-            or IOException
-            or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is Win32Exception or InvalidOperationException)
         {
             // Outside a repository git exits non-zero (handled above); a missing
             // binary, a dead working directory, or an unreadable pipe lands here.
@@ -690,8 +719,7 @@ public static class GitFacts
 
             return lines;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
-            or NotSupportedException or OutOfMemoryException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is OutOfMemoryException)
         {
             return null;
         }

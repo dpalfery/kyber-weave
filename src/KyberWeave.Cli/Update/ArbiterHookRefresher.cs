@@ -48,7 +48,7 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
             {
                 loaded = KyberWeaveConfigLoader.TryLoad(root);
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            catch (Exception ex) when (FileFailure.Is(ex))
             {
                 _log?.Invoke($"warning: skipping arbiter hook refresh for '{root}': {ex.Message}");
                 failed++;
@@ -82,13 +82,7 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
                     refreshed++;
                 }
             }
-            catch (Exception ex) when (ex is InvalidOperationException
-                or IOException
-                or UnauthorizedAccessException
-                or HttpRequestException
-                or TimeoutException
-                or OperationCanceledException
-                or InvalidDataException)
+            catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or HttpRequestException or TimeoutException or OperationCanceledException or InvalidDataException)
             {
                 _log?.Invoke($"warning: arbiter hook refresh for '{root}' failed: {ex.Message}");
                 failed++;
@@ -109,7 +103,7 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
             {
                 receipt = stateStore.ReadReceipt(home, SquadDeploymentScope.Global);
             }
-            catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException)
+            catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException)
             {
                 _log?.Invoke($"warning: could not read global squad receipt: {ex.Message}");
             }
@@ -161,10 +155,7 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
                         }
                     }
                 }
-                catch (Exception ex) when (ex is InvalidOperationException
-                    or IOException
-                    or UnauthorizedAccessException
-                    or JsonException)
+                catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or JsonException)
                 {
                     _log?.Invoke($"warning: arbiter global hook refresh for '{targetToken}' failed: {ex.Message}");
                     globalFailed++;
@@ -184,7 +175,7 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
                     string serialized = stateStore.SerializeReceipt(updatedReceipt);
                     AtomicFile.WriteAllText(receiptPath, serialized);
                 }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+                catch (Exception ex) when (FileFailure.Is(ex) || ex is JsonException)
                 {
                     _log?.Invoke($"warning: updating global squad receipt failed: {ex.Message}");
                 }
@@ -370,7 +361,11 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
                                 ["command"] = commandLine,
                                 ["timeout"] = timeoutSeconds,
                             })
-                    }
+                    },
+                    CreateMatcherGroup(
+                        ClaudeRenderer.WorkerGuardMatcher,
+                        ArbiterHookWiring.WorkerGuardCommandLine(SquadTargetCatalog.GetToken(SquadTarget.Claude)),
+                        timeoutSeconds)
                 ];
                 postToolUse =
                 [

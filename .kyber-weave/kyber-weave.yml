@@ -60,39 +60,9 @@ review:
     # tell those survivors from fresh outputs. Forcing a rebuild here keeps the `--no-build`
     # test gate that follows it from running against binaries no longer executable.
     - id: build
-      include: &net-test-paths ["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets", "**/*.sln*", "**/NuGet.config", "**/.editorconfig", "global.json", ".config/dotnet-tools.json", ".kyber-weave/kyber-weave.yml", "apm.yml", ".apm/**", "products/**", "REVIEW.md", "scripts/**"]
+      include: &net-test-paths ["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets", "**/*.sln*", "**/NuGet.config", "**/.editorconfig", "global.json", ".kyber-weave/kyber-weave.yml", "apm.yml", ".apm/**", "products/**", "REVIEW.md", "scripts/**"]
       run: [dotnet, build, KyberWeave.sln, -c, Release, --no-incremental, -nr:false, -p:UseSharedCompilation=false]
       blocking: true
-    # ReSharper InspectCode. The `resharper-clt` skill owns how to read this; the
-    # `static-analysis-triage` lens reads the report at the --output path below and
-    # attributes each diagnostic to the diff. InspectCode exits 0 whether or not it finds
-    # anything, so "blocking" here means the analyzer must have *run* — a review that
-    # skipped it silently would read as one that passed it. Scoped to WARNING and above:
-    # the suggestion tier is dominated by style inspections this repository settles in
-    # .editorconfig, and burying 500 real warnings under 1200 of those helps nobody.
-    # Declared here, straight after `build`, and `concurrent`, so it starts on a restored tree
-    # and runs alongside the test run instead of after it: declared last and run in turn, a
-    # review waited for the full suite and then for the analyzer.
-    # `--no-build` because `build` has just restored and compiled the tree: the analyzer's own
-    # Debug build added nothing to its findings and wrote into obj/ beside the gates below.
-    # `requires-paths` keeps that honest when the gate is run on its own: without a restore the
-    # analyzer would resolve nothing, exit 0 and read as a clean run, so it does not start.
-    # The path proves a restore happened, not that it is current: in the declared order `build`
-    # has just restored. Run alone with `--gate inspectcode` after package references changed,
-    # run `--gate build` with it.
-    # `--jobs=4` because the full test run beside it is load-sensitive: on an 18-core machine
-    # four analysis threads took 108 seconds against 91 unbounded, with the same findings.
-    # `scripts/report-gate.sh` because on macOS 27.3 Beta the analyzer writes its whole report
-    # and then never exits. The wrapper removes any earlier report, and stops the analyzer only
-    # once this run's report is complete and has not changed for 20 seconds. A hang before that
-    # still runs to the time limit and is reported as timed out.
-    # Not measured: this gate beside the full test run. A dev agent may not run that suite.
-    - id: inspectcode
-      include: *net-source-paths
-      run: [scripts/report-gate.sh, --report, artifacts/inspectcode.xml, --ends-with, "</Report>", --grace, "20", --, dotnet, jb, inspectcode, KyberWeave.sln, --output=artifacts/inspectcode.xml, --format=Xml, --severity=WARNING, "--caches-home=artifacts/inspectcode-cache", "--jobs=4", --no-build]
-      requires-paths: ["src/KyberWeave.Core/obj/project.assets.json"]
-      blocking: true
-      concurrent: true
     # coverlet.MTP writes Cobertura under artifacts/coverage so GateRunner can populate
     # the coverage floor. xUnit 4 uses Microsoft Testing Platform, whose coverage
     # extension uses `--coverlet` instead of VSTest's `--collect` data-collector option.
@@ -215,6 +185,34 @@ review:
       include: *skill-model-profile-paths
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/kyber-weave-model-profile, --fail-on, critical]
       blocking: true
+    # The onboarding skill walks a new user through the whole setup, so its command examples
+    # and per-harness tables are gated like the other skills' surfaces.
+    - id: skill-validate-kw-onboarding
+      include: &skill-kw-onboarding-paths [".apm/skills/kw-onboarding/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Core/Skills/**"]
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kw-onboarding]
+      blocking: true
+    - id: skill-lint-kw-onboarding
+      include: *skill-kw-onboarding-paths
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, lint, .apm/skills/kw-onboarding, --min-desc-score, "70"]
+      blocking: true
+    - id: skill-scan-kw-onboarding
+      include: *skill-kw-onboarding-paths
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/kw-onboarding, --fail-on, critical]
+      blocking: true
+    # The spec-conductor skill orchestrates delivery of an existing specification bundle, so
+    # its trigger wording and command examples are gated like the other skills' surfaces.
+    - id: skill-validate-spec-conductor
+      include: &skill-spec-conductor-paths [".apm/skills/spec-conductor/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Core/Skills/**"]
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/spec-conductor]
+      blocking: true
+    - id: skill-lint-spec-conductor
+      include: *skill-spec-conductor-paths
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, lint, .apm/skills/spec-conductor, --min-desc-score, "70"]
+      blocking: true
+    - id: skill-scan-spec-conductor
+      include: *skill-spec-conductor-paths
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/spec-conductor, --fail-on, critical]
+      blocking: true
     - id: docs-validate
       include: ["docs/**", "**/*.md", ".kyber-weave/kyber-weave.yml", "src/**"]
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, docs, validate, .]
@@ -224,11 +222,10 @@ review:
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, docs, drift, .]
       blocking: true
     # Cross-file duplicate bodies, from the CodeGraph index. Nothing else in the chain
-    # answers this: JetBrains retired `dupfinder`, and the inspections InspectCode still
-    # ships that touch duplication are scoped to one statement or one method group. The
-    # `duplicate-implementation` lens reads the report at the --out path below and decides
-    # which clusters this change is responsible for. Like the analyzer gate it exits 0
-    # whether or not it finds anything, so "blocking" means it must have *run*.
+    # answers this: JetBrains retired `dupfinder`, and the compiler and analyzers only see one
+    # statement or one method group. The `duplicate-implementation` lens reads the report at
+    # the --out path below and decides which clusters this change is responsible for. It
+    # exits 0 whether or not it finds anything, so "blocking" means it must have *run*.
     - id: duplicates
       include: *net-source-paths
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, review, duplicates, ., --out, artifacts/duplicates.json]
@@ -395,22 +392,27 @@ review:
         run: [dotnet, test, tests/KyberWeave.Tests/KyberWeave.Tests.csproj, -c, Release, --no-build, --filter, "{tests}", --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
         timeout: 600
     # Every .NET authoring role carries the suppression gate, not only csharp-dev: a `#pragma`
-    # or a SuppressMessage is the same defect wherever it is written.
+    # or a SuppressMessage is the same defect wherever it is written. Each also runs the tests its
+    # change covers: in test-first mode the worker writes its own tests, and the task gate's
+    # failing run (--red) and passing run are the proof (ADR 0076).
     dal-dev:
       - *fmt-whitespace
       - *fmt-style
       - *dotnet-build
       - *suppressions
+      - *dotnet-tests
     maui-dev:
       - *fmt-whitespace
       - *fmt-style
       - *dotnet-build
       - *suppressions
+      - *dotnet-tests
     pulumi-dev:
       - *fmt-whitespace
       - *fmt-style
       - *dotnet-build
       - *suppressions
+      - *dotnet-tests
     # The three file kinds no language gate selects. A task that edits only a workflow, a shell
     # script, or this file used to select zero gates and report NONE_APPLICABLE — a valid result
     # that is no evidence anything ran. `include` alone decides selection, so these are defined

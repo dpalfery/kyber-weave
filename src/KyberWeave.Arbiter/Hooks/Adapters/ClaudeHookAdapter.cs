@@ -188,66 +188,6 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
             $"Malformed Claude hook event: unknown hook_event_name '{eventName ?? "<missing>"}'.");
     }
 
-    /// <inheritdoc/>
-    public string RenderFailClosed(string detail, string? renderedCaller, string rawStdin, string decisionId)
-    {
-        string safe = (detail ?? string.Empty)
-            .Replace("\r\n", " ", StringComparison.Ordinal)
-            .Replace('\n', ' ')
-            .Replace('\r', ' ');
-        if (string.IsNullOrWhiteSpace(safe))
-        {
-            safe = "unknown error";
-        }
-
-        string? eventName = null;
-        string? agentType = null;
-        try
-        {
-            using JsonDocument doc = JsonDocument.Parse(rawStdin);
-            if (doc.RootElement.ValueKind == JsonValueKind.Object)
-            {
-                eventName = GetString(doc.RootElement, "hook_event_name");
-                agentType = GetString(doc.RootElement, "agent_type");
-            }
-        }
-        catch (JsonException)
-        {
-            // Best effort only: the envelope carries what is known.
-        }
-
-        // The host throws config errors with the code already prefixed; strip it so the
-        // envelope carries the code exactly once, in both ANSWER and EVIDENCE.
-        string message = safe.StartsWith(
-            HookCommand.FailClosedCode + ": ", StringComparison.Ordinal)
-            ? safe.Substring((HookCommand.FailClosedCode + ": ").Length)
-            : safe;
-        string evidence = $"{HookCommand.FailClosedCode}: {message}";
-
-        string? caller = !string.IsNullOrWhiteSpace(agentType) ? agentType : renderedCaller;
-        string trigger = string.Equals(caller, "conductor", StringComparison.Ordinal)
-            ? "delegate"
-            : "investigate";
-        string callerText = $"{(string.IsNullOrWhiteSpace(caller) ? "unidentified" : caller)} (claude)";
-        ArbiterEscalationEnvelope envelope = new(
-            trigger,
-            callerText,
-            null,
-            null,
-            null,
-            [new ArbiterEnvelopeEntry(
-                HookCommand.FailClosedCode,
-                "Did the hook host fail before evaluation completed?",
-                ArbiterAnswerText.Error(HookCommand.FailClosedCode, message),
-                evidence)],
-            string.IsNullOrWhiteSpace(decisionId) ? "unknown" : decisionId,
-            1);
-
-        return string.Equals(eventName, "PostToolUse", StringComparison.Ordinal)
-            ? RenderPostBlock(envelope.Render())
-            : RenderPreDeny(envelope.Render());
-    }
-
     /// <summary>Resolves the caller: the payload's <c>agent_type</c> outranks <c>--caller</c>.</summary>
     internal static string? ResolveCaller(JsonElement payload, string? renderedCaller)
     {

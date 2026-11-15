@@ -12,6 +12,7 @@ using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Core.Squad.Validation;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Cli.Commands.Squad;
 
@@ -176,6 +177,10 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         // 5b. Retired skills. A stale second-brain directory or a receipt that still
         // claims it is a warning, not a failure: the stale copy works.
         ReportRetiredSkills(workingDirectory, homeStateStore);
+
+        // 5c. Project skills that hide an installed squad skill. A warning: the shadowing copy works,
+        // it is just not the one the squad installed.
+        ReportShadowedSkills(workingDirectory, homeStateStore);
 
         // 6. Home state: the migration the other verbs run, then the registry and any retained in-repo state.
         SquadMigrationReport migration = SquadCommandComposition.EnsureStateMigrated(
@@ -458,6 +463,85 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     }
 
     /// <summary>
+    /// Warns when a skill folder the repository keeps for itself repeats the name of an installed
+    /// squad skill with different content, because a worker may load the repository's copy.
+    /// </summary>
+    /// <remarks>
+    /// Rule <c>KW-SQUAD-SHADOW-001</c>. A warning that never moves the exit code: the project copy
+    /// works, and deleting a tracked file is the operator's call. Installed skills come from the
+    /// project and global deployment receipts; with neither there is nothing to be shadowed.
+    /// </remarks>
+    private void ReportShadowedSkills(string workingDirectory, SquadStateStore stateStore)
+    {
+        ISquadGlobalRootResolver globalRoots =
+            _globalRoots ?? SquadCommandComposition.ResolveGlobalRoots(_environmentReader);
+        List<SquadInstalledSkill> installed = [];
+        HashSet<string> managed = new(StringComparer.Ordinal);
+
+        foreach (SquadDeploymentScope scope in new[] { SquadDeploymentScope.Project, SquadDeploymentScope.Global })
+        {
+            SquadReceipt? receipt;
+            try
+            {
+                receipt = stateStore.ReadReceipt(workingDirectory, scope);
+            }
+            catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException or JsonException)
+            {
+                // The retired-skills check above already names an unreadable receipt.
+                continue;
+            }
+
+            if (receipt is null) continue;
+
+            foreach (SquadOwnedFile file in receipt.Files)
+            {
+                string[] parts = file.RelativePath.Replace('\\', '/').Split('/');
+                if (parts.Length < 3 || parts[^1] != "SKILL.md" || parts[^3] != "skills") continue;
+
+                string fullPath;
+                try
+                {
+                    fullPath = SquadDeploymentPlan.ResolveOwnedFilePath(receipt, workingDirectory, globalRoots, file);
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+                {
+                    continue;
+                }
+
+                if (scope == SquadDeploymentScope.Project) managed.Add(fullPath);
+                if (File.Exists(fullPath)) installed.Add(new SquadInstalledSkill(parts[^2], fullPath));
+            }
+        }
+
+        if (installed.Count == 0)
+        {
+            AnsiConsole.MarkupLine(
+                "  [grey]info[/] Project skills shadowing the squad: not checked (no installed squad skills found)");
+            return;
+        }
+
+        IReadOnlyList<SquadSkillShadow> shadows = SquadSkillShadowing.Find(workingDirectory, installed, managed);
+        if (shadows.Count == 0)
+        {
+            AnsiConsole.MarkupLine("  [green]ok[/] Project skills shadowing the squad: none");
+            return;
+        }
+
+        CommandHelpers.WriteUnfolded(() =>
+        {
+            foreach (SquadSkillShadow shadow in shadows)
+            {
+                AnsiConsole.MarkupLine(
+                    $"  [yellow]warn[/] [bold]KW-SQUAD-SHADOW-001[/] Project skill '{Markup.Escape(shadow.Name)}' at " +
+                    $"[bold]{Markup.Escape(shadow.ProjectPath)}[/] differs from the installed squad skill at " +
+                    $"[bold]{Markup.Escape(shadow.InstalledPath)}[/]; agents may read the project copy.");
+                AnsiConsole.MarkupLine(
+                    "         Delete the project copy, or re-run [grey]squad install[/] for this project.");
+            }
+        });
+    }
+
+    /// <summary>
     /// Warns about the retired <c>second-brain</c> skill, whether it survives as an
     /// unmanaged directory in a deployed target tree or as a retained entry in the
     /// project deployment receipt.
@@ -494,7 +578,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 retained.AddRange(SquadRetiredSkills.FindRetainedReceiptPaths(receipt));
             }
         }
-        catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException)
         {
             // An unreadable receipt is state this check could not read. Warn with the
             // reason rather than reporting healthy over unknown state; the registry
@@ -718,10 +802,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             }
         }
         catch (Exception ex) when (
-            ex is SquadRenderValidationException
-                or InvalidDataException
-                or IOException
-                or UnauthorizedAccessException or ArgumentException)
+            FileFailure.Is(ex) || ex is SquadRenderValidationException or InvalidDataException)
         {
             AnsiConsole.MarkupLine(
                 $"  [red]fail[/] Global unmanaged-collision scan failed: {Markup.Escape(ex.Message)}");
@@ -763,8 +844,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         {
             receipt = stateStore.ReadReceipt(workingDirectory, scope);
         }
-        catch (Exception ex) when (ex is InvalidDataException or ArgumentException or System.Text.Json.JsonException
-            or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException or System.Text.Json.JsonException)
         {
             AnsiConsole.MarkupLine($"  [yellow]warn[/] Owned blocks: cannot read the ownership receipt: {Markup.Escape(ex.Message)}");
             return false;
@@ -834,7 +914,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             {
                 currentJson = File.ReadAllText(fullPath);
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            catch (Exception ex) when (FileFailure.Is(ex))
             {
                 AnsiConsole.MarkupLine(
                     $"  [red]fail[/] Owned block drift: {fileLabel} (unreadable: {Markup.Escape(ex.Message)})");

@@ -3,6 +3,7 @@ using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Diagnostics;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Cli.Commands.Arbiter;
 
@@ -29,7 +30,14 @@ public sealed class ArbiterPlanCommand : Command<ArbiterSettings>
     public override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new();
-        string resolved = Path.GetFullPath(settings.Path);
+        string root = PlanArguments.RepositoryRootFor(settings.Path, settings.WorkingDirectory);
+        if (!PlanArguments.TryResolve(root, PlanArguments.ConfigForResolving(root, settings.Config), settings.Path, settings.WorkingDirectory, "arbiter plan", report, out string relative))
+        {
+            CommandHelpers.Finish(report, settings, "arbiter plan", "Task");
+            return 1;
+        }
+
+        string resolved = Path.GetFullPath(relative, root);
         if (!File.Exists(resolved))
         {
             report.Add(new Diagnostic(
@@ -47,7 +55,7 @@ public sealed class ArbiterPlanCommand : Command<ArbiterSettings>
         {
             text = File.ReadAllText(resolved);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (FileFailure.Is(exception))
         {
             report.Add(new Diagnostic(
                 PlanNotReadable,
@@ -95,9 +103,9 @@ public sealed class ArbiterPlanCommand : Command<ArbiterSettings>
 
         // The prose lines are for a person reading the table. Json, sarif and markdown must
         // carry only the rendered report, or a script reading stdout would parse a non-document.
-        if (settings.ParsedFormat == OutputFormat.Table)
+        if (ReportRenderer.IsHuman(settings.ParsedFormat))
         {
-            AnsiConsole.MarkupLine($"[bold]Plan:[/] {Markup.Escape(resolved)}");
+            CommandHelpers.WriteUnfolded(() => AnsiConsole.MarkupLine($"[bold]Plan:[/] {Markup.Escape(resolved)}"));
             AnsiConsole.MarkupLine($"[grey]Status: {Markup.Escape(document.Status ?? "—")}; mode: {Markup.Escape(document.DevelopmentMode)}.[/]");
 
             if (digest is { } printed)

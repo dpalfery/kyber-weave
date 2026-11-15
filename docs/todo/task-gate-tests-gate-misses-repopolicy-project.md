@@ -13,7 +13,7 @@ last-reviewed: 2026-11-11
 The `tests` task gate in `review.task-gates` (`.kyber-weave/kyber-weave.yml`, anchor
 `&dotnet-tests`) always runs `tests/KyberWeave.Tests/KyberWeave.Tests.csproj` with the classes
 `review gates` resolves. A task whose tests live in `tests/KyberWeave.RepoPolicy.Tests` (for example
-`KyberWeave.Tests.ReportGateScriptTests`, whose namespace is `KyberWeave.Tests` although its project
+`KyberWeave.Tests.ReportGateScriptTests`, since removed, whose namespace is `KyberWeave.Tests` although its project
 is RepoPolicy) gets a filter that matches nothing in that project, and the gate exits 8 (zero tests
 matched).
 

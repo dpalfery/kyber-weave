@@ -142,6 +142,61 @@ public sealed class ArbiterInstallCommandTests : IDisposable
     }
 
     /// <summary>
+    /// Omitting <c>--provider</c> keeps the provider the host config already holds, and the
+    /// run says so.
+    /// </summary>
+    [Fact]
+    public void Install_OmittedProvider_KeepsTheExistingProvider()
+    {
+        string host = NewDir("install-keep-provider");
+        WriteProviderConfig(host, "systemone");
+        _store.Write(TypeSafeOrigin, "stored-key");
+
+        CommandExecution execution = Capture(() => new ArbiterInstallCommand().Execute(
+            null!,
+            new ArbiterInstallSettings { Path = host, Target = "kilo", Project = true }));
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Contains("kind: systemone", File.ReadAllText(ConfigPath(host)), StringComparison.Ordinal);
+        Assert.Contains("systemone", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("kept", execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>An explicit <c>--provider</c> replaces the configured provider and reports the change.</summary>
+    [Fact]
+    public void Install_ExplicitProvider_ChangesTheExistingProvider()
+    {
+        string host = NewDir("install-change-provider");
+        WriteProviderConfig(host, "systemone");
+
+        CommandExecution execution = Capture(() => new ArbiterInstallCommand().Execute(
+            null!,
+            new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = "none", Project = true }));
+
+        Assert.Equal(0, execution.ExitCode);
+        string config = File.ReadAllText(ConfigPath(host));
+        Assert.Contains("kind: none", config, StringComparison.Ordinal);
+        Assert.DoesNotContain("systemone", config, StringComparison.Ordinal);
+        Assert.Contains("changed from systemone", execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>A machine with nothing configured keeps the default of no provider.</summary>
+    [Fact]
+    public void Install_OmittedProviderOnAFreshMachine_DefaultsToNone()
+    {
+        string host = NewDir("install-fresh-provider");
+
+        CommandExecution execution = Capture(() => new ArbiterInstallCommand().Execute(
+            null!,
+            new ArbiterInstallSettings { Path = host, Target = "kilo", Project = true }));
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Contains("kind: none", File.ReadAllText(ConfigPath(host)), StringComparison.Ordinal);
+        Assert.Contains("none", execution.Output, StringComparison.Ordinal);
+        Assert.Empty(_store.Entries);
+    }
+
+    /// <summary>
     /// The key travels into the credential store for the endpoint origin only. It must
     /// appear in no config file, no receipt, no deployed file, and no captured output:
     /// a leaked key in the repo would be committed and pushed.
@@ -591,6 +646,15 @@ public sealed class ArbiterInstallCommandTests : IDisposable
         string[] expectedTargets = ["codex", "cursor", "factory"];
         Assert.Equal(expectedTargets, pathByTarget.Keys.Order(StringComparer.Ordinal));
         Assert.All(pathByTarget.Values, path => Assert.Equal("hooks.json", path));
+    }
+
+    private static void WriteProviderConfig(string host, string kind)
+    {
+        string directory = Path.Combine(host, ".kyber-weave");
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(
+            Path.Combine(directory, "kyber-weave.yml"),
+            $"arbiter:\n  enabled: true\n  provider:\n    kind: {kind}\n");
     }
 
     private static string ConfigPath(string host) =>

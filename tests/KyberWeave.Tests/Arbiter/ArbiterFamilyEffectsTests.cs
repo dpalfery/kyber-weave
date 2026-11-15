@@ -226,10 +226,10 @@ public sealed class ArbiterFamilyEffectsTests
     }
 
     [Fact]
-    public void UnchangedFamilies_KeepTheirUndecidableEffects()
+    public void EveryFamily_MapsUndecidableToItsProceedingEffect()
     {
-        Assert.Equal(RuleEffects.Escalate, ArbiterTriggerFamilies.UndecidableEffect(ArbiterTriggerFamily.Conductor));
-        Assert.Equal(RuleEffects.Escalate, ArbiterTriggerFamilies.UndecidableEffect(ArbiterTriggerFamily.Investigate));
+        Assert.Equal(RuleEffects.Allow, ArbiterTriggerFamilies.UndecidableEffect(ArbiterTriggerFamily.Conductor));
+        Assert.Equal(RuleEffects.Allow, ArbiterTriggerFamilies.UndecidableEffect(ArbiterTriggerFamily.Investigate));
         Assert.Equal(RuleEffects.Allow, ArbiterTriggerFamilies.UndecidableEffect(ArbiterTriggerFamily.LensSpawn));
         Assert.Equal(RuleEffects.Applies, ArbiterTriggerFamilies.UndecidableEffect(ArbiterTriggerFamily.Gate));
     }

@@ -102,8 +102,8 @@ public sealed record HookContext(
 
 /// <summary>The dispatch-gating decision behind a hook: later tasks replace the default
 /// allow-all engine with step-0/step-1 evaluation (the <c>serve</c>/<c>eval</c> entry
-/// points). The hook host fails closed around it: an engine throw becomes that
-/// harness's block carrying <c>KW-ARB-HOOK-001</c>, never a pass.</summary>
+/// points). The hook host fails open around it: an engine throw is logged with
+/// <c>KW-ARB-HOOK-001</c> and the dispatch proceeds (ADR 0072).</summary>
 public interface IHookDecisionEngine
 {
     /// <summary>Decides a pre-dispatch event for <paramref name="caller"/> dispatching
@@ -121,7 +121,7 @@ public interface IHookDecisionEngine
 public sealed record DispatchClaimKey(string ToolUseId, string Phase);
 
 /// <summary>One harness's hook dialect: fast-path detection without configuration,
-/// decision rendering for classified events, and the fail-closed block.</summary>
+/// decision rendering for classified events, and a block document for a fault.</summary>
 public interface IHarnessHookAdapter
 {
     /// <summary>The <c>--harness</c> token this adapter serves (for example <c>claude</c>).</summary>
@@ -129,7 +129,7 @@ public interface IHarnessHookAdapter
 
     /// <summary>
     /// Whether the harness delivers a sub-agent's return to the post-dispatch hook. When
-    /// false, <c>READY-001</c> and <c>MODE-001</c> answer <c>returns-unobservable</c>
+    /// false, <c>READY-001</c> answers <c>returns-unobservable</c>
     /// (Q17 option (a)): pre-dispatch gating still runs, completion order is advisory.
     /// </summary>
     bool ObservesReturns => true;
@@ -193,8 +193,4 @@ public interface IHarnessHookAdapter
         string? renderedCaller,
         KyberWeaveConfig config,
         HookContext context);
-
-    /// <summary>Renders the fail-closed block for <paramref name="detail"/>, carrying
-    /// <c>KW-ARB-HOOK-001</c>. Never throws: the host falls back further if it does.</summary>
-    string RenderFailClosed(string detail, string? renderedCaller, string rawStdin, string decisionId);
 }

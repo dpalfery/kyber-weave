@@ -130,6 +130,16 @@ public sealed class TaskGateSelectionTests
     }
 
     [Fact]
+    public void ClassesThePlanDeclaresFillTheTestsTokenEvenWhenNoTestFileExistsYet()
+    {
+        TaskGatePlan plan = TaskGateSelection.Plan(
+            [TestsGate()], ["src/KyberWeave.Cli/Program.cs"], null, "unix", declaredClasses: ["Acme.Tests.OrdersTests", "Acme.Tests.CartTests"]);
+
+        PlannedTaskGate gate = Assert.Single(plan.Gates);
+        Assert.Contains("FullyQualifiedName~Acme.Tests.OrdersTests|FullyQualifiedName~Acme.Tests.CartTests", gate.Run);
+    }
+
+    [Fact]
     public void AnArgumentContainingBothTaskAndTestsExpandsBothTokens()
     {
         ReviewTaskGate gate = new(

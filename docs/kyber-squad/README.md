@@ -25,7 +25,7 @@ and registered today: `copilot`, `cursor`, `claude`, `codex`, `antigravity`, `op
 Deploying multi-agent workflows across modern engineering environments breaks down in three key ways:
 
 ### 1. The Multi-Harness Fragmentation Tax
-Every coding harness uses its own configuration format, folder layout, and prompt syntax (`.cursorrules`, `.claude/agents`, `.github/copilot-instructions.md`, TOML, JSON). Manually duplicating 24 specialized agent roles and 29 skills across multiple tools guarantees silent configuration drift, outdated prompts, and inconsistent behaviors across developers.
+Every coding harness uses its own configuration format, folder layout, and prompt syntax (`.cursorrules`, `.claude/agents`, `.github/copilot-instructions.md`, TOML, JSON). Manually duplicating 24 specialized agent roles and 28 skills across multiple tools guarantees silent configuration drift, outdated prompts, and inconsistent behaviors across developers.
 
 ### 2. Differing Capability Boundaries & Tool Permissions
 Harnesses have wildly different capabilities: some support restricted subagent spawning or granular MCP permissions; others allow only flat prompt injection. Without a formalized capability lattice, agents fail unexpectedly or gain unintended permissions when deployed to less restrictive harnesses.

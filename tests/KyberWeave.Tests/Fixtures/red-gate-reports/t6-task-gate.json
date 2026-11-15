@@ -1,0 +1,19 @@
+{
+  "schema": "kyber-weave.review-gates/v1",
+  "gates": [
+    {
+      "id": "dashboard-e2e",
+      "blocking": true,
+      "exitCode": 1,
+      "summary": "npm notice run \u0027playwright\u0027 test --project=chromium 1-Presentation/admin-dashboard/tests/job-status-cards.spec.ts | [WebServer] npm notice run admin-dashboard@0.1.0 npx | [WebServer] npm notice run \u0027next\u0027 dev --port 3100",
+      "durationMilliseconds": 14009,
+      "notApplicableReason": null,
+      "outcome": "completed",
+      "passed": false,
+      "notApplicable": false
+    }
+  ],
+  "coverage": null,
+  "coverageReports": [],
+  "base": null
+}

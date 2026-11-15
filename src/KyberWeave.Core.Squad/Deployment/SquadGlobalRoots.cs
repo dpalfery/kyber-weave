@@ -12,6 +12,13 @@ public interface ISquadGlobalRootResolver
     ///     Targets without a renderer throw <see cref="ArgumentOutOfRangeException" />.
     /// </summary>
     string ResolveGlobalRoot(SquadTarget target);
+
+    /// <summary>
+    ///     The fully qualified per-user home directory the roots resolve against, or null when the
+    ///     resolver does not know it. A render uses it to write a global path as <c>~/…</c>, so the
+    ///     rendered text does not change with the machine's user name.
+    /// </summary>
+    string? HomeDirectory => null;
 }
 
 /// <summary>
@@ -108,6 +115,9 @@ public sealed class SquadGlobalRoots : ISquadGlobalRootResolver
         _isWindows = isWindows ?? OperatingSystem.IsWindows();
         _instancesDirectory = Path.GetFullPath(Path.Combine(_homeDirectory, ".kyber-weave", "squad", "instances"));
     }
+
+    /// <inheritdoc />
+    public string? HomeDirectory => _homeDirectory;
 
     public string ResolveGlobalRoot(SquadTarget target)
     {

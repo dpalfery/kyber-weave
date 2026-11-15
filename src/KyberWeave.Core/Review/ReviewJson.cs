@@ -300,6 +300,19 @@ public static class ReviewJson
             if (!inRange)
                 throw new JsonException($"'{path}.{key}' is {Describe(value)}; it must be a whole number from 1 to 10.");
         }
+
+        foreach ((string key, JsonNode? value) in Members(finding, nameof(ReviewFinding.Line)))
+        {
+            bool inRange = value is JsonValue number
+                           && number.GetValueKind() == JsonValueKind.Number
+                           && number.TryGetValue(out long line)
+                           && ReviewSeatInput.IsLineNumber(line);
+            if (!inRange)
+            {
+                throw new JsonException(
+                    $"'{path}.{key}' is {Describe(value)}; it must be a whole number from 0 to {ReviewSeatInput.MaxLine}.");
+            }
+        }
     }
 
     /// <summary>
@@ -313,13 +326,7 @@ public static class ReviewJson
 
     private static string Describe(JsonNode? node)
     {
-        const int limit = 60;
-        string text = node?.ToJsonString() ?? "null";
-        if (text.Length <= limit)
-            return text;
-
-        // Back off one character rather than split a surrogate pair at the cut.
-        return text[..(char.IsHighSurrogate(text[limit - 1]) ? limit - 1 : limit)] + "…";
+        return ReviewSeatInput.Clip(node?.ToJsonString() ?? "null", 60);
     }
 
     private static void BindSnakeCaseFailureScenario(JsonObject finding)

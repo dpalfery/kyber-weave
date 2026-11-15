@@ -275,7 +275,7 @@ derive, since it declares no MCP capability.
 
 **An approval grant, not isolation.** Kilo's `permission` values are `ask`, `allow`, `deny`, or
 null, and `allow` means the call runs without the ask prompt. It hides nothing: only a `deny` whose
-pattern is `*` removes a tool from the model. The entry above is what keeps the eight `kw-docs`
+pattern is `*` removes a tool from the model. The entry above is what keeps the ten `kw-docs`
 tools callable from a subagent nobody is watching, because an ask that no one answers fails
 closed. It restricts nothing, and deleting it from a rendered file would not hide the tools — it
 would put the prompt back.
@@ -292,7 +292,7 @@ still leaves it alone.
 **Your half:** the server entry in `kilo.jsonc`'s `mcp` key under the key `kw-docs`, launched as
 `kyber-weave-mcp --repo-root .`. An agent file cannot add a server and `squad install` writes no
 harness settings file, so a rendered grant with no `mcp` entry reaches nothing. Then check the repository
-rather than assuming it — call `docs_get_source_repository_and_revision` (it takes no arguments)
+rather than assuming it — call `docs_get_source_repository_and_revision` (its only argument is the optional `projectPath`)
 and confirm its `repo=` equals `git rev-parse --git-common-dir` in the repository you meant.
 
 Do not hand-add a permission key to a rendered agent file: install and update own those bytes.
@@ -1142,8 +1142,32 @@ came from, which is what decides whether a code answer is about your branch.
 
 ## The tools
 
-All eight are declared `ReadOnly` and `OpenWorld = false`, which the SDK maps to the
-protocol's `readOnlyHint` and `openWorldHint`. A client can act on an annotation; it cannot
+### Naming your worktree with `projectPath`
+
+The server binds one root at startup, but agent runs work in linked worktrees created after it
+started, so an answer from the bound root can describe a different branch than the one being
+edited. Every tool therefore takes a `projectPath` (optional, except on the two plan lifecycle tools), the same name CodeGraph's
+`codegraph_explore` uses: the absolute path of a worktree of this repository. Omit it and the
+call is answered from the server's root, as before.
+
+- **Same repository only.** Git is asked for the path's working-tree top level and common git
+  directory (`git rev-parse --show-toplevel --git-common-dir`). The common directory must equal
+  the server root's; a path in another repository, a path that is not inside a git working
+  tree, and a path that is not a directory are refused with a `projectPath was refused:` line
+  after the provenance line, and nothing is answered from the server root in their place. A
+  subdirectory of a worktree names that worktree.
+- **The provenance line shows the root used.** `root=`, `branch=`, `rev=`, `dirty=` and
+  `documents=` describe the worktree the answer came from, so a caller can confirm its own
+  checkout answered.
+- **Per-root state.** The document host, analysis reader and CodeGraph refresh schedule are
+  built on first use for each root and kept in a registry of the four most recently used
+  worktrees (the server root is separate and never evicted). The least recently used one is
+  dropped when a fifth is named, and is rebuilt on its next call.
+- **The index is the worktree's own.** The CodeGraph joins and the freshness refresh use the
+  `.codegraph/` of the named worktree, never the server root's.
+
+All ten are declared `OpenWorld = false`, and all but the two plan lifecycle tools are declared
+`ReadOnly`; the SDK maps those to the protocol's `openWorldHint` and `readOnlyHint`. A client can act on an annotation; it cannot
 act on a sentence claiming the same thing, which is why that claim is no longer prose.
 
 ### How the descriptions are written
@@ -1165,7 +1189,7 @@ logs` puts those nouns in permanently resident text held back only by a negation
 negation is the first thing to degrade when a model scans many tools at once. Read out of
 context it becomes a prohibition on reading tests. Only
 `docs_answer_question_from_repo_documentation` carries an exclusion, because it is the broadest of
-the eight; the narrower seven state their territory positively so no request falls between them.
+the ten; the narrower nine state their territory positively so no request falls between them.
 
 Where a constraint can live on a parameter it goes there instead — for example how
 `charBudget` caps **`docs_get_coding_standard_for_technology`** prose sits on that parameter,
@@ -1186,8 +1210,7 @@ builds from it. The tightest figures anyone reports are:
 These are the tightest figures any client reports, not a figure every vendor has verified — two of
 the three are not vendor documentation at all — so the names are chosen against the smallest of
 them rather than the one that happens to be written down. The current maxima sit inside them: the
-longest tool name is 46 characters (`docs_find_duplicates_conflicts_ambiguous_terms` and
-`dash_read_captured_run_session_or_turn_context`), the longest server-plus-tool pair is 55
+longest tool name is 47 characters (`docs_finalize_approved_plan_and_write_task_file`), the longest server-plus-tool pair is 55
 (`kw-arbiter` with `arbiter_check_configuration_and_key_readiness`), and the longest qualified name
 is 62 (`mcp__kw-arbiter__arbiter_check_configuration_and_key_readiness`). A test pins all three
 bounds (`McpToolNameContractTests`), so a name that would break a client breaks the build instead.
@@ -1198,14 +1221,17 @@ what comes back. A name that states the question wins that decision on merit; a 
 explained before it can be chosen. The cost is paid in the qualified form, which is why the three
 figures above are a budget rather than a remark.
 
-### `docs_answer_question_from_repo_documentation(query, cursor = null)`
+### `docs_answer_question_from_repo_documentation(query, cursor = null, projectPath = null)`
 
 One answer for a question, symbol, route, component, or document id — not a ranked list of
 documents. After the relevance floor, leaves inside qualifying documents compete; the
-winning **leaf** (preamble, lead-in before a `##` section's first `###`, or a `###`) is
-returned whole up to a **24,000-character** ceiling. Past that, the reply is marked
-incomplete and the optional **`cursor`** continues the **same** leaf on the next call with
-the same question.
+winning **leaf** (preamble, lead-in before a `##` section's first `###`, or a `###`) answers
+with a **window**: its best-matching paragraphs plus neighbouring context, about **3,000
+characters**. A window is a complete answer, so it is not marked incomplete and keeps its
+confidence; when the leaf has more, one line offers the optional **`cursor`** for the rest of
+the leaf (no confidence penalty). A continuation returns up to the **24,000-character** ceiling
+and is marked incomplete only if the leaf runs past it. Lists, tables and code blocks are
+never cut inside, so one larger than the window comes back whole.
 
 The response reads, in order:
 
@@ -1213,7 +1239,8 @@ The response reads, in order:
 2. `confidence: 0.00`–`1.00` — `tanh((winning topic − best other topic) / 2)`, halved when
    incomplete; stop at **0.60 or higher** when the answer is not incomplete
 3. a short reading rule (stop, continue with `cursor`, or ask a narrower question)
-4. when incomplete, one line naming the cursor token to pass on the next call
+4. when the window is not the whole leaf, one line naming the cursor token to pass on the next
+   call if the window did not answer (or, past the ceiling, the incomplete notice)
 5. `source: {path} — {## heading} › {### heading}`, or `source: {path}` for the preamble
 6. the leaf prose
 
@@ -1229,7 +1256,7 @@ claims; see [the documentation ontology](../documentation-ontology.md) and [ADR
 A miss says so plainly, reports how many documents were considered, and suggests naming a
 component, doc-id, or symbol instead. Treat that as permission to fall back to grep.
 
-### `docs_get_coding_standard_for_technology(technology, topic = null, charBudget = 12000)`
+### `docs_get_coding_standard_for_technology(technology, topic = null, charBudget = 12000, projectPath = null)`
 
 The local answer for one stack: which standard this repository writes that technology by,
 and what it says. A portable agent arrives holding the standard its own stack ships; this
@@ -1374,7 +1401,7 @@ Four replies are not a standard at all:
   reply never claims otherwise, and the prose is the point: a caller that receives no prose
   opens the file, which is the cost this tool exists to prevent.
 
-### `docs_find_documents_citing_code_symbol(symbol)`
+### `docs_find_documents_citing_code_symbol(symbol, projectPath = null)`
 
 The documents whose `code-refs` **formally claim** a symbol — not those that mention it in
 prose, which is exactly the distinction grep cannot make. Run it before renaming, moving,
@@ -1383,7 +1410,7 @@ or deleting anything to find the documentation that must change with it.
 An empty result distinguishes the two cases the caller cares about: the symbol is
 undocumented, or it is discussed in prose that never claimed ownership of it.
 
-### `docs_find_duplicates_conflicts_ambiguous_terms(kind?, cursor?, limit = 20, charBudget = 12000)`
+### `docs_find_duplicates_conflicts_ambiguous_terms(kind?, cursor?, limit = 20, charBudget = 12000, projectPath = null)`
 
 Runs the repository's current configured documentation analysis and returns candidates in
 stable kind, term, and candidate-id order. `kind` is optional and accepts `duplicate`,
@@ -1396,7 +1423,7 @@ response keeps local cost/cache metrics and line-addressable evidence inside the
 budget. Use [`docs review export`](analysis.md#cli-and-exit-behavior) when a reviewing
 agent needs the versioned rubric and hashes for reusable verdicts.
 
-### `docs_look_up_glossary_term_definition(term)`
+### `docs_look_up_glossary_term_definition(term, projectPath = null)`
 
 Looks up one managed glossary term case-insensitively and returns its proposed, approved,
 and rejected senses, definitions, scopes, and aliases. An unknown term is an ordinary
@@ -1408,12 +1435,11 @@ glossary proposals enter through `docs glossary --write` at the CLI. The MCP rea
 the current config and corpus for each call; embeddings remain loopback-only and are not
 called unless the local cache is safely ignored.
 
-### `docs_validate_governed_document_schema(mergeReady = false, base = "origin/HEAD", charBudget = 12000)`
+### `docs_validate_governed_document_schema(mergeReady = false, base = "origin/HEAD", charBudget = 12000, projectPath = null)`
 
 Runs the same schema conformance gate as [`kyber-weave docs validate`](governance.md) against
-the corpus the server already bound at startup. There is **no repository-path argument**: the
-root is `DocumentIndexHost.RepositoryRoot` for this process, disclosed by the provenance line
-on every response. Compare that `repo=` to `git rev-parse --git-common-dir` before trusting a
+the corpus the server already bound at startup, or the worktree `projectPath` names. The root
+used is disclosed by the provenance line on every response. Compare that `repo=` to `git rev-parse --git-common-dir` before trusting a
 pass or fail.
 
 `mergeReady` maps to the CLI's `--merge-ready`. Default `false` is the **planning gate** —
@@ -1443,12 +1469,12 @@ an omitted count so the caller knows how many more exist.
 The document walk reads the tree on disk, not `git ls-files`, so an untracked plan file under
 the active plans folder is visible to this gate the same way it is to the CLI.
 
-### `docs_detect_drift_between_documents_and_code(charBudget = 12000)`
+### `docs_detect_drift_between_documents_and_code(charBudget = 12000, projectPath = null)`
 
 Runs the same entity-drift gate as [`kyber-weave docs drift`](governance.md) against the
-server's resolved repository root — again with no path argument and the same provenance
+server's resolved repository root, or the worktree `projectPath` names, with the same provenance
 contract as
-[`docs_validate_governed_document_schema`](#docs_validate_governed_document_schemamergeready--false-base--originhead-charbudget--12000).
+[`docs_validate_governed_document_schema`](#docs_validate_governed_document_schemamergeready--false-base--originhead-charbudget--12000-projectpath--null).
 
 `charBudget` uses the same default, clamp, and truncation rules as
 `docs_validate_governed_document_schema`. Response
@@ -1456,14 +1482,15 @@ order matches: provenance, `result: pass` or `result: fail` with counts, then fi
 errors and criticals before warnings.
 
 Warnings such as `KW-DOC-DRIFT-003` do **not** fail the gate; they still appear in the
-findings when present. A missing or unreadable CodeGraph index is reported as critical
+findings when present. An index older than the code collapses the unresolved references into one
+`KW-DOC-DRIFT-004` error naming `codegraph sync .` instead of listing each as drift. A missing or unreadable CodeGraph index is reported as critical
 `KW-DOC-DRIFT-001` with the existing "Drift cannot be verified" message — not as `result:
 pass`.
 
-### `docs_get_source_repository_and_revision()`
+### `docs_get_source_repository_and_revision(projectPath = null)`
 
-Reports the provenance of the corpus this server is answering from, with no query and no
-arguments. This is the cheap session-start check: call it once before trusting any other
+Reports the provenance of the corpus this server is answering from, with no query and only the
+optional `projectPath`. This is the cheap session-start check: call it once before trusting any other
 docs tool, and compare its `repo=` to `git rev-parse --git-common-dir` — a different `root=`
 with the same `repo=` is another worktree of this repository, and a different `repo=` is the
 wrong repository. It returns exactly
@@ -1471,6 +1498,77 @@ the provenance line above — nothing else — so an empty corpus is not a failu
 still reports the root, a count of `0`, and unavailable revision markers when Git cannot be
 read. It is also the one tool that always answers: under the stop rule every other tool can
 return `STATUS: TOOL_FAILURE`, and this one cannot, so a failure can be diagnosed.
+
+### `docs_finalize_approved_plan_and_write_task_file(projectPath, planFile, approvalMode, approval)`
+
+Finalizes an approved Draft plan: records the approval in its `## Decisions` table (an open `AP` row
+or an open "approve and execute" row is answered in place, otherwise a new `AP<n>` row is added; in
+autonomous mode any other row still `RECOMMENDED` is accepted as `autonomous: recommendation
+accepted`), sets the frontmatter `status` to
+`current` and the body status line and the plan index row to Ready, and writes the task file with
+the same code as `kyber-weave docs tasks <plan> --write`. `kyber-weave docs finalize` is its CLI
+twin. `projectPath` is required (the run's worktree); `approvalMode` is `autonomous` or
+`supervised`; `approval` is one line, at most 300 characters, recorded as the provenance.
+
+It edits only the plan, its task file and the plan index, then commits exactly those three files on
+the current branch of `projectPath` (conventional message, never a push), and refuses, changing
+nothing, with `KW-DOC-FINALIZE-008` when other files are staged, and with
+`KW-DOC-FINALIZE-001` (not a plan file under the plans folder), `-002` (not Draft), `-003` (no usable
+approval, or an autonomous approval of a plan whose frontmatter says `autonomy: supervised`), `-004`
+(no Decisions table, or a decision still `OPEN`, or `RECOMMENDED` in supervised mode) or `-005` (the task file cannot be
+written from the plan, or the finalized files fail validation; it writes, validates, and restores
+the original bytes). A plan already Ready with a current task file reports `result: already-ready`.
+The response is the provenance line, `result: finalized | already-ready | refused`, one line per
+finding, and on success `TASK_FILE: <path>`, the ready queue (one line per task: id, title, role,
+dependencies, session; then the tasks that may run now) and `dispatch the first ready tasks now`. The packet self-containment check
+(`KW-DOC-TASKS-008` to `-011`) needs a model, so it is not run here; the architect runs
+`docs tasks --check` before `PLAN_READY`. See
+[ADR 0078](../adr/0078-the-conductor-finalizes-and-archives-plans-through-two-docs-tools.md).
+
+### `docs_archive_plan_after_closeout_is_complete(projectPath, planFile)`
+
+Archives a plan through the same step as `kyber-weave docs closeout <plan> --archive`: sets it
+Archived, moves it to the archive, removes its task file, takes its row out of the plan index, adds
+one to the archived plan inventory and stages the files. `projectPath` is required. When the
+closeout evidence is incomplete it refuses with exactly the findings `docs closeout` reports,
+changes nothing, and ends with a `next:` line sending those findings to `docs-dev`. On success it
+ends with a `next:` line to run `docs_validate_governed_document_schema` with `mergeReady` true and
+`docs_detect_drift_between_documents_and_code`.
+
+### `docs_push_run_branch_and_open_draft_pull_request(projectPath, summary, notes?, title?, draft?, documentationImpact?, planFile?)`
+
+Delivers a finished run in one call, through the same `RunDelivery` step as `kyber-weave run deliver`.
+`projectPath` (the run's worktree) and `summary` (one to three plain sentences: the problem and the
+outcome) are required. `draft` defaults to true and applies only to a new pull request;
+`documentationImpact` carries docs-dev's outcome verbatim; `planFile` is needed only when the branch
+archived more than one plan. In order, it:
+
+1. checks the branch is a run branch with a run record naming its base, and not the base or default
+   branch;
+2. checks the origin remote is on github.com, and that nothing is uncommitted outside the plans,
+   archived-plans and todo folders (the scratch folder is ignored);
+3. finds the plan the branch archived, and refuses a plan it added but did not archive;
+4. checks the title convention and that `gh` runs and is signed in;
+5. commits the archived plan when the archive left it staged, and the todos the follow-up filing
+   wrote, then pushes the branch to `origin` (never forced, never another branch);
+6. creates the pull request into the run's base, as a draft and assigned to the signed-in user, or
+   updates the title and description of the open one for that branch; then reads it back once.
+
+The description is the create-pull-request skill's one format
+(`assets/pull-request-description.md`, shipped as a hash-checked copy), or the host's pull request
+template when it has one. It is filled from the archived plan (changes, `NOT VERIFIED` items,
+low-confidence autonomous decisions), the per-task `task-gate.json` reports written since the run
+started, the last review cycle tied to this branch, and the todos the branch added (listed under
+Follow-up work filed); a missing piece is reported as missing. The
+body goes to `gh` on standard input, so no file is written. It never marks the pull request ready,
+merges, requests reviewers or waits for CI.
+
+The response is the provenance line, `result: created | updated | refused`, one line per finding, and
+on success the pull request link, number, draft state, base, head and the CI checks GitHub reports.
+A refusal carrying `KW-DELIVER-005` ends with a `next:` line to dispatch the delivery agent with the
+`create-pull-request` skill. The rule ids are in the
+[rule reference](../ci-pipelines/rule-reference.md#run-delivery--run-deliver-and-docs_push_run_branch_and_open_draft_pull_request);
+the decision is [ADR 0081](../adr/0081-the-conductor-delivers-a-run-through-one-docs-tool.md).
 
 ## Reading a code join
 
@@ -1511,8 +1609,8 @@ with no shell is not served a stale index. The rules ([ADR 0061](../adr/0062-the
 - **One exception, deliberately.** `docs_get_source_repository_and_revision` always answers, so
   a failure can be diagnosed; and
   `docs_detect_drift_between_documents_and_code` still answers **with** the failure, because
-  its verdict is the CodeGraph-failure report the caller asked for. The other six tools return
-  the failure block.
+  its verdict is the CodeGraph-failure report the caller asked for. The two plan lifecycle tools read
+  no code join and never consult the index. The other six tools return the failure block.
 - **Nothing reaches stdout.** The refresh runs through the process runner, which captures both
   streams: stdout stays JSON-RPC.
 - **Only where the repository declares the server.** The refresh and the failure apply only
@@ -1585,6 +1683,9 @@ so a server that stops answering is killed rather than left behind. The rule and
 | `mcp.handshake` | The server did not answer `initialize` within the MCP budget, or closed its output first | Used up the budget: `kyber-weave doctor --check --mcp-timeout <2 x current>`. Refused because the folder has no `.kyber-weave/kyber-weave.yml`: `kyber-weave docs init "<root>"`, or commit that file to the base branch so new worktrees get it. Any other early exit: run the server directly to read its own error |
 | `mcp.docs_explore` | `docs_answer_question_from_repo_documentation` returned an error, did not answer, or its reply was not a tool result | `kyber-weave update`, or a retry with a larger `--mcp-timeout` |
 | `mcp.root` | The server answers from a different checkout, or its reply names no provenance root | `stop the stale kyber-weave-mcp server and re-run: kyber-weave doctor --check`, or `kyber-weave update` |
+
+`copilot.large-output-limit` is an advisory check that always passes. It is described in
+[The Copilot CLI large-output limit](#the-copilot-cli-large-output-limit).
 
 ### Output contract
 
@@ -1706,6 +1807,43 @@ Windows. If `kyber-weave` is not found on `PATH` there, the block does nothing, 
 `kyber-weave doctor --ensure .`. The block is taken out and the other lines of the hook are kept; the file is deleted
 when only its `#!` line is left. You can also delete the lines between `# >>> kyber-weave worktree index >>>` and
 `# <<< kyber-weave worktree index <<<` by hand. Doing neither leaves the hook running on every new worktree.
+
+### The Copilot CLI large-output limit
+
+Copilot CLI saves any tool result larger than 20 KiB to a temporary file and gives the model only the path and a
+preview. A CodeGraph answer can run to 25,000 characters, so by default many of them are saved instead of shown, and
+agents then stop using the code index and fall back to text search. In live runs, 40% of CodeGraph answers spilled.
+The variable `COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES` raises the limit; it is documented in GitHub's
+[Copilot CLI context management](https://docs.github.com/en/copilot/concepts/agents/copilot-cli/context-management)
+page. Setting it to `32000` keeps every CodeGraph answer inline.
+
+**The check: `copilot.large-output-limit`.** It is reported only when Copilot is in use: a Copilot CLI home exists
+(`$COPILOT_HOME`, else `~/.copilot`), or the repository holds the files the Squad Copilot target installs
+(`.github/agents/` or `.github/copilot-instructions.md`). It reads the variable from the environment `doctor` runs in.
+It is advisory: it always passes, in every mode, so it never changes the exit code and never stops a run. Doctor writes
+nothing; it does not touch your shell profile.
+
+| Reason | Meaning | Fix |
+|---|---|---|
+| `COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES is <n>; large tool results stay inline` | Set to `32000` or more | None |
+| `warning: ... is not set` | Unset, so the 20 KiB default applies | Set it, below |
+| `warning: ... is <n>, below 32000` | Too low for CodeGraph's largest answers | Set it, below |
+| `warning: ... is not a whole number of bytes` | Copilot CLI cannot use the value | Set it, below |
+
+The fix, for the shell Copilot CLI starts from (bash or zsh, then PowerShell):
+
+```bash
+export COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES=32000
+```
+
+```powershell
+$env:COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES = "32000"
+```
+
+Put the line in the profile of the shell that launches Copilot CLI, or in the launcher's environment, and start a new
+session. A variable set in a different terminal does not reach it, and `doctor` run from another shell reports on that
+shell. A larger limit leaves less room for the conversation, so `32000` is the recommended value, not the largest one.
+The threshold is `CopilotLargeOutputProbe.RecommendedThresholdBytes`.
 
 ### Provisioning rules
 

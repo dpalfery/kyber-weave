@@ -13,7 +13,8 @@ Repository-wide rules that govern how the system is built, independent of any on
 A rule about how C# is written belongs in the [C# coding standard](../standards/csharp/README.md);
 a rule about how tests are written belongs in the [test coding standard](../standards/test/README.md);
 a rule that would still hold if this repository were rewritten in another language belongs
-here.
+here. The placement test and the size budget for what every agent reads are in
+[Rules and standards](../documentation-ontology.md#rules-and-standards).
 
 - [`rules/feature-runbooks`](feature-runbooks.md) — Mandates that every component declared with `Type: Feature` in the component catalog provides a companion local run/test runbook or declares an explicit non-executable rationale.
 - [`rules/relocation-over-deletion`](relocation-over-deletion.md) — Mandates that diagnostic recommendations prioritize relocating and progressively disclosing context over deleting or pruning it.

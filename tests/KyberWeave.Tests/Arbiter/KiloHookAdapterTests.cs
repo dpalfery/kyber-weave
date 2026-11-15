@@ -188,7 +188,7 @@ public sealed class KiloHookAdapterTests
     [InlineData("")]
     [InlineData("{\"schema\":\"nope\",\"harness\":\"kilo\",\"phase\":\"before\",\"tool\":\"task\"}")]
     [InlineData("{\"schema\":\"kyber-arbiter.plugin-event/v1\",\"harness\":\"kilo\",\"phase\":\"middle\",\"tool\":\"task\"}")]
-    public void MalformedEnvelope_BlocksFailClosedWithHarnessToken(string stdin)
+    public void MalformedEnvelope_AllowsAndLogsWithHarnessToken(string stdin)
     {
         ScriptedEngine engine = new();
         PluginHookAdapter adapter = new("kilo", "task", "subagent_type", "prompt", engine);
@@ -201,12 +201,10 @@ public sealed class KiloHookAdapterTests
 
         int exit = command.Run("kilo", "conductor", stdin, stdout, log);
 
+        // ADR 0072: an envelope the host cannot read allows, with the code and the harness in the log.
         Assert.Equal(0, exit);
-        using JsonDocument doc = JsonDocument.Parse(stdout.ToString());
-        Assert.Equal("block", doc.RootElement.GetProperty("decision").GetString());
-        string reason = doc.RootElement.GetProperty("reason").GetString() ?? string.Empty;
-        Assert.Contains(HookCommand.FailClosedCode, reason, StringComparison.Ordinal);
-        Assert.Contains("kilo", reason, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, stdout.ToString());
+        Assert.Contains(HookCommand.FailClosedCode, log.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

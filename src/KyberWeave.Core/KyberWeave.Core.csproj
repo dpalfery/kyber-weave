@@ -55,7 +55,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- The 18 shipped Arbiter rules plus the OWNER-001 file-kind map and the
+    <!-- The 18 shipped Arbiter rules plus the test-file patterns and the
          LENS-001 step-0 path table: the single source of truth for defaults. -->
     <EmbeddedResource Include="Arbiter\Rules\default-rules.yml" LogicalName="Arbiter.default-rules.yml" />
     <!-- Embedded Squad copies the Arbiter reads in host repositories without a

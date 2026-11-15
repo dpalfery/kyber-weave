@@ -18,14 +18,22 @@ public static class ArbiterTriggerCatalog
         "delegation.target-class",
         "delegation.target-profile",
         "delegation.prompt",
+        "delegation.head",
+        "delegation.body-head",
+        "delegation.markers",
         "delegation.paths",
         "delegation.planning-paths",
         "delegation.plan-file",
+        "delegation.plan-file-raw",
         "delegation.task",
+        "delegation.task-raw",
+        "delegation.identity",
+        "config.planning-dirs",
         "plan.exists",
         "plan.status",
         "plan.development-mode",
         "plan.tasks.count",
+        "plan.task-list",
         "plan.task",
         "plan.task.text",
         "plan.task.files",
@@ -35,11 +43,12 @@ public static class ArbiterTriggerCatalog
         "plan.test-contract.row",
         "ledger.in-flight.paths",
         "ledger.completed-tasks",
-        "ledger.red-evidence",
+        "ledger.task-returns",
         "harness.observes-returns",
         "harness.model-override",
         "roster.caller.delegates-to",
         "roster.descriptions",
+        "run.started",
         "rules.<id>.answer",
     };
 
@@ -48,10 +57,15 @@ public static class ArbiterTriggerCatalog
         "caller",
         "delegation.target",
         "delegation.prompt",
+        "delegation.head",
         "delegation.markers",
         "delegation.plan-file",
+        "delegation.plan-file-raw",
         "delegation.plan-file-rejected",
+        "delegation.target-profile",
         "config.planning-dirs",
+        "roster.caller.delegates-to",
+        "run.started",
     };
 
     /// <summary>Trigger name to the facts it supplies.</summary>
@@ -61,26 +75,36 @@ public static class ArbiterTriggerCatalog
             ["delegate"] = DelegateFacts,
             ["delegate.returned"] = Union(
                 DelegateFacts,
-                ["git.changed-paths.since-dispatch", "ledger.concurrent.paths", "gate.report.agrees"]),
+                [
+                    "git.changed-paths.since-dispatch", "git.changed-paths.attributed", "ledger.concurrent.paths", "gate.report.agrees",
+                    "gate.report.failing-run-first", "gate.report.claim", "delegation.returned-tail", "checkout.stray-paths", "config.task-gates-declared",
+                ]),
             ["delegate.planner"] = DelegatePlannerFacts,
             ["delegate.planner.returned"] = Union(
                 DelegatePlannerFacts,
-                ["git.changed-paths.since-dispatch", "ledger.concurrent.paths"]),
+                ["git.changed-paths.since-dispatch", "git.changed-paths.attributed", "ledger.concurrent.paths", "checkout.stray-paths"]),
             ["investigate"] = new HashSet<string>(StringComparer.Ordinal)
             {
                 "caller",
                 "delegation.target",
                 "delegation.target-class",
+                "delegation.target-profile",
+                "delegation.markers",
                 "roster.caller.delegates-to",
+                "run.started",
             },
             ["investigate.returned"] = new HashSet<string>(StringComparer.Ordinal)
             {
                 "caller",
                 "delegation.target",
                 "delegation.target-class",
+                "delegation.markers",
                 "roster.caller.delegates-to",
                 "git.changed-paths.since-dispatch",
+                "git.changed-paths.attributed",
                 "ledger.concurrent.paths",
+                "delegation.target-profile",
+                "checkout.stray-paths",
             },
             ["delegate.model"] = new HashSet<string>(StringComparer.Ordinal)
             {
@@ -129,6 +153,14 @@ public static class ArbiterTriggerCatalog
                 "comment.author",
                 "file.text-at-line",
                 "comment.fixing-commits",
+            },
+            // Asked by `review verdict` on the seat files, never by a hook.
+            ["review.verdict"] = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "finding.severity",
+                "finding.claim",
+                "finding.failure-scenario",
+                "override.class",
             },
             ["lens.spawn"] = new HashSet<string>(StringComparer.Ordinal)
             {

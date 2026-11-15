@@ -19,6 +19,7 @@ public sealed class ArbiterPlannerDiffRuleTests
 {
     private const string RuleId = "KW-ARB-PLANNER-DIFF-001";
     private const string SinceDispatchFact = "git.changed-paths.since-dispatch";
+    private const string AttributedFact = "git.changed-paths.attributed";
 
     private const string PlannerPrompt =
         "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\n\nPlan prompt";
@@ -67,7 +68,10 @@ public sealed class ArbiterPlannerDiffRuleTests
 
         if (includeChangedPaths)
         {
-            return facts.With(SinceDispatchFact, changedPaths, ArbiterFactLabel.Derived);
+            // Alone in its tree the planner owns every path that changed, so the attributed paths are the same.
+            return facts
+                .With(SinceDispatchFact, changedPaths, ArbiterFactLabel.Derived)
+                .With(AttributedFact, changedPaths, ArbiterFactLabel.Derived);
         }
 
         Dictionary<string, ArbiterFact> dict = facts.Facts
@@ -117,7 +121,7 @@ public sealed class ArbiterPlannerDiffRuleTests
     }
 
     [Fact]
-    public void AbsentChangedPathsFactAnswersUndecidableAndEscalates()
+    public void AbsentChangedPathsFactAnswersUndecidableAndAllows()
     {
         ArbiterRule rule = ShippedRule();
         ArbiterFactSet facts = PlannerReturnedFacts(includeChangedPaths: false);
@@ -126,11 +130,11 @@ public sealed class ArbiterPlannerDiffRuleTests
         string effect = EffectFor(rule, answer);
 
         Assert.Equal(RuleEngine.Undecidable, answer);
-        Assert.Equal(RuleEffects.Escalate, effect);
+        Assert.Equal(RuleEffects.Allow, effect);
     }
 
     [Fact]
-    public void NullValuedChangedPathsFactAnswersUndecidableAndEscalates()
+    public void NullValuedChangedPathsFactAnswersUndecidableAndAllows()
     {
         ArbiterRule rule = ShippedRule();
         ArbiterFactSet facts = PlannerReturnedFacts(changedPaths: null, includeChangedPaths: true);
@@ -139,7 +143,7 @@ public sealed class ArbiterPlannerDiffRuleTests
         string effect = EffectFor(rule, answer);
 
         Assert.Equal(RuleEngine.Undecidable, answer);
-        Assert.Equal(RuleEffects.Escalate, effect);
+        Assert.Equal(RuleEffects.Allow, effect);
     }
 
     [Fact]
@@ -228,7 +232,7 @@ public sealed class ArbiterPlannerDiffRuleTests
     }
 
     [Fact]
-    public void HookGitFactsOutsideARepositoryLeavesChangedPathsAbsentAndEscalates()
+    public void HookGitFactsOutsideARepositoryLeavesChangedPathsAbsentAndAllows()
     {
         using TempDirectory nonRepo = new();
         using TempDirectory home = new();
@@ -255,7 +259,7 @@ public sealed class ArbiterPlannerDiffRuleTests
         ArbiterRule rule = ShippedRule();
         string answer = RuleEngine.Decide(rule, enrichedPost);
         Assert.Equal(RuleEngine.Undecidable, answer);
-        Assert.Equal(RuleEffects.Escalate, EffectFor(rule, answer));
+        Assert.Equal(RuleEffects.Allow, EffectFor(rule, answer));
 
         const string lensPrompt = "KYBER-ARBITER: true\nLENS: correctness\n\nApply the lens.";
         ArbiterEvent lensEvent = new()
@@ -298,19 +302,20 @@ public sealed class ArbiterPlannerDiffRuleTests
         // 1. Unpaired PostToolUse with no pre-dispatch snapshot: the dispatch delta is
         // unobservable, so the fact stays absent. Falling back to a diff against HEAD would
         // read a committed dispatch write as an empty diff (inside/allow) and leave the
-        // outside branch dead, so the rule stops and asks instead.
+        // outside branch dead, so the rule stays undecidable and allows (ADR 0072).
         ArbiterFactSet unpairedReturn = EnrichPlannerReturn(gitFacts, probe.Root, toolCallId: null);
         Assert.True(unpairedReturn.Facts.TryGetValue(SinceDispatchFact, out ArbiterFact? unpairedFact));
         Assert.Null(unpairedFact!.Value);
         Assert.Equal(RuleEngine.Undecidable, RuleEngine.Decide(rule, unpairedReturn));
-        Assert.Equal(RuleEffects.Escalate, EffectFor(rule, RuleEngine.Undecidable));
+        Assert.Equal(RuleEffects.Allow, EffectFor(rule, RuleEngine.Undecidable));
 
         // 2. Pre-existing dirty file before PreToolUse + planner writes only docs/plans/plan.md during dispatch.
         WriteRepoFile(probe.Root, "src/PreExistingDirty.cs", "// dirty before planner dispatch\n");
         EnrichPlannerPre(gitFacts, probe.Root, toolCallId: "call-plan-1");
         WriteRepoFile(probe.Root, "docs/plans/2026-11-09-feature-plan.md", "# Plan\n");
 
-        ArbiterFactSet planOnlyReturn = EnrichPlannerReturn(gitFacts, probe.Root, toolCallId: "call-plan-1");
+        ArbiterFactSet planOnlyReturn = AttributedToThePlanner(
+            EnrichPlannerReturn(gitFacts, probe.Root, toolCallId: "call-plan-1"));
         IReadOnlyList<string> planOnlyPaths = Assert.IsAssignableFrom<IReadOnlyList<string>>(
             planOnlyReturn.Facts[SinceDispatchFact].Value);
         Assert.Equal(["docs/plans/2026-11-09-feature-plan.md"], planOnlyPaths);
@@ -320,13 +325,18 @@ public sealed class ArbiterPlannerDiffRuleTests
         EnrichPlannerPre(gitFacts, probe.Root, toolCallId: "call-plan-2");
         WriteRepoFile(probe.Root, "src/Rogue.cs", "// rogue planner edit\n");
 
-        ArbiterFactSet rogueReturn = EnrichPlannerReturn(gitFacts, probe.Root, toolCallId: "call-plan-2");
+        ArbiterFactSet rogueReturn = AttributedToThePlanner(
+            EnrichPlannerReturn(gitFacts, probe.Root, toolCallId: "call-plan-2"));
         IReadOnlyList<string> roguePaths = Assert.IsAssignableFrom<IReadOnlyList<string>>(
             rogueReturn.Facts[SinceDispatchFact].Value);
         Assert.Contains("src/Rogue.cs", roguePaths);
         Assert.Equal("outside", RuleEngine.Decide(rule, rogueReturn));
         Assert.Equal(RuleEffects.Escalate, EffectFor(rule, "outside"));
     }
+
+    /// <summary>With no dispatch in flight beside it, the planner owns every path that changed.</summary>
+    private static ArbiterFactSet AttributedToThePlanner(ArbiterFactSet facts) =>
+        facts.With(AttributedFact, facts.Facts[SinceDispatchFact].Value, ArbiterFactLabel.Derived);
 
     private static void EnrichPlannerPre(HookGitFacts gitFacts, string repoRoot, string? toolCallId)
     {

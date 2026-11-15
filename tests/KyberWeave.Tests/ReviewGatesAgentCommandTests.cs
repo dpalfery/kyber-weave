@@ -491,12 +491,10 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
     }
 
     [Theory]
-    [InlineData("Has Space")]
-    [InlineData("../escape")]
-    [InlineData("a/b")]
-    [InlineData("-leading")]
-    [InlineData("UPPER")]
-    public void AnInvalidTaskSlugIsRefusedBeforeAnyGateStarts(string slug)
+    [InlineData("../")]
+    [InlineData("---")]
+    [InlineData("/")]
+    public void ATaskIdWithNothingToNameItIsRefusedBeforeAnyGateStarts(string slug)
     {
         WriteConfiguration(TaskPlaceholderConfiguration);
         ChangeTracked("src/a.cs");
@@ -506,6 +504,20 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
         AssertExitCode(1, run);
         AssertRendered(run, InvalidInput);
         Assert.False(MarkerWasSet());
+    }
+
+    [Theory]
+    [InlineData("Has Space")]
+    [InlineData("UPPER")]
+    [InlineData("../escape")]
+    public void ATaskIdInAnotherSpellingIsNormalisedNotRefused(string slug)
+    {
+        WriteConfiguration(TaskPlaceholderConfiguration);
+        ChangeTracked("src/a.cs");
+
+        CliRun run = Cli(GatesCommand("--agent", "csharp-dev", $"--task={slug}"));
+
+        AssertExitCode(0, run);
     }
 
     [Fact]

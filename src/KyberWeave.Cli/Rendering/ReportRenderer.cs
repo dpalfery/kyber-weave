@@ -7,11 +7,15 @@ using Spectre.Console;
 
 namespace KyberWeave.Cli.Rendering;
 
-public enum OutputFormat { Table, Json, Sarif, Markdown }
+/// <summary>The ways a report is written.</summary>
+/// <remarks><c>Lines</c> is the human format for a reader that is not a terminal: one finding per line, never wrapped.</remarks>
+public enum OutputFormat { Table, Json, Sarif, Markdown, Lines }
 
 /// <summary>Renders a <see cref="DiagnosticReport"/> in the requested format.</summary>
 public static class ReportRenderer
 {
+    private const string NoFindings = "No findings.";
+
     /// <summary>
     /// Renders a report. <paramref name="subjectLabel"/> names what the findings are
     /// about — "Skill", "Agent", "Document" — because the diagnostic model is shared
@@ -24,7 +28,89 @@ public static class ReportRenderer
             case OutputFormat.Json: Console.WriteLine(ToJson(report)); break;
             case OutputFormat.Sarif: Console.WriteLine(ToSarif(report)); break;
             case OutputFormat.Markdown: Console.WriteLine(ToMarkdown(report, command, subjectLabel)); break;
+            case OutputFormat.Lines: RenderLines(report); break;
             default: RenderTable(report, subjectLabel); break;
+        }
+    }
+
+    /// <summary>
+    /// Whether output goes to a terminal that can lay a table out. A redirected stream, or a console that cannot
+    /// measure itself, is read by a program or an agent that greps it, and a table there wraps a rule id or a message
+    /// across several lines.
+    /// </summary>
+    public static bool IsInteractive() => AnsiConsole.Profile.Out.IsTerminal && AnsiConsole.Profile.Width > 0;
+
+    /// <summary>Whether the format is the one meant for a person or an agent to read, rather than a document for a program.</summary>
+    public static bool IsHuman(OutputFormat format) => format is OutputFormat.Table or OutputFormat.Lines;
+
+    /// <summary>
+    /// One finding per line, <c>&lt;severity&gt; &lt;rule-id&gt; &lt;location&gt;: &lt;message&gt; → &lt;fix&gt;</c>, written without
+    /// folding so each line can be grepped whole. Informational findings are listed only when nothing actionable exists,
+    /// as in the table.
+    /// </summary>
+    private static void RenderLines(DiagnosticReport report)
+    {
+        if (report.Items.Count == 0)
+        {
+            AnsiConsole.WriteLine(NoFindings);
+            WriteMetricLines(report);
+            return;
+        }
+
+        List<Diagnostic> actionable = report.Items.Where(item => item.Severity >= Severity.Warning).ToList();
+        IEnumerable<Diagnostic> rows = actionable.Count > 0 ? actionable : report.Items;
+        int omitted = report.Items.Count - rows.Count();
+        if (omitted > 0)
+        {
+            Console.WriteLine(
+                $"{omitted.ToString(CultureInfo.InvariantCulture)} informational findings omitted. Use --format json to list them.");
+        }
+
+        foreach (Diagnostic d in rows.OrderByDescending(item => item.Severity))
+        {
+            Console.WriteLine(FormatLine(d));
+        }
+
+        WriteMetricLines(report);
+    }
+
+    /// <summary>One finding as a single line.</summary>
+    internal static string FormatLine(Diagnostic d)
+    {
+        string where = FormatLocation(d);
+        if (where.Length == 0)
+        {
+            where = d.Subject;
+        }
+
+        StringBuilder line = new StringBuilder();
+        line.Append(d.Severity.ToString().ToUpperInvariant()).Append(' ').Append(d.Code);
+        if (where.Length > 0)
+        {
+            line.Append(' ').Append(OneLine(where)).Append(':');
+        }
+        else
+        {
+            line.Append(':');
+        }
+
+        line.Append(' ').Append(OneLine(d.Message));
+        if (!string.IsNullOrWhiteSpace(d.Hint))
+        {
+            line.Append(" → ").Append(OneLine(d.Hint));
+        }
+
+        return line.ToString();
+    }
+
+    private static string OneLine(string text) =>
+        string.Join(' ', text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+
+    private static void WriteMetricLines(DiagnosticReport report)
+    {
+        foreach (KeyValuePair<string, object?> metric in report.Metrics)
+        {
+            Console.WriteLine($"metric {metric.Key}: {OneLine(FormatMetric(metric.Value))}");
         }
     }
 

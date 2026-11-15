@@ -16,6 +16,8 @@ findings Kilo and CodeRabbit raised across about 100 pull requests from 30 Sep t
 - A `NO FINDINGS` reply names the sections it checked.
 - A seat given guidance that returns no attestation is recorded as a council-coverage gap; its
   findings are not dropped.
+- A finding that matches a [severity override](#severity-overrides) row takes that row's severity
+  and cites its id as `override: <id>`.
 - *(low evidence)* marks a rule that rests on one PR or a thin body of evidence.
 - **Never** cite `scripts/fast-loop.sh` as evidence; only the declared gate suite counts.
 
@@ -31,11 +33,11 @@ findings Kilo and CodeRabbit raised across about 100 pull requests from 30 Sep t
 5. **Don't ask for scope creep.** Unrelated refactors, renames, and new features are
    out of bounds for a review. Equally, flag unrelated edits *in* the diff (see
    [Scope discipline](#scope-discipline)).
-6. **Style and wording nits are minor** and never block. Comment typos, capitalisation, and
-   alignment belong in a single batched note, not one comment each.
+6. **Style and wording nits are nitpicks**: not reported, never fixed (see *What not to flag*).
+   A comment or document statement that is wrong or misleading is a real minor finding.
 7. **Severity follows consequence**: data loss, wrong figures shown to the user, silent failure,
    or a crash path → critical when it ships silently or corrupts data, otherwise major. Wrong only
-   in an edge case with a visible failure → minor. Cosmetic → minor, and never blocks.
+   in an edge case with a visible failure → minor. Cosmetic only → a nitpick, not reported.
 
 ## Recurring defect classes
 
@@ -67,6 +69,10 @@ Governing rule: [honest unobservability](docs/rules/honest-unobservability.md).
   and API responses, including error responses with no data. (#439, #425)
 - **R3** Parsers reject invalid input. Decode strictly (`fatal: true`). Forward only allowlisted
   keys. Never invent identity (for example, a fabricated `sessionId`). (#433, #425)
+- Seat-written and tool-written text (a seat file's `file`, `line`, `evidence`, `Budget reached` line;
+  `gh` or `git` JSON) is untrusted input to the review commands: parse numbers with `TryParse` and a
+  range, canonicalise paths inside the error handling, check JSON shape before `GetProperty`, and cap
+  per-run work (model questions, file reads) with a named constant. (#609)
 - A flat fallback must not override a more specific field that is present (precedence order
   stated and tested).
 - **R4** In .NET, a deserialised value (`as T`, `JsonSerializer` result) must be null-checked and
@@ -315,12 +321,15 @@ Governing standards: [`docs/standards/csharp`](docs/standards/csharp/README.md) 
 
 ## What not to flag
 
-- Anything `dotnet format`, ReSharper, `tsc`, ESLint, `clippy`, or `docs validate` already
+- Anything `dotnet format`, the compiler and analyzers, `tsc`, ESLint, `clippy`, or `docs validate` already
   enforces.
-- Joke-grade or stylistic prose in comments, naming taste, or "I would have written this
-  differently" with no failure scenario.
+- Nitpicks. A nitpick is a purely stylistic point with no effect on how the application operates:
+  formatting, wording preference, naming style, "I would have written this differently". Nitpicks are
+  not raised and never fixed, unless `review.policy.fix-level` is `nitpick`. A naming issue that causes a defect or breaks a documented public contract is graded
+  by its impact instead.
 - Suggestions to add features, abstractions, or configurability the task did not ask for.
-- Pre-existing issues the change does not touch.
+- Pre-existing issues the change does not touch. A breach of a documented rule is the exception: it is
+  reported as pre-existing debt, blocks nothing, and becomes a todo.
 - Re-raising a finding the author already answered with a justified reason, unless the reason
   is demonstrably wrong.
 
@@ -378,6 +387,20 @@ The sections named here are sections of this file. Only the technologies with a 
 Single tasks are not reviewed by an agent: the developer's deterministic `task-gate` covers the
 mechanical checks, and everything judgemental is council-owned.
 
+## Severity overrides
+
+How this repository grades a class of finding, up or down. A row outranks the shipped lens
+guidance and the general severity definitions (*Ground rules* 7): host override, then lens
+guidance, then the definitions. `review seats` gives each seat the rows for its lens and the
+changed files; a seat that applies one writes `override: <Id>` on the finding, and the verdict
+grades the finding at the row's severity and records it. Severity: `critical`, `major`, `minor` or
+`nitpick`. Applies to: lens or technology names, comma-separated; empty for every seat. Add a row
+only for an opinion the owner has stated.
+
+| Id | Finding class | Severity | Applies to | Why |
+|---|---|---|---|---|
+| SO-1 | File or type placed against the documented project, layer or folder structure | major | model-placement, csharp | The owner grades correct placement of files in the C# projects as a major maintainability issue. |
+
 ## Finding format
 
 ```text
@@ -387,6 +410,7 @@ CLASS     <section number and name>
 FAILS     <input or state> → <wrong behaviour>
 FIX       <exact change>; test: <what proves it>
 GUIDANCE  <section ids>
+OVERRIDE  <severity override id, when one applies>
 ```
 
 ## Maintaining this file

@@ -5,6 +5,7 @@ using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Review;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Docs.Validation;
 
@@ -15,7 +16,7 @@ namespace KyberWeave.Core.Docs.Validation;
 public static class DocsSchemaGate
 {
     /// <summary>
-    /// Runs every frontmatter and inventory validator, the managed glossary gate, and — only
+    /// Runs every frontmatter and inventory validator, the review guidance's severity overrides, the managed glossary gate, and — only
     /// when <paramref name="mergeReady"/> is set — the open-work and archive-closeout gates.
     /// </summary>
     public static DiagnosticReport Validate(
@@ -36,6 +37,7 @@ public static class DocsSchemaGate
 
         report.AddRange(new DocSpecValidator(repoRoot, ontology).Validate(set).Items);
         report.AddRange(new ConfigRegValidator(repoRoot, config).Validate().Items);
+        report.AddRange(SeverityOverrides.Validate(repoRoot, config).Items);
         report.AddRange(new PlanInventoryValidator(config).Validate(set).Items);
         report.AddRange(new TodoInventoryValidator(config).Validate(set).Items);
         report.AddRange(new PlanTaskFileValidator(repoRoot, config).Validate(set).Items);
@@ -104,9 +106,7 @@ public static class DocsSchemaGate
         {
             changes = ChangedFiles.ResolveSinceMergeBase(repoRoot, baseRef);
         }
-        catch (Exception ex) when (ex is InvalidOperationException
-            or IOException or UnauthorizedAccessException
-            or Win32Exception or TimeoutException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or Win32Exception or TimeoutException)
         {
             report.Add(new Diagnostic(
                 ArchiveCloseoutValidator.MissingCloseoutEvidence,

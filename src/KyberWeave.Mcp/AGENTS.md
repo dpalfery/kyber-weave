@@ -72,6 +72,30 @@ another branch; only a different `repo=` is the wrong repository. `branch=` says
 answer describes. Adding a field to the header means teaching `McpLiveProbe`'s trailing-metadata
 regex the same field, or `mcp.root` starts failing on a healthy server.
 
+## One root at startup, any worktree per call
+
+Every tool takes an optional `projectPath`. `DocsRootRegistry` resolves it with git to a worktree
+of the same repository as the server root (equal common git directory) and refuses anything else;
+the per-root objects (document host, analysis reader, CodeGraph schedule) live in a `DocsTools`
+built per root, kept in a four-entry least-recently-used set. Omitted means the server root.
+A new tool must take `projectPath` and start with `Redirect(projectPath, ...)`.
+
+## Three tools change files: two plan lifecycle tools and the deliver tool
+
+`docs_finalize_approved_plan_and_write_task_file` and `docs_archive_plan_after_closeout_is_complete`
+(`DocsTools.PlanLifecycle.cs`) write only plan lifecycle files. Each is a thin wrapper over a Core.Docs
+class the CLI also runs (`PlanFinalize`, `PlanCloseout`), requires `projectPath`, refuses any path
+that is not a plan file under the plans folder, and changes nothing on a refusal. Keep any new
+writing tool to that shape: the check and the write live in Core, the tool only formats the result
+([ADR 0078](../../docs/adr/0078-the-conductor-finalizes-and-archives-plans-through-two-docs-tools.md)).
+
+`docs_push_run_branch_and_open_draft_pull_request` (`DocsTools.Delivery.cs`) has the same shape over
+`RunDelivery`, which `kyber-weave run deliver` also runs. It is the one tool that reaches outside the
+machine (`OpenWorld = true`): it pushes the run branch and creates or updates its draft pull request
+with `gh`. Its only local write is a commit of plan files the archive left staged. Its git and gh
+calls go through an `IProcessExecutor` that tests replace (`DeliveryExecutor`), so no test contacts
+GitHub ([ADR 0081](../../docs/adr/0081-the-conductor-delivers-a-run-through-one-docs-tool.md)).
+
 ## Staleness is handled for you
 
 `DocumentIndexHost.Current()` rebuilds whichever half has gone stale on each call. Do not
@@ -94,8 +118,8 @@ so a tool call never blocks on the provisioner's 600-second index timeout.
   token is a whole line so a passing mention cannot satisfy a caller that routes on it.
 - **Two tools answer anyway, deliberately.** `docs_get_source_repository_and_revision` always
   answers so a failure can be diagnosed, and `docs_detect_drift_between_documents_and_code` answers
-  with the failure because its verdict is the failure report. The other six go through
-  `CheckCodeGraph` and return the block.
+  with the failure because its verdict is the failure report. The two plan lifecycle tools read no
+  code join and skip the gate. The other six go through `CheckCodeGraph` and return the block.
 - **Where it applies.** Only where the bound repository lists `codegraph` under
   `mcp.required-servers` (`McpConfig.DeclaresCodeGraph`). A host that never declared it takes no
   lock and reports nothing. Settings are read at each refresh, so an edit needs no restart.

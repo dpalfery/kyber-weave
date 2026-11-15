@@ -242,6 +242,24 @@ public sealed class ArbiterModelTargetFactsTests : IDisposable
     }
 
     [Fact]
+    public async Task PriorAttempt_ABudgetExceededReturnIsAFailureSoTheReworkClimbsARung()
+    {
+        InFlightLedger ledger = new(ArbiterDirectory);
+        await ledger.AppendAsync(Pre("pre-1", "T2", profile: "fast", token: "t-fast"));
+        await ledger.AppendAsync(new ArbiterLedgerEvent("post-1", At, "hook", "claude", null, ArbiterLedgerPhases.Post)
+        {
+            PreId = "pre-1",
+            Returns = new ArbiterReturnMarkers(PlannerStatus: "BUDGET_EXCEEDED"),
+        });
+
+        ArbiterFactSet facts = Enrich(DelegateModelBag(["src/A.cs"]));
+
+        Assert.Equal("fail", PriorAttempt(facts).Result);
+        Assert.True(facts.TryGet("model-targeting.ladder.next", out ArbiterFact? next));
+        Assert.Equal("general", next.Value);
+    }
+
+    [Fact]
     public void PriorAttempt_AbsentWithNoEarlierAttempt()
     {
         ArbiterFactSet facts = Enrich(DelegateModelBag(["src/A.cs"]));

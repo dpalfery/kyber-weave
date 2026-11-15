@@ -28,12 +28,13 @@ and decision ids. Tests construct `HookCommand` directly with scripted engines a
 counting config loaders — that is how the fast path proves it never loads
 `.kyber-weave/kyber-weave.yml`.
 
-## Fail closed
+## Fail open (ADR 0072)
 
-One top-level catch in `HookCommand` turns any exception into that harness's block,
-carrying `KW-ARB-HOOK-001`. On conductor dispatches the reason is an escalation
-envelope with `ANSWER: error`. Malformed stdin, missing or malformed configuration on
-a classified event, and an engine crash all block, never pass.
+One top-level catch in `HookCommand` turns any exception into an allow: it logs
+`KW-ARB-HOOK-001` with the reason to stderr and writes the harness's allow document.
+Malformed stdin, missing or malformed configuration on a classified event, an engine
+crash and a guard fault all allow and log. Only a machine fact or a confident model
+answer blocks.
 
 ## The MCP fallback (`serve`)
 

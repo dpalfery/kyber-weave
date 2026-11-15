@@ -33,7 +33,7 @@ public sealed partial class DocumentIndex
     private const double EndpointWeight = 5.0;
     private const double KeywordWeight = 4.0;
     private const double ComponentWeight = 3.0;
-    private const double TitleWeight = 2.0;
+    private const double TitleWeight = 4.0;
     private const double BodyWeight = 1.0;
 
     /// <summary>
@@ -604,9 +604,14 @@ public sealed partial class DocumentIndex
     /// system and Azure architecture documents was: three documents sharing one generic
     /// word, ranked above the one the user actually asked for.
     /// </remarks>
-    internal static double ScorePartialIdentity(DocumentModel doc, IReadOnlyDictionary<string, double> queryVector)
+    internal static double ScorePartialIdentity(
+        DocumentModel doc,
+        IReadOnlyDictionary<string, double> queryVector,
+        DocumentCorpus? corpus = null)
     {
         if (queryVector.Count == 0) return 0;
+
+        Func<string, double>? weight = corpus is null ? null : corpus.IdentityTokenWeight;
 
         double keywordCoverage = 0;
         if (doc.Keywords.Count > 0)
@@ -614,7 +619,7 @@ public sealed partial class DocumentIndex
             double matched = 0;
             foreach (string keyword in doc.Keywords)
             {
-                double cov = Coverage(keyword, queryVector);
+                double cov = Coverage(keyword, queryVector, weight);
                 if (cov > 0)
                 {
                     matched += cov;
@@ -624,8 +629,8 @@ public sealed partial class DocumentIndex
             keywordCoverage = KeywordPartialWeight * Math.Min(1.5, matched);
         }
 
-        return IdPartialWeight * Coverage(doc.Frontmatter.Id, queryVector)
-               + ComponentPartialWeight * Coverage(doc.Frontmatter.Component, queryVector)
+        return IdPartialWeight * Coverage(doc.Frontmatter.Id, queryVector, weight)
+               + ComponentPartialWeight * Coverage(doc.Frontmatter.Component, queryVector, weight)
                + keywordCoverage;
     }
 
@@ -641,7 +646,10 @@ public sealed partial class DocumentIndex
     /// That fusion is not a nicety: the component "MotorcycleRAG Web UI" has to be
     /// reachable from a query that writes "WebUI" as one word, which is how people type it.
     /// </remarks>
-    internal static double Coverage(string? identity, IReadOnlyDictionary<string, double> queryVector)
+    internal static double Coverage(
+        string? identity,
+        IReadOnlyDictionary<string, double> queryVector,
+        Func<string, double>? weight = null)
     {
         if (string.IsNullOrWhiteSpace(identity)) return 0;
 
@@ -653,7 +661,8 @@ public sealed partial class DocumentIndex
 
         if (parts.Count == 0) return 0;
 
-        int covered = 0;
+        double covered = 0;
+        double total = 0;
         for (int i = 0; i < parts.Count; i++)
         {
             string p = parts[i];
@@ -674,10 +683,12 @@ public sealed partial class DocumentIndex
                 }
             }
 
-            if (hit) covered++;
+            double share = weight?.Invoke(p) ?? 1.0;
+            total += share;
+            if (hit) covered += share;
         }
 
-        return (double)covered / parts.Count;
+        return covered / total;
     }
 
     /// <summary>
