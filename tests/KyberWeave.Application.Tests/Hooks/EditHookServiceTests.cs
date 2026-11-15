@@ -45,7 +45,7 @@ public sealed class EditHookServiceTests
         Assert.DoesNotContain("dotnet-format-style", result.Feedback, StringComparison.Ordinal);
         Assert.Equal(2, runner.Calls.Count);
         Assert.All(runner.Calls, c => Assert.Equal(FakeFileSystem.Root, c.Cwd));
-        Assert.Contains("KyberWeave.sln", runner.Calls[0].Argv);
+        Assert.Contains("src/App/App.csproj", runner.Calls[0].Argv);
         Assert.Contains("src/App/Foo.cs", runner.Calls[0].Argv);
     }
 

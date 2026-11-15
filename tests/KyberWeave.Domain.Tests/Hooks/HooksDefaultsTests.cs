@@ -19,7 +19,7 @@ public sealed class HooksDefaultsTests
     {
         HookRule rule = Rule("dotnet-format-whitespace");
 
-        Assert.Equal(["dotnet", "format", "{marker}", "whitespace", "--verify-no-changes", "--include", "{file}", "-v", "minimal"], rule.Run);
+        Assert.Equal(["dotnet", "format", "{target}", "whitespace", "--verify-no-changes", "--include", "{file}", "-v", "minimal"], rule.Run);
         Assert.Equal(["**/*.cs", "**/*.csproj", "**/*.props"], rule.Include);
         Assert.True(rule.Enabled);
         Assert.Equal(HookRuleKind.Lint, rule.Kind);
@@ -30,7 +30,7 @@ public sealed class HooksDefaultsTests
     {
         HookRule rule = Rule("dotnet-format-style");
 
-        Assert.Equal(["dotnet", "format", "{marker}", "style", "--verify-no-changes", "--severity", "warn", "--include", "{file}", "-v", "minimal"], rule.Run);
+        Assert.Equal(["dotnet", "format", "{target}", "style", "--verify-no-changes", "--severity", "warn", "--include", "{file}", "-v", "minimal"], rule.Run);
         Assert.True(rule.Enabled);
     }
 

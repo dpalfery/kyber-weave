@@ -47,7 +47,7 @@ public sealed class RealDataCompositionTests : IDisposable
         HookResult result = await provider.GetRequiredService<IEditHookService>().RunAsync(new HookEditEvent(file, root.FullName, "Write"), CancellationToken.None);
 
         Assert.Equal(HookResult.Silent, result);
-        Assert.Equal(["dotnet", "format", "App.sln", "whitespace", "--verify-no-changes", "--include", "src/App/Foo.cs", "-v", "minimal"], runner.Calls[0].Argv);
+        Assert.Equal(["dotnet", "format", "src/App/App.csproj", "whitespace", "--verify-no-changes", "--include", "src/App/Foo.cs", "-v", "minimal"], runner.Calls[0].Argv);
         Assert.Equal(root.FullName, runner.Calls[0].Cwd);
     }
 

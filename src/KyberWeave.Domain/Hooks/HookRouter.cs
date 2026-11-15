@@ -64,7 +64,8 @@ public static class HookRouter
             string expanded = arg
                 .Replace("{file}", file, StringComparison.Ordinal)
                 .Replace("{root}", facts.Root, StringComparison.Ordinal);
-            if (!TryReplace(ref expanded, "{marker}", facts.Marker)
+            if (!TryReplace(ref expanded, "{target}", facts.Project ?? facts.Marker)
+                || !TryReplace(ref expanded, "{marker}", facts.Marker)
                 || !TryReplace(ref expanded, "{project}", facts.Project)
                 || !TryReplace(ref expanded, "{testProject}", facts.TestProject))
             {

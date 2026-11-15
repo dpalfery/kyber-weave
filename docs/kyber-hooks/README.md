@@ -75,14 +75,15 @@ go to stderr; Claude Code shows stderr to the agent only on exit 2.
 
 | Id | Kind | On by default | Runs |
 |---|---|---|---|
-| `dotnet-format-whitespace` | lint | yes | `dotnet format {marker} whitespace --verify-no-changes --include {file} -v minimal` |
-| `dotnet-format-style` | lint | yes | `dotnet format {marker} style --verify-no-changes --severity warn --include {file} -v minimal` |
+| `dotnet-format-whitespace` | lint | yes | `dotnet format {target} whitespace --verify-no-changes --include {file} -v minimal` |
+| `dotnet-format-style` | lint | yes | `dotnet format {target} style --verify-no-changes --severity warn --include {file} -v minimal` |
 | `dotnet-test` | test | no | `dotnet test --project {testProject} -c Release --filter-class {testClasses}` |
 
 The format rules match `**/*.cs`, `**/*.csproj` and `**/*.props` and skip `bin` and `obj`.
-`{marker}` is the nearest `*.sln` or `*.slnx` above the file, as in the repository's own task
-gates. A rule that needs a token with no value for the file (no solution, no covering test) is
-left out.
+`{target}` is the nearest project file above the file, or the nearest solution when there is none;
+formatting one project is much faster than formatting the whole solution. `{marker}` is the nearest
+`*.sln` or `*.slnx`, as in the repository's own task gates. A rule that needs a token with no value
+for the file (no project or solution, no covering test) is left out.
 
 The test rule is opt-in and never runs a whole suite. For `Foo.cs` it looks for a class `FooTests`
 declared in a file `FooTests.cs`, confirms the class exists, and passes only those classes to the
@@ -113,8 +114,8 @@ A rule has these keys:
 | `blocking` | Whether failure exits 2; default true. |
 | `enabled` | Turn a rule off, or an opt-in rule on. |
 
-Tokens in `run`: `{file}`, `{marker}` and `{project}` (repository-relative), `{root}` (absolute
-repository root), `{testProject}` (the test project holding the covering tests), and a standalone
+Tokens in `run`: `{file}`, `{marker}`, `{project}` and `{target}` (the project, else the marker), all
+repository-relative, `{root}` (absolute repository root), `{testProject}` (the test project holding the covering tests), and a standalone
 `{testClasses}` argument, which expands to one argument per class. Commands run from the repository
 root. A new rule (an id that is not built in) must set `kind`, `include` and `run`.
 

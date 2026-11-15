@@ -12,12 +12,12 @@ public sealed class HookRouterTests
         new HooksConfigOverlay(null, null, null, null, [new HookRuleOverlay("dotnet-test", null, null, null, null, null, null, true)], []));
 
     [Fact]
-    public void PlansBothFormatChecksForACSharpFileWithTheSolutionAndFile()
+    public void PlansBothFormatChecksForACSharpFileWithTheProjectAndFile()
     {
         IReadOnlyList<PlannedCommand> plan = HookRouter.Plan(HooksDefaults.Config, "src/App/Foo.cs", Facts);
 
         Assert.Equal(["dotnet-format-whitespace", "dotnet-format-style"], plan.Select(p => p.RuleId));
-        Assert.Equal(["dotnet", "format", "KyberWeave.sln", "whitespace", "--verify-no-changes", "--include", "src/App/Foo.cs", "-v", "minimal"], plan[0].Argv);
+        Assert.Equal(["dotnet", "format", "src/App/App.csproj", "whitespace", "--verify-no-changes", "--include", "src/App/Foo.cs", "-v", "minimal"], plan[0].Argv);
     }
 
     [Fact]
@@ -55,8 +55,26 @@ public sealed class HookRouterTests
     }
 
     [Fact]
-    public void LeavesOutARuleWhoseMarkerIsMissing() =>
-        Assert.Empty(HookRouter.Plan(HooksDefaults.Config, "src/App/Foo.cs", Facts with { Marker = null }));
+    public void FallsBackToTheSolutionWhenThereIsNoProject()
+    {
+        PlannedCommand first = HookRouter.Plan(HooksDefaults.Config, "src/App/Foo.cs", Facts with { Project = null })[0];
+
+        Assert.Equal("KyberWeave.sln", first.Argv[2]);
+    }
+
+    [Fact]
+    public void ExpandsMarkerToTheSolutionEvenWhenAProjectExists()
+    {
+        HookRule rule = new("custom", HookRuleKind.Lint, ["**"], [], ["tool", "{marker}", "{target}"], 10, true, true);
+
+        PlannedCommand command = Assert.Single(HookRouter.Plan(new HooksConfig(30, false, 30, 3000, [rule], []), "f", Facts));
+
+        Assert.Equal(["tool", "KyberWeave.sln", "src/App/App.csproj"], command.Argv);
+    }
+
+    [Fact]
+    public void LeavesOutARuleWhoseTargetIsMissing() =>
+        Assert.Empty(HookRouter.Plan(HooksDefaults.Config, "src/App/Foo.cs", Facts with { Marker = null, Project = null }));
 
     [Fact]
     public void ExpandsRootProjectAndFileTokensInsideLargerArguments()
