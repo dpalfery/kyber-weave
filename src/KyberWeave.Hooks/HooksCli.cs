@@ -40,8 +40,17 @@ internal static class HooksCli
             return 1;
         }
 
-        string json = await stdin.ReadToEndAsync().ConfigureAwait(false);
-        if (ClaudeHookEventParser.Parse(json) is not { } edit)
+        string json = await ReadBoundedAsync(stdin).ConfigureAwait(false);
+        HookParseResult parsed = ClaudeHookEventParser.Parse(json);
+        if (parsed.Problem is { } problem)
+        {
+            string warning = $"kyber-weave-hooks: skipped; {problem}";
+            await stderr.WriteLineAsync(warning).ConfigureAwait(false);
+            await stdout.WriteLineAsync(AdditionalContext(warning)).ConfigureAwait(false);
+            return 0;
+        }
+
+        if (parsed.Edit is not { } edit)
         {
             return 0;
         }
@@ -65,6 +74,24 @@ internal static class HooksCli
         }
 
         return result.ExitCode;
+    }
+
+    private static async Task<string> ReadBoundedAsync(TextReader reader)
+    {
+        char[] buffer = new char[ClaudeHookEventParser.MaxInputChars + 1];
+        int total = 0;
+        while (total < buffer.Length)
+        {
+            int read = await reader.ReadAsync(buffer.AsMemory(total)).ConfigureAwait(false);
+            if (read == 0)
+            {
+                break;
+            }
+
+            total += read;
+        }
+
+        return new string(buffer, 0, total);
     }
 
     private static string AdditionalContext(string feedback) =>

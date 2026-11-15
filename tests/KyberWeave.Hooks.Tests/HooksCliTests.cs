@@ -55,12 +55,33 @@ public sealed class HooksCliTests : IDisposable
     }
 
     [Fact]
-    public async Task UnreadableStdinExitsZeroSilently()
+    public async Task UnreadableStdinExitsZeroWithAWarningInAdditionalContext()
     {
         int code = await Run("{ nope", new ProcessRunResult(1, "x", false), "run", "--harness", "claude");
 
         Assert.Equal(0, code);
+        Assert.Contains("not valid JSON", stderr.ToString(), StringComparison.Ordinal);
+        Assert.Contains("additionalContext", stdout.ToString(), StringComparison.Ordinal);
+        Assert.Contains("not valid JSON", stdout.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WrongHarnessJsonWarnsInsteadOfSkippingSilently()
+    {
+        int code = await Run("""{"conversation_id":"c1"}""", new ProcessRunResult(1, "x", false), "run", "--harness", "claude");
+
+        Assert.Equal(0, code);
+        Assert.Contains("tool_input", stdout.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InputWithoutAFileIsSilent()
+    {
+        int code = await Run("""{"tool_input":{"command":"ls"}}""", new ProcessRunResult(1, "x", false), "run", "--harness", "claude");
+
+        Assert.Equal(0, code);
         Assert.Equal(string.Empty, stderr.ToString());
+        Assert.Equal(string.Empty, stdout.ToString());
     }
 
     [Fact]
