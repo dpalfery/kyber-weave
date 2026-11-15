@@ -220,7 +220,7 @@ public static class FactoryHookMapper
     private static FactoryWireSpan MapSessionSpan(JsonElement payload)
     {
         string? session = ReadNonEmptyString(payload, "session_id");
-        string sessionId = session ?? string.Empty;
+        string sessionId = session ?? AnonymousSessionId(payload);
         List<FactoryWireEntry> attributes = [ContractAttribute()];
         if (session is not null)
             attributes.Add(StringAttribute(FactoryKeys.SessionId, session));
@@ -233,7 +233,7 @@ public static class FactoryHookMapper
     private static FactoryWireSpan MapPromptTurnSpan(JsonElement payload, FactoryMapOptions options)
     {
         string? session = ReadNonEmptyString(payload, "session_id");
-        string sessionId = session ?? string.Empty;
+        string sessionId = session ?? AnonymousSessionId(payload);
         string? messageId = ReadNonEmptyString(payload, "message_id");
         List<FactoryWireEntry> attributes = [ContractAttribute()];
         if (session is not null)
@@ -257,7 +257,7 @@ public static class FactoryHookMapper
     private static FactoryWireSpan MapStopTurnSpan(JsonElement payload)
     {
         string? session = ReadNonEmptyString(payload, "session_id");
-        string sessionId = session ?? string.Empty;
+        string sessionId = session ?? AnonymousSessionId(payload);
         string? messageId = ReadNonEmptyString(payload, "message_id");
         List<FactoryWireEntry> attributes = [ContractAttribute()];
         if (session is not null)
@@ -276,7 +276,7 @@ public static class FactoryHookMapper
     private static FactoryWireSpan MapToolSpan(JsonElement payload, bool includeOutcome)
     {
         string? session = ReadNonEmptyString(payload, "session_id");
-        string sessionId = session ?? string.Empty;
+        string sessionId = session ?? AnonymousSessionId(payload);
         string? callId = ReadNonEmptyString(payload, "tool_call_id");
         List<FactoryWireEntry> attributes = [ContractAttribute()];
         if (session is not null)
@@ -300,6 +300,15 @@ public static class FactoryHookMapper
 
         return CreateSpan(FactorySpanKind.Tool, sessionId, callId ?? sessionId, attributes);
     }
+
+    /// <summary>
+    /// Session identity for a payload that carries none. Every anonymous payload must not share
+    /// one empty identity, or unrelated anonymous sessions collapse onto the same trace and span
+    /// ids; a digest of the payload keeps them apart and stays stable across a retry of the same
+    /// payload.
+    /// </summary>
+    private static string AnonymousSessionId(JsonElement payload) =>
+        $"anon-{Sha256Hex(JsonSerializer.Serialize(payload))[..16]}";
 
     private static FactoryWireSpan CreateSpan(
         FactorySpanKind kind,
