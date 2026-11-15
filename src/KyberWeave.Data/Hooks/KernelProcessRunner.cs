@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
@@ -43,6 +44,10 @@ internal sealed class KernelProcessRunner : IProcessRunner
         {
             ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, timeout, MaxOutputBytes, cancellationToken);
             return new ProcessRunResult(result.ExitCode, result.StandardOutput + result.StandardError, TimedOut: false);
+        }
+        catch (Exception ex) when (ex is Win32Exception or FileNotFoundException or DirectoryNotFoundException)
+        {
+            throw new FileNotFoundException($"command not found: {argv[0]}", argv[0], ex);
         }
         catch (TimeoutException)
         {

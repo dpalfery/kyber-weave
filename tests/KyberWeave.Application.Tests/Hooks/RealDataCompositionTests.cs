@@ -38,6 +38,33 @@ public sealed class RealDataCompositionTests : IDisposable
     }
 
     [Fact]
+    public async Task MissingExecutableIsReportedAsCommandNotFoundAndNeverBlocks()
+    {
+        string file = Repository();
+        _ = Write(
+            ".kyber-weave/hooks.yml",
+            """
+            rules:
+              - id: dotnet-format-whitespace
+                enabled: false
+              - id: dotnet-format-style
+                enabled: false
+              - id: ghost
+                kind: lint
+                include: ["src/**/*.cs"]
+                run: [kyber-weave-no-such-command-xyz, "{file}"]
+            """);
+        ServiceCollection services = [];
+        _ = services.AddWeaveApplication();
+        using ServiceProvider provider = services.BuildServiceProvider();
+
+        HookResult result = await provider.GetRequiredService<IEditHookService>().RunAsync(new HookEditEvent(file, root.FullName), CancellationToken.None);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("command not found: kyber-weave-no-such-command-xyz", result.Feedback, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RegistrationKeepsAHostSuppliedRunnerAndRunsTheBuiltInRules()
     {
         string file = Repository();

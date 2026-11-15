@@ -8,7 +8,7 @@ public interface IProcessRunner
     /// <param name="workingDirectory">The directory to run in.</param>
     /// <param name="timeout">Longest the command may run before its process tree is killed.</param>
     /// <param name="cancellationToken">Cancels the run and kills the process tree.</param>
-    /// <returns>The exit code and merged output. Throws when the program cannot be started.</returns>
+    /// <returns>The exit code and merged output. Throws <see cref="FileNotFoundException"/> ("command not found: name") when the program does not exist, and another exception when it cannot be started.</returns>
     Task<ProcessRunResult> RunAsync(
         IReadOnlyList<string> argv,
         string workingDirectory,
