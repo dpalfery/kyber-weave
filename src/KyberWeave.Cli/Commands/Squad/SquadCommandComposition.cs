@@ -215,8 +215,9 @@ internal static class SquadCommandComposition
 
     /// <summary>
     ///     Whether the receipt at <paramref name="targetRoot" /> records any file or block for
-    ///     <paramref name="target" />. An absent or unreadable receipt answers false: the uninstall then
-    ///     reports the harness as not installed, and a corrupt receipt is surfaced by the lifecycle call.
+    ///     <paramref name="target" />. An absent receipt answers false: the uninstall then reports the
+    ///     harness as not installed. A receipt that cannot be read (corrupt, or a file-system failure) answers
+    ///     true so the lifecycle call surfaces the real error instead of a misleading "not installed".
     /// </summary>
     public static bool ReceiptHasTarget(
         SquadStateStore stateStore,
@@ -229,7 +230,7 @@ internal static class SquadCommandComposition
         {
             receipt = stateStore.ReadReceipt(targetRoot, scope);
         }
-        catch (InvalidDataException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException)
         {
             return true;
         }
