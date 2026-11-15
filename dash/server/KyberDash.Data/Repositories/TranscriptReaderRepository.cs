@@ -142,7 +142,26 @@ public class TranscriptReaderRepository : ITranscriptReaderRepository
             index++;
             bool hasUsage = group.InputTokens != 0 || group.OutputTokens != 0 || group.CacheReadTokens != 0 || group.CacheCreationTokens != 0;
             if (!hasUsage)
+            {
+                // A transcript tail (tool results after the last usage line) belongs to the call
+                // before it, so attach its parts there rather than dropping them.
+                if (group.Turn.Parts.Count > 0 && envelopes.Count > 0)
+                {
+                    SourceRecordEnvelope previous = envelopes[^1];
+                    if (previous.ReaderTurn is { } previousTurn)
+                    {
+                        envelopes[^1] = previous with
+                        {
+                            ReaderTurn = previousTurn with
+                            {
+                                Parts = [.. previousTurn.Parts, .. group.Turn.Parts],
+                            },
+                        };
+                    }
+                }
+
                 continue;
+            }
 
             string sessionId = group.SessionId ?? Path.GetFileNameWithoutExtension(filePath);
             string dedupSuffix = group.NativeRecordId ?? index.ToString(CultureInfo.InvariantCulture);
