@@ -41,9 +41,20 @@
         "resolved": "18.1.0",
         "contentHash": "5K+9KFg2TdTl7VXv88Qzi/0lqK6JFoNP3lRuImPYGRV7K/QYklDyTrj4+A+KAki1JsQi6qKY+hDyY7d6WRqjrw=="
       },
+      "kyberweave.contracts": {
+        "type": "Project",
+        "dependencies": {
+          "KyberWeave.Domain": "[0.1.0, )",
+          "KyberWeave.Kernel": "[0.1.0, )"
+        }
+      },
       "kyberweave.core": {
         "type": "Project",
         "dependencies": {
+          "KyberWeave.Contracts": "[0.1.0, )",
+          "KyberWeave.Data": "[0.1.0, )",
+          "KyberWeave.Domain": "[0.1.0, )",
+          "KyberWeave.Kernel": "[0.1.0, )",
           "Markdig": "[1.5.1, )",
           "YamlDotNet": "[18.1.0, )"
         }
@@ -63,6 +74,23 @@
           "Markdig": "[1.5.1, )",
           "YamlDotNet": "[18.1.0, )"
         }
+      },
+      "kyberweave.data": {
+        "type": "Project",
+        "dependencies": {
+          "KyberWeave.Contracts": "[0.1.0, )",
+          "KyberWeave.Domain": "[0.1.0, )",
+          "KyberWeave.Kernel": "[0.1.0, )"
+        }
+      },
+      "kyberweave.domain": {
+        "type": "Project",
+        "dependencies": {
+          "KyberWeave.Kernel": "[0.1.0, )"
+        }
+      },
+      "kyberweave.kernel": {
+        "type": "Project"
       }
     }
   }

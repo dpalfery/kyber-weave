@@ -6,10 +6,21 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
     <RootNamespace>KyberWeave.Kernel</RootNamespace>
     <Version>0.1.0</Version>
     <Authors>KyberWeave</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="KyberWeave.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.Core" />
+    <InternalsVisibleTo Include="KyberWeave.Core.Docs" />
+    <InternalsVisibleTo Include="KyberWeave.Core.Squad" />
+  </ItemGroup>
+
+  <!-- Each area owns one Areas\<Area>.props for its resources and package references, so parallel moves never edit the same lines. -->
+  <Import Project="Areas\*.props" />
 
 </Project>
