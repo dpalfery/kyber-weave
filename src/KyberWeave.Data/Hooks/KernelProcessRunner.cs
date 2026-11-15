@@ -77,12 +77,12 @@ internal sealed class KernelProcessRunner : IProcessRunner
     {
         if (ex is Win32Exception { NativeErrorCode: MissingExecutableErrorCode } && !Directory.Exists(workingDirectory))
         {
-            return WorkingDirectoryNotFound(workingDirectory);
+            return WorkingDirectoryNotFound(workingDirectory, ex);
         }
 
         return new FileNotFoundException($"command not found: {program}", program, ex);
     }
 
-    private static DirectoryNotFoundException WorkingDirectoryNotFound(string workingDirectory) =>
-        new($"working directory not found: {workingDirectory}");
+    private static DirectoryNotFoundException WorkingDirectoryNotFound(string workingDirectory, Exception? inner = null) =>
+        new($"working directory not found: {workingDirectory}", inner);
 }

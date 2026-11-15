@@ -44,10 +44,12 @@ public sealed class KernelProcessRunnerTests : IDisposable
     {
         string missing = Path.Combine(directory.FullName, "removed-mid-start");
 
+        Win32Exception native = new(2);
         DirectoryNotFoundException mapped = Assert.IsType<DirectoryNotFoundException>(
-            KernelProcessRunner.MapMissingExecutable(new Win32Exception(2), "dotnet", missing));
+            KernelProcessRunner.MapMissingExecutable(native, "dotnet", missing));
 
         Assert.Equal($"working directory not found: {missing}", mapped.Message);
+        Assert.Same(native, mapped.InnerException);
     }
 
     [Fact]
