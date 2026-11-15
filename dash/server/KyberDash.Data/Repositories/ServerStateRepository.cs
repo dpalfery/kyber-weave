@@ -343,7 +343,15 @@ public class ServerStateRepository : IServerStateRepository, IEngineDescriptorPu
             {
                 AtomicFile.RefuseSymlink(lockPath);
                 if (!JobsLease.TryReadLockPid(lockPath, out int existingPid))
-                    return null;
+                {
+                    // A lock that cannot be read is corrupt, not a live holder. Reclaim it once it is
+                    // old enough that a concurrent writer would have finished, so one bad file
+                    // cannot deny the jobs lease forever.
+                    if (!TryReclaimCorruptLock(lockPath))
+                        return null;
+
+                    continue;
+                }
 
                 if (JobsLease.IsProcessAlive(existingPid))
                     return null;
@@ -360,6 +368,32 @@ public class ServerStateRepository : IServerStateRepository, IEngineDescriptorPu
         }
 
         return null;
+    }
+
+    /// <summary>How long a corrupt <c>jobs.lock</c> is left alone in case a writer is mid-write.</summary>
+    private static readonly TimeSpan CorruptLockGracePeriod = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Deletes a <c>jobs.lock</c> that holds no readable owner, or reports <see langword="false"/>
+    /// while it may still be a lock being written.
+    /// </summary>
+    private static bool TryReclaimCorruptLock(string lockPath)
+    {
+        try
+        {
+            if (!File.Exists(lockPath))
+                return true;
+
+            if (DateTime.UtcNow - File.GetLastWriteTimeUtc(lockPath) < CorruptLockGracePeriod)
+                return false;
+
+            File.Delete(lockPath);
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private static async Task<(EngineProbeState Status, EngineDescriptor? Record)> SendEngineIpcAsync(
