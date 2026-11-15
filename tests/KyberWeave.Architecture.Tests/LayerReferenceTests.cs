@@ -28,7 +28,9 @@ public sealed class LayerReferenceTests
     };
 
     /// <summary>Entry apps that exist today. Each may reference these layers and nothing else new.</summary>
-    public static TheoryData<string> EntryApps => new() { "KyberWeave.Cli", "KyberWeave.Mcp", "KyberWeave.Arbiter", "KyberWeave.Hooks" };
+    public static TheoryData<string> EntryApps => [.. EntryAppNames];
+
+    private static readonly string[] EntryAppNames = ["KyberWeave.Cli", "KyberWeave.Mcp", "KyberWeave.Arbiter", "KyberWeave.Hooks"];
 
     /// <summary>Legacy references an entry app still holds. Remove an entry when the reference is dropped; never add one.</summary>
     private static readonly Dictionary<string, string[]> LegacyReferenceBaseline = new(StringComparer.Ordinal)
@@ -55,14 +57,23 @@ public sealed class LayerReferenceTests
 
     [Theory]
     [MemberData(nameof(EntryApps))]
-    public void EntryAppsHoldNoLegacyReferenceBeyondTheBaseline(string project)
+    public void EntryAppLegacyReferencesMatchTheBaselineExactly(string project)
     {
         string[] legacy = [.. References(project).Where(r => LegacyProjects.Contains(r, StringComparer.Ordinal))];
-        string[] baseline = LegacyReferenceBaseline[project];
+        string[] baseline = [.. LegacyReferenceBaseline[project].Order(StringComparer.Ordinal)];
 
-        Assert.True(
-            legacy.All(r => baseline.Contains(r, StringComparer.Ordinal)),
-            $"{project} references a legacy engine project outside its baseline: {string.Join(", ", legacy.Except(baseline))}.");
+        string[] added = [.. legacy.Except(baseline, StringComparer.Ordinal)];
+        string[] stale = [.. baseline.Except(legacy, StringComparer.Ordinal)];
+
+        Assert.True(added.Length == 0, $"{project} references legacy projects outside its baseline: {string.Join(", ", added)}. Move the code instead of adding a reference.");
+        Assert.True(stale.Length == 0, $"{project} no longer references {string.Join(", ", stale)}; remove it from the baseline so it cannot grow back.");
+    }
+
+    [Fact]
+    public void BaselineNamesEveryEntryAppAndOnlyLegacyProjects()
+    {
+        Assert.Equal(EntryAppNames.Order(StringComparer.Ordinal), LegacyReferenceBaseline.Keys.Order(StringComparer.Ordinal));
+        Assert.All(LegacyReferenceBaseline.Values.SelectMany(v => v), r => Assert.Contains(r, LegacyProjects));
     }
 
     private static string[] References(string project)
