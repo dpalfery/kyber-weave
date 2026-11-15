@@ -15,7 +15,6 @@ namespace KyberWeave.Tests;
 /// <c>ArbiterCommentSettings.Author</c> (string?, <c>--author &lt;LOGIN&gt;</c>). With no provider configured every item is
 /// real, which is the fail-safe answer, so these tests pin the shape and the fail-safe, not a nitpick answer.
 /// </remarks>
-[Collection(ArbiterCommandCompositionCollection.Name)]
 public sealed class ArbiterSummaryCommentTriageCliTests : IDisposable
 {
     private const string Summary =

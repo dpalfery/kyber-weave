@@ -8,7 +8,6 @@ namespace KyberWeave.Tests;
 /// subdirectory, a cited file that sits inside the git repository but outside that root is refused. The check used to
 /// test the git root, the read then used <c>--root</c>, and the read silently found no excerpt.
 /// </summary>
-[Collection(ArbiterCommandCompositionCollection.Name)]
 public sealed class ArbiterCommentRootContainmentCliTests : IDisposable
 {
     private readonly TempDirectory _temp = new();

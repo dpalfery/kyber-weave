@@ -16,7 +16,6 @@ namespace KyberWeave.Tests;
 /// provider override and diagnose the host installation.
 /// RED: <c>setup</c>, <c>status</c> and <c>doctor</c> are not registered.
 /// </summary>
-[Collection(ArbiterCommandCompositionCollection.Name)]
 public sealed class ArbiterSetupCommandTests : IDisposable
 {
     private readonly TempDirectory _temp = new();

@@ -11,6 +11,7 @@ using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review;
 using KyberWeave.Core.RunStart;
 using KyberWeave.Mcp;
+using KyberWeave.Tests.Fakes;
 using ModelContextProtocol.Server;
 using Xunit;
 
@@ -858,25 +859,7 @@ public sealed class RunDeliveryTests : IDisposable
     /// </summary>
     private void GitRunRepository(bool archivePending, bool archived = true)
     {
-        Git(_root, "init", "-q", "--bare", _remote);
-        Git(_work, "init", "-q", "-b", "main");
-        Git(_work, "config", "user.name", "t");
-        Git(_work, "config", "user.email", "t@example.com");
-        Write(".kyber-weave/.keep", string.Empty);
-        Write("docs/plans/README.md", "# Plans\n");
-        Write("README.md", "# Widgets\n");
-        Git(_work, "add", "-A");
-        Git(_work, "commit", "-q", "-m", "init");
-        Git(_work, "remote", "add", "origin", "https://github.com/acme/widgets.git");
-        Git(_work, "remote", "set-url", "--push", "origin", _remote);
-        Git(_work, "update-ref", "refs/remotes/origin/main", "HEAD");
-        Git(_work, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
-        Git(_work, "checkout", "-q", "-b", Branch);
-        Write("src/Export.cs", "// export\n");
-        Write(ActivePlan, PlanText);
-        Git(_work, "add", "-A");
-        Git(_work, "commit", "-q", "-m", "feat: export");
-        WriteRunEvidence();
+        TestGitRepositoryTemplate.CreateRunDeliveryRepositories(_work, _remote);
         if (archived)
         {
             Directory.CreateDirectory(Path.Combine(_work, "docs", "archive", "plans"));
@@ -887,26 +870,6 @@ public sealed class RunDeliveryTests : IDisposable
 
         string common = Path.GetFullPath(Path.Combine(_work, Git(_work, "rev-parse", "--git-common-dir").Trim()));
         RunBaseState.Write(_home, Branch, "origin/main", new RunStartPlace(common, _work, DateTimeOffset.UtcNow.AddMinutes(-5)));
-    }
-
-    /// <summary>One task's passing gate report and an approving review cycle with one minor finding, as the run leaves them.</summary>
-    private void WriteRunEvidence()
-    {
-        Write(".gitignore", ".agent_scratchpad/\n");
-        Git(_work, "add", ".gitignore");
-        Git(_work, "commit", "-q", "-m", "chore: ignore scratch");
-        Write(".agent_scratchpad/T3/task-gate.json", ReviewJson.Write(new GateReport(GateReport.CurrentSchema,
-            [new GateResult("build", true, 0, "passed"), new GateResult("test", true, 0, "passed"), new GateResult("format", true, 0, "passed")])));
-        string cycle = Path.Combine(_work, ".agent_scratchpad", "review", "review", "cycle-1");
-        Directory.CreateDirectory(cycle);
-        File.WriteAllText(Path.Combine(cycle, "gates.json"), ReviewJson.Write(new GateReport(GateReport.CurrentSchema,
-            [new GateResult("build", true, 0, "passed"), new GateResult("test", true, 0, "passed")])));
-        File.WriteAllText(Path.Combine(cycle, "findings.json"), ReviewJson.Write(new FindingsReport(FindingsReport.CurrentSchema,
-            [new ReviewFinding("naming/vague", "naming", ReviewSeverity.Minor, 8, "src/Export.cs", 1, "// export",
-                "The file name does not say it writes CSV.", "Read the file.", "A reader looks for the CSV writer elsewhere.", "Rename it CsvExport.cs.")],
-            ["src/Export.cs"], 1)));
-        string head = Git(_work, "rev-parse", "HEAD").Trim();
-        ReviewCycles.WriteIdentity(cycle, new ReviewCycleIdentity(Branch, Git(_work, "merge-base", "origin/main", "HEAD").Trim(), head));
     }
 
     private void Write(string relative, string text)

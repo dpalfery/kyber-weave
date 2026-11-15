@@ -5,7 +5,6 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary><c>arbiter audit --plan</c> resolves its argument through the shared plan resolver, so any natural spelling selects the events carrying that plan.</summary>
-[Collection(ArbiterCommandCompositionCollection.Name)]
 public sealed class ArbiterAuditPlanArgumentTests : IDisposable
 {
     private const string Plan = "handbook/plans/2026-11-13-job-status-cards.md";

@@ -23,28 +23,91 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 /// handler, credential store, home path, process runner and clock that Core
 /// takes as constructor arguments but never constructs itself.
 /// </summary>
+/// <remarks>
+/// Every seam below is an <see cref="AsyncLocal{T}"/> override over a fixed default, so a
+/// caller replaces the seam for its own async flow only. Two test classes that each inject a
+/// fake collaborator therefore never overwrite each other's seam, and tests run in parallel.
+/// The one process-wide piece of state is process-global by nature rather than by choice:
+/// generic type initializers stay single-threaded however many threads reach them at once.
+/// </remarks>
 public static class ArbiterCommandComposition
 {
-    /// <summary>The operator home directory the user override resolves under.</summary>
-    public static Func<string> HomeDirectory { get; set; } =
-        () => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    private static readonly AsyncLocal<Func<string>?> HomeDirectoryOverride = new();
+    private static readonly AsyncLocal<Func<TimeProvider>?> ClockOverride = new();
+    private static readonly AsyncLocal<Func<HttpMessageHandler>?> HttpHandlerOverride = new();
+    private static readonly AsyncLocal<Func<ICredentialProcessRunner>?> CredentialProcessRunnerOverride = new();
+    private static readonly AsyncLocal<Func<ProcessStartInfo, string, ProcessResult>?> RunProcessOverride = new();
+    private static readonly AsyncLocal<Func<ICredentialStore>?> CredentialStoreOverride = new();
+    private static readonly AsyncLocal<Func<string, string?>?> GetEnvironmentVariableOverride = new();
+    private static readonly AsyncLocal<Func<string?>?> KeyStdinReaderOverride = new();
+    private static readonly AsyncLocal<Func<string?>?> KeyPromptOverride = new();
+    private static readonly AsyncLocal<Func<IProcessExecutor>?> ArbiterProbeExecutorOverride = new();
 
-    /// <summary>The clock evaluations stamp records with.</summary>
-    public static Func<TimeProvider> Clock { get; set; } = () => TimeProvider.System;
+    /// <summary>
+    /// The operator home directory the user override resolves under. Flow-local: an
+    /// override set here is visible to the async flow that set it, not to other tests.
+    /// </summary>
+    public static Func<string> HomeDirectory
+    {
+        get => HomeDirectoryOverride.Value ?? DefaultHomeDirectory;
+        set => HomeDirectoryOverride.Value = value;
+    }
 
-    /// <summary>The HTTP transport step-1 calls run on.</summary>
-    public static Func<HttpMessageHandler> HttpHandler { get; set; } = () => new HttpClientHandler();
+    /// <summary>The clock evaluations stamp records with. Flow-local, as above.</summary>
+    public static Func<TimeProvider> Clock
+    {
+        get => ClockOverride.Value ?? DefaultClock;
+        set => ClockOverride.Value = value;
+    }
 
-    /// <summary>The child-process seam credential stores shell out through.</summary>
-    public static Func<ICredentialProcessRunner> CredentialProcessRunner { get; set; } =
-        () => new ProcessRunnerCredentialProcessRunner();
+    /// <summary>The HTTP transport step-1 calls run on. Flow-local, as above.</summary>
+    public static Func<HttpMessageHandler> HttpHandler
+    {
+        get => HttpHandlerOverride.Value ?? DefaultHttpHandler;
+        set => HttpHandlerOverride.Value = value;
+    }
+
+    /// <summary>The child-process seam credential stores shell out through. Flow-local, as above.</summary>
+    public static Func<ICredentialProcessRunner> CredentialProcessRunner
+    {
+        get => CredentialProcessRunnerOverride.Value ?? DefaultCredentialProcessRunner;
+        set => CredentialProcessRunnerOverride.Value = value;
+    }
 
     /// <summary>
     /// The child-process seam git probes run through. Arguments travel in
     /// <see cref="ProcessStartInfo.ArgumentList"/>, never a shell string.
+    /// Flow-local, as above.
     /// </summary>
-    public static Func<ProcessStartInfo, string, ProcessResult> RunProcess { get; set; } =
+    public static Func<ProcessStartInfo, string, ProcessResult> RunProcess
+    {
+        get => RunProcessOverride.Value ?? DefaultRunProcess;
+        set => RunProcessOverride.Value = value;
+    }
+
+    private static Func<string> DefaultHomeDirectory { get; } =
+        () => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+    private static Func<TimeProvider> DefaultClock { get; } = () => TimeProvider.System;
+
+    private static Func<HttpMessageHandler> DefaultHttpHandler { get; } = () => new HttpClientHandler();
+
+    private static Func<ICredentialProcessRunner> DefaultCredentialProcessRunner { get; } =
+        () => new ProcessRunnerCredentialProcessRunner();
+
+    private static Func<ProcessStartInfo, string, ProcessResult> DefaultRunProcess { get; } =
         (startInfo, standardInput) => ProcessRunner.Run(startInfo, standardInput);
+
+    private static Func<ICredentialStore> DefaultCredentialStore { get; } = CreateCredentialStore;
+
+    private static Func<string, string?> DefaultGetEnvironmentVariable { get; } =
+        name => Environment.GetEnvironmentVariable(name);
+
+    private static Func<string?> DefaultKeyStdinReader { get; } = () => Console.In.ReadLine();
+
+    private static Func<string?> DefaultKeyPrompt { get; } = PromptKeyMasked;
+
+    private static Func<IProcessExecutor> DefaultArbiterProbeExecutor { get; } = () => ProcessExecutor.Instance;
 
     /// <summary>Creates the OS credential store for the Arbiter key.</summary>
     public static ICredentialStore CreateCredentialStore()
@@ -56,30 +119,52 @@ public static class ArbiterCommandComposition
         return new SecretServiceCredentialStore(CredentialProcessRunner());
     }
 
-    /// <summary>The credential store the key is read from and written to.</summary>
+    /// <summary>The credential store the key is read from and written to. Flow-local, as above.</summary>
     /// <remarks>
     /// Settable so <c>setup</c>, <c>status</c> and <c>doctor</c> tests inject a fake
     /// store and assert the exact origin without touching the OS keychain.
     /// </remarks>
-    public static Func<ICredentialStore> CredentialStore { get; set; } = () => CreateCredentialStore();
+    public static Func<ICredentialStore> CredentialStore
+    {
+        get => CredentialStoreOverride.Value ?? DefaultCredentialStore;
+        set => CredentialStoreOverride.Value = value;
+    }
 
-    /// <summary>Reads a process environment variable; injected so tests stay hermetic.</summary>
-    public static Func<string, string?> GetEnvironmentVariable { get; set; } =
-        name => Environment.GetEnvironmentVariable(name);
+    /// <summary>Reads a process environment variable; injected so tests stay hermetic. Flow-local, as above.</summary>
+    public static Func<string, string?> GetEnvironmentVariable
+    {
+        get => GetEnvironmentVariableOverride.Value ?? DefaultGetEnvironmentVariable;
+        set => GetEnvironmentVariableOverride.Value = value;
+    }
 
-    /// <summary>Reads the TypeSafe key from stdin for <c>setup --key-stdin</c>.</summary>
-    public static Func<string?> KeyStdinReader { get; set; } = () => Console.In.ReadLine();
+    /// <summary>Reads the TypeSafe key from stdin for <c>setup --key-stdin</c>. Flow-local, as above.</summary>
+    public static Func<string?> KeyStdinReader
+    {
+        get => KeyStdinReaderOverride.Value ?? DefaultKeyStdinReader;
+        set => KeyStdinReaderOverride.Value = value;
+    }
 
-    /// <summary>Prompts for the TypeSafe key with input hidden; the key is never echoed.</summary>
-    public static Func<string?> KeyPrompt { get; set; } = () => PromptKeyMasked();
+    /// <summary>
+    /// Prompts for the TypeSafe key with input hidden; the key is never echoed.
+    /// Flow-local, as above.
+    /// </summary>
+    public static Func<string?> KeyPrompt
+    {
+        get => KeyPromptOverride.Value ?? DefaultKeyPrompt;
+        set => KeyPromptOverride.Value = value;
+    }
 
-    /// <summary>The process boundary the Arbiter binary probe runs through.</summary>
+    /// <summary>The process boundary the Arbiter binary probe runs through. Flow-local, as above.</summary>
     /// <remarks>
     /// <c>doctor</c> probes <c>kyber-weave-arbiter --version</c> through
     /// <see cref="ArbiterProcessProbe"/> from the Squad surface; tests inject a stub
     /// executor so the probe never leaves the process.
     /// </remarks>
-    public static Func<IProcessExecutor> ArbiterProbeExecutor { get; set; } = () => ProcessExecutor.Instance;
+    public static Func<IProcessExecutor> ArbiterProbeExecutor
+    {
+        get => ArbiterProbeExecutorOverride.Value ?? DefaultArbiterProbeExecutor;
+        set => ArbiterProbeExecutorOverride.Value = value;
+    }
 
     /// <summary>
     /// Resolves the key for <paramref name="endpoint"/> through the injected store and
@@ -484,7 +569,7 @@ public static class ArbiterCommandComposition
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(report);
 
-        ICredentialStore store = CreateCredentialStore();
+        ICredentialStore store = CredentialStore();
         string? userOverrideEndpoint = UserOverrideEndpoint(config);
         keyResolver = uri => ArbiterKeyResolver.Resolve(uri.ToString(), store, userOverrideEndpoint);
 

@@ -8,7 +8,6 @@ namespace KyberWeave.Tests;
 /// <c>--body</c> to stdout, and a body over the MCP tool's text limit is refused on both the single and the summary
 /// path, instead of being classified unbounded.
 /// </summary>
-[Collection(ArbiterCommandCompositionCollection.Name)]
 public sealed class ArbiterCommentBodyCliTests : IDisposable
 {
     private readonly TempDirectory _temp = new();

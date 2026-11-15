@@ -17,7 +17,6 @@ namespace KyberWeave.Tests;
 /// The provider is substituted through <c>ArbiterCommentCommand.ProviderFactory</c>, so the printed answer does not depend on
 /// a live provider. Host configuration is written to <c>.kyber-weave/kyber-weave.yml</c> under the temp root the command reads.
 /// </remarks>
-[Collection(ArbiterCommandCompositionCollection.Name)]
 public sealed class ArbiterCommentShadowCliTests : IDisposable
 {
     private const string BotLogin = "kilo-code-bot";

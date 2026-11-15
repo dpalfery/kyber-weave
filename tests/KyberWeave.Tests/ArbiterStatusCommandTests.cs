@@ -9,7 +9,6 @@ namespace KyberWeave.Tests;
 /// Contract: <c>arbiter status</c> reports both global and project scope, brands the
 /// project override, and enumerates the per-harness gap tiers.
 /// </summary>
-[Collection(ArbiterCommandCompositionCollection.Name)]
 public sealed class ArbiterStatusCommandTests : IDisposable
 {
     private readonly TempDirectory _home = new();

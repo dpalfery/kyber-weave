@@ -7,7 +7,6 @@ namespace KyberWeave.Tests;
 /// Review finding 4538775160: <c>arbiter comment</c> refuses a body over the MCP tool's text limit on both the single
 /// and the summary path. The summary path used to parse and classify an unbounded body.
 /// </summary>
-[Collection(ArbiterCommandCompositionCollection.Name)]
 public sealed class ArbiterCommentBodyLimitCliTests : IDisposable
 {
     /// <summary>The MCP tool's text limit, written out here so the test pins the value, not a shared name.</summary>

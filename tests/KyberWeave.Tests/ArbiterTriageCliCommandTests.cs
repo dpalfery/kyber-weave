@@ -15,7 +15,6 @@ namespace KyberWeave.Tests;
 /// checkout, so the fixture is written under the repository's gitignored scratch folder, in a directory unique to the
 /// test, and removed afterwards. A document outside the root must be refused, which the companion test pins.
 /// </remarks>
-[Collection(ArbiterCommandCompositionCollection.Name)]
 public sealed class ArbiterTriageCliCommandTests : IDisposable
 {
     private readonly TempDirectory _temp = new();

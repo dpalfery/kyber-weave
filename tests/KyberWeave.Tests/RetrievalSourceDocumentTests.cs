@@ -27,6 +27,14 @@ public sealed class RetrievalSourceDocumentTests(ITestOutputHelper output)
 {
     private const string Arbiter = "docs/kyber-arbiter/";
 
+    /// <summary>
+    /// The index over this checkout's documentation, built once per test run rather than once
+    /// per case: loading the corpus and reading the code index is the expensive part, the
+    /// corpus is read-only while the run executes, and <c>DocumentIndex.Explore</c> only reads
+    /// it. Null when the repository is not found, which is how these tests skip.
+    /// </summary>
+    private static readonly Lazy<DocumentIndex?> Index = new(IndexOverThisRepository);
+
     public static TheoryData<string, string> Cases() => new()
     {
         // Reported from live sessions.
@@ -59,7 +67,7 @@ public sealed class RetrievalSourceDocumentTests(ITestOutputHelper output)
     [MemberData(nameof(Cases))]
     public void TheAnswerComesFromAPageThatCoversTheSubject(string query, string acceptablePaths)
     {
-        DocumentIndex? index = IndexOverThisRepository();
+        DocumentIndex? index = Index.Value;
         if (index is null) return;
 
         ExploreAnswer answer = index.Explore(query);
@@ -79,7 +87,7 @@ public sealed class RetrievalSourceDocumentTests(ITestOutputHelper output)
     [InlineData("What does the Kyber-Squad architecture look like?")]
     public void ALongSectionAnswersWithABoundedCompleteWindow(string query)
     {
-        DocumentIndex? index = IndexOverThisRepository();
+        DocumentIndex? index = Index.Value;
         if (index is null) return;
 
         ExploreAnswer answer = index.Explore(query);

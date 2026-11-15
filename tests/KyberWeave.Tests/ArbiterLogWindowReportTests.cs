@@ -11,7 +11,6 @@ namespace KyberWeave.Tests;
 /// <c>arbiter audit</c> and <c>arbiter tune</c> must say so, and must not present a log that exists but cannot be read
 /// as an empty one.
 /// </summary>
-[Collection(ArbiterCommandCompositionCollection.Name)]
 public sealed class ArbiterLogWindowReportTests : IDisposable
 {
     private const int PaddingChars = 100_000;

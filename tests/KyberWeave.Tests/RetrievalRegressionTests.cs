@@ -41,6 +41,20 @@ public sealed class RetrievalRegressionTests
         @"^confidence: (?<value>0\.\d{2}|1\.00)$",
         RegexOptions.Multiline | RegexOptions.CultureInvariant);
 
+    /// <summary>
+    /// The answer engine over this checkout's documentation, built once per test run.
+    /// Loading the corpus and reading the code index cost seconds each, so paying that per
+    /// theory row made this suite look slow for no gain: the corpus is read-only and does not
+    /// change while the run executes. Null when the repository is not found, which is how the
+    /// suite skips.
+    /// </summary>
+    private static readonly Lazy<DocsTools?> Tools = new(
+        () =>
+        {
+            string? root = RepositoryRoot();
+            return root is null ? null : new DocsTools(CreateHost(root), new RepositoryDocsAnalysisReader(root));
+        });
+
     /// <summary>Question, expected document id, phrase from the answering section, confidence floor.</summary>
     public static TheoryData<string, string, string, double, string?> AnswerableCases() => new()
     {
@@ -115,10 +129,9 @@ public sealed class RetrievalRegressionTests
         double floor,
         string? sourceHeading)
     {
-        string? root = RepositoryRoot();
-        if (root is null) return;
+        DocsTools? tools = Tools.Value;
+        if (tools is null) return;
 
-        DocsTools tools = CreateTools(root);
         string response = Explore(tools, query);
 
         Assert.Contains(phrase, response, StringComparison.Ordinal);
@@ -157,19 +170,15 @@ public sealed class RetrievalRegressionTests
     [InlineData("tell me a joke")]
     public void AnUnanswerableQuestionReturnsNothing(string query)
     {
-        string? root = RepositoryRoot();
-        if (root is null) return;
+        DocsTools? tools = Tools.Value;
+        if (tools is null) return;
 
-        DocsTools tools = CreateTools(root);
         string response = Explore(tools, query);
 
         Assert.Contains("No document", response, StringComparison.Ordinal);
         Assert.DoesNotContain("confidence:", response, StringComparison.Ordinal);
         Assert.Empty(SourceLines(response).ToList());
     }
-
-    private static DocsTools CreateTools(string root) =>
-        new(CreateHost(root), new RepositoryDocsAnalysisReader(root));
 
     private static DocumentIndexHost CreateHost(string root)
     {
