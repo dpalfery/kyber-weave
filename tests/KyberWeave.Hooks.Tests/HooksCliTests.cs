@@ -109,6 +109,20 @@ public sealed class HooksCliTests : IDisposable
     }
 
     [Fact]
+    public async Task MalformedHooksYmlReachesTheAgentThroughAdditionalContext()
+    {
+        string file = Repository();
+        _ = Directory.CreateDirectory(Path.Combine(root.FullName, ".kyber-weave"));
+        await File.WriteAllTextAsync(Path.Combine(root.FullName, ".kyber-weave", "hooks.yml"), "rules:\n  - id: [unclosed\n");
+
+        int code = await Run(Json(file), new ProcessRunResult(0, string.Empty, false), "run", "--harness", "claude");
+
+        Assert.Equal(0, code);
+        Assert.Contains("skipped after an internal error", stdout.ToString(), StringComparison.Ordinal);
+        Assert.Contains("additionalContext", stdout.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task NotesOnAnExitZeroRunAreAlsoPrintedAsAdditionalContextJson()
     {
         string file = Repository();
