@@ -278,7 +278,9 @@ public sealed class ArbiterRunStore
         TimeSpan retain = TimeSpan.FromDays(Math.Clamp(_options.RetainDays, 1, MaxRetainDays));
         string keep = Path.GetFullPath(keepDirectory);
         DirectoryInfo root = new(_storesDirectory);
-        EnumerationOptions options = new() { RecurseSubdirectories = false, AttributesToSkip = 0 };
+        // IgnoreInaccessible is off so an unlistable stores directory is reported to the catch below instead of being
+        // silently read as empty: the outcome is the same, but the failure is handled in one place.
+        EnumerationOptions options = new() { RecurseSubdirectories = false, AttributesToSkip = 0, IgnoreInaccessible = false };
         try
         {
             foreach (FileSystemInfo entry in root.EnumerateFileSystemInfos("*", options))
