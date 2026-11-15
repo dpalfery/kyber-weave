@@ -63,7 +63,7 @@ public static class PostCheckoutHook
         ArgumentNullException.ThrowIfNull(executor);
 
         // A repository without governed docs has no index to keep, so it gets no hook and no status line.
-        if (!DocsEnabled.IsEnabled(root, ReadText))
+        if (!DocsEnabled.IsEnabled(root, ReadText, Directory.Exists))
             return null;
 
         try

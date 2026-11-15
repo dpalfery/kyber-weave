@@ -65,7 +65,7 @@ public static class WorktreeIndexGuard
         bool governed;
         try
         {
-            governed = DocsEnabled.IsEnabled(root, ReadText);
+            governed = DocsEnabled.IsEnabled(root, ReadText, Directory.Exists);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

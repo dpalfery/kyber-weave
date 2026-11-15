@@ -31,7 +31,7 @@ public sealed class DocsEnabledTests : IDisposable
     {
         Directory.CreateDirectory(Path.Combine(Root, "docs"));
 
-        bool enabled = DocsEnabled.IsEnabled(Root, ConfigReader(null));
+        bool enabled = DocsEnabled.IsEnabled(Root, ConfigReader(null), Directory.Exists);
 
         Assert.False(enabled);
     }
@@ -40,7 +40,7 @@ public sealed class DocsEnabledTests : IDisposable
     [Fact]
     public void DocsEnabled_ConfigWithoutDocsRootDirectory_IsFalse()
     {
-        bool enabled = DocsEnabled.IsEnabled(Root, ConfigReader(ConfigText));
+        bool enabled = DocsEnabled.IsEnabled(Root, ConfigReader(ConfigText), Directory.Exists);
 
         Assert.False(enabled);
     }
@@ -53,7 +53,8 @@ public sealed class DocsEnabledTests : IDisposable
 
         bool enabled = DocsEnabled.IsEnabled(
             Root,
-            ConfigReader("ontology:\n  docs-root: documentation\n"));
+            ConfigReader("ontology:\n  docs-root: documentation\n"),
+            Directory.Exists);
 
         Assert.True(enabled);
     }
@@ -70,7 +71,8 @@ public sealed class DocsEnabledTests : IDisposable
 
         bool enabled = DocsEnabled.IsEnabled(
             Root,
-            ConfigReader("ontology:\n  docs-root: ..\n"));
+            ConfigReader("ontology:\n  docs-root: ..\n"),
+            Directory.Exists);
 
         Assert.False(enabled);
     }
@@ -83,7 +85,8 @@ public sealed class DocsEnabledTests : IDisposable
 
         bool enabled = DocsEnabled.IsEnabled(
             Root,
-            ConfigReader($"ontology:\n  docs-root: '{absolute}'\n"));
+            ConfigReader($"ontology:\n  docs-root: '{absolute}'\n"),
+            Directory.Exists);
 
         Assert.False(enabled);
     }
@@ -96,7 +99,8 @@ public sealed class DocsEnabledTests : IDisposable
 
         bool enabled = DocsEnabled.IsEnabled(
             Root,
-            ConfigReader("ontology:\n  docs-root: documentation\n"));
+            ConfigReader("ontology:\n  docs-root: documentation\n"),
+            Directory.Exists);
 
         Assert.False(enabled);
     }
@@ -107,7 +111,7 @@ public sealed class DocsEnabledTests : IDisposable
     {
         Directory.CreateDirectory(Path.Combine(Root, "docs"));
 
-        bool enabled = DocsEnabled.IsEnabled(Root, ConfigReader(ConfigText));
+        bool enabled = DocsEnabled.IsEnabled(Root, ConfigReader(ConfigText), Directory.Exists);
 
         Assert.True(enabled);
     }
