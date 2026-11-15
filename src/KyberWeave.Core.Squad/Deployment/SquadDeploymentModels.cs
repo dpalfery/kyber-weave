@@ -83,7 +83,8 @@ public sealed record SquadUpdateRequest(
 public sealed record SquadUninstallRequest(
     string TargetRoot,
     SquadDeploymentScope Scope,
-    bool DryRun = false);
+    bool DryRun = false,
+    SquadTarget? Target = null);
 
 /// <summary>The result of executing a Kyber-Squad lifecycle operation.</summary>
 /// <remarks>

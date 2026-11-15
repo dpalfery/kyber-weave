@@ -912,7 +912,7 @@ public sealed class SquadCliCommandTests : IDisposable
             null!,
             new SquadUninstallSettings
             {
-                Path = targetDir,
+                PathOption = targetDir,
                 Global = false,
                 DryRun = false
             }));
@@ -949,7 +949,7 @@ public sealed class SquadCliCommandTests : IDisposable
             null!,
             new SquadUninstallSettings
             {
-                Path = targetDir,
+                PathOption = targetDir,
                 Global = false,
                 DryRun = false
             }));
@@ -983,7 +983,7 @@ public sealed class SquadCliCommandTests : IDisposable
             null!,
             new SquadUninstallSettings
             {
-                Path = targetDir,
+                PathOption = targetDir,
                 Global = false,
                 DryRun = true
             }));
@@ -1012,13 +1012,248 @@ public sealed class SquadCliCommandTests : IDisposable
             null!,
             new SquadUninstallSettings
             {
-                Path = targetDir,
+                PathOption = targetDir,
                 Global = false,
                 DryRun = false
             }));
 
         Assert.Equal(1, execution.ExitCode);
         Assert.Contains("error", execution.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Uninstall_NamedHarness_RemovesOnlyThatHarnessUntilTheLastOneGoes()
+    {
+        (string targetDir, FakeUserPaths userPaths, string codexFile, string cursorFile, string receiptPath) =
+            SeedCodexAndCursorProject("uninstall-one-harness");
+        SquadUninstallCommand command = new SquadUninstallCommand(userPaths);
+
+        CommandExecution first = Capture(() => command.Execute(
+            null!,
+            new SquadUninstallSettings { Harness = "cursor", Project = true, PathOption = targetDir }));
+
+        Assert.Equal(0, first.ExitCode);
+        Assert.False(File.Exists(cursorFile));
+        Assert.True(File.Exists(codexFile));
+        Assert.True(File.Exists(receiptPath));
+        SquadReceipt? remaining = new SquadStateStore(userPaths).ReadReceipt(targetDir, SquadDeploymentScope.Project);
+        Assert.Equal(["codex"], remaining!.Files.Select(file => file.Target).Distinct());
+
+        CommandExecution last = Capture(() => command.Execute(
+            null!,
+            new SquadUninstallSettings { Harness = "codex", Project = true, PathOption = targetDir }));
+
+        Assert.Equal(0, last.ExitCode);
+        Assert.False(File.Exists(codexFile));
+        Assert.False(File.Exists(receiptPath));
+    }
+
+    [Fact]
+    public void Uninstall_NamedHarnessDryRun_PreservesFilesAndReceipt()
+    {
+        (string targetDir, FakeUserPaths userPaths, string codexFile, string cursorFile, string receiptPath) =
+            SeedCodexAndCursorProject("uninstall-one-harness-dry-run");
+
+        CommandExecution execution = Capture(() => new SquadUninstallCommand(userPaths).Execute(
+            null!,
+            new SquadUninstallSettings { Harness = "cursor", Project = true, PathOption = targetDir, DryRun = true }));
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.True(File.Exists(codexFile));
+        Assert.True(File.Exists(cursorFile));
+        Assert.True(File.Exists(receiptPath));
+    }
+
+    [Fact]
+    public void Uninstall_InvalidHarnessInput_ExitsTwoWithoutChanges()
+    {
+        (string targetDir, FakeUserPaths userPaths, string codexFile, string cursorFile, string receiptPath) =
+            SeedCodexAndCursorProject("uninstall-invalid-harness-input");
+        SquadUninstallCommand command = new SquadUninstallCommand(userPaths);
+
+        (SquadUninstallSettings Settings, string ExpectedMessage)[] invalid =
+        [
+            (new() { Harness = "nope", Project = true, PathOption = targetDir }, "nope"),
+            (new() { Harness = "all", Project = true, PathOption = targetDir }, "exactly one harness"),
+            (new() { Harness = "claude", Project = true, PathOption = targetDir }, "'claude' is not installed"),
+            (new() { Harness = "cursor", Project = true, Global = true, PathOption = targetDir }, "mutually exclusive"),
+            (new() { Harness = "cursor", PathOption = targetDir }, "--path is only valid with --project"),
+            (new() { Harness = "cursor" }, "'cursor' is not installed in the global deployment")
+        ];
+
+        foreach ((SquadUninstallSettings settings, string expectedMessage) in invalid)
+        {
+            CommandExecution execution = Capture(() => command.Execute(null!, settings));
+            Assert.Equal(2, execution.ExitCode);
+            Assert.Contains(expectedMessage, execution.Output, StringComparison.OrdinalIgnoreCase);
+        }
+
+        Assert.True(File.Exists(codexFile));
+        Assert.True(File.Exists(cursorFile));
+        Assert.True(File.Exists(receiptPath));
+    }
+
+    [Fact]
+    public void Uninstall_NamedHarnessWithoutProject_UsesTheGlobalScopeAndKeepsTheOtherHarness()
+    {
+        FakeUserPaths userPaths = new(Path.Combine(_temp.Path, "uninstall-global-harness"));
+        string home = userPaths.HomeDirectory;
+        Directory.CreateDirectory(home);
+        SquadGlobalRoots roots = new(_ => null, home);
+        SquadStateStore stateStore = new(userPaths);
+        SquadLock squadLock = new(
+            "kyber-squad.lock/v1",
+            "1.2.3",
+            "1.2.3",
+            "1.2.3",
+            "full",
+            ["codex", "cursor"],
+            [],
+            "best-effort",
+            "a".PadRight(64, '0'),
+            "b".PadRight(64, '0'),
+            new SquadApmIdentity("0.28.0", "c".PadRight(40, '0'), "d".PadRight(64, '0')));
+        new SquadTransaction(stateStore).Execute(SquadDeploymentPlan.CreateInstall(
+            home,
+            SquadDeploymentScope.Global,
+            squadLock,
+            [
+                new SquadDeploymentFile("agents/architect.md", "You are architect.\n"u8.ToArray(), "codex"),
+                new SquadDeploymentFile("agents/reviewer.md", "You are reviewer.\n"u8.ToArray(), "cursor")
+            ],
+            [],
+            adopt: false,
+            TimeProvider.System,
+            globalRoots: roots));
+        string codexFile = Path.Combine(roots.ResolveGlobalRoot(SquadTarget.Codex), "agents", "architect.md");
+        string cursorFile = Path.Combine(roots.ResolveGlobalRoot(SquadTarget.Cursor), "agents", "reviewer.md");
+        Assert.True(File.Exists(codexFile));
+        Assert.True(File.Exists(cursorFile));
+        SquadUninstallCommand command = new(userPaths, stateStore, null, false, null, roots);
+
+        CommandExecution first = Capture(() => command.Execute(
+            null!,
+            new SquadUninstallSettings { Harness = "cursor", Yes = true }));
+
+        Assert.Equal(0, first.ExitCode);
+        Assert.False(File.Exists(cursorFile));
+        Assert.True(File.Exists(codexFile));
+        SquadReceipt remaining = Assert.IsType<SquadReceipt>(stateStore.ReadReceipt(home, SquadDeploymentScope.Global));
+        Assert.Equal(["codex"], remaining.Files.Select(file => file.Target).Distinct());
+
+        CommandExecution last = Capture(() => command.Execute(
+            null!,
+            new SquadUninstallSettings { Harness = "codex", Yes = true }));
+
+        Assert.Equal(0, last.ExitCode);
+        Assert.False(File.Exists(codexFile));
+        Assert.Null(stateStore.ReadReceipt(home, SquadDeploymentScope.Global));
+    }
+
+    [Theory]
+    [InlineData(".")]
+    [InlineData("./deploy")]
+    public void Uninstall_DirectoryGivenAsTheHarness_ExitsTwoNamingProjectAndPath(string directory)
+    {
+        (string targetDir, FakeUserPaths userPaths, string codexFile, string cursorFile, string receiptPath) =
+            SeedCodexAndCursorProject("uninstall-directory-as-harness");
+
+        CommandExecution execution = Capture(() => new SquadUninstallCommand(userPaths).Execute(
+            null!,
+            new SquadUninstallSettings { Harness = directory, PathOption = targetDir }));
+
+        Assert.Equal(2, execution.ExitCode);
+        Assert.Contains("--project", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("--path", execution.Output, StringComparison.Ordinal);
+        Assert.True(File.Exists(codexFile));
+        Assert.True(File.Exists(cursorFile));
+        Assert.True(File.Exists(receiptPath));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Uninstall_BlankPathOption_ExitsTwoWithoutChanges(string blank)
+    {
+        (string targetDir, FakeUserPaths userPaths, string codexFile, string cursorFile, string receiptPath) =
+            SeedCodexAndCursorProject("uninstall-blank-path");
+        SquadUninstallCommand command = new(userPaths);
+
+        foreach (SquadUninstallSettings settings in new[]
+                 {
+                     new SquadUninstallSettings { PathOption = blank },
+                     new SquadUninstallSettings { Harness = "cursor", Project = true, PathOption = blank }
+                 })
+        {
+            CommandExecution execution = Capture(() => command.Execute(null!, settings));
+
+            Assert.Equal(2, execution.ExitCode);
+            Assert.Contains("must not be blank", execution.Output, StringComparison.Ordinal);
+        }
+
+        Assert.True(File.Exists(codexFile));
+        Assert.True(File.Exists(cursorFile));
+        Assert.True(File.Exists(receiptPath));
+    }
+
+    [Fact]
+    public void Uninstall_GlobalAndProjectWithoutAHarness_ExitsTwo()
+    {
+        CommandExecution execution = Capture(() => new SquadUninstallCommand(
+            new FakeUserPaths(Path.Combine(_temp.Path, "uninstall-global-and-project"))).Execute(
+            null!,
+            new SquadUninstallSettings { Global = true, Project = true }));
+
+        Assert.Equal(2, execution.ExitCode);
+        Assert.Contains("mutually exclusive", execution.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Uninstall_NamedHarnessWithCorruptReceipt_ReportsTheReadErrorAndChangesNothing()
+    {
+        (string targetDir, FakeUserPaths userPaths, string codexFile, string cursorFile, string receiptPath) =
+            SeedCodexAndCursorProject("uninstall-corrupt-receipt");
+        File.WriteAllText(receiptPath, "{ not json", Encoding.UTF8);
+
+        CommandExecution execution = Capture(() => new SquadUninstallCommand(userPaths).Execute(
+            null!,
+            new SquadUninstallSettings { Harness = "cursor", Project = true, PathOption = targetDir }));
+
+        Assert.Equal(1, execution.ExitCode);
+        Assert.Contains("error", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("is not installed", execution.Output, StringComparison.Ordinal);
+        Assert.True(File.Exists(codexFile));
+        Assert.True(File.Exists(cursorFile));
+        Assert.Equal("{ not json", File.ReadAllText(receiptPath));
+    }
+
+    private (string TargetDir, FakeUserPaths UserPaths, string CodexFile, string CursorFile, string ReceiptPath)
+        SeedCodexAndCursorProject(string name)
+    {
+        string targetDir = Path.Combine(_temp.Path, name);
+        Directory.CreateDirectory(targetDir);
+        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        SquadStateStore stateStore = new SquadStateStore(userPaths);
+        SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
+            ("agents/architect.md", "You are architect.\n"),
+            ("skills/test-dev/SKILL.md", "Use when writing tests.\n"));
+
+        SquadReceipt receipt = stateStore.ReadReceipt(targetDir, SquadDeploymentScope.Project)!;
+        File.WriteAllText(
+            stateStore.ResolveReceiptPath(targetDir, SquadDeploymentScope.Project),
+            stateStore.SerializeReceipt(receipt with
+            {
+                Files = [.. receipt.Files.Select(file =>
+                    file.RelativePath.StartsWith("skills/", StringComparison.Ordinal) ? file with { Target = "cursor" } : file)]
+            }),
+            Encoding.UTF8);
+
+        return (
+            targetDir,
+            userPaths,
+            Path.Combine(targetDir, "agents", "architect.md"),
+            Path.Combine(targetDir, "skills", "test-dev", "SKILL.md"),
+            stateStore.ResolveReceiptPath(targetDir, SquadDeploymentScope.Project));
     }
 
     #endregion
@@ -1682,7 +1917,7 @@ public sealed class SquadCliCommandTests : IDisposable
             null!,
             new SquadUninstallSettings
             {
-                Path = targetRoot,
+                PathOption = targetRoot,
                 Global = true,
                 Yes = true
             }));

@@ -465,6 +465,78 @@ public sealed class SquadOwnedBlockLifecycleTests
         Assert.Null(store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
     }
 
+    [Fact]
+    public void UninstallOneHarnessSplicesOnlyItsEntriesAndKeepsUserEmptyArraysAndTheOtherBlock()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        Write(fixture.Path, "settings.json", """
+            {
+              "theme": "dark",
+              "hooks": {
+                "PostToolUse": [
+                  { "matcher": "Bash", "hooks": [ { "type": "command", "command": "user-linter" } ] }
+                ],
+                "Stop": []
+              }
+            }
+            """);
+        SquadStateStore store = InstallProjectClaudeAndCursor(fixture.Path);
+        string cursorBefore = Read(fixture.Path, ".cursor/hooks.json");
+
+        UninstallOnly(store, fixture.Path, SquadTarget.Claude);
+
+        JsonObject settings = Assert.IsType<JsonObject>(JsonNode.Parse(Read(fixture.Path, "settings.json")));
+        JsonObject hooks = Assert.IsType<JsonObject>(settings["hooks"]);
+        Assert.Equal("dark", settings["theme"]!.GetValue<string>());
+        Assert.False(hooks.ContainsKey("PreToolUse"));
+        Assert.Contains("user-linter", Read(fixture.Path, "settings.json"), StringComparison.Ordinal);
+        Assert.DoesNotContain("kyber-weave-arbiter", Read(fixture.Path, "settings.json"), StringComparison.Ordinal);
+        Assert.Single(hooks["PostToolUse"]!.AsArray());
+        Assert.Empty(hooks["Stop"]!.AsArray());
+        Assert.Equal(cursorBefore, Read(fixture.Path, ".cursor/hooks.json"));
+        SquadReceipt receipt = Assert.IsType<SquadReceipt>(
+            store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
+        Assert.Equal("cursor", Assert.Single(receipt.Blocks).Target);
+        Assert.Equal("kyber-squad.receipt/v3", receipt.Schema);
+    }
+
+    [Fact]
+    public void UninstallOneHarnessPrunesAnEmptiedHooksObjectButKeepsTheUserFile()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        Write(fixture.Path, "settings.json", "{ \"theme\": \"dark\" }");
+        SquadStateStore store = InstallProjectClaudeAndCursor(fixture.Path);
+        Assert.Contains("kyber-weave-arbiter", Read(fixture.Path, "settings.json"), StringComparison.Ordinal);
+
+        UninstallOnly(store, fixture.Path, SquadTarget.Claude);
+
+        JsonObject settings = Assert.IsType<JsonObject>(JsonNode.Parse(Read(fixture.Path, "settings.json")));
+        Assert.False(settings.ContainsKey("hooks"), settings.ToJsonString());
+        Assert.Equal("dark", settings["theme"]!.GetValue<string>());
+        Assert.Contains("kyber-weave-arbiter", Read(fixture.Path, ".cursor/hooks.json"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UninstallOneHarnessDeletesTheHookFileSquadCreatedAndTheLastHarnessRemovesTheReceipt()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        SquadStateStore store = InstallProjectClaudeAndCursor(fixture.Path);
+
+        UninstallOnly(store, fixture.Path, SquadTarget.Cursor);
+
+        Assert.False(File.Exists(Path.Combine(fixture.Path, ".cursor/hooks.json")));
+        Assert.Contains("kyber-weave-arbiter", Read(fixture.Path, "settings.json"), StringComparison.Ordinal);
+        Assert.Equal(
+            "claude",
+            Assert.Single(Assert.IsType<SquadReceipt>(
+                store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project)).Blocks).Target);
+
+        UninstallOnly(store, fixture.Path, SquadTarget.Claude);
+
+        Assert.False(File.Exists(Path.Combine(fixture.Path, "settings.json")));
+        Assert.Null(store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
+    }
+
     /// <summary>
     /// The retained-schema rule the uninstall plan applies: a receipt that still owns a
     /// block stays on v3, while one whose blocks are all gone drops to the block-less
@@ -735,6 +807,41 @@ public sealed class SquadOwnedBlockLifecycleTests
     // ----------------------------------------------------------------------------------
     // Helpers
     // ----------------------------------------------------------------------------------
+
+    private static SquadRenderedBlock ClaudeBlock(string marker) =>
+        new(
+            "claude",
+            "settings.json",
+            SquadHookBlockFormat.Claude,
+            [
+                new SquadRenderedBlockEntry("PreToolUse", MatcherGroup("kyber-weave-arbiter hook --harness claude", $"probe-{marker}")),
+                new SquadRenderedBlockEntry("PostToolUse", MatcherGroup("kyber-weave-arbiter hook --harness claude", $"probe-{marker}")),
+            ]);
+
+    private static SquadStateStore InstallProjectClaudeAndCursor(string root)
+    {
+        SquadStateStore store = Store(root);
+        new SquadTransaction(store).Execute(SquadDeploymentPlan.CreateInstall(
+            root,
+            SquadDeploymentScope.Project,
+            Lock(),
+            [],
+            [],
+            adopt: false,
+            new FixedTimeProvider(InstalledAt),
+            blocks: [ClaudeBlock("claude-one"), CursorBlock("cursor-one")]));
+        return store;
+    }
+
+    private static void UninstallOnly(SquadStateStore store, string root, SquadTarget target)
+    {
+        SquadReceipt receipt = Assert.IsType<SquadReceipt>(store.ReadReceipt(root, SquadDeploymentScope.Project));
+        new SquadTransaction(store).Execute(SquadDeploymentPlan.CreateUninstall(
+            root,
+            SquadDeploymentScope.Project,
+            receipt,
+            onlyTarget: target));
+    }
 
     private static SquadRenderedBlock CursorBlock(string marker) =>
         new(

@@ -67,7 +67,7 @@ kyber-weave squad install [path] [--target <targets>] [--exclude <targets>] [--g
 kyber-weave squad update [path] [--target <targets>] [--exclude <targets>] [--global] [--projects <all|none|PATH>] [--dry-run] [--replace-managed] [--path <PATH>] [--yes] [--version <VERSION>] [--no-capture-plugin]
 
 # Uninstall squad deployment
-kyber-weave squad uninstall [path] [--global] [--dry-run] [--path <PATH>] [--yes]
+kyber-weave squad uninstall [harness] [--project] [--global] [--dry-run] [--path <PATH>] [--yes]
 
 # Inspect installation health, version, and file drift
 kyber-weave squad status [path] [--global] [--path <PATH>]
@@ -1113,6 +1113,15 @@ kyber-weave squad uninstall --yes
 ```
 
 Locally modified files are preserved during uninstallation unless explicitly cleaned up by the operator. If no receipt exists, uninstall is a clean no-op.
+
+To remove one harness and leave the rest, name it. A named harness defaults to the global scope, as `squad install --target <harness> -g` does; add `--project` for the local project:
+
+```bash
+kyber-weave squad uninstall claude
+kyber-weave squad uninstall cursor --project
+```
+
+Only that harness's files and hook entries go. Empty hook containers that the removal leaves behind are dropped, while empty arrays you wrote yourself stay. The receipt is kept while other harnesses remain and is removed with the last one. Naming a harness that is not in the receipt exits 2. `--global` and `--project` cannot be combined, and with a harness `--path` is valid only with `--project`.
 
 `kyber-weave squad uninstall --global` removes only global state and files. It opens no picker and changes no
 registered project. A project uninstall also removes that project's registry entry.

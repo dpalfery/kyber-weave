@@ -76,7 +76,8 @@ environment override: Copilot (`~/.github` vs `~/.copilot`) and Antigravity (`~/
    refuse a `single-root` receipt with `SquadDeploymentConflictException` before any download
    or change, and name `squad uninstall --global` followed by `squad install --global` as the
    way out. A v1 receipt with bare paths updates normally and is rewritten as v2
-   `per-target-roots`.
+   `per-target-roots`. A per-harness `squad uninstall <harness>` reclassifies the layout from the files that remain, so a receipt
+   never keeps a layout its remaining files do not use.
 
 ## Alternatives Considered
 

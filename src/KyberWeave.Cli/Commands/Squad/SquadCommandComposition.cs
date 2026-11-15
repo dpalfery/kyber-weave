@@ -163,7 +163,7 @@ internal static class SquadCommandComposition
 
     /// <summary>
     ///     Derives the per-target global roots a <c>--global</c> uninstall will write from the
-    ///     deployment receipt: uninstall has no <c>--target</c> option, so the receipt's owned
+    ///     deployment receipt: uninstall takes no target list, so the receipt's owned
     ///     files are the authoritative target list, and the lifecycle resolves each through
     ///     <see cref="ISquadGlobalRootResolver.ResolveGlobalRoot" /> at plan time — unless the
     ///     receipt is a legacy single-root receipt (#91), in which case every target actually
@@ -179,7 +179,8 @@ internal static class SquadCommandComposition
     public static IReadOnlyList<(SquadTarget Target, string GlobalRoot)> ResolveUninstallGlobalTargetRoots(
         SquadStateStore stateStore,
         string targetRoot,
-        ISquadGlobalRootResolver? injectedGlobalRoots = null)
+        ISquadGlobalRootResolver? injectedGlobalRoots = null,
+        SquadTarget? onlyTarget = null)
     {
         SquadReceipt? receipt;
         try
@@ -203,10 +204,40 @@ internal static class SquadCommandComposition
             return [];
         }
 
+        if (onlyTarget is { } chosen)
+            targets = [.. targets.Where(target => target == chosen)];
+
         if (SquadDeploymentPlan.IsLegacySingleRootReceipt(receipt))
             return [.. targets.Select(target => (target, targetRoot))];
 
         return ResolveGlobalTargetRoots(targets, injectedGlobalRoots);
+    }
+
+    /// <summary>
+    ///     Whether the receipt at <paramref name="targetRoot" /> records any file or block for
+    ///     <paramref name="target" />. An absent receipt answers false: the uninstall then reports the
+    ///     harness as not installed. A receipt that cannot be read (corrupt, or a file-system failure) answers
+    ///     true so the lifecycle call surfaces the real error instead of a misleading "not installed".
+    /// </summary>
+    public static bool ReceiptHasTarget(
+        SquadStateStore stateStore,
+        string targetRoot,
+        SquadDeploymentScope scope,
+        SquadTarget target)
+    {
+        SquadReceipt? receipt;
+        try
+        {
+            receipt = stateStore.ReadReceipt(targetRoot, scope);
+        }
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException)
+        {
+            return true;
+        }
+
+        string token = SquadTargetCatalog.GetToken(target);
+        return receipt is not null
+               && (receipt.Files.Any(file => file.Target == token) || receipt.Blocks.Any(block => block.Target == token));
     }
 
     /// <summary>

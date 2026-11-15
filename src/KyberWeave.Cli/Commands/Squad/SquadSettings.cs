@@ -162,15 +162,25 @@ public sealed class SquadUpdateSettings : CommandSettings
 /// <summary>Settings for the <c>squad uninstall</c> command.</summary>
 public sealed class SquadUninstallSettings : CommandSettings
 {
-    /// <summary>The deployment root directory. Defaults to the current directory.</summary>
-    [CommandArgument(0, "[path]")]
-    [Description("The deployment root directory. Defaults to the current directory.")]
-    public string Path { get; set; } = ".";
+    /// <summary>
+    ///     The harness to uninstall (for example claude or cursor). When omitted, every harness in the
+    ///     deployment receipt is removed.
+    /// </summary>
+    [CommandArgument(0, "[harness]")]
+    [Description(
+        "The harness to uninstall (for example claude or cursor). Omit to remove every harness in the deployment receipt. With a harness, the scope is global unless --project is given.")]
+    public string? Harness { get; set; }
 
-    /// <summary>The deployment root directory, overriding the positional path when supplied.</summary>
+    /// <summary>The project root to uninstall from; valid only for a project-scoped uninstall.</summary>
     [CommandOption("--path <PATH>")]
-    [Description("The deployment root directory, overriding the positional path when supplied.")]
+    [Description("The project root to uninstall from. Not valid for a global uninstall.")]
     public string? PathOption { get; set; }
+
+    /// <summary>Uninstall from the local project rather than the per-user global scope.</summary>
+    [CommandOption("--project")]
+    [Description(
+        "Uninstall from the local project instead of the global scope. With a harness the default is global; without one the default is the project. Cannot be combined with --global.")]
+    public bool Project { get; set; }
 
     /// <summary>Target the per-user global deployment directory rather than the local project.</summary>
     [CommandOption("-g|--global")]

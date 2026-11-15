@@ -291,7 +291,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
                 harness.Lifecycle(renderer),
                 false,
                 globalRoots: harness.GlobalRoots)
-            .Execute(null!, new SquadUninstallSettings { Path = anchor, Global = true, Yes = true }));
+            .Execute(null!, new SquadUninstallSettings { PathOption = anchor, Global = true, Yes = true }));
         AssertExit(uninstall.Result, uninstall.Output, 0);
 
         string[] removedNames = [.. kyberWeaveSkills, "task-gate"];
