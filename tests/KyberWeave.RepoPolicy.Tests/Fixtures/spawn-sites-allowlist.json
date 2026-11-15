@@ -1278,6 +1278,18 @@
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
       "count": 1,
       "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp repository the fixture created."
+    },
+    {
+      "file": "src/KyberWeave.Data/Hooks/KernelProcessRunner.cs",
+      "text": "ProcessStartInfo startInfo = new(argv[0])",
+      "count": 1,
+      "bound": "Built only for the ProcessRunner.Run call below, never started on its own; the run is bounded by the hook's remaining time budget (rule timeout capped by it), output is capped at 4 MiB, and cancellation kills the process tree."
+    },
+    {
+      "file": "src/KyberWeave.Data/Hooks/KernelProcessRunner.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, timeout, MaxOutputBytes, cancellationToken);",
+      "count": 1,
+      "bound": "ProcessRunner timeout is the rule timeout capped by the hook's remaining budget; stdout and stderr are capped at 4 MiB (MaxOutputBytes); the cancellation token kills the child process tree on expiry or cancel."
     }
   ]
 }
