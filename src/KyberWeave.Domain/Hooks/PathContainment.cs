@@ -3,18 +3,25 @@ namespace KyberWeave.Domain.Hooks;
 /// <summary>Decides whether a path lies inside a directory, comparing whole path segments.</summary>
 public static class PathContainment
 {
-    /// <summary>Checks that a path equals a directory or sits below it, so <c>/repo</c> does not contain <c>/repo-other</c>.</summary>
+    /// <summary>Checks that a path equals a directory or sits below it, so <c>/repo</c> does not contain <c>/repo-other</c>. Both sides are normalized first, so <c>..</c> segments cannot escape.</summary>
     /// <param name="directory">The containing directory, absolute.</param>
     /// <param name="path">The absolute path to test.</param>
-    /// <returns>True when <paramref name="path"/> is <paramref name="directory"/> or below it.</returns>
+    /// <returns>True when <paramref name="path"/> is <paramref name="directory"/> or below it; false when either input is empty or relative.</returns>
     public static bool IsWithin(string directory, string path)
     {
         ArgumentNullException.ThrowIfNull(directory);
         ArgumentNullException.ThrowIfNull(path);
 
-        string root = directory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        return path.Equals(root, StringComparison.Ordinal)
-            || path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal)
-            || path.StartsWith(root + Path.AltDirectorySeparatorChar, StringComparison.Ordinal);
+        if (string.IsNullOrWhiteSpace(directory) || string.IsNullOrWhiteSpace(path)
+            || !Path.IsPathFullyQualified(directory) || !Path.IsPathFullyQualified(path))
+        {
+            return false;
+        }
+
+        string root = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        string target = Path.GetFullPath(path);
+        return target.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Equals(root, StringComparison.Ordinal)
+            || target.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+            || target.StartsWith(root + Path.AltDirectorySeparatorChar, StringComparison.Ordinal);
     }
 }

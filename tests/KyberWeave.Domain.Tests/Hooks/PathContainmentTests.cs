@@ -18,4 +18,36 @@ public sealed class PathContainmentTests
 
         Assert.Equal(expected, PathContainment.IsWithin(dir, target));
     }
+
+    [Fact]
+    public void RejectsDotDotTraversalOutOfTheDirectory()
+    {
+        string dir = Path.GetFullPath("/repo");
+        string escaping = dir + Path.DirectorySeparatorChar + "sub" + Path.DirectorySeparatorChar + ".." + Path.DirectorySeparatorChar + ".." + Path.DirectorySeparatorChar + "etc" + Path.DirectorySeparatorChar + "passwd";
+
+        Assert.False(PathContainment.IsWithin(dir, escaping));
+    }
+
+    [Fact]
+    public void AcceptsDotDotThatStaysInside()
+    {
+        string dir = Path.GetFullPath("/repo");
+        string inside = dir + Path.DirectorySeparatorChar + "a" + Path.DirectorySeparatorChar + ".." + Path.DirectorySeparatorChar + "b.cs";
+
+        Assert.True(PathContainment.IsWithin(dir, inside));
+    }
+
+    [Theory]
+    [InlineData("", "/repo/a.cs")]
+    [InlineData("  ", "/repo/a.cs")]
+    [InlineData("/repo", "")]
+    [InlineData("repo", "/repo/a.cs")]
+    [InlineData("/repo", "repo/a.cs")]
+    public void FailsClosedOnEmptyOrRelativeInput(string directory, string path)
+    {
+        string dir = directory.StartsWith('/') ? Path.GetFullPath(directory) : directory;
+        string target = path.StartsWith('/') ? Path.GetFullPath(path) : path;
+
+        Assert.False(PathContainment.IsWithin(dir, target));
+    }
 }
