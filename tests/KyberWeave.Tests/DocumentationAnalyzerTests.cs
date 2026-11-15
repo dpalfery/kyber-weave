@@ -983,7 +983,9 @@ public sealed class DocumentationAnalyzerTests
         new(
             new ClaimExtractor(),
             sources ?? [new GraphClaimCandidateSource(), new SparseLexicalCandidateSource()],
-            embeddingGenerator,
+            embeddingGenerator is null || persistence is null
+                ? null
+                : new EmbeddingCoordinator(embeddingGenerator, persistence),
             persistence);
 
     private static DocumentSet NearDuplicateDocuments() =>

@@ -38,7 +38,7 @@ public sealed class DocumentationAnalysisScaleTests(ITestOutputHelper output)
         DocumentationAnalyzer analyzer = new DocumentationAnalyzer(
             new ClaimExtractor(),
             [graphSource, lexicalSource],
-            embeddingGenerator: null,
+            embeddingResolver: null,
             persistence: null);
 
         WarmCandidateGeneration();

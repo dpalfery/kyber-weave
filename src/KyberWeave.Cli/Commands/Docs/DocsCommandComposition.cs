@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -222,7 +223,9 @@ internal sealed class DocsAnalysisRuntime(
     public DocumentationAnalyzer CreateAnalyzer() => new(
         new ClaimExtractor(),
         [new GraphClaimCandidateSource(), new SparseLexicalCandidateSource()],
-        EmbeddingGenerator,
+        EmbeddingGenerator is null || Persistence is null
+            ? null
+            : new EmbeddingCoordinator(EmbeddingGenerator, Persistence),
         Persistence);
 
     public void Dispose()

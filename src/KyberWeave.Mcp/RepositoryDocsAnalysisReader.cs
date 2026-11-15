@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -49,10 +50,13 @@ public sealed class RepositoryDocsAnalysisReader : IDocsAnalysisReader
         using OpenAiCompatibleEmbeddingGenerator? embeddingGenerator = config.DocsAnalysis.Embeddings.Mode == DocsAnalysisEmbeddingMode.Off
             ? null
             : new OpenAiCompatibleEmbeddingGenerator();
+        IEmbeddingResolver? embeddingResolver = embeddingGenerator is null
+            ? null
+            : new EmbeddingCoordinator(embeddingGenerator, persistence);
         DocumentationAnalyzer analyzer = new DocumentationAnalyzer(
             new ClaimExtractor(),
             [new GraphClaimCandidateSource(), new SparseLexicalCandidateSource()],
-            embeddingGenerator,
+            embeddingResolver,
             persistence);
         ManagedGlossaryLoadResult glossary = new ManagedGlossaryService(
             _repositoryRoot,

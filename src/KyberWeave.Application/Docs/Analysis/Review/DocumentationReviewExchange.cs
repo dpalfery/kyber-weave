@@ -16,7 +16,7 @@ public sealed class DocumentationReviewExchange
 {
     public const string CandidateSchema = "kyber-weave.docs-review.candidates/v1";
     private const string VerdictSchema = "kyber-weave.docs-review.verdicts/v1";
-    public const string ReviewRuleCode = "KW-DOC-REVIEW-001";
+    public const string ReviewRuleCode = DocumentationAnalysisRuleIds.ReviewRuleCode;
 
     private static readonly JsonSerializerOptions SerializerOptions = CreateSerializerOptions();
     private static readonly ReviewRubric Rubric = new(
@@ -119,8 +119,8 @@ public sealed class DocumentationReviewExchange
 
         ReviewCandidateBundle bundle = new ReviewCandidateBundle(
             CandidateSchema,
-            DocumentationAnalyzer.AnalyzerVersion,
-            DocumentationAnalyzer.RubricVersion,
+            DocumentationAnalysisRuleIds.AnalyzerVersion,
+            DocumentationAnalysisRuleIds.RubricVersion,
             CandidateSetHash(emittedCandidates),
             Rubric,
             items);
@@ -235,9 +235,9 @@ public sealed class DocumentationReviewExchange
     {
         if (!StringComparer.Ordinal.Equals(bundle.Schema, VerdictSchema))
             return $"Unsupported verdict schema '{bundle.Schema}'.";
-        if (!StringComparer.Ordinal.Equals(bundle.AnalyzerVersion, DocumentationAnalyzer.AnalyzerVersion))
+        if (!StringComparer.Ordinal.Equals(bundle.AnalyzerVersion, DocumentationAnalysisRuleIds.AnalyzerVersion))
             return "The verdict bundle analyzer version is stale.";
-        if (!StringComparer.Ordinal.Equals(bundle.RubricVersion, DocumentationAnalyzer.RubricVersion))
+        if (!StringComparer.Ordinal.Equals(bundle.RubricVersion, DocumentationAnalysisRuleIds.RubricVersion))
             return "The verdict bundle rubric version is stale.";
         // Deserialized input: System.Text.Json does not enforce non-nullable annotations.
         // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
@@ -415,8 +415,8 @@ public sealed class DocumentationReviewExchange
         string identity = string.Join('\n',
             new[]
             {
-                DocumentationAnalyzer.AnalyzerVersion,
-                DocumentationAnalyzer.RubricVersion
+                DocumentationAnalysisRuleIds.AnalyzerVersion,
+                DocumentationAnalysisRuleIds.RubricVersion
             }.Concat(candidateLines));
         return Hash(identity);
     }

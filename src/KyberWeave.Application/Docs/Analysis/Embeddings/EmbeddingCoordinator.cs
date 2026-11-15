@@ -1,4 +1,5 @@
 using System.Text.Json;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis.Model;
@@ -6,11 +7,19 @@ using KyberWeave.Core.Docs.Analysis.Model;
 namespace KyberWeave.Core.Docs.Analysis.Embeddings;
 
 /// <summary>Applies embedding mode and safe-cache policy around a provider.</summary>
-public sealed class EmbeddingCoordinator(IEmbeddingGenerator generator, IAnalysisPersistence persistence)
+public sealed class EmbeddingCoordinator(IEmbeddingGenerator generator, IAnalysisPersistence persistence) : IEmbeddingResolver
 {
     private readonly IEmbeddingGenerator _generator = generator ?? throw new ArgumentNullException(nameof(generator));
     private readonly IAnalysisPersistence _persistence = persistence ?? throw new ArgumentNullException(nameof(persistence));
 
+    /// <summary>Wraps a provider and a cache as the analysis pass's resolver.</summary>
+    /// <param name="generator">The configured provider.</param>
+    /// <param name="persistence">The analysis cache.</param>
+    /// <returns>A resolver over both.</returns>
+    public static IEmbeddingResolver Create(IEmbeddingGenerator generator, IAnalysisPersistence persistence) =>
+        new EmbeddingCoordinator(generator, persistence);
+
+    /// <inheritdoc />
     public EmbeddingResolutionResult Resolve(
         IReadOnlyCollection<EmbeddingWorkItem> workItems,
         DocsAnalysisEmbeddingConfig config)
@@ -22,8 +31,7 @@ public sealed class EmbeddingCoordinator(IEmbeddingGenerator generator, IAnalysi
             return Empty();
         if (!_persistence.IsAvailable)
         {
-            return Unavailable(
-                config.Mode,
+            return EmbeddingResolutionResult.Unavailable(config.Mode,
                 "Embedding generation was skipped because the analysis cache is not safely ignored.");
         }
 
@@ -33,42 +41,41 @@ public sealed class EmbeddingCoordinator(IEmbeddingGenerator generator, IAnalysi
         }
         catch (HttpRequestException ex)
         {
-            return Unavailable(config.Mode, ex.Message);
+            return EmbeddingResolutionResult.Unavailable(config.Mode, ex.Message);
         }
         catch (IOException ex)
         {
-            return Unavailable(config.Mode, ex.Message);
+            return EmbeddingResolutionResult.Unavailable(config.Mode, ex.Message);
         }
         catch (InvalidDataException ex)
         {
-            return Unavailable(config.Mode, ex.Message);
+            return EmbeddingResolutionResult.Unavailable(config.Mode, ex.Message);
         }
         catch (InvalidOperationException ex)
         {
-            return Unavailable(config.Mode, ex.Message);
+            return EmbeddingResolutionResult.Unavailable(config.Mode, ex.Message);
         }
         catch (ArgumentException ex)
         {
-            return Unavailable(config.Mode, ex.Message);
+            return EmbeddingResolutionResult.Unavailable(config.Mode, ex.Message);
         }
         catch (OperationCanceledException ex)
         {
-            return Unavailable(config.Mode, ex.Message);
+            return EmbeddingResolutionResult.Unavailable(config.Mode, ex.Message);
         }
         catch (JsonException ex)
         {
-            return Unavailable(config.Mode, ex.Message);
+            return EmbeddingResolutionResult.Unavailable(config.Mode, ex.Message);
         }
         catch (OverflowException ex)
         {
-            return Unavailable(config.Mode, ex.Message);
+            return EmbeddingResolutionResult.Unavailable(config.Mode, ex.Message);
         }
         catch (FormatException)
         {
             // Header parsing is the only provider-boundary FormatException expected here.
             // Use a fixed reason so malformed secret text can never reach diagnostics.
-            return Unavailable(
-                config.Mode,
+            return EmbeddingResolutionResult.Unavailable(config.Mode,
                 "The configured embedding credential is not a valid HTTP bearer token.");
         }
     }
@@ -136,20 +143,4 @@ public sealed class EmbeddingCoordinator(IEmbeddingGenerator generator, IAnalysi
 
     private static EmbeddingResolutionResult Empty() =>
         new([], new DiagnosticReport(), 0, 0, EmbeddingUsage.None);
-
-    internal static EmbeddingResolutionResult Unavailable(
-        DocsAnalysisEmbeddingMode mode,
-        string reason)
-    {
-        DiagnosticReport diagnostics = new DiagnosticReport();
-        diagnostics.Add(new Diagnostic(
-            DocumentationAnalyzer.EmbeddingUnavailableRuleCode,
-            mode == DocsAnalysisEmbeddingMode.Required ? Severity.Error : Severity.Warning,
-            $"Embedding analysis is unavailable: {reason}",
-            "docs-analysis.embeddings",
-            Hint: mode == DocsAnalysisEmbeddingMode.Required
-                ? "Restore the configured local embedding endpoint and safe analysis cache, or set embeddings.mode to prefer/off."
-                : "Lexical analysis will continue without embeddings."));
-        return new EmbeddingResolutionResult([], diagnostics, 0, 0, EmbeddingUsage.None);
-    }
 }

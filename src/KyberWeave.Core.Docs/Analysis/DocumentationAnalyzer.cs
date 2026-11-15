@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis.Candidates;
@@ -14,18 +15,18 @@ namespace KyberWeave.Core.Docs.Analysis;
 public sealed partial class DocumentationAnalyzer(
     ClaimExtractor extractor,
     IReadOnlyList<IClaimCandidateSource> candidateSources,
-    IEmbeddingGenerator? embeddingGenerator,
+    IEmbeddingResolver? embeddingResolver,
     IAnalysisPersistence? persistence)
 {
-    public const string DuplicateRuleCode = "KW-DOC-ANALYSIS-001";
-    public const string ConflictRuleCode = "KW-DOC-ANALYSIS-002";
-    public const string TerminologyRuleCode = "KW-DOC-ANALYSIS-003";
-    public const string IgnoreMarkupRuleCode = "KW-DOC-ANALYSIS-004";
-    public const string CodeGraphUnavailableRuleCode = "KW-DOC-ANALYSIS-005";
-    public const string EmbeddingUnavailableRuleCode = "KW-DOC-ANALYSIS-006";
+    public const string DuplicateRuleCode = DocumentationAnalysisRuleIds.DuplicateRuleCode;
+    public const string ConflictRuleCode = DocumentationAnalysisRuleIds.ConflictRuleCode;
+    public const string TerminologyRuleCode = DocumentationAnalysisRuleIds.TerminologyRuleCode;
+    public const string IgnoreMarkupRuleCode = DocumentationAnalysisRuleIds.IgnoreMarkupRuleCode;
+    public const string CodeGraphUnavailableRuleCode = DocumentationAnalysisRuleIds.CodeGraphUnavailableRuleCode;
+    public const string EmbeddingUnavailableRuleCode = DocumentationAnalysisRuleIds.EmbeddingUnavailableRuleCode;
 
-    public const string AnalyzerVersion = "analyzer/v1";
-    public const string RubricVersion = "rubric/v1";
+    public const string AnalyzerVersion = DocumentationAnalysisRuleIds.AnalyzerVersion;
+    public const string RubricVersion = DocumentationAnalysisRuleIds.RubricVersion;
 
     private static readonly IReadOnlySet<string> TerminologyStopWords =
         new HashSet<string>(StringComparer.Ordinal)
@@ -170,21 +171,20 @@ public sealed partial class DocumentationAnalyzer(
         IReadOnlyList<Claim> claims,
         DocsAnalysisEmbeddingConfig config)
     {
-        if (embeddingGenerator is null)
+        if (embeddingResolver is null)
         {
-            return EmbeddingCoordinator.Unavailable(
+            return EmbeddingResolutionResult.Unavailable(
                 config.Mode,
                 "No embedding provider is configured in this host.");
         }
         if (persistence is null)
         {
-            return EmbeddingCoordinator.Unavailable(
+            return EmbeddingResolutionResult.Unavailable(
                 config.Mode,
                 "No safe analysis persistence provider is configured in this host.");
         }
 
-        EmbeddingCoordinator coordinator = new EmbeddingCoordinator(embeddingGenerator, persistence);
-        return coordinator.Resolve(
+        return embeddingResolver.Resolve(
             claims.Select(claim => new EmbeddingWorkItem(
                 claim.ContextualHash,
                 claim.ContextualText)).ToArray(),
@@ -575,7 +575,7 @@ public sealed partial class DocumentationAnalyzer(
     {
         CandidateSourceKind.Graph => true,
         CandidateSourceKind.Lexical => config.Search.Mode != DocsAnalysisSearchMode.Graph,
-        CandidateSourceKind.Embedding => embeddingGenerator is not null
+        CandidateSourceKind.Embedding => embeddingResolver is not null
             && config.Embeddings.Mode != DocsAnalysisEmbeddingMode.Off,
         _ => false
     };
