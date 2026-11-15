@@ -30,7 +30,7 @@ internal sealed class KernelProcessRunner : IProcessRunner
     {
         if (!Directory.Exists(workingDirectory))
         {
-            throw new DirectoryNotFoundException($"working directory not found: {workingDirectory}");
+            throw WorkingDirectoryNotFound(workingDirectory);
         }
 
         ProcessStartInfo startInfo = new(argv[0])
@@ -53,7 +53,7 @@ internal sealed class KernelProcessRunner : IProcessRunner
         }
         catch (Exception ex) when (IsMissingExecutable(ex))
         {
-            throw new FileNotFoundException($"command not found: {argv[0]}", argv[0], ex);
+            throw MapMissingExecutable(ex, argv[0], workingDirectory);
         }
         catch (TimeoutException)
         {
@@ -67,4 +67,22 @@ internal sealed class KernelProcessRunner : IProcessRunner
 
     private static bool IsMissingExecutable(Exception ex) =>
         ex is FileNotFoundException || (ex is Win32Exception win32 && win32.NativeErrorCode == MissingExecutableErrorCode);
+
+    /// <summary>Names the cause of a failed start: a directory removed after the up-front check, or a missing program.</summary>
+    /// <remarks>
+    /// Linux reports a missing working directory with the same native error as a missing program, so the directory is
+    /// checked again before blaming the command.
+    /// </remarks>
+    internal static Exception MapMissingExecutable(Exception ex, string program, string workingDirectory)
+    {
+        if (ex is Win32Exception { NativeErrorCode: MissingExecutableErrorCode } && !Directory.Exists(workingDirectory))
+        {
+            return WorkingDirectoryNotFound(workingDirectory);
+        }
+
+        return new FileNotFoundException($"command not found: {program}", program, ex);
+    }
+
+    private static DirectoryNotFoundException WorkingDirectoryNotFound(string workingDirectory) =>
+        new($"working directory not found: {workingDirectory}");
 }

@@ -1,4 +1,6 @@
+using System.ComponentModel;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Data.Hooks;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -35,6 +37,26 @@ public sealed class KernelProcessRunnerTests : IDisposable
             Runner().RunAsync(["dotnet", "--version"], missing, TimeSpan.FromSeconds(5), CancellationToken.None));
 
         Assert.Contains("working directory not found", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BlamesTheDirectoryWhenItWasRemovedAfterTheCheck()
+    {
+        string missing = Path.Combine(directory.FullName, "removed-mid-start");
+
+        DirectoryNotFoundException mapped = Assert.IsType<DirectoryNotFoundException>(
+            KernelProcessRunner.MapMissingExecutable(new Win32Exception(2), "dotnet", missing));
+
+        Assert.Equal($"working directory not found: {missing}", mapped.Message);
+    }
+
+    [Fact]
+    public void BlamesTheCommandWhenTheDirectoryStillExists()
+    {
+        FileNotFoundException mapped = Assert.IsType<FileNotFoundException>(
+            KernelProcessRunner.MapMissingExecutable(new Win32Exception(2), "kw-no-such-program-4e1f", directory.FullName));
+
+        Assert.Equal("command not found: kw-no-such-program-4e1f", mapped.Message);
     }
 
     [Fact]
