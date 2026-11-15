@@ -57,7 +57,7 @@ public sealed class ReviewGateProcGuardWiringTests
     {
         string[] run = GateRunArgv(gateId);
 
-        Assert.All(run, word => Assert.NotEqual("scripts/proc-guard.sh", word));
+        Assert.All(run, word => Assert.DoesNotContain("proc-guard.sh", word, StringComparison.Ordinal));
         Assert.Equal(["dotnet", "test", projectPath, "-c", "Release", "--no-build"], run.Take(6));
     }
 
@@ -76,7 +76,7 @@ public sealed class ReviewGateProcGuardWiringTests
         {
             YamlMappingNode gate = (YamlMappingNode)node;
             if (Child(gate, "run") is YamlSequenceNode argv &&
-                argv.Children.Any(item => ((YamlScalarNode)item).Value == "scripts/proc-guard.sh"))
+                argv.Children.Any(item => ((YamlScalarNode)item).Value?.Contains("proc-guard.sh", StringComparison.Ordinal) == true))
             {
                 guarded.Add(Scalar(gate, "id") ?? "(no id)");
             }
