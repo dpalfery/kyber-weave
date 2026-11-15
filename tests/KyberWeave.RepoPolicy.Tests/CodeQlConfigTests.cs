@@ -6,9 +6,10 @@ using YamlDotNet.RepresentationModel;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// The CodeQL configuration leaves every query rule and path active — no path-scoped
-/// exclusions (retired in ADR 0020) and no rule filters remain now that the live-gate
-/// script has been retired alongside the TypeScript engine cutover.
+/// The CodeQL configuration leaves every query rule active. It excludes no path except the frozen
+/// TypeScript archive under <c>dash/archived/</c>, which its own README forbids any build, runtime
+/// or test target from importing or executing. ADR 0020 retired the vendored-subtree exclusions;
+/// this one hides a snapshot of retired code, not live code.
 /// </summary>
 public sealed partial class CodeQlConfigTests
 {
@@ -25,13 +26,24 @@ public sealed partial class CodeQlConfigTests
     }
 
     [Fact]
-    public void CodeQlConfigExcludesByRuleAndNeverByPath()
+    public void CodeQlConfigExcludesOnlyTheFrozenArchiveAndNeverByInclusion()
     {
         YamlMappingNode root = LoadRoot();
 
-        IEnumerable<string?> keys = root.Children.Keys.Select(key => (key as YamlScalarNode)?.Value);
+        IEnumerable<string?> keys = root.Children.Keys.Select(key => (key as YamlScalarNode)?.Value).ToList();
         Assert.DoesNotContain("paths", keys);
-        Assert.DoesNotContain("paths-ignore", keys);
+
+        YamlNode? ignoreNode = root.Children
+            .Where(pair => string.Equals((pair.Key as YamlScalarNode)?.Value, "paths-ignore", StringComparison.Ordinal))
+            .Select(pair => pair.Value)
+            .SingleOrDefault();
+        if (ignoreNode is null)
+            return;
+
+        YamlSequenceNode ignored = Assert.IsType<YamlSequenceNode>(ignoreNode);
+        Assert.Equal(
+            ["dash/archived"],
+            ignored.Children.Select(node => Assert.IsType<YamlScalarNode>(node).Value));
     }
 
     [Fact]

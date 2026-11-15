@@ -1,11 +1,18 @@
 # CodeQL scope for KyberWeave.
 #
-# Everything is analysed, `dash/**` included. `dash/` was a vendored subtree of
-# the upstream CodeBurn project whose directories this config once excluded;
-# since the one-time fork (ADR 0020) all of it is first-party code under the
-# same analysis as the rest of the repository. No file, path, or query rule is
-# excluded.
+# Everything this repository authors is analysed, `dash/**` included: since the
+# one-time fork (ADR 0020) the dashboard is first-party code under the same
+# analysis as the rest of the repository, and no file or path was excluded.
+#
+# The single exception is `dash/archived/`, the frozen TypeScript engine kept for
+# reference after the C# cutover. Its README forbids every build, runtime, CLI, UI
+# and test target from importing or executing it, so analysing it can only report
+# on code that never runs. Excluding it is not the vendored-subtree exclusion the
+# ADR retired: that hid live code, this hides a snapshot.
 #
 # Owner: dpalfery
 # Review date: 2026-11-15
 name: KyberWeave CodeQL
+
+paths-ignore:
+  - dash/archived
