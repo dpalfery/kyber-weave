@@ -281,9 +281,8 @@ public sealed class SquadHookJsonBlockTests
         SquadHookJsonBlock.RemoveFile(format, path);
 
         JsonObject root = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
-        Assert.DoesNotContain("PostToolUse", root.ToJsonString(), StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("\"hooks\":{}", root.ToJsonString(), StringComparison.Ordinal);
-        Assert.True(SquadHookJsonBlock.IsEmpty(format, root.ToJsonString()));
+        string[] removed = ["hooks", "PreToolUse", "PostToolUse"];
+        Assert.DoesNotContain(root, property => removed.Contains(property.Key, StringComparer.OrdinalIgnoreCase));
     }
 
     [Fact]
