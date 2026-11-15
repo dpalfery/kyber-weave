@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Contracts.Services;
 using KyberDash.Domain;
@@ -375,11 +376,36 @@ public class OtlpCollectorService : IOtlpCollectorService
     /// </summary>
     private static string? SniffJsonSignal(ReadOnlySpan<byte> payload)
     {
-        if (payload.IndexOf("resourceLogs"u8) >= 0)
+        try
         {
-            return "logs";
+            Utf8JsonReader reader = new(payload);
+            if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
+                return null;
+
+            while (reader.Read())
+            {
+                if (reader.TokenType == JsonTokenType.EndObject)
+                    break;
+
+                if (reader.TokenType != JsonTokenType.PropertyName)
+                    continue;
+
+                // Only a top-level property name decides the signal; a value that merely mentions
+                // one of these names (for example in an attribute) must not.
+                string? name = reader.GetString();
+                if (string.Equals(name, "resourceLogs", StringComparison.Ordinal))
+                    return "logs";
+                if (string.Equals(name, "resourceMetrics", StringComparison.Ordinal))
+                    return "metrics";
+
+                reader.Skip();
+            }
+        }
+        catch (JsonException)
+        {
+            return null;
         }
 
-        return payload.IndexOf("resourceMetrics"u8) >= 0 ? "metrics" : null;
+        return null;
     }
 }
