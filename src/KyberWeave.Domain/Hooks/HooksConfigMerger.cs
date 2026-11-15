@@ -66,7 +66,7 @@ public static class HooksConfigMerger
         int clamped = Math.Clamp(given, min, max);
         if (clamped != given)
         {
-            warnings.Add($"{scope}: '{name}' must be between {min} and {max}; using {clamped}.");
+            warnings.Add($"{scope}: '{name}' must be between {min} and {max}; got {given}; using {clamped}.");
         }
 
         return clamped;

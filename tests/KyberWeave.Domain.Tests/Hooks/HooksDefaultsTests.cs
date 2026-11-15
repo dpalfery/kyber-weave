@@ -99,8 +99,8 @@ public sealed class HooksDefaultsTests
         Assert.Equal(500, merged.MaxOutputLines);
         Assert.Equal(100, merged.MaxOutputBytes);
         Assert.Equal(300, Assert.Single(merged.Rules, r => r.Id == "dotnet-test").TimeoutSeconds);
-        Assert.Contains(merged.Warnings, w => w.Contains("'time-budget-seconds' must be between 1 and 120", StringComparison.Ordinal));
-        Assert.Contains(merged.Warnings, w => w.Contains("rule 'dotnet-test': 'timeout-seconds'", StringComparison.Ordinal));
+        Assert.Contains(merged.Warnings, w => w.Contains("'time-budget-seconds' must be between 1 and 120; got 0; using 1.", StringComparison.Ordinal));
+        Assert.Contains(merged.Warnings, w => w.Contains("rule 'dotnet-test': 'timeout-seconds' must be between ", StringComparison.Ordinal) && w.Contains("; got 100000; using ", StringComparison.Ordinal));
         Assert.Equal(4, merged.Warnings.Count);
     }
 
