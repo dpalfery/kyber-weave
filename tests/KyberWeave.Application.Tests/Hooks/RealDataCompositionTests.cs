@@ -236,6 +236,21 @@ public sealed class RealDataCompositionTests : IDisposable
         Assert.Equal(TestClassResolution.None, provider.GetRequiredService<ITestClassResolver>().Resolve(root.FullName, "src/App/Foo.cs"), new ResolutionComparer());
     }
 
+    [Theory]
+    [InlineData("/* namespace Fake; */\nnamespace Real;\npublic sealed class FooTests {}")]
+    [InlineData("/*\nnamespace Fake;\n*/\nnamespace Real;\npublic sealed class FooTests {}")]
+    public void ConventionResolverReadsTheNamespaceOutsideBlockComments(string source)
+    {
+        _ = Write("tests/App.Tests/App.Tests.csproj", "<Project />");
+        _ = Write("tests/App.Tests/FooTests.cs", source);
+        using ServiceProvider provider = Provider(new FakeProcessRunner(clock));
+
+        Assert.Equal(
+            new TestClassResolution(["Real.FooTests"], "tests/App.Tests/App.Tests.csproj"),
+            provider.GetRequiredService<ITestClassResolver>().Resolve(root.FullName, "src/App/Foo.cs"),
+            new ResolutionComparer());
+    }
+
     [Fact]
     public void ConventionResolverTreatsWildcardCharactersInTheFileNameAsPlainText()
     {

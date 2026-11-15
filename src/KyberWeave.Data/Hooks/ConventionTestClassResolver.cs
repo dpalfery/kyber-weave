@@ -62,7 +62,7 @@ internal sealed partial class ConventionTestClassResolver(IFileSystem fileSystem
             return null;
         }
 
-        Match ns = NamespacePattern().Match(source);
+        Match ns = NamespacePattern().Match(code);
         return ns.Success ? $"{ns.Groups[1].Value}.{className}" : className;
     }
 
