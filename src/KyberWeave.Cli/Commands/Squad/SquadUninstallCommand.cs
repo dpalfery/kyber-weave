@@ -101,6 +101,12 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
             return 2;
         }
 
+        if (settings.PathOption is not null && string.IsNullOrWhiteSpace(settings.PathOption))
+        {
+            SquadCommandComposition.WriteClientInputError("--path must not be blank. Give a directory, or omit the option.");
+            return 2;
+        }
+
         string? effectivePath = settings.PathOption;
         SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(isGlobal);
 
