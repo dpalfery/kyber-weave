@@ -859,9 +859,33 @@ public sealed class AnalysisPersistenceTests
 
         // Turn off AutoFlush so the write buffers, making Flush() write across the broken pipe and throw IOException.
         process.StandardInput.AutoFlush = false;
-        process.StandardInput.Write(' ');
 
-        Assert.False(IsStandardInputOpen(process));
+        // Under parallel test execution on Linux, a concurrent fork() can briefly hold a duplicate of the read pipe
+        // until execve() closes O_CLOEXEC descriptors. Retry writing until the transient reader drains and Flush throws IOException.
+        DateTime deadline = DateTime.UtcNow.AddSeconds(5);
+        bool isOpen = true;
+        while (DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                process.StandardInput.Write(' ');
+            }
+            catch (IOException)
+            {
+                isOpen = false;
+                break;
+            }
+
+            if (!IsStandardInputOpen(process))
+            {
+                isOpen = false;
+                break;
+            }
+
+            Thread.Sleep(20);
+        }
+
+        Assert.False(isOpen, "Standard input pipe was not broken within timeout.");
     }
 
     private static string QuerySqlite(string databasePath, string input)
