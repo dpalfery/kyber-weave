@@ -1,0 +1,78 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/dpalfery/kyber-weave/.kyber-weave/hooks.schema.json",
+  "title": "Kyber-Weave edit hook configuration",
+  "description": "Settings for .kyber-weave/hooks.yml. Everything is optional: the file is merged over the built-in C# rules.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "time-budget-seconds": {
+      "description": "Total seconds the hook may spend running commands for one edit. Default 30.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "stop-on-first-blocking": {
+      "description": "Stop after the first blocking failure instead of running every rule. Default false.",
+      "type": "boolean"
+    },
+    "max-output-lines": {
+      "description": "Most output lines kept per failing rule in the feedback. Default 30.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "max-output-bytes": {
+      "description": "Most output bytes kept per failing rule in the feedback. Default 3000.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "rules": {
+      "description": "Rule overrides and additions. A rule with a built-in id changes only the fields it sets; any other id adds a rule that needs kind, include and run.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id"],
+        "properties": {
+          "id": {
+            "description": "Rule name. Built-in ids: dotnet-format-whitespace, dotnet-format-style, dotnet-test.",
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "description": "lint rules run before test rules.",
+            "enum": ["lint", "test"]
+          },
+          "include": {
+            "description": "Globs over the repository-relative path (** crosses folders, * and ? do not).",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "exclude": {
+            "description": "Globs that remove a path from the rule.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "run": {
+            "description": "Command as an argument list, never a shell string. Tokens: {file}, {root}, {marker}, {project}, {target} (project, else marker), {testProject}, and a standalone {testClasses}.",
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1
+          },
+          "timeout-seconds": {
+            "description": "Longest the command may run. Default 25.",
+            "type": "integer",
+            "minimum": 1
+          },
+          "blocking": {
+            "description": "Whether a failure makes the hook exit 2 so the agent sees it. Default true.",
+            "type": "boolean"
+          },
+          "enabled": {
+            "description": "Set false to turn a rule off, true to turn on an opt-in rule such as dotnet-test.",
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}

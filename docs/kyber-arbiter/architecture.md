@@ -84,6 +84,8 @@ This repository has no managed glossary, so the two overloaded names are fixed h
 - **JEV** — one decision-model provider behind the Arbiter (TypeSafe's cloud `jev-*`
   models), alongside local Ollama decision models (`nimble`, `tev1`). JEV never names the
   feature.
+  A future [edit hook](../kyber-hooks/README.md) step may ask Jev to judge ambiguous failures
+  through the same decision-provider seam.
 
 ## Reference material
 
