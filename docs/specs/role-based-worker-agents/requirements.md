@@ -134,6 +134,9 @@ profiles, so a change to one does not change the other.
 1.13. THE `conductor` agent SHALL have no model profile; it SHALL run on the model its session was
 started with, by the user or by the headless caller.
 
+1.14. EVERY place in the product that names `github-devops` for run start or delivery SHALL accept
+`devops` under the tiered roster.
+
 ### Requirement 2: Every task carries a difficulty
 
 **User Story:** As the owner, I want each task rated easy, medium or hard by judgement, so that the
@@ -207,8 +210,9 @@ technology.
 4.3. IF a task names a technology the host's `ontology.technologies` does not declare THEN
 `docs validate` SHALL report an error naming the task, the value and the declared list.
 
-4.4. IF the active roster is `tiered` and a task that changes files has no `Technology:` line THEN
-`docs validate` SHALL report an error naming the task.
+4.4. IF the active roster is `tiered` and a task that a developer agent will do has no
+`Technology:` line THEN `docs validate` SHALL report an error naming the task; a documentation or
+delivery task SHALL need none.
 
 4.5. IF a `Technology:` line names more than one technology THEN `docs validate` SHALL report an
 error that tells the author to split the task.
@@ -263,6 +267,14 @@ standard that lacks one of the six headings, naming the folder and what is missi
 
 5.10. THE system SHALL ship no role folder for testing; testing guidance SHALL live only in
 `shared-rules.md` and in each standard's Testing section.
+
+5.11. A host folder that still holds the standard as `README.md` SHALL keep working for at least two
+minor releases: it SHALL be read, and `docs validate` SHALL report a warning that names the
+migration command instead of an error.
+
+5.12. THE system SHALL provide a command that renames a host's existing standards files to the
+prefixed names and adds any of the four files that is missing, prints the change before writing,
+and changes no file content.
 
 ### Requirement 6: Standards ship as templates
 
@@ -370,8 +382,9 @@ host facts; the shared rules; the parent technology's rules and skills, when the
 parent; then the task technology's rules, skills and standard.
 
 9.3. WHEN a conductor dispatches a worker with a task id on a harness whose dispatch hook can
-rewrite the dispatch THEN the hook SHALL replace the dispatch text with the full task prompt before
-the worker starts, and the worker SHALL NOT need to read a file to get it.
+rewrite the dispatch THEN the hook SHALL expand the task-id line into the full task prompt before
+the worker starts, SHALL keep every other line of the dispatch (such as a failure report on a
+retry), and the worker SHALL NOT need to read a file to get it.
 
 9.4. THE conductor's dispatch SHALL carry the task id and SHALL NOT carry the prompt content; the
 prompt text SHALL NOT enter the conductor's context on any harness.
@@ -419,6 +432,13 @@ and that technology's rules, skills and standard, for a dispatch that belongs to
 
 9.18. No existing Arbiter rule SHALL treat the expanded prompt, or a dispatch that names the prompt
 file, as a dispatch that tells a worker to read a plan.
+
+9.19. IF a worker starts and its prompt holds no task part (the hook did not run) THEN the worker
+SHALL print its own prompt with `kyber-weave docs packet` for the task id it was given, or stop and
+report; it SHALL NOT work from the task id alone.
+
+9.20. THE dispatch SHALL carry the number of failed attempts and the prior results the prompt needs
+as header lines, so the hook builds the same prompt the docs tool describes.
 
 ### Requirement 10: Task gates resolve by technology
 
@@ -488,6 +508,10 @@ from the same base commit on the same harness.
 
 12.5. THE procedure SHALL record, per run: tasks completed, attempts per task and tier of each
 attempt, task-gate failures, review findings by severity, tokens and wall time.
+
+12.6. AN agent SHALL be able to declare the roster it belongs to; an agent that declares none SHALL
+serve both. The fourteen agents to be removed SHALL declare `technology`, and the five new agents
+SHALL declare `tiered`.
 
 ### Requirement 13: Removal has a migration path
 

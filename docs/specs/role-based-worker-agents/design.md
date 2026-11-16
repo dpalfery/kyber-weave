@@ -79,6 +79,7 @@ copilot-tools: [the same list every worker agent carries today]
 delegates-to: []
 fallback: role-skill
 aliases: []
+worker-roster: tiered
 ---
 # Developer
 
@@ -111,19 +112,22 @@ inside them, stop and report it as an open question. Never edit secrets or deplo
 
 1. Read the whole task prompt before you touch anything. Do not open the plan, the specification
    or the task file.
-2. If the prompt names a technology and gives no rules or standard for it, stop and report that.
+2. If your prompt is only a task id, with no `<task>` part, the prompt was not delivered. Run
+   `kyber-weave docs packet <task id>` and use its output as your prompt. If that fails, stop and
+   report. Never work from a task id alone.
+3. If the prompt names a technology and gives no rules or standard for it, stop and report that.
    Do not improvise a standard.
-3. If `<left-out>` lists a section you need, fetch it with `docs_get_coding_standard_for_technology`,
+4. If `<left-out>` lists a section you need, fetch it with `docs_get_coding_standard_for_technology`,
    naming the technology and the topic. Fetch nothing else by default.
-4. Look up current library documentation for any library you configure or call in a way that is new
+5. Look up current library documentation for any library you configure or call in a way that is new
    to this repository. Use the standard for which libraries this repository takes.
-5. In test-first mode, write the task's tests first, following the standard's Testing section, and
+6. In test-first mode, write the task's tests first, following the standard's Testing section, and
    run the task gate so it fails on them.
-6. Implement the change. Match the repository's existing naming and layout unless the standard says
+7. Implement the change. Match the repository's existing naming and layout unless the standard says
    otherwise.
-7. Run the task gate on your changed files. Fix what fails and run it again.
-8. Check your change against the standard's Done checklist.
-9. Return the completion digest.
+8. Run the task gate on your changed files. Fix what fails and run it again.
+9. Check your change against the standard's Done checklist.
+10. Return the completion digest.
 
 ## When you cannot finish
 
@@ -234,6 +238,10 @@ Stated so the owner can weigh them. The design follows the owner's direction in 
 8. **Routing was rebuilt three days ago.** ADR 0080 and ADR 0082 moved routing to capabilities and a
    model pick. Under the tiered roster that pick shrinks to "developer, docs or delivery", and
    difficulty picks the tier.
+9. **Delivery is GitHub-only in code.** The run delivery tool pushes a branch and opens a pull
+   request on GitHub. The Azure DevOps, GitLab and Jira folders give the `devops` agent rules and
+   skills, but no product code delivers to those platforms. That is instruction only until a
+   later specification adds it.
 
 ## Architecture
 
@@ -258,8 +266,13 @@ rules that hold for every technology, and names no technology. `docs-dev` keeps 
 because they follow the documentation ontology and the Config Reg, which a host already customises
 through its configuration.
 
+An agent may declare its roster with a `worker-roster` key. The five new agents declare `tiered`,
+the fourteen to be removed declare `technology`, and an agent with no key serves both.
+
 `devops` does what `github-devops` does today (run start, push, pull request, pipeline files) and
-names no platform. Its task or the host configuration names one platform, and it receives that
+names no platform. Six source files name `github-devops` for run start and delivery
+(`RunStartEvidenceRules`, `ArbiterRunStartRemedy`, `RunWriterProfiles`, `GateCatalogueRenderer`,
+`RunDeliveryService`, `RunDelivery`); each accepts `devops` under the tiered roster. Its task or the host configuration names one platform, and it receives that
 platform folder's rules and skills.
 
 ### Difficulty
@@ -355,6 +368,11 @@ The standard's headings, in order:
 5. **Security and data handling**.
 6. **Done checklist**: what a reviewer checks.
 
+**Existing hosts.** Every host today, this repository included, holds each standard as
+`README.md`. That name is read for two minor releases with a warning, not an error, and
+`kyber-weave docs standards migrate` renames the files and adds the missing ones without changing
+their content.
+
 Role folders are declared in a new `ontology.roles` list, so validation tells a role from a
 technology. A platform folder is a technology folder; the `devops` agent's task names it the way a
 developer task names `csharp`.
@@ -382,9 +400,11 @@ folders for the technologies and platforms the user names. `kyber-weave docs sta
 One service builds the prompt for a task. Three callers use it: the dispatch hook, the docs tool and
 `docs packet`. It is built on the service behind `docs packet` today.
 
-**Main path: the dispatch hook inserts it.** The conductor dispatches the worker with one short
-line that carries the task id. A hook on the dispatch call builds the prompt and replaces the
-dispatch text with it before the worker starts. The worker begins with its whole prompt and reads
+**Main path: the dispatch hook inserts it.** The conductor dispatches the worker with a few header
+lines: the task id, the number of failed attempts, and the prior-results file when there is one. A
+hook on the dispatch call builds the prompt and puts it in place of the task-id line before the
+worker starts. Every other line of the dispatch is kept, so a retry's failure report still reaches
+the worker. The worker begins with its whole prompt and reads
 nothing. The conductor never sees the text.
 
 Kyber-Weave already rewrites dispatch text this way: the Arbiter's hook removes routing headers
@@ -407,8 +427,12 @@ to read it. The folder is not tracked, so the file is never committed.
 Arbiter. Prompt insertion is split out as its own hook action that Squad setup installs on every
 harness that supports it, whether or not the Arbiter is enabled. With the Arbiter on, one hook call
 does both: the rules run on the short dispatch first, then the prompt is inserted. If the prompt
-cannot be built, the dispatch is stopped with the repair command; a worker never starts with only a
-task id.
+cannot be built, the dispatch is stopped with the repair command.
+
+**When the hook does not run.** A hook can be absent: Codex skips a hook the user has not trusted,
+and Copilot in VS Code needs a setting. The worker then starts with only the header lines. Its
+instructions cover this: with no `<task>` part it prints its own prompt with `docs packet`, or
+stops. `kyber-weave doctor` reports a harness where the hook is not installed or not trusted.
 
 **The docs tool** `docs_build_task_prompt_for_agent_dispatch` takes the project path and a task id
 (and optionally the plan, a prior-results file and the number of failed attempts). It replies with
@@ -611,7 +635,9 @@ Each phase ships on its own and leaves a working product.
 | `Difficulty:` holds another value | `docs validate` error naming the task and the three values. |
 | No `Difficulty:` line | Treated as `medium`, source `default`. |
 | Unknown technology on a task | `docs validate` error naming the task, the value and the declared list. |
-| Tiered roster, file-changing task without a technology | `docs validate` error naming the task. |
+| Tiered roster, developer task without a technology | `docs validate` error naming the task. |
+| Host folder still using `README.md` | Read, with a warning naming the migrate command, for two minor releases. |
+| Worker starts with only a task id | It prints its own prompt with `docs packet`, or stops and reports. |
 | `Technology:` names two | `docs validate` error telling the author to split the task. |
 | Technology named, folder missing | The prompt says so in that technology's section; the rest is returned. |
 | Prompt over budget | Rules kept; skills then standard sections cut; cuts listed. |
@@ -646,7 +672,7 @@ Estimates, for planning only.
 | Phase | Source | Tests | Docs and prompts |
 |---|---|---|---|
 | 1. Technology folders | 6 to 9 files | 4 new classes, 4 to 6 changed | 15 template folders reshaped, 4 role folders, 4 platform folders, 1 inventory, 4 docs |
-| 2. Task fields and the task prompt | 16 to 22 files | 8 new classes, 12 to 18 changed | 4 prompt files, 4 docs |
+| 2. Task fields and the task prompt | 18 to 24 files | 8 new classes, 14 to 20 changed | 4 prompt files, 4 docs; the JSON task list name appears in 7 source, 10 test, 8 product and 9 live doc files |
 | 3. Agents | 6 to 9 files | 3 new classes, 8 to 12 changed | 5 new agents, 13 rendered sets, 4 docs |
 | 4. Arbiter rules from folders | 8 to 12 files | 4 new classes, 6 to 10 changed | 3 rule files, 3 docs |
 | 5. Comparison and removal | 10 to 15 files | 40 to 60 changed | 14 agents deleted, 1 runbook, 39 live docs, 84 product files |

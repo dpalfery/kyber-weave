@@ -33,7 +33,7 @@ with today's agents as the default, so any phase can ship without the next.
 
 | Phase | Delivers | Tasks | Shippable because |
 |---|---|---|---|
-| 1. Technology folders | Four prefixed files per folder, six headings, templates, role and platform folders, onboarding by choice | 1.1 to 1.9 | Additive: nothing today's agents read is removed |
+| 1. Technology folders | Four prefixed files per folder, six headings, templates, role and platform folders, onboarding by choice, migration of existing folders | 1.1 to 1.10 | Additive: nothing today's agents read is removed |
 | 2. Task fields and the task prompt | Difficulty and technology on tasks, the YAML task list file, gates by technology, the prompt service, hook insertion with the file fallback | 2.1 to 2.12 | Optional fields; today's agents receive the richer prompt |
 | 3. Agents | Three developer agents, `platform-researcher`, `devops`, the `dev-hard` profile, the roster switch, the step-up | 3.1 to 3.9 | The default roster stays `technology` |
 | 4. Arbiter rules from folders | The 36 rules split into role folders, folder loading, the command allow-list | 4.1 to 4.6 | Rule ids and effects are unchanged |
@@ -69,11 +69,11 @@ Phase 1 cannot start until the plan on
     - `src/KyberWeave.Domain/Configuration/OntologyConfig.cs`: a `roles` list beside `technologies`
     - `src/KyberWeave.Domain/Docs/Validation/DocSpecValidator.cs`: the four-file check and the six-heading check, each with a new `KW-DOC-SPEC-*` id
     - `tests/KyberWeave.Tests/StandardsFolderShapeTests.cs` (new): `KyberWeave.Tests.StandardsFolderShapeTests`
-  - **Acceptance criteria:** A folder missing one of the four files is an error naming the folder and the file; a standard missing one of the six headings, or holding them out of order, is an error naming the heading; an Arbiter rules file that declares no rule is valid; a role declared in `ontology.roles` is checked the same way.
+  - **Acceptance criteria:** A folder that still holds its standard as `README.md` is read and raises a warning that names the migrate command, not an error; otherwise a folder missing one of the four files is an error naming the folder and the file; a standard missing one of the six headings, or holding them out of order, is an error naming the heading; an Arbiter rules file that declares no rule is valid; a role declared in `ontology.roles` is checked the same way.
   - **Capabilities:** C# validation rules and configuration parsing in the documentation engine, with xUnit tests
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~StandardsFolderShapeTests"`
   - **Depends on:** none
-  - _Requirements: 5.1, 5.2, 5.8, 5.9_
+  - _Requirements: 5.1, 5.2, 5.8, 5.9, 5.11_
 
 - [ ] 1.2 Reshape the shipped templates
   - **Objective:** Give every shipped technology template the four prefixed files and the six headings, with a Testing section in each standard.
@@ -169,17 +169,32 @@ Phase 1 cannot start until the plan on
   - **Acceptance criteria:** The guide states the four files, the six headings and the one check that decides completeness; the onboarding guide and the configuration guide agree on how many templates ship; `docs validate .` and `docs drift .` report zero findings.
   - **Capabilities:** Documentation: onboarding and contribution guides in governed Markdown
   - **Command:** `dotnet run --project src/KyberWeave.Cli -- docs validate .`
-  - **Depends on:** 1.4, 1.5, 1.6, 1.7, 1.8
+  - **Depends on:** 1.4, 1.5, 1.6, 1.7, 1.8, 1.10
   - _Requirements: 6.5_
+
+- [ ] 1.10 Migrate existing standards folders
+  - **Objective:** Add `kyber-weave docs standards migrate`, which renames a host's standards files to the prefixed names and adds the missing ones, and run it on this repository.
+  - **Files:**
+    - `src/KyberWeave.Cli/Commands/Docs/DocsStandardsMigrateCommand.cs` (new), `src/KyberWeave.Cli/CliApplication.cs`
+    - `src/KyberWeave.Application/Docs/Scaffolding/StandardsFolderMigration.cs` (new)
+    - `docs/standards/`: this repository's seven folders
+    - `src/KyberWeave.Domain/Docs/Scaffolding/ConfigRegMarkdown.cs`: the standard's registry path
+    - `tests/KyberWeave.Tests/DocsStandardsMigrateCommandTests.cs` (new): `KyberWeave.Tests.DocsStandardsMigrateCommandTests`
+    - `docs/cli-command-surface.md`
+  - **Acceptance criteria:** The command prints each rename and each added file before writing; file content is unchanged byte for byte; a second run changes nothing; the registry property for a technology's standard points at the new name; this repository's folders pass the checks of task 1.1 with no warning.
+  - **Capabilities:** C# command-line and file migration work, with xUnit tests, and governed Markdown moves
+  - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~DocsStandardsMigrateCommandTests"`
+  - **Depends on:** 1.1
+  - _Requirements: 5.12_
 
 ### Phase 2: Task fields and the task prompt
 
 - [ ] 2.1 Confirm which harnesses let a hook rewrite the dispatch
-  - **Objective:** For each of the thirteen harnesses, establish from its current documentation and one live check whether a hook on the dispatch call can replace the dispatch text, and record the result.
+  - **Objective:** For each of the thirteen harnesses, establish from its current documentation and one live check whether a hook on the dispatch call can replace the dispatch text and whether the replaced text stays out of the dispatching agent's own context, and record the result.
   - **Files:**
     - `docs/kyber-arbiter/architecture.md`: the per-harness table, including the correction that Antigravity documents an `overwrite` field
     - `docs/kyber-squad/architecture.md`: which delivery path each harness uses
-  - **Acceptance criteria:** Every harness has a row with "rewrite" or "file", the documentation link and the date checked; for Antigravity the row states the decision value used and that the whole `Subagents` list is replaced; `docs validate .` and `docs drift .` report zero findings.
+  - **Acceptance criteria:** Every harness has a row with "rewrite" or "file", the documentation link and the date checked; a harness is "rewrite" only when the live check showed the worker received the replaced text and the dispatching agent's transcript did not; the row says what happens when the hook is not trusted or not enabled; for Antigravity the row states the decision value used and that the whole `Subagents` list is replaced; `docs validate .` and `docs drift .` report zero findings.
   - **Capabilities:** Research of coding-agent harness hook documentation and governed Markdown writing
   - **Command:** `dotnet run --project src/KyberWeave.Cli -- docs validate .`
   - **Depends on:** none
@@ -203,7 +218,9 @@ Phase 1 cannot start until the plan on
   - **Files:**
     - `src/KyberWeave.Domain/Docs/Validation/PlanTaskFileRules.cs`: the `.yml` names beside the `.json` names
     - `src/KyberWeave.Application/Docs/Validation/PlanTaskFileGenerator.cs`, `src/KyberWeave.Application/Docs/Validation/PlanTaskService.cs`: write YAML, read either
-    - `src/KyberWeave.Application/Docs/Validation/OpenWorkValidator.cs`: both names
+    - `src/KyberWeave.Application/Docs/Validation/OpenWorkValidator.cs`, `src/KyberWeave.Application/Docs/Validation/PlanTaskFileValidator.cs`: both names
+    - `src/KyberWeave.Domain/Arbiter/Hooks/ArchitectShellGuard.cs`, `src/KyberWeave.Application/Arbiter/Hooks/ConductorGuard.cs`: both names
+    - the agent, skill and document files that name the JSON file (8 product files, 9 live documents)
     - `src/KyberWeave.Cli/Commands/Docs/`: a convert option on the tasks command
     - `tests/KyberWeave.Tests/PlanTaskFileYamlTests.cs` (new): `KyberWeave.Tests.PlanTaskFileYamlTests`
   - **Acceptance criteria:** A write produces YAML; a JSON file from an older release loads and raises one warning that names the convert command; converting produces a YAML file with the same entries and digest inputs; no JSON file is written.
@@ -276,17 +293,18 @@ Phase 1 cannot start until the plan on
   - _Requirements: 9.1, 9.9, 9.15_
 
 - [ ] 2.9 Insert the prompt through the dispatch hook
-  - **Objective:** On every harness whose hook can rewrite the dispatch, replace a dispatch that carries a task id with the full prompt before the worker starts, with the Arbiter on or off.
+  - **Objective:** On every harness whose hook can rewrite the dispatch, expand the task-id line of a dispatch into the full prompt before the worker starts and keep its other lines, with the Arbiter on or off.
   - **Files:**
     - `src/KyberWeave.Domain/Arbiter/Hooks/Adapters/`: the Claude, Copilot, Codex, Cursor, plug-in and Antigravity adapters
     - `src/KyberWeave.Domain/Arbiter/Hooks/`: a prompt-insertion action that runs after the rules, and alone when the Arbiter is off
     - `src/KyberWeave.Domain/Arbiter/Rules/default-rules.yml`: one criteria line on `KW-ARB-PLANREAD-001`
+    - `src/KyberWeave.Application/Hooks/`, `src/KyberWeave.Application/Doctor/`: install the hook when the Arbiter is off; report a harness where it is missing or not trusted
     - `tests/KyberWeave.Tests/DispatchPromptInsertionTests.cs` (new): `KyberWeave.Tests.DispatchPromptInsertionTests`
-  - **Acceptance criteria:** For each rewrite harness, the hook's output carries the full prompt in the field that harness documents; with the Arbiter off the insertion still happens; with it on, the rules judge the short dispatch first; when the prompt cannot be built the dispatch is stopped with the repair command and no worker starts; an expanded prompt is not judged as telling a worker to read a plan.
+  - **Acceptance criteria:** For each rewrite harness, the hook's output carries the full prompt in the field that harness documents; a retry's failure section and every other line of the dispatch survive; the failed-attempt count and prior-results file named on the dispatch reach the prompt; a dispatch that names a technology and no task gets the shared rules and that technology's parts; a fresh host with the Arbiter off has the hook installed, and the doctor command reports a harness where it is not; with the Arbiter off the insertion still happens; with it on, the rules judge the short dispatch first; when the prompt cannot be built the dispatch is stopped with the repair command and no worker starts; an expanded prompt is not judged as telling a worker to read a plan.
   - **Capabilities:** C# work on coding-agent harness hook adapters, with xUnit tests over recorded hook payloads
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~DispatchPromptInsertionTests"`
   - **Depends on:** 2.1, 2.7
-  - _Requirements: 9.3, 9.4, 9.7, 9.8, 9.18_
+  - _Requirements: 9.3, 9.4, 9.7, 9.8, 9.17, 9.18, 9.20_
 
 - [ ] 2.10 Fall back to a prompt file
   - **Objective:** Where a harness's hook cannot rewrite the dispatch, write the prompt to one untracked file in the run's scratch folder and have the dispatch name it.
@@ -332,12 +350,13 @@ Phase 1 cannot start until the plan on
     - `src/KyberWeave.Domain/Squad/Validation/SquadSourceValidator.cs`, `src/KyberWeave.Domain/Arbiter/Squad/ArbiterSquadCatalog.cs`: the optional agent key
     - `src/KyberWeave.Application/Docs/Validation/PlanTaskFileGenerator.cs`, `src/KyberWeave.Application/Docs/Validation/PlanTaskFileValidator.cs`: record it; the tiered check
     - `src/KyberWeave.Domain/Docs/Scaffolding/ConfigRegMarkdown.cs`: the `<worker-roster>` property
+    - `products/kyber-squad/agents/`: `worker-roster: technology` on the fourteen agents to be removed
     - `tests/KyberWeave.Tests/WorkerRosterTests.cs` (new): `KyberWeave.Tests.WorkerRosterTests`
-  - **Acceptance criteria:** No key means `technology`; another value is a configuration error listing the two; the written task list records the roster and later readers take it from there; under `tiered` a file-changing task with no technology is an error; under `technology` a run behaves as it does today.
+  - **Acceptance criteria:** An agent with no key serves both rosters; the fourteen agents to be removed declare `technology` and are otherwise unchanged; no host key means `technology`; another value is a configuration error listing the two; the written task list records the roster and later readers take it from there; under `tiered` a task a developer agent will do with no technology is an error, and a documentation or delivery task needs none; under `technology` a run behaves as it does today.
   - **Capabilities:** C# configuration, squad source validation and documentation-engine work, with xUnit tests
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~WorkerRosterTests"`
   - **Depends on:** none
-  - _Requirements: 4.4, 12.1, 12.2, 12.3_
+  - _Requirements: 4.4, 12.1, 12.2, 12.3, 12.6_
 
 - [ ] 3.2 Add the `dev-hard` profile and drop the conductor's
   - **Objective:** Add a `dev-hard` model profile separate from the planning profiles, make an agent's model profile optional, and render the conductor with no model on every harness.
@@ -370,23 +389,24 @@ Phase 1 cannot start until the plan on
     - `products/kyber-squad/agents/dev-easy.md`, `dev-medium.md`, `dev-hard.md` (new)
     - `products/kyber-squad/bundles/`: the `full` bundle
     - `tests/KyberWeave.Tests/DeveloperAgentContentTests.cs` (new): `KyberWeave.Tests.DeveloperAgentContentTests`
-  - **Acceptance criteria:** The three files differ only in name, description and model profile (`fast`, `general`, `dev-hard`); each uses the `worker` profile and today's worker tool list and carries `worker-roster: tiered`; no body names a technology, a library, a command of one language or a skill; no body tells the agent to fetch its standards at start; every agent that exists today is still present.
+  - **Acceptance criteria:** The three files differ only in name, description and model profile (`fast`, `general`, `dev-hard`); each uses the `worker` profile and today's worker tool list and carries `worker-roster: tiered`; no body names a technology, a library, a command of one language or a skill; no body tells the agent to fetch its standards at start; each body tells the agent what to do when its prompt holds only a task id; every agent that exists today is still present.
   - **Capabilities:** Agent instruction writing in Markdown, with C# xUnit content tests
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~DeveloperAgentContentTests|FullyQualifiedName~SquadCanonicalContentTests|FullyQualifiedName~SquadPackAndReleaseTests"`
   - **Depends on:** 3.1, 3.2
-  - _Requirements: 1.1, 1.2, 1.3, 9.14_
+  - _Requirements: 1.1, 1.2, 1.3, 9.14, 9.19_
 
 - [ ] 3.5 Add `platform-researcher` and `devops`
   - **Objective:** Add a read-only research agent that takes its technology from the request, and a delivery agent that names no platform.
   - **Files:**
     - `products/kyber-squad/agents/platform-researcher.md`, `products/kyber-squad/agents/devops.md` (new)
+    - `src/KyberWeave.Domain/RunStart/RunStartEvidenceRules.cs`, `src/KyberWeave.Domain/Arbiter/ArbiterRunStartRemedy.cs`, `src/KyberWeave.Domain/Arbiter/Hooks/RunWriterProfiles.cs`, `src/KyberWeave.Application/Docs/Mcp/RunDeliveryService.cs`, `src/KyberWeave.Application/Docs/Delivery/RunDelivery.cs`: accept `devops` wherever `github-devops` is named
     - `products/kyber-squad/bundles/`: the `full` bundle
     - `tests/KyberWeave.Tests/PlatformAgentContentTests.cs` (new): `KyberWeave.Tests.PlatformAgentContentTests`
-  - **Acceptance criteria:** `platform-researcher` uses `platform-reader`, names no cloud or platform, and says to report and stop when its technology has no folder; `devops` uses `publishing-worker`, does what `github-devops` does today and names no platform; both carry `worker-roster: tiered`; `azure-reader` and `github-devops` are still present.
+  - **Acceptance criteria:** `platform-researcher` uses `platform-reader`, names no cloud or platform, and says to report and stop when its technology has no folder; `devops` uses `publishing-worker`, does what `github-devops` does today and names no platform; run start and delivery accept a dispatch to `devops` exactly as they accept one to `github-devops`; both carry `worker-roster: tiered`; `azure-reader` and `github-devops` are still present.
   - **Capabilities:** Agent instruction writing in Markdown for research and delivery roles, with C# xUnit content tests
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~PlatformAgentContentTests|FullyQualifiedName~SquadCanonicalContentTests"`
   - **Depends on:** 3.1, 3.3
-  - _Requirements: 1.4, 1.10, 8.1, 8.7_
+  - _Requirements: 1.4, 1.10, 1.14, 8.1, 8.7_
 
 - [ ] 3.6 Pick the worker by kind and tier, and step up on failure
   - **Objective:** Under the tiered roster, pick the kind of worker as today and the tier from difficulty plus failed attempts, and list the new agents wherever the old ones may be dispatched.
@@ -605,6 +625,7 @@ Phase 1 cannot start until the plan on
 | 1.7 | `tests/KyberWeave.Tests`: `DocsInitTemplateChoiceTests`, `DocsScaffolderTests` | task's Command | Only chosen templates install; existing files survive | Install is all or nothing | New class passes; scaffolder tests stay green |
 | 1.8 | `tests/KyberWeave.Tests`: `DocsStandardsDiffCommandTests` | task's Command | Differences are printed, nothing is written | The command does not exist | New class passes |
 | 1.9 | none: documentation | docs gates | Guides exist | not applicable | Zero findings |
+| 1.10 | `tests/KyberWeave.Tests`: `DocsStandardsMigrateCommandTests` | task's Command | Files are renamed and added, content unchanged | The command does not exist | New class passes |
 | 2.1 | none: research and documentation | docs gates | Per-harness delivery path recorded | not applicable | Zero findings |
 | 2.2 | `tests/KyberWeave.Tests`: `PlanTaskDifficultyAndTechnologyTests` | task's Command | Both lines reach the entry | The fields do not exist | New class passes |
 | 2.3 | `tests/KyberWeave.Tests`: `PlanTaskFileYamlTests`, `PlanTaskFileGeneratorReadTests` | task's Command | YAML is written, JSON is read with a warning | Only JSON is written | New class passes; read tests stay green |
@@ -640,7 +661,7 @@ Phase 1 cannot start until the plan on
 
 ## Dependency graph
 
-- Phase 1: 1.1 first; 1.2 and 1.6 after it; 1.3, 1.5 and 1.8 after 1.2; 1.4 after 1.3; 1.7 after 1.2 and 1.5; 1.9 last.
+- Phase 1: 1.1 first; 1.2, 1.6 and 1.10 after it; 1.3, 1.5 and 1.8 after 1.2; 1.4 after 1.3; 1.7 after 1.2 and 1.5; 1.9 last.
 - Phase 2: 2.1 and 2.2 in parallel; 2.3, 2.4 and 2.5 after 2.2; 2.6 after 2.2; 2.7 after 2.6; 2.8 after 2.7; 2.9 after 2.1 and 2.7; 2.10 after 2.8 and 2.9; 2.11 after 2.4; 2.12 last.
 - Phase 3: 3.1, 3.2 and 3.3 in parallel; 3.4 after 3.1 and 3.2; 3.5 after 3.1 and 3.3; 3.6 after 3.4 and 3.5; 3.7 after 3.6; 3.8 after 3.4 and 3.5; 3.9 last.
 - Phase 4: 4.1 first; 4.2, 4.3 and 4.5 after it; 4.4 after 4.2; 4.6 last.
@@ -655,12 +676,12 @@ Phase 1 cannot start until the plan on
 | 2 | 2.2, 2.4, 2.5, 2.11, 4.5 |
 | 3 | 3.6, 3.7, 4.5 |
 | 4 | 1.6, 2.2, 2.4, 2.11, 3.1 |
-| 5 | 1.1, 1.2, 1.3, 1.4, 1.5 |
+| 5 | 1.1, 1.2, 1.3, 1.4, 1.5, 1.10 |
 | 6 | 1.2, 1.5, 1.7, 1.8, 1.9 |
 | 7 | 4.1, 4.2, 4.3, 4.6 |
 | 8 | 1.4, 3.3, 3.5, 4.4 |
 | 9 | 2.1, 2.7, 2.8, 2.9, 2.10, 3.4, 3.7 |
 | 10 | 2.6 |
 | 11 | 2.3, 2.12 |
-| 12 | 3.1, 5.1 |
+| 12 | 3.1, 3.4, 3.5, 5.1 |
 | 13 | 5.2, 5.3, 5.4, 5.5 |
