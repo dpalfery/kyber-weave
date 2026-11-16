@@ -354,58 +354,71 @@ only.
 8.7. IF the task names a technology with no folder THEN the agent SHALL report that and SHALL NOT
 improvise commands.
 
-### Requirement 9: One docs tool builds the whole task prompt
+### Requirement 9: The worker starts with its whole task prompt
 
-**User Story:** As a conductor, I want one tool call that prepares everything a worker needs for a
-task, so that I dispatch with one short message and the worker never has to remember to fetch its
-standards.
+**User Story:** As a conductor, I want to dispatch a worker with a task id and have the machine
+give the worker its full prompt, so that the worker starts with everything and I never read or
+retype it.
 
 #### Acceptance Criteria
 
-9.1. THE docs tool server SHALL provide a tool that takes a task id, builds the task prompt and
-writes it to one file in the run's scratch folder.
+9.1. ONE service SHALL build the task prompt; the dispatch hook, the docs tool and
+`kyber-weave docs packet` SHALL all use it and SHALL produce the same text for the same task.
 
 9.2. THE task prompt SHALL contain, in this order: the task's own prompt from the task file; the
 host facts; the shared rules; the parent technology's rules and skills, when the template names a
 parent; then the task technology's rules, skills and standard.
 
-9.3. THE tool's reply SHALL be short: the path of the prompt file, the agent to dispatch, the
-difficulty in use and its source, the technology, and a list of anything left out. It SHALL NOT
-contain the prompt text.
+9.3. WHEN a conductor dispatches a worker with a task id on a harness whose dispatch hook can
+rewrite the dispatch THEN the hook SHALL replace the dispatch text with the full task prompt before
+the worker starts, and the worker SHALL NOT need to read a file to get it.
 
-9.4. THE conductor's dispatch SHALL name the prompt file and SHALL NOT restate its content; the
-worker's first step SHALL be to read that file.
+9.4. THE conductor's dispatch SHALL carry the task id and SHALL NOT carry the prompt content; the
+prompt text SHALL NOT enter the conductor's context on any harness.
 
-9.5. THE `kyber-weave docs packet` command SHALL print the same task prompt for the same task.
+9.5. WHERE a harness's dispatch hook cannot rewrite the dispatch, the system SHALL write the task
+prompt to one untracked file in the run's scratch folder, the dispatch SHALL name that file, and
+the worker's first step SHALL be to read it.
 
-9.6. THE prompt file SHALL be written outside the task file and outside tracked files, so the task
-file's digest and staleness check are unchanged and the prompt is never committed.
+9.6. THE design SHALL state, per harness, which of 9.3 and 9.5 applies, from evidence.
 
-9.7. EACH stitched part SHALL be enclosed in a named tag that marks where it starts and ends; the
+9.7. THE dispatch hook of 9.3 SHALL work when the Arbiter is off.
+
+9.8. IF the hook cannot build the prompt THEN the dispatch SHALL be stopped with a reason that
+names the repair command; a worker SHALL never start with only the task id.
+
+9.9. THE docs tool server SHALL provide a tool that takes a task id and replies with the agent to
+dispatch, the difficulty in use and its source, the technology, anything left out, and, on a
+harness of 9.5, the prompt file's path. Its reply SHALL NOT contain the prompt text.
+
+9.10. THE task prompt SHALL NOT be written into the task file or any tracked file, so the task
+file's digest and staleness check are unchanged.
+
+9.11. EACH stitched part SHALL be enclosed in a named tag that marks where it starts and ends; the
 content inside a tag SHALL stay Markdown.
 
-9.8. WHEN the stitched text would exceed the prompt budget THEN rules SHALL be kept whole, skills
+9.12. WHEN the stitched text would exceed the prompt budget THEN rules SHALL be kept whole, skills
 and standard sections SHALL be cut by relevance to the task, and the prompt SHALL list what was
 left out.
 
-9.9. THE shipped prompt budget SHALL be large enough that, for every shipped template together
+9.13. THE shipped prompt budget SHALL be large enough that, for every shipped template together
 with its parent, a task receives its rules, skills and standard with nothing cut; one test SHALL
 prove this for every template.
 
-9.10. A developer agent's instructions SHALL NOT require it to fetch its standards at start; it MAY
+9.14. A developer agent's instructions SHALL NOT require it to fetch its standards at start; it MAY
 call `docs_get_coding_standard_for_technology` for a topic the prompt left out.
 
-9.11. IF the task file is missing or does not match its plan THEN the tool SHALL write no prompt
-and SHALL say which command repairs it.
+9.15. IF the task file is missing or does not match its plan THEN no prompt SHALL be built and the
+reply SHALL say which command repairs it.
 
-9.12. IF the named technology has no folder THEN the prompt SHALL say so in that part and the tool
-SHALL still write the rest.
+9.16. IF the named technology has no folder THEN the prompt SHALL say so in that part and the rest
+SHALL still be built.
 
-9.13. WHEN the tool is given a technology and no task id THEN it SHALL write the shared rules and
-that technology's rules, skills and standard, for a dispatch that belongs to no task.
+9.17. WHEN a dispatch names a technology and no task id THEN the prompt SHALL hold the shared rules
+and that technology's rules, skills and standard, for a dispatch that belongs to no task.
 
-9.14. No existing Arbiter rule SHALL treat a dispatch that names the prompt file as a dispatch that
-tells a worker to read a plan.
+9.18. No existing Arbiter rule SHALL treat the expanded prompt, or a dispatch that names the prompt
+file, as a dispatch that tells a worker to read a plan.
 
 ### Requirement 10: Task gates resolve by technology
 

@@ -83,13 +83,14 @@ aliases: []
 # Developer
 
 You implement one task: the code and its tests. You are not tied to a technology. Your task prompt
-is a file. It tells you which one technology the task uses and carries that technology's rules,
-skills and standard.
+tells you which one technology the task uses and carries that technology's rules, skills and
+standard.
 Those outrank any habit you bring with you.
 
 ## What your task prompt contains
 
-Your dispatch names one file. It holds these parts, each inside its own tag:
+It holds these parts, each inside its own tag. If instead it is one line that names a prompt file,
+read that file first; it holds the same parts.
 
 1. `<task>`: what to build, the files in scope, the tests the task must add or change.
 2. `<host-facts>`: paths, the task gate commands for this technology, the host's own rules.
@@ -108,8 +109,8 @@ inside them, stop and report it as an open question. Never edit secrets or deplo
 
 ## Workflow
 
-1. Read the whole prompt file before you touch anything else. Do not open the plan, the
-   specification or the task file.
+1. Read the whole task prompt before you touch anything. Do not open the plan, the specification
+   or the task file.
 2. If the prompt names a technology and gives no rules or standard for it, stop and report that.
    Do not improvise a standard.
 3. If `<left-out>` lists a section you need, fetch it with `docs_get_coding_standard_for_technology`,
@@ -376,18 +377,46 @@ that adds one folder; the completeness check of Requirement 5.8 runs on it. Onbo
 folders for the technologies and platforms the user names. `kyber-weave docs standards diff
 [technology]` shows how a host folder differs from the current template and writes nothing.
 
-### The task prompt tool
+### The task prompt
 
-A new tool on the docs server, `docs_build_task_prompt_for_agent_dispatch`, takes the project path
-and a task id (and optionally the plan, a prior-results file and the number of failed attempts). It
-is built on the service behind `docs packet`, and that command prints the same text.
+One service builds the prompt for a task. Three callers use it: the dispatch hook, the docs tool and
+`docs packet`. It is built on the service behind `docs packet` today.
 
-The tool writes the prompt to one file, `.agent_scratchpad/<task>/prompt.md`, and replies with a
-few lines: the file's path, the agent to dispatch, the difficulty and its source, the technology,
-and anything left out. The prompt text never enters the conductor's context. The conductor's
-dispatch is one short message that names the file; the worker's first step is to read it.
+**Main path: the dispatch hook inserts it.** The conductor dispatches the worker with one short
+line that carries the task id. A hook on the dispatch call builds the prompt and replaces the
+dispatch text with it before the worker starts. The worker begins with its whole prompt and reads
+nothing. The conductor never sees the text.
 
-The file holds, in order, each part inside its own tag:
+Kyber-Weave already rewrites dispatch text this way: the Arbiter's hook removes routing headers
+from the prompt before a worker starts.
+
+| Harness | Can the hook rewrite the dispatch? | Evidence |
+|---|---|---|
+| Claude | yes | `updatedInput` carries the rewritten `prompt` (`docs/kyber-arbiter/architecture.md`). |
+| Copilot CLI | yes | `CopilotHookAdapter.RenderCliAllowStrip` rewrites `prompt` in the call's arguments. |
+| Copilot in VS Code | yes, with limits | `CopilotHookAdapter.RenderLocalPreAllowStrip` writes `updatedInput`. Hooks there are a preview that needs `chat.useHooks` and a trusted workspace, and the sub-agent dispatch is not confirmed by name. |
+| Codex, Cursor, Pi, Kilo, OpenCode | yes | Each adapter's strip writes the rewritten input (architecture, delivery per harness). |
+| Antigravity | no | "It documents no input-rewrite field for `hooks.json`". |
+| The remaining harnesses | not checked | Confirmed in the first task of phase 2. |
+
+**Fallback: a file.** Where the hook cannot rewrite the dispatch, the prompt is written to
+`.agent_scratchpad/<task>/prompt.md`, the dispatch names that file, and the worker's first step is
+to read it. The folder is not tracked, so the file is never committed.
+
+**The hook runs with the Arbiter off.** Today the dispatch hook is installed as part of the
+Arbiter. Prompt insertion is split out as its own hook action that Squad setup installs on every
+harness that supports it, whether or not the Arbiter is enabled. With the Arbiter on, one hook call
+does both: the rules run on the short dispatch first, then the prompt is inserted. If the prompt
+cannot be built, the dispatch is stopped with the repair command; a worker never starts with only a
+task id.
+
+**The docs tool** `docs_build_task_prompt_for_agent_dispatch` takes the project path and a task id
+(and optionally the plan, a prior-results file and the number of failed attempts). It replies with
+the agent to dispatch, the difficulty and its source, the technology, anything left out, and the
+prompt file's path on a fallback harness. It never returns the prompt text. The conductor calls it
+to learn which agent to dispatch.
+
+The prompt holds, in order, each part inside its own tag:
 
 ```text
 <task>              the task's own prompt from the task file
@@ -403,13 +432,13 @@ The file holds, in order, each part inside its own tag:
 The tags only mark where a part starts and ends. What is inside stays Markdown, so a heading inside
 a standard cannot be mistaken for the start of the next part.
 
-Given a technology instead of a task id, the tool writes the parts from `<shared-rules>` on, for a
+Given a technology instead of a task id, the prompt holds the parts from `<shared-rules>` on, for a
 dispatch that has no task: a `platform-researcher` request or a fix `bug-crusher` hands on.
 
-The file is in the run's scratch folder, which is not tracked, so it is never committed and the
-task file's digest and staleness check are unchanged. `KW-ARB-PLANREAD-001` stops a dispatch that
-tells a worker to open a plan, specification or todo file; the prompt file is none of those, and
-the rule's criteria gain one line saying so.
+The prompt is never written into the task file or a tracked file, so the task file's digest and
+staleness check are unchanged. `KW-ARB-PLANREAD-001` stops a dispatch that tells a worker to open a
+plan, specification or todo file; neither the expanded prompt nor the prompt file is one of those,
+and the rule's criteria gain one line saying so.
 
 **Budget.** The shipped default is 60,000 characters, about 15,000 tokens. Sized from today's files:
 
@@ -497,8 +526,7 @@ new trigger, `worker.command`, raised by the existing worker guard.
 ### The platform research agent
 
 `platform-researcher` takes one technology from its request and receives that folder's
-`<name>.skills.md` and `<name>.rules.md` through the task prompt tool, the same way a developer agent
-does.
+`<name>.skills.md` and `<name>.rules.md` in its task prompt, the same way a developer agent does.
 
 - New capability profile `platform-reader`: `read-only` plus `process.execute: allow`.
 - A technology's `<name>.skills.md` covers sign-in, the command-line tools and tool servers to use, query
@@ -542,7 +570,7 @@ Not scheduled. The old agents stay until the owner decides, after the comparison
 | Arbiter rules | YAML, one file | YAML, one file per folder (`<name>.arbiter-rules.yml`) |
 | Task file | JSON (`tasks.json`, `<plan>.tasks.json`) | YAML, converted in the phase that already raises its schema version; JSON is read for two minor releases with a warning |
 | Standards, rules, skills, agents | Markdown | unchanged |
-| The task prompt file | does not exist | Markdown parts inside named tags, written to the untracked scratch folder |
+| The task prompt | does not exist | Markdown parts inside named tags; inserted by the hook, or written to the untracked scratch folder on a fallback harness |
 | Arbiter decision log, gate reports | JSON lines, JSON | machine output, not authored; out of scope |
 
 New files use the `.yml` extension, as every YAML file in the repository does.
@@ -554,7 +582,7 @@ Each phase ships on its own and leaves a working product.
 | Phase | Delivers | Depends on |
 |---|---|---|
 | 1. Technology folders | Six-heading templates with four files each, the rule inventory, `shared-rules.md` testing rules, role folder templates, onboarding by chosen technology, `docs standards diff`. Additive: nothing the old roster reads is deleted | Pull request 625 |
-| 2. Task fields and the prompt tool | `Difficulty:` and `Technology:`, the task file change, `TaskGateResolver`, the task prompt tool | Phase 1 |
+| 2. Task fields and the task prompt | `Difficulty:` and `Technology:`, the task file change, `TaskGateResolver`, the prompt service, the dispatch hook's prompt insertion with the file fallback, the docs tool | Phase 1 |
 | 3. Agents | The three developer agents, `platform-researcher`, `devops`, the `dev-hard` profile, the conductor without a profile, the roster switch, the step-up | Phase 2 |
 | 4. Arbiter rules from folders | The split of the 36 rules, folder loading, the `MODE-002` change, the command allow-list | Phases 1 and 3 |
 | 5. Comparison and removal | The comparison runbook and runs, the owner's decision, removal of the fourteen agents, the `test` technology, the `testing` skill and the `sql` template, and migration | Phases 1 to 4 |
@@ -573,7 +601,8 @@ Each phase ships on its own and leaves a working product.
 | Technology, role and platform folders | The standard is `<name>.standards.md`; new `<name>.arbiter-rules.yml`. |
 | Arbiter | Trigger `worker.command`; fact `plan.task.files-all-tests`. |
 | Docs tool server | New tool `docs_build_task_prompt_for_agent_dispatch`. |
-| Run scratch folder | New untracked file `.agent_scratchpad/<task>/prompt.md`. |
+| Dispatch hook | New prompt-insertion action, installed with or without the Arbiter. |
+| Run scratch folder | New untracked file `.agent_scratchpad/<task>/prompt.md`, on a fallback harness only. |
 
 ## Error handling
 
@@ -617,7 +646,7 @@ Estimates, for planning only.
 | Phase | Source | Tests | Docs and prompts |
 |---|---|---|---|
 | 1. Technology folders | 6 to 9 files | 4 new classes, 4 to 6 changed | 15 template folders reshaped, 4 role folders, 4 platform folders, 1 inventory, 4 docs |
-| 2. Task fields and the prompt tool | 12 to 16 files | 6 new classes, 10 to 15 changed | 4 prompt files, 4 docs |
+| 2. Task fields and the task prompt | 16 to 22 files | 8 new classes, 12 to 18 changed | 4 prompt files, 4 docs |
 | 3. Agents | 6 to 9 files | 3 new classes, 8 to 12 changed | 5 new agents, 13 rendered sets, 4 docs |
 | 4. Arbiter rules from folders | 8 to 12 files | 4 new classes, 6 to 10 changed | 3 rule files, 3 docs |
 | 5. Comparison and removal | 10 to 15 files | 40 to 60 changed | 14 agents deleted, 1 runbook, 39 live docs, 84 product files |
@@ -637,7 +666,7 @@ Estimates, for planning only.
 | D9 | What are the standard's headings? | Naming and layout; Coding standards; Testing; Commands; Security and data handling; Done checklist. | | user: explicit decision 2026-11-16 |
 | D10 | Where do the 36 Arbiter rules go? | Into `conductor`, `architect` and `reviewer` role folders, split by trigger. | The owner named conductor and architect. `reviewer` is added because 13 rules are review rules. | user: explicit decision 2026-11-16; `reviewer` folder is autonomous, pending owner approval |
 | D11 | Is any Arbiter rule locked? | No. | The owner's view, and the code agrees: every rule can already be set to log only. | user: explicit decision 2026-11-16 |
-| D12 | Who builds the task prompt, and how does it reach the worker? | A docs tool the conductor calls. It writes the prompt to a file in the run's scratch folder and replies with the path; the worker reads the file. | Reverses decision D3 of the plan on pull request 625. Deterministic, the worker cannot skip it, and about 12,000 tokens per dispatch stay out of the conductor's context. | user: explicit decision 2026-11-16 |
+| D12 | How does the task prompt reach the worker? | A hook on the dispatch call replaces the conductor's one-line dispatch with the full prompt. Where a harness's hook cannot rewrite the dispatch, the prompt is written to a file the worker reads first. | Reverses decision D3 of the plan on pull request 625. The worker starts with everything, the conductor never reads or retypes about 12,000 tokens per task, and the worker cannot skip it. | user: explicit decision 2026-11-16 |
 | D13 | How are task gates keyed? | By the task's one technology, then its parent, with a fallback to the old agent-keyed entries. | No agent is named after a technology any more. No gate is added and no lists are merged. | autonomous: recommendation, pending owner approval |
 | D14 | Which file format? | YAML for every data file added or changed, the task file included, extension `.yml`. | The owner asked for one format and approved converting the task file. `.yml` matches every YAML file in the repository. | user: explicit decision 2026-11-16; extension is autonomous |
 | D15 | What replaces `azure-reader`? | `platform-researcher`, which loads the skills and rules of the technology its task names. | Needs a new capability profile that can run commands. | user: explicit decision 2026-11-16 |
@@ -669,7 +698,7 @@ Estimates, for planning only.
 | H3 | The `dev-hard` profile and the conductor without a profile (Models) | KyberSquad | reference |
 | H4 | Technology and role folders, the six headings, templates and contribution (Technology folders and templates) | DocGraph | reference |
 | H5 | Installing templates and comparing a host folder with its template (Technology folders and templates) | DocGraph | onboarding |
-| H6 | The task prompt tool, its order and budget (The task prompt tool) | DocGraph | runbook |
+| H6 | The task prompt, hook insertion, the file fallback, order and budget (The task prompt) | DocGraph | runbook |
 | H7 | Technology-resolved task gates and `review.technology-gates` (Task gates by technology) | ReviewCouncil | architecture |
 | H8 | Rules by folder, loading order and overrides (Arbiter rules from folders) | KyberArbiter | architecture |
 | H9 | The platform research agent, the `devops` agent and platform folders (The platform research agent; Roster) | KyberSquad | runbook |
