@@ -47,5 +47,5 @@ When the task gate passes, do not re-run its commands (its build, tests or forma
 
 **Batch your reads:** send independent reads in one round trip.
 
-Skills load by name with the harness skill tool; if you must read one as a file, it is at `{{skills-root}}/<name>/SKILL.md`. Never search the filesystem for a skill, and never read a skill or an agent file from another repository or checkout.
+Skills load by name with the harness skill tool; if you must read one as a file, it is at `{{skills-root}}/<name>/SKILL.md`. A leading `~` there is your home directory: a file tool does not expand it, so read the file through the shell or resolve `$HOME` first, and never guess the home directory from the working directory. Never search the filesystem for a skill, and never read a skill or an agent file from another repository or checkout.
 </worker-baseline>

@@ -131,8 +131,7 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
 
     /// <summary>
     /// The directory this render's skills install to, as a worker can open it: repository-relative at
-    /// project scope, absolute at global scope (a file tool does not expand <c>~</c>, and a model that
-    /// expands it guesses the home directory). It is
+    /// project scope, <c>~/…</c> (or absolute outside the home directory) at global scope. It is
     /// null when a global render has no resolver or the resolver refuses the target; the install step
     /// reports that failure, and the worker baseline then omits the path rather than guess one.
     /// </summary>
@@ -159,7 +158,11 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
             return null;
         }
 
-        return $"{root.Replace('\\', '/').TrimEnd('/')}/{skills}";
+        string path = $"{root.Replace('\\', '/').TrimEnd('/')}/{skills}";
+        string? home = request.GlobalRoots.HomeDirectory?.Replace('\\', '/').TrimEnd('/');
+        return home is { Length: > 0 } && path.StartsWith(home + "/", StringComparison.Ordinal)
+            ? $"~{path[home.Length..]}"
+            : path;
     }
 
     /// <summary>
