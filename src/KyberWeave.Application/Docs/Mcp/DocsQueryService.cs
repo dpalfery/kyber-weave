@@ -473,27 +473,43 @@ public sealed partial class DocsQueryService : IDocsQueryService
 
         string requested = technology.Trim().ReplaceLineEndings(" ");
         int budget = Math.Clamp(charBudget, MinCharBudget, MaxCharBudget);
-        IReadOnlyList<DocumentHit> hits = index.CodingStandards(requested, topic, budget);
+        StandardsBundle? bundle = index.StandardsFor(requested);
 
-        if (hits.Count == 0)
+        if (bundle?.Standard is null)
             return Lead(gate, provenance, StandardMiss(index, requested));
-        // A topic that matched nothing still returns the standard, which means the same call
-        // made without a topic — built once, and only when a standard's topic actually missed.
-        IReadOnlyDictionary<string, DocumentExcerpt>? withoutTopic = null;
 
         StringBuilder sb = new();
-        AppendStandardCount(sb, requested, hits);
+        IReadOnlyList<string> ruleIds = RuleIds(bundle.Standard);
+        WithheldRuleIds withheld = WithheldRuleIds.For(ruleIds);
+        sb.Append("bundle: ").AppendLine(requested);
+        AppendRuleIdIndex(sb, ruleIds);
+
+        int remaining = Math.Max(0, budget - sb.Length);
+        List<string> leftOut = [];
+
+        remaining = AppendWholePart(sb, "Shared rules", bundle.SharedRules, remaining);
+
+        string? parent = bundle.Standard.Frontmatter.BuildsOn?.Trim();
+        if (!string.IsNullOrWhiteSpace(parent))
+        {
+            remaining = AppendWholePart(sb, $"Parent rules ({parent})", bundle.ParentRules, remaining);
+            remaining = AppendCutPart(sb, $"Parent skills ({parent})", bundle.ParentSkills, remaining, leftOut);
+        }
+
+        remaining = AppendWholePart(sb, $"{requested} rules", bundle.Rules, remaining);
+        remaining = AppendCutPart(sb, $"{requested} skills", bundle.Skills, remaining, leftOut);
+
+        int standardBudget = Math.Max(MinCharBudget, remaining);
+        IReadOnlyList<DocumentHit> hits = index.CodingStandards(requested, topic, standardBudget);
+
+        // A topic that matched nothing still returns the standard, which means the same call
+        // made without a topic.
+        IReadOnlyDictionary<string, DocumentExcerpt>? withoutTopic = null;
+
         foreach (DocumentHit hit in hits)
         {
-            sb.AppendLine();
-
-            // The ids are read before the identity block rather than where they are printed,
-            // because the identity block echoes the frontmatter title — document text the same
-            // cap governs. The index still follows the identity, where the block order puts it.
-            IReadOnlyList<string> ruleIds = RuleIds(hit.Document);
-            WithheldRuleIds withheld = WithheldRuleIds.For(ruleIds);
+            sb.Append("## ").Append(requested).AppendLine(" standard");
             AppendStandardIdentity(sb, hit, withheld);
-            AppendRuleIdIndex(sb, ruleIds);
 
             if (hit.Excerpt.Sections.Count == 0)
             {
@@ -504,7 +520,7 @@ public sealed partial class DocsQueryService : IDocsQueryService
                 }
 
                 withoutTopic ??= index
-                    .CodingStandards(requested, charBudget: budget)
+                    .CodingStandards(requested, charBudget: standardBudget)
                     .ToDictionary(
                         whole => whole.Document.RelativePath,
                         whole => whole.Excerpt,
@@ -525,7 +541,71 @@ public sealed partial class DocsQueryService : IDocsQueryService
             AppendExcerpt(sb, withheld.Elide(hit.Excerpt), "topic");
         }
 
+        AppendLeftOut(sb, leftOut);
+
         return Lead(gate, provenance, sb.ToString());
+    }
+
+    /// <summary>
+    /// Appends one bundle part whole. Rules are never cut: an id or a hard rule a caller
+    /// cannot see is worse than a standard section it can ask for again.
+    /// </summary>
+    private static int AppendWholePart(
+        StringBuilder sb,
+        string heading,
+        DocumentModel? document,
+        int remaining)
+    {
+        if (document is null) return remaining;
+
+        string body = document.Body.Trim();
+        sb.Append("## ").AppendLine(heading);
+        sb.AppendLine(body);
+        return Math.Max(0, remaining - body.Length - heading.Length - 4);
+    }
+
+    /// <summary>
+    /// Appends a skills part, cut to the remaining budget. Skills are cut before the standard
+    /// because the standard is what a caller asked for by naming a topic; a cut is named so
+    /// the caller knows to ask again.
+    /// </summary>
+    private static int AppendCutPart(
+        StringBuilder sb,
+        string heading,
+        DocumentModel? document,
+        int remaining,
+        List<string> leftOut)
+    {
+        if (document is null) return remaining;
+
+        string body = document.Body.Trim();
+        if (body.Length + heading.Length + 4 <= remaining)
+        {
+            sb.Append("## ").AppendLine(heading);
+            sb.AppendLine(body);
+            return Math.Max(0, remaining - body.Length - heading.Length - 4);
+        }
+
+        int take = Math.Max(0, remaining - heading.Length - 4);
+        if (take < 200)
+        {
+            leftOut.Add($"{heading} ({body.Length} characters)");
+            return remaining;
+        }
+
+        sb.Append("## ").AppendLine(heading);
+        sb.AppendLine(body[..take]);
+        sb.Append("… ").Append(body.Length - take).AppendLine(" characters cut for space.");
+        leftOut.Add($"{heading} (part)");
+        return 0;
+    }
+
+    private static void AppendLeftOut(StringBuilder sb, IReadOnlyList<string> leftOut)
+    {
+        if (leftOut.Count == 0) return;
+
+        sb.Append("[left out for space: ").Append(string.Join(" · ", leftOut))
+          .AppendLine(". Ask again with a larger charBudget for the whole part.]");
     }
 
     /// <summary>
@@ -790,41 +870,6 @@ public sealed partial class DocsQueryService : IDocsQueryService
     /// coding standard cites and what suppressions and code-scanning alerts key on.</summary>
     [GeneratedRegex(@"\bKW-[A-Z0-9]+(?:-[A-Z0-9]+)*\b", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 2000)]
     private static partial Regex RuleIdPattern();
-
-    /// <summary>
-    /// Says which standard answered and how current it is, before anything else, so a draft
-    /// answering for a technology is visible in the first line of the body rather than only in
-    /// the identity block below it.
-    /// </summary>
-    private static void AppendStandardCount(
-        StringBuilder sb,
-        string requested,
-        IReadOnlyList<DocumentHit> hits)
-    {
-        sb.Append(hits.Count)
-          .Append(hits.Count == 1 ? " standard for technology '" : " standards for technology '")
-          .Append(requested)
-          .Append("' (status ")
-          .Append(string.Join(", ", StatusNames(hits)))
-          .AppendLine(").");
-    }
-
-    /// <summary>
-    /// Each answering standard's status, deduped in document order, so the count line names
-    /// every status present exactly once.
-    /// </summary>
-    private static List<string> StatusNames(IReadOnlyList<DocumentHit> hits)
-    {
-        List<string> names = [];
-        HashSet<string> seen = new(StringComparer.Ordinal);
-        foreach (DocumentHit hit in hits)
-        {
-            string name = StatusName(hit.Document.Status);
-            if (seen.Add(name)) names.Add(name);
-        }
-
-        return names;
-    }
 
     /// <summary>
     /// A status in the spelling the ontology authors it in, so a caller can look the word up.

@@ -1269,7 +1269,8 @@ configuration registry's property name for it (`csharp-coding-standard`,
 one surrounding `<>` pair and the literal suffix `-coding-standard`, then matches corpus
 documents whose `doc-type` is `coding-standard` by their declared `technology`. **The
 corpus decides, not the registry**: declaring a technology in `ontology.technologies`
-without a standard scaffolded at `docs/standards/<technology>/README.md` is still a miss.
+without a standard scaffolded at `docs/standards/<technology>/<technology>.standards.md`
+is still a miss.
 Only a *pair* of angle brackets is the registry's prose form — a half-typed `"<csharp"` is
 not quietly repaired into a hit.
 
@@ -1334,23 +1335,33 @@ A budget cut is normal rather than a defect — this repository's standards are 
 12,000-character default — so the expected-cut line is stated beside the marker, not deduced
 by the caller from two numbers.
 
-The response reads, in order:
+The reply is one **bundle** for the technology, stitched by
+`DocumentIndex.StandardsFor` from the files on disk at the moment it is asked for. It reads,
+in order:
 
 1. the provenance line
-2. a count line naming the technology asked for and the status that answered — `1 standard
-   for technology 'csharp' (status CURRENT).`
-3. a `###` heading with the standard's title, then the identity block — `path:`, `id:`,
-   `doc-type:`, `status:`, `component:` — and a `technology:` line echoing the corpus value
-   verbatim, not the caller's spelling. The declared value is what a later lookup is defined
-   against, so echoing the request would hide a standard that answers under a different
-   name. A standard declares no `component` by ontology design, so that field reads
-   `component: (none)`. The `doc-type:` is the ontology's own spelling rather than the enum
-   member's name, so a coding standard reads `doc-type: CODING-STANDARD` — the value a
-   reader can look up, not `CODINGSTANDARD`, which no document or rule id uses.
-4. the rule-id index
-5. the chosen sections, with the `[complete document]` marker when nothing was omitted
-6. nothing else — a coding standard declares no `code-refs` by ontology design, so the
-   response never carries code joins.
+2. `bundle: <technology>`
+3. the rule-id index: every `KW-*` id the standard states, in document order, capped with the
+   remainder counted. It comes first so that no budget can clip it.
+4. `## Shared rules`: the `shared-rules.md` file beside the folders, if the corpus has one.
+5. `## Parent rules (<technology>)` and `## Parent skills (<technology>)`: present only when
+   the standard's frontmatter names a parent with `builds-on`.
+6. `## <technology> rules` and `## <technology> skills`.
+7. `## <technology> standard`: a `###` heading with the standard's title, then the identity
+   block — `path:`, `id:`, `doc-type:`, `status:`, `component:` — and a `technology:` line
+   echoing the corpus value verbatim, not the caller's spelling. The declared value is what a
+   later lookup is defined against, so echoing the request would hide a standard that answers
+   under a different name. A standard declares no `component` by ontology design, so that
+   field reads `component: (none)`. The `doc-type:` is the ontology's own spelling rather than
+   the enum member's name, so a coding standard reads `doc-type: CODING-STANDARD` — the value a
+   reader can look up, not `CODINGSTANDARD`, which no document or rule id uses. Then the
+   chosen sections, with the `[complete document]` marker when nothing was omitted.
+8. `[left out for space: …]` when a skills part was cut, and the omission markers below when a
+   standard section was.
+
+Rules are never cut: an id or a hard rule the caller cannot see is worse than a section it
+can ask for again. Skills are cut before standard sections. A coding standard declares no
+`code-refs` by ontology design, so the response never carries code joins.
 
 **The rule-id index is emitted ahead of the prose.** It lists the `KW-*` ids the standard
 states, deduped: the ids its section headings and bodies cite, in document order — the order
@@ -1996,7 +2007,7 @@ index of the root it is bound to, and nothing else.
 | Joins show `(unresolved)` | The symbol is in `code-refs` but not in the index — run [`docs drift`](governance.md) |
 | Analysis warns that the cache is unsafe | Run `docs init` to merge `.kyber-weave/.gitignore` with `cache/`; until then deterministic/lexical analysis continues and no document text is sent for embeddings |
 | `docs_look_up_glossary_term_definition` returns no senses | The configured glossary is absent, the term is not present, or its spelling differs; use `docs glossary .` to preview proposals |
-| `docs_get_coding_standard_for_technology` reports no standard for a technology | The key names no technology this corpus declares a standard for — check the Config Reg block of the repository root [`AGENTS.md`](../../AGENTS.md) and `ontology.technologies` in [`.kyber-weave/kyber-weave.yml`](../../.kyber-weave/kyber-weave.yml). Spelling alone cannot be it: the match is case-insensitive, so a miss means the technology is undeclared, or is declared with no standard scaffolded at `docs/standards/<technology>/README.md` |
+| `docs_get_coding_standard_for_technology` reports no standard for a technology | The key names no technology this corpus declares a standard for — check the Config Reg block of the repository root [`AGENTS.md`](../../AGENTS.md) and `ontology.technologies` in [`.kyber-weave/kyber-weave.yml`](../../.kyber-weave/kyber-weave.yml). Spelling alone cannot be it: the match is case-insensitive, so a miss means the technology is undeclared, or is declared with no standard scaffolded at `docs/standards/<technology>/<technology>.standards.md` |
 | Client reports a protocol error | Something wrote to stdout; check that you launched `kyber-weave-mcp`, not `kyber-weave` |
 | Answers look right but named files do not exist, or the document count is wrong | A same-named server is bound to a different checkout — compare the `provenance: repo=` line to `git rev-parse --git-common-dir`, call `docs_get_source_repository_and_revision`, and pin the server with `--expect-root`. A matching `repo=` with a different `root=` is another worktree of your own repository, not a foreign one |
 | A tool answers `STATUS: TOOL_FAILURE`, or carries a `warning: codegraph is unavailable` line | The repository declares `codegraph` under `mcp.required-servers` and the server could not read the index: the `fix:` line names the repair, usually `kyber-weave doctor --ensure .`. Under the default stop rule the tool refuses to answer with joins missing; `stop-on-tool-failure: false` turns the same detail into the warning. See [the refresh rules](#the-server-refreshes-codegraph-and-its-tools-fail-when-it-cannot) |

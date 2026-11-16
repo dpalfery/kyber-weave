@@ -21,8 +21,9 @@ public static class DocsServerInstructions
         appropriate.
 
         Also available: docs_find_documents_citing_code_symbol (which documents describe a code symbol, before changing
-        it), docs_get_coding_standard_for_technology (how this repository writes code in a named technology, and
-        the rule ids that standard states, before writing or reviewing code in it),
+        it), docs_get_coding_standard_for_technology (one bundle for a technology: the rule ids, the shared rules,
+        the parent's rules and skills, the technology's rules and skills, and the standard's sections,
+        before writing or reviewing code in it),
         docs_look_up_glossary_term_definition (what a term means here), docs_find_duplicates_conflicts_ambiguous_terms (duplicated or
         contradictory documentation), docs_validate_governed_document_schema and docs_detect_drift_between_documents_and_code (the same schema and drift
         gates as kyber-weave docs validate and docs drift, without a shell), and docs_get_source_repository_and_revision

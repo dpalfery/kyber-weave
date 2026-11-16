@@ -226,9 +226,11 @@ public sealed partial class DocsTools
         Use when you are about to write or review code in one of this repository's stacks and
         need the local answer rather than the one you shipped with: how C# is written here, how
         a test is written here, what a rule id in this repository means for the code in front of
-        you. Returns the standard that answers for the technology — its title, path, id, declared
-        technology, status, and the rule ids it states — with the sections that match the topic
-        you name. The ids come first, so a budget can never cut them away.
+        you. Returns one bundle for the technology: the rule ids it states, the shared rules, the
+        parent technology's rules and skills when the standard names a parent, the technology's
+        rules and skills, then the standard's sections that match the topic you name. The ids
+        come first, so a budget can never cut them away; rules are never cut, skills are cut
+        before standard sections, and anything cut is named in a closing note.
 
         Pass the technology ('csharp', 'test') or the property name the repository instructions
         use for it ('csharp-coding-standard'). A technology this repository declares no standard

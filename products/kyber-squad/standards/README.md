@@ -1,28 +1,48 @@
 # Coding standard templates
 
-A starting standard per technology, for a repository adopting
-`<docs-root>/standards/<technology>/`. These are **templates, not governance**: `squad install`
-does not deploy them, and nothing reads one until a host adopts it — all fourteen at once with
-`kyber-weave docs init . --kyber-standards`, or one at a time by hand, as below.
+A starting folder per technology, role and delivery platform, for a repository adopting
+`<docs-root>/standards/<name>/`. These are **templates, not governance**: `squad install`
+does not deploy them, and nothing reads one until a host adopts it — every technology folder
+at once with `kyber-weave docs init . --kyber-standards`, or exactly the folders named with
+`kyber-weave docs init . --standards csharp,reviewer,github`.
+
+Each folder holds four files, every one named after the folder:
+
+| File | What it is |
+|---|---|
+| `<name>.standards.md` | The standard: six headings — Naming and layout, Coding standards, Testing, Commands, Security and data handling, Done checklist. |
+| `<name>.rules.md` | Prose rules a model reads. They outrank the standard. |
+| `<name>.skills.md` | How to do the work: commands, tool servers, query patterns, output shape. |
+| `<name>.arbiter-rules.yml` | Machine rules the Arbiter evaluates. An empty list is valid, and most folders declare none. |
+
+Technology and platform folders are scoped by `technology:`; role folders (`conductor`,
+`architect`, `reviewer`, `devops`) by `role:`. A standard may name one parent with
+`builds-on:` (React on TypeScript, Tauri on Rust, the data-access layer on C#), and a task in
+the child receives the parent's rules and skills too.
+
+The docs tool `docs_get_coding_standard_for_technology` returns one bundle for a technology:
+the rule ids, `shared-rules.md`, the parent's rules and skills, the technology's rules and
+skills, then the standard's sections for the topic asked for. The folder templates are
+embeddings of the same files, so a host's copy and the shipped template are comparable with
+`kyber-weave docs standards diff`.
 
 ## Using one
 
-1. Declare the technology in the host repository's `.kyber-weave/kyber-weave.yml`:
+1. Name the folders to install:
 
-   ```yaml
-   ontology:
-     technologies:
-       - react
+   ```bash
+   kyber-weave docs init . --standards csharp,typescript,reviewer,github
    ```
 
-2. Run `kyber-weave docs init .`, which creates `<docs-root>/standards/react/`, publishes
-   `<react-coding-standard>` in the Config Reg block of the root `AGENTS.md`, and writes a
-   standard to fill in.
+   This declares `csharp` and `typescript` in `ontology.technologies`, `reviewer` in
+   `ontology.roles`, writes only those folders plus `shared-rules.md`, publishes the Config
+   Reg property for each technology in the root `AGENTS.md`, and leaves any file the host
+   already has byte-for-byte unchanged.
 
-3. Replace that file with this template, set `owner` to a row in the host's `catalog.md`, set
-   `last-reviewed`, and promote `status` to `current` once someone has actually read it.
+2. Set `owner` to a row in the host's `catalog.md`, set `last-reviewed`, and promote `status`
+   to `current` once someone has actually read it.
 
-Until step 3 is done the agents have nothing to follow. They ship no built-in standard: an
+Until step 2 is done the agents have nothing to follow. They ship no built-in standard: an
 agent that finds `<react-coding-standard>` undeclared, or pointing at a `status: draft`
 document, never stops: it follows the existing code's pattern or uses the draft as the best
 available guidance, and names the gap or the draft in one line of its report. The code-review
