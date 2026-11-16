@@ -1,70 +1,20 @@
 using System.Security.Cryptography;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Domain.StatusLine;
 
-namespace KyberWeave.Core.Utilities.StatusLine;
+namespace KyberWeave.Application.Utilities;
 
-/// <summary>A preflighted set of status-line file mutations for one harness.</summary>
+/// <summary>Plans and applies the status-line deployment over <see cref="IStatusLineFiles"/>.</summary>
 /// <remarks>
-/// Mirrors <c>SquadDeploymentPlan</c>'s shape — build a plan, inspect it, then apply it — with two
-/// differences this slice's contract pins. A plan is built from injected roots
-/// (<see cref="StatusLineTargetRoots"/>) rather than from process state, so a host and a test drive
-/// the whole deploy/remove surface the same way. And every mutation is confined to the harness
-/// staging root and cross-checked against that harness's settings paths and auto-load directories,
-/// because Kyber Utilities never writes a harness settings file (A4, C2) and never activates a
-/// status line on the user's behalf (A3, C1).
-///
-/// <para>
-/// Building a plan is the dry run: it reads the receipt and the target paths and writes nothing, not
-/// even a directory. Only <see cref="Apply"/> changes the filesystem.
-/// </para>
+/// Every mutation is confined to the harness staging root and cross-checked against that harness's settings paths and
+/// auto-load directories, because Kyber Utilities never writes a harness settings file (A4, C2) and never activates a
+/// status line on the user's behalf (A3, C1). Building a plan is the dry run: it reads the receipt and the target
+/// paths and writes nothing, not even a directory.
 /// </remarks>
-public sealed class StatusLineDeploymentPlan
+public sealed class StatusLineDeploymentService(IStatusLineFiles files) : IStatusLineDeploymentService
 {
-    private readonly StatusLineReceiptStore _store;
-    private readonly IReadOnlyList<PendingChange> _pendingChanges;
-
-    private StatusLineDeploymentPlan(
-        StatusLineTarget target,
-        string stagingRoot,
-        StatusLineReceiptStore store,
-        StatusLineReceipt receipt,
-        IReadOnlyList<PendingChange> pendingChanges)
-    {
-        Target = target;
-        StagingRoot = stagingRoot;
-        _store = store;
-        Receipt = receipt;
-        _pendingChanges = pendingChanges;
-        PlannedFileChanges =
-        [
-            .. pendingChanges.Select(change =>
-                new StatusLinePlannedFileChange(change.RelativePath, change.Kind))
-        ];
-        PlannedPhysicalPaths = [.. pendingChanges.Select(change => change.PhysicalPath)];
-    }
-
-    /// <summary>The harness this plan deploys or removes.</summary>
-    public StatusLineTarget Target { get; }
-
-    /// <summary>The Kyber-owned staging root every planned path lives beneath.</summary>
-    public string StagingRoot { get; }
-
-    /// <summary>
-    /// The receipt this plan will persist: the deployed files for a deploy, and, for a removal, the
-    /// files it keeps because they were edited locally.
-    /// </summary>
-    public StatusLineReceipt Receipt { get; }
-
-    /// <summary>The pending file changes, in apply order, without payloads.</summary>
-    public IReadOnlyList<StatusLinePlannedFileChange> PlannedFileChanges { get; }
-
-    /// <summary>
-    /// The absolute paths this plan will touch. Public so a caller — and a test — can prove that no
-    /// harness settings path is ever among them.
-    /// </summary>
-    public IReadOnlyList<string> PlannedPhysicalPaths { get; }
-
     /// <summary>Preflights a deployment without changing the filesystem.</summary>
     /// <param name="target">The harness to deploy the artifacts for.</param>
     /// <param name="roots">The resolved per-user roots the deployment is confined to.</param>
@@ -83,7 +33,7 @@ public sealed class StatusLineDeploymentPlan
     /// so <c>SquadPathPolicy</c>'s own path exception propagates unchanged instead of being
     /// relabelled as a conflict the operator is expected to resolve.
     /// </remarks>
-    public static StatusLineDeploymentPlan CreateDeploy(
+    public StatusLineDeploymentPlan CreateDeploy(
         StatusLineTarget target,
         StatusLineTargetRoots roots,
         IReadOnlyList<StatusLineDeploymentFile> files)
@@ -101,11 +51,11 @@ public sealed class StatusLineDeploymentPlan
                 nameof(files));
         }
 
-        StatusLineReceiptStore store = new(roots, target);
-        StatusLineReceipt? existing = store.Read();
+        StatusLineReceiptFormat format = new(roots, target);
+        StatusLineReceipt? existing = Read(format);
         Dictionary<string, StatusLineOwnedFile> ownedByPath = OwnedByPath(existing);
 
-        List<PendingChange> changes = [];
+        List<StatusLinePendingChange> changes = [];
         List<StatusLineOwnedFile> owned = [];
         HashSet<string> plannedPaths = new(StringComparer.Ordinal);
         foreach (StatusLineDeploymentFile file in files)
@@ -123,7 +73,7 @@ public sealed class StatusLineDeploymentPlan
             EnsureOutsideReservedLocations(target, roots, physicalPath, $"'{relativePath}'");
             string digest = Digest(file.Content.Span);
             RefuseUnmanagedOccupant(ownedByPath, relativePath, physicalPath);
-            changes.Add(new PendingChange(
+            changes.Add(new StatusLinePendingChange(
                 relativePath,
                 physicalPath,
                 StatusLineFileChangeKind.Write,
@@ -141,7 +91,7 @@ public sealed class StatusLineDeploymentPlan
         return new StatusLineDeploymentPlan(
             target,
             stagingRoot,
-            store,
+            format,
             new StatusLineReceipt(owned),
             changes);
     }
@@ -158,25 +108,25 @@ public sealed class StatusLineDeploymentPlan
     /// hand-edited receipt looks like, and what would otherwise let a removal delete an arbitrary
     /// file.
     /// </exception>
-    public static StatusLineDeploymentPlan CreateRemove(StatusLineTarget target, StatusLineTargetRoots roots)
+    public StatusLineDeploymentPlan CreateRemove(StatusLineTarget target, StatusLineTargetRoots roots)
     {
         ArgumentNullException.ThrowIfNull(roots);
 
         string stagingRoot = roots.ResolveStagingRoot(target);
-        StatusLineReceiptStore store = new(roots, target);
-        StatusLineReceipt? existing = store.Read();
-        List<PendingChange> changes = [];
+        StatusLineReceiptFormat format = new(roots, target);
+        StatusLineReceipt? existing = Read(format);
+        List<StatusLinePendingChange> changes = [];
         List<StatusLineOwnedFile> retained = [];
         foreach (StatusLineOwnedFile owned in existing?.Files ?? [])
         {
             ArgumentNullException.ThrowIfNull(owned);
             string physicalPath = ResolveOwnedPhysicalPath(target, roots, stagingRoot, owned.RelativePath);
-            if (!File.Exists(physicalPath) && !Directory.Exists(physicalPath))
+            if (!files.FileExists(physicalPath) && !files.DirectoryExists(physicalPath))
                 continue;
 
-            if (File.Exists(physicalPath) && IsUnmodified(physicalPath, owned.Sha256))
+            if (files.FileExists(physicalPath) && IsUnmodified(physicalPath, owned.Sha256))
             {
-                changes.Add(new PendingChange(
+                changes.Add(new StatusLinePendingChange(
                     owned.RelativePath,
                     physicalPath,
                     StatusLineFileChangeKind.Delete,
@@ -190,16 +140,16 @@ public sealed class StatusLineDeploymentPlan
         return new StatusLineDeploymentPlan(
             target,
             stagingRoot,
-            store,
+            format,
             new StatusLineReceipt(retained),
             changes);
     }
 
-    /// <summary>Reads the persisted receipt for <paramref name="target"/>, or null when none exists.</summary>
-    public static StatusLineReceipt? ReadReceipt(StatusLineTarget target, StatusLineTargetRoots roots)
+    /// <inheritdoc />
+    public StatusLineReceipt? ReadReceipt(StatusLineTarget target, StatusLineTargetRoots roots)
     {
         ArgumentNullException.ThrowIfNull(roots);
-        return new StatusLineReceiptStore(roots, target).Read();
+        return Read(new StatusLineReceiptFormat(roots, target));
     }
 
     /// <summary>Applies the plan, writing or deleting exactly the paths it planned.</summary>
@@ -208,18 +158,19 @@ public sealed class StatusLineDeploymentPlan
     /// record intact rather than claiming files that were never written. An empty resulting receipt
     /// deletes the receipt file instead of writing one that owns nothing.
     /// </remarks>
-    public void Apply()
+    public void Apply(StatusLineDeploymentPlan plan)
     {
-        foreach (PendingChange change in _pendingChanges)
+        ArgumentNullException.ThrowIfNull(plan);
+        foreach (StatusLinePendingChange change in plan.PendingChanges)
         {
             switch (change.Kind)
             {
                 case StatusLineFileChangeKind.Write:
-                    Directory.CreateDirectory(RequireParentDirectory(change.PhysicalPath));
-                    File.WriteAllBytes(change.PhysicalPath, change.Content.Span);
+                    files.CreateDirectory(RequireParentDirectory(change.PhysicalPath));
+                    files.WriteAllBytes(change.PhysicalPath, change.Content.Span);
                     break;
                 case StatusLineFileChangeKind.Delete:
-                    File.Delete(change.PhysicalPath);
+                    files.DeleteFile(change.PhysicalPath);
                     break;
                 default:
                     throw new InvalidOperationException(
@@ -227,12 +178,12 @@ public sealed class StatusLineDeploymentPlan
             }
         }
 
-        RemoveEmptyDirectoriesLeftByDeletions();
+        RemoveEmptyDirectoriesLeftByDeletions(plan);
 
-        if (Receipt.Files.Count == 0)
-            _store.Delete();
+        if (plan.Receipt.Files.Count == 0)
+            files.DeleteFile(plan.ReceiptFormat.ReceiptPath);
         else
-            _store.Write(Receipt);
+            files.WriteTextAtomically(plan.ReceiptFormat.ReceiptPath, plan.ReceiptFormat.Serialize(plan.Receipt));
     }
 
     /// <summary>
@@ -249,19 +200,19 @@ public sealed class StatusLineDeploymentPlan
     /// rather than replaced: the operator's bytes are never the ones discarded, and the refusal names
     /// the path so the remedy is obvious.
     /// </remarks>
-    private static void RefuseUnmanagedOccupant(
+    private void RefuseUnmanagedOccupant(
         Dictionary<string, StatusLineOwnedFile> ownedByPath,
         string relativePath,
         string physicalPath)
     {
-        if (Directory.Exists(physicalPath))
+        if (files.DirectoryExists(physicalPath))
         {
             throw new StatusLineDeploymentConflictException(
                 $"Unmanaged directory '{physicalPath}' occupies the status-line path " +
                 $"'{relativePath}'. Move it aside, then deploy again.");
         }
 
-        if (!File.Exists(physicalPath))
+        if (!files.FileExists(physicalPath))
             return;
 
         if (ownedByPath.TryGetValue(relativePath, out StatusLineOwnedFile? owned) &&
@@ -322,10 +273,10 @@ public sealed class StatusLineDeploymentPlan
     /// directories are removed, and the walk never leaves the staging root or removes it, so a file
     /// the user placed beside Kyber's files keeps its directory.
     /// </remarks>
-    private void RemoveEmptyDirectoriesLeftByDeletions()
+    private void RemoveEmptyDirectoriesLeftByDeletions(StatusLineDeploymentPlan plan)
     {
         HashSet<string> candidates = new(StringComparer.Ordinal);
-        foreach (PendingChange change in _pendingChanges)
+        foreach (StatusLinePendingChange change in plan.PendingChanges)
         {
             if (change.Kind == StatusLineFileChangeKind.Delete)
                 candidates.Add(RequireParentDirectory(change.PhysicalPath));
@@ -334,12 +285,12 @@ public sealed class StatusLineDeploymentPlan
         foreach (string candidate in candidates)
         {
             string directory = candidate;
-            while (Directory.Exists(directory) &&
-                   !SquadFileSystemPathSemantics.AreSame(StagingRoot, directory) &&
-                   SquadFileSystemPathSemantics.IsWithin(StagingRoot, directory) &&
-                   !Directory.EnumerateFileSystemEntries(directory).Any())
+            while (files.DirectoryExists(directory) &&
+                   !SquadFileSystemPathSemantics.AreSame(plan.StagingRoot, directory) &&
+                   SquadFileSystemPathSemantics.IsWithin(plan.StagingRoot, directory) &&
+                   files.IsDirectoryEmpty(directory))
             {
-                Directory.Delete(directory);
+                files.DeleteDirectory(directory);
                 string? parent = Path.GetDirectoryName(directory);
                 if (parent is null)
                     break;
@@ -350,7 +301,7 @@ public sealed class StatusLineDeploymentPlan
     }
 
     /// <summary>Resolves a receipt-recorded path, refusing one that would escape the staging root or traverse symlinks.</summary>
-    private static string ResolveOwnedPhysicalPath(
+    private string ResolveOwnedPhysicalPath(
         StatusLineTarget target,
         StatusLineTargetRoots roots,
         string stagingRoot,
@@ -378,7 +329,7 @@ public sealed class StatusLineDeploymentPlan
     /// Traverses the path components from the harness root down to <paramref name="physicalPath"/>,
     /// rejecting any symbolic link or reparse point.
     /// </summary>
-    private static void EnsureNoSymlinks(string harnessRoot, string physicalPath)
+    private void EnsureNoSymlinks(string harnessRoot, string physicalPath)
     {
         string relative = Path.GetRelativePath(harnessRoot, physicalPath);
         if (relative.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relative))
@@ -394,30 +345,18 @@ public sealed class StatusLineDeploymentPlan
         foreach (string segment in segments)
         {
             current = Path.Combine(current, segment);
-            FileSystemInfo info = Directory.Exists(current)
-                ? new DirectoryInfo(current)
-                : new FileInfo(current);
-
-            try
+            if (files.IsLinkOrReparsePoint(current))
             {
-                if (info.LinkTarget is not null ||
-                    (info.Exists && info.Attributes.HasFlag(FileAttributes.ReparsePoint)))
-                {
-                    throw new StatusLineDeploymentConflictException(
-                        $"The status-line path '{physicalPath}' traverses symbolic link or reparse point '{current}'. " +
-                        "Kyber Utilities refuses to deploy or remove through symbolic links.");
-                }
-            }
-            catch (StatusLineDeploymentConflictException)
-            {
-                throw;
-            }
-            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
-            {
-                // Component does not exist yet.
+                throw new StatusLineDeploymentConflictException(
+                    $"The status-line path '{physicalPath}' traverses symbolic link or reparse point '{current}'. " +
+                    "Kyber Utilities refuses to deploy or remove through symbolic links.");
             }
         }
     }
+
+    /// <summary>Reads the receipt a format describes, or returns null when this target owns nothing.</summary>
+    private StatusLineReceipt? Read(StatusLineReceiptFormat format) =>
+        files.ReadTextOrNull(format.ReceiptPath) is { } json ? format.Deserialize(json) : null;
 
     private static Dictionary<string, StatusLineOwnedFile> OwnedByPath(StatusLineReceipt? receipt)
     {
@@ -444,12 +383,12 @@ public sealed class StatusLineDeploymentPlan
     /// occupant must not replace it. Both are the safe direction, and both are visible in the plan
     /// the operator is shown.
     /// </remarks>
-    private static bool IsUnmodified(string physicalPath, string sha256)
+    private bool IsUnmodified(string physicalPath, string sha256)
     {
         try
         {
             return string.Equals(
-                Digest(File.ReadAllBytes(physicalPath)),
+                Digest(files.ReadAllBytes(physicalPath)),
                 sha256,
                 StringComparison.OrdinalIgnoreCase);
         }
@@ -475,14 +414,4 @@ public sealed class StatusLineDeploymentPlan
     {
         return Convert.ToHexStringLower(SHA256.HashData(content));
     }
-
-    /// <summary>
-    /// A pending write or delete, with the payload a write needs. Private because a host reports
-    /// <see cref="PlannedFileChanges"/> rather than the bytes.
-    /// </summary>
-    private sealed record PendingChange(
-        string RelativePath,
-        string PhysicalPath,
-        StatusLineFileChangeKind Kind,
-        ReadOnlyMemory<byte> Content);
 }

@@ -6,6 +6,7 @@ using KyberWeave.Data.Doctor;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Host;
 using KyberWeave.Data.RunStart;
+using KyberWeave.Data.Utilities;
 using KyberWeave.Kernel.FileSystem;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -39,6 +40,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<ICodeGraphIndexWorkspace, FileCodeGraphIndexWorkspace>();
         services.TryAddSingleton<IGitHookFiles, FileGitHookFiles>();
         services.TryAddSingleton<IMcpStdioSessionFactory, StdioMcpSessionFactory>();
+        services.TryAddSingleton<IStatusLineFiles, FileStatusLineFiles>();
         services.TryAddSingleton<IUserHostConfigStore, FileUserHostConfigStore>();
         return services;
     }

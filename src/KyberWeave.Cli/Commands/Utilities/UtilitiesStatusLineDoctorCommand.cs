@@ -1,6 +1,6 @@
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Deployment;
-using KyberWeave.Core.Utilities.StatusLine;
 using KyberWeave.Domain.StatusLine;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -21,18 +21,23 @@ namespace KyberWeave.Cli.Commands.Utilities;
 public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLineSettings>
 {
     private readonly IProcessEnvironment _environment;
+    private readonly IStatusLineDeploymentService _plans;
     private readonly UtilitiesStatusLineProcessRunner? _processRunner;
 
     /// <summary>Creates a doctor command over the process environment.</summary>
     /// <param name="environment">The process state the per-user roots and <c>PATH</c> are read from.</param>
+    /// <param name="plans">Reads the receipts.</param>
     /// <param name="processRunner">Runs the harness version probe; the bounded production runner when none is registered.</param>
     public UtilitiesStatusLineDoctorCommand(
         IProcessEnvironment environment,
+        IStatusLineDeploymentService plans,
         UtilitiesStatusLineProcessRunner? processRunner = null)
     {
         ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(plans);
 
         _environment = environment;
+        _plans = plans;
         _processRunner = processRunner;
     }
 
@@ -75,7 +80,7 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
     }
 
     /// <summary>Diagnoses one harness. Returns <see langword="false" /> when it has an actionable issue.</summary>
-    private static bool Diagnose(
+    private bool Diagnose(
         StatusLineTarget target,
         StatusLineTargetRoots roots,
         UtilitiesStatusLineToolProbe toolProbe,
@@ -147,12 +152,12 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
     }
 
     /// <summary>Checks every receipt-owned file's checksum and, where owed, its executable bit.</summary>
-    private static bool ReportOwnedFiles(StatusLineTarget target, StatusLineTargetRoots roots, string token)
+    private bool ReportOwnedFiles(StatusLineTarget target, StatusLineTargetRoots roots, string token)
     {
         StatusLineReceipt? receipt;
         try
         {
-            receipt = StatusLineDeploymentPlan.ReadReceipt(target, roots);
+            receipt = _plans.ReadReceipt(target, roots);
         }
         catch (Exception ex) when (ex is InvalidDataException or StatusLineDeploymentConflictException)
         {

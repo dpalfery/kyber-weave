@@ -1,12 +1,10 @@
 using System.Text;
 using System.Text.Json;
-using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Squad.Deployment;
-using KyberWeave.Domain.StatusLine;
 
-namespace KyberWeave.Core.Utilities.StatusLine;
+namespace KyberWeave.Domain.StatusLine;
 
-/// <summary>Reads and writes the Kyber Utilities status-line receipt for one harness.</summary>
+/// <summary>Where the Kyber Utilities status-line receipt for one harness lives, and its JSON form.</summary>
 /// <remarks>
 /// The receipt is state, not a deployed artifact, so it lives in the per-user Kyber directory —
 /// <c>~/.kyber-weave/utilities/statusline/&lt;target&gt;.receipt.json</c> — rather than inside the
@@ -23,10 +21,10 @@ namespace KyberWeave.Core.Utilities.StatusLine;
 /// cannot make a removal reach outside the staging root.
 /// </para>
 /// </remarks>
-internal sealed class StatusLineReceiptStore
+public sealed class StatusLineReceiptFormat
 {
     /// <summary>The one receipt schema. A file that declares anything else is refused, not guessed at.</summary>
-    internal const string Schema = "kyber-utilities.statusline.receipt/v1";
+    public const string Schema = "kyber-utilities.statusline.receipt/v1";
 
     private const string StateDirectoryRelativePath = ".kyber-weave/utilities/statusline";
 
@@ -39,7 +37,10 @@ internal sealed class StatusLineReceiptStore
     private readonly StatusLineTargetRoots _roots;
     private readonly StatusLineTarget _target;
 
-    internal StatusLineReceiptStore(StatusLineTargetRoots roots, StatusLineTarget target)
+    /// <summary>Creates the format for one harness under the given roots.</summary>
+    /// <param name="roots">The resolved per-user roots.</param>
+    /// <param name="target">The harness the receipt belongs to.</param>
+    public StatusLineReceiptFormat(StatusLineTargetRoots roots, StatusLineTarget target)
     {
         ArgumentNullException.ThrowIfNull(roots);
         _roots = roots;
@@ -51,30 +52,12 @@ internal sealed class StatusLineReceiptStore
     }
 
     /// <summary>The absolute path of this target's receipt file, whether or not it exists.</summary>
-    internal string ReceiptPath { get; }
+    public string ReceiptPath { get; }
 
-    /// <summary>Reads the receipt, or returns <see langword="null"/> when this target owns nothing.</summary>
-    internal StatusLineReceipt? Read()
-    {
-        return File.Exists(ReceiptPath)
-            ? Deserialize(File.ReadAllText(ReceiptPath, Encoding.UTF8))
-            : null;
-    }
-
-    internal void Write(StatusLineReceipt receipt)
-    {
-        ArgumentNullException.ThrowIfNull(receipt);
-        AtomicFile.WriteAllText(ReceiptPath, Serialize(receipt));
-    }
-
-    /// <summary>Removes the receipt, so a completed removal leaves no ownership record behind.</summary>
-    internal void Delete()
-    {
-        if (File.Exists(ReceiptPath))
-            File.Delete(ReceiptPath);
-    }
-
-    private string Serialize(StatusLineReceipt receipt)
+    /// <summary>Renders a receipt as the JSON the receipt file holds.</summary>
+    /// <param name="receipt">The receipt to record.</param>
+    /// <returns>The JSON text.</returns>
+    public string Serialize(StatusLineReceipt receipt)
     {
         using MemoryStream stream = new();
         using (Utf8JsonWriter writer = new(stream, WriterOptions))
@@ -107,7 +90,11 @@ internal sealed class StatusLineReceiptStore
         return Encoding.UTF8.GetString(stream.ToArray());
     }
 
-    private StatusLineReceipt Deserialize(string json)
+    /// <summary>Parses and validates the JSON a receipt file holds.</summary>
+    /// <param name="json">The file's text.</param>
+    /// <returns>The receipt.</returns>
+    /// <exception cref="InvalidDataException">The file is not a receipt for this harness.</exception>
+    public StatusLineReceipt Deserialize(string json)
     {
         try
         {
