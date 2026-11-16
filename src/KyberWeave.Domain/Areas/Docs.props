@@ -5,4 +5,31 @@
     <PackageReference Include="Markdig" Version="1.5.1" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!--
+      The standards templates KyberStandardsTemplates reads. A reader resolves its resources
+      through typeof(Anchor).Assembly, so the templates travel with the type that reads them.
+
+      These are copies of the files Core.Docs already embeds, and the logical names are the
+      ones KyberStandardsTemplates asks for. Core.Docs still embeds them for the code that has
+      not moved yet; a later commit drops that duplicate once nothing there reads it. The
+      build fails rather than shipping two different texts, for the same reason the pull
+      request description template does.
+    -->
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\azure\README.md" LogicalName="Standards.azure.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\csharp\README.md" LogicalName="Standards.csharp.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\data-access-layer\README.md" LogicalName="Standards.data-access-layer.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\github-actions\README.md" LogicalName="Standards.github-actions.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\go\README.md" LogicalName="Standards.go.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\maui\README.md" LogicalName="Standards.maui.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\pulumi\README.md" LogicalName="Standards.pulumi.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\python\README.md" LogicalName="Standards.python.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\react\README.md" LogicalName="Standards.react.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\rust\README.md" LogicalName="Standards.rust.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\sql\README.md" LogicalName="Standards.sql.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\tauri\README.md" LogicalName="Standards.tauri.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\test\README.md" LogicalName="Standards.test.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\typescript\README.md" LogicalName="Standards.typescript.md" />
+  </ItemGroup>
+
 </Project>

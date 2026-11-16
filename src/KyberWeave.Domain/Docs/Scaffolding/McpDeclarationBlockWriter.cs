@@ -9,7 +9,7 @@ namespace KyberWeave.Core.Docs.Scaffolding;
 /// <remarks>
 /// <para>
 /// The block is appended as text, never round-tripped through a YAML emitter, for the same
-/// reason <see cref="ReviewBlockWriter"/> appends its section that way: a round trip drops the
+/// reason <c>ReviewBlockWriter</c> appends its section that way: a round trip drops the
 /// operator's comments, reorders keys, and loses unknown ones. Only the appended lines are
 /// new; every other byte of the file is returned verbatim, in the file's own newline style.
 /// </para>

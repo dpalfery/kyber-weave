@@ -20,7 +20,7 @@ namespace KyberWeave.Core.Docs.Scaffolding;
 /// When rendering a template for a host repository, <see cref="Render"/> replaces the default
 /// frontmatter <c>owner</c> and <c>last-reviewed</c> date while leaving the remainder of the
 /// template intact. Both values are YAML-encoded with the same scalar quoting
-/// <see cref="DocsScaffolder"/> uses, so punctuation in an accepted owner (colons, hashes,
+/// <c>DocsScaffolder</c> uses, so punctuation in an accepted owner (colons, hashes,
 /// quotes) stays a scalar rather than becoming a nested mapping or a comment.
 /// </para>
 /// </remarks>
