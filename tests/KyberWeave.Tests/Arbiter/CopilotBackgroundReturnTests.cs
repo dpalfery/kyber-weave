@@ -146,7 +146,7 @@ public sealed class CopilotBackgroundReturnTests : IDisposable
     [Fact]
     public void ATaskWhoseDependenciesReturnedPassingDigestsInTheBackground_IsReadyWithoutAskingTheModel()
     {
-        Run(Pre("csharp-dev", "T1") );
+        Run(Pre("csharp-dev", "T1"));
         Run(Pre("react-dev", "T2"));
         Run(BackgroundStart("csharp-dev", "T1", BackendAgent));
         Run(BackgroundStart("react-dev", "T2", FrontendAgent));
