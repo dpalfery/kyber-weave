@@ -1,4 +1,4 @@
-namespace KyberWeave.Core.Utilities.StatusLine;
+namespace KyberWeave.Domain.StatusLine;
 
 /// <summary>One planned status-line file change, without its payload.</summary>
 /// <remarks>

@@ -1,4 +1,4 @@
-namespace KyberWeave.Core.Utilities.StatusLine;
+namespace KyberWeave.Domain.StatusLine;
 
 /// <summary>Resolves each harness's per-user root, staging root, settings paths, and auto-load hazards.</summary>
 /// <remarks>
@@ -164,8 +164,8 @@ public sealed class StatusLineTargetRoots
 
     /// <summary>
     /// A relative root or override would be completed against the process working directory by
-    /// <see cref="KyberWeave.Core.Squad.Deployment.SquadPathPolicy.ResolveFile"/>, so a deployment
-    /// could write outside the home tree it claims to own. Reject it rather than resolve it.
+    /// <c>SquadPathPolicy.ResolveFile</c>, so a deployment could write outside the home tree it
+    /// claims to own. Reject it rather than resolve it.
     /// </summary>
     private static string RequireFullyQualified(string path, string paramName)
     {

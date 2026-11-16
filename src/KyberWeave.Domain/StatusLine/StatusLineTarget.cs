@@ -1,4 +1,4 @@
-namespace KyberWeave.Core.Utilities.StatusLine;
+namespace KyberWeave.Domain.StatusLine;
 
 /// <summary>A harness whose status line Kyber Utilities deploys a variant for.</summary>
 /// <remarks>

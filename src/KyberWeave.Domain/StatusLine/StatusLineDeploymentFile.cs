@@ -1,4 +1,4 @@
-namespace KyberWeave.Core.Utilities.StatusLine;
+namespace KyberWeave.Domain.StatusLine;
 
 /// <summary>One status-line artifact to deploy, as a portable relative path and its bytes.</summary>
 /// <remarks>

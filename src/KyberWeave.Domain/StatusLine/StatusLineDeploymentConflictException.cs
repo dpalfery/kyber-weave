@@ -1,6 +1,6 @@
 using JetBrains.Annotations;
 
-namespace KyberWeave.Core.Utilities.StatusLine;
+namespace KyberWeave.Domain.StatusLine;
 
 /// <summary>Raised when a status-line deployment would touch a path outside its receipt authority.</summary>
 /// <remarks>

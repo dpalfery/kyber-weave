@@ -1,4 +1,4 @@
-namespace KyberWeave.Core.Utilities.StatusLine;
+namespace KyberWeave.Domain.StatusLine;
 
 /// <summary>The ownership boundary for one status-line deployment.</summary>
 /// <remarks>

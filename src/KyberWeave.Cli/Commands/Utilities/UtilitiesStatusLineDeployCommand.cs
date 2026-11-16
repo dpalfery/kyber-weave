@@ -1,4 +1,5 @@
 using KyberWeave.Core.Utilities.StatusLine;
+using KyberWeave.Domain.StatusLine;
 using Spectre.Console;
 using Spectre.Console.Cli;
 

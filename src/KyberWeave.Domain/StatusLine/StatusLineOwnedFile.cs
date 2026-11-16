@@ -1,4 +1,4 @@
-namespace KyberWeave.Core.Utilities.StatusLine;
+namespace KyberWeave.Domain.StatusLine;
 
 /// <summary>A deployed path and the exact bytes over which Kyber Utilities has authority.</summary>
 /// <remarks>

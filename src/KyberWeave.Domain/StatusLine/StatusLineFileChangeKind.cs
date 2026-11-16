@@ -1,4 +1,4 @@
-namespace KyberWeave.Core.Utilities.StatusLine;
+namespace KyberWeave.Domain.StatusLine;
 
 /// <summary>Whether a planned status-line change writes new bytes or removes a deployed file.</summary>
 /// <remarks>
