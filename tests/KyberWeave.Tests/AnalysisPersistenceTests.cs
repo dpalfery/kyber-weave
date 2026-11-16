@@ -845,7 +845,7 @@ public sealed class AnalysisPersistenceTests
     }
 
     [Fact]
-    public void IsStandardInputOpen_WhenPipeBroken_ReturnsFalse()
+    public async Task IsStandardInputOpen_WhenPipeBroken_ReturnsFalse()
     {
         ProcessStartInfo startInfo = new("git", ["version"])
         {
@@ -854,27 +854,20 @@ public sealed class AnalysisPersistenceTests
             UseShellExecute = false
         };
         using Process process = Process.Start(startInfo)!;
-        _ = process.StandardOutput.ReadToEnd();
-        Assert.True(process.WaitForExit(5000), "Process did not exit in time.");
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(5));
+        _ = await process.StandardOutput.ReadToEndAsync(timeout.Token);
+        await process.WaitForExitAsync(timeout.Token);
 
         // Turn off AutoFlush so the write buffers, making Flush() write across the broken pipe and throw IOException.
         process.StandardInput.AutoFlush = false;
 
         // Under parallel test execution on Linux, a concurrent fork() can briefly hold a duplicate of the read pipe
         // until execve() closes O_CLOEXEC descriptors. Retry writing until the transient reader drains and Flush throws IOException.
-        DateTime deadline = DateTime.UtcNow.AddSeconds(5);
+        Stopwatch stopwatch = Stopwatch.StartNew();
         bool isOpen = true;
-        while (DateTime.UtcNow < deadline)
+        while (stopwatch.Elapsed < TimeSpan.FromSeconds(5))
         {
-            try
-            {
-                process.StandardInput.Write(' ');
-            }
-            catch (IOException)
-            {
-                isOpen = false;
-                break;
-            }
+            await process.StandardInput.WriteAsync(' ');
 
             if (!IsStandardInputOpen(process))
             {
@@ -882,7 +875,7 @@ public sealed class AnalysisPersistenceTests
                 break;
             }
 
-            Thread.Sleep(20);
+            await Task.Delay(20);
         }
 
         Assert.False(isOpen, "Standard input pipe was not broken within timeout.");

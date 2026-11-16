@@ -238,8 +238,8 @@ public class ServerStateRepositoryTests : IDisposable
 
             Assert.True(await repository.RequestEngineShutdownAsync(directory.Path));
             // EngineOwner dispatches onShutdownRequested via Task.Run; await completion to eliminate thread pool dispatch races on loaded runners.
-            await shutdownRequested.Task.WaitAsync(TimeSpan.FromSeconds(5));
-            Assert.True(shutdownRequested.Task.IsCompleted);
+            Task completedTask = await Task.WhenAny(shutdownRequested.Task, Task.Delay(TimeSpan.FromSeconds(5)));
+            Assert.True(completedTask == shutdownRequested.Task, "Shutdown callback did not fire within 5s.");
         }
         finally
         {
