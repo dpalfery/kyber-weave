@@ -3,12 +3,12 @@
   "install": "bash .cursor/cloud-agent-install.sh",
   "mcpServerAllowlist": [
     {
-      "name": "kyber-weave",
-      "command": "kyber-weave-mcp"
+      "name": "kw-docs",
+      "command": "*kyber-weave-mcp --repo-root *"
     },
     {
       "name": "codegraph",
-      "command": "codegraph"
+      "command": "*codegraph serve --mcp --path *"
     },
     {
       "name": "azure-mcp",
