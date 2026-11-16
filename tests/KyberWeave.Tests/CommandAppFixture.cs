@@ -84,7 +84,7 @@ internal static class CommandAppFixture
     /// </summary>
     private static CommandApp Build(bool strictParsing, params Action<IConfigurator>[] branches)
     {
-        CommandApp app = new();
+        CommandApp app = new(ReviewTestServices.Registrar());
         app.Configure(config =>
         {
             config.SetApplicationName(ApplicationName);

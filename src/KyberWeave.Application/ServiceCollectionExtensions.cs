@@ -1,4 +1,5 @@
 using KyberWeave.Application.Hooks;
+using KyberWeave.Application.Review;
 using KyberWeave.Application.RunStart;
 using KyberWeave.Core.Squad.Briefs;
 using KyberWeave.Contracts.Services;
@@ -28,6 +29,9 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IEditHookService, EditHookService>();
         services.TryAddSingleton<IRunStartRunnerFactory, RunStartRunnerFactory>();
         services.TryAddSingleton<ISquadBriefService, SquadBriefService>();
+        services.TryAddSingleton<IReviewEvidenceService, ReviewEvidenceService>();
+        services.TryAddSingleton<IReviewWorkTreeService, ReviewWorkTreeService>();
+        services.TryAddSingleton<ISuppressionScanService, SuppressionScanService>();
         return services;
     }
 }

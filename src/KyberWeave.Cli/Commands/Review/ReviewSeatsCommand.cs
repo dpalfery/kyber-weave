@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using KyberWeave.Cli.Commands.Doctor;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Doctor;
@@ -17,7 +19,7 @@ namespace KyberWeave.Cli.Commands.Review;
 ///     cycle folder, writes the diff and the change half of the evidence, writes every packet and prints each seat's
 ///     dispatch block, the lenses a catalogue file pattern rules out, and the gate command to run alongside.
 /// </summary>
-public sealed class ReviewSeatsCommand : Command<ReviewSeatsSettings>
+public sealed class ReviewSeatsCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, IReviewEvidenceService evidenceWriter, INotSeatedStore notSeatedStore) : Command<ReviewSeatsSettings>
 {
     /// <summary>The command description shared by the real registration and the help tests.</summary>
     public const string Description =
@@ -48,27 +50,27 @@ public sealed class ReviewSeatsCommand : Command<ReviewSeatsSettings>
             return 1;
         }
 
-        if (settings.BaseRef is not null && ChangedFiles.ValidateBase(settings.BaseRef) is { } baseProblem)
+        if (settings.BaseRef is not null && GitChangeParsing.ValidateBase(settings.BaseRef) is { } baseProblem)
         {
             Say($"kyber-weave review seats: error: {baseProblem}");
             return ClientInputExitCode;
         }
 
-        string tree = ReviewWorkTree.Of(root);
+        string tree = trees.Containing(root);
         string scratchpad = ReviewWorkTree.Scratchpad(tree);
-        if (!ReviewCycleView.TryChooseTask(tree, scratchpad, settings.Task, out string task, out _, out string? problem))
+        if (!ReviewCycleView.TryChooseTask(cycles, git, tree, scratchpad, settings.Task, out string task, out _, out string? problem))
         {
             Say($"kyber-weave review seats: error: {problem}");
             return ClientInputExitCode;
         }
 
         string reviewFolder = Path.Combine(scratchpad, task, "review");
-        PriorCycles prior = ReviewWorkTree.Prior(tree, settings.BaseRef, ReviewCycles.ReadFinished(reviewFolder));
-        ReviewCyclePlan plan = ReviewCycles.Plan(
+        PriorCycles prior = trees.Prior(tree, settings.BaseRef, cycles.ReadFinished(reviewFolder));
+        ReviewCyclePlan plan = ReviewCyclePlanning.Plan(
             prior.Valid,
             config.Review.Gates,
             OperatingSystem.IsWindows() ? "windows" : "unix",
-            commit => ReviewCycleView.TryChangedSince(tree, commit));
+            commit => ReviewCycleView.TryChangedSince(git, tree, commit));
         List<ReviewFinding> recheck = [];
         if (plan.Prior is { } priorCycle
             && !ReviewCycleView.TryReadRecheck(priorCycle, config.Review.Policy, report, recheck, UnreadableInput, Severity.Error, "review seats"))
@@ -97,7 +99,7 @@ public sealed class ReviewSeatsCommand : Command<ReviewSeatsSettings>
             : WithDecisionModel(root, baseRef, changed, CouncilSeating.Plan(changed), model, cancellationToken);
         try
         {
-            evidence = ReviewEvidence.Write(
+            evidence = evidenceWriter.Write(
                 folder, root, baseRef, null, gatesPath, plan.Prior?.Head, config.Review.Coverage);
             WritePackets(folder, seats, new CouncilSeatContext(
                 tree,
@@ -110,7 +112,7 @@ public sealed class ReviewSeatsCommand : Command<ReviewSeatsSettings>
                 Path.Combine(folder, "duplicates.json"),
                 SeverityOverrides.Load(root, config),
                 changed));
-            NotSeatedRecord.Replace(folder, ReviewLensCatalogue.Names, seats.NotSeated);
+            notSeatedStore.Replace(folder, ReviewLensCatalogue.Names, seats.NotSeated);
         }
         catch (Exception ex) when (FileFailure.Is(ex))
         {
@@ -174,7 +176,7 @@ public sealed class ReviewSeatsCommand : Command<ReviewSeatsSettings>
     /// Leaves out each judgement lens the decision model confidently finds does not apply to the change. With no model
     /// configured, or no changed-file list, the seating is returned unchanged.
     /// </summary>
-    private static CouncilSeatPlan WithDecisionModel(
+    private CouncilSeatPlan WithDecisionModel(
         string root,
         string baseRef,
         IReadOnlyList<string>? changed,
@@ -188,7 +190,7 @@ public sealed class ReviewSeatsCommand : Command<ReviewSeatsSettings>
         string patch;
         try
         {
-            patch = ChangedFiles.DiffSinceMergeBase(root, baseRef).Patch;
+            patch = git.DiffSinceMergeBase(root, baseRef).Patch;
         }
         catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or TimeoutException)
         {
@@ -212,16 +214,16 @@ public sealed class ReviewSeatsCommand : Command<ReviewSeatsSettings>
     ///     The verifier cycle's seats, measured on the fix delta from the prior cycle's head: what the fix changed, and how
     ///     many lines. A head git cannot compare with leaves the files unknown, which still seats the narrow set.
     /// </summary>
-    private static CouncilSeatPlan VerifierSeats(string tree, ReviewCycleRecord prior, IReadOnlyList<ReviewFinding> recheck)
+    private CouncilSeatPlan VerifierSeats(string tree, ReviewCycleRecord prior, IReadOnlyList<ReviewFinding> recheck)
     {
         IReadOnlyList<string>? fixPaths = null;
         int fixLines = 0;
         if (prior.Head is { } head)
         {
-            fixPaths = ReviewCycleView.TryChangedSince(tree, head);
+            fixPaths = ReviewCycleView.TryChangedSince(git, tree, head);
             try
             {
-                fixLines = ChangedLineCount(ChangedFiles.DiffSince(tree, head));
+                fixLines = ChangedLineCount(git.DiffSince(tree, head));
             }
             catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or TimeoutException)
             {
@@ -262,11 +264,11 @@ public sealed class ReviewSeatsCommand : Command<ReviewSeatsSettings>
             File.WriteAllText(Path.Combine(packets, lens + ".md"), CouncilSeating.Packet(context, lens));
     }
 
-    private static IReadOnlyList<string>? ChangedPaths(string root, string baseRef)
+    private IReadOnlyList<string>? ChangedPaths(string root, string baseRef)
     {
         try
         {
-            return [.. ChangedFiles.ResolveSinceMergeBase(root, baseRef).Select(change => change.Path)];
+            return [.. git.ResolveSinceMergeBase(root, baseRef).Select(change => change.Path)];
         }
         catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or TimeoutException)
         {

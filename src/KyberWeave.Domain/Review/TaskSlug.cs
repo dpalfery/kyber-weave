@@ -20,21 +20,14 @@ public static class TaskSlug
     }
 
     /// <summary>
-    /// The existing folder under <paramref name="scratchpad"/> whose normalised name is the task's, matched without
-    /// regard to case; null when none exists.
+    /// The folder among <paramref name="folders"/> whose normalised name is the task's, matched without regard to case;
+    /// null when none is.
     /// </summary>
-    public static string? FindFolder(string scratchpad, string task)
+    /// <param name="folders">The task folder names, from <c>IReviewCycleStore.TaskFolders</c>.</param>
+    /// <param name="task">The task id the caller holds.</param>
+    public static string? FindFolder(IReadOnlyList<string> folders, string task)
     {
         string slug = Normalise(task);
-        return slug.Length == 0 ? null : Folders(scratchpad).FirstOrDefault(name => Normalise(name) == slug);
+        return slug.Length == 0 ? null : folders.FirstOrDefault(name => Normalise(name) == slug);
     }
-
-    /// <summary>The task folders under <paramref name="scratchpad"/> that hold a <c>review</c> folder.</summary>
-    public static IReadOnlyList<string> Folders(string scratchpad) =>
-        Directory.Exists(scratchpad)
-            ? [.. Directory.EnumerateDirectories(scratchpad)
-                .Where(dir => Directory.Exists(Path.Combine(dir, "review")))
-                .Select(dir => Path.GetFileName(dir))
-                .Order(StringComparer.Ordinal)]
-            : [];
 }

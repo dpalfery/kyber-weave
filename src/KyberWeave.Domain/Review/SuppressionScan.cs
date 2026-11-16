@@ -1,9 +1,6 @@
-using System.ComponentModel;
-using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
-using KyberWeave.Core.Processes;
 
 namespace KyberWeave.Core.Review;
 
@@ -61,83 +58,18 @@ public static partial class SuppressionScan
     /// <summary>The ref the working tree is compared with when the caller names none.</summary>
     public const string DefaultBase = "HEAD";
 
-    private const int MaxDiffBytes = 10 * 1024 * 1024;
+    /// <summary>The most bytes of a diff or of an untracked file the scan reads.</summary>
+    public const int MaxDiffBytes = 10 * 1024 * 1024;
 
-    private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(60);
-
-    /// <summary>Finds every suppression the change under <paramref name="workingDirectory"/> adds without a reason.</summary>
-    /// <remarks>
-    /// A path the scan cannot read — a binary file, or a file that vanished between listing and reading — adds no
-    /// finding: no source suppression can live in a binary, and the alternative is failing the gate on a race
-    /// rather than on the change. A git invocation that fails is different, and is returned as
-    /// <see cref="SuppressionScanResult.Failure"/>, because then the scan did not see the change at all.
-    /// </remarks>
-    /// <param name="workingDirectory">The repository root the diff is taken in.</param>
-    /// <param name="baseRef">The ref the working tree is diffed against.</param>
-    /// <returns>The findings, ordered by path and then by line, and why the scan could not run when it could not.</returns>
-    public static SuppressionScanResult Scan(string workingDirectory, string baseRef)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
-        ArgumentException.ThrowIfNullOrWhiteSpace(baseRef);
-
-        string root;
-        try
-        {
-            root = Path.GetFullPath(workingDirectory);
-        }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException
-                                       or System.Security.SecurityException)
-        {
-            return new SuppressionScanResult([], $"'{workingDirectory}' is not a usable path: {ex.Message}");
-        }
-
-        if (!Directory.Exists(root))
-            return new SuppressionScanResult([], $"'{root}' is not a directory");
-
-        if (ChangedFiles.ValidateBase(baseRef) is { } baseProblem)
-            return new SuppressionScanResult([], baseProblem);
-
-        GitRunResult diffResult = RunGit(
-            root,
-            MaxDiffBytes,
-            "diff", "--no-color", "--no-ext-diff", "-U0", "-M", "--relative", "--diff-filter=ACMRT", baseRef, "--");
-        if (!diffResult.Succeeded)
-        {
-            if (diffResult.ExceededBudget)
-                return new SuppressionScanResult([], $"the diff against '{baseRef}' exceeded the 10 MB scan budget");
-
-            return new SuppressionScanResult([], $"the change against '{baseRef}' could not be read: {diffResult.Output}");
-        }
-
-        SortedDictionary<string, List<AddedLine>> added = ParseAddedLines(diffResult.Output);
-
-        GitRunResult untrackedResult = RunGit(
-            root, "ls-files", "-z", "--others", "--exclude-standard", "--");
-        if (!untrackedResult.Succeeded)
-            return new SuppressionScanResult([], $"the untracked files could not be listed: {untrackedResult.Output}");
-
-        string[] untrackedPaths = untrackedResult.Output
-            .Split('\0', StringSplitOptions.RemoveEmptyEntries)
-            .Order(StringComparer.Ordinal)
-            .ToArray();
-
-        foreach (string path in untrackedPaths)
-        {
-            if (added.ContainsKey(path))
-                continue;
-
-            if (ReadAddedFile(Path.Combine(root, path)) is { } lines)
-                added[path] = lines;
-        }
-
-        return new SuppressionScanResult(Collect(added), null);
-    }
+    /// <summary>Turns a unified diff into the added lines of each file.</summary>
+    /// <param name="diff">The diff text.</param>
+    public static SuppressionCandidates FromDiff(string diff) => new(ParseAddedLines(diff));
 
     /// <summary>
     /// Turns a unified diff into the added lines of each file, keyed by path. Only a line inside a hunk counts:
     /// a header, a binary patch, and a trailing marker carry no source line to judge.
     /// </summary>
-    private static SortedDictionary<string, List<AddedLine>> ParseAddedLines(string diff)
+    internal static SortedDictionary<string, List<AddedLine>> ParseAddedLines(string diff)
     {
         SortedDictionary<string, List<AddedLine>> added = new(StringComparer.Ordinal);
         string? path = null;
@@ -228,45 +160,15 @@ public static partial class SuppressionScan
         return path.StartsWith("b/", StringComparison.Ordinal) ? path[2..] : path;
     }
 
-    /// <summary>The added lines of a file the change leaves untracked, whose every line is added, or null when it
-    /// cannot be read as text.</summary>
-    private static List<AddedLine>? ReadAddedFile(string fullPath)
+    /// <summary>The added lines of an untracked file's bytes, whose every line is added, or null when they are not text.</summary>
+    internal static List<AddedLine>? LinesOfUntracked(byte[] content)
     {
-        const int maxBytes = 10 * 1024 * 1024;
-        byte[] buffer = new byte[maxBytes + 1];
-        int totalRead = 0;
-        try
-        {
-            if (!File.Exists(fullPath))
-                return null;
-
-            using FileStream stream = new(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-            if (stream.Length > maxBytes)
-                return null;
-
-            while (totalRead <= maxBytes)
-            {
-                int read = stream.Read(buffer, totalRead, buffer.Length - totalRead);
-                if (read == 0)
-                    break;
-                totalRead += read;
-            }
-
-            if (totalRead > maxBytes)
-                return null;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
-                                       or NotSupportedException or System.Security.SecurityException)
-        {
-            return null;
-        }
-
-        if (Array.IndexOf(buffer, (byte)0, 0, totalRead) >= 0)
+        if (Array.IndexOf(content, (byte)0, 0, content.Length) >= 0)
             return null;
 
         List<AddedLine> lines = [];
         int number = 0;
-        string text = Encoding.UTF8.GetString(buffer, 0, totalRead);
+        string text = Encoding.UTF8.GetString(content, 0, content.Length);
         foreach (ReadOnlySpan<char> raw in text.AsSpan().EnumerateLines())
         {
             number++;
@@ -276,7 +178,7 @@ public static partial class SuppressionScan
         return lines;
     }
 
-    private static void AddLine(SortedDictionary<string, List<AddedLine>> added, string path, AddedLine line)
+    internal static void AddLine(SortedDictionary<string, List<AddedLine>> added, string path, AddedLine line)
     {
         if (!added.TryGetValue(path, out List<AddedLine>? lines))
         {
@@ -288,7 +190,7 @@ public static partial class SuppressionScan
     }
 
     /// <summary>Reports each added suppression that states no reason, in the order the files and lines arrived.</summary>
-    private static IReadOnlyList<SuppressionFinding> Collect(SortedDictionary<string, List<AddedLine>> added)
+    internal static IReadOnlyList<SuppressionFinding> Collect(SortedDictionary<string, List<AddedLine>> added)
     {
         List<SuppressionFinding> findings = [];
         foreach (KeyValuePair<string, List<AddedLine>> file in added)
@@ -349,51 +251,32 @@ public static partial class SuppressionScan
     [GeneratedRegex(@"<\s*NoWarn\b", RegexOptions.CultureInvariant)]
     private static partial Regex AddsNoWarn();
 
-    private readonly record struct GitRunResult(bool Succeeded, string Output, bool ExceededBudget = false);
+    /// <summary>One added line, with the number it carries in the file as the change leaves it.</summary>
+    internal sealed record AddedLine(int Number, string Text);
+}
 
-    /// <summary>
-    /// Runs git with argv, never a shell, and returns its output or the reason it produced none. A missing git, a
-    /// timeout, and a non-zero exit are all the same fact to the caller: the change was not read.
-    /// </summary>
-    private static GitRunResult RunGit(string workingDirectory, params string[] arguments) =>
-        RunGit(workingDirectory, null, arguments);
+/// <summary>The lines a change adds, by path, waiting to be judged.</summary>
+public sealed class SuppressionCandidates
+{
+    private readonly SortedDictionary<string, List<SuppressionScan.AddedLine>> _added;
 
-    private static GitRunResult RunGit(
-        string workingDirectory,
-        long? maxOutputBytes,
-        params string[] arguments)
+    internal SuppressionCandidates(SortedDictionary<string, List<SuppressionScan.AddedLine>> added) => _added = added;
+
+    /// <summary>Whether the diff already added lines to <paramref name="path"/>.</summary>
+    public bool Has(string path) => _added.ContainsKey(path);
+
+    /// <summary>Adds the lines of an untracked file; false when the content is binary, so it adds none.</summary>
+    /// <param name="path">The repository-relative path.</param>
+    /// <param name="content">The file's bytes.</param>
+    public bool AddUntracked(string path, byte[] content)
     {
-        ProcessStartInfo startInfo = new("git")
-        {
-            WorkingDirectory = workingDirectory,
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        };
+        if (SuppressionScan.LinesOfUntracked(content) is not { } lines)
+            return false;
 
-        foreach (string argument in arguments)
-            startInfo.ArgumentList.Add(argument);
-
-        try
-        {
-            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout, maxOutputBytes);
-            return result.ExitCode == 0
-                ? new GitRunResult(true, result.StandardOutput)
-                : new GitRunResult(false, $"git {string.Join(' ', arguments)} exited with code {result.ExitCode}: " +
-                                          result.StandardError.Trim());
-        }
-        catch (OutputLimitExceededException ex)
-        {
-            return new GitRunResult(false, ex.Message.Trim(), ExceededBudget: true);
-        }
-        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or TimeoutException or IOException)
-        {
-            return new GitRunResult(false, ex.Message.Trim());
-        }
+        _added[path] = lines;
+        return true;
     }
 
-    /// <summary>One added line, with the number it carries in the file as the change leaves it.</summary>
-    private sealed record AddedLine(int Number, string Text);
+    /// <summary>Reports each added suppression that states no reason, in the order the files and lines arrived.</summary>
+    public IReadOnlyList<SuppressionFinding> Findings() => SuppressionScan.Collect(_added);
 }

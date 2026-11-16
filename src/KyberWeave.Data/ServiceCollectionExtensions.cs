@@ -3,6 +3,7 @@ using KyberWeave.Contracts.Services;
 using KyberWeave.Data.Doctor;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Host;
+using KyberWeave.Data.Review;
 using KyberWeave.Data.RunStart;
 using KyberWeave.Kernel.FileSystem;
 using Microsoft.Extensions.DependencyInjection;
@@ -33,6 +34,12 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IRunCheckout>(sp => new RunCheckoutGuard(sp.GetRequiredService<IWritableFileSystem>(), sp.GetRequiredService<IRunStateStore>()));
         services.TryAddSingleton<IHooksConfigSource>(sp => new YamlHooksConfigSource(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<ITestClassResolver>(sp => new ConventionTestClassResolver(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<IProgramRunner>(_ => new ProcessProgramRunner());
+        services.TryAddSingleton<IGitChangeReader>(sp => new GitChangeReader(sp.GetRequiredService<IProgramRunner>()));
+        services.TryAddSingleton<IReviewCycleStore>(_ => new FileReviewCycleStore());
+        services.TryAddSingleton<INotSeatedStore>(_ => new FileNotSeatedStore());
+        services.TryAddSingleton<IReviewEvidenceStore>(_ => new FileReviewEvidenceStore());
+        services.TryAddSingleton<IBoundedFileReader>(_ => new FileBoundedFileReader());
         return services;
     }
 }

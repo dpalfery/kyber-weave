@@ -1,4 +1,6 @@
 using System.Text.Json;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Review;
@@ -25,13 +27,13 @@ internal static class ReviewCycleView
     /// <param name="task">The folder name when one was chosen.</param>
     /// <param name="note">A line saying how the folder was chosen when the caller did not name it.</param>
     /// <param name="error">Why none could be chosen.</param>
-    public static bool TryChooseTask(string root, string scratchpad, string? given, out string task, out string? note, out string? error)
+    public static bool TryChooseTask(IReviewCycleStore cycles, IGitChangeReader git, string root, string scratchpad, string? given, out string task, out string? note, out string? error)
     {
         note = null;
         error = null;
         if (!string.IsNullOrWhiteSpace(given))
         {
-            task = TaskSlug.FindFolder(scratchpad, given) ?? TaskSlug.Normalise(given);
+            task = TaskSlug.FindFolder(cycles.TaskFolders(scratchpad), given) ?? TaskSlug.Normalise(given);
             if (task.Length > 0)
                 return true;
 
@@ -39,8 +41,8 @@ internal static class ReviewCycleView
             return false;
         }
 
-        IReadOnlyList<string> folders = TaskSlug.Folders(scratchpad);
-        string branch = TaskSlug.Normalise(CurrentBranch(root));
+        IReadOnlyList<string> folders = cycles.TaskFolders(scratchpad);
+        string branch = TaskSlug.Normalise(CurrentBranch(git, root));
         string[] named = [.. folders.Where(folder => branch.Length > 0 && TaskSlug.Normalise(folder) == branch)];
         if (folders.Count == 1 || named.Length == 1)
         {
@@ -88,11 +90,11 @@ internal static class ReviewCycleView
     }
 
     /// <summary>The current branch, or an empty string when git cannot say.</summary>
-    public static string CurrentBranch(string root)
+    public static string CurrentBranch(IGitChangeReader git, string root)
     {
         try
         {
-            return ChangedFiles.CurrentBranch(root);
+            return git.CurrentBranch(root);
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception
                                        or TimeoutException)
@@ -102,11 +104,11 @@ internal static class ReviewCycleView
     }
 
     /// <summary>The paths the working tree changed since <paramref name="commit"/>, or null when git cannot list them.</summary>
-    public static IReadOnlyList<string>? TryChangedSince(string root, string commit)
+    public static IReadOnlyList<string>? TryChangedSince(IGitChangeReader git, string root, string commit)
     {
         try
         {
-            return ChangedFiles.ResolveSince(root, commit);
+            return git.ResolveSince(root, commit);
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception
                                        or TimeoutException)

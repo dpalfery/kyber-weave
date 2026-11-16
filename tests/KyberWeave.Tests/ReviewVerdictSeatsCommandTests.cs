@@ -52,7 +52,7 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
         Directory.CreateDirectory(_seats);
 
         // A --prior folder counts only when it records the change it reviewed, so the tests' prior belongs to this repository's.
-        ReviewCycles.WriteIdentity(PriorFolder, ReviewWorkTree.IdentityOf(_repo, null)!);
+        ReviewTestServices.Cycles.WriteIdentity(PriorFolder, ReviewTestServices.WorkTrees.IdentityOf(_repo, null)!);
     }
 
     /// <summary>Deletes the temporary repository and seat folders.</summary>
@@ -436,7 +436,7 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
         string cycle = Path.Combine(_repo, ".agent_scratchpad", "bare-task", "review", "cycle-1");
         Directory.CreateDirectory(Path.Combine(cycle, "seats"));
         File.WriteAllText(Path.Combine(cycle, "seats", "correctness.md"), NoFindingsSeat("correctness"));
-        NotSeatedRecord.Add(cycle, ReviewLensCatalogue.Names
+        ReviewTestServices.NotSeated.Add(cycle, ReviewLensCatalogue.Names
             .Where(lens => lens != "correctness")
             .ToDictionary(lens => lens, _ => "recorded by review seats in this test", StringComparer.Ordinal));
 
@@ -1567,7 +1567,7 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
         for (int index = 0; index < findingIdsPerCycle.Length; index++)
         {
             string folder = CycleFolder(index + 1);
-            ReviewCycles.WriteIdentity(folder, ReviewWorkTree.IdentityOf(_repo, null)!);
+            ReviewTestServices.Cycles.WriteIdentity(folder, ReviewTestServices.WorkTrees.IdentityOf(_repo, null)!);
             JsonArray findings = [.. findingIdsPerCycle[index].Select((id, position) =>
             {
                 JsonObject finding = PriorFinding();
@@ -1677,7 +1677,7 @@ public sealed class ReviewVerdictSeatsCommandTests : IDisposable
 
     private static CommandApp CreateApp()
     {
-        CommandApp app = new();
+        CommandApp app = new(ReviewTestServices.Registrar());
         app.Configure(config =>
         {
             config.SetApplicationName("kyber-weave");

@@ -502,7 +502,7 @@ public static class TestGitRepositoryTemplate
             [new ReviewFinding("naming/vague", "naming", ReviewSeverity.Minor, 8, "src/Export.cs", 1, "// export",
                 "The file name does not say it writes CSV.", "Read the file.", "A reader looks for the CSV writer elsewhere.", "Rename it CsvExport.cs.")],
             ["src/Export.cs"], 1)));
-        ReviewCycles.WriteIdentity(cycle, new ReviewCycleIdentity(
+        ReviewTestServices.Cycles.WriteIdentity(cycle, new ReviewCycleIdentity(
             branch,
             Output(model, "merge-base", "origin/main", "HEAD"),
             Output(model, "rev-parse", "HEAD")));

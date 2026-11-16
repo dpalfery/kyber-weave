@@ -1,5 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Review;
@@ -15,7 +17,8 @@ namespace KyberWeave.Cli.Commands.Review;
 ///     Whether a cycle is a verifier cycle used to depend on how the conductor worded the dispatch. It is now a fact
 ///     of the folders: a run with a finished cycle is in a verifier cycle. The command reads and writes nothing else.
 /// </remarks>
-public sealed class ReviewCycleCommand : Command<ReviewCycleSettings>
+public sealed class ReviewCycleCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git)
+    : Command<ReviewCycleSettings>
 {
     /// <summary>The command description shared by the real registration and the help tests.</summary>
     public const string Description = "Report which review cycle a task is in, the prior findings to re-check and the gates to re-run.";
@@ -38,9 +41,9 @@ public sealed class ReviewCycleCommand : Command<ReviewCycleSettings>
 
         // The review folder belongs to the git work tree that contains the path the command was run against: a linked
         // worktree has its own .agent_scratchpad, and the canonical checkout's is never read on its behalf.
-        string tree = ReviewWorkTree.Of(root);
+        string tree = trees.Containing(root);
         string scratchpad = ReviewWorkTree.Scratchpad(tree);
-        if (!ReviewCycleView.TryChooseTask(tree, scratchpad, settings.Task, out string task, out string? chosen, out string? problem))
+        if (!ReviewCycleView.TryChooseTask(cycles, git, tree, scratchpad, settings.Task, out string task, out string? chosen, out string? problem))
         {
             WriteClientInputError(problem!);
             return ClientInputExitCode;
@@ -50,17 +53,17 @@ public sealed class ReviewCycleCommand : Command<ReviewCycleSettings>
         if (chosen is not null && !json)
             Console.WriteLine(chosen);
 
-        string? liveRun = ReviewWorkTree.LiveRunNote(tree, ReviewWorkTree.HomeDirectory());
+        string? liveRun = trees.LiveRunNote(tree, trees.HomeDirectory());
         if (liveRun is not null && !json)
             Console.WriteLine(liveRun);
 
         string reviewFolder = Path.Combine(scratchpad, task, "review");
-        PriorCycles prior = ReviewWorkTree.Prior(tree, settings.BaseRef, ReviewCycles.ReadFinished(reviewFolder));
-        ReviewCyclePlan plan = ReviewCycles.Plan(
+        PriorCycles prior = trees.Prior(tree, settings.BaseRef, cycles.ReadFinished(reviewFolder));
+        ReviewCyclePlan plan = ReviewCyclePlanning.Plan(
             prior.Valid,
             config.Review.Gates,
             OperatingSystem.IsWindows() ? "windows" : "unix",
-            commit => ReviewCycleView.TryChangedSince(tree, commit));
+            commit => ReviewCycleView.TryChangedSince(git, tree, commit));
 
         List<ReviewFinding> recheck = [];
         if (plan.Prior is { } priorCycle && !ReviewCycleView.TryReadRecheck(priorCycle, config.Review.Policy, report, recheck, UnreadableInput, Severity.Error, "review cycle"))

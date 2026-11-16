@@ -18,10 +18,10 @@ public sealed class NotSeatedRecordTests : IDisposable
     public void LaterDecisionsAreAddedToEarlierOnes()
     {
         string cycle = Path.Combine(_temp.Path, "review", "cycle-1");
-        NotSeatedRecord.Add(cycle, new Dictionary<string, string> { ["infra-workflow"] = "no infrastructure file" });
-        NotSeatedRecord.Add(cycle, new Dictionary<string, string> { ["static-analysis-triage"] = "gates passed" });
+        ReviewTestServices.NotSeated.Add(cycle, new Dictionary<string, string> { ["infra-workflow"] = "no infrastructure file" });
+        ReviewTestServices.NotSeated.Add(cycle, new Dictionary<string, string> { ["static-analysis-triage"] = "gates passed" });
 
-        IReadOnlyDictionary<string, string> read = NotSeatedRecord.Read(cycle);
+        IReadOnlyDictionary<string, string> read = ReviewTestServices.NotSeated.Read(cycle);
 
         Assert.Equal("no infrastructure file", read["infra-workflow"]);
         Assert.Equal("gates passed", read["static-analysis-triage"]);
@@ -31,11 +31,11 @@ public sealed class NotSeatedRecordTests : IDisposable
     public void ARerunReplacesTheLensesItOwnsSoAStaleReasonDoesNotSurvive()
     {
         string cycle = Path.Combine(_temp.Path, "review", "cycle-1");
-        NotSeatedRecord.Add(cycle, new Dictionary<string, string> { ["infra-workflow"] = "patterns", ["static-analysis-triage"] = "gates passed" });
+        ReviewTestServices.NotSeated.Add(cycle, new Dictionary<string, string> { ["infra-workflow"] = "patterns", ["static-analysis-triage"] = "gates passed" });
 
-        NotSeatedRecord.Replace(cycle, CouncilSeating.GateProvenLenses, new Dictionary<string, string>());
+        ReviewTestServices.NotSeated.Replace(cycle, CouncilSeating.GateProvenLenses, new Dictionary<string, string>());
 
-        IReadOnlyDictionary<string, string> read = NotSeatedRecord.Read(cycle);
+        IReadOnlyDictionary<string, string> read = ReviewTestServices.NotSeated.Read(cycle);
         Assert.False(read.ContainsKey("static-analysis-triage"));
         Assert.Equal("patterns", read["infra-workflow"]);
     }
@@ -44,11 +44,11 @@ public sealed class NotSeatedRecordTests : IDisposable
     public void AMissingOrBrokenRecordReadsAsEmpty()
     {
         string cycle = Path.Combine(_temp.Path, "review", "cycle-1");
-        Assert.Empty(NotSeatedRecord.Read(cycle));
+        Assert.Empty(ReviewTestServices.NotSeated.Read(cycle));
 
         Directory.CreateDirectory(cycle);
         File.WriteAllText(Path.Combine(cycle, NotSeatedRecord.FileName), "{not json");
-        Assert.Empty(NotSeatedRecord.Read(cycle));
+        Assert.Empty(ReviewTestServices.NotSeated.Read(cycle));
     }
 
     [Fact]
@@ -59,7 +59,7 @@ public sealed class NotSeatedRecordTests : IDisposable
         Directory.CreateDirectory(Path.Combine(review, "cycle-10", "seats"));
         Directory.CreateDirectory(Path.Combine(review, "cycle-11"));
 
-        Assert.Equal(Path.Combine(review, "cycle-10"), NotSeatedRecord.LatestCycle(review));
-        Assert.Null(NotSeatedRecord.LatestCycle(Path.Combine(_temp.Path, "none")));
+        Assert.Equal(Path.Combine(review, "cycle-10"), ReviewTestServices.NotSeated.LatestCycle(review));
+        Assert.Null(ReviewTestServices.NotSeated.LatestCycle(Path.Combine(_temp.Path, "none")));
     }
 }
