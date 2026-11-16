@@ -60,8 +60,15 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - docs: `dotnet run --project src/KyberWeave.Cli -- docs validate .` and `dotnet run --project src/KyberWeave.Cli -- docs drift .`
 - **A run that reports zero tests verified nothing.**
 - **Rule ids.** Every new `KW-*` id takes the next free number in its family; none is reused.
-- **Phase order.** A phase starts after the last task of the phase before it. Inside a phase, tasks
-  with no dependency between them and no shared file may run in parallel.
+- **Order.** A task may start when every task on its `Depends on` line is done. Two tracks have no
+  dependency on each other and may run at the same time, each in its own worktree and branch:
+  - **Track A:** all of phase 1 (1.1 to 1.14).
+  - **Track B:** 2.1, then 2.2, 2.3, 2.4, 2.5, 2.11, 3.1, 3.2, 3.3 in that order, one after another in
+    the track's one worktree: several of them change the same source files (the task-list source
+    files, and the Squad source validator in 3.1 and 3.2), and one order for the whole track needs no
+    merge inside it.
+  Every other task waits for the tasks it depends on. Both tracks merge into the specification's
+  branch, `claude/docs/role-based-worker-agents`.
 
 ## Tasks
 
@@ -720,8 +727,8 @@ Phase 1 has no outside dependency. The standards plan first drafted on
 ## Dependency graph
 
 - Phase 1: 1.11 first; 1.1 after it; 1.2, 1.6 and 1.10 after 1.1; 1.12 after 1.11 and 1.6; 1.13 after 1.1 and 1.12; 1.14 after 1.10 and 1.13; 1.3, 1.5 and 1.8 after 1.2; 1.4 after 1.3; 1.7 after 1.2 and 1.5; 1.9 last.
-- Phase 2: 2.1 and 2.2 in parallel; 2.3, 2.4 and 2.5 after 2.2; 2.6 after 2.2 and 1.6; 2.7 after 2.2, 2.6, 1.2 and 1.13; 2.8 after 2.7; 2.9 after 2.1 and 2.7; 2.10 after 2.8 and 2.9; 2.11 after 2.4; 2.12 last.
-- Phase 3: 3.1, 3.2 and 3.3 in parallel; 3.4 after 3.1 and 3.2; 3.5 after 3.1 and 3.3; 3.6 after 3.4, 3.5 and 2.8; 3.7 after 3.6; 3.8 after 3.4 and 3.5; 3.9 last.
+- Phase 2: 2.1 and 2.2 depend on nothing, and run in Track B's order; 2.3, 2.4 and 2.5 after 2.2; 2.6 after 2.2 and 1.6; 2.7 after 2.2, 2.6, 1.2 and 1.13; 2.8 after 2.7; 2.9 after 2.1 and 2.7; 2.10 after 2.8 and 2.9; 2.11 after 2.4; 2.12 last.
+- Phase 3: 3.1, 3.2 and 3.3 depend on nothing, and run in Track B's order; 3.4 after 3.1 and 3.2; 3.5 after 3.1 and 3.3; 3.6 after 3.4, 3.5 and 2.8; 3.7 after 3.6; 3.8 after 3.4 and 3.5; 3.9 last.
 - Phase 4: 4.1 first, after 1.5; 4.2 after 4.1 and 2.2; 4.3 after 4.1; 4.4 after 4.2 and 3.5; 4.5 after 4.1 and 3.6; 4.6 last.
 - Phase 5: 5.1, then 5.2; 5.3 and 5.4 in parallel; 5.5 after both; 5.6 last.
 - 6.1 after 5.6.
