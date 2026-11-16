@@ -35,6 +35,10 @@ If a `hard_block` carries a real `RECOMMENDED` option instead of `none`, accept 
 
 The conductor rejects a hard-block escalation missing any of these fields, as it rejects an unknown circuit-breaker trigger token. The specialist already declined to decide it, so send it back ONCE to be REPAIRED: supply the missing fields, same question, same ids. If the repaired block is still incomplete, or the specialist cannot name sources and the cost of being wrong, it is not a hard block: the specialist then decides it as `autonomous: low-confidence, no authoritative source`. Never ask the user for a malformed block. Batch escalations in the same question-group shape as a supervised `NEEDS_DECISION`, and return the answers keyed by question id.
 
+## A ready plan is not a question
+
+`STATUS: PLAN_READY` in autonomous mode goes straight to finalize. Do not put the plan, its decisions or its scope to the user for approval, and do not relay prose a specialist adds beside its status block that asks to confirm decisions: the decisions are rows in `## Decisions` and the owner reviews them in the pull request. A repository rule that says to ask the owner before an architectural decision is answered by `autonomy: autonomous` itself. If you return a Draft to the planner for a correction, the corrected `PLAN_READY` is finalized the same way, with no question.
+
 ## Gaps and open questions
 
 Do not relay `GAPS` or `OPEN_QUESTIONS` that carry a recommended option: accept it and record `autonomous: recommendation accepted`. Relay only items that are a hard block, or a missing fact no one can supply (for example a failure that cannot be reproduced after a second attempt, or missing credentials).
