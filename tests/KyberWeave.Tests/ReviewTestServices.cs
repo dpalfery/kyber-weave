@@ -39,6 +39,12 @@ internal static class ReviewTestServices
     /// <summary>Reads the coverage reports a test gate wrote.</summary>
     public static ICoverageReportSource Coverage { get; } = Provider.GetRequiredService<ICoverageReportSource>();
 
+    /// <summary>Repairs the lines findings cite.</summary>
+    public static ICitedLineChecker CitedLines { get; } = Provider.GetRequiredService<ICitedLineChecker>();
+
+    /// <summary>Reports the declarations whose bodies repeat verbatim.</summary>
+    public static IDuplicateDetectionService Duplicates { get; } = Provider.GetRequiredService<IDuplicateDetectionService>();
+
     /// <summary>Builds a command the way the command line does, from the registered services.</summary>
     public static T Create<T>()
         where T : class => ActivatorUtilities.CreateInstance<T>(Provider);

@@ -44,6 +44,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IProjectFileLocator>(_ => new FileProjectFileLocator());
         services.TryAddSingleton<IRepositoryFileLister>(sp => new FileRepositoryFileLister(sp.GetRequiredService<IProgramRunner>()));
         services.TryAddSingleton<ICoverageReportSource>(_ => new FileCoverageReportSource());
+        services.TryAddSingleton<IContainedFileReader>(_ => new FileContainedFileReader());
         services.TryAddSingleton<IBoundedFileReader>(_ => new FileBoundedFileReader());
         _ = services.AddWeaveArbiterData();
         return services;

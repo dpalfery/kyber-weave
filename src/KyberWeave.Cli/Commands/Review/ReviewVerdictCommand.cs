@@ -28,7 +28,7 @@ namespace KyberWeave.Cli.Commands.Review;
 /// <see cref="VerdictEngine"/>, which stays the only judge.
 /// </para>
 /// </remarks>
-public sealed partial class ReviewVerdictCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, INotSeatedStore notSeatedStore, ISeverityOverrideSource severityOverrides) : Command<ReviewVerdictSettings>
+public sealed partial class ReviewVerdictCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, INotSeatedStore notSeatedStore, ISeverityOverrideSource severityOverrides, ICitedLineChecker citedLines) : Command<ReviewVerdictSettings>
 {
     /// <summary>The command description shared by the real registration and the help tests.</summary>
     public const string Description = "Compute approve / request-changes from findings and gates.";
@@ -872,14 +872,14 @@ public sealed partial class ReviewVerdictCommand(IReviewWorkTreeService trees, I
         return kept;
     }
 
-    private static List<ReviewFinding> CheckCitedLines(
+    private List<ReviewFinding> CheckCitedLines(
         string root,
         List<ReviewFinding> findings,
         DiagnosticReport report,
         List<DroppedFinding> dropped)
     {
         List<ReviewFinding> kept = new(findings.Count);
-        IReadOnlyList<CitedLineResult> results = CitedLineCheck.Check(root, findings);
+        IReadOnlyList<CitedLineResult> results = citedLines.Check(root, findings);
         foreach (CitedLineResult result in results)
         {
             ReviewFinding finding = result.Finding;

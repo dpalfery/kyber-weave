@@ -52,7 +52,7 @@ public class ReviewDuplicatesTests : IDisposable
         new($"id-{kind}-{name}-{startLine}", kind, name, $"N.{name}", file, "csharp", startLine, endLine);
 
     private DuplicateReport Detect(IReadOnlyList<CodeGraphNode> nodes, int minimumLines = 4) =>
-        DuplicateDetector.Detect(
+        ReviewTestServices.Duplicates.Detect(
             _temp.Path,
             nodes,
             new ReviewDuplicates(minimumLines),
@@ -301,6 +301,7 @@ public class ReviewDuplicatesTests : IDisposable
             Method("Sum", "B.cs", 1, 7));
 
         DuplicateReport report = ReviewDuplicatesCommand.Analyze(
+            ReviewTestServices.Duplicates,
             _temp.Path, graph, graph, ReviewDuplicates.Default);
 
         Assert.True(report.IndexAvailable);
@@ -315,6 +316,7 @@ public class ReviewDuplicatesTests : IDisposable
         UnavailableGraph graph = new();
 
         DuplicateReport report = ReviewDuplicatesCommand.Analyze(
+            ReviewTestServices.Duplicates,
             _temp.Path, graph, graph, ReviewDuplicates.Default);
 
         Assert.False(report.IndexAvailable);

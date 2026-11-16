@@ -3,11 +3,13 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
-using KyberWeave.Core.FileSystem;
+using KyberWeave.Core.Review;
 using KyberWeave.Domain.CodeGraph;
 
-namespace KyberWeave.Core.Review;
+namespace KyberWeave.Application.Review;
 
 /// <summary>Measures declarations' bodies and reports the ones that repeat verbatim.</summary>
 /// <remarks>
@@ -33,24 +35,18 @@ namespace KyberWeave.Core.Review;
 /// mode this gate must not have.
 /// </para>
 /// </remarks>
-public static class DuplicateDetector
+public sealed class DuplicateDetectionService(IContainedFileReader files) : IDuplicateDetectionService
 {
-    /// <summary>
-    /// The CodeGraph node kinds whose bodies are worth comparing. Frozen so one caller
-    /// cannot change what every other caller — and <see cref="Detect"/> itself — compares.
-    /// </summary>
-    public static ImmutableArray<string> ComparableKinds { get; } = ["method", "function"];
-
     /// <summary>
     /// Clusters the given symbols by normalized body. <paramref name="repoRoot"/> is the tree
     /// the index's relative paths resolve against.
     /// </summary>
     /// <remarks>
-    /// <see cref="ComparableKinds"/> is applied here, not only at the call site. The CLI
+    /// <see cref="DuplicateDetector.ComparableKinds"/> is applied here, not only at the call site. The CLI
     /// still enumerates by kind because that is how the CodeGraph port is queried; Detect
     /// still filters so a mixed list cannot widen the comparison.
     /// </remarks>
-    public static DuplicateReport Detect(
+    public DuplicateReport Detect(
         string repoRoot,
         IReadOnlyList<CodeGraphNode> symbols,
         ReviewDuplicates options,
@@ -107,27 +103,9 @@ public static class DuplicateDetector
             clusters);
     }
 
-    /// <summary>The report for a run that found no index to read.</summary>
-    public static DuplicateReport Unavailable(string indexPath, string reason, ReviewDuplicates options)
-    {
-        ArgumentNullException.ThrowIfNull(indexPath);
-        ArgumentNullException.ThrowIfNull(options);
-
-        return new DuplicateReport(
-            DuplicateReport.CurrentSchema,
-            indexPath,
-            IndexAvailable: false,
-            IndexModifiedUtc: null,
-            reason,
-            options.MinimumLines,
-            SymbolsConsidered: 0,
-            SymbolsUnreadable: 0,
-            Clusters: []);
-    }
-
     private static bool IsComparableKind(string kind)
     {
-        foreach (string comparable in ComparableKinds)
+        foreach (string comparable in DuplicateDetector.ComparableKinds)
         {
             if (string.Equals(comparable, kind, StringComparison.Ordinal))
                 return true;
@@ -194,7 +172,7 @@ public static class DuplicateDetector
         return Convert.ToHexStringLower(digest);
     }
 
-    private static string[]? ReadFile(string repoRoot, string relativePath, Dictionary<string, string[]?> cache)
+    private string[]? ReadFile(string repoRoot, string relativePath, Dictionary<string, string[]?> cache)
     {
         if (cache.TryGetValue(relativePath, out string[]? cached)) return cached;
 
@@ -206,8 +184,8 @@ public static class DuplicateDetector
             // The same cap every other read of a path a seat or an index names applies: an oversized file is unreadable.
             // A symbolic link on the path can lead out of the tree, so a file reached through one is unreadable here, as
             // it is for every other read of a path an index or a seat names.
-            if (DocsRootPath.IsContainedFile(repoRoot, relativePath, []))
-                lines = BoundedFileReader.ReadAllLines(full, ReviewSeatInput.MaxFileBytes);
+            if (files.IsContainedFile(repoRoot, relativePath))
+                lines = files.ReadLines(full, ReviewSeatInput.MaxFileBytes);
         }
         catch (Exception ex) when (ReviewSeatInput.IsFileFailure(ex) || ex is InvalidDataException)
         {

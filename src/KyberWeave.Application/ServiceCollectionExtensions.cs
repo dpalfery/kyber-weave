@@ -33,6 +33,8 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IReviewWorkTreeService, ReviewWorkTreeService>();
         services.TryAddSingleton<ISuppressionScanService, SuppressionScanService>();
         services.TryAddSingleton<IGateRunService, GateRunService>();
+        services.TryAddSingleton<ICitedLineChecker, CitedLineChecker>();
+        services.TryAddSingleton<IDuplicateDetectionService, DuplicateDetectionService>();
         return services;
     }
 }

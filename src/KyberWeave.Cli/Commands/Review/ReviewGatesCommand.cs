@@ -23,7 +23,7 @@ namespace KyberWeave.Cli.Commands.Review;
 ///     Runs the deterministic gates the host declares under <c>review.gates</c>, or, with <c>--agent</c>,
 ///     one developer agent's gates under <c>review.task-gates</c> against the change that agent made.
 /// </summary>
-public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, IReviewEvidenceService evidenceWriter, INotSeatedStore notSeatedStore, IProjectFileLocator projectFiles, IGateRunService gateRunner) : Command<ReviewGatesSettings>
+public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, IReviewEvidenceService evidenceWriter, INotSeatedStore notSeatedStore, IProjectFileLocator projectFiles, IGateRunService gateRunner, IDuplicateDetectionService duplicateDetection) : Command<ReviewGatesSettings>
 {
     private const string NoGatesDeclared = "KW-REVIEW-020";
     private const string IndexState = "KW-REVIEW-038";
@@ -496,7 +496,7 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
         DiagnosticReport report)
     {
         CodeGraphPorts graph = CodeGraphResolvers.ForRepository(root);
-        DuplicateReport duplicates = ReviewDuplicatesCommand.Analyze(root, graph.Resolver, graph.Enumerator, config.Review.Duplicates);
+        DuplicateReport duplicates = ReviewDuplicatesCommand.Analyze(duplicateDetection, root, graph.Resolver, graph.Enumerator, config.Review.Duplicates);
         CommandHelpers.TryWriteReport(
             Path.Combine(cycle.Folder!, "duplicates.json"), ReviewJson.Write(duplicates), ReportWriteFailed, report);
         (IReadOnlyList<string>? changed, _) = ResolveCouncilChangedSet(root, settings);
