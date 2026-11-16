@@ -112,6 +112,19 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<ITaskGateSelectionService, TaskGateSelectionService>();
         services.TryAddSingleton<IConfigLoadService, ConfigLoadService>();
         services.TryAddSingleton<IReviewCycleSelector, ReviewCycleSelector>();
+        services.TryAddSingleton<IReviewSeatsService>(sp => new ReviewSeatsService(
+            sp.GetRequiredService<IReviewWorkTreeService>(),
+            sp.GetRequiredService<IReviewCycleStore>(),
+            sp.GetRequiredService<IGitChangeReader>(),
+            sp.GetRequiredService<IReviewEvidenceService>(),
+            sp.GetRequiredService<INotSeatedStore>(),
+            sp.GetRequiredService<ISeverityOverrideSource>(),
+            sp.GetRequiredService<IWorktreeIndexGuard>(),
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IReviewCycleSelector>(),
+            sp.GetRequiredService<IConfigLoadService>(),
+            sp.GetRequiredService<IReviewDecisionSteps>()));
         services.TryAddSingleton<IReviewGatesService>(sp => new ReviewGatesService(
             sp.GetRequiredService<IReviewWorkTreeService>(),
             sp.GetRequiredService<IReviewCycleStore>(),
