@@ -71,6 +71,14 @@ CONFIGURATION=Release
 TEST_DLL="tests/KyberWeave.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Tests.dll"
 POLICY_TEST_DLL="tests/KyberWeave.RepoPolicy.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.RepoPolicy.Tests.dll"
 PROMPT_TEST_DLL="tests/KyberWeave.PromptContent.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.PromptContent.Tests.dll"
+# The layer projects (Domain, Application, Hooks, Architecture): pure or fake-backed, so they run whole
+# on every .NET loop, whatever --class / --method names a legacy project.
+LAYER_TEST_DLLS=(
+  "tests/KyberWeave.Domain.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Domain.Tests.dll"
+  "tests/KyberWeave.Application.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Application.Tests.dll"
+  "tests/KyberWeave.Hooks.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Hooks.Tests.dll"
+  "tests/KyberWeave.Architecture.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Architecture.Tests.dll"
+)
 CLASS_LIST="scripts/fast-loop-classes.txt"
 # The two policy tests that read source text. A C#-only edit can trip them (an unlisted process
 # spawn, a banned upstream name), and they only read files, so they run on every .NET loop.
@@ -334,10 +342,19 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
       policy_status=1
     fi
   fi
+  step "layer tests (Domain, Application, Hooks, Architecture)"
+  layers_status=0
+  for layer_dll in "${LAYER_TEST_DLLS[@]}"; do
+    dotnet "${layer_dll}" || layers_status=$?
+  done
   if [[ "${product_status}" -ne 0 || "${policy_status}" -ne 0 ]]; then
     printf '\ntests failed: product suite exit %s, repository-policy tests exit %s\n' \
       "${product_status}" "${policy_status}" >&2
     exit $(( product_status != 0 ? product_status : policy_status ))
+  fi
+  if [[ "${layers_status}" -ne 0 ]]; then
+    printf '\nlayer tests failed: exit %s\n' "${layers_status}" >&2
+    exit "${layers_status}"
   fi
   if ! sed $'s/\x1b\\[[0-9;]*m//g' "${test_log}" | grep -Eq 'Total: [1-9][0-9]*,'; then
     printf 'no tests ran; check the --class / --method filter\n' >&2

@@ -260,6 +260,20 @@ jobs:
           --report-trx-filename prompt-content.trx
           --results-directory TestResults
 
+      # The layer projects: pure Domain tests, Application tests over fakes, the edit hook's
+      # entry-app tests, and the architecture test that pins the layering. They are fast, and a
+      # test moved into one of them must keep running here.
+      - name: Test (layers)
+        run: |
+          for project in Domain Application Hooks Architecture; do
+            dotnet test "tests/KyberWeave.${project}.Tests/KyberWeave.${project}.Tests.csproj" \
+              -c "${CONFIGURATION}" \
+              --no-build \
+              --report-trx \
+              --report-trx-filename "layers-${project}.trx" \
+              --results-directory TestResults
+          done
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
