@@ -1,6 +1,7 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Tests.Arbiter;
 using Microsoft.Extensions.DependencyInjection;
+using KyberWeave.Application.Arbiter;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
@@ -72,7 +73,7 @@ public sealed class ArbiterAuditModelEvaluationTests : IDisposable
         DiagnosticReport report = new();
         int reported = 0;
 
-        bool configured = _host.Command<ArbiterAuditCommand>().ModelConfigured(KyberWeaveConfig.ProductDefaults, report, ref reported);
+        bool configured = _host.Command<ArbiterAuditService>().ModelConfigured(KyberWeaveConfig.ProductDefaults, report, ref reported);
 
         Assert.False(configured);
         Assert.Equal(1, reported);
@@ -91,7 +92,7 @@ public sealed class ArbiterAuditModelEvaluationTests : IDisposable
         DiagnosticReport report = new();
         int reported = 0;
 
-        bool configured = _host.Command<ArbiterAuditCommand>().ModelConfigured(KyberWeaveConfig.ProductDefaults, report, ref reported);
+        bool configured = _host.Command<ArbiterAuditService>().ModelConfigured(KyberWeaveConfig.ProductDefaults, report, ref reported);
 
         Assert.True(configured);
         Assert.Equal(0, reported);

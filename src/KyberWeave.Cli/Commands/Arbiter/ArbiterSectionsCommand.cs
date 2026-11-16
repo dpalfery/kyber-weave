@@ -15,7 +15,11 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 /// The command has no repository root to read configuration from, so it selects with <see cref="NoneProvider"/> and
 /// lists every section; the served tool <c>arbiter_select_relevant_document_sections</c> uses the configured provider.
 /// </remarks>
-public sealed class ArbiterSectionsCommand(IFileTextFacts fileText, IArbiterRepositoryLocator locator, IFileStatReader fileStats) : Command<ArbiterSectionsSettings>
+public sealed class ArbiterSectionsCommand(
+    IFileTextFacts fileText,
+    IArbiterRepositoryLocator locator,
+    IFileStatReader fileStats,
+    IArbiterSectionSelectionService sections) : Command<ArbiterSectionsSettings>
 {
     /// <summary>Prints each section's id, its line range and title. Exits 2 on a usage error, and 1 when the document is missing.</summary>
     public override int Execute(CommandContext context, ArbiterSectionsSettings settings, CancellationToken cancellationToken)
@@ -42,8 +46,8 @@ public sealed class ArbiterSectionsCommand(IFileTextFacts fileText, IArbiterRepo
             return 1;
         }
 
-        SectionSelection selection = new SectionSelector(new NoneProvider())
-            .SelectAsync(full, settings.Task, cancellationToken)
+        SectionSelection selection = sections
+            .SelectAsync(full, settings.Task, new NoneProvider(), cancellationToken)
             .GetAwaiter()
             .GetResult();
         if (selection.FailedSafe && selection.Selected.Count == 0)

@@ -1,5 +1,4 @@
 using System.Diagnostics.CodeAnalysis;
-using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Application.Squad;
@@ -28,7 +27,7 @@ internal static class SquadHostDefaults
         Func<string, string?> reader = environmentReader ?? Environment.GetEnvironmentVariable;
         string? home = reader("HOME");
         if (string.IsNullOrWhiteSpace(home)) home = reader("USERPROFILE");
-        if (string.IsNullOrWhiteSpace(home)) home = ArbiterCommandComposition.HomeDirectory();
+        if (string.IsNullOrWhiteSpace(home)) home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         if (string.IsNullOrWhiteSpace(home)) home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
         string? appData = reader("APPDATA");
@@ -53,7 +52,7 @@ internal static class SquadHostDefaults
         Func<string, string?> reader = environmentReader ?? Environment.GetEnvironmentVariable;
         string? home = reader("HOME");
         if (string.IsNullOrWhiteSpace(home)) home = reader("USERPROFILE");
-        if (string.IsNullOrWhiteSpace(home)) home = ArbiterCommandComposition.HomeDirectory();
+        if (string.IsNullOrWhiteSpace(home)) home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         if (string.IsNullOrWhiteSpace(home)) home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
         return new SquadGlobalRoots(reader, home ?? string.Empty, ReadFileTextOrNull);

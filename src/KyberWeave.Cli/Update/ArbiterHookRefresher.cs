@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Arbiter;
@@ -23,9 +24,14 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
 {
     private readonly Action<string>? _log;
     private readonly Func<string, string?>? _environmentReader;
+    private readonly IUserHostConfigStore _userConfig;
 
-    internal ArbiterHookRefresher(Action<string>? log = null, Func<string, string?>? environmentReader = null)
+    internal ArbiterHookRefresher(
+        IUserHostConfigStore userConfig,
+        Action<string>? log = null,
+        Func<string, string?>? environmentReader = null)
     {
+        _userConfig = userConfig;
         _log = log;
         _environmentReader = environmentReader;
     }
@@ -217,7 +223,7 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
 
     private IEnumerable<(string TargetToken, string HookPath)> ResolveGlobalHookTargets(string home)
     {
-        foreach (string token in UserHostConfig.ReadGlobalTargets(home))
+        foreach (string token in _userConfig.ReadGlobalTargets(home))
         {
             if (string.IsNullOrWhiteSpace(token))
                 continue;

@@ -8,7 +8,8 @@ namespace KyberWeave.Cli.Update;
 
 /// <summary>Reads the projects and global targets the update's arbiter hook refresh covers, from the user's registry and configuration.</summary>
 /// <param name="readEnvironment">Reads one environment variable; decides which home the registry is read from.</param>
-internal sealed class CliArbiterRefreshTargets(Func<string, string?> readEnvironment) : IArbiterRefreshTargets
+/// <param name="userConfig">Reads the per-user host config's Arbiter global targets.</param>
+internal sealed class CliArbiterRefreshTargets(Func<string, string?> readEnvironment, IUserHostConfigStore userConfig) : IArbiterRefreshTargets
 {
     /// <inheritdoc />
     public IReadOnlyList<string> CollectEnabledProjectRoots()
@@ -30,5 +31,5 @@ internal sealed class CliArbiterRefreshTargets(Func<string, string?> readEnviron
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<string> ReadGlobalTargets(string home) => UserHostConfig.ReadGlobalTargets(home);
+    public IReadOnlyList<string> ReadGlobalTargets(string home) => userConfig.ReadGlobalTargets(home);
 }

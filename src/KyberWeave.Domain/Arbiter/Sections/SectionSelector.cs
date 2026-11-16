@@ -1,6 +1,6 @@
+using System.Text;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
-using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Arbiter.Sections;
 
@@ -28,35 +28,24 @@ public sealed class SectionSelector(IArbiterProvider provider)
     private const string TaskFact = "task.text";
     private const string CandidatesFact = "section.candidates";
 
-    /// <summary>Selects the sections of the document at <paramref name="documentPath"/> that the task needs.</summary>
-    /// <param name="documentPath">The path of the markdown document; it must exist.</param>
+    /// <summary>Selects the sections of <paramref name="documentText"/> that the task needs.</summary>
+    /// <param name="documentText">The markdown document's text; the caller reads it under <see cref="MaxDocumentBytes"/>.</param>
     /// <param name="task">The task the worker is about to do, in plain words.</param>
     /// <param name="ct">Cancels the provider call.</param>
     /// <returns>The selection; never throws for a provider failure.</returns>
-    public async Task<SectionSelection> SelectAsync(string documentPath, string task, CancellationToken ct = default)
+    public async Task<SectionSelection> SelectAsync(string documentText, string task, CancellationToken ct = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(documentPath);
+        ArgumentNullException.ThrowIfNull(documentText);
         ArgumentNullException.ThrowIfNull(task);
 
-        // A document that cannot be read or is over the size cap yields no sections to choose from. The selection then
-        // fails safe with nothing selected, and the caller falls back to the whole document it already holds.
-        string? text;
-        try
-        {
-            ct.ThrowIfCancellationRequested();
-            text = BoundedFileReader.ReadAllText(documentPath, MaxDocumentBytes);
-        }
-        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException)
+        // A document over the size cap yields no sections to choose from. The selection then fails safe with nothing
+        // selected, and the caller falls back to the whole document it already holds.
+        if (Encoding.UTF8.GetByteCount(documentText) > MaxDocumentBytes)
         {
             return new SectionSelection([], FailedSafe: true);
         }
 
-        if (text is null)
-        {
-            return new SectionSelection([], FailedSafe: true);
-        }
-
-        IReadOnlyList<DocumentSection> sections = DocumentSectionIndex.Split(text);
+        IReadOnlyList<DocumentSection> sections = DocumentSectionIndex.Split(documentText);
         if (sections.Count <= 1)
         {
             return new SectionSelection(sections, FailedSafe: false);

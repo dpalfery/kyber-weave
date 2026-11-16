@@ -25,6 +25,13 @@ public static class ArbiterApplicationServiceCollectionExtensions
         services.TryAddSingleton<IArbiterKeyService, Core.Arbiter.ArbiterKeyService>();
         services.TryAddSingleton<IArbiterDryRunService, Core.Arbiter.ArbiterDryRunService>();
         services.TryAddSingleton<IOllamaProbe, Core.Arbiter.OllamaProbe>();
+        services.TryAddSingleton<IArbiterConfigResolver, Cli.Commands.Arbiter.ArbiterConfigResolver>();
+        services.TryAddSingleton<IArbiterSectionSelectionService, ArbiterSectionSelectionService>();
+        services.TryAddSingleton<IArbiterPlanService, ArbiterPlanService>();
+        services.TryAddSingleton<IArbiterTuneService, ArbiterTuneService>();
+        services.TryAddSingleton<IArbiterAuditService, ArbiterAuditService>();
+        services.TryAddSingleton<IArbiterDoctorService, ArbiterDoctorService>();
+        services.TryAddSingleton<IArbiterInstallService, ArbiterInstallService>();
         services.TryAddSingleton<IArbiterRepositoryLocator, Core.Arbiter.ArbiterRepositoryLocator>();
         services.TryAddSingleton<IArbiterUninstaller, Cli.Commands.Arbiter.ArbiterUninstaller>();
         services.TryAddSingleton<IArbiterHarnessGating, Cli.Commands.Arbiter.ArbiterHarnessGating>();

@@ -24,9 +24,11 @@ internal static class SquadCliServices
             sp.GetRequiredService<ISquadRenderInputReader>()));
         services.TryAddSingleton<Func<SelfUpdateHost>>(_ => SelfUpdateHostFactory.FromCurrentProcess);
         services.TryAddSingleton<IArbiterRefreshTargets>(sp => new CliArbiterRefreshTargets(
-            sp.GetRequiredService<IProcessEnvironment>().GetVariable));
+            sp.GetRequiredService<IProcessEnvironment>().GetVariable,
+            sp.GetRequiredService<IUserHostConfigStore>()));
         services.TryAddSingleton<IArbiterHookRefresherFactory>(sp => new ArbiterHookRefresherFactory(
-            sp.GetRequiredService<IProcessEnvironment>().GetVariable));
+            sp.GetRequiredService<IProcessEnvironment>().GetVariable,
+            sp.GetRequiredService<IUserHostConfigStore>()));
         services.TryAddSingleton(new SquadConsoleOptions());
         services.TryAddSingleton(new SquadRunOptions());
         services.TryAddSingleton(new SquadDoctorOptions());

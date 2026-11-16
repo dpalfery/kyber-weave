@@ -1,3 +1,4 @@
+using KyberWeave.Data.Configuration;
 using KyberWeave.Application;
 using KyberWeave.Cli.Commands.Update;
 using KyberWeave.Cli.Composition;
@@ -30,9 +31,9 @@ internal static class UpdateCommandTestServices
         services.AddSingleton<IProcessEnvironment>(new EmptyEnvironment());
         services.AddSingleton<ISelfUpdateSystem>(new HandOffSystem(finishingProcess));
         Func<string, string?> empty = _ => null;
-        services.AddSingleton<IArbiterRefreshTargets>(new CliArbiterRefreshTargets(empty));
+        services.AddSingleton<IArbiterRefreshTargets>(new CliArbiterRefreshTargets(empty, new FileUserHostConfigStore()));
         services.AddSingleton<IArbiterHookRefresherFactory>(arbiterHookRefresher is null
-            ? new ArbiterHookRefresherFactory(empty)
+            ? new ArbiterHookRefresherFactory(empty, new FileUserHostConfigStore())
             : new FixedRefresherFactory(arbiterHookRefresher));
         _ = services.AddWeaveApplication();
         ServiceProvider provider = services.BuildServiceProvider();

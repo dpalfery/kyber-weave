@@ -5,6 +5,7 @@ using System.IO.Compression;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using KyberWeave.Data.Configuration;
 using KyberWeave.Cli.Update;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Processes;
@@ -510,7 +511,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
         string stateDirectory = store.ResolveHomeStateDirectory();
         Directory.CreateDirectory(stateDirectory);
         File.WriteAllText(Path.Combine(stateDirectory, "registry.json"), "{ this is not a registry");
-        UserHostConfig.WriteGlobalTargets(userPaths.HomeDirectory, ["cursor"]);
+        new FileUserHostConfigStore().WriteGlobalTargets(userPaths.HomeDirectory, ["cursor"]);
         string hookPath = WriteLegacyCursorHook(userPaths.HomeDirectory, "/legacy/kyber-weave-arbiter hook");
         using MapHandler handler = new();
         SelfUpdateHost host = CreateHost("0.2.0");
@@ -523,7 +524,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
             new SelfUpdateOptions("0.2.0", false, false, FinishUpdate: true),
             record,
             environment: environment,
-            refresher: new ArbiterHookRefresher(record.Log.Add, environment));
+            refresher: new ArbiterHookRefresher(new FileUserHostConfigStore(), record.Log.Add, environment));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Contains(
@@ -667,7 +668,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
             spawn,
             captureProcess: capture,
             arbiterHookRefresher: arbiter,
-            arbiterTargets: new CliArbiterRefreshTargets(readEnvironment));
+            arbiterTargets: new CliArbiterRefreshTargets(readEnvironment, new FileUserHostConfigStore()));
         Func<string, IReadOnlyList<string>, bool, int> loopbackSeam = loopback.Invoke;
         SeamProbe probe = new(record, handOff ?? loopbackSeam);
 
@@ -679,7 +680,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
             spawn,
             captureProcess: capture,
             arbiterHookRefresher: arbiter,
-            arbiterTargets: new CliArbiterRefreshTargets(readEnvironment),
+            arbiterTargets: new CliArbiterRefreshTargets(readEnvironment, new FileUserHostConfigStore()),
             finishingProcess: probe.Invoke);
         return updater.Run(options);
     }

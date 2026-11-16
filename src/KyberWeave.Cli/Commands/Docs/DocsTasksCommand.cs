@@ -15,16 +15,24 @@ namespace KyberWeave.Cli.Commands.Docs;
 /// Derives a plan's, or a specification's, task file from the plan and writes or checks it, so no one writes the
 /// machine format, or its execution digest, by hand.
 /// </summary>
-public sealed class DocsTasksCommand(IPlanTaskService tasks, IPlanTaskAgentPickerFactory pickers) : Command<DocsTasksSettings>
+public sealed class DocsTasksCommand(
+    IPlanTaskService tasks,
+    IPlanTaskAgentPickerFactory pickers,
+    IArbiterKeyService arbiterKeys,
+    IArbiterDryRunService arbiterDryRun) : Command<DocsTasksSettings>
 {
     /// <summary>Both <c>--write</c> and <c>--check</c> were given; they ask for opposite things.</summary>
     public const string ConflictingModes = "KW-DOC-TASKS-CLI-001";
 
     /// <summary>
     /// The model provider the packet self-containment check asks, or null to skip the check. The default is the
-    /// Arbiter's configured provider when a key is available for it; tests replace it.
+    /// Arbiter's configured provider when a key is available for it; tests replace it through
+    /// <see cref="PacketProviderOverride"/>.
     /// </summary>
-    public static Func<KyberWeaveConfig, IArbiterProvider?> PacketProvider { get; set; } = DefaultPacketProvider;
+    public static Func<KyberWeaveConfig, IArbiterProvider?>? PacketProviderOverride { get; set; }
+
+    private IArbiterProvider? PacketProvider(KyberWeaveConfig config) =>
+        (PacketProviderOverride ?? DefaultPacketProvider)(config);
 
     /// <summary>
     /// Reads the plan named by the positional path and derives its task file. With <c>--write</c> it writes the
@@ -138,7 +146,7 @@ public sealed class DocsTasksCommand(IPlanTaskService tasks, IPlanTaskAgentPicke
         return report.HasErrors ? 1 : 0;
     }
 
-    private static IArbiterProvider? DefaultPacketProvider(KyberWeaveConfig config)
+    private IArbiterProvider? DefaultPacketProvider(KyberWeaveConfig config)
     {
         if (config.Arbiter.Provider.Kind == ArbiterProviderKind.None)
         {
@@ -147,15 +155,15 @@ public sealed class DocsTasksCommand(IPlanTaskService tasks, IPlanTaskAgentPicke
 
         string endpoint = config.Arbiter.Provider.Endpoint;
         bool loopback = Uri.TryCreate(endpoint, UriKind.Absolute, out Uri? uri) && uri.IsLoopback;
-        if (!loopback && ArbiterCommandComposition.TryResolveKey(config, endpoint) is null)
+        if (!loopback && arbiterKeys.TryResolveKey(config, endpoint) is null)
         {
             return null;
         }
 
-        return ArbiterCommandComposition.CreateProvider(config, null, new DiagnosticReport(), out _);
+        return arbiterDryRun.CreateProvider(config, null, new DiagnosticReport(), out _);
     }
 
-    private static async Task CheckPacketsAsync(
+    private async Task CheckPacketsAsync(
         KyberWeaveConfig config, PlanTaskFile file, string plan, DiagnosticReport report, CancellationToken cancellationToken)
     {
         IArbiterProvider? provider = PacketProvider(config);

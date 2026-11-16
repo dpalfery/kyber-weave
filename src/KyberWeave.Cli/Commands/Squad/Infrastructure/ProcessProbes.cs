@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
+using KyberWeave.Cli;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Release;
 
@@ -34,9 +36,12 @@ public sealed partial class McpProcessProbe
 /// Follows <see cref="McpProcessProbe"/>: runs only <c>kyber-weave-arbiter --version</c>
 /// and parses its exact output envelope.
 /// </remarks>
-public sealed partial class ArbiterProcessProbe
+public sealed partial class ArbiterProcessProbe : IArbiterBinaryProbe
 {
     private readonly IProcessExecutor _executor;
+
+    /// <inheritdoc />
+    public string CliVersion => CliAssemblyVersion.ForProbe(typeof(ArbiterProcessProbe).Assembly);
 
     /// <summary>Creates an Arbiter probe over an injectable process boundary.</summary>
     public ArbiterProcessProbe(IProcessExecutor executor)

@@ -1,3 +1,4 @@
+using KyberWeave.Data.Configuration;
 using KyberWeave.Tests.Arbiter;
 using System.Security.Cryptography;
 using System.Text;
@@ -6,6 +7,7 @@ using KyberWeave.Arbiter;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Update;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -203,16 +205,16 @@ public sealed class ArbiterKiloReviewRemediationTests
         string configPath = Path.Combine(configDir, "kyber-weave.yml");
 
         File.WriteAllText(configPath, "");
-        Assert.Empty(UserHostConfig.ReadGlobalTargets(home.Path));
+        Assert.Empty(new FileUserHostConfigStore().ReadGlobalTargets(home.Path));
 
         File.WriteAllText(configPath, "   \n\r\n  ");
-        Assert.Empty(UserHostConfig.ReadGlobalTargets(home.Path));
+        Assert.Empty(new FileUserHostConfigStore().ReadGlobalTargets(home.Path));
 
         File.WriteAllText(configPath, "arbiter: : malformed yaml");
-        Assert.Empty(UserHostConfig.ReadGlobalTargets(home.Path));
+        Assert.Empty(new FileUserHostConfigStore().ReadGlobalTargets(home.Path));
 
         File.WriteAllText(configPath, "arbiter:\n  global:\n    targets: 12345");
-        Assert.Empty(UserHostConfig.ReadGlobalTargets(home.Path));
+        Assert.Empty(new FileUserHostConfigStore().ReadGlobalTargets(home.Path));
     }
 
     [Fact]
@@ -298,7 +300,7 @@ public sealed class ArbiterKiloReviewRemediationTests
         string home = Path.Combine(temp.Path, "home");
         Directory.CreateDirectory(home);
 
-        UserHostConfig.WriteGlobalTargets(home, ["kilo", "opencode", "pi", "copilot", "cursor"]);
+        new FileUserHostConfigStore().WriteGlobalTargets(home, ["kilo", "opencode", "pi", "copilot", "cursor"]);
 
         SquadGlobalRoots roots = new(_ => null, home);
         string kiloRoot = roots.ResolveGlobalRoot(SquadTarget.Kilo);
@@ -358,7 +360,7 @@ public sealed class ArbiterKiloReviewRemediationTests
 
         Func<string, string?> env = name => name == "HOME" ? home : null;
         List<string> log = [];
-        ArbiterHookRefresher refresher = new(log.Add, env);
+        ArbiterHookRefresher refresher = new(new FileUserHostConfigStore(), log.Add, env);
 
         ArbiterHookRefreshResult refreshResult = refresher.Refresh([]);
         Assert.Equal(5, refreshResult.Refreshed);
@@ -414,7 +416,7 @@ public sealed class ArbiterKiloReviewRemediationTests
 
         using (FileStream lockStream = new(configPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
         {
-            IReadOnlyList<string> targets = UserHostConfig.ReadGlobalTargets(home.Path);
+            IReadOnlyList<string> targets = new FileUserHostConfigStore().ReadGlobalTargets(home.Path);
             Assert.Empty(targets);
         }
     }

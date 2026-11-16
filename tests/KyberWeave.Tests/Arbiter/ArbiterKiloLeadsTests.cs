@@ -1,8 +1,10 @@
+using KyberWeave.Application.Arbiter;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Tests.Arbiter;
 using KyberWeave.Data.Arbiter;
 using KyberWeave.Data.Hooks;
+using KyberWeave.Data.Review;
 using KyberWeave.Core.Arbiter.Plans;
 using System.Text.Json;
 using KyberWeave.Arbiter;
@@ -37,6 +39,9 @@ public sealed class ArbiterKiloLeadsTests : IDisposable
     public void Dispose() => _sandbox.Dispose();
 
     private static DateTimeOffset Now => new(2026, 11, 11, 12, 0, 0, TimeSpan.Zero);
+
+    private static IArbiterSectionSelectionService SelectorFor() =>
+        new ArbiterSectionSelectionService(new FileBoundedFileReader());
 
     /// <summary>Holds a file open with no sharing, so a read of it fails with an I/O error while the file still exists.</summary>
     private static FileStream LockAgainstReads(string path)
@@ -132,7 +137,8 @@ public sealed class ArbiterKiloLeadsTests : IDisposable
         string full = await WriteCitedFileAsync("docs/locked.md", "# Guide\nIntro.\n## Install\nSteps.\n");
         using FileStream holder = LockAgainstReads(full);
 
-        SectionSelection selection = await new SectionSelector(new NoneProvider()).SelectAsync(full, "Change the install steps.");
+        SectionSelection selection = await SelectorFor()
+            .SelectAsync(full, "Change the install steps.", new NoneProvider());
 
         Assert.True(selection.FailedSafe);
     }

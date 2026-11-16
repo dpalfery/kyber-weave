@@ -1,8 +1,11 @@
+using KyberWeave.Application.Arbiter;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Arbiter.Sections;
+using KyberWeave.Data.Review;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -75,7 +78,7 @@ public sealed class ArbiterSectionBoundsTests : IDisposable
         await File.WriteAllTextAsync(path, "# Title\n" + new string('a', (int)SectionSelector.MaxDocumentBytes));
         UnaskedProvider provider = new();
 
-        SectionSelection selection = await new SectionSelector(provider).SelectAsync(path, "Change the install steps.");
+        SectionSelection selection = await SelectorFor().SelectAsync(path, "Change the install steps.", provider);
 
         Assert.True(selection.FailedSafe);
         Assert.Equal(0, provider.CallCount);
@@ -87,10 +90,13 @@ public sealed class ArbiterSectionBoundsTests : IDisposable
     {
         UnaskedProvider provider = new();
 
-        SectionSelection selection = await new SectionSelector(provider)
-            .SelectAsync(Path.Combine(_temp.Path, "bad\0name.md"), "Change the install steps.");
+        SectionSelection selection = await SelectorFor()
+            .SelectAsync(Path.Combine(_temp.Path, "bad\0name.md"), "Change the install steps.", provider);
 
         Assert.True(selection.FailedSafe);
         Assert.Equal(0, provider.CallCount);
     }
+
+    private static IArbiterSectionSelectionService SelectorFor() =>
+        new ArbiterSectionSelectionService(new FileBoundedFileReader());
 }

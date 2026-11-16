@@ -6,6 +6,7 @@ using System.Net;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using KyberWeave.Data.Configuration;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Commands.Update;
 using KyberWeave.Cli.Update;
@@ -969,7 +970,7 @@ public sealed class UpdateCommandTests : IDisposable
             _ => null,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
-            arbiterTargets: new CliArbiterRefreshTargets(_ => null));
+            arbiterTargets: new CliArbiterRefreshTargets(_ => null, new FileUserHostConfigStore()));
         using SelfUpdater updater = new(
             handler,
             host,
@@ -977,7 +978,7 @@ public sealed class UpdateCommandTests : IDisposable
             _ => null,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
-            arbiterTargets: new CliArbiterRefreshTargets(_ => null),
+            arbiterTargets: new CliArbiterRefreshTargets(_ => null, new FileUserHostConfigStore()),
             finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
@@ -1004,7 +1005,7 @@ public sealed class UpdateCommandTests : IDisposable
             _ => null,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
-            arbiterTargets: new CliArbiterRefreshTargets(_ => null));
+            arbiterTargets: new CliArbiterRefreshTargets(_ => null, new FileUserHostConfigStore()));
         using SelfUpdater updater = new(
             handler,
             host,
@@ -1012,7 +1013,7 @@ public sealed class UpdateCommandTests : IDisposable
             _ => null,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
-            arbiterTargets: new CliArbiterRefreshTargets(_ => null),
+            arbiterTargets: new CliArbiterRefreshTargets(_ => null, new FileUserHostConfigStore()),
             finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 

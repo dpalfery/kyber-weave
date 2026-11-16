@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using KyberWeave.Cli.Update;
+using KyberWeave.Data.Configuration;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -36,7 +37,7 @@ public sealed class ArbiterHookRefresherRenameNoticeTests : IDisposable
         WriteProvenOldKey(withLeftover);
         List<string> log = [];
 
-        ArbiterHookRefresher refresher = new(log.Add, EnvironmentWithHome());
+        ArbiterHookRefresher refresher = new(new FileUserHostConfigStore(), log.Add, EnvironmentWithHome());
         refresher.Refresh([withLeftover, clean]);
 
         string[] notices = [.. log.Where(line => line.Contains(WarningCode, StringComparison.Ordinal))];
@@ -57,7 +58,7 @@ public sealed class ArbiterHookRefresherRenameNoticeTests : IDisposable
         byte[] before = File.ReadAllBytes(Path.Combine(project, ".mcp.json"));
         List<string> log = [];
 
-        ArbiterHookRefresher refresher = new(log.Add, EnvironmentWithHome());
+        ArbiterHookRefresher refresher = new(new FileUserHostConfigStore(), log.Add, EnvironmentWithHome());
         refresher.Refresh([project]);
 
         Assert.Contains(log, line => line.Contains(WarningCode, StringComparison.Ordinal));

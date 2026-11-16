@@ -1,22 +1,12 @@
-using System.ComponentModel;
-using KyberWeave.Application.Squad;
-using KyberWeave.Cli.Commands.Squad;
-using KyberWeave.Cli.Commands.Squad.Infrastructure;
-using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
-using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Arbiter.Rules;
-using KyberWeave.Core.Configuration;
-using KyberWeave.Core.Docs.Scaffolding;
-using KyberWeave.Core.Parsing;
 using KyberWeave.Core.Squad.Deployment;
-using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
 using Spectre.Console;
 using Spectre.Console.Cli;
-using YamlDotNet.Core;
-using KyberWeave.Core.FileSystem;
+using KyberWeave.Cli.Commands.Squad;
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
 
 namespace KyberWeave.Cli.Commands.Arbiter;
 
@@ -35,18 +25,8 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 /// <c>TYPESAFE_API_KEY</c> remain the safer paths.
 /// </remarks>
 internal sealed class ArbiterInstallCommand(
-    IProcessEnvironment environment,
-    IUserHostConfigStore userConfig,
-    IArbiterConfigResolver configs,
-    IArbiterUserSettings userSettings,
-    IArbiterKeyInput keyInput,
-    ICredentialStore credentials,
-    IWritableFileSystem files,
-    ISquadStateStore stateStore,
-    IArbiterInstallLifecycle lifecycle,
-    SquadConsoleOptions console,
-    ArbiterProcessProbe probe,
-    IDocsScaffoldingService scaffolder) : Command<ArbiterInstallSettings>
+    IArbiterInstallService installer,
+    SquadConsoleOptions console) : Command<ArbiterInstallSettings>
 {
     /// <inheritdoc />
     public override int Execute(CommandContext context, ArbiterInstallSettings settings,
@@ -57,16 +37,10 @@ internal sealed class ArbiterInstallCommand(
         if (settings.Project && settings.Global)
         {
             AnsiConsole.MarkupLine(
-                "[red]kyber-weave arbiter: error: --global and --project are mutually exclusive. " +
+                "[red]kyber-weave arbiter: error: " +
+                "--global and --project are mutually exclusive. " +
                 $"[bold]{RuleValidator.InstallScopeConflict}[/] is the permanent rule id for this scope conflict.[/]");
             return 2;
-        }
-
-        if (settings.Global && !settings.Project)
-        {
-            // The install defaults to global scope, so an explicit --global is accepted as a
-            // redundant alias for the default home-scoped behavior. The conflict remains hard
-            // when the user tries to combine it with an explicit project install.
         }
 
         if (!string.IsNullOrWhiteSpace(settings.PathOption) && !settings.Project)
@@ -84,207 +58,36 @@ internal sealed class ArbiterInstallCommand(
         }
 
         string targetToken = settings.Target.Trim();
-        if (!SquadTargetCatalog.TryResolve(targetToken, out SquadTarget target))
+        if (!SquadTargetCatalog.TryResolve(targetToken, out _))
         {
             WriteError($"Unknown target '{targetToken}'. Known targets: {Roster()}, all.");
             return 2;
         }
 
-        if (!TryParseProvider(settings.Provider, out ArbiterProviderKind providerKind))
+        if (!IsSupportedProvider(settings.Provider))
         {
             WriteError($"--provider '{settings.Provider}' is not supported. Use none or systemone.");
             return 2;
         }
 
-        bool isProjectScope = settings.Project;
-        string root = isProjectScope
-            ? Path.GetFullPath(string.IsNullOrWhiteSpace(settings.PathOption)
-                ? (string.IsNullOrWhiteSpace(settings.Path) ? "." : settings.Path)
-                : settings.PathOption)
-            : Path.GetFullPath(environment.HomeDirectory);
+        ArbiterInstallPrepared prepared = installer.Prepare(new ArbiterInstallRequest(
+            settings.Path,
+            settings.PathOption,
+            settings.Project,
+            targetToken,
+            settings.Config,
+            settings.Provider,
+            settings.ArbiterKey,
+            settings.KeyStdin,
+            settings.DryRun));
 
-        ArbiterProviderKind existingKind;
-        ArbiterProviderKind effectiveKind;
-        try
-        {
-            (existingKind, effectiveKind) = ReadExistingProviderKind(root, settings.Config, isProjectScope);
-        }
-        catch (YamlException ex)
-        {
-            WriteError(ex.Message);
-            return 1;
-        }
+        Print(prepared.Events, plan: null);
+        if (prepared.Plan is not { } plan)
+            return prepared.ExitCode;
 
-        bool providerOmitted = settings.Provider is null;
-        if (providerOmitted)
-            providerKind = existingKind;
-
-        string kindName = KindName(providerKind);
-        string overrideNote = effectiveKind != providerKind
-            ? $" The per-user override sets {KindName(effectiveKind)}, which takes precedence."
-            : string.Empty;
-        AnsiConsole.MarkupLine(providerOmitted
-            ? $"Arbiter provider: [bold]{kindName}[/] (kept; pass --provider to change it).{Markup.Escape(overrideNote)}"
-            : providerKind == existingKind
-                ? $"Arbiter provider: [bold]{kindName}[/] (unchanged).{Markup.Escape(overrideNote)}"
-                : $"Arbiter provider: [bold]{kindName}[/] (changed from {KindName(existingKind)}).{Markup.Escape(overrideNote)}");
-
-        if (!string.IsNullOrWhiteSpace(settings.ArbiterKey))
-        {
-            AnsiConsole.MarkupLine(
-                "[yellow]warn:[/] --arbiter-key is visible in process argv and shell history; " +
-                $"prefer --key-stdin or {Markup.Escape(ArbiterKeyResolver.EnvVarName)}.");
-        }
-
-        string endpoint = ResolveEndpoint(root, settings.Config, isProjectScope);
-        string origin = ArbiterKeyResolver.GetOrigin(endpoint) ?? ArbiterKeyResolver.TypeSafeOrigin;
-        bool needsKey = providerKind == ArbiterProviderKind.Systemone
-                        && !IsLoopbackEndpoint(endpoint);
-
-        string? keyToStore = NullIfEmpty(settings.ArbiterKey);
-        if (needsKey && keyToStore is null && settings.KeyStdin)
-            keyToStore = NullIfEmpty(ReadStdinKey());
-
-        if (needsKey && keyToStore is null)
-        {
-            if (!string.IsNullOrEmpty(ResolveStoredKey(endpoint)))
-            {
-                keyToStore = null;
-            }
-            else
-            {
-                string? prompted = settings.KeyStdin ? null : NullIfEmpty(ReadPromptedKey());
-                if (!string.IsNullOrEmpty(prompted))
-                {
-                    keyToStore = prompted;
-                }
-                else
-                {
-                    WriteError(
-                        $"{ArbiterStatusCommand.KeyMissing}: A remote provider is configured, " +
-                        $"and no key resolves for origin '{origin}'. " +
-                        "Run with --arbiter-key, --key-stdin, or export " +
-                        $"{ArbiterKeyResolver.EnvVarName}.");
-                    return 2;
-                }
-            }
-        }
-
-        string? existingStored = needsKey ? ReadStoredKey(origin) : null;
-        bool keyWriteNeeded = needsKey
-                              && !string.IsNullOrEmpty(keyToStore)
-                              && !string.Equals(existingStored, keyToStore, StringComparison.Ordinal);
-
-        if (isProjectScope
-            && !settings.DryRun
-            && string.IsNullOrWhiteSpace(settings.Config)
-            && FindConfigPath(root) is null)
-        {
-            try
-            {
-                scaffolder.Scaffold(root);
-            }
-            catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException)
-            {
-                WriteError($"The documentation scaffold could not be created: {ex.Message}");
-                return 1;
-            }
-        }
-
-        SquadDeploymentScope scope = isProjectScope ? SquadDeploymentScope.Project : SquadDeploymentScope.Global;
-        string configPath;
-        string? existingText;
-        string desiredText;
-        bool configChanged;
-
-        if (isProjectScope)
-        {
-            configPath = ResolveConfigPath(root, settings.Config);
-            existingText = ReadConfigText(configPath);
-            if (existingText is null)
-                return 1;
-
-            try
-            {
-                desiredText = HostConfigYaml.WithArbiterProviderKind(
-                    HostConfigYaml.WithArbiterEnabled(existingText),
-                    kindName);
-            }
-            catch (InvalidDataException ex)
-            {
-                WriteError(ex.Message);
-                return 1;
-            }
-
-            configChanged = !string.Equals(desiredText, existingText, StringComparison.Ordinal);
-        }
-        else
-        {
-            configPath = UserHostConfigPath.Of(root);
-            if (settings.DryRun && files.FileExists(configPath))
-            {
-                existingText = files.ReadAllText(configPath);
-            }
-            else if (!settings.DryRun && files.FileExists(configPath))
-            {
-                existingText = files.ReadAllText(configPath);
-            }
-            else if (settings.DryRun)
-            {
-                existingText = string.Empty;
-            }
-            else
-            {
-                existingText = userConfig.EnsureUserConfig(root);
-            }
-
-            List<string> globalTargets = userConfig.ReadGlobalTargets(root).ToList();
-            if (!globalTargets.Any(token => string.Equals(token, targetToken, StringComparison.OrdinalIgnoreCase)))
-            {
-                globalTargets.Add(targetToken);
-            }
-
-            try
-            {
-                desiredText = HostConfigYaml.WithArbiterGlobalTargets(
-                    HostConfigYaml.WithArbiterProviderKind(
-                        HostConfigYaml.WithArbiterEnabled(existingText),
-                        kindName),
-                    globalTargets);
-            }
-            catch (InvalidDataException ex)
-            {
-                WriteError(ex.Message);
-                return 1;
-            }
-
-            configChanged = !string.Equals(desiredText, existingText, StringComparison.Ordinal);
-        }
-
-        SquadReceipt? existingReceipt;
-        try
-        {
-            existingReceipt = stateStore.ReadReceipt(root, scope);
-        }
-        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException or InvalidOperationException)
-        {
-            WriteError($"The Squad deployment state for '{root}' could not be read: {ex.Message}");
-            return 1;
-        }
-
-        bool receiptMatches = existingReceipt is not null && ReceiptTargetsMatch(existingReceipt, targetToken);
-
-        if (!configChanged && !keyWriteNeeded && receiptMatches)
-        {
-            AnsiConsole.MarkupLine(
-                $"[grey]Arbiter already installed for target '[bold]{Markup.Escape(targetToken)}[/]' " +
-                $"in '[bold]{Markup.Escape(root)}[/]'. Nothing to do.[/]");
-            return 0;
-        }
-
-        if (!settings.DryRun && !SquadTargetRootConfirmation.Confirm(
-                root,
-                scope,
+        if (!plan.DryRun && !SquadTargetRootConfirmation.Confirm(
+                plan.Root,
+                plan.Scope,
                 "install",
                 console.IsInteractive ?? SquadCommandComposition.IsInteractiveConsole(),
                 settings.Yes,
@@ -294,113 +97,9 @@ internal sealed class ArbiterInstallCommand(
             return 2;
         }
 
-        if (!settings.DryRun)
-        {
-            if (configChanged && !WriteConfigText(configPath, desiredText))
-                return 1;
-
-            if (keyWriteNeeded && keyToStore is not null && !WriteStoredKey(origin, keyToStore))
-                return 1;
-        }
-
-        // A dry run writes no scaffold, so on a bare root there is no file to load. Preview
-        // against the configuration the real run would have written instead of failing. An
-        // explicit --config keeps its normal load path, so a missing file is still reported.
-        KyberWeaveConfigLoadResult configLoad;
-        if (settings.DryRun
-            && string.IsNullOrWhiteSpace(settings.Config)
-            && !files.FileExists(configPath))
-        {
-            try
-            {
-                configLoad = KyberWeaveConfigLoadResult.Ok(
-                    configs.LoadFromYaml(desiredText), configPath);
-            }
-            catch (YamlException ex)
-            {
-                configLoad = KyberWeaveConfigLoadResult.Fail(ex.Message, configPath);
-            }
-        }
-        else
-        {
-            configLoad = configs.Load(root, settings.Config, isProjectScope);
-        }
-
-        if (!configLoad.Success || configLoad.Config is null)
-        {
-            WriteError(
-                $"The host configuration '{configLoad.ConfigPath ?? configPath}' could not be loaded: " +
-                $"{configLoad.Error ?? "unknown load failure"}.");
-            return 1;
-        }
-
-        SquadArbiterWiring wiring =
-            SquadCommandComposition.ResolveArbiterWiring(configLoad.Config.Arbiter);
-
-
-        SquadLifecycleResult result;
-        try
-        {
-            result = lifecycle.InstallAsync(root, scope, target, existingReceipt, settings.DryRun, wiring, cancellationToken)
-                .GetAwaiter().GetResult();
-        }
-        catch (SquadDeploymentConflictException ex)
-        {
-            WriteError(ex.Message);
-            return 1;
-        }
-        catch (Exception ex)
-        {
-            WriteError(ex.Message);
-            return 1;
-        }
-
-        if (!result.Success)
-        {
-            if (result.Errors is { Count: > 0 })
-            {
-                foreach (string error in result.Errors)
-                    WriteError(error);
-            }
-            else
-            {
-                WriteError("The Squad render failed.");
-            }
-
-            return 1;
-        }
-
-        if (settings.DryRun)
-        {
-            int fileCount = result.Receipt?.Files.Count ?? 0;
-            SquadCommandComposition.WriteLine(
-                $"[bold]Dry-run:[/] planned {fileCount} deployed files for [bold]{Markup.Escape(root)}[/].");
-        }
-        else if (isProjectScope)
-        {
-            SquadCommandComposition.WriteLine(
-                $"[green]Successfully installed Arbiter for target '[bold]{Markup.Escape(targetToken)}[/]' " +
-                $"in '[bold]{Markup.Escape(root)}[/]'.[/]");
-        }
-        else
-        {
-            SquadCommandComposition.WriteLine(
-                $"[green]Successfully installed Arbiter for target '[bold]{Markup.Escape(targetToken)}[/]' " +
-                $"in the global user-home scope '[bold]{Markup.Escape(root)}[/]'.[/]");
-        }
-
-        SquadInstallCommand.WriteArbiterTrustSteps([target], wiring);
-        SquadCommandComposition.WriteTransactionWarnings(result.Warnings);
-
-        if (!isProjectScope)
-        {
-            WriteGlobalScopeTable(root);
-        }
-
-        if (!settings.DryRun && !Verify(root, settings.Config, endpoint, needsKey, isProjectScope))
-            return 1;
-
-        return 0;
+        ArbiterInstallApplied applied = installer.Apply(plan, cancellationToken);
+        Print(applied.Events, plan.Target);
+        return applied.ExitCode;
     }
 
     /// <summary>Runs the command without cancellation; the entry point tests use this.</summary>
@@ -409,81 +108,98 @@ internal sealed class ArbiterInstallCommand(
         return Execute(context, settings, CancellationToken.None);
     }
 
-    private void WriteGlobalScopeTable(string home)
+    private static void Print(IReadOnlyList<ArbiterInstallEvent> events, SquadTarget? plan)
     {
-        IReadOnlyList<string> targets = userConfig.ReadGlobalTargets(home);
-        if (targets.Count == 0)
+        foreach (ArbiterInstallEvent item in events)
+        {
+            switch (item)
+            {
+                case ArbiterInstallProviderLine provider:
+                    PrintProvider(provider);
+                    break;
+                case ArbiterInstallArgvKeyWarning:
+                    AnsiConsole.MarkupLine(
+                        "[yellow]warn:[/] --arbiter-key is visible in process argv and shell history; " +
+                        $"prefer --key-stdin or {Markup.Escape(ArbiterKeyResolver.EnvVarName)}.");
+                    break;
+                case ArbiterInstallError error:
+                    WriteError(error.Message);
+                    break;
+                case ArbiterInstallAlreadyInstalled done:
+                    AnsiConsole.MarkupLine(
+                        $"[grey]Arbiter already installed for target '[bold]{Markup.Escape(done.TargetToken)}[/]' " +
+                        $"in '[bold]{Markup.Escape(done.Root)}[/]'. Nothing to do.[/]");
+                    break;
+                case ArbiterInstallStoredKey stored:
+                    AnsiConsole.MarkupLine($"[green]ok[/] Stored a key for {Markup.Escape(stored.Origin)}.");
+                    break;
+                case ArbiterInstallDryRun dryRun:
+                    CommandHelpers.WriteUnfolded(() =>
+                        AnsiConsole.MarkupLine(
+                            $"[bold]Dry-run:[/] planned {dryRun.PlannedFiles} deployed files for [bold]{Markup.Escape(dryRun.Root)}[/]."));
+                    break;
+                case ArbiterInstallDone done:
+                    CommandHelpers.WriteUnfolded(() => AnsiConsole.MarkupLine(done.GlobalScope
+                        ? $"[green]Successfully installed Arbiter for target '[bold]{Markup.Escape(done.TargetToken)}[/]' " +
+                          $"in the global user-home scope '[bold]{Markup.Escape(done.Root)}[/]'.[/]"
+                        : $"[green]Successfully installed Arbiter for target '[bold]{Markup.Escape(done.TargetToken)}[/]' " +
+                          $"in '[bold]{Markup.Escape(done.Root)}[/]'.[/]"));
+                    break;
+                case ArbiterInstallTrustSteps trust:
+                    SquadInstallCommand.WriteArbiterTrustSteps(plan is { } target ? [target] : [], trust.Wiring);
+                    break;
+                case ArbiterInstallWarnings warnings:
+                    SquadCommandComposition.WriteTransactionWarnings(warnings.Warnings);
+                    break;
+                case ArbiterInstallScopeTable table:
+                    PrintScopeTable(table);
+                    break;
+                case ArbiterInstallProbeWarning probe:
+                    AnsiConsole.MarkupLine($"[yellow]warn:[/] {Markup.Escape(probe.Message)}");
+                    break;
+            }
+        }
+    }
+
+    private static void PrintProvider(ArbiterInstallProviderLine provider)
+    {
+        string note = provider.OverrideNote is null ? string.Empty : Markup.Escape(provider.OverrideNote);
+        AnsiConsole.MarkupLine(provider switch
+        {
+            { Kept: true } =>
+                $"Arbiter provider: [bold]{provider.KindName}[/] (kept; pass --provider to change it).{note}",
+            { ChangedFrom: null } =>
+                $"Arbiter provider: [bold]{provider.KindName}[/] (unchanged).{note}",
+            _ =>
+                $"Arbiter provider: [bold]{provider.KindName}[/] (changed from {provider.ChangedFrom}).{note}",
+        });
+    }
+
+    private static void PrintScopeTable(ArbiterInstallScopeTable table)
+    {
+        if (table.Rows.Count == 0)
         {
             return;
         }
 
         AnsiConsole.MarkupLine("[bold]D13 global hook table[/]");
         AnsiConsole.MarkupLine("[bold]target[/] | [bold]tier[/] | [bold]path[/] | [bold]reason[/] | [bold]trust[/]");
-
-        SquadGlobalRoots roots = new(_ => null, home);
-        foreach (string token in targets.Distinct(StringComparer.OrdinalIgnoreCase))
+        foreach (ArbiterInstallScopeRow row in table.Rows)
         {
-            if (string.IsNullOrWhiteSpace(token))
-            {
-                continue;
-            }
-
-            if (!SquadTargetCatalog.TryResolve(token, out SquadTarget target))
-            {
-                AnsiConsole.MarkupLine(
-                    $"  {Markup.Escape(token)} | {Markup.Escape("enforced-global")} | {Markup.Escape(home)} | {Markup.Escape("enforced-global")} | {Markup.Escape("not a known harness")} ");
-                continue;
-            }
-
-            string path = roots.ResolveGlobalRoot(target);
-            IReadOnlyList<SquadDegradationRecord> records = ArbiterHookWiring.TargetDegradations([target], SquadDeploymentScope.Global);
-            string reason = records.Count > 0 ? (records[0].Details ?? "enforced-global") : "enforced-global";
-            string trust = ArbiterHookWiring.TrustSteps.TryGetValue(target, out string? text)
-                ? text
-                : "No trust gate is required for this harness.";
-
             AnsiConsole.MarkupLine(
-                $"  {Markup.Escape(token)} | {Markup.Escape(reason)} | {Markup.Escape(path)} | {Markup.Escape(reason)} | {Markup.Escape(trust)}");
+                $"  {Markup.Escape(row.Token)} | {Markup.Escape(row.Reason)} | {Markup.Escape(row.Path)} | " +
+                $"{Markup.Escape(row.Reason)} | {Markup.Escape(row.Trust)}");
         }
     }
 
-    private static string KindName(ArbiterProviderKind kind) =>
-        kind == ArbiterProviderKind.Systemone ? "systemone" : "none";
-
-    /// <summary>
-    /// The provider kind the host config holds before this run (none when nothing is configured),
-    /// and the kind in effect once the per-user override is applied over it.
-    /// </summary>
-    /// <exception cref="YamlException">Thrown when the per-user override is malformed.</exception>
-    private (ArbiterProviderKind Configured, ArbiterProviderKind Effective) ReadExistingProviderKind(
-        string root, string? configOption, bool projectScope)
+    private static bool IsSupportedProvider(string? raw)
     {
-        KyberWeaveConfigLoadResult loaded = configs.Load(root, configOption, projectScope);
-        ArbiterProviderConfig repository = loaded.Success && loaded.Config is not null
-            ? loaded.Config.Arbiter.Provider
-            : KyberWeaveConfig.ProductDefaults.Arbiter.Provider;
-        ArbiterProviderKind effective =
-            userSettings.ApplyTo(repository, environment.HomeDirectory).Kind;
-        return (repository.Kind, effective);
-    }
-
-    private static bool TryParseProvider(string? raw, out ArbiterProviderKind kind)
-    {
-        kind = ArbiterProviderKind.None;
         if (string.IsNullOrWhiteSpace(raw))
             return true;
 
         string trimmed = raw.Trim();
-        if (string.Equals(trimmed, "none", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        if (string.Equals(trimmed, "systemone", StringComparison.OrdinalIgnoreCase))
-        {
-            kind = ArbiterProviderKind.Systemone;
-            return true;
-        }
-
-        return false;
+        return string.Equals(trimmed, "none", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(trimmed, "systemone", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string Roster()
@@ -495,225 +211,5 @@ internal sealed class ArbiterInstallCommand(
     {
         CommandHelpers.WriteUnfolded(() =>
             AnsiConsole.MarkupLine($"[red]kyber-weave arbiter: error: {Markup.Escape(message)}[/]"));
-    }
-
-    private static string? NullIfEmpty(string? value)
-    {
-        return string.IsNullOrEmpty(value) ? null : value;
-    }
-
-    private string? ReadStdinKey()
-    {
-        try
-        {
-            return keyInput.ReadFromStandardInput();
-        }
-        catch (Exception ex) when (FileFailure.Is(ex))
-        {
-            return null;
-        }
-    }
-
-    private string? ReadPromptedKey()
-    {
-        try
-        {
-            return keyInput.PromptHidden();
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or IOException)
-        {
-            return null;
-        }
-    }
-
-    private string ResolveEndpoint(string root, string? configOption, bool projectScope)
-    {
-        KyberWeaveConfigLoadResult loaded = configs.Load(root, configOption, projectScope);
-        if (loaded.Success
-            && loaded.Config is not null
-            && !string.IsNullOrWhiteSpace(loaded.Config.Arbiter.Provider.Endpoint))
-            return loaded.Config.Arbiter.Provider.Endpoint.Trim();
-
-        return ArbiterSetupCommand.TypeSafeEndpoint;
-    }
-
-    private static bool IsLoopbackEndpoint(string endpoint)
-    {
-        try
-        {
-            return ArbiterKeyResolver.IsLoopbackEndpoint(endpoint);
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-    }
-
-    private string? ResolveStoredKey(string endpoint)
-    {
-        try
-        {
-            return ArbiterKeyResolver.Resolve(endpoint, credentials, environment.GetVariable);
-        }
-        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or Win32Exception)
-        {
-            return null;
-        }
-    }
-
-    private string? ReadStoredKey(string origin)
-    {
-        try
-        {
-            return credentials.Read(origin);
-        }
-        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or Win32Exception)
-        {
-            return null;
-        }
-    }
-
-    private bool WriteStoredKey(string origin, string key)
-    {
-        try
-        {
-            credentials.Write(origin, key);
-        }
-        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or Win32Exception)
-        {
-            WriteError(
-                $"The credential store for origin '{origin}' is not available: {ex.Message} " +
-                $"Store the key in {ArbiterKeyResolver.EnvVarName} instead.");
-            return false;
-        }
-
-        AnsiConsole.MarkupLine($"[green]ok[/] Stored a key for {Markup.Escape(origin)}.");
-        return true;
-    }
-
-    private static bool ReceiptTargetsMatch(SquadReceipt receipt, string targetToken)
-    {
-        HashSet<string> existing = receipt.Files
-            .Select(file => file.Target)
-            .Distinct(StringComparer.Ordinal)
-            .ToHashSet(StringComparer.Ordinal);
-        return existing.SetEquals([targetToken]);
-    }
-
-    private string ResolveConfigPath(string root, string? configOption)
-    {
-        if (!string.IsNullOrWhiteSpace(configOption))
-        {
-            return Path.IsPathRooted(configOption)
-                ? configOption
-                : Path.Combine(root, configOption);
-        }
-
-        return FindConfigPath(root) ?? Path.Combine(root, ".kyber-weave", "kyber-weave.yml");
-    }
-
-    private string? FindConfigPath(string root)
-    {
-        string defaultPath = Path.Combine(root, ".kyber-weave", "kyber-weave.yml");
-        if (files.FileExists(defaultPath))
-            return defaultPath;
-
-        string legacyPath = Path.Combine(root, "kyber-weave.yml");
-        return files.FileExists(legacyPath) ? legacyPath : null;
-    }
-
-    private string? ReadConfigText(string configPath)
-    {
-        if (!files.FileExists(configPath))
-            return string.Empty;
-
-        try
-        {
-            return files.ReadAllText(configPath);
-        }
-        catch (Exception ex) when (FileFailure.Is(ex))
-        {
-            WriteError($"The host configuration '{configPath}' could not be read: {ex.Message}");
-            return null;
-        }
-    }
-
-    private bool WriteConfigText(string configPath, string text)
-    {
-        try
-        {
-            string? directory = Path.GetDirectoryName(configPath);
-            if (!string.IsNullOrEmpty(directory))
-                files.CreateDirectory(directory);
-
-            files.WriteAllText(configPath, text);
-            return true;
-        }
-        catch (Exception ex) when (FileFailure.Is(ex))
-        {
-            WriteError($"The host configuration '{configPath}' could not be written: {ex.Message}");
-            return false;
-        }
-    }
-
-    private bool Verify(string root, string? configOption, string endpoint, bool needsKey, bool projectScope)
-    {
-        KyberWeaveConfigLoadResult loaded = configs.Load(root, configOption, projectScope);
-        if (!loaded.Success || loaded.Config is null || !loaded.Config.Arbiter.Enabled)
-        {
-            WriteError(
-                "Verification failed: the host configuration does not enable the Arbiter " +
-                $"after install: {loaded.Error ?? "arbiter.enabled is not true"}.");
-            return false;
-        }
-
-        if (needsKey)
-        {
-            string? key = null;
-            try
-            {
-                key = ArbiterKeyResolver.Resolve(
-                    endpoint,
-                    credentials,
-                    environment.GetVariable);
-            }
-            catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or Win32Exception)
-            {
-                key = null;
-            }
-
-            if (string.IsNullOrEmpty(key))
-            {
-                WriteError(
-                    "Verification failed: no key resolves for the configured provider " +
-                    "after install. Run with --arbiter-key, --key-stdin, or export " +
-                    $"{ArbiterKeyResolver.EnvVarName}.");
-                return false;
-            }
-        }
-
-        ProbeBinary();
-        return true;
-    }
-
-    private void ProbeBinary()
-    {
-        try
-        {
-            ToolProbeResult result = probe.Probe();
-            if (!result.IsAvailable)
-            {
-                AnsiConsole.MarkupLine(
-                    "[yellow]warn:[/] The 'kyber-weave-arbiter' binary is not available: " +
-                    $"{Markup.Escape(result.FailureReason ?? "not on PATH")}. " +
-                    "Install the binary matching this CLI version so hooks can enforce.");
-            }
-        }
-        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or Win32Exception)
-        {
-            AnsiConsole.MarkupLine(
-                "[yellow]warn:[/] The 'kyber-weave-arbiter' binary probe failed: " +
-                $"{Markup.Escape(ex.Message)}");
-        }
     }
 }
