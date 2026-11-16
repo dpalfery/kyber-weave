@@ -2,6 +2,7 @@ using System.Text.Json;
 using KyberWeave.Cli.Commands.Docs;
 using Xunit;
 
+using KyberWeave.Tests.Fakes;
 namespace KyberWeave.Tests;
 
 /// <summary>
@@ -35,7 +36,7 @@ public sealed class DocsTasksCommandTests
         };
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
-            () => new DocsTasksCommand().Execute(null!, settings, CancellationToken.None));
+            () => DocsTestCommands.Tasks().Execute(null!, settings, CancellationToken.None));
         return (execution.Result, execution.Output);
     }
 
@@ -60,7 +61,7 @@ public sealed class DocsTasksCommandTests
         };
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
-            () => new DocsTasksCommand().Execute(null!, settings, CancellationToken.None));
+            () => DocsTestCommands.Tasks().Execute(null!, settings, CancellationToken.None));
 
         Assert.True(execution.Result == 0, execution.Output);
         using JsonDocument report = JsonDocument.Parse(execution.Output);

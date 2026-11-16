@@ -668,8 +668,8 @@ public sealed class SquadGlobalRootTests : IDisposable
         FakeSquadUserPaths userPaths = new(userData);
         SquadStateStore stateStore = new(userPaths);
         using CorpusSquadReleaseSource releaseSource = new();
-        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore, globalRoots: globalRoots);
+        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore, globalRoots: globalRoots);
 
         SquadInstallRequest request = new(
             projectRoot,
@@ -773,9 +773,9 @@ public sealed class SquadGlobalRootTests : IDisposable
                     $"Global-scope path '{file.RelativePath}' for {target} is outside that " +
                     "target's declared global subtrees.");
 
-            string physicalPath = result.Plan.ResolvePhysicalPath(file);
+            string physicalPath = result.Plan.ResolvePhysicalPath(file, SquadFileSystemPathSemantics.Instance);
             Assert.True(
-                SquadFileSystemPathSemantics.IsWithin(expectedRoot, physicalPath),
+                SquadFileSystemPathSemantics.Instance.IsWithin(expectedRoot, physicalPath),
                 $"Physical path '{physicalPath}' for '{file.RelativePath}' ({target}) is not under " +
                 $"the resolved global root '{expectedRoot}'.");
         }
@@ -809,9 +809,9 @@ public sealed class SquadGlobalRootTests : IDisposable
         FakeSquadUserPaths userPaths = new(userData);
         SquadStateStore stateStore = new(userPaths);
         using SyntheticValidSquadReleaseSource releaseSource = new();
-        SquadLifecycleService service = new(
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
             releaseSource,
-            SquadCommandComposition.ResolveRenderer(),
+            SquadHostDefaults.ResolveRenderer(),
             stateStore,
             globalRoots: globalRoots);
 
@@ -833,13 +833,13 @@ public sealed class SquadGlobalRootTests : IDisposable
             result.Receipt.Files,
             file => file.Target == "pi" && file.RelativePath == "agents/architect.md");
 
-        string claudePath = result.Plan.ResolvePhysicalPath(claudeArchitect);
-        string piPath = result.Plan.ResolvePhysicalPath(piArchitect);
+        string claudePath = result.Plan.ResolvePhysicalPath(claudeArchitect, SquadFileSystemPathSemantics.Instance);
+        string piPath = result.Plan.ResolvePhysicalPath(piArchitect, SquadFileSystemPathSemantics.Instance);
         Assert.NotEqual(claudePath, piPath);
         Assert.True(
-            SquadFileSystemPathSemantics.IsWithin(globalRoots.ResolveGlobalRoot(SquadTarget.Claude), claudePath));
+            SquadFileSystemPathSemantics.Instance.IsWithin(globalRoots.ResolveGlobalRoot(SquadTarget.Claude), claudePath));
         Assert.True(
-            SquadFileSystemPathSemantics.IsWithin(globalRoots.ResolveGlobalRoot(SquadTarget.Pi), piPath));
+            SquadFileSystemPathSemantics.Instance.IsWithin(globalRoots.ResolveGlobalRoot(SquadTarget.Pi), piPath));
     }
 
     private (SquadLifecycleService Service, SquadStateStore Store, string Project, SquadGlobalRoots Roots, SyntheticValidSquadReleaseSource Source) GlobalService(string name)
@@ -851,7 +851,7 @@ public sealed class SquadGlobalRootTests : IDisposable
         SquadGlobalRoots roots = new(_ => null, home);
         SquadStateStore store = new(new FakeSquadUserPaths(Path.Combine(_temp.Path, name + "-user-data")));
         SyntheticValidSquadReleaseSource source = new();
-        return (new SquadLifecycleService(source, SquadCommandComposition.ResolveRenderer(), store, globalRoots: roots), store, project, roots, source);
+        return (SquadHostDefaults.CreateLifecycleService(source, SquadHostDefaults.ResolveRenderer(), store, globalRoots: roots), store, project, roots, source);
     }
 
     [Fact]
@@ -871,9 +871,9 @@ public sealed class SquadGlobalRootTests : IDisposable
             string[] targets = [.. receipt.Files.Select(file => file.Target).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
             Assert.Equal(["claude", "opencode"], targets);
             SquadOwnedFile openCodeFile = receipt.Files.First(file => file.Target == "opencode");
-            Assert.True(File.Exists(added.Plan!.ResolvePhysicalPath(openCodeFile)));
-            Assert.True(File.Exists(added.Plan.ResolvePhysicalPath(receipt.Files.First(file => file.Target == "claude"))));
-            Assert.True(SquadFileSystemPathSemantics.IsWithin(roots.ResolveGlobalRoot(SquadTarget.OpenCode), added.Plan.ResolvePhysicalPath(openCodeFile)));
+            Assert.True(File.Exists(added.Plan!.ResolvePhysicalPath(openCodeFile, SquadFileSystemPathSemantics.Instance)));
+            Assert.True(File.Exists(added.Plan.ResolvePhysicalPath(receipt.Files.First(file => file.Target == "claude"), SquadFileSystemPathSemantics.Instance)));
+            Assert.True(SquadFileSystemPathSemantics.Instance.IsWithin(roots.ResolveGlobalRoot(SquadTarget.OpenCode), added.Plan.ResolvePhysicalPath(openCodeFile, SquadFileSystemPathSemantics.Instance)));
         }
     }
 
@@ -928,7 +928,7 @@ public sealed class SquadGlobalRootTests : IDisposable
             ]);
 
         SquadDeploymentConflictException exception = Assert.Throws<SquadDeploymentConflictException>(() =>
-            SquadDeploymentPlan.CreateInstall(
+            SquadDeploymentPlanner.CreateInstall(
                 projectRoot,
                 SquadDeploymentScope.Global,
                 GlobalLock(["pi"]),
@@ -968,7 +968,7 @@ public sealed class SquadGlobalRootTests : IDisposable
             [owned]);
         SquadReceipt sibling = receipt;
 
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUninstall(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUninstall(
             projectRoot,
             SquadDeploymentScope.Global,
             receipt,
@@ -997,8 +997,8 @@ public sealed class SquadGlobalRootTests : IDisposable
         FakeSquadUserPaths userPaths = new(userData);
         SquadStateStore stateStore = new(userPaths);
         using CorpusSquadReleaseSource releaseSource = new();
-        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore, globalRoots: globalRoots);
+        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore, globalRoots: globalRoots);
 
         SquadLifecycleResult result = await service.InstallAsync(new SquadInstallRequest(
             projectRoot,
@@ -1031,9 +1031,9 @@ public sealed class SquadGlobalRootTests : IDisposable
             else
                 Assert.Fail($"Global-scope path '{file.RelativePath}' for Factory is neither droids/ nor skills/.");
 
-            string physicalPath = result.Plan.ResolvePhysicalPath(file);
+            string physicalPath = result.Plan.ResolvePhysicalPath(file, SquadFileSystemPathSemantics.Instance);
             Assert.True(
-                SquadFileSystemPathSemantics.IsWithin(expectedRoot, physicalPath),
+                SquadFileSystemPathSemantics.Instance.IsWithin(expectedRoot, physicalPath),
                 $"Physical path '{physicalPath}' for '{file.RelativePath}' (Factory) is not under " +
                 $"the resolved global root '{expectedRoot}'.");
         }
@@ -1059,8 +1059,8 @@ public sealed class SquadGlobalRootTests : IDisposable
         FakeSquadUserPaths userPaths = new(userData);
         SquadStateStore stateStore = new(userPaths);
         using SyntheticValidSquadReleaseSource releaseSource = new();
-        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
 
         SquadLifecycleResult result = await service.InstallAsync(new SquadInstallRequest(
             projectRoot,
@@ -1105,8 +1105,8 @@ public sealed class SquadGlobalRootTests : IDisposable
         FakeSquadUserPaths userPaths = new(userData);
         SquadStateStore stateStore = new(userPaths);
         using SyntheticValidSquadReleaseSource releaseSource = new();
-        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
 
         SquadInstallRequest request = new(
             projectRoot,
@@ -1159,8 +1159,8 @@ public sealed class SquadGlobalRootTests : IDisposable
         FakeSquadUserPaths userPaths = new(userData);
         SquadStateStore stateStore = new(userPaths);
         using CorpusSquadReleaseSource releaseSource = new();
-        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore, globalRoots: globalRoots);
+        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore, globalRoots: globalRoots);
 
         SquadInstallRequest request = new(
             projectRoot,
@@ -1253,7 +1253,7 @@ public sealed class SquadGlobalRootTests : IDisposable
         Directory.CreateDirectory(tempHome);
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
 
-        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
+        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
 
         foreach (SquadTarget target in SquadTargetCatalog.All)
         {
@@ -1262,7 +1262,7 @@ public sealed class SquadGlobalRootTests : IDisposable
                     productRoot,
                     [target],
                     SquadDeploymentScope.Global,
-                    GlobalRoots: globalRoots));
+                    GlobalRoots: globalRoots).Prepared());
 
             if (legacyPrefixes.TryGetValue(target, out string? prefix))
                 foreach (SquadDeploymentFile file in result.Files)

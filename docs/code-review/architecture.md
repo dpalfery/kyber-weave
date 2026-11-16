@@ -18,14 +18,14 @@ decided-by:
   - adr/0079-the-reviewer-starts-its-own-seats-where-sub-agents-can-dispatch
 code-refs:
   - VerdictEngine
-  - GateRunner
+  - GateRunService
   - PathGlob
   - ReviewConfig
   - ReviewConfigLoader
   - ReviewTaskGate
   - TaskGateSelection
   - GateCatalogue
-  - ProjectRootDetector
+  - ProjectRootDetection
   - ReviewBlockWriter
   - ReviewCatalogueCommand
   - SeatOutputParser
@@ -166,12 +166,12 @@ is recorded like any other evidence, and it exits 0 whether or not it finds anyt
 | Technology checklists | 11 reference files, loaded as lens *modifiers*; each points at the host's `<technology>-coding-standard` and states no rule of its own | `products/kyber-squad/skills/code-review/references/` |
 | `dp-code-reviewer` | Skill — modes and the re-review loop | `products/kyber-squad/skills/dp-code-reviewer/SKILL.md` |
 | `security-review` | Skill — invoked by the security lens, not duplicated | `products/kyber-squad/skills/security-review/SKILL.md` |
-| `GateRunner` | Runs declared gates, normalizes results | `src/KyberWeave.Core/Review/GateRunner.cs` |
-| `DuplicateDetector` | Clusters symbols by normalized body, from the CodeGraph index | `src/KyberWeave.Core/Review/DuplicateDetector.cs` |
-| `ICodeGraphSymbolEnumerator` | Optional CodeGraph port: every indexed symbol of one kind | `src/KyberWeave.Core/CodeGraph/ICodeGraphSymbolEnumerator.cs` |
-| `VerdictEngine` | The rules. Pure — no clock, no filesystem, no process | `src/KyberWeave.Core/Review/VerdictEngine.cs` |
-| `PathGlob` | Matches changed paths against reserved patterns | `src/KyberWeave.Core/Review/PathGlob.cs` |
-| `ReviewConfig` | The `review:` host configuration | `src/KyberWeave.Core/Configuration/ReviewConfig.cs` |
+| `GateRunService` | Runs declared gates, normalizes results | `src/KyberWeave.Application/Review/GateRunService.cs` |
+| `DuplicateDetector` | Clusters symbols by normalized body, from the CodeGraph index | `src/KyberWeave.Application/Review/DuplicateDetectionService.cs` |
+| `ICodeGraphSymbolEnumerator` | Optional CodeGraph port: every indexed symbol of one kind | `src/KyberWeave.Contracts/Repositories/ICodeGraphSymbolEnumerator.cs` |
+| `VerdictEngine` | The rules. Pure — no clock, no filesystem, no process | `src/KyberWeave.Domain/Review/VerdictEngine.cs` |
+| `PathGlob` | Matches changed paths against reserved patterns | `src/KyberWeave.Kernel/Text/PathGlob.cs` |
+| `ReviewConfig` | The `review:` host configuration | `src/KyberWeave.Domain/Configuration/ReviewConfig.cs` |
 
 ## Review guidance
 
@@ -231,7 +231,7 @@ section of `REVIEW.md`: a table of `Id`, `Finding class`, `Severity` (`critical`
 `nitpick`), `Applies to` (lens and technology names; empty for every seat) and `Why`. Precedence, as
 seats and the reviewer read it: host override, then the lens's shipped severity guidance, then the
 general definitions. An override changes the grade up or down. `SeverityOverrides`
-(`src/KyberWeave.Core/Review/SeverityOverrides.cs`) is the one reader; an absent file or section is
+(`src/KyberWeave.Domain/Review/SeverityOverrides.cs`) is the one reader; an absent file or section is
 no rows, and rows inside an HTML comment or a code fence are examples, not rows.
 
 - **Delivery.** `review seats` writes into each packet only that seat's rows: unscoped rows, rows
@@ -1008,7 +1008,7 @@ their gates and a host that does not receives none of them. Each of the three ca
 and the family's `sources` map carries the download or install page for its tool; a gate skipped
 outside that restriction is reported rather than read as a pass.
 
-Root detection (`ProjectRootDetector`) skips dependency, build-output and ignored
+Root detection (`ProjectRootDetection`) skips dependency, build-output and ignored
 directories, orders roots by ordinal path so the same tree always yields the same
 output, and writes one copy of each root-bound gate per root: the id is the family
 prefix plus the entry id plus a suffix derived from the root's path (empty for a single

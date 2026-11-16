@@ -2,6 +2,7 @@ using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Docs.Validation;
 using Xunit;
 
+using KyberWeave.Tests.Fakes;
 namespace KyberWeave.Tests;
 
 /// <summary>
@@ -14,7 +15,7 @@ public sealed class DocsPacketCommandTests
     {
         DocFixture fixture = PlanTaskFileProbe.Corpus();
         Directory.CreateDirectory(Path.Combine(fixture.Root, ".git"));
-        new DocsTasksCommand().Execute(
+        DocsTestCommands.Tasks().Execute(
             null!,
             new DocsTasksSettings { Path = Path.Combine(fixture.Root, PlanTaskFileProbe.PlanPath), Format = "json", Write = true },
             CancellationToken.None);
@@ -33,7 +34,7 @@ public sealed class DocsPacketCommandTests
             ListWorktrees = _ => [fixture.Root, .. worktrees],
         };
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
-            () => new DocsPacketCommand().Execute(null!, settings, CancellationToken.None));
+            () => DocsTestCommands.Packet().Execute(null!, settings, CancellationToken.None));
         return (execution.Result, execution.Output);
     }
 
@@ -187,7 +188,7 @@ public sealed class DocsPacketCommandTests
         DocsTasksSettings settings = new() { Path = Path.Combine(fixture.Root, PlanTaskFileProbe.PlanPath), List = true };
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
-            () => new DocsTasksCommand().Execute(null!, settings, CancellationToken.None));
+            () => DocsTestCommands.Tasks().Execute(null!, settings, CancellationToken.None));
 
         Assert.True(execution.Result == 0, execution.Output);
         string[] lines = execution.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);

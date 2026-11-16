@@ -166,7 +166,7 @@ public sealed class SquadDoctorMcpRenameTests : IDisposable
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
         FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadDoctorCommand command = new SquadDoctorCommand(
+        SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
             userPaths,
             workingDirectory: workingDir);

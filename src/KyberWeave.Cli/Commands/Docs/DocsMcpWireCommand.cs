@@ -1,3 +1,5 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Mcp;
@@ -39,6 +41,13 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
     /// </summary>
     internal const string TargetPlaceholder = "<harness>[,<harness>]";
 
+    private readonly IMcpWiringService _wiring;
+
+    /// <summary>Creates the command over the MCP wiring service the container resolves.</summary>
+    /// <param name="wiring">Inspects, repairs and renames the harness MCP configuration.</param>
+    public DocsMcpWireCommand(IMcpWiringService wiring) =>
+        _wiring = wiring ?? throw new ArgumentNullException(nameof(wiring));
+
     /// <inheritdoc />
     public override int Execute(
         CommandContext context,
@@ -76,7 +85,7 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
         // The resolver takes the repository root, not the process's working directory: the
         // declaration is committed and a launch command written as a path in the tree means the same
         // file wherever the operator ran this from.
-        LaunchCommandResolver resolver = LaunchCommandResolver.FromEnvironment(root);
+        ILaunchCommandResolver resolver = _wiring.ResolverFor(root);
         IReadOnlyList<string> targets = Targets(settings.Target);
 
         return targets.Count == 0
@@ -256,9 +265,9 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
     /// The no-target run: the harnesses in play, the gaps found, the writable harnesses no marker
     /// can detect, and not one byte written (5.3).
     /// </summary>
-    private static int Preview(string root, McpConfig config, LaunchCommandResolver resolver)
+    private int Preview(string root, McpConfig config, ILaunchCommandResolver resolver)
     {
-        McpWiringReport inspection = McpWiringInspector.Inspect(root, config, resolver);
+        McpWiringReport inspection = _wiring.Inspect(root, config, resolver);
 
         // A writable harness with neither a marker nor its configuration file is invisible to
         // detection, so naming it in the preview is the only way it can ever be written: the
@@ -319,13 +328,13 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
     /// itself still uses. A preview is where an operator looks before writing, so the leftover is
     /// named here whether or not anything is declared.
     /// </remarks>
-    internal static void ReportRenameNotices(string root)
+    internal void ReportRenameNotices(string root)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
 
         IReadOnlyList<McpRenameChange> leftovers =
         [
-            .. McpServerRenamer.Scan(root)
+            .. _wiring.Scan(root, null)
                 .Where(change => string.Equals(change.Code, McpServerRenamer.RenameCode, StringComparison.Ordinal)
                     || string.Equals(change.Code, McpServerRenamer.LeftAloneCode, StringComparison.Ordinal)
                     || string.Equals(change.Code, McpServerRenamer.RefusedCode, StringComparison.Ordinal))
@@ -363,14 +372,14 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
     /// The targeted run: skip what is already right, write what the operator named, and exit 1 when
     /// any requested target was refused.
     /// </summary>
-    private static int Wire(
+    private int Wire(
         string root,
         McpConfig config,
-        LaunchCommandResolver resolver,
+        ILaunchCommandResolver resolver,
         IReadOnlyList<string> targets,
         bool dryRun)
     {
-        McpWiringReport inspection = McpWiringInspector.Inspect(root, config, resolver);
+        McpWiringReport inspection = _wiring.Inspect(root, config, resolver);
 
         List<string> satisfied = [];
         List<string> toRepair = [];
@@ -384,7 +393,7 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
 
         List<McpWiringFileChange> changes = toRepair.Count == 0
             ? []
-            : [.. McpWiringRepairer.Repair(root, config, resolver, toRepair, dryRun).Files];
+            : [.. _wiring.Repair(root, config, resolver, toRepair, dryRun).Files];
 
         CommandHelpers.WriteUnfolded(() =>
         {
@@ -420,7 +429,7 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
     /// of them needs — a typo and a snippet-only harness need an explanation, not a skip.
     /// </para>
     /// </remarks>
-    private static bool Satisfied(string root, McpWiringReport inspection, string harness)
+    private bool Satisfied(string root, McpWiringReport inspection, string harness)
     {
         if (HarnessMcpCatalog.Find(harness) is not { Fixability: McpWiringFixability.Fixable } row)
             return false;
@@ -434,7 +443,7 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
         // is the same server under the name this version uses, and adding it beside the old one
         // leaves one server under two names. The repair refuses it for that reason, so leaving it to
         // the repair is what puts the migration in front of the operator.
-        if (McpServerRenamer.Scan(root, harness)
+        if (_wiring.Scan(root, harness)
             .Any(change => string.Equals(change.Code, McpServerRenamer.RenameCode, StringComparison.Ordinal)))
         {
             return false;

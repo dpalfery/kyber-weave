@@ -22,7 +22,7 @@ namespace KyberWeave.Tests;
 /// render that carries it ten times.
 /// </para>
 /// <para>
-/// The target rows come from <see cref="SquadCommandComposition.CreateRenderers"/>, the same list the
+/// The target rows come from <see cref="SquadHostDefaults.CreateRenderers"/>, the same list the
 /// shared renderer contract suite uses, so a renderer that ships later is held to this contract the
 /// day it ships rather than whenever someone remembers it. The tag is
 /// <c>&lt;worker-baseline&gt;</c>, following the <c>&lt;response-preferences&gt;</c> block the
@@ -52,7 +52,7 @@ public sealed class SquadWorkerBaselineInjectionTests
     ];
 
     public static TheoryData<SquadTarget> ShippedTargets() =>
-        new(SquadCommandComposition.CreateRenderers().SelectMany(renderer => renderer.SupportedTargets));
+        new(SquadHostDefaults.CreateRenderers().SelectMany(renderer => renderer.SupportedTargets));
 
     /// <summary>
     /// The single source exists and carries the baseline's rule tokens. One file is the whole point:
@@ -139,10 +139,10 @@ public sealed class SquadWorkerBaselineInjectionTests
         Directory.CreateDirectory(emptyTemp);
         try
         {
-            string? block = SquadWorkerBaselineInjector.ReadBlock(emptyTemp);
+            string? block = SquadWorkerBaselineFile.ReadBlock(emptyTemp);
             Assert.Null(block);
 
-            string? cached = SquadWorkerBaselineInjector.ReadBlock(emptyTemp);
+            string? cached = SquadWorkerBaselineFile.ReadBlock(emptyTemp);
             Assert.Null(cached);
         }
         finally
@@ -164,7 +164,7 @@ public sealed class SquadWorkerBaselineInjectionTests
                 baselinePath,
                 "<worker-baseline>\n<worker-baseline>\ntext\n</worker-baseline>");
 
-            Assert.Throws<SquadRenderValidationException>(() => SquadWorkerBaselineInjector.ReadBlock(tempDir));
+            Assert.Throws<SquadRenderValidationException>(() => SquadWorkerBaselineFile.ReadBlock(tempDir));
         }
         finally
         {

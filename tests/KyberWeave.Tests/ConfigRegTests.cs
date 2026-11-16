@@ -4,6 +4,7 @@ using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Docs.Validation;
 using Xunit;
 using YamlDotNet.Core;
+using KyberWeave.Tests.Fakes;
 
 namespace KyberWeave.Tests;
 
@@ -344,7 +345,7 @@ public sealed class ConfigRegValidatorTests : IDisposable
     }
 
     private DiagnosticReport Validate(KyberWeaveConfig config) =>
-        new ConfigRegValidator(_temp.Path, config).Validate();
+        new ConfigRegValidator(_temp.Path, config, DocsPorts.Files).Validate();
 
     [Fact]
     public void ARepositoryThatNeverAdoptedTheRegistryIsSilent()
@@ -369,7 +370,7 @@ public sealed class ConfigRegValidatorTests : IDisposable
     [Fact]
     public void AnAdoptedRegistryPointingAtNothingIsCONFIGREG001()
     {
-        DocsScaffolder.Scaffold(_temp.Path, "docs");
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "docs");
         Directory.Delete(Path.Combine(_temp.Path, "docs", "adr"), recursive: true);
 
         DiagnosticReport report = Validate(Configured());
@@ -381,7 +382,7 @@ public sealed class ConfigRegValidatorTests : IDisposable
     [Fact]
     public void AFreshlyScaffoldedRepositoryHasNoRegistryFindings()
     {
-        DocsScaffolder.Scaffold(_temp.Path, "docs");
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "docs");
 
         DiagnosticReport report = Validate(Configured());
 
@@ -391,7 +392,7 @@ public sealed class ConfigRegValidatorTests : IDisposable
     [Fact]
     public void ARenderedBlockThatNoLongerMatchesConfigurationIsCONFIGREG002()
     {
-        DocsScaffolder.Scaffold(_temp.Path, "docs");
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "docs");
 
         // The repository declared a technology after the block was rendered: configuration
         // now publishes a property the file does not carry.
@@ -403,7 +404,7 @@ public sealed class ConfigRegValidatorTests : IDisposable
     [Fact]
     public void AnAutonomyValueIsNotPathCheckedAsARegistryProperty()
     {
-        DocsScaffolder.Scaffold(_temp.Path, "docs");
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "docs");
         KyberWeaveConfig config = Configured().WithConfigReg(new ConfigRegConfig { Autonomy = "autonomous" });
         Write("AGENTS.md", ConfigRegMarkdown.Splice(
             File.ReadAllText(Path.Combine(_temp.Path, "AGENTS.md")),
@@ -417,7 +418,7 @@ public sealed class ConfigRegValidatorTests : IDisposable
     [Fact]
     public void AMissingAutonomyLineIsCONFIGREG002()
     {
-        DocsScaffolder.Scaffold(_temp.Path, "docs");
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "docs");
 
         DiagnosticReport report = Validate(
             Configured().WithConfigReg(new ConfigRegConfig { Autonomy = "autonomous" }));
@@ -463,7 +464,7 @@ public sealed class ConfigRegValidatorTests : IDisposable
             Path.Combine(".kyber-weave", "kyber-weave.yml"),
             "ontology:\n  docs-root: docs\n  technologies:\n    - csharp\nonboarding: done\n");
 
-        DocsScaffolder.Scaffold(_temp.Path);
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
 
         string agents = File.ReadAllText(Path.Combine(_temp.Path, "AGENTS.md"));
         KyberWeaveConfig config = KyberWeaveConfigLoader.Load(_temp.Path);
@@ -490,7 +491,7 @@ public sealed class ConfigRegValidatorTests : IDisposable
             Path.Combine(".kyber-weave", "kyber-weave.yml"),
             "ontology:\n  docs-root: docs\n  technologies:\n    - csharp\n");
 
-        DocsScaffolder.Scaffold(_temp.Path);
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
 
         Assert.DoesNotContain(
             "onboarding",
@@ -501,7 +502,7 @@ public sealed class ConfigRegValidatorTests : IDisposable
     [Fact]
     public void AnUnclosedMarkerIsReportedRatherThanOverwritten()
     {
-        DocsScaffolder.Scaffold(_temp.Path, "docs");
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "docs");
         string agents = Path.Combine(_temp.Path, "AGENTS.md");
         File.WriteAllText(agents,
             $"# Working here\n\n{ConfigRegMarkdown.StartMarker}\n- **<docs-root>**: `docs`\n\n## Mine\n\nKeep me.\n");
@@ -521,7 +522,7 @@ public sealed class ConfigRegValidatorTests : IDisposable
     [Fact]
     public void AnEnabledIntakeSettingRendersAModePropertyThatIsNotPathChecked()
     {
-        DocsScaffolder.Scaffold(_temp.Path, "docs");
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "docs");
         KyberWeaveConfig config = IntakeEnabled();
         Write("AGENTS.md", ConfigRegMarkdown.Splice(
             File.ReadAllText(Path.Combine(_temp.Path, "AGENTS.md")),
@@ -545,7 +546,7 @@ public sealed class ConfigRegValidatorTests : IDisposable
     [Fact]
     public void AnEnabledIntakeSettingMakesTheScaffoldedBlockStale()
     {
-        DocsScaffolder.Scaffold(_temp.Path, "docs");
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "docs");
 
         DiagnosticReport report = Validate(IntakeEnabled());
 
@@ -561,7 +562,7 @@ public sealed class ConfigRegValidatorTests : IDisposable
     [Fact]
     public void PathValuedRegistryEntriesAreStillPathCheckedWhenIntakeIsEnabled()
     {
-        DocsScaffolder.Scaffold(_temp.Path, "docs");
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "docs");
         Directory.Delete(Path.Combine(_temp.Path, "docs", "adr"), recursive: true);
 
         DiagnosticReport report = Validate(IntakeEnabled());

@@ -9,7 +9,6 @@ component: DocGraph
 code-refs:
   - StdioSession
   - ProcessRunner
-  - McpLiveProbe
   - CodeGraphProvisioner
 ---
 

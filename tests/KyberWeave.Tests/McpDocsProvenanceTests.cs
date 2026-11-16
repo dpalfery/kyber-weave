@@ -2,16 +2,18 @@ using System.ComponentModel;
 using System.Globalization;
 using System.Reflection;
 using System.Text.RegularExpressions;
-using KyberWeave.Core.CodeGraph;
+
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Docs.Search;
+using KyberWeave.Data.CodeGraph;
 using KyberWeave.Mcp;
 using ModelContextProtocol.Server;
 using Xunit;
 
+using KyberWeave.Tests.Fakes;
 namespace KyberWeave.Tests;
 
 /// <summary>
@@ -158,8 +160,8 @@ public sealed class McpDocsProvenanceTests : IDisposable
         string rootB = Path.Combine(_parent.Path, "repo-b");
         Directory.CreateDirectory(rootA);
         Directory.CreateDirectory(rootB);
-        DocsScaffolder.Scaffold(rootA, owner: "alpha-team");
-        DocsScaffolder.Scaffold(rootB, owner: "beta-team");
+        DocsTestCommands.Scaffolding.Scaffold(rootA, owner: "alpha-team");
+        DocsTestCommands.Scaffolding.Scaffold(rootB, owner: "beta-team");
         // Stop git from walking up into a parent checkout when TMPDIR sits inside one:
         // an invalid local gitdir keeps rev=unavailable / dirty=unknown deterministic.
         IsolateFromParentGit(rootA);
@@ -197,7 +199,7 @@ public sealed class McpDocsProvenanceTests : IDisposable
             $"gitdir: {Path.Combine(root, ".git-missing")}{Environment.NewLine}");
 
     private static DocsTools CreateTools(string root) =>
-        new(CreateHost(root), new RepositoryDocsAnalysisReader(root));
+        DocsToolsComposition.Create(CreateHost(root), McpTestServices.AnalysisReader(root));
 
     private static DocumentIndexHost CreateHost(string root)
     {

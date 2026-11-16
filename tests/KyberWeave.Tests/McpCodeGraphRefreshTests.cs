@@ -1,13 +1,16 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
+
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
-using KyberWeave.Core.CodeGraph;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Domain.Doctor;
 using KyberWeave.Core.Processes;
+using KyberWeave.Data.CodeGraph;
 using KyberWeave.Mcp;
 using KyberWeave.Tests.Fakes;
 using Xunit;
@@ -141,7 +144,7 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
     [Fact]
     public void WhenResolverFactoryThrowsDuringRefresh_FailsToolsUnderStopRule()
     {
-        DocsScaffolder.Scaffold(Root);
+        DocsTestCommands.Scaffolding.Scaffold(Root);
         McpDeclarationFixture.RequireCodeGraph(Root);
 
         int resolverCalls = 0;
@@ -171,7 +174,7 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
     [Fact]
     public void WhenResolverFactoryThrowsAndConfigUnreadable_DefaultsToStopRule()
     {
-        DocsScaffolder.Scaffold(Root);
+        DocsTestCommands.Scaffolding.Scaffold(Root);
         McpDeclarationFixture.RequireCodeGraph(Root);
 
         DocsTools tools = ScaffoldedTools(
@@ -195,7 +198,7 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
     [Fact]
     public void WhenDocsTreeUnreadable_BlockedResponseReportsDocumentsUnavailable()
     {
-        DocsScaffolder.Scaffold(Root);
+        DocsTestCommands.Scaffolding.Scaffold(Root);
         McpDeclarationFixture.RequireCodeGraph(Root);
 
         KyberWeaveConfig config = KyberWeaveConfigLoader.Load(Root);
@@ -206,10 +209,10 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
 
-        DocsTools tools = new(
+        DocsTools tools = DocsToolsComposition.Create(
             host,
             null,
-            new CodeGraphFreshness(Root, refreshEnabled: true, ProvisionSucceeds()));
+            DocsTestCommands.Freshness(Root, ProvisionSucceeds()));
 
         string response = tools.Explore("anything");
         Assert.Contains("STATUS: TOOL_FAILURE", response, StringComparison.Ordinal);
@@ -294,7 +297,7 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
         string lockPath = LockPath(Root);
         RemoveStaleLock(lockPath);
 
-        DocsScaffolder.Scaffold(Root);
+        DocsTestCommands.Scaffolding.Scaffold(Root);
         if (!stopsOnToolFailure)
         {
             File.AppendAllText(
@@ -338,7 +341,7 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
     /// </summary>
     private static DocsTools ToolsRequiringCodeGraph(string root)
     {
-        DocsScaffolder.Scaffold(root);
+        DocsTestCommands.Scaffolding.Scaffold(root);
         McpDeclarationFixture.RequireCodeGraph(root);
         return ScaffoldedTools(root, () => FakeCodeGraphResolver.WithSymbols());
     }
@@ -360,10 +363,10 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
 
-        return new DocsTools(
+        return DocsToolsComposition.Create(
             host,
             null,
-            new CodeGraphFreshness(root, refreshEnabled: true, ProvisionSucceeds()));
+            DocsTestCommands.Freshness(root, ProvisionSucceeds()));
     }
 
     /// <summary>

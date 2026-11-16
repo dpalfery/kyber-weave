@@ -21,7 +21,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// an example link shown in a code sample is not turned into a machine path. Indented code
 /// blocks are not recognised.
 /// </remarks>
-internal static class SquadResourceLinkRewriter
+public static class SquadResourceLinkRewriter
 {
     /// <summary>
     /// A Markdown inline link or image whose target is captured for resource-link rewriting.
@@ -52,7 +52,7 @@ internal static class SquadResourceLinkRewriter
     /// <param name="mapPath">Maps the authored path part, fragment and query excluded, to the emitted path.</param>
     /// <param name="changed">True when at least one link was rewritten.</param>
     /// <returns>The body with in-closure links rewritten.</returns>
-    internal static string Rewrite(
+    public static string Rewrite(
         string body,
         IReadOnlySet<string> resourcePaths,
         Func<string, string> mapPath,

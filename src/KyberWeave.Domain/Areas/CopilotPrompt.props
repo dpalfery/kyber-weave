@@ -1,0 +1,9 @@
+<Project>
+
+  <ItemGroup>
+    <!-- The Copilot system prompt `squad copilot-prompt install` writes. Its logical name is what
+         CopilotPromptFile reads, so the reader and the prompt must stay in the same assembly. -->
+    <EmbeddedResource Include="..\..\products\kyber-squad\copilot\system-prompt.yaml" LogicalName="CopilotPrompt.system-prompt.yaml" />
+  </ItemGroup>
+
+</Project>

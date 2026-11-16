@@ -1,12 +1,13 @@
 using System.Collections.ObjectModel;
 using System.Text.Json;
-using KyberWeave.Core.CodeGraph;
+
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Analysis.Model;
 using KyberWeave.Core.Docs.Export;
 using KyberWeave.Core.Docs.Graph;
 using KyberWeave.Core.Docs.Model;
+using KyberWeave.Domain.CodeGraph;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -161,7 +162,7 @@ public sealed class GlossaryGraphExportTests
         Assert.DoesNotContain(contribution.Edges, edge => edge.To.Contains("mutated", StringComparison.Ordinal));
     }
 
-    private static ManagedGlossaryService GlossaryService(string repositoryRoot) =>
+    private static ManagedGlossary GlossaryService(string repositoryRoot) =>
         new(
             repositoryRoot,
             new KyberWeaveConfig
@@ -169,7 +170,8 @@ public sealed class GlossaryGraphExportTests
                 Ontology = OntologyConfig.ProductDefaults.WithDocsRoots(["docs"]),
                 DocsAnalysis = new DocsAnalysisConfig { GlossaryPath = "docs/glossary.md" }
             },
-            TimeProvider.System);
+            TimeProvider.System,
+            DocsPorts.Files);
 
     private static ManagedGlossaryLoadResult CreateLoad(params GlossaryLookupResult[] terms) =>
         new(new AnalysisGlossary([]), terms);

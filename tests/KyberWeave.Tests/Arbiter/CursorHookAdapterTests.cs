@@ -131,8 +131,8 @@ public sealed class CursorHookAdapterTests
         IHookDecisionEngine engine,
         Func<string, KyberWeaveConfig>? loader = null)
     {
-        HookCommand command = new(
-            HarnessAdapterRegistry.CreateDefault(engine),
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
             loader ?? (_ => EnabledConfig()),
             () => "decision-test-1");
         using StringWriter stdout = new();
@@ -227,8 +227,8 @@ public sealed class CursorHookAdapterTests
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate\nANSWER: undecidable (step 0)";
         ScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Deny, envelope) };
         int loads = 0;
-        HookCommand command = new(
-            HarnessAdapterRegistry.CreateDefault(engine),
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
             (string repoRoot) => { loads++; return EnabledConfig(); },
             () => "decision-test-1");
         using StringWriter stdout = new();
@@ -253,8 +253,8 @@ public sealed class CursorHookAdapterTests
     {
         int loads = 0;
         ScriptedEngine engine = new();
-        HookCommand command = new(
-            HarnessAdapterRegistry.CreateDefault(engine),
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
             (string repoRoot) => { loads++; return EnabledConfig(); },
             () => "decision-test-1");
         using StringWriter stdout = new();
@@ -275,8 +275,8 @@ public sealed class CursorHookAdapterTests
         ScriptedEngine engine = new();
         string stdin = Fixture("pre-task-dispatch.json").Replace(
             "\"tool_name\": \"Task\"", "\"tool_name\": \"task\"", StringComparison.Ordinal);
-        HookCommand command = new(
-            HarnessAdapterRegistry.CreateDefault(engine),
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
             (string repoRoot) => { loads++; return EnabledConfig(); },
             () => "decision-test-1");
         using StringWriter stdout = new();
@@ -386,7 +386,7 @@ public sealed class CursorHookAdapterTests
     public void Adapters_AreRegisteredForCursorToken()
     {
         ScriptedEngine engine = new();
-        HarnessAdapterRegistry registry = HarnessAdapterRegistry.CreateDefault(engine);
+        HarnessAdapterRegistry registry = ArbiterTestServices.Registry(engine);
 
         Assert.True(registry.TryGet(CursorHookAdapter.Token, out IHarnessHookAdapter? adapter));
         Assert.IsType<CursorHookAdapter>(adapter);

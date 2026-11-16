@@ -1,4 +1,7 @@
-using KyberWeave.Core.Utilities.StatusLine;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Domain.StatusLine;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -16,21 +19,30 @@ namespace KyberWeave.Cli.Commands.Utilities;
 /// </remarks>
 public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLineDeploySettings>
 {
-    private readonly IUtilitiesStatusLineArtifactSource? _artifacts;
-    private readonly StatusLineTargetRoots? _roots;
+    private readonly IProcessEnvironment _environment;
+    private readonly IStatusLineHostService _host;
+    private readonly IStatusLineDeploymentService _plans;
+    private readonly IFileSystemPathSemantics _semantics;
 
-    /// <summary>Creates a deploy command using the default per-user roots and product artifact tree.</summary>
-    public UtilitiesStatusLineDeployCommand()
+    /// <summary>Creates a deploy command over the process environment and the host service.</summary>
+    /// <param name="environment">The process state the per-user roots are read from.</param>
+    /// <param name="host">Opens the artifact tree of the checkout and marks the deployed commands executable.</param>
+    /// <param name="plans">Plans and applies the deployment.</param>
+    /// <param name="semantics">The filesystem's containment rules.</param>
+    public UtilitiesStatusLineDeployCommand(
+        IProcessEnvironment environment,
+        IStatusLineHostService host,
+        IStatusLineDeploymentService plans,
+        IFileSystemPathSemantics semantics)
     {
-    }
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(host);
+        ArgumentNullException.ThrowIfNull(plans);
 
-    /// <summary>Creates a deploy command using injectable dependencies.</summary>
-    internal UtilitiesStatusLineDeployCommand(
-        StatusLineTargetRoots? roots = null,
-        IUtilitiesStatusLineArtifactSource? artifacts = null)
-    {
-        _roots = roots;
-        _artifacts = artifacts;
+        _environment = environment;
+        _host = host;
+        _plans = plans;
+        _semantics = semantics;
     }
 
     /// <inheritdoc />
@@ -55,7 +67,7 @@ public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLi
         StatusLineTargetRoots roots;
         try
         {
-            roots = _roots ?? UtilitiesStatusLineCommandComposition.ResolveRoots();
+            roots = UtilitiesStatusLineCommandComposition.ResolveRoots(_environment);
             foreach (StatusLineTarget target in targets)
             {
                 _ = roots.ResolveStagingRoot(target);
@@ -70,7 +82,7 @@ public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLi
         IUtilitiesStatusLineArtifactSource artifacts;
         try
         {
-            artifacts = _artifacts ?? UtilitiesStatusLineCommandComposition.ResolveArtifactSource();
+            artifacts = _host.ResolveArtifactSource();
         }
         catch (DirectoryNotFoundException ex)
         {
@@ -92,7 +104,7 @@ public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLi
         return Execute(context, settings, CancellationToken.None);
     }
 
-    private static bool DeployOne(
+    private bool DeployOne(
         StatusLineTarget target,
         StatusLineTargetRoots roots,
         IUtilitiesStatusLineArtifactSource artifacts,
@@ -105,7 +117,7 @@ public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLi
         try
         {
             files = artifacts.Load(target);
-            plan = StatusLineDeploymentPlan.CreateDeploy(target, roots, files);
+            plan = _plans.CreateDeploy(target, roots, files);
         }
         catch (Exception ex) when (
             ex is StatusLineDeploymentConflictException or InvalidDataException or
@@ -128,8 +140,8 @@ public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLi
         {
             try
             {
-                plan.Apply();
-                UtilitiesStatusLineCommandComposition.ApplyExecutableBit(plan.StagingRoot, files);
+                _plans.Apply(plan);
+                _host.ApplyExecutableBit(plan.StagingRoot, files);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -143,7 +155,7 @@ public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLi
                 $"{Markup.Escape(plan.StagingRoot)}");
         }
 
-        string? commandPath = UtilitiesStatusLineOutput.ResolvePrimaryCommandPath(target, plan.StagingRoot, files);
+        string? commandPath = UtilitiesStatusLineOutput.ResolvePrimaryCommandPath(target, plan.StagingRoot, files, _semantics);
         if (commandPath is null)
         {
             AnsiConsole.MarkupLine(

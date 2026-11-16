@@ -1,9 +1,10 @@
 using System.Collections.ObjectModel;
-using KyberWeave.Core.CodeGraph;
+
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Text;
+using KyberWeave.Domain.CodeGraph;
 using Xunit;
 
 namespace KyberWeave.Tests;

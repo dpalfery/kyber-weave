@@ -1,3 +1,11 @@
+using KyberWeave.Application.Arbiter;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Tests.Arbiter;
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Data.Review;
+using KyberWeave.Core.Arbiter.Plans;
 using System.Text.Json;
 using KyberWeave.Arbiter;
 using KyberWeave.Arbiter.Hooks;
@@ -31,6 +39,9 @@ public sealed class ArbiterKiloLeadsTests : IDisposable
     public void Dispose() => _sandbox.Dispose();
 
     private static DateTimeOffset Now => new(2026, 11, 11, 12, 0, 0, TimeSpan.Zero);
+
+    private static IArbiterSectionSelectionService SelectorFor() =>
+        new ArbiterSectionSelectionService(new FileBoundedFileReader());
 
     /// <summary>Holds a file open with no sharing, so a read of it fails with an I/O error while the file still exists.</summary>
     private static FileStream LockAgainstReads(string path)
@@ -67,7 +78,7 @@ public sealed class ArbiterKiloLeadsTests : IDisposable
         string full = await WriteCitedFileAsync("src/Locked.cs");
         using FileStream holder = LockAgainstReads(full);
 
-        FileExcerpt? excerpt = FileTextFacts.ReadExcerpt(_sandbox.Path, "src/Locked.cs", 12);
+        FileExcerpt? excerpt = new FileTextFacts().ReadExcerpt(_sandbox.Path, "src/Locked.cs", 12);
 
         Assert.Null(excerpt);
     }
@@ -80,7 +91,7 @@ public sealed class ArbiterKiloLeadsTests : IDisposable
         string full = await WriteCitedFileAsync("src/Locked.cs");
         using FileStream holder = LockAgainstReads(full);
         CountingNitpickProvider provider = new();
-        CommentTriageService service = new(provider, _sandbox.Path, Path.Combine(_sandbox.Path, "artifacts", "arbiter"), new FixedClock(Now));
+        CommentTriageService service = new(provider, _sandbox.Path, Path.Combine(_sandbox.Path, "artifacts", "arbiter"), new FixedClock(Now), ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<IArbiterStateFactory>());
 
         CommentTriageResult result = await service.ClassifyAsync(new CommentTriageRequest("src/Locked.cs", 12, "Rename this.", null));
 
@@ -126,7 +137,8 @@ public sealed class ArbiterKiloLeadsTests : IDisposable
         string full = await WriteCitedFileAsync("docs/locked.md", "# Guide\nIntro.\n## Install\nSteps.\n");
         using FileStream holder = LockAgainstReads(full);
 
-        SectionSelection selection = await new SectionSelector(new NoneProvider()).SelectAsync(full, "Change the install steps.");
+        SectionSelection selection = await SelectorFor()
+            .SelectAsync(full, "Change the install steps.", new NoneProvider());
 
         Assert.True(selection.FailedSafe);
     }
@@ -166,14 +178,14 @@ public sealed class ArbiterKiloLeadsTests : IDisposable
     public async Task AClassifyCallWithANullBodyReturnsAnErrorAnswer()
     {
         using TempDirectory home = new();
-        ArbiterHookDecisionEngine engine = new(
+        ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
             providerFactory: _ => new NullAnswerProvider(),
             homeDirectory: () => home.Path);
-        ArbiterTools tools = new(new ArbiterServeContext(
+        ArbiterTools tools = ArbiterTestServices.Tools(new ArbiterServeContext(
             _sandbox.Path,
             engine,
             TextWriter.Null,
-            Composition.LoadHostConfig,
+            ArbiterTestServices.LoadHostConfig,
             _ => true));
         await WriteCitedFileAsync("docs/guide.md");
 

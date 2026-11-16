@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Domain.Doctor;
 using KyberWeave.Core.Processes;
 using KyberWeave.Tests.Fakes;
 using Xunit;
@@ -7,7 +8,7 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-///     Pins <see cref="WorktreeIndexGuard" />: the CodeGraph index a worktree or a review gets before any work starts.
+///     Pins <see cref="KyberWeave.Contracts.Services.IWorktreeIndexGuard" />: the CodeGraph index a worktree or a review gets before any work starts.
 /// </summary>
 /// <remarks>
 ///     A worktree has no index of its own, and nothing else builds one, so the guard is the only thing standing
@@ -242,7 +243,7 @@ public sealed class WorktreeIndexGuardTests : IDisposable
     }
 
     private WorktreeIndexOutcome Ensure(ScriptedProcessExecutor executor) =>
-        WorktreeIndexGuard.Ensure(_root, DoctorHarness.Options("kyber-weave-mcp"), executor, _locks);
+        DoctorServices.WorktreeIndex.Ensure(_root, DoctorHarness.Options("kyber-weave-mcp"), executor, _locks);
 
     /// <summary>A CodeGraph that answers every verb healthily, except that each named verb exits 1.</summary>
     private static ScriptedProcessExecutor Codegraph(params string[] failingVerbs) =>

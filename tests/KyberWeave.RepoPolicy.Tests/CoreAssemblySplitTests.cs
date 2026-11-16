@@ -13,9 +13,9 @@ public sealed class CoreAssemblySplitTests
     /// <summary>Each engine project and the only repository projects it may reference.</summary>
     public static TheoryData<string, string[]> AllowedReferences => new()
     {
-        { "KyberWeave.Core", ["KyberWeave.Contracts", "KyberWeave.Data", "KyberWeave.Domain", "KyberWeave.Kernel"] },
-        { "KyberWeave.Core.Docs", ["KyberWeave.Core", "KyberWeave.Domain"] },
-        { "KyberWeave.Core.Squad", ["KyberWeave.Core", "KyberWeave.Domain"] }
+        { "KyberWeave.Core", ["KyberWeave.Application", "KyberWeave.Contracts", "KyberWeave.Data", "KyberWeave.Domain", "KyberWeave.Kernel"] },
+        { "KyberWeave.Core.Docs", ["KyberWeave.Application", "KyberWeave.Core", "KyberWeave.Domain"] },
+        { "KyberWeave.Core.Squad", ["KyberWeave.Application", "KyberWeave.Core", "KyberWeave.Data", "KyberWeave.Domain"] }
     };
 
     [Theory]

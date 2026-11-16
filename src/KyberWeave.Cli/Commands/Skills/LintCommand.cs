@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using KyberWeave.Cli.Rendering;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Skills.Model;
 using KyberWeave.Core.Skills.Validation;
@@ -20,19 +21,14 @@ public sealed class LintSettings : AnalysisSettings
     public bool Explain { get; set; }
 }
 
-public sealed class LintCommand : Command<LintSettings>
+public sealed class LintCommand(ISkillGovernanceService skills) : Command<LintSettings>
 {
     /// <inheritdoc />
     public override int Execute(CommandContext context, LintSettings settings, CancellationToken cancellationToken)
     {
-        DiagnosticReport report = new DiagnosticReport();
-        SkillSet set = CommandHelpers.LoadOrReport(settings.Path, report);
-
-        RoutingLinter linter = new RoutingLinter { MinDescriptionScore = settings.MinDescriptionScore };
-
-        foreach (Skill skill in set.Skills)
-            report.AddRange(linter.LintSkill(skill));
-        report.AddRange(linter.LintSet(set));
+        SkillLintResult linted = skills.Lint(settings.Path, settings.MinDescriptionScore);
+        DiagnosticReport report = linted.Report;
+        SkillSet set = linted.Skills;
 
         if (settings.Explain && ReportRenderer.IsHuman(settings.ParsedFormat))
         {

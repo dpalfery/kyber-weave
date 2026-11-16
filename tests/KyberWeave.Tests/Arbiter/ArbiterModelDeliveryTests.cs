@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Arbiter.Hooks;
@@ -95,7 +96,7 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
         Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
     };
 
-    private ArbiterHookDecisionEngine Engine(IArbiterProvider provider) => new(
+    private ArbiterHookDecisionEngine Engine(IArbiterProvider provider) => ArbiterTestServices.Engine(
         providerFactory: _ => provider,
         planReaderFactory: _ => new PlanStub(),
         homeDirectory: () => _repo.Path);

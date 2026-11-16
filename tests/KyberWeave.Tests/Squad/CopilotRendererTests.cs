@@ -423,10 +423,10 @@ public sealed class CopilotRendererTests
                                        """);
 
         CopilotRenderer renderer = new();
-        SquadRenderRequest request = new(
+        SquadRenderRequest request = new SquadRenderRequest(
             temp.Path,
             [SquadTarget.Copilot],
-            SquadDeploymentScope.Project);
+            SquadDeploymentScope.Project).Prepared();
 
         SquadRenderResult result = await renderer.RenderAsync(request);
         Assert.True(result.Success, string.Join("; ", result.Errors));
@@ -754,7 +754,7 @@ public sealed class CopilotRendererTests
         SquadRenderResult result = await renderer.RenderAsync(new SquadRenderRequest(
             temp.Path,
             [SquadTarget.Copilot],
-            SquadDeploymentScope.Project));
+            SquadDeploymentScope.Project).Prepared());
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         SquadDeploymentFile file = Assert.Single(
@@ -783,7 +783,7 @@ public sealed class CopilotRendererTests
         SquadRenderResult result = await renderer.RenderAsync(new SquadRenderRequest(
             temp.Path,
             [SquadTarget.Copilot],
-            SquadDeploymentScope.Project));
+            SquadDeploymentScope.Project).Prepared());
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -988,12 +988,12 @@ public sealed class CopilotRendererTests
     [Fact]
     public async Task GlobalRenderWithoutAGlobalRootResolverFailsClosedNamingTheMissingInput()
     {
-        SquadRendererRegistry registry = new([new CopilotRenderer()]);
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new CopilotRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Copilot],
             SquadDeploymentScope.Global,
-            PreloadedSource: TestSquadCorpus.CanonicalSource);
+            PreloadedSource: TestSquadCorpus.CanonicalSource).Prepared();
 
         SquadRenderValidationException exception =
             await Assert.ThrowsAsync<SquadRenderValidationException>(() => registry.RenderAsync(request));
@@ -1056,15 +1056,15 @@ public sealed class CopilotRendererTests
         SquadDeploymentScope scope,
         ISquadGlobalRootResolver? globalRoots)
     {
-        SquadRendererRegistry registry = new([new CopilotRenderer()]);
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new CopilotRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
             sourceDirectory,
             [SquadTarget.Copilot],
             scope,
             GlobalRoots: globalRoots,
             PreloadedSource: string.Equals(sourceDirectory, ProductRoot, StringComparison.Ordinal)
                 ? TestSquadCorpus.CanonicalSource
-                : null);
+                : null).Prepared();
 
         SquadRenderResult result = await registry.RenderAsync(request);
         Assert.True(result.Success, string.Join("; ", result.Errors));

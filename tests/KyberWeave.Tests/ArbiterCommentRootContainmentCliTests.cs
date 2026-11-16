@@ -1,3 +1,9 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Tests.Arbiter;
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Core.Arbiter.Plans;
+using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Cli.Commands.Arbiter;
 using Xunit;
 
@@ -25,7 +31,7 @@ public sealed class ArbiterCommentRootContainmentCliTests : IDisposable
         string cited = Path.Combine(_temp.Path, "secret.md");
         File.WriteAllText(cited, "# Secret\nText.\n");
 
-        ArbiterCommentCommand command = new();
+        ArbiterCommentCommand command = ArbiterTestServices.Command<ArbiterCommentCommand>();
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
             new ArbiterCommentSettings

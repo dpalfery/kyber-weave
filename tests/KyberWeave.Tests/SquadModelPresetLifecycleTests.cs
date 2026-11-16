@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Release;
@@ -87,7 +88,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
 
         Dictionary<SquadTarget, string> presets = new()
         {
@@ -145,7 +146,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
 
         SquadInstallRequest installRequest = new(
             targetRoot,
@@ -196,7 +197,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
 
         SquadInstallRequest installRequest = new(
             targetRoot,
@@ -245,7 +246,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
 
         SquadInstallRequest installRequest = new(
             targetRoot,
@@ -307,7 +308,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
 
         SquadInstallRequest request = new(
             targetRoot,
@@ -346,7 +347,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
 
         SquadInstallRequest request = new(
             targetRoot,
@@ -379,7 +380,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
 
         SquadInstallRequest request = new(
             targetRoot,
@@ -424,7 +425,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
 
         // Install Project 1 with "fast" preset
         SquadInstallRequest request1 = new(
@@ -484,7 +485,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
 
         SquadInstallRequest installRequest = new(
             targetRoot,
@@ -521,7 +522,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
 
         SquadInstallRequest request = new(
             targetRoot,
@@ -542,7 +543,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
 
         SquadUpdateRequest request = new(
             targetRoot,
@@ -564,7 +565,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         SquadStateStore stateStore = new(userPaths);
         using TruncatedReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
 
         SquadInstallRequest request = new(
             targetRoot,
@@ -591,7 +592,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
 
         SquadInstallRequest request = new(
             targetRoot,
@@ -627,7 +628,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
 
         SquadInstallRequest installRequest = new(
             targetRoot,
@@ -670,7 +671,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
 
         // Act — dry-run install modifies no state, so it must not write a snapshot.
         SquadInstallRequest dryInstall = new(
@@ -729,7 +730,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
 
         SquadInstallRequest request = new(
             targetRoot,

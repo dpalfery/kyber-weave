@@ -215,11 +215,11 @@ public sealed class SquadOperatorChannelCliTests : IDisposable
         string? gateValue = null,
         string? serverName = SquadOperatorChannelFixture.DefaultServerName)
     {
-        return new SquadInstallCommand(
+        return SquadTestCommands.Install(
             h.UserPaths,
             h.Store,
             h.ReleaseSource,
-            SquadCommandComposition.ResolveRenderer(),
+            SquadHostDefaults.ResolveRenderer(),
             false,
             _ => true,
             h.GlobalRoots,
@@ -231,11 +231,11 @@ public sealed class SquadOperatorChannelCliTests : IDisposable
         string? gateValue = null,
         string? serverName = SquadOperatorChannelFixture.DefaultServerName)
     {
-        return new SquadUpdateCommand(
+        return SquadTestCommands.Update(
             h.UserPaths,
             h.Store,
             h.ReleaseSource,
-            SquadCommandComposition.ResolveRenderer(),
+            SquadHostDefaults.ResolveRenderer(),
             false,
             _ => true,
             h.GlobalRoots,
@@ -251,12 +251,12 @@ public sealed class SquadOperatorChannelCliTests : IDisposable
         string? gateValue = null,
         string? serverName = SquadOperatorChannelFixture.DefaultServerName)
     {
-        return new SquadDoctorCommand(
+        return SquadTestCommands.Doctor(
             new FakeProcessExecutor().WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n"),
             h.UserPaths,
             KyberWeaveTestPaths.ToolRoot,
             h.GlobalRoots,
-            SquadCommandComposition.ResolveRenderer(),
+            SquadHostDefaults.ResolveRenderer(),
             h.Store,
             h.CreateEnvironmentReader(gateValue, serverName));
     }
@@ -266,7 +266,7 @@ public sealed class SquadOperatorChannelCliTests : IDisposable
         string? gateValue = null,
         string? serverName = SquadOperatorChannelFixture.DefaultServerName)
     {
-        return new SquadStatusCommand(
+        return SquadTestCommands.Status(
             h.UserPaths,
             h.Store,
             h.GlobalRoots,

@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -433,16 +434,16 @@ public sealed class ArbiterHookWiringTests : IDisposable
     [Fact]
     public async Task RenderAsync_DisabledArbiter_RendersByteForByteIdenticallyToOmittingIt()
     {
-        SquadRendererRegistry registry = new([new ClaudeRenderer(), new OpenCodeRenderer()]);
-        SquadRenderRequest withoutWiring = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer(), new OpenCodeRenderer()]);
+        SquadRenderRequest withoutWiring = new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Claude, SquadTarget.OpenCode],
-            Scope: SquadDeploymentScope.Project);
-        SquadRenderRequest disabledWiring = new(
+            Scope: SquadDeploymentScope.Project).Prepared();
+        SquadRenderRequest disabledWiring = new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Claude, SquadTarget.OpenCode],
             Scope: SquadDeploymentScope.Project,
-            Arbiter: new SquadArbiterWiring(Enabled: false, HookTimeoutSeconds: 45));
+            Arbiter: new SquadArbiterWiring(Enabled: false, HookTimeoutSeconds: 45)).Prepared();
 
         SquadRenderResult withoutResult = await registry.RenderAsync(withoutWiring);
         SquadRenderResult disabledResult = await registry.RenderAsync(disabledWiring);

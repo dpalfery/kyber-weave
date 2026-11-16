@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Validation;
@@ -8,32 +9,28 @@ namespace KyberWeave.Cli.Commands.Squad;
 /// <summary>
 /// Shows resolved model profiles for a preset and target harness.
 /// </summary>
-public sealed class SquadPresetShowCommand : Command<SquadPresetShowSettings>
+internal sealed class SquadPresetShowCommand : Command<SquadPresetShowSettings>
 {
-    private readonly ISquadUserPaths? _userPaths;
+    private readonly ISquadUserPaths _userPaths;
+    private readonly ISquadModelPresetStore _presetStore;
+    private readonly ISquadCanonicalProfileResolver _canonicalProfiles;
 
-    /// <summary>Creates a new preset show command using default dependencies.</summary>
-    public SquadPresetShowCommand()
+    /// <summary>Creates the command over the Squad services the host registers.</summary>
+    /// <param name="userPaths">Names the home the presets live under.</param>
+    /// <param name="presetStore">Loads the named presets.</param>
+    /// <param name="canonicalProfiles">Finds the canonical model profiles to show.</param>
+    public SquadPresetShowCommand(
+        ISquadUserPaths userPaths,
+        ISquadModelPresetStore presetStore,
+        ISquadCanonicalProfileResolver canonicalProfiles)
     {
-    }
-
-    /// <summary>Creates a new preset show command using injectable dependencies.</summary>
-    internal SquadPresetShowCommand(
-        ISquadUserPaths? userPaths = null,
-        Func<string?, ISquadUserPaths, SquadCanonicalProfiles?>? canonicalProfileResolver = null)
-    {
+        ArgumentNullException.ThrowIfNull(userPaths);
+        ArgumentNullException.ThrowIfNull(presetStore);
+        ArgumentNullException.ThrowIfNull(canonicalProfiles);
         _userPaths = userPaths;
-        if (canonicalProfileResolver is not null)
-            CanonicalProfileResolver = canonicalProfileResolver;
+        _presetStore = presetStore;
+        _canonicalProfiles = canonicalProfiles;
     }
-
-    /// <summary>Resolves canonical model profiles for this command.</summary>
-    /// <remarks>
-    ///     Injectable seam so tests can force the no-checkout path; the production default is the
-    ///     composition static, which prefers a checkout and falls back to the newest home snapshot.
-    /// </remarks>
-    internal Func<string?, ISquadUserPaths, SquadCanonicalProfiles?> CanonicalProfileResolver { get; } =
-        SquadCommandComposition.ResolveCanonicalProfiles;
 
     /// <inheritdoc />
     public override int Execute(CommandContext context, SquadPresetShowSettings settings,
@@ -41,9 +38,8 @@ public sealed class SquadPresetShowCommand : Command<SquadPresetShowSettings>
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        SquadStateStore stateStore = SquadCommandComposition.ResolveStateStore(_userPaths);
-        ISquadUserPaths userPaths = _userPaths ?? stateStore.UserPaths;
-        SquadModelPresetStore presetStore = new(userPaths);
+        ISquadUserPaths userPaths = _userPaths;
+        ISquadModelPresetStore presetStore = _presetStore;
 
         SquadModelPreset? preset = null;
         try
@@ -93,7 +89,7 @@ public sealed class SquadPresetShowCommand : Command<SquadPresetShowSettings>
             return 0;
         }
 
-        SquadCanonicalProfiles? canonical = CanonicalProfileResolver(null, userPaths);
+        SquadCanonicalProfiles? canonical = _canonicalProfiles.Resolve(null);
         if (canonical is null)
         {
             // Show has no deployment context to key a version on, so the chain already fell

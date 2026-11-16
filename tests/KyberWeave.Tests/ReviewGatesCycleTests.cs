@@ -191,7 +191,7 @@ public sealed class ReviewGatesCycleTests : IDisposable
         Write("src/a.cs", "// first\n");
         Commit("work");
         string priorHead = Git("rev-parse", "HEAD").Trim();
-        FinishCycle1(baseCommit: ReviewWorkTree.IdentityOf(_repo, baseCommit)!.Base);
+        FinishCycle1(baseCommit: ReviewTestServices.WorkTrees.IdentityOf(_repo, baseCommit)!.Base);
         Write("src/b.cs", "// fix\n");
         Commit("fix");
 
@@ -215,7 +215,7 @@ public sealed class ReviewGatesCycleTests : IDisposable
         string baseCommit = Git("rev-parse", "HEAD").Trim();
         Write("src/Domain/JobStatusSummaryDto.cs", "// first\n");
         Commit("work");
-        FinishCycle1(baseCommit: ReviewWorkTree.IdentityOf(_repo, baseCommit)!.Base);
+        FinishCycle1(baseCommit: ReviewTestServices.WorkTrees.IdentityOf(_repo, baseCommit)!.Base);
         Write(
             $".agent_scratchpad/{Task}/review/cycle-1/findings.json",
             ReviewJson.Write(new FindingsReport(
@@ -253,7 +253,7 @@ public sealed class ReviewGatesCycleTests : IDisposable
         string baseCommit = Git("rev-parse", "HEAD").Trim();
         Write("src/a.cs", "// first\n");
         Commit("work");
-        FinishCycle1(baseCommit: ReviewWorkTree.IdentityOf(_repo, baseCommit)!.Base);
+        FinishCycle1(baseCommit: ReviewTestServices.WorkTrees.IdentityOf(_repo, baseCommit)!.Base);
         Write("src/b.cs", "// fix\n");
         Commit("fix");
 
@@ -551,12 +551,12 @@ public sealed class ReviewGatesCycleTests : IDisposable
         string home = Path.Combine(_temp.Path, "home");
         RunBaseState.Write(home, "run-branch", "master", new RunStartPlace(Path.Combine(_repo, ".git"), worktree, DateTimeOffset.UtcNow));
 
-        string? note = ReviewWorkTree.LiveRunNote(_repo, home);
+        string? note = ReviewTestServices.WorkTrees.LiveRunNote(_repo, home);
 
         Assert.NotNull(note);
         Assert.Contains(RunCheckout.RealPath(worktree), note, StringComparison.Ordinal);
         Assert.Contains("run the review there", note, StringComparison.Ordinal);
-        Assert.Null(ReviewWorkTree.LiveRunNote(worktree, home));
+        Assert.Null(ReviewTestServices.WorkTrees.LiveRunNote(worktree, home));
     }
 
     [Fact]
@@ -687,8 +687,8 @@ public sealed class ReviewGatesCycleTests : IDisposable
         Write($".agent_scratchpad/{Task}/review/cycle-1/head", Git("rev-parse", "HEAD").Trim());
         if (identity)
         {
-            ReviewCycleIdentity current = ReviewWorkTree.IdentityOf(_repo, null)!;
-            ReviewCycles.WriteIdentity(CycleFolder(1), new ReviewCycleIdentity(branch ?? current.Branch, baseCommit ?? current.Base, head ?? current.Head));
+            ReviewCycleIdentity current = ReviewTestServices.WorkTrees.IdentityOf(_repo, null)!;
+            ReviewTestServices.Cycles.WriteIdentity(CycleFolder(1), new ReviewCycleIdentity(branch ?? current.Branch, baseCommit ?? current.Base, head ?? current.Head));
         }
 
         Write(
@@ -756,7 +756,7 @@ public sealed class ReviewGatesCycleTests : IDisposable
 
     private static CommandApp CreateApp()
     {
-        CommandApp app = new();
+        CommandApp app = new(ReviewTestServices.Registrar());
         app.Configure(config =>
         {
             config.SetApplicationName("kyber-weave");

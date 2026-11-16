@@ -18,6 +18,7 @@ the closed vocabulary fits — inventing a doc-type is not.
 | Page | Covers |
 |---|---|
 | [Autonomous gates inventory](autonomous-gates.md) | Every gate reachable in autonomous mode, with disposition and irreversible-action justifications (issue #386 item A) |
+| [How the CLI gets its dependencies](cli-composition.md) | The container behind the commands, the contracts a command asks for, and how a test replaces them |
 
 Kyber-Weave's reference material predates the folder and sits at the root of the corpus:
 [`configuration.md`](../configuration.md), [`install.md`](../install.md),

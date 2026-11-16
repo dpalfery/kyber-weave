@@ -1,10 +1,11 @@
 using System.Globalization;
 using System.Reflection;
 using System.Text.RegularExpressions;
-using KyberWeave.Core.CodeGraph;
+
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Search;
+using KyberWeave.Data.CodeGraph;
 using KyberWeave.Mcp;
 using ModelContextProtocol.Server;
 using Xunit;
@@ -1003,7 +1004,7 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
             () => new DocumentLoader(root, config.Ontology).Load(),
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
-        return new DocsTools(host);
+        return DocsToolsComposition.Create(host);
     }
 
     /// <summary>
@@ -1026,7 +1027,7 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
             () => new DocumentLoader(_corpus.Root, config.Ontology).Load(),
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
-        return (new DocsTools(host), host);
+        return (DocsToolsComposition.Create(host), host);
     }
 
     /// <summary>

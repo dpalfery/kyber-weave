@@ -1,3 +1,4 @@
+using KyberWeave.Data.Docs.Mcp;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -176,7 +177,7 @@ public sealed class McpWiringHardeningTests : IDisposable
         Assert.Equal(expected, McpRepositoryPath.Contained(Repo, name));
         Assert.Equal(expected, McpWiringRepairer.ContainedPath(Repo, name));
 
-        McpWiringFix fix = Assert.Single(McpWiringFixes.Derive(ReportOffering(name), Repo));
+        McpWiringFix fix = Assert.Single(McpWiringTestServices.Wiring.Derive(ReportOffering(name), Repo));
         Assert.Equal(name, fix.Path);
         Assert.True(fix.Create);
     }
@@ -200,7 +201,7 @@ public sealed class McpWiringHardeningTests : IDisposable
     {
         Assert.Null(McpRepositoryPath.Contained(Repo, name));
         Assert.Null(McpWiringRepairer.ContainedPath(Repo, name));
-        Assert.Empty(McpWiringFixes.Derive(ReportOffering(name), Repo));
+        Assert.Empty(McpWiringTestServices.Wiring.Derive(ReportOffering(name), Repo));
     }
 
     /// <summary>
@@ -214,7 +215,7 @@ public sealed class McpWiringHardeningTests : IDisposable
 
         Assert.Null(McpRepositoryPath.Contained(Repo, absolute));
         Assert.Null(McpWiringRepairer.ContainedPath(Repo, absolute));
-        Assert.Empty(McpWiringFixes.Derive(ReportOffering(absolute), Repo));
+        Assert.Empty(McpWiringTestServices.Wiring.Derive(ReportOffering(absolute), Repo));
     }
 
     /// <summary>
@@ -236,7 +237,7 @@ public sealed class McpWiringHardeningTests : IDisposable
 
         Assert.Null(McpRepositoryPath.Contained(Repo, sibling));
         Assert.Null(McpWiringRepairer.ContainedPath(Repo, sibling));
-        Assert.Empty(McpWiringFixes.Derive(ReportOffering(sibling), Repo));
+        Assert.Empty(McpWiringTestServices.Wiring.Derive(ReportOffering(sibling), Repo));
     }
 
     /// <summary>
@@ -263,7 +264,7 @@ public sealed class McpWiringHardeningTests : IDisposable
     {
         Assert.Null(McpRepositoryPath.Contained(Repo, ".vscode/../.mcp.json"));
         Assert.Null(McpWiringRepairer.ContainedPath(Repo, ".vscode/../.mcp.json"));
-        Assert.Empty(McpWiringFixes.Derive(ReportOffering(".vscode/../.mcp.json"), Repo));
+        Assert.Empty(McpWiringTestServices.Wiring.Derive(ReportOffering(".vscode/../.mcp.json"), Repo));
     }
 
     /// <summary>
@@ -315,7 +316,7 @@ public sealed class McpWiringHardeningTests : IDisposable
         string link = Path.Combine(Repo, "..foo");
         McpWiringFixture.CreateSymlink(link, outside);
 
-        Assert.Equal("..foo", McpConfigurationLink.LinkedSegment(Repo, link));
+        Assert.Equal("..foo", McpConfigurationLink.LinkedSegment(Repo, link, new PhysicalMcpConfigFiles().InspectLink));
     }
 
     /// <summary>A path that really does leave the root is not this guard's question.</summary>
@@ -326,7 +327,7 @@ public sealed class McpWiringHardeningTests : IDisposable
         Directory.CreateDirectory(Path.GetDirectoryName(outside)!);
         File.WriteAllText(outside, """{"mcpServers": {}}""");
 
-        Assert.Null(McpConfigurationLink.LinkedSegment(Repo, outside));
+        Assert.Null(McpConfigurationLink.LinkedSegment(Repo, outside, new PhysicalMcpConfigFiles().InspectLink));
     }
 
     // ---- Paths are compared by value, and on a case-sensitive filesystem case is part of the value.
@@ -388,8 +389,8 @@ public sealed class McpWiringHardeningTests : IDisposable
         {
             DenyTraversal(directory, target);
 
-            Assert.Equal(McpLinkObstruction.Denied, McpConfigurationLink.Probe(Repo, target).Obstruction);
-            Assert.Equal(".vscode/mcp.json", McpConfigurationLink.Probe(Repo, target).Segment);
+            Assert.Equal(McpLinkObstruction.Denied, McpConfigurationLink.Probe(Repo, target, new PhysicalMcpConfigFiles().InspectLink).Obstruction);
+            Assert.Equal(".vscode/mcp.json", McpConfigurationLink.Probe(Repo, target, new PhysicalMcpConfigFiles().InspectLink).Segment);
         }
         finally
         {
@@ -450,7 +451,7 @@ public sealed class McpWiringHardeningTests : IDisposable
             DenyTraversal(directory, target);
 
             CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
-                new DocsMcpMigrateCommand().Execute(
+                new DocsMcpMigrateCommand(McpWiringTestServices.Wiring).Execute(
                     null!,
                     new DocsMcpMigrateSettings { Path = Repo, Target = VsCode }));
 
@@ -494,7 +495,7 @@ public sealed class McpWiringHardeningTests : IDisposable
         {
             DenyTraversal(directory, target);
 
-            McpWiringReport report = McpWiringInspector.Inspect(
+            McpWiringReport report = McpWiringTestServices.Wiring.Inspect(
                 Repo,
                 McpWiringFixture.Declare(FirstPartyServer()),
                 new LaunchCommandResolver([Bin]));
@@ -513,7 +514,7 @@ public sealed class McpWiringHardeningTests : IDisposable
 
             // The fix list is derived from the findings, and this finding is never offered as a
             // write: the repair would refuse it, so the operator is never asked to consent to it.
-            Assert.Empty(McpWiringFixes.Derive(report, Repo));
+            Assert.Empty(McpWiringTestServices.Wiring.Derive(report, Repo));
         }
         finally
         {
@@ -724,7 +725,7 @@ public sealed class McpWiringHardeningTests : IDisposable
         string planned = Digest(Encoding.UTF8.GetBytes("""{"mcpServers": {"kyber-weave": {}}}"""));
         WriteReceipt(Record(".mcp.json", McpWiringWriteMode.Inserted, Digest(pre), Convert.ToBase64String(pre), planned));
 
-        McpWiringFileChange change = Assert.Single(McpWiringRepairer.Unwire(Repo, [ClaudeCode]).Files);
+        McpWiringFileChange change = Assert.Single(McpWiringTestServices.Wiring.Unwire(Repo, [ClaudeCode]).Files);
 
         Assert.NotEqual(McpWiringChangeOutcome.Refused, change.Outcome);
         Assert.False(change.Written, "the pre-write bytes were already on disk, so nothing needed writing");
@@ -741,7 +742,7 @@ public sealed class McpWiringHardeningTests : IDisposable
     {
         WriteReceipt(Record(".mcp.json", McpWiringWriteMode.Created, postSha256: Digest(Encoding.UTF8.GetBytes("{}"))));
 
-        McpWiringFileChange change = Assert.Single(McpWiringRepairer.Unwire(Repo, [ClaudeCode]).Files);
+        McpWiringFileChange change = Assert.Single(McpWiringTestServices.Wiring.Unwire(Repo, [ClaudeCode]).Files);
 
         Assert.NotEqual(McpWiringChangeOutcome.Refused, change.Outcome);
         Assert.False(change.Written);
@@ -1022,7 +1023,7 @@ public sealed class McpWiringHardeningTests : IDisposable
     }
 
     private McpWiringRepairReport Repair(params string[] targets) =>
-        McpWiringRepairer.Repair(Repo, McpWiringFixture.Declare(FirstPartyServer()), new LaunchCommandResolver([Bin]), targets);
+        McpWiringTestServices.Wiring.Repair(Repo, McpWiringFixture.Declare(FirstPartyServer()), new LaunchCommandResolver([Bin]), targets);
 
     private static RequiredMcpServer FirstPartyServer() =>
         new(ServerName, [BinaryName, "--repo-root", "."], McpProvenance.FirstParty);

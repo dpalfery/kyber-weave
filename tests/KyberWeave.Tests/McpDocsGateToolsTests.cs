@@ -1,7 +1,8 @@
 using System.Globalization;
 using System.Reflection;
 using System.Text.RegularExpressions;
-using KyberWeave.Core.CodeGraph;
+
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Scaffolding;
@@ -9,10 +10,12 @@ using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
+using KyberWeave.Domain.CodeGraph;
 using KyberWeave.Mcp;
 using ModelContextProtocol.Server;
-using Xunit;
 using Xunit.Sdk;
+using Xunit;
+using KyberWeave.Tests.Fakes;
 
 namespace KyberWeave.Tests;
 
@@ -293,7 +296,7 @@ public sealed class McpDocsGateToolsTests : IDisposable
     public void DocsValidateMergeReadyPassesWhenGitBaseResolvesAndCorpusIsClean()
     {
         using CloseoutGitRepo repo = new();
-        DocsScaffolder.Scaffold(repo.Root, owner: "gate-fixture");
+        DocsTestCommands.Scaffolding.Scaffold(repo.Root, owner: "gate-fixture");
         repo.Commit("initial");
 
         DocsTools tools = CreateTools(repo.Root, () => FakeCodeGraphResolver.WithSymbols());
@@ -306,7 +309,7 @@ public sealed class McpDocsGateToolsTests : IDisposable
     public void DocsValidateMergeReadyFailsWhenGitBaseDoesNotResolve()
     {
         using CloseoutGitRepo repo = new();
-        DocsScaffolder.Scaffold(repo.Root, owner: "gate-fixture");
+        DocsTestCommands.Scaffolding.Scaffold(repo.Root, owner: "gate-fixture");
         repo.Commit("initial");
 
         DocsTools tools = CreateTools(repo.Root, () => FakeCodeGraphResolver.WithSymbols());
@@ -324,7 +327,7 @@ public sealed class McpDocsGateToolsTests : IDisposable
 
         using CloseoutGitRepo repo = new();
         using TempDirectory outside = new();
-        DocsScaffolder.Scaffold(repo.Root, owner: "gate-fixture");
+        DocsTestCommands.Scaffolding.Scaffold(repo.Root, owner: "gate-fixture");
         repo.Commit("initial");
 
         string target = Path.Combine(outside.Path, "target.md");
@@ -393,7 +396,7 @@ public sealed class McpDocsGateToolsTests : IDisposable
     {
         string root = Path.Combine(_parent.Path, "repo-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
-        DocsScaffolder.Scaffold(root, owner: "gate-fixture");
+        DocsTestCommands.Scaffolding.Scaffold(root, owner: "gate-fixture");
         IsolateFromParentGit(root);
         return root;
     }
@@ -474,7 +477,7 @@ public sealed class McpDocsGateToolsTests : IDisposable
             () => new DocumentLoader(root, config.Ontology).Load(),
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
-        return new DocsTools(host);
+        return DocsToolsComposition.Create(host);
     }
 
     private static string InvokeValidate(

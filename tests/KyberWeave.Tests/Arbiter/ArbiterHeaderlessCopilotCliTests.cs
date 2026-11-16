@@ -141,8 +141,8 @@ public sealed class ArbiterHeaderlessCopilotCliTests : IDisposable
 
     private string Run(string stdin, IArbiterProvider? provider = null)
     {
-        ArbiterHookDecisionEngine engine = new(providerFactory: _ => provider ?? new NoneProvider(), homeDirectory: () => _home.Path);
-        HookCommand command = new(HarnessAdapterRegistry.CreateDefault(engine), Composition.LoadHostConfig, () => "cli-1");
+        ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(providerFactory: _ => provider ?? new NoneProvider(), homeDirectory: () => _home.Path);
+        HookCommand command = ArbiterTestServices.Command(ArbiterTestServices.Registry(engine), ArbiterTestServices.LoadHostConfig, () => "cli-1");
         using StringWriter stdout = new();
         using StringWriter log = new();
 

@@ -11,6 +11,7 @@ using KyberWeave.Core.Docs.Search;
 using KyberWeave.Mcp;
 using Xunit;
 
+using KyberWeave.Tests.Fakes;
 namespace KyberWeave.Tests;
 
 /// <summary>
@@ -228,7 +229,7 @@ public sealed class McpAnalysisToolsTests : IDisposable
         Write("knowledge/second.md", Document("reference/second", "current"));
         Write("knowledge/draft.md", Document("reference/draft", "draft"));
         Write("knowledge/terms.md", GlossaryMarkdown());
-        RepositoryDocsAnalysisReader reader = new RepositoryDocsAnalysisReader(_temp.Path);
+        RepositoryDocsAnalysisReader reader = McpTestServices.AnalysisReader(_temp.Path);
 
         DocumentationAnalysisResult analysis = reader.Analyze();
         GlossaryLookupResult glossary = reader.LookupGlossary("loop");
@@ -250,7 +251,7 @@ public sealed class McpAnalysisToolsTests : IDisposable
               statuses: [current]
             """);
         Write("knowledge/first.md", Document("reference/first", "current"));
-        RepositoryDocsAnalysisReader reader = new RepositoryDocsAnalysisReader(_temp.Path);
+        RepositoryDocsAnalysisReader reader = McpTestServices.AnalysisReader(_temp.Path);
 
         DocumentationAnalysisResult analysis = reader.Analyze();
 
@@ -269,7 +270,7 @@ public sealed class McpAnalysisToolsTests : IDisposable
             () => FakeCodeGraphResolver.WithSymbols(),
             () => new DocumentSet { Documents = [] },
             "docs");
-        return new DocsTools(host, reader);
+        return DocsToolsComposition.Create(host, reader);
     }
 
     private static DocumentationAnalysisResult Result(params AnalysisCandidate[] candidates) =>

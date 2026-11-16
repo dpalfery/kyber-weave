@@ -1,9 +1,11 @@
+using KyberWeave.Cli.Composition;
 using System.Text.Json;
 using KyberWeave.Cli;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Mcp;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -19,40 +21,89 @@ namespace KyberWeave.Cli.Commands.Squad;
 /// <summary>
 ///     Diagnoses prerequisites, toolchain availability, and deployment health for Kyber-Squad.
 /// </summary>
-public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
+internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 {
     private const string ArbiterServer = McpServerNames.Arbiter;
 
-    private readonly IProcessExecutor? _executor;
-    private readonly ISquadGlobalRootResolver? _globalRoots;
-    private readonly ISquadRenderer? _renderer;
-    private readonly SquadStateStore? _stateStore;
-    private readonly ISquadUserPaths? _userPaths;
-    private readonly string? _workingDirectory;
-    private readonly Func<string, string?>? _environmentReader;
+    private readonly ISquadStateStore _stateStore;
+    private readonly ISquadStateMigration _migration;
+    private readonly ISquadGlobalRootResolver _globalRoots;
+    private readonly ISquadRenderer _renderer;
+    private readonly ISquadModelPresetStore _presetStore;
+    private readonly ISquadDeploymentPlanner _planner;
+    private readonly ISquadResponseGuidanceStore _guidance;
+    private readonly IProcessEnvironment _environment;
+    private readonly ISquadSourceLocator _sourceLocator;
+    private readonly ISquadSourceLoader _sourceLoader;
+    private readonly ISquadSkillShadowing _skillShadowing;
+    private readonly IDevinImportOverlapInspector _devinOverlap;
+    private readonly IZCodeMcpInspector _zcodeMcp;
+    private readonly SquadDoctorOptions _options;
+    private readonly IFileSystemPathSemantics _pathSemantics;
 
-    /// <summary>Creates a new doctor command using default dependencies.</summary>
-    public SquadDoctorCommand()
+    /// <summary>Creates the doctor command over the Squad services the host registers.</summary>
+    /// <param name="stateStore">Reads the deployment state.</param>
+    /// <param name="migration">Moves legacy state into the home layout.</param>
+    /// <param name="globalRoots">Resolves each target's global root.</param>
+    /// <param name="renderer">Renders the canonical source to find unmanaged collisions.</param>
+    /// <param name="presetStore">Loads the presets the lock names.</param>
+    /// <param name="planner">Finds the unmanaged collisions a deployment would cause.</param>
+    /// <param name="guidance">Reads the response guidance in effect.</param>
+    /// <param name="environment">Reads the environment the render sees.</param>
+    /// <param name="sourceLocator">Finds the canonical Squad source in the working directory.</param>
+    /// <param name="sourceLoader">Loads and validates the Squad source.</param>
+    /// <param name="skillShadowing">Finds project skills that hide an installed squad skill.</param>
+    /// <param name="devinOverlap">Finds identities Devin would load twice.</param>
+    /// <param name="zcodeMcp">Reads the MCP servers a ZCode installation declares.</param>
+    /// <param name="options">The process executor and working directory; the defaults use the real ones.</param>
+    /// <param name="pathSemantics">The filesystem's containment and canonical spelling rules.</param>
+    public SquadDoctorCommand(
+        ISquadStateStore stateStore,
+        ISquadStateMigration migration,
+        ISquadGlobalRootResolver globalRoots,
+        ISquadRenderer renderer,
+        ISquadModelPresetStore presetStore,
+        ISquadDeploymentPlanner planner,
+        ISquadResponseGuidanceStore guidance,
+        IProcessEnvironment environment,
+        ISquadSourceLocator sourceLocator,
+        ISquadSourceLoader sourceLoader,
+        ISquadSkillShadowing skillShadowing,
+        IDevinImportOverlapInspector devinOverlap,
+        IZCodeMcpInspector zcodeMcp,
+        SquadDoctorOptions options,
+        IFileSystemPathSemantics pathSemantics)
     {
-    }
-
-    /// <summary>Creates a new doctor command using injectable dependencies.</summary>
-    internal SquadDoctorCommand(
-        IProcessExecutor? executor = null,
-        ISquadUserPaths? userPaths = null,
-        string? workingDirectory = null,
-        ISquadGlobalRootResolver? globalRoots = null,
-        ISquadRenderer? renderer = null,
-        SquadStateStore? stateStore = null,
-        Func<string, string?>? environmentReader = null)
-    {
-        _executor = executor;
-        _userPaths = userPaths;
+        ArgumentNullException.ThrowIfNull(stateStore);
+        ArgumentNullException.ThrowIfNull(migration);
+        ArgumentNullException.ThrowIfNull(globalRoots);
+        ArgumentNullException.ThrowIfNull(renderer);
+        ArgumentNullException.ThrowIfNull(presetStore);
+        ArgumentNullException.ThrowIfNull(planner);
+        ArgumentNullException.ThrowIfNull(guidance);
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(sourceLocator);
+        ArgumentNullException.ThrowIfNull(sourceLoader);
+        ArgumentNullException.ThrowIfNull(skillShadowing);
+        ArgumentNullException.ThrowIfNull(devinOverlap);
+        ArgumentNullException.ThrowIfNull(zcodeMcp);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(pathSemantics);
         _stateStore = stateStore;
-        _workingDirectory = workingDirectory;
+        _migration = migration;
         _globalRoots = globalRoots;
         _renderer = renderer;
-        _environmentReader = environmentReader;
+        _presetStore = presetStore;
+        _planner = planner;
+        _guidance = guidance;
+        _environment = environment;
+        _sourceLocator = sourceLocator;
+        _sourceLoader = sourceLoader;
+        _skillShadowing = skillShadowing;
+        _devinOverlap = devinOverlap;
+        _zcodeMcp = zcodeMcp;
+        _options = options;
+        _pathSemantics = pathSemantics;
     }
 
     /// <inheritdoc />
@@ -80,14 +131,13 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         // no --path — keeps the injected working directory, the process's current
         // directory in production, exactly as before the option existed.
         string workingDirectory = SquadCommandComposition.ResolveTargetRoot(
-            effectivePath is null or "." ? _workingDirectory : effectivePath);
+            effectivePath is null or "." ? _options.WorkingDirectory : effectivePath);
 
         // Doctor reads home-level state, so it resolves the store once. A --global doctor is anchored at the
         // home directory whatever the working directory is, and a path given with it is named and ignored.
         // The anchor resolves as a dry run, so doctor never creates the home directory. Doctor is not read-only:
         // the migration below runs with dryRun: false and may move legacy state into the home.
-        SquadStateStore homeStateStore =
-            _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths, _environmentReader);
+        ISquadStateStore homeStateStore = _stateStore;
         if (settings.Global) _ = SquadCommandComposition.ResolveGlobalAnchorRoot(homeStateStore, effectivePath, true);
 
         AnsiConsole.MarkupLine("[bold]Kyber-Squad Doctor[/]");
@@ -100,7 +150,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         AnsiConsole.MarkupLine($"  [green]ok[/] CLI Version: [bold]{Markup.Escape(cliVersion)}[/]");
 
         // 2. Renderer coverage — which of the declared targets can actually install today.
-        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
+        ISquadRenderer renderer = _renderer;
         string[] supported = renderer.SupportedTargets
             .Select(SquadTargetCatalog.GetToken)
             .OrderBy(token => token, StringComparer.Ordinal)
@@ -117,7 +167,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 $"  [grey]info[/] Not yet implemented: [bold]{Markup.Escape(string.Join(", ", pending))}[/] (see docs/todo/<target>.md)");
 
         // 3. MCP Probe
-        McpProcessProbe mcpProbe = SquadCommandComposition.ResolveProbe(_executor);
+        McpProcessProbe mcpProbe = SquadCommandComposition.ResolveProbe(_options.Executor);
         ToolProbeResult mcpResult = mcpProbe.Probe();
         if (mcpResult is { IsAvailable: true, Version: not null })
         {
@@ -143,12 +193,12 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         ReportRetiredMcpKeys(workingDirectory);
 
         // 4. Canonical Source (Maintainer check - only when inside repository root)
-        string? canonicalSourcePath = SquadPackSourceLocator.Resolve(workingDirectory);
+        string? canonicalSourcePath = _sourceLocator.Resolve(workingDirectory);
         bool canonicalSourceValid = false;
         if (canonicalSourcePath is not null)
             try
             {
-                SquadSource source = SquadSourceLoader.Load(canonicalSourcePath);
+                SquadSource source = _sourceLoader.Load(canonicalSourcePath);
                 AnsiConsole.MarkupLine(
                     $"  [green]ok[/] Canonical source: valid ([grey]{Markup.Escape(source.Manifest.Name)}[/], {source.Agents.Count} agents, {source.Skills.Count} skills)");
                 canonicalSourceValid = true;
@@ -184,7 +234,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 
         // 6. Home state: the migration the other verbs run, then the registry and any retained in-repo state.
         SquadMigrationReport migration = SquadCommandComposition.EnsureStateMigrated(
-            homeStateStore,
+            _migration,
             Environment.CurrentDirectory,
             settings.Global ? null : workingDirectory,
             false);
@@ -240,7 +290,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     {
         IReadOnlyList<McpRenameChange> leftovers =
         [
-            .. McpServerRenamer.Scan(workingDirectory)
+            .. LegacyMcpWiring.Service.Scan(workingDirectory, null)
                 .Where(change => change.Code is McpServerRenamer.RenameCode
                     or McpServerRenamer.LeftAloneCode
                     or McpServerRenamer.RefusedCode)
@@ -291,7 +341,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             return false;
         }
 
-        ArbiterProcessProbe arbiterProbe = SquadCommandComposition.ResolveArbiterProbe(_executor);
+        ArbiterProcessProbe arbiterProbe = SquadCommandComposition.ResolveArbiterProbe(_options.Executor);
         ToolProbeResult arbiterResult = arbiterProbe.Probe();
         string cliVersion = CliAssemblyVersion.ForProbe(typeof(SquadDoctorCommand).Assembly);
 
@@ -365,7 +415,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         string zcodeRoot;
         try
         {
-            zcodeRoot = (_globalRoots ?? SquadCommandComposition.ResolveGlobalRoots(_environmentReader))
+            zcodeRoot = _globalRoots
                 .ResolveGlobalRoot(SquadTarget.ZCode);
         }
         catch (ArgumentException ex)
@@ -375,7 +425,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             return true;
         }
 
-        ZCodeMcpConfigurationReport report = ZCodeMcpConfiguration.Inspect(
+        ZCodeMcpConfigurationReport report = _zcodeMcp.Inspect(
             required,
             zcodeRoot,
             workingDirectory,
@@ -428,7 +478,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         string? devinUserRoot;
         try
         {
-            devinUserRoot = (_globalRoots ?? SquadCommandComposition.ResolveGlobalRoots(_environmentReader))
+            devinUserRoot = _globalRoots
                 .ResolveGlobalRoot(SquadTarget.Devin);
         }
         catch (ArgumentException)
@@ -436,7 +486,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             devinUserRoot = null;
         }
 
-        DevinImportOverlapReport report = DevinImportOverlap.Inspect(
+        DevinImportOverlapReport report = _devinOverlap.Inspect(
             workingDirectory,
             devinUserRoot,
             SquadCommandComposition.ReadFileTextOrNull);
@@ -471,10 +521,9 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     /// works, and deleting a tracked file is the operator's call. Installed skills come from the
     /// project and global deployment receipts; with neither there is nothing to be shadowed.
     /// </remarks>
-    private void ReportShadowedSkills(string workingDirectory, SquadStateStore stateStore)
+    private void ReportShadowedSkills(string workingDirectory, ISquadStateStore stateStore)
     {
-        ISquadGlobalRootResolver globalRoots =
-            _globalRoots ?? SquadCommandComposition.ResolveGlobalRoots(_environmentReader);
+        ISquadGlobalRootResolver globalRoots = _globalRoots;
         List<SquadInstalledSkill> installed = [];
         HashSet<string> managed = new(StringComparer.Ordinal);
 
@@ -501,7 +550,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 string fullPath;
                 try
                 {
-                    fullPath = SquadDeploymentPlan.ResolveOwnedFilePath(receipt, workingDirectory, globalRoots, file);
+                    fullPath = SquadDeploymentPlan.ResolveOwnedFilePath(receipt, workingDirectory, globalRoots, file, _pathSemantics);
                 }
                 catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
                 {
@@ -520,7 +569,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             return;
         }
 
-        IReadOnlyList<SquadSkillShadow> shadows = SquadSkillShadowing.Find(workingDirectory, installed, managed);
+        IReadOnlyList<SquadSkillShadow> shadows = _skillShadowing.Find(workingDirectory, installed, managed);
         if (shadows.Count == 0)
         {
             AnsiConsole.MarkupLine("  [green]ok[/] Project skills shadowing the squad: none");
@@ -552,7 +601,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     /// the receipt. The workflow moved to the Kyber-Docs skills deployed by
     /// <c>docs init</c>, so the warning points there.
     /// </remarks>
-    private void ReportRetiredSkills(string workingDirectory, SquadStateStore stateStore)
+    private void ReportRetiredSkills(string workingDirectory, ISquadStateStore stateStore)
     {
         List<string> staleDirs = [];
         string[] skillsRoots = [Path.Combine(".claude", "skills"), Path.Combine(".agents", "skills")];
@@ -635,7 +684,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     ///     The retained-state warning is only raised for a project still registered as live, because a stale
     ///     project's home state is already gone and there is nothing to be authoritative over.
     /// </remarks>
-    private static void ReportHomeState(SquadStateStore stateStore)
+    private static void ReportHomeState(ISquadStateStore stateStore)
     {
         IReadOnlyList<SquadProjectRegistryEntry> projects = stateStore.ListProjects();
         if (projects.Count == 0)
@@ -687,11 +736,9 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             return false;
         }
 
-        ISquadRenderer renderer = _renderer ?? SquadCommandComposition.ResolveRenderer();
-        ISquadGlobalRootResolver globalRoots =
-            _globalRoots ?? SquadCommandComposition.ResolveGlobalRoots(_environmentReader);
-        SquadStateStore stateStore =
-            _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths, _environmentReader);
+        ISquadRenderer renderer = _renderer;
+        ISquadGlobalRootResolver globalRoots = _globalRoots;
+        ISquadStateStore stateStore = _stateStore;
 
         List<SquadUnmanagedPathCollision> collisions = [];
         bool invalidGlobalRoot = false;
@@ -714,7 +761,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             Dictionary<SquadTarget, SquadModelPreset>? loadedPresets = null;
             if (squadLock?.ModelPresets is { Count: > 0 })
             {
-                SquadModelPresetStore presetStore = new(stateStore.UserPaths);
+                ISquadModelPresetStore presetStore = _presetStore;
                 foreach (KeyValuePair<SquadTarget, SquadAppliedPreset> entry in squadLock.ModelPresets)
                 {
                     try
@@ -733,7 +780,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 }
             }
 
-            SquadSource sharedSource = SquadSourceLoader.Load(canonicalSourcePath);
+            SquadSource sharedSource = _sourceLoader.Load(canonicalSourcePath);
 
             foreach (SquadTarget target in renderer.SupportedTargets)
             {
@@ -769,7 +816,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                             GlobalRoots: globalRoots,
                             ModelPresets: loadedPresets,
                             PreloadedSource: sharedSource,
-                            EnvironmentReader: _environmentReader))
+                            EnvironmentReader: _environment.GetVariable))
                     .GetAwaiter()
                     .GetResult();
 
@@ -784,7 +831,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 }
 
                 List<string> warnings = [];
-                string effectiveGuidance = SquadResponseGuidanceSource.ReadEffective(
+                string effectiveGuidance = _guidance.ReadEffective(
                     Path.Combine(stateStore.UserPaths.HomeDirectory, ".kyber-weave"),
                     warnings);
                 if (!SquadResponsePreferencesInjector.HasAnyBlock(render))
@@ -792,7 +839,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 SquadCommandComposition.WriteTransactionWarnings(warnings);
                 render = SquadResponsePreferencesInjector.Inject(render, effectiveGuidance);
 
-                collisions.AddRange(SquadDeploymentPlan.CollectUnmanagedCollisions(
+                collisions.AddRange(_planner.CollectUnmanagedCollisions(
                     workingDirectory,
                     SquadDeploymentScope.Global,
                     render.Files,
@@ -836,8 +883,8 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     private bool ReportOwnedBlockDrift(string workingDirectory, bool isGlobal)
     {
         SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(isGlobal);
-        SquadStateStore stateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths);
-        ISquadGlobalRootResolver globalRoots = _globalRoots ?? SquadCommandComposition.ResolveGlobalRoots();
+        ISquadStateStore stateStore = _stateStore;
+        ISquadGlobalRootResolver globalRoots = _globalRoots;
 
         SquadReceipt? receipt;
         try
@@ -876,7 +923,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                     receipt,
                     workingDirectory,
                     globalRoots,
-                    new SquadOwnedFile(block.RelativePath, new string('0', 64), block.Target, false));
+                    new SquadOwnedFile(block.RelativePath, new string('0', 64), block.Target, false), _pathSemantics);
             }
             catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
             {
@@ -961,3 +1008,8 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         return hasDrift;
     }
 }
+
+/// <summary>How <c>squad doctor</c> probes tools and which directory it diagnoses.</summary>
+/// <param name="Executor">Runs the tool probes; null uses the shared process executor.</param>
+/// <param name="WorkingDirectory">The directory diagnosed when none is named; null is the current directory.</param>
+internal sealed record SquadDoctorOptions(IProcessExecutor? Executor = null, string? WorkingDirectory = null);

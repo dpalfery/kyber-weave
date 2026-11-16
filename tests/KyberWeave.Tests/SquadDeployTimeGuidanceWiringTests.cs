@@ -32,7 +32,7 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
         string homeText = "Use short tool calls and be explicit about assumptions.";
         WriteHomeGuidance(h, homeText);
 
-        SquadLifecycleResult result = await h.Lifecycle(SquadCommandComposition.ResolveRenderer())
+        SquadLifecycleResult result = await h.Lifecycle(SquadHostDefaults.ResolveRenderer())
             .InstallAsync(new SquadInstallRequest(
                 h.MakeDirectory("anchor"),
                 SquadDeploymentScope.Global,
@@ -58,7 +58,7 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
         string anchor = h.MakeDirectory("anchor");
         WriteHomeGuidance(h, original);
 
-        SquadLifecycleService lifecycle = h.Lifecycle(SquadCommandComposition.ResolveRenderer());
+        SquadLifecycleService lifecycle = h.Lifecycle(SquadHostDefaults.ResolveRenderer());
         SquadLifecycleResult install = await lifecycle.InstallAsync(new SquadInstallRequest(
             anchor,
             SquadDeploymentScope.Global,
@@ -94,7 +94,7 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
         string anchor = h.MakeDirectory("anchor");
         WriteHomeGuidance(h, "Version 1 guidance.");
 
-        SquadLifecycleService lifecycle = h.Lifecycle(SquadCommandComposition.ResolveRenderer());
+        SquadLifecycleService lifecycle = h.Lifecycle(SquadHostDefaults.ResolveRenderer());
         Assert.True((await lifecycle.InstallAsync(new SquadInstallRequest(
             anchor,
             SquadDeploymentScope.Global,
@@ -127,7 +127,7 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
         string anchor = h.MakeDirectory("anchor");
         WriteHomeGuidance(h, "Version 1 guidance.");
 
-        SquadLifecycleService lifecycle = h.Lifecycle(SquadCommandComposition.ResolveRenderer());
+        SquadLifecycleService lifecycle = h.Lifecycle(SquadHostDefaults.ResolveRenderer());
         Assert.True((await lifecycle.InstallAsync(new SquadInstallRequest(
             anchor,
             SquadDeploymentScope.Global,
@@ -158,7 +158,7 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
         string anchor = h.MakeDirectory("anchor");
         WriteHomeGuidance(h, "Version 1 guidance.");
 
-        SquadLifecycleService lifecycle = h.Lifecycle(SquadCommandComposition.ResolveRenderer());
+        SquadLifecycleService lifecycle = h.Lifecycle(SquadHostDefaults.ResolveRenderer());
         Assert.True((await lifecycle.InstallAsync(new SquadInstallRequest(
             anchor,
             SquadDeploymentScope.Global,
@@ -192,7 +192,7 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
         string anchor = h.MakeDirectory("anchor");
         WriteHomeGuidance(h, "Version 1 guidance.");
 
-        SquadLifecycleService lifecycle = h.Lifecycle(SquadCommandComposition.ResolveRenderer());
+        SquadLifecycleService lifecycle = h.Lifecycle(SquadHostDefaults.ResolveRenderer());
         Assert.True((await lifecycle.InstallAsync(new SquadInstallRequest(
             anchor,
             SquadDeploymentScope.Global,
@@ -230,7 +230,7 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
         string anchor = h.MakeDirectory("anchor");
         WriteHomeGuidance(h, "Version 1 guidance.");
 
-        SquadLifecycleService lifecycle = h.Lifecycle(SquadCommandComposition.ResolveRenderer());
+        SquadLifecycleService lifecycle = h.Lifecycle(SquadHostDefaults.ResolveRenderer());
         Assert.True((await lifecycle.InstallAsync(new SquadInstallRequest(
             anchor,
             SquadDeploymentScope.Global,
@@ -267,7 +267,7 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
         string anchor = h.MakeDirectory("anchor");
         WriteHomeGuidance(h, "Doctor parity is the operator-level default.");
 
-        SquadLifecycleService lifecycle = h.Lifecycle(SquadCommandComposition.ResolveRenderer());
+        SquadLifecycleService lifecycle = h.Lifecycle(SquadHostDefaults.ResolveRenderer());
         SquadLifecycleResult install = await lifecycle.InstallAsync(new SquadInstallRequest(
             anchor,
             SquadDeploymentScope.Global,
@@ -290,7 +290,7 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
         string homeText = "Every target must carry the same operator guidance.";
         WriteHomeGuidance(h, homeText);
 
-        SquadLifecycleResult result = await h.Lifecycle(SquadCommandComposition.ResolveRenderer())
+        SquadLifecycleResult result = await h.Lifecycle(SquadHostDefaults.ResolveRenderer())
             .InstallAsync(new SquadInstallRequest(
                 projectRoot,
                 SquadDeploymentScope.Project,
@@ -320,7 +320,7 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         Directory.CreateDirectory(path);
 
-        SquadLifecycleResult result = await h.Lifecycle(SquadCommandComposition.ResolveRenderer())
+        SquadLifecycleResult result = await h.Lifecycle(SquadHostDefaults.ResolveRenderer())
             .InstallAsync(new SquadInstallRequest(
                 anchor,
                 SquadDeploymentScope.Global,
@@ -346,7 +346,7 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
         string guidancePath = GuidancePath(h);
         Assert.False(File.Exists(guidancePath), "The scenario requires the home guidance file to be absent before install.");
 
-        SquadLifecycleResult result = await h.Lifecycle(SquadCommandComposition.ResolveRenderer())
+        SquadLifecycleResult result = await h.Lifecycle(SquadHostDefaults.ResolveRenderer())
             .InstallAsync(new SquadInstallRequest(
                 anchor,
                 SquadDeploymentScope.Global,
@@ -369,7 +369,7 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
         string original = "Operator edit that update must never overwrite.";
 
         WriteHomeGuidance(h, original);
-        SquadLifecycleService lifecycle = h.Lifecycle(SquadCommandComposition.ResolveRenderer());
+        SquadLifecycleService lifecycle = h.Lifecycle(SquadHostDefaults.ResolveRenderer());
         Assert.True((await lifecycle.InstallAsync(new SquadInstallRequest(
             anchor,
             SquadDeploymentScope.Global,

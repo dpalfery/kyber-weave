@@ -22,7 +22,7 @@ public sealed class ReviewVerdictCliCommandTests
             KyberWeaveTestPaths.ToolRoot,
             "src",
             "KyberWeave.Cli",
-            "Program.cs"));
+            "CliApplication.cs"));
 
         int verdictIndex = program.IndexOf("AddCommand<ReviewVerdictCommand>(\"verdict\")", StringComparison.Ordinal);
         Assert.True(verdictIndex >= 0, "Program.cs must register the review verdict command.");
@@ -52,7 +52,7 @@ public sealed class ReviewVerdictCliCommandTests
             KyberWeaveTestPaths.ToolRoot,
             "src",
             "KyberWeave.Cli",
-            "Program.cs"));
+            "CliApplication.cs"));
 
         int verdictIndex = program.IndexOf("AddCommand<ReviewVerdictCommand>(\"verdict\")", StringComparison.Ordinal);
         Assert.True(verdictIndex >= 0, "Program.cs must register the review verdict command.");
@@ -205,7 +205,7 @@ public sealed class ReviewVerdictCliCommandTests
 
     private static CommandApp CreateApp()
     {
-        CommandApp app = new();
+        CommandApp app = new(ReviewTestServices.Registrar());
         app.Configure(config =>
         {
             config.SetApplicationName("kyber-weave");

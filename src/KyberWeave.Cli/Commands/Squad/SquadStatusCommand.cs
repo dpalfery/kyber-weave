@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using Spectre.Console;
@@ -10,29 +11,37 @@ namespace KyberWeave.Cli.Commands.Squad;
 /// <summary>
 ///     Verifies the integrity of deployed Kyber-Squad files against the recorded ownership receipt.
 /// </summary>
-public sealed class SquadStatusCommand : Command<SquadStatusSettings>
+internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
 {
-    private readonly ISquadGlobalRootResolver? _globalRoots;
-    private readonly SquadStateStore? _stateStore;
-    private readonly ISquadUserPaths? _userPaths;
-    private readonly Func<string, string?>? _environmentReader;
+    private readonly ISquadStateStore _stateStore;
+    private readonly ISquadStateMigration _migration;
+    private readonly ISquadGlobalRootResolver _globalRoots;
+    private readonly ISquadModelPresetStore _presetStore;
+    private readonly IFileSystemPathSemantics _pathSemantics;
 
-    /// <summary>Creates a new status command using default system paths.</summary>
-    public SquadStatusCommand()
+    /// <summary>Creates the status command over the Squad services the host registers.</summary>
+    /// <param name="stateStore">Reads the deployment state.</param>
+    /// <param name="migration">Moves legacy state into the home layout before status reads it.</param>
+    /// <param name="globalRoots">Resolves each target's global root.</param>
+    /// <param name="presetStore">Loads the presets the lock names.</param>
+    /// <param name="pathSemantics">The filesystem's containment and canonical spelling rules.</param>
+    public SquadStatusCommand(
+        ISquadStateStore stateStore,
+        ISquadStateMigration migration,
+        ISquadGlobalRootResolver globalRoots,
+        ISquadModelPresetStore presetStore,
+        IFileSystemPathSemantics pathSemantics)
     {
-    }
-
-    /// <summary>Creates a new status command using injectable dependencies.</summary>
-    internal SquadStatusCommand(
-        ISquadUserPaths? userPaths = null,
-        SquadStateStore? stateStore = null,
-        ISquadGlobalRootResolver? globalRoots = null,
-        Func<string, string?>? environmentReader = null)
-    {
-        _userPaths = userPaths;
+        ArgumentNullException.ThrowIfNull(stateStore);
+        ArgumentNullException.ThrowIfNull(migration);
+        ArgumentNullException.ThrowIfNull(globalRoots);
+        ArgumentNullException.ThrowIfNull(presetStore);
+        ArgumentNullException.ThrowIfNull(pathSemantics);
         _stateStore = stateStore;
+        _migration = migration;
         _globalRoots = globalRoots;
-        _environmentReader = environmentReader;
+        _presetStore = presetStore;
+        _pathSemantics = pathSemantics;
     }
 
     /// <inheritdoc />
@@ -41,8 +50,7 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        SquadStateStore stateStore =
-            _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths, _environmentReader);
+        ISquadStateStore stateStore = _stateStore;
 
         // Coalesce the positional path with --path; invalid client input returns exit
         // code 2 before any resolution or work
@@ -64,15 +72,14 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
         // directory is, or at the recorded root of a legacy single-root receipt the migration has just copied.
         string projectRoot = SquadCommandComposition.ResolveTargetRoot(effectivePath);
         SquadCommandComposition.WriteMigrationNotes(SquadCommandComposition.EnsureStateMigrated(
-            stateStore,
+            _migration,
             Environment.CurrentDirectory,
             scope == SquadDeploymentScope.Project ? projectRoot : null,
             false));
         string targetRoot = scope == SquadDeploymentScope.Global
             ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, false)
             : projectRoot;
-        ISquadGlobalRootResolver globalRoots =
-            _globalRoots ?? SquadCommandComposition.ResolveGlobalRoots(_environmentReader);
+        ISquadGlobalRootResolver globalRoots = _globalRoots;
 
         SquadReceipt? receipt = stateStore.ReadReceipt(targetRoot, scope);
         IReadOnlyList<(string TargetPreset, string Version)> instances = scope == SquadDeploymentScope.Global
@@ -126,7 +133,7 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
                 // beneath the recorded root for a legacy single-root receipt — see
                 // ResolveOwnedFilePath). Joining targetRoot directly would check a global
                 // deployment against the project directory and report every file missing.
-                fullPath = SquadDeploymentPlan.ResolveOwnedFilePath(receipt, targetRoot, globalRoots, file);
+                fullPath = SquadDeploymentPlan.ResolveOwnedFilePath(receipt, targetRoot, globalRoots, file, _pathSemantics);
             }
             catch (Exception)
             {
@@ -199,7 +206,7 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
     /// shape are read from the receipt, so reporting never depends on a render that may no
     /// longer exist and never needs a scope of its own to say where a global block lives.
     /// </remarks>
-    private static void ReportOwnedBlock(
+    private void ReportOwnedBlock(
         SquadOwnedBlock block,
         SquadReceipt receipt,
         string targetRoot,
@@ -222,7 +229,7 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
                 receipt,
                 targetRoot,
                 globalRoots,
-                new SquadOwnedFile(block.RelativePath, new string('0', 64), block.Target, false));
+                new SquadOwnedFile(block.RelativePath, new string('0', 64), block.Target, false), _pathSemantics);
         }
         catch (Exception)
         {
@@ -312,7 +319,7 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
     ///     Inspects and renders the active model presets recorded in the deployment lock.
     /// </summary>
     /// <returns><see langword="true" /> when a recorded preset file is missing; otherwise <see langword="false" />.</returns>
-    private static (bool HasMissingPreset, bool HasLockError) WriteModelPresets(SquadStateStore stateStore,
+    private (bool HasMissingPreset, bool HasLockError) WriteModelPresets(ISquadStateStore stateStore,
         string targetRoot, SquadDeploymentScope scope)
     {
         SquadLock? squadLock;
@@ -335,7 +342,7 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
         }
 
         AnsiConsole.MarkupLine("Model presets:");
-        SquadModelPresetStore presetStore = new(stateStore.UserPaths);
+        ISquadModelPresetStore presetStore = _presetStore;
         bool hasMissingPreset = false;
 
         foreach (KeyValuePair<SquadTarget, SquadAppliedPreset> entry in squadLock.ModelPresets.OrderBy(
@@ -387,7 +394,7 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
     ///     rebuild it.
     /// </remarks>
     /// <returns><see langword="false" /> when the registry could not be read; otherwise <see langword="true" />.</returns>
-    private static bool WriteRegisteredProjects(SquadStateStore stateStore)
+    private static bool WriteRegisteredProjects(ISquadStateStore stateStore)
     {
         IReadOnlyList<SquadProjectRegistryEntry> projects;
         try
@@ -424,7 +431,7 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
     /// <summary>
     ///     Inspects and returns the deployed harness instances recorded in the instance state directory.
     /// </summary>
-    private static List<(string TargetPreset, string Version)> GetDeployedInstances(SquadStateStore stateStore)
+    private static List<(string TargetPreset, string Version)> GetDeployedInstances(ISquadStateStore stateStore)
     {
         string home = stateStore.UserPaths.HomeDirectory;
         string instanceStateBase = Path.Combine(home, ".kyber-weave", "squad", "instance-state");

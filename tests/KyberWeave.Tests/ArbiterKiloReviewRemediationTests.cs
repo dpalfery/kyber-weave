@@ -1,3 +1,5 @@
+using KyberWeave.Data.Configuration;
+using KyberWeave.Tests.Arbiter;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -5,11 +7,13 @@ using KyberWeave.Arbiter;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Update;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Domain.Doctor;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
@@ -27,12 +31,12 @@ public sealed class ArbiterKiloReviewRemediationTests
     public async Task Item1_CursorRenderer_GlobalScope_EmitsHooksJsonDirectlyUnderGlobalRoot()
     {
         using ArbiterSquadFixture fixture = ArbiterSquadFixture.Create();
-        SquadRendererRegistry registry = new([new CursorRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new CursorRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: fixture.Path,
             Targets: [SquadTarget.Cursor],
             Scope: SquadDeploymentScope.Global,
-            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)));
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)).Prepared());
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         SquadRenderedBlock block = Assert.Single(result.Blocks ?? []);
@@ -79,12 +83,12 @@ public sealed class ArbiterKiloReviewRemediationTests
             skills: []
             """);
 
-        SquadRendererRegistry registry = new([new CopilotRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new CopilotRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: fixture.Path,
             Targets: [SquadTarget.Copilot],
             Scope: SquadDeploymentScope.Project,
-            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)));
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)).Prepared());
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         Assert.DoesNotContain(result.Files, f => f.RelativePath == ".github/hooks/kyber-arbiter.json");
@@ -94,12 +98,12 @@ public sealed class ArbiterKiloReviewRemediationTests
     public async Task Item4_ClaudeRenderer_GlobalScope_OmitsFrontmatterHooksOnAgents()
     {
         using ArbiterSquadFixture fixture = ArbiterSquadFixture.Create();
-        SquadRendererRegistry registry = new([new ClaudeRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: fixture.Path,
             Targets: [SquadTarget.Claude],
             Scope: SquadDeploymentScope.Global,
-            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)));
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)).Prepared());
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         foreach (SquadDeploymentFile file in result.Files.Where(f => f.RelativePath.EndsWith(".md", StringComparison.Ordinal)))
@@ -167,7 +171,7 @@ public sealed class ArbiterKiloReviewRemediationTests
         Assert.Contains("failed to load project config", combined, StringComparison.OrdinalIgnoreCase);
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
-            Composition.LoadHostConfig(projectDir.Path, HookScope.Global, homeDir.Path));
+            ArbiterTestServices.LoadHostConfig(projectDir.Path, HookScope.Global, homeDir.Path));
         Assert.Contains("KW-ARB-HOOK-001", ex.Message, StringComparison.Ordinal);
         Assert.Contains("failed to load project config", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -201,16 +205,16 @@ public sealed class ArbiterKiloReviewRemediationTests
         string configPath = Path.Combine(configDir, "kyber-weave.yml");
 
         File.WriteAllText(configPath, "");
-        Assert.Empty(UserHostConfig.ReadGlobalTargets(home.Path));
+        Assert.Empty(new FileUserHostConfigStore().ReadGlobalTargets(home.Path));
 
         File.WriteAllText(configPath, "   \n\r\n  ");
-        Assert.Empty(UserHostConfig.ReadGlobalTargets(home.Path));
+        Assert.Empty(new FileUserHostConfigStore().ReadGlobalTargets(home.Path));
 
         File.WriteAllText(configPath, "arbiter: : malformed yaml");
-        Assert.Empty(UserHostConfig.ReadGlobalTargets(home.Path));
+        Assert.Empty(new FileUserHostConfigStore().ReadGlobalTargets(home.Path));
 
         File.WriteAllText(configPath, "arbiter:\n  global:\n    targets: 12345");
-        Assert.Empty(UserHostConfig.ReadGlobalTargets(home.Path));
+        Assert.Empty(new FileUserHostConfigStore().ReadGlobalTargets(home.Path));
     }
 
     [Fact]
@@ -278,11 +282,11 @@ public sealed class ArbiterKiloReviewRemediationTests
     }
 
     [Fact]
-    public void Item12_ArbiterCommandComposition_TryResolveConfig_EmptyRepoRoot_FailsCleanly()
+    public void Item12_ArbiterConfigResolver_TryResolve_EmptyRepoRoot_FailsCleanly()
     {
         DiagnosticReport report = new();
-        ArbiterSettings settings = new() { Path = "" };
-        bool success = ArbiterCommandComposition.TryResolveConfig(settings, report, out KyberWeaveConfig _, out string? _);
+        using ArbiterTestHost host = ArbiterTestHost.Create();
+        bool success = host.Get<IArbiterConfigResolver>().TryResolve("", null, report, out KyberWeaveConfig _, out string? _);
 
         Assert.False(success);
         Assert.NotEmpty(report.Items);
@@ -296,7 +300,7 @@ public sealed class ArbiterKiloReviewRemediationTests
         string home = Path.Combine(temp.Path, "home");
         Directory.CreateDirectory(home);
 
-        UserHostConfig.WriteGlobalTargets(home, ["kilo", "opencode", "pi", "copilot", "cursor"]);
+        new FileUserHostConfigStore().WriteGlobalTargets(home, ["kilo", "opencode", "pi", "copilot", "cursor"]);
 
         SquadGlobalRoots roots = new(_ => null, home);
         string kiloRoot = roots.ResolveGlobalRoot(SquadTarget.Kilo);
@@ -356,7 +360,7 @@ public sealed class ArbiterKiloReviewRemediationTests
 
         Func<string, string?> env = name => name == "HOME" ? home : null;
         List<string> log = [];
-        ArbiterHookRefresher refresher = new(log.Add, env);
+        ArbiterHookRefresher refresher = UpdateTestServices.Refresher(env, log.Add);
 
         ArbiterHookRefreshResult refreshResult = refresher.Refresh([]);
         Assert.Equal(5, refreshResult.Refreshed);
@@ -412,7 +416,7 @@ public sealed class ArbiterKiloReviewRemediationTests
 
         using (FileStream lockStream = new(configPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
         {
-            IReadOnlyList<string> targets = UserHostConfig.ReadGlobalTargets(home.Path);
+            IReadOnlyList<string> targets = new FileUserHostConfigStore().ReadGlobalTargets(home.Path);
             Assert.Empty(targets);
         }
     }
@@ -423,11 +427,11 @@ public sealed class ArbiterKiloReviewRemediationTests
         using TempDirectory home = new();
 
         ThrowingGlobalRoots throwingRoots = new(new ArgumentException("Invalid or relative root override"));
-        string? result = ArbiterHookRefresher.ResolveGlobalHookPath(SquadTarget.Cursor, home.Path, globalRoots: throwingRoots);
+        string? result = ArbiterGlobalHookPaths.Resolve(SquadTarget.Cursor, home.Path, globalRoots: throwingRoots);
         Assert.Null(result);
 
         Func<string, string?> envWithRelativePath = varName => varName == "CURSOR_CONFIG_DIR" ? "relative/path" : null;
-        string? envResult = ArbiterHookRefresher.ResolveGlobalHookPath(SquadTarget.Cursor, home.Path, environmentReader: envWithRelativePath);
+        string? envResult = ArbiterGlobalHookPaths.Resolve(SquadTarget.Cursor, home.Path, environmentReader: envWithRelativePath);
         Assert.Null(envResult);
     }
 

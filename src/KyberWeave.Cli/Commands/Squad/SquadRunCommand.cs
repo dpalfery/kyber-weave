@@ -1,5 +1,6 @@
 using System.Diagnostics;
-using KyberWeave.Core.Processes;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using Spectre.Console;
@@ -15,38 +16,44 @@ namespace KyberWeave.Cli.Commands.Squad;
 ///     and linked, redirects configuration to the isolated instance root, and passes through
 ///     execution control and exit codes to the underlying harness process.
 /// </remarks>
-public sealed class SquadRunCommand : Command<SquadRunSettings>
+internal sealed class SquadRunCommand : Command<SquadRunSettings>
 {
-    private readonly Func<SquadTarget, string, Task<SquadInstanceEnsureResult>>? _ensureOverride;
-    private readonly Func<string, string?>? _findOnPath;
-    private readonly Func<string, string?>? _getEnv;
+    private readonly ISquadInstanceService _instances;
+    private readonly ISquadModelPresetSelectionStore _selectionStore;
+    private readonly ISquadModelPresetStore _presetStore;
+    private readonly ISquadHarnessLauncher _launcher;
+    private readonly IProcessEnvironment _environment;
+    private readonly SquadRunOptions _options;
     private readonly Func<ProcessStartInfo, int>? _runner;
-    private readonly SquadModelPresetSelectionStore? _selectionStore;
-    private readonly ISquadUserPaths? _userPaths;
-    private readonly string? _workingDirectory;
 
-    /// <summary>Creates a new squad run command using default runtime dependencies.</summary>
-    public SquadRunCommand()
-    {
-    }
-
-    /// <summary>Creates a new squad run command using injectable dependencies.</summary>
+    /// <summary>Creates the run command over the Squad services the host registers.</summary>
+    /// <param name="instances">Ensures the instance the harness runs in.</param>
+    /// <param name="selectionStore">Reads the preset the project selected.</param>
+    /// <param name="presetStore">Loads the selected preset.</param>
+    /// <param name="launcher">Builds the harness start information and starts it on the console.</param>
+    /// <param name="environment">Reads the process environment and working directory.</param>
+    /// <param name="options">How the harness process is found and started; the defaults use the real process.</param>
     public SquadRunCommand(
-        ISquadUserPaths? userPaths = null,
-        SquadModelPresetSelectionStore? selectionStore = null,
-        Func<ProcessStartInfo, int>? runner = null,
-        Func<string, string?>? getEnv = null,
-        Func<string, string?>? findOnPath = null,
-        string? workingDirectory = null,
-        Func<SquadTarget, string, Task<SquadInstanceEnsureResult>>? ensureOverride = null)
+        ISquadInstanceService instances,
+        ISquadModelPresetSelectionStore selectionStore,
+        ISquadModelPresetStore presetStore,
+        ISquadHarnessLauncher launcher,
+        IProcessEnvironment environment,
+        SquadRunOptions options)
     {
-        _userPaths = userPaths;
+        ArgumentNullException.ThrowIfNull(instances);
+        ArgumentNullException.ThrowIfNull(selectionStore);
+        ArgumentNullException.ThrowIfNull(presetStore);
+        ArgumentNullException.ThrowIfNull(launcher);
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(options);
+        _instances = instances;
         _selectionStore = selectionStore;
-        _runner = runner;
-        _getEnv = getEnv;
-        _findOnPath = findOnPath;
-        _workingDirectory = workingDirectory;
-        _ensureOverride = ensureOverride;
+        _presetStore = presetStore;
+        _launcher = launcher;
+        _environment = environment;
+        _options = options;
+        _runner = options.Runner;
     }
 
     /// <inheritdoc />
@@ -62,7 +69,7 @@ public sealed class SquadRunCommand : Command<SquadRunSettings>
             return 2;
         }
 
-        string projectRoot = Path.GetFullPath(_workingDirectory ?? ".");
+        string projectRoot = Path.GetFullPath(_options.WorkingDirectory ?? _environment.CurrentDirectory);
 
         SquadTarget target;
         try
@@ -83,11 +90,7 @@ public sealed class SquadRunCommand : Command<SquadRunSettings>
             return 2;
         }
 
-        ISquadUserPaths userPaths = _userPaths ?? SquadCommandComposition.ResolveUserPaths();
-        SquadModelPresetSelectionStore
-            selectionStore = _selectionStore ?? new SquadModelPresetSelectionStore(userPaths);
-
-        SquadModelPresetSelection? selection = selectionStore.Read(projectRoot);
+        SquadModelPresetSelection? selection = _selectionStore.Read(projectRoot);
         if (selection is null || !selection.ModelPresets.TryGetValue(target, out string? presetName) ||
             string.IsNullOrWhiteSpace(presetName))
         {
@@ -110,34 +113,25 @@ public sealed class SquadRunCommand : Command<SquadRunSettings>
         SquadInstanceEnsureResult ensureResult;
         try
         {
-            if (_ensureOverride is not null)
+            SquadModelPreset? preset = null;
+            try
             {
-                ensureResult = _ensureOverride(target, presetName).GetAwaiter().GetResult();
+                preset = _presetStore.TryLoad(presetName);
             }
-            else
+            catch (ArgumentException)
             {
-                SquadModelPresetStore presetStore = new(userPaths);
-                SquadModelPreset? preset = null;
-                try
-                {
-                    preset = presetStore.TryLoad(presetName);
-                }
-                catch (ArgumentException)
-                {
-                }
-
-                if (preset is null)
-                {
-                    string targetToken = SquadTargetCatalog.GetToken(target);
-                    SquadCommandComposition.WriteLine(
-                        $"[red]error:[/] Model preset '{Markup.Escape(presetName)}' for target '{Markup.Escape(targetToken)}' not found.");
-                    return 1;
-                }
-
-                SquadInstanceService instanceService = SquadCommandComposition.CreateInstanceService(userPaths);
-                ensureResult = instanceService.EnsureAsync(target, presetName, cancellationToken).GetAwaiter()
-                    .GetResult();
             }
+
+            if (preset is null)
+            {
+                string targetToken = SquadTargetCatalog.GetToken(target);
+                SquadCommandComposition.WriteLine(
+                    $"[red]error:[/] Model preset '{Markup.Escape(presetName)}' for target '{Markup.Escape(targetToken)}' not found.");
+                return 1;
+            }
+
+            ensureResult = _instances.EnsureAsync(target, presetName, cancellationToken).GetAwaiter()
+                .GetResult();
         }
         catch (SquadLinkException ex)
         {
@@ -158,12 +152,12 @@ public sealed class SquadRunCommand : Command<SquadRunSettings>
         ProcessStartInfo startInfo;
         try
         {
-            startInfo = SquadHarnessLauncher.BuildStartInfo(
+            startInfo = _launcher.PrepareLaunch(
                 row,
                 ensureResult.InstanceRoot,
                 settings.Args,
-                _getEnv ?? Environment.GetEnvironmentVariable,
-                _findOnPath ?? (name => SquadHarnessLauncher.FindOnPath(name, _getEnv)),
+                _options.GetEnv ?? _environment.GetVariable,
+                _options.FindOnPath ?? (name => _launcher.FindOnPath(name, _options.GetEnv)),
                 OperatingSystem.IsWindows());
         }
         catch (FileNotFoundException ex)
@@ -179,7 +173,18 @@ public sealed class SquadRunCommand : Command<SquadRunSettings>
 
         startInfo.WorkingDirectory = projectRoot;
 
-        Func<ProcessStartInfo, int> runner = _runner ?? ProcessRunner.RunInteractive;
+        Func<ProcessStartInfo, int> runner = _runner ?? _launcher.RunInteractive;
         return runner(startInfo);
     }
 }
+
+/// <summary>How <c>squad run</c> finds and starts the harness process.</summary>
+/// <param name="Runner">Starts the process and returns its exit code; null runs it on the console.</param>
+/// <param name="GetEnv">Reads environment variables; null reads the process environment.</param>
+/// <param name="FindOnPath">Finds an executable on the path; null searches the process path.</param>
+/// <param name="WorkingDirectory">The project root; null is the current directory.</param>
+internal sealed record SquadRunOptions(
+    Func<ProcessStartInfo, int>? Runner = null,
+    Func<string, string?>? GetEnv = null,
+    Func<string, string?>? FindOnPath = null,
+    string? WorkingDirectory = null);

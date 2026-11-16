@@ -58,8 +58,8 @@ public sealed class ClaudeHandbackTests
     private static (int Exit, string Stdout) Run(
         string stdin, string? caller, ScriptedEngine engine)
     {
-        HookCommand command = new(
-            HarnessAdapterRegistry.CreateDefault(engine),
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
             _ => EnabledConfig(),
             () => "decision-test-1");
         using StringWriter stdout = new();
@@ -202,8 +202,8 @@ public sealed class ClaudeHandbackTests
     public void Handback_IsClassifiedBeforeConfigLoad()
     {
         int loads = 0;
-        HookCommand command = new(
-            HarnessAdapterRegistry.CreateDefault(new ScriptedEngine()),
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(new ScriptedEngine()),
             root => { loads++; return EnabledConfig(); },
             () => "decision-test-1");
         using StringWriter stdout = new();

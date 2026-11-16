@@ -1,4 +1,11 @@
+using KyberWeave.Data.Configuration;
+using KyberWeave.Cli;
 using KyberWeave.Cli.Commands.Arbiter;
+using KyberWeave.Cli.Commands.Squad;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Squad.Release;
+using KyberWeave.Tests.Arbiter;
+using Microsoft.Extensions.DependencyInjection;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
@@ -28,41 +35,30 @@ public sealed class ArbiterInstallCommandTests : IDisposable
     private readonly TempDirectory _temp = new();
     private readonly TempDirectory _home = new();
     private readonly FakeCredentialStore _store = new();
-    private readonly AsyncLocal<bool> _isolated = new();
+    private readonly ArbiterTestHost _host;
 
     private string? _keyStdinValue;
     private string? _keyPromptValue;
 
-    private readonly Func<string> _savedHome;
-    private readonly Func<ICredentialStore> _savedStore;
-    private readonly Func<string, string?> _savedEnvironment;
-    private readonly Func<string?> _savedKeyStdin;
-    private readonly Func<string?> _savedKeyPrompt;
-
     public ArbiterInstallCommandTests()
     {
-        _savedHome = ArbiterCommandComposition.HomeDirectory;
-        _savedStore = ArbiterCommandComposition.CredentialStore;
-        _savedEnvironment = ArbiterCommandComposition.GetEnvironmentVariable;
-        _savedKeyStdin = ArbiterCommandComposition.KeyStdinReader;
-        _savedKeyPrompt = ArbiterCommandComposition.KeyPrompt;
-
-        ArbiterCommandComposition.HomeDirectory = () => _isolated.Value ? _home.Path : _savedHome();
-        ArbiterCommandComposition.CredentialStore = () => _isolated.Value ? _store : _savedStore();
-        ArbiterCommandComposition.GetEnvironmentVariable = _ => _isolated.Value ? null : _savedEnvironment(_);
-        ArbiterCommandComposition.KeyStdinReader = () => _isolated.Value ? _keyStdinValue : _savedKeyStdin();
-        ArbiterCommandComposition.KeyPrompt = () => _isolated.Value ? _keyPromptValue : _savedKeyPrompt();
+        _host = ArbiterTestHost.Create(RegisterFakes);
     }
 
     public void Dispose()
     {
-        ArbiterCommandComposition.HomeDirectory = _savedHome;
-        ArbiterCommandComposition.CredentialStore = _savedStore;
-        ArbiterCommandComposition.GetEnvironmentVariable = _savedEnvironment;
-        ArbiterCommandComposition.KeyStdinReader = _savedKeyStdin;
-        ArbiterCommandComposition.KeyPrompt = _savedKeyPrompt;
+        _host.Dispose();
         _temp.Dispose();
         _home.Dispose();
+    }
+
+    // The commands resolve the injected home, store and key input, never the real home, keychain or console, and read no
+    // environment variable.
+    private void RegisterFakes(IServiceCollection services)
+    {
+        services.AddSingleton<IProcessEnvironment>(new FakeProcessEnvironment(() => _home.Path));
+        services.AddSingleton<ICredentialStore>(_store);
+        services.AddSingleton<IArbiterKeyInput>(new FakeArbiterKeyInput(() => _keyStdinValue, () => _keyPromptValue));
     }
 
     /// <summary>
@@ -73,7 +69,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
     {
         string host = NewDir("install-bad-target");
 
-        ArbiterInstallCommand command = new();
+        ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterInstallSettings { Path = host, Target = "hal9000", Provider = "none" }));
@@ -94,9 +90,9 @@ public sealed class ArbiterInstallCommandTests : IDisposable
     public void Install_GlobalScope_ExplicitGlobal_IsAcceptedAndWritesToHomeConfigAndGlobalRoot()
     {
         string host = NewDir("install-global");
-        UserHostConfig.WriteGlobalTargets(_home.Path, ["claude", "warp"]);
+        new FileUserHostConfigStore().WriteGlobalTargets(_home.Path, ["claude", "warp"]);
 
-        ArbiterInstallCommand command = new();
+        ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterInstallSettings
@@ -115,7 +111,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
         string globalRoot = new SquadGlobalRoots(_ => null, _home.Path).ResolveGlobalRoot(SquadTarget.Claude);
         Assert.True(Directory.Exists(globalRoot), "the explicit global install should write beneath the target's global root");
 
-        string config = File.ReadAllText(UserHostConfig.GetPath(_home.Path));
+        string config = File.ReadAllText(UserHostConfigPath.Of(_home.Path));
         Assert.Contains("claude", config, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("global", config, StringComparison.OrdinalIgnoreCase);
     }
@@ -129,7 +125,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
     {
         string host = NewDir("install-empty-provider");
 
-        ArbiterInstallCommand command = new();
+        ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = string.Empty, Project = true }));
@@ -151,7 +147,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
         WriteProviderConfig(host, "systemone");
         _store.Write(TypeSafeOrigin, "stored-key");
 
-        CommandExecution execution = Capture(() => new ArbiterInstallCommand().Execute(
+        CommandExecution execution = Capture(() => _host.Command<ArbiterInstallCommand>().Execute(
             null!,
             new ArbiterInstallSettings { Path = host, Target = "kilo", Project = true }));
 
@@ -168,7 +164,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
         string host = NewDir("install-change-provider");
         WriteProviderConfig(host, "systemone");
 
-        CommandExecution execution = Capture(() => new ArbiterInstallCommand().Execute(
+        CommandExecution execution = Capture(() => _host.Command<ArbiterInstallCommand>().Execute(
             null!,
             new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = "none", Project = true }));
 
@@ -185,7 +181,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
     {
         string host = NewDir("install-fresh-provider");
 
-        CommandExecution execution = Capture(() => new ArbiterInstallCommand().Execute(
+        CommandExecution execution = Capture(() => _host.Command<ArbiterInstallCommand>().Execute(
             null!,
             new ArbiterInstallSettings { Path = host, Target = "kilo", Project = true }));
 
@@ -206,7 +202,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
         const string key = "TS-INSTALL-KEY-7f3a9c1e4b2d";
         string host = NewDir("install-key");
 
-        ArbiterInstallCommand command = new();
+        ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterInstallSettings
@@ -242,7 +238,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
         _keyPromptValue = null;
         string host = NewDir("install-missing-key");
 
-        ArbiterInstallCommand command = new();
+        ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = "systemone" }));
@@ -260,7 +256,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
     {
         const string key = "TS-INSTALL-REPEAT-1a2b3c4d5e6f";
         string host = NewDir("install-repeat");
-        ArbiterInstallCommand command = new();
+        ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
 
         CommandExecution first = Capture(() => command.Execute(
             null!,
@@ -307,7 +303,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
             "# keep this comment\n" +
             "custom-unrelated-key: custom-value\n");
 
-        ArbiterInstallCommand command = new();
+        ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = "none", Project = true }));
@@ -339,12 +335,18 @@ public sealed class ArbiterInstallCommandTests : IDisposable
         FakeSquadRenderer renderer = new();
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home-e2e"));
         SquadStateStore stateStore = new(userPaths);
-        ArbiterInstallCommand command = new(
-            userPaths: userPaths,
-            stateStore: stateStore,
-            releaseSource: releaseSource,
-            renderer: renderer,
-            isInteractive: false);
+        using ArbiterTestHost e2eHost = ArbiterTestHost.Create(services =>
+        {
+            RegisterFakes(services);
+            services.AddSingleton<ISquadUserPaths>(userPaths);
+            services.AddSingleton(stateStore);
+            services.AddSingleton<ISquadStateStore>(stateStore);
+            services.AddSingleton<ISquadReleaseSource>(releaseSource);
+            services.AddSingleton<ISquadInstanceReleaseSource>(new ForwardingInstanceReleaseSource(releaseSource));
+            services.AddSingleton<ISquadRenderer>(renderer);
+            services.AddSingleton(new SquadConsoleOptions(IsInteractive: false));
+        });
+        ArbiterInstallCommand command = e2eHost.Command<ArbiterInstallCommand>();
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -379,9 +381,9 @@ public sealed class ArbiterInstallCommandTests : IDisposable
     public void Install_DefaultScope_GlobalWritesToHomeConfigAndGlobalRoot()
     {
         string host = NewDir("install-global-default");
-        UserHostConfig.WriteGlobalTargets(_home.Path, ["claude", "warp"]);
+        new FileUserHostConfigStore().WriteGlobalTargets(_home.Path, ["claude", "warp"]);
 
-        ArbiterInstallCommand command = new();
+        ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterInstallSettings
@@ -399,7 +401,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
         string globalRoot = new SquadGlobalRoots(_ => null, _home.Path).ResolveGlobalRoot(SquadTarget.Claude);
         Assert.True(Directory.Exists(globalRoot), "the default install should write beneath the target's global root");
 
-        string config = File.ReadAllText(UserHostConfig.GetPath(_home.Path));
+        string config = File.ReadAllText(UserHostConfigPath.Of(_home.Path));
         Assert.Contains("claude", config, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("global", config, StringComparison.OrdinalIgnoreCase);
     }
@@ -413,11 +415,11 @@ public sealed class ArbiterInstallCommandTests : IDisposable
     public void Install_DefaultGlobalScope_WithoutUserConfig_CreatesUserConfigAndNoDocsScaffold()
     {
         string host = NewDir("install-global-default-empty-home");
-        Assert.False(File.Exists(UserHostConfig.GetPath(_home.Path)));
+        Assert.False(File.Exists(UserHostConfigPath.Of(_home.Path)));
         Assert.False(Directory.Exists(Path.Combine(_home.Path, "docs")));
         Assert.False(File.Exists(Path.Combine(_home.Path, "AGENTS.md")));
 
-        ArbiterInstallCommand command = new();
+        ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterInstallSettings
@@ -428,7 +430,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
             }));
 
         Assert.Equal(0, execution.ExitCode);
-        Assert.True(File.Exists(UserHostConfig.GetPath(_home.Path)), "the default global install should create the user config");
+        Assert.True(File.Exists(UserHostConfigPath.Of(_home.Path)), "the default global install should create the user config");
         Assert.False(Directory.Exists(Path.Combine(_home.Path, "docs")), "a global install must not scaffold docs under the home directory");
         Assert.False(File.Exists(Path.Combine(_home.Path, "AGENTS.md")), "a global install must not scaffold AGENTS.md under the home directory");
     }
@@ -443,9 +445,9 @@ public sealed class ArbiterInstallCommandTests : IDisposable
     public void Install_D13Output_ListsTierPathReasonAndTrustStepForEachGlobalHarness()
     {
         string host = NewDir("install-d13");
-        UserHostConfig.WriteGlobalTargets(_home.Path, ["claude", "warp", "copilot"]);
+        new FileUserHostConfigStore().WriteGlobalTargets(_home.Path, ["claude", "warp", "copilot"]);
 
-        ArbiterInstallCommand command = new();
+        ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterInstallSettings
@@ -476,12 +478,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
         {
-            CommandApp app = new();
-            app.Configure(config =>
-            {
-                config.UseStrictParsing();
-                config.AddBranch("arbiter", branch => branch.AddCommand<ArbiterInstallCommand>("install"));
-            });
+            CommandApp app = CliApplication.Create();
             return app.Run(["arbiter", "install", "--target", "claude", "--path", host]);
         });
 
@@ -499,12 +496,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
     {
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
         {
-            CommandApp app = new();
-            app.Configure(config =>
-            {
-                config.UseStrictParsing();
-                config.AddBranch("arbiter", branch => branch.AddCommand<ArbiterInstallCommand>("install"));
-            });
+            CommandApp app = CliApplication.Create();
             return app.Run(["arbiter", "install", "--target", "claude", "--global", "--project"]);
         });
 
@@ -521,7 +513,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
     {
         string host = NewDir("install-dry-run");
 
-        ArbiterInstallCommand command = new();
+        ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterInstallSettings
@@ -552,7 +544,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
         string config = Path.Combine(directory, "kyber-weave.yml");
         File.WriteAllText(config, yaml);
 
-        ArbiterInstallCommand command = new();
+        ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = "none", Project = true }));
@@ -572,7 +564,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
     {
         string host = NewDir("install-dry-run-missing-config");
 
-        ArbiterInstallCommand command = new();
+        ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterInstallSettings
@@ -603,8 +595,8 @@ public sealed class ArbiterInstallCommandTests : IDisposable
     public void Install_ThreeGlobalTargetsSharingOneHookFileName_AllExitZeroAndOneReceiptHoldsThreeBlocks()
     {
         string host = NewDir("install-three-global-blocks");
-        UserHostConfig.WriteGlobalTargets(_home.Path, ["cursor", "codex", "factory"]);
-        ArbiterInstallCommand command = new();
+        new FileUserHostConfigStore().WriteGlobalTargets(_home.Path, ["cursor", "codex", "factory"]);
+        ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
 
         CommandExecution cursor = Capture(() => command.Execute(
             null!,
@@ -671,17 +663,20 @@ public sealed class ArbiterInstallCommandTests : IDisposable
         return dir;
     }
 
-    private CommandExecution Capture(Func<int> execute)
+    private static CommandExecution Capture(Func<int> execute)
     {
-        _isolated.Value = true;
-        try
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
+        return new CommandExecution(execution.Result, execution.Output);
+    }
+
+    /// <summary>The instance release source a test points at one fake release source.</summary>
+    private sealed class ForwardingInstanceReleaseSource(ISquadReleaseSource inner) : ISquadInstanceReleaseSource
+    {
+        public Task<SquadReleaseResult> DownloadAndExtractAsync(SquadReleaseRequest request, CancellationToken cancellationToken) =>
+            inner.DownloadAndExtractAsync(request, cancellationToken);
+
+        public void Dispose()
         {
-            CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
-            return new CommandExecution(execution.Result, execution.Output);
-        }
-        finally
-        {
-            _isolated.Value = false;
         }
     }
 

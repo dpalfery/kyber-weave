@@ -1,20 +1,15 @@
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Diagnostics;
-using KyberWeave.Core.Skills.Model;
-using KyberWeave.Core.Skills.Validation;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Skills;
 
-public sealed class ValidateCommand : Command<AnalysisSettings>
+public sealed class ValidateCommand(ISkillGovernanceService skills) : Command<AnalysisSettings>
 {
     /// <inheritdoc />
     public override int Execute(CommandContext context, AnalysisSettings settings, CancellationToken cancellationToken)
     {
-        DiagnosticReport report = new DiagnosticReport();
-        SkillSet set = CommandHelpers.LoadOrReport(settings.Path, report);
-
-        foreach (Skill skill in set.Skills)
-            report.AddRange(SpecValidator.Validate(skill));
+        DiagnosticReport report = skills.Validate(settings.Path);
 
         CommandHelpers.Finish(report, settings, "skill validate", "Skill");
         return report.HasErrors ? 1 : 0;

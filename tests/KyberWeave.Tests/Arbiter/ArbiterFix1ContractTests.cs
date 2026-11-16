@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using KyberWeave.Tests.Fakes;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Arbiter;
@@ -97,13 +98,17 @@ public sealed class ArbiterFix1ContractTests : IDisposable
         Assert.Empty(runner.Calls);
     }
 
-    // F3: no hand-written `unsafe` in Core outside generated LibraryImport stubs.
+    // F3: no hand-written `unsafe` in Core or Data outside generated LibraryImport stubs.
     [Fact]
     public void Fix3_CoreHasNoHandWrittenUnsafe()
     {
-        string coreRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Core");
+        string[] roots =
+        [
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Core"),
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Data"),
+        ];
         List<string> offenders = [];
-        foreach (string file in Directory.EnumerateFiles(coreRoot, "*.cs", SearchOption.AllDirectories))
+        foreach (string file in roots.SelectMany(root => Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)))
         {
             foreach (string line in StripCommentsAndStrings(File.ReadAllText(file)).Split('\n'))
             {
@@ -144,7 +149,7 @@ public sealed class ArbiterFix1ContractTests : IDisposable
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Claude],
             Scope: SquadDeploymentScope.Project,
-            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)));
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)).Prepared());
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         SquadDeploymentFile file = Assert.Single(

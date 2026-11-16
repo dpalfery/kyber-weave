@@ -1,10 +1,12 @@
-using KyberWeave.Core.CodeGraph;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Docs.Search;
+using KyberWeave.Domain.CodeGraph;
 using KyberWeave.Mcp;
 using Xunit;
+using KyberWeave.Tests.Fakes;
 
 namespace KyberWeave.Tests;
 
@@ -55,7 +57,7 @@ public sealed class McpDocsToolsRefreshOptInTests : IDisposable
     [Fact]
     public void DocsToolsBuiltWithoutARefreshScheduleAnswerFromTheDocumentsOnDisk()
     {
-        DocsScaffolder.Scaffold(_root.Path);
+        DocsTestCommands.Scaffolding.Scaffold(_root.Path);
         McpDeclarationFixture.RequireCodeGraph(_root.Path);
 
         string response = ToolsWithoutARefreshSchedule(_root.Path).Explore(ScaffoldedDocumentId);
@@ -82,7 +84,7 @@ public sealed class McpDocsToolsRefreshOptInTests : IDisposable
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
 
-        return new DocsTools(host);
+        return DocsToolsComposition.Create(host);
     }
 
     /// <summary>A CodeGraph port that reports no readable index, as a runner without one does.</summary>

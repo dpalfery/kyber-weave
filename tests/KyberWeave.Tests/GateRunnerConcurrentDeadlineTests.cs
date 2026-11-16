@@ -43,7 +43,7 @@ public sealed class GateRunnerConcurrentDeadlineTests : IDisposable
         ReviewGate quick = new("quick", ["git", "--version"], TimeoutSeconds: 30);
 
         long start = Stopwatch.GetTimestamp();
-        GateReport report = GateRunner.Run(
+        GateReport report = ReviewTestServices.Gates.Run(
             new ReviewConfig { Gates = [slow, quick] }, _root.Path, deadline: TimeSpan.FromSeconds(2));
 
         Assert.True(
@@ -71,7 +71,7 @@ public sealed class GateRunnerConcurrentDeadlineTests : IDisposable
         ReviewGate after = new("after", ["git", "--version"], TimeoutSeconds: 30);
 
         long start = Stopwatch.GetTimestamp();
-        GateReport report = GateRunner.Run(
+        GateReport report = ReviewTestServices.Gates.Run(
             new ReviewConfig { Gates = [slow, pivot, after] },
             _root.Path,
             stopOnBlockingFailure: true,
@@ -97,7 +97,7 @@ public sealed class GateRunnerConcurrentDeadlineTests : IDisposable
 
         ReviewGate late = new("late", MarkStartedThenSleep30(), TimeoutSeconds: 60) { Concurrent = true };
 
-        GateReport report = GateRunner.Run(
+        GateReport report = ReviewTestServices.Gates.Run(
             new ReviewConfig { Gates = [late] }, _root.Path, deadline: TimeSpan.Zero);
 
         GateResult result = Assert.Single(report.Gates);
@@ -121,7 +121,7 @@ public sealed class GateRunnerConcurrentDeadlineTests : IDisposable
         ReviewGate pivot = new("pivot", Sleep3(), TimeoutSeconds: 30);
         ReviewGate never = new("never-started", ["git", "--version"], TimeoutSeconds: 30);
 
-        GateReport report = GateRunner.Run(
+        GateReport report = ReviewTestServices.Gates.Run(
             new ReviewConfig { Gates = [slow, pivot, never] }, _root.Path, stopOnBlockingFailure: true);
 
         Assert.Equal(["slow", "pivot"], report.Gates.Select(gate => gate.Id));

@@ -1,5 +1,7 @@
+using KyberWeave.Application.Doctor;
 using KyberWeave.Cli.Commands.Doctor;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Domain.Doctor;
 using KyberWeave.Core.Processes;
 using KyberWeave.Tests.Fakes;
 using Xunit;
@@ -152,13 +154,7 @@ public sealed class DoctorPostCheckoutTests : IDisposable
     {
         WriteGoverned("stop-on-tool-failure: true\n");
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
-        DoctorCommand command = new()
-        {
-            Executor = executor,
-            IsTerminal = () => false,
-            ReadEnvironment = _ => null,
-            McpExecutable = Mcp()
-        };
+        DoctorCommand command = new(DoctorServices.Doctor, new DoctorTestEnvironment(false, _ => null), executor, Mcp());
 
         int exitCode = DoctorAppHarness.Run(command, "doctor", "--post-checkout", "--ensure", Root);
 
@@ -216,7 +212,7 @@ public sealed class DoctorPostCheckoutTests : IDisposable
             _ => null,
             _locks.Path);
 
-        DoctorCheck hook = Assert.Single(report.Checks, check => check.Id == PostCheckoutHook.CheckId);
+        DoctorCheck hook = Assert.Single(report.Checks, check => check.Id == PostCheckoutHookInstaller.CheckId);
         Assert.True(hook.Passed);
         Assert.StartsWith("warning:", hook.Reason ?? string.Empty, StringComparison.Ordinal);
         Assert.Equal(0, report.ExitCode);

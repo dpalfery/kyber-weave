@@ -1,3 +1,6 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Core.Arbiter.Plans;
 using System.Text;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Sections;
@@ -34,7 +37,7 @@ public sealed class FileTextFactsByteCapTests : IDisposable
         string content = "// header\n" + new string('x', (int)SectionSelector.MaxDocumentBytes + 1) + "\n";
         string path = WriteRepoFile("src/Minified.js", content);
 
-        Assert.Null(FileTextFacts.ReadExcerpt(Root, path, 2));
+        Assert.Null(new FileTextFacts().ReadExcerpt(Root, path, 2));
     }
 
     [Fact]
@@ -43,7 +46,7 @@ public sealed class FileTextFactsByteCapTests : IDisposable
         string head = string.Join("\n", Enumerable.Range(1, 40).Select(i => $"line {i}"));
         string path = WriteRepoFile("src/Large.cs", head + "\n" + new string('x', TailCharacters));
 
-        FileExcerpt excerpt = Assert.IsType<FileExcerpt>(FileTextFacts.ReadExcerpt(Root, path, 2));
+        FileExcerpt excerpt = Assert.IsType<FileExcerpt>(new FileTextFacts().ReadExcerpt(Root, path, 2));
 
         Assert.Contains("line 2", excerpt.Text, StringComparison.Ordinal);
     }

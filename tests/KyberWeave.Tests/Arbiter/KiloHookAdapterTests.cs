@@ -81,7 +81,7 @@ public sealed class KiloHookAdapterTests
         string stdin, string? caller, ScriptedEngine engine)
     {
         PluginHookAdapter adapter = new("kilo", "task", "subagent_type", "prompt", engine);
-        HookCommand command = new(
+        HookCommand command = ArbiterTestServices.Command(
             new HarnessAdapterRegistry([adapter]),
             _ => EnabledConfig(),
             () => "decision-test-1");
@@ -192,7 +192,7 @@ public sealed class KiloHookAdapterTests
     {
         ScriptedEngine engine = new();
         PluginHookAdapter adapter = new("kilo", "task", "subagent_type", "prompt", engine);
-        HookCommand command = new(
+        HookCommand command = ArbiterTestServices.Command(
             new HarnessAdapterRegistry([adapter]),
             _ => EnabledConfig(),
             () => "decision-test-1");
@@ -218,7 +218,7 @@ public sealed class KiloHookAdapterTests
         Assert.IsType<PluginHookAdapter>(adapter);
 
         Assert.True(
-            HarnessAdapterRegistry.CreateDefault(engine).TryGet("kilo", out _),
+            ArbiterTestServices.Registry(engine).TryGet("kilo", out _),
             "The default registry must serve the kilo harness.");
     }
 }

@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using KyberWeave.Tests.Fakes;
 using System.Text;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
@@ -138,7 +139,7 @@ public sealed class SquadInstanceScopeTests : IDisposable
             Encoding.UTF8.GetBytes("# Conductor Agent Content"),
             "claude");
 
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
             instanceRoot,
             SquadDeploymentScope.Instance,
             squadLock,
@@ -189,7 +190,7 @@ public sealed class SquadInstanceScopeTests : IDisposable
             "default");
         Directory.CreateDirectory(instanceRoot);
 
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
             instanceRoot,
             SquadDeploymentScope.Instance,
             CreateLock(),
@@ -290,15 +291,15 @@ public sealed class SquadInstanceScopeTests : IDisposable
             "default");
         Directory.CreateDirectory(instanceRoot);
 
-        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
+        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
         SquadInstanceRootResolver resolver = new(instanceRoot, SquadTarget.Claude);
 
-        SquadRenderRequest request = new(
+        SquadRenderRequest request = new SquadRenderRequest(
             SourceDirectory: Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad"),
             Targets: [SquadTarget.Claude],
             Scope: SquadDeploymentScope.Global,
             UserScopeDirectory: userPaths.ApplicationDataDirectory,
-            GlobalRoots: resolver);
+            GlobalRoots: resolver).Prepared();
 
         SquadRenderResult result = await renderer.RenderAsync(request);
 
@@ -327,15 +328,15 @@ public sealed class SquadInstanceScopeTests : IDisposable
             "default");
         Directory.CreateDirectory(instanceRoot);
 
-        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
+        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
         SquadInstanceRootResolver resolver = new(instanceRoot, SquadTarget.Copilot);
 
-        SquadRenderRequest request = new(
+        SquadRenderRequest request = new SquadRenderRequest(
             SourceDirectory: Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad"),
             Targets: [SquadTarget.Copilot],
             Scope: SquadDeploymentScope.Global,
             UserScopeDirectory: userPaths.ApplicationDataDirectory,
-            GlobalRoots: resolver);
+            GlobalRoots: resolver).Prepared();
 
         SquadRenderResult result = await renderer.RenderAsync(request);
 

@@ -31,14 +31,14 @@ public sealed class DocumentationAnalysisScaleTests(ITestOutputHelper output)
     public void AnalyzeDefaultHybridTenThousandClaimsRemainsBoundedAndWithinReleaseEnvelope()
     {
         DocumentSet documents = ScaleCorpus.Create(DocumentCount, ClaimsPerDocument);
-        DocGraphProjection graph = DocGraphProjection.Build(documents, FakeCodeGraphResolver.WithSymbols());
+        DocGraphProjection graph = DocGraphProjectionBuilder.Build(documents, FakeCodeGraphResolver.WithSymbols());
         DocsAnalysisConfig config = DefaultHybridConfig();
         RecordingCandidateSource graphSource = new RecordingCandidateSource(new GraphClaimCandidateSource());
         RecordingCandidateSource lexicalSource = new RecordingCandidateSource(new SparseLexicalCandidateSource());
         DocumentationAnalyzer analyzer = new DocumentationAnalyzer(
             new ClaimExtractor(),
             [graphSource, lexicalSource],
-            embeddingGenerator: null,
+            embeddingResolver: null,
             persistence: null);
 
         WarmCandidateGeneration();
@@ -109,7 +109,7 @@ public sealed class DocumentationAnalysisScaleTests(ITestOutputHelper output)
         const int documentsCount = 160;
         DocumentSet documents = ScaleCorpus.Create(documentsCount, claimsPerDocument: 1);
         IReadOnlyList<Claim> claims = Extract(documents);
-        DocGraphProjection graph = DocGraphProjection.Build(documents, FakeCodeGraphResolver.WithSymbols());
+        DocGraphProjection graph = DocGraphProjectionBuilder.Build(documents, FakeCodeGraphResolver.WithSymbols());
         SparseLexicalCandidateSource source = new SparseLexicalCandidateSource();
         ClaimCandidateSourceRequest hybridRequest = new ClaimCandidateSourceRequest(
             claims,
@@ -170,7 +170,7 @@ public sealed class DocumentationAnalysisScaleTests(ITestOutputHelper output)
     private static void WarmCandidateGeneration()
     {
         DocumentSet documents = ScaleCorpus.Create(documentCount: 2, claimsPerDocument: 2);
-        DocGraphProjection graph = DocGraphProjection.Build(documents, FakeCodeGraphResolver.WithSymbols());
+        DocGraphProjection graph = DocGraphProjectionBuilder.Build(documents, FakeCodeGraphResolver.WithSymbols());
         IReadOnlyList<Claim> claims = Extract(documents);
         ClaimCandidateSourceRequest request = new ClaimCandidateSourceRequest(
             claims,

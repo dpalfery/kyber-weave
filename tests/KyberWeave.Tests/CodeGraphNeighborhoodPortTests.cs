@@ -1,4 +1,6 @@
-using KyberWeave.Core.CodeGraph;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Data.CodeGraph;
+using KyberWeave.Domain.CodeGraph;
 using Xunit;
 
 namespace KyberWeave.Tests;

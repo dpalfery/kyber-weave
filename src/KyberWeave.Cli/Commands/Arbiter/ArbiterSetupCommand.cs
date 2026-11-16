@@ -1,3 +1,5 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Arbiter.Rules;
@@ -18,7 +20,12 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 /// <c>nimble</c> model, and a <c>tev1</c> model warns that its usable input of
 /// about 2,000 tokens is too small for most shipped rules.
 /// </remarks>
-public sealed class ArbiterSetupCommand : Command<ArbiterSettings>
+public sealed class ArbiterSetupCommand(
+    IProcessEnvironment environment,
+    IArbiterUserOverrideWriter overrideWriter,
+    IOllamaProbe ollama,
+    IArbiterKeyInput keyInput,
+    ICredentialStore credentials) : Command<ArbiterSettings>
 {
     /// <summary>The TypeSafe cloud endpoint written when no <c>--endpoint</c> is given.</summary>
     internal const string TypeSafeEndpoint = "https://api.typesafe.ai/v1";
@@ -69,13 +76,10 @@ public sealed class ArbiterSetupCommand : Command<ArbiterSettings>
             : settings.Model.Trim();
 
         string kindName = kind == ArbiterProviderKind.Systemone ? "systemone" : "none";
-        string overridePath = ArbiterUserSettings.GetPath(ArbiterCommandComposition.HomeDirectory());
+        string overridePath = ArbiterUserSettings.GetPath(environment.HomeDirectory);
         try
         {
-            string? directory = Path.GetDirectoryName(overridePath);
-            if (!string.IsNullOrEmpty(directory))
-                Directory.CreateDirectory(directory);
-            File.WriteAllText(overridePath, RenderOverride(kindName, endpoint, model));
+            _ = overrideWriter.Write(environment.HomeDirectory, ArbiterCliText.RenderUserOverride(kindName, endpoint, model));
         }
         catch (ArgumentException exception)
         {
@@ -124,7 +128,7 @@ public sealed class ArbiterSetupCommand : Command<ArbiterSettings>
     public int Execute(CommandContext context, ArbiterSettings settings) =>
         Execute(context, settings, CancellationToken.None);
 
-    private static void ReportOllama(ArbiterSettings settings, string endpoint, string model)
+    private void ReportOllama(ArbiterSettings settings, string endpoint, string model)
     {
         string probeBase = !string.IsNullOrWhiteSpace(settings.Ollama)
             ? settings.Ollama.Trim()
@@ -134,7 +138,7 @@ public sealed class ArbiterSetupCommand : Command<ArbiterSettings>
 
         Uri? versionUri = BuildOllamaVersionUri(probeBase);
         if (versionUri is not null
-            && ArbiterCommandComposition.TryDetectOllama(versionUri, out string? version))
+            && ollama.TryDetect(versionUri, out string? version))
         {
             AnsiConsole.MarkupLine(
                 $"  [green]ok[/] Ollama {Markup.Escape(version ?? "0.35")} detected at {Markup.Escape(probeBase)}; suggested model: [bold]nimble[/].");
@@ -152,14 +156,14 @@ public sealed class ArbiterSetupCommand : Command<ArbiterSettings>
             ? uri
             : null;
 
-    private static bool StoreKey(ArbiterSettings settings, string endpoint, DiagnosticReport report)
+    private bool StoreKey(ArbiterSettings settings, string endpoint, DiagnosticReport report)
     {
         // The key travels on stdin or through a masked prompt, and is stored for the
         // endpoint origin only. It is never printed, so diagnostics and summaries name
         // the origin while the value stays out of every surface.
         string? key = settings.KeyStdin
-            ? ArbiterCommandComposition.KeyStdinReader()
-            : ArbiterCommandComposition.KeyPrompt();
+            ? keyInput.ReadFromStandardInput()
+            : keyInput.PromptHidden();
         if (string.IsNullOrEmpty(key))
         {
             AnsiConsole.MarkupLine(
@@ -173,7 +177,7 @@ public sealed class ArbiterSetupCommand : Command<ArbiterSettings>
 
         try
         {
-            ArbiterCommandComposition.CredentialStore().Write(origin, key);
+            credentials.Write(origin, key);
         }
         catch (Exception exception) when (exception is InvalidOperationException
             or IOException
@@ -191,36 +195,6 @@ public sealed class ArbiterSetupCommand : Command<ArbiterSettings>
 
         AnsiConsole.MarkupLine($"  [green]ok[/] Stored a key for {Markup.Escape(origin)}.");
         return true;
-    }
-
-    /// <summary>
-    /// Renders the user override. Every value is written as a single-quoted YAML scalar
-    /// and every control character is rejected, so a value carrying YAML syntax is read
-    /// back as the value rather than as structure.
-    /// </summary>
-    /// <remarks>
-    /// The model, and the endpoint, come from the command line. Interpolated raw, a value
-    /// containing a colon, a quote or a <c>#</c> changed what the next read saw, and a
-    /// newline could append arbitrary keys to the operator's override. Single quotes are
-    /// the only YAML quoting with no escape sequences: the one character that cannot
-    /// appear inside them is the single quote itself, which is written doubled. A newline
-    /// is rejected rather than escaped, because no quoting carries one on a single line.
-    /// </remarks>
-    /// <exception cref="ArgumentException">Thrown when a value contains a control character.</exception>
-    private static string RenderOverride(string kindName, string endpoint, string model) =>
-        $"provider:\n  kind: {YamlScalar(kindName)}\n  endpoint: {YamlScalar(endpoint)}\n  model: {YamlScalar(model)}\n";
-
-    private static string YamlScalar(string value)
-    {
-        if (value.Any(char.IsControl))
-        {
-            throw new ArgumentException(
-                "An arbiter setup value cannot contain newline or other control characters: " +
-                "it would not survive the YAML round trip.",
-                nameof(value));
-        }
-
-        return $"'{value.Replace("'", "''", StringComparison.Ordinal)}'";
     }
 
     private static bool TryParseProvider(string? raw, out ArbiterProviderKind kind, out Diagnostic? error)

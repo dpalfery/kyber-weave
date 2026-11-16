@@ -1,0 +1,826 @@
+using System.Text.RegularExpressions;
+
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Docs.Graph;
+using KyberWeave.Core.Docs.Model;
+using KyberWeave.Core.Text;
+using KyberWeave.Domain.CodeGraph;
+
+namespace KyberWeave.Core.Docs.Search;
+
+/// <summary>
+/// Retrieval over the documentation corpus, joined to the code graph.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The operation that justifies an index over grep is <see cref="ForSymbol"/>: a document
+/// <em>formally claims</em> a symbol in its <c>code-refs</c> frontmatter, which is a
+/// different and much smaller set than the documents that happen to mention the name in
+/// prose. Grep cannot tell the two apart.
+/// </para>
+/// <para>
+/// The index is immutable. Staleness is handled by rebuilding a whole snapshot — see
+/// <c>DocumentIndexHost</c> — rather than by mutating this object, so a request in
+/// flight always sees one coherent view of the corpus.
+/// </para>
+/// </remarks>
+public sealed partial class DocumentIndex
+{
+    /// <summary>Frontmatter identity outranks prose: a document that formally claims the
+    /// query term is a better answer than one that merely discusses it.</summary>
+    private const double IdWeight = 6.0;
+
+    private const double CodeRefWeight = 5.0;
+    private const double EndpointWeight = 5.0;
+    private const double KeywordWeight = 4.0;
+    private const double ComponentWeight = 3.0;
+    private const double TitleWeight = 4.0;
+    private const double BodyWeight = 1.0;
+
+    /// <summary>
+    /// Weights for partial identity matches. A natural-language question almost never
+    /// equals a document's id or component verbatim, so exact-equality scoring alone
+    /// leaves free-text queries decided entirely by body similarity — where a generic
+    /// doc-type word like "architecture" outvotes the subject the user actually named.
+    /// Partial matches sit below their exact counterparts but above prose.
+    /// </summary>
+    private const double IdPartialWeight = 4.5;
+
+    private const double KeywordPartialWeight = 3.0;
+    private const double ComponentPartialWeight = 2.5;
+
+    /// <summary>
+    /// Section length at which the length damping reaches half strength. Raw cosine
+    /// similarity is biased towards very short sections, because a three-word stub can
+    /// overlap a query almost perfectly while saying nothing.
+    /// </summary>
+    private const double SectionSaturation = 40.0;
+
+    /// <summary>Below this, a section is not relevant enough to be worth returning.</summary>
+    private const double MinSectionScore = 0.02;
+
+    /// <summary>
+    /// Default characters of prose returned across all documents in one call.
+    /// </summary>
+    /// <remarks>
+    /// Sized from the corpus rather than guessed. The median section is ~640 characters
+    /// and the median whole document ~5,100, so returning a single section saves a few
+    /// hundred characters while routinely forcing the caller to read the entire file —
+    /// a net loss. The budget is spent across the returned documents, which means asking
+    /// for one document gets depth and asking for five gets breadth, from the same knob.
+    /// </remarks>
+    public const int DefaultCharBudget = 12000;
+
+    /// <summary>
+    /// Floor on any single document's share, so a wide query still returns something
+    /// substantive per hit rather than slicing everything into uselessness.
+    /// </summary>
+    private const int MinPerDocumentBudget = 1500;
+
+    /// <summary>
+    /// Total score below which a document is not returned at all.
+    /// </summary>
+    /// <remarks>
+    /// Without a floor every query returned exactly <c>maxDocs</c> documents, so a miss
+    /// was indistinguishable from a hit — "how do I make a sandwich" came back with three
+    /// confident results. For a tool the repository instructions make mandatory before
+    /// grep, that is the most consequential possible failure: the caller has no signal to
+    /// fall back and answers from whatever was nearest.
+    /// </remarks>
+    private const double MinRelevanceScore = 0.25;
+
+    private readonly DocumentCorpus _corpus;
+    private readonly Dictionary<string, List<DocumentModel>> _bySymbol;
+    private readonly Dictionary<string, List<DocumentModel>> _byKeyword;
+    private readonly Dictionary<string, IReadOnlyList<CodeJoin>> _joinsByPath;
+    private readonly DocumentSectionGraph _sectionGraph;
+
+    internal IReadOnlyDictionary<string, List<DocumentModel>> ByKeyword => _byKeyword;
+
+    internal DocumentSectionGraph SectionGraph => _sectionGraph;
+
+    private DocumentIndex(
+        DocumentCorpus corpus,
+        Dictionary<string, List<DocumentModel>> bySymbol,
+        Dictionary<string, List<DocumentModel>> byKeyword,
+        Dictionary<string, IReadOnlyList<CodeJoin>> joinsByPath,
+        DocumentSectionGraph sectionGraph)
+    {
+        _corpus = corpus;
+        _bySymbol = bySymbol;
+        _byKeyword = byKeyword;
+        _joinsByPath = joinsByPath;
+        _sectionGraph = sectionGraph;
+    }
+
+    /// <summary>Documents in scope.</summary>
+    public int DocumentCount => _corpus.Documents.Count;
+
+    /// <summary>True when the code graph was readable, so joins are populated.</summary>
+    public bool CodeGraphAvailable { get; private init; }
+
+    /// <summary>
+    /// Builds an index over an already-computed corpus. Kept separate from
+    /// <see cref="DocumentCorpus.Build"/> so a code-graph change can rebuild the joins
+    /// without re-reading and re-vectorising every document.
+    /// </summary>
+    public static DocumentIndex Build(DocumentCorpus corpus, ICodeGraphResolver resolver)
+    {
+        ArgumentNullException.ThrowIfNull(corpus);
+        ArgumentNullException.ThrowIfNull(resolver);
+
+        Dictionary<string, List<DocumentModel>> bySymbol = new(StringComparer.Ordinal);
+        Dictionary<string, List<DocumentModel>> byKeyword = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, IReadOnlyList<CodeJoin>> joinsByPath = new(StringComparer.Ordinal);
+
+        foreach (DocumentModel doc in corpus.Documents)
+        {
+            List<CodeJoin> joins = new();
+
+            foreach (string keyword in doc.Keywords)
+            {
+                string trimmed = keyword.Trim();
+                if (trimmed.Length == 0) continue;
+                if (!byKeyword.TryGetValue(trimmed, out List<DocumentModel>? list))
+                {
+                    list = [];
+                    byKeyword[trimmed] = list;
+                }
+
+                if (!list.Contains(doc)) list.Add(doc);
+            }
+
+            foreach (string symbol in doc.CodeRefs)
+            {
+                foreach (string key in SymbolKeys(symbol))
+                {
+                    if (!bySymbol.TryGetValue(key, out List<DocumentModel>? list))
+                    {
+                        list = [];
+                        bySymbol[key] = list;
+                    }
+
+                    if (!list.Contains(doc)) list.Add(doc);
+                }
+
+                joins.Add(ToJoin(doc, symbol, resolver.ResolveSymbol(symbol)));
+            }
+
+            foreach (string endpoint in doc.ApiEndpoints)
+            {
+                joins.Add(ToJoin(doc, endpoint, resolver.ResolveRoute(endpoint)));
+            }
+
+            joinsByPath[doc.RelativePath] = joins;
+        }
+
+        DocumentSectionGraph sectionGraph = DocumentSectionGraph.Build(corpus.Documents);
+
+        return new DocumentIndex(corpus, bySymbol, byKeyword, joinsByPath, sectionGraph)
+        {
+            CodeGraphAvailable = resolver.IsAvailable
+        };
+    }
+
+    /// <summary>Builds an index from an already-loaded document set and resolver.</summary>
+    public static DocumentIndex Build(DocumentSet set, ICodeGraphResolver resolver)
+    {
+        return Build(DocumentCorpus.Build(set), resolver);
+    }
+
+    /// <summary>
+    /// The documents whose <c>code-refs</c> formally claim a symbol. This is the reverse
+    /// lookup the ontology exists to make possible; it is a claim of ownership, not a
+    /// textual occurrence.
+    /// </summary>
+    public IReadOnlyList<DocumentHit> ForSymbol(string symbol)
+    {
+        if (string.IsNullOrWhiteSpace(symbol)) return [];
+
+        if (!_bySymbol.TryGetValue(symbol.Trim(), out List<DocumentModel>? documents)) return [];
+
+        return documents
+            .OrderBy(d => d.RelativePath, StringComparer.Ordinal)
+            .Select(d => new DocumentHit(d, 1.0, DocumentExcerpt.Empty, JoinsFor(d)))
+            .ToList();
+    }
+
+    /// <summary>
+    /// The coding standards this repository declares for a technology, chosen by the key a
+    /// caller names rather than by similarity.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Similarity is the wrong instrument here. A portable agent arrives holding the standard
+    /// its own stack ships and needs <em>this</em> repository's answer for the same stack;
+    /// ranking by vocabulary hands it whichever standard is worded most like the question,
+    /// which is the one failure the lookup exists to prevent. <c>doc-type:
+    /// coding-standard</c> plus a <c>technology</c> key make it a lookup instead of a guess.
+    /// </para>
+    /// <para>
+    /// Several standards may carry one technology — a README and an appendix beside it — so
+    /// the answer is a set, ordered by path for determinism, sharing one budget. A standard
+    /// that declares no technology answers no key, and a document that declares the
+    /// technology without being a standard answers none either: the doc-type is the claim.
+    /// </para>
+    /// </remarks>
+    /// <param name="technology">
+    /// The technology, the configuration registry's property for it, or that property as
+    /// instruction files write it — <c>csharp</c>, <c>csharp-coding-standard</c> and
+    /// <c>&lt;csharp-coding-standard&gt;</c> are one request.
+    /// </param>
+    /// <param name="topic">
+    /// What the caller is doing in the stack, to bring back the sections that answer it.
+    /// Omit it for the standard itself.
+    /// </param>
+    /// <param name="charBudget">Total characters of prose across every matched standard.</param>
+    public IReadOnlyList<DocumentHit> CodingStandards(
+        string technology,
+        string? topic = null,
+        int charBudget = DefaultCharBudget)
+    {
+        string key = NormalizeTechnologyKey(technology);
+        if (key.Length == 0) return [];
+
+        List<DocumentModel> matched = _corpus.Documents
+            .Where(doc => doc.DocType == DocType.CodingStandard
+                          && string.Equals(
+                              doc.Frontmatter.Technology?.Trim(), key, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(doc => doc.RelativePath, StringComparer.Ordinal)
+            .ToList();
+
+        if (matched.Count == 0) return [];
+
+        int perDocument = Math.Max(MinPerDocumentBudget, Math.Clamp(charBudget, 1000, 120_000) / matched.Count);
+
+        // An unnamed or blank topic is the caller asking for the standard rather than for
+        // part of it. Vectorising it would produce an empty query, and selection against an
+        // empty query rejects every section — see WholeExcerpt.
+        string trimmedTopic = topic?.Trim() ?? string.Empty;
+        Dictionary<string, double>? topicVector = trimmedTopic.Length == 0
+            ? null
+            : TopicVector(_corpus, matched, trimmedTopic);
+
+        return matched
+            .Select(doc => new DocumentHit(
+                doc,
+                1.0,
+                topicVector is null ? WholeExcerpt(doc, perDocument) : Excerpt(doc, topicVector, perDocument),
+                // A coding standard declares no code-refs by ontology design, so there is
+                // nothing to join to the code graph: an empty join set is the honest answer
+                // rather than a lookup that happens to find nothing.
+                []))
+            .ToList();
+    }
+
+    /// <summary>
+    /// The vector a topic is scored against the candidate standards with: rarity-weighted, and
+    /// without the compounds the caller never wrote and no candidate states.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The narrowing is what makes a two-word topic work. <see cref="TextVectorizer.VectorizeFused"/>
+    /// adds each adjacent pair of the topic's words as a term of its own, so a caller asking for
+    /// <c>error handling</c> also queries for the compound <c>errorhandling</c>. <c>VectorizeFused</c>
+    /// calls that pair a bridge for compound names rather than evidence in its own right, and a
+    /// pair no candidate section states bridges to nothing: it can add nothing to any section's
+    /// overlap, but it still counts towards the query vector's magnitude, which is the
+    /// denominator of every section's cosine. Rarity turns the dilution into a loss, because a
+    /// term no document states carries the highest inverse document frequency the corpus
+    /// offers. On this repository's own C# standard that compound alone held
+    /// <c>Errors and diagnostics</c> a ten-thousandth under <see cref="MinSectionScore"/>.
+    /// </para>
+    /// <para>
+    /// Only the synthesised pairs are dropped by this filter; question scaffolding and
+    /// corpus-ubiquitous terms are already removed by rarity weighting. Informative words
+    /// the caller wrote stay in the query whether or not a candidate states them, because a
+    /// word the caller wrote is an ask the standard either answers or does not: dropping it
+    /// would rescale every section's score by the mass that was removed, so a topic the
+    /// standard covers in part would clear the relevance floor on a denominator that had
+    /// forgotten the part it does not cover — and a section sharing only a generic word such
+    /// as <c>time</c> would come back as an answer. Keeping those words keeps each score on the
+    /// scale <see cref="MinSectionScore"/> was set against.
+    /// </para>
+    /// </remarks>
+    /// <param name="corpus">The corpus the rarity weights come from.</param>
+    /// <param name="candidates">The documents the topic will be scored against.</param>
+    /// <param name="topic">The caller's topic, already trimmed and known to be non-empty.</param>
+    private static Dictionary<string, double> TopicVector(
+        DocumentCorpus corpus,
+        IReadOnlyList<DocumentModel> candidates,
+        string topic)
+    {
+        HashSet<string> words = new(TextVectorizer.Vectorize(topic).Keys, StringComparer.Ordinal);
+
+        // The same text Excerpt scores, built by the same helper, so "stated" means stated to
+        // the scorer rather than to a second reading of the section.
+        HashSet<string> stated = new(StringComparer.Ordinal);
+        foreach (DocumentModel candidate in candidates)
+        {
+            foreach (DocumentSection section in candidate.Sections)
+            {
+                stated.UnionWith(SectionVector(section).Keys);
+            }
+        }
+
+        Dictionary<string, double> query = new(StringComparer.Ordinal);
+        foreach ((string term, double weight) in corpus.WeightByRarity(TextVectorizer.VectorizeFused(topic)))
+        {
+            // A compound the caller never wrote, and that no candidate states, is a bridge to
+            // nothing. An informative word the caller wrote stays whether or not it is stated here.
+            bool synthesised = !words.Contains(term);
+            if (synthesised && !stated.Contains(term)) continue;
+
+            query[term] = weight;
+        }
+
+        return query;
+    }
+
+    /// <summary>
+    /// The term vector of one section, as selection scores it. Shared with
+    /// <see cref="TopicVector"/>, so what counts as "stated" for a topic and what
+    /// <see cref="Excerpt"/> scores are the same reading of the same section.
+    /// </summary>
+    private static Dictionary<string, double> SectionVector(DocumentSection section) =>
+        TextVectorizer.VectorizeFused(section.Heading + "\n" + section.Body);
+
+    /// <summary>
+    /// Every technology this repository declares a coding standard for, so a caller that does
+    /// not know the local vocabulary can still choose from it.
+    /// </summary>
+    /// <remarks>
+    /// Drawn only from documents whose resolved type is a coding standard: a reference
+    /// document that mentions a technology is not the standard for it, and offering it would
+    /// send the caller to prose that never claimed to answer for the stack. Ordinal-sorted
+    /// rather than left in corpus order, so the list a caller picks from does not depend on
+    /// how the files were walked.
+    /// </remarks>
+    public IReadOnlyList<string> CodingStandardTechnologies()
+    {
+        return _corpus.Documents
+            .Where(doc => doc.DocType == DocType.CodingStandard)
+            .Select(doc => doc.Frontmatter.Technology?.Trim() ?? string.Empty)
+            .Where(declared => declared.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(declared => declared, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Reduces the ways a caller may name a technology's standard to the technology itself.
+    /// </summary>
+    /// <remarks>
+    /// Three spellings reach an agent and all three mean the same lookup: the bare
+    /// technology, the configuration registry's property name, and that property as the
+    /// repository instructions write it, wrapped in the angle brackets the registry uses.
+    /// Normalising once here keeps every caller from re-deciding what a key may look like.
+    /// </remarks>
+    private static string NormalizeTechnologyKey(string? technology)
+    {
+        if (string.IsNullOrWhiteSpace(technology)) return string.Empty;
+
+        string value = technology.Trim();
+
+        // Only a *pair* of angle brackets is the registry's prose form. "<csharp" is a typo
+        // that still names a technology; stripping the bracket would answer it, and
+        // answering a half-typed key with the csharp standard is the miss-as-hit the
+        // lookup refuses to make.
+        if (value.Length >= 2 && value[0] == '<' && value[^1] == '>')
+        {
+            value = value[1..^1].Trim();
+        }
+
+        if (value.EndsWith(ConfigRegConfig.CodingStandardSuffix, StringComparison.OrdinalIgnoreCase))
+        {
+            value = value[..^ConfigRegConfig.CodingStandardSuffix.Length].Trim();
+        }
+
+        return value;
+    }
+
+    private IReadOnlyList<CodeJoin> JoinsFor(DocumentModel doc)
+    {
+        return _joinsByPath.TryGetValue(doc.RelativePath, out IReadOnlyList<CodeJoin>? joins) ? joins : [];
+    }
+
+    /// <summary>
+    /// Both the reference as authored and its last dotted segment are indexed, so a
+    /// <c>code-refs</c> entry of <c>MotorcycleRAG.Api.HealthChecks.Foo</c> is findable by
+    /// the bare type name a caller would actually type.
+    /// </summary>
+    private static IEnumerable<string> SymbolKeys(string reference)
+    {
+        string value = reference.Trim();
+        if (value.Length == 0) yield break;
+
+        yield return value;
+
+        int lastDot = value.LastIndexOf('.');
+        if (lastDot >= 0 && lastDot < value.Length - 1)
+        {
+            yield return value[(lastDot + 1)..];
+        }
+    }
+
+    /// <summary>
+    /// Chooses which of several same-named symbols a document actually meant.
+    /// </summary>
+    /// <remarks>
+    /// Bare symbol names collide freely: <c>HostHeaderValidationMiddleware</c>,
+    /// <c>CorsServiceConfiguration</c> and <c>WebApplicationExtensions</c> each exist in
+    /// both the API and the BFF, and <c>AuthProvider</c> is simultaneously a React context
+    /// provider in TypeScript and a C# claims property. Taking the index's first match
+    /// therefore joins documents to symbols in projects they do not describe.
+    ///
+    /// The document already declares which subtree it is about, so scope to its
+    /// <c>source-root</c> first and fall back to a repo-wide match only when the name
+    /// resolves nowhere beneath it — flagging that fallback rather than hiding it.
+    /// </remarks>
+    internal static CodeJoin ToJoin(DocumentModel doc, string reference, IReadOnlyList<CodeGraphNode> nodes)
+    {
+        if (nodes.Count == 0) return new CodeJoin(reference, "unresolved", string.Empty);
+
+        string? sourceRoot = doc.Frontmatter.SourceRoot?.Replace('\\', '/').TrimEnd('/');
+
+        List<CodeGraphNode> scoped = string.IsNullOrWhiteSpace(sourceRoot) || sourceRoot == "."
+            ? []
+            : nodes.Where(n => n.FilePath.Replace('\\', '/')
+                    .StartsWith(sourceRoot + "/", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+        bool inSourceRoot = scoped.Count > 0;
+        IReadOnlyList<CodeGraphNode> pool = inSourceRoot ? scoped : nodes;
+
+        // Within the pool, a declaration beats an incidental member of the same name: a
+        // class or interface named X is far likelier to be what documentation calls "X"
+        // than a property that happens to be called X.
+        CodeGraphNode node = pool
+            .OrderByDescending(n => DeclarationRank(n.Kind))
+            .ThenBy(n => n.FilePath, StringComparer.Ordinal)
+            .First();
+
+        return new CodeJoin(reference, node.Kind, node.Location, inSourceRoot, pool.Count - 1);
+    }
+
+    private static int DeclarationRank(string kind)
+    {
+        return kind switch
+        {
+            "class" or "interface" or "struct" or "enum" or "type_alias" => 3,
+            "function" or "method" => 2,
+            "route" => 2,
+            _ => 1
+        };
+    }
+
+    internal static double ScoreExact(DocumentModel doc, string query)
+    {
+        double score = 0;
+
+        if (string.Equals(doc.Frontmatter.Id, query, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(doc.RelativePath, query, StringComparison.OrdinalIgnoreCase))
+        {
+            score += IdWeight;
+        }
+
+        if (string.Equals(doc.Frontmatter.Component, query, StringComparison.OrdinalIgnoreCase))
+        {
+            score += ComponentWeight;
+        }
+
+        foreach (string keyword in doc.Keywords)
+        {
+            if (string.Equals(keyword, query, StringComparison.OrdinalIgnoreCase))
+            {
+                score += KeywordWeight;
+                break;
+            }
+        }
+
+        foreach (string reference in doc.CodeRefs)
+        {
+            if (SymbolKeys(reference).Contains(query, StringComparer.Ordinal))
+            {
+                score += CodeRefWeight;
+                break;
+            }
+        }
+
+        foreach (string endpoint in doc.ApiEndpoints)
+        {
+            if (string.Equals(endpoint, query, StringComparison.OrdinalIgnoreCase))
+            {
+                score += EndpointWeight;
+                break;
+            }
+        }
+
+        return score;
+    }
+
+    /// <summary>
+    /// The query terms a title may be matched on: what was asked about, with the phrasing
+    /// of the asking removed.
+    /// </summary>
+    /// <remarks>
+    /// Raw title cosine counted question scaffolding. "how do I make a sandwich" shares
+    /// only "make" with a plan titled "Make 0 unrepresentable…", and after the plan
+    /// discount that was still 0.30 — over the floor, so an unanswerable question got a
+    /// confident answer. Body scoring already drops those words; title scoring has to as
+    /// well, or the floor does not mean a miss.
+    ///
+    /// Only the scaffolding half of <see cref="DocumentCorpus.IsInformative"/> is applied.
+    /// The corpus-ubiquity half belongs to bodies alone: dropping it here cost the
+    /// document titled "Skills" a third of its score for the query "skill authoring",
+    /// because a corpus about agents and skills says those words everywhere. Titles are
+    /// curated labels, and naming the corpus's own subject in one is the point of a title.
+    /// </remarks>
+    internal static Dictionary<string, double> TitleQuery(IReadOnlyCollection<string> coverageTerms)
+    {
+        Dictionary<string, double> query = new(StringComparer.Ordinal);
+        foreach (string term in coverageTerms)
+        {
+            if (DocumentCorpus.IsQuestionScaffolding(term)) continue;
+            query[term] = 1;
+        }
+
+        return query;
+    }
+
+    /// <summary>Cosine overlap between a document's title and <see cref="TitleQuery"/>.</summary>
+    private static double ScoreTitle(DocumentModel doc, IReadOnlyDictionary<string, double> titleQuery)
+    {
+        if (titleQuery.Count == 0) return 0;
+
+        return TextVectorizer.CosineSimilarity(
+            titleQuery, TextVectorizer.Vectorize(doc.Frontmatter.Title ?? doc.RelativePath));
+    }
+
+    /// <summary>
+    /// How far a document counts as current guidance, as a multiplier on its relevance.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Term statistics measure wordiness, not authority. Asked "what frontmatter keys does
+    /// a document need", BM25 correctly preferred the plan that says "frontmatter"
+    /// twenty-five times over the documentation standard that says it seven times — and
+    /// answered from a work artifact instead of the rule.
+    /// </para>
+    /// <para>
+    /// The repository already takes a position on this: plans are archived once closed and
+    /// the archive is explicitly never current guidance, so a plan or a spec is a record of
+    /// intent, not the thing an agent should act on. That judgement belongs in ranking. A
+    /// demoted document still wins when it is named outright, because an exact id match
+    /// scores far above the discount.
+    /// </para>
+    /// </remarks>
+    internal static double Authority(DocumentModel doc)
+    {
+        double byType = doc.DocType switch
+        {
+            DocType.Plan or DocType.Spec => 0.55,
+            DocType.Adr => 0.9,
+            _ => 1.0
+        };
+
+        double byStatus = doc.Status switch
+        {
+            DocStatus.Superseded => 0.4,
+            DocStatus.Draft or DocStatus.NeedsReview => 0.85,
+            _ => 1.0
+        };
+
+        return byType * byStatus;
+    }
+
+    /// <summary>
+    /// How much of a document's declared identity the query names.
+    /// </summary>
+    /// <remarks>
+    /// Document ids are structured slugs — <c>webui/architecture</c>, <c>api/architecture</c>
+    /// — so splitting on the separators yields the closest thing this corpus has to a
+    /// controlled vocabulary. A query naming both halves of an id is a far stronger signal
+    /// than body similarity, which is what "WebUI architecture" returning the API,
+    /// system and Azure architecture documents was: three documents sharing one generic
+    /// word, ranked above the one the user actually asked for.
+    /// </remarks>
+    internal static double ScorePartialIdentity(
+        DocumentModel doc,
+        IReadOnlyDictionary<string, double> queryVector,
+        DocumentCorpus? corpus = null)
+    {
+        if (queryVector.Count == 0) return 0;
+
+        Func<string, double>? weight = corpus is null ? null : corpus.IdentityTokenWeight;
+
+        double keywordCoverage = 0;
+        if (doc.Keywords.Count > 0)
+        {
+            double matched = 0;
+            foreach (string keyword in doc.Keywords)
+            {
+                double cov = Coverage(keyword, queryVector, weight);
+                if (cov > 0)
+                {
+                    matched += cov;
+                }
+            }
+
+            keywordCoverage = KeywordPartialWeight * Math.Min(1.5, matched);
+        }
+
+        return IdPartialWeight * Coverage(doc.Frontmatter.Id, queryVector, weight)
+               + ComponentPartialWeight * Coverage(doc.Frontmatter.Component, queryVector, weight)
+               + keywordCoverage;
+    }
+
+    /// <summary>A lower-case letter or digit followed by a capital: the split point in a camelCase identifier.</summary>
+    [GeneratedRegex("([a-z0-9])([A-Z])")]
+    private static partial Regex CamelCaseBoundaryRegex();
+
+    /// <summary>
+    /// The fraction of an identity's own tokens that the query mentions.
+    /// </summary>
+    /// <remarks>
+    /// A token also counts as mentioned when the query contains it fused to its neighbour.
+    /// That fusion is not a nicety: the component "MotorcycleRAG Web UI" has to be
+    /// reachable from a query that writes "WebUI" as one word, which is how people type it.
+    /// </remarks>
+    internal static double Coverage(
+        string? identity,
+        IReadOnlyDictionary<string, double> queryVector,
+        Func<string, double>? weight = null)
+    {
+        if (string.IsNullOrWhiteSpace(identity)) return 0;
+
+        string expanded = CamelCaseBoundaryRegex().Replace(identity, "$1 $2");
+        List<string> parts = TextVectorizer
+            .Vectorize(expanded.Replace('/', ' ').Replace('-', ' '))
+            .Keys
+            .ToList();
+
+        if (parts.Count == 0) return 0;
+
+        double covered = 0;
+        double total = 0;
+        for (int i = 0; i < parts.Count; i++)
+        {
+            string p = parts[i];
+            bool hit = queryVector.ContainsKey(p)
+                       || (i + 1 < parts.Count && queryVector.ContainsKey(p + parts[i + 1]))
+                       || (i > 0 && queryVector.ContainsKey(parts[i - 1] + p));
+
+            if (!hit)
+            {
+                foreach (string q in queryVector.Keys)
+                {
+                    if (Math.Min(p.Length, q.Length) >= 3 &&
+                        (p.StartsWith(q, StringComparison.Ordinal) || q.StartsWith(p, StringComparison.Ordinal)))
+                    {
+                        hit = true;
+                        break;
+                    }
+                }
+            }
+
+            double share = weight?.Invoke(p) ?? 1.0;
+            total += share;
+            if (hit) covered += share;
+        }
+
+        return covered / total;
+    }
+
+    /// <summary>
+    /// Fills a document's share of the budget with sections in document order, without
+    /// ranking them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// For a caller who asked for the standard itself, every section is an answer and none
+    /// of them is more of one than another. This is deliberately <em>not</em>
+    /// <c>Excerpt(doc, empty, budget)</c>: cosine similarity against no terms is zero
+    /// everywhere, so relevance gating would reject the whole document and a caller who
+    /// named the technology but no topic would be handed a path in place of the standard.
+    /// </para>
+    /// <para>
+    /// The first section survives even when it alone exceeds the budget, the rule
+    /// <see cref="Excerpt"/> already follows. Truncating an oversized section is the
+    /// transport edge's job; dropping it would make the tool a directory listing, which is
+    /// the failure that sends callers to Read in the first place.
+    /// </para>
+    /// </remarks>
+    private static DocumentExcerpt WholeExcerpt(DocumentModel doc, int budget)
+    {
+        List<DocumentSection> chosen = new();
+        List<string> omitted = new();
+        int spent = 0;
+        bool budgetExhausted = false;
+
+        foreach (DocumentSection section in doc.Sections.OrderBy(s => s.LineNumber))
+        {
+            int cost = section.Heading.Length + section.Body.Length;
+
+            if (chosen.Count == 0 || spent + cost <= budget)
+            {
+                chosen.Add(section);
+                spent += cost;
+                continue;
+            }
+
+            omitted.Add(section.Heading);
+            budgetExhausted = true;
+        }
+
+        if (chosen.Count == 0) return DocumentExcerpt.Empty;
+
+        return new DocumentExcerpt(
+            chosen,
+            omitted.Where(heading => heading.Length > 0).ToList(),
+            omitted.Count == 0,
+            budgetExhausted);
+    }
+
+    /// <summary>
+    /// Fills a document's share of the budget with its most relevant <c>##</c> sections.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Returning exactly one section was the original design and it was wrong for this
+    /// corpus. Sections are small — a median of ~640 characters — so one section is about
+    /// a third of a document, and the caller who needed the other two thirds read the
+    /// whole file anyway. Being stingy cost more than it saved.
+    /// </para>
+    /// <para>
+    /// Sections are <em>chosen</em> by relevance but <em>emitted</em> in document order,
+    /// because prose written to be read in sequence is confusing when shuffled. Anything
+    /// that did not fit is named rather than silently dropped.
+    /// </para>
+    /// <para>
+    /// Relevance is damped by section length. Undamped cosine similarity systematically
+    /// prefers the shortest section sharing any term with the query, so a heading-only
+    /// stub beat the paragraph that held the answer.
+    /// </para>
+    /// </remarks>
+    private static DocumentExcerpt Excerpt(
+        DocumentModel doc,
+        IReadOnlyDictionary<string, double> queryVector,
+        int budget)
+    {
+        if (doc.Sections.Count == 0) return DocumentExcerpt.Empty;
+
+        List<(DocumentSection Section, double Score)> ranked = doc.Sections
+            .Select(section =>
+            {
+                Dictionary<string, double> vector = SectionVector(section);
+                double length = vector.Values.Sum();
+                double score = TextVectorizer.CosineSimilarity(queryVector, vector)
+                               * (length / (length + SectionSaturation));
+                return (Section: section, Score: score);
+            })
+            .OrderByDescending(s => s.Score)
+            .ToList();
+
+        List<DocumentSection> chosen = new();
+        List<DocumentSection> omitted = new();
+        int spent = 0;
+        bool budgetExhausted = false;
+
+        foreach ((DocumentSection? section, double score) in ranked)
+        {
+            int cost = section.Heading.Length + section.Body.Length;
+
+            // The top clearing section is always included even if it alone exceeds the budget —
+            // it gets truncated at the transport edge. Returning nothing but a path would
+            // make the tool a directory listing, which is what sent callers to Read.
+            bool mustInclude = chosen.Count == 0 && score >= MinSectionScore;
+
+            if (score < MinSectionScore && !mustInclude)
+            {
+                omitted.Add(section);
+                continue;
+            }
+
+            if (mustInclude || spent + cost <= budget)
+            {
+                chosen.Add(section);
+                spent += cost;
+            }
+            else
+            {
+                omitted.Add(section);
+                budgetExhausted = true;
+            }
+        }
+
+        if (chosen.Count == 0) return DocumentExcerpt.Empty;
+
+        return new DocumentExcerpt(
+            chosen.OrderBy(s => s.LineNumber).ToList(),
+            omitted.OrderBy(s => s.LineNumber).Select(s => s.Heading).Where(h => h.Length > 0).ToList(),
+            omitted.Count == 0,
+            budgetExhausted);
+    }
+}

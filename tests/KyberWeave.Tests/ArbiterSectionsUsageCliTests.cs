@@ -1,3 +1,9 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Tests.Arbiter;
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Core.Arbiter.Plans;
+using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Cli.Commands.Arbiter;
 using Xunit;
 
@@ -12,7 +18,7 @@ public sealed class ArbiterSectionsUsageCliTests
     [Fact]
     public void ASectionsRunWithoutAPathIsAUsageErrorNotAnException()
     {
-        ArbiterSectionsCommand command = new();
+        ArbiterSectionsCommand command = ArbiterTestServices.Command<ArbiterSectionsCommand>();
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,

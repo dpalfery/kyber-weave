@@ -39,7 +39,7 @@ public sealed class SquadInstanceCliTests : IDisposable
             RepositoryRoot(),
             "src",
             "KyberWeave.Cli",
-            "Program.cs"));
+            "CliApplication.cs"));
 
         Assert.Contains("AddBranch(\"instance\"", program, StringComparison.Ordinal);
         Assert.Contains("AddCommand<SquadInstanceRemoveCommand>(\"remove\")", program, StringComparison.Ordinal);
@@ -290,7 +290,7 @@ public sealed class SquadInstanceCliTests : IDisposable
         SeedInstance(userPaths, SquadTarget.Codex, "precise", "1.2.4",
             (".codex/agents/architect.toml", "name = \"architect\""));
 
-        SquadStatusCommand command = new(userPaths, stateStore);
+        SquadStatusCommand command = SquadTestCommands.Status(userPaths, stateStore);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -318,7 +318,7 @@ public sealed class SquadInstanceCliTests : IDisposable
         SquadStateStore stateStore = new(userPaths);
         SeedGlobalDeployment(userPaths);
 
-        SquadStatusCommand command = new(userPaths, stateStore);
+        SquadStatusCommand command = SquadTestCommands.Status(userPaths, stateStore);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -345,7 +345,7 @@ public sealed class SquadInstanceCliTests : IDisposable
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
         SquadStateStore stateStore = new(userPaths);
 
-        SquadStatusCommand command = new(userPaths, stateStore);
+        SquadStatusCommand command = SquadTestCommands.Status(userPaths, stateStore);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -375,7 +375,7 @@ public sealed class SquadInstanceCliTests : IDisposable
         SeedInstance(userPaths, SquadTarget.Claude, "fast", "1.2.0",
             (".claude/agents/architect.md", "Old content"));
 
-        SquadUpdateCommand command = new(
+        SquadUpdateCommand command = SquadTestCommands.Update(
             userPaths,
             stateStore,
             isInteractive: false);
@@ -409,7 +409,7 @@ public sealed class SquadInstanceCliTests : IDisposable
         SeedInstance(userPaths, SquadTarget.Claude, "fast", "1.2.3",
             (".claude/agents/architect.md", "You are architect."));
 
-        SquadUpdateCommand command = new(
+        SquadUpdateCommand command = SquadTestCommands.Update(
             userPaths,
             stateStore,
             isInteractive: false);
@@ -440,7 +440,7 @@ public sealed class SquadInstanceCliTests : IDisposable
         Directory.CreateDirectory(instanceStateDir);
         File.WriteAllText(Path.Combine(instanceStateDir, "squad.receipt.json"), "{ invalid json }", Encoding.UTF8);
 
-        SquadUpdateCommand command = new(
+        SquadUpdateCommand command = SquadTestCommands.Update(
             userPaths,
             stateStore,
             isInteractive: false);
@@ -466,7 +466,7 @@ public sealed class SquadInstanceCliTests : IDisposable
         bool? isInteractive = null,
         Func<string, bool>? readAnswer = null)
     {
-        return new SquadInstanceRemoveCommand(
+        return SquadTestCommands.InstanceRemove(
             userPaths,
             instanceService,
             isInteractive,

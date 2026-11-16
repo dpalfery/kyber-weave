@@ -1,4 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Core.Docs.Analysis.Glossary;
@@ -6,7 +8,6 @@ using KyberWeave.Core.Docs.Analysis.Model;
 using KyberWeave.Core.Docs.Analysis.Review;
 using KyberWeave.Core.Docs.Graph;
 using KyberWeave.Core.Docs.Model;
-using KyberWeave.Core.Docs.Parsing;
 
 namespace KyberWeave.Cli.Commands.Docs;
 
@@ -14,12 +15,18 @@ namespace KyberWeave.Cli.Commands.Docs;
 internal sealed class RepositoryDocsAnalysisCommandService : IDocsAnalysisCommandService
 {
     private readonly DocsAnalysisCompositionFactories _factories;
+    private readonly IManagedGlossaryFactory _glossaries;
+    private readonly IDocumentSourceFactory _documents;
 
-    public RepositoryDocsAnalysisCommandService()
-        : this(new DocsAnalysisCompositionFactories()) { }
-
-    internal RepositoryDocsAnalysisCommandService(DocsAnalysisCompositionFactories factories) =>
+    public RepositoryDocsAnalysisCommandService(
+        DocsAnalysisCompositionFactories factories,
+        IManagedGlossaryFactory glossaries,
+        IDocumentSourceFactory documents)
+    {
         _factories = factories ?? throw new ArgumentNullException(nameof(factories));
+        _glossaries = glossaries ?? throw new ArgumentNullException(nameof(glossaries));
+        _documents = documents ?? throw new ArgumentNullException(nameof(documents));
+    }
 
     public DocumentationAnalysisResult Analyze(DocsIntegrityCheckSettings settings)
     {
@@ -59,10 +66,7 @@ internal sealed class RepositoryDocsAnalysisCommandService : IDocsAnalysisComman
         using AnalysisExecution execution = RunAnalysis(settings);
         ThrowIfOperational(execution.Result.Diagnostics);
         IReadOnlyList<GlossaryProposal> proposals = Proposals(execution.Result.Candidates);
-        ManagedGlossaryService service = new ManagedGlossaryService(
-            execution.Runtime.RepositoryRoot,
-            execution.Runtime.Config,
-            TimeProvider.System);
+        IManagedGlossary service = _glossaries.Open(execution.Runtime.RepositoryRoot, execution.Runtime.Config);
         GlossaryUpdateResult glossary = settings.Write ? service.Write(proposals) : service.Preview(proposals);
         MergeDiagnostics(glossary.Diagnostics, execution.Result.Diagnostics);
         return glossary;
@@ -91,15 +95,12 @@ internal sealed class RepositoryDocsAnalysisCommandService : IDocsAnalysisComman
 
         try
         {
-            DocumentSet documents = new DocumentLoader(created.RepositoryRoot, created.Ontology).Load();
-            DocGraphProjection graph = DocGraphProjection.Build(
+            DocumentSet documents = _documents.Create(created.RepositoryRoot, created.Ontology).Load();
+            DocGraphProjection graph = DocGraphProjectionBuilder.Build(
                 documents,
                 created.Resolver,
                 created.Config.DocsAnalysis.Search.MaxCodeNeighbors);
-            ManagedGlossaryLoadResult glossary = new ManagedGlossaryService(
-                created.RepositoryRoot,
-                created.Config,
-                TimeProvider.System).Load();
+            ManagedGlossaryLoadResult glossary = _glossaries.Open(created.RepositoryRoot, created.Config).Load();
             DocumentationAnalysisResult analyzed = created.CreateAnalyzer().Analyze(
                 documents,
                 graph,

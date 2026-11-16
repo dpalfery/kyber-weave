@@ -46,9 +46,9 @@ public sealed class SquadHotshotLifecycleCopilotGlobalUpdateLinksTests : IDispos
         SquadGlobalRoots globalRoots = new(_ => null, home);
         SquadStateStore stateStore = new(userPaths);
         using CorpusSquadReleaseSource releaseSource = new();
-        SquadLifecycleService service = new(
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
             releaseSource,
-            SquadCommandComposition.ResolveRenderer(),
+            SquadHostDefaults.ResolveRenderer(),
             stateStore,
             globalRoots: globalRoots);
 

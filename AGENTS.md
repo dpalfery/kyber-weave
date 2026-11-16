@@ -50,6 +50,8 @@ run reports a non-zero test count. The commands for each area:
 - .NET: [`docs/standards/test/README.md`](docs/standards/test/README.md#completion)
 - Repository policy (scripts, workflows, gate configuration, docs prose, source scans):
   [`tests/KyberWeave.RepoPolicy.Tests/AGENTS.md`](tests/KyberWeave.RepoPolicy.Tests/AGENTS.md)
+- Wording of skills, agents and instructions (scheduled to become eval-style):
+  [`tests/KyberWeave.PromptContent.Tests/AGENTS.md`](tests/KyberWeave.PromptContent.Tests/AGENTS.md)
 - KyberDash: [`dash/AGENTS.md`](dash/AGENTS.md#gates)
 - Tray UI and tray crate: [`dash/tray/AGENTS.md`](dash/tray/AGENTS.md#gates)
 

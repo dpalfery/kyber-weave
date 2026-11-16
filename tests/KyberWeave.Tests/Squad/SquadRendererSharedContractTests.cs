@@ -12,7 +12,7 @@ namespace KyberWeave.Tests.Squad;
 
 /// <summary>
 /// The contract every shipped Squad renderer owes whatever its harness, run once per renderer in
-/// <see cref="SquadCommandComposition.CreateRenderers"/>.
+/// <see cref="SquadHostDefaults.CreateRenderers"/>.
 /// </summary>
 /// <remarks>
 /// Each of these used to be copied into every harness suite with only the renderer and target
@@ -90,7 +90,7 @@ public sealed class SquadRendererSharedContractTests
     public static TheoryData<SquadTarget, SquadDeploymentScope> ShippedTargetsAtEachScope()
     {
         TheoryData<SquadTarget, SquadDeploymentScope> rows = [];
-        foreach (SquadTarget target in SquadCommandComposition.CreateRenderers().SelectMany(renderer => renderer.SupportedTargets))
+        foreach (SquadTarget target in SquadHostDefaults.CreateRenderers().SelectMany(renderer => renderer.SupportedTargets))
         {
             rows.Add(target, SquadDeploymentScope.Project);
             rows.Add(target, SquadDeploymentScope.Global);
@@ -100,7 +100,7 @@ public sealed class SquadRendererSharedContractTests
     }
 
     public static TheoryData<SquadTarget> ShippedTargets() =>
-        new(SquadCommandComposition.CreateRenderers().SelectMany(renderer => renderer.SupportedTargets));
+        new(SquadHostDefaults.CreateRenderers().SelectMany(renderer => renderer.SupportedTargets));
 
     public static TheoryData<SquadTarget> TargetsWithAResourceProjectionContract() =>
         new(ResourceProjectionContracts.Keys);
@@ -117,7 +117,7 @@ public sealed class SquadRendererSharedContractTests
     [Fact]
     public void EveryShippedRendererClaimsExactlyOneTargetNoOtherRendererClaims()
     {
-        IReadOnlyList<ISquadRenderer> renderers = SquadCommandComposition.CreateRenderers();
+        IReadOnlyList<ISquadRenderer> renderers = SquadHostDefaults.CreateRenderers();
 
         Assert.All(renderers, renderer => Assert.True(
             renderer.SupportedTargets.Count == 1,
@@ -136,11 +136,11 @@ public sealed class SquadRendererSharedContractTests
     [MemberData(nameof(ShippedTargets))]
     public async Task EachRendererRefusesARequestForAnotherTarget(SquadTarget target)
     {
-        SquadRenderRequest request = new(
+        SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
             [AnotherTarget(target)],
             SquadDeploymentScope.Project,
-            PreloadedSource: TestSquadCorpus.CanonicalSource);
+            PreloadedSource: TestSquadCorpus.CanonicalSource).Prepared();
 
         await Assert.ThrowsAsync<ArgumentException>(() => RendererFor(target).RenderAsync(request));
     }
@@ -153,8 +153,8 @@ public sealed class SquadRendererSharedContractTests
     [MemberData(nameof(ShippedTargets))]
     public async Task EachRendererRendersTheCanonicalCorpusByteForByteTheSameTwice(SquadTarget target)
     {
-        SquadRendererRegistry registry = new([RendererFor(target)]);
-        SquadRenderRequest fromDisk = new(ProductRoot, [target], SquadDeploymentScope.Project);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([RendererFor(target)]);
+        SquadRenderRequest fromDisk = new SquadRenderRequest(ProductRoot, [target], SquadDeploymentScope.Project).Prepared();
 
         SquadRenderResult first = await registry.RenderAsync(
             fromDisk with { PreloadedSource = TestSquadCorpus.CanonicalSource });
@@ -343,7 +343,7 @@ public sealed class SquadRendererSharedContractTests
     public static TheoryData<SquadTarget, string> ShippedTargetsWithEachUnresolvableProfile()
     {
         TheoryData<SquadTarget, string> rows = [];
-        foreach (SquadTarget target in SquadCommandComposition.CreateRenderers().SelectMany(renderer => renderer.SupportedTargets))
+        foreach (SquadTarget target in SquadHostDefaults.CreateRenderers().SelectMany(renderer => renderer.SupportedTargets))
         {
             rows.Add(target, "model-profile");
             rows.Add(target, "capability-profile");
@@ -384,14 +384,14 @@ public sealed class SquadRendererSharedContractTests
 
         SquadSourceValidationException refused = await Assert.ThrowsAsync<SquadSourceValidationException>(() =>
             RendererFor(target).RenderAsync(
-                new SquadRenderRequest(ProductRoot, [target], SquadDeploymentScope.Project, PreloadedSource: tampered)));
+                new SquadRenderRequest(ProductRoot, [target], SquadDeploymentScope.Project, PreloadedSource: tampered).Prepared()));
         Assert.Contains("undeclared", refused.Message, StringComparison.Ordinal);
     }
 
     public static TheoryData<SquadTarget, string> ShippedTargetsWithEachUnsafeOutputName()
     {
         TheoryData<SquadTarget, string> rows = [];
-        foreach (SquadTarget target in SquadCommandComposition.CreateRenderers().SelectMany(renderer => renderer.SupportedTargets))
+        foreach (SquadTarget target in SquadHostDefaults.CreateRenderers().SelectMany(renderer => renderer.SupportedTargets))
         {
             rows.Add(target, "agent-name");
             rows.Add(target, "skill-name");
@@ -439,7 +439,7 @@ public sealed class SquadRendererSharedContractTests
         };
 
         await Assert.ThrowsAsync<SquadRenderValidationException>(() => RendererFor(target).RenderAsync(
-            new SquadRenderRequest(ProductRoot, [target], SquadDeploymentScope.Project, PreloadedSource: tampered)));
+            new SquadRenderRequest(ProductRoot, [target], SquadDeploymentScope.Project, PreloadedSource: tampered).Prepared()));
     }
 
     /// <summary>
@@ -495,13 +495,13 @@ public sealed class SquadRendererSharedContractTests
     public async Task TheRegistryRefusesTheWholeRequestBeforeAnyRendererRunsWhenATargetHasNoRenderer()
     {
         CountingRenderer claude = new(SquadTarget.Claude);
-        SquadRendererRegistry registry = new([claude]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([claude]);
 
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Copilot, SquadTarget.Claude],
             SquadDeploymentScope.Project,
-            PreloadedSource: TestSquadCorpus.CanonicalSource));
+            PreloadedSource: TestSquadCorpus.CanonicalSource).Prepared());
 
         Assert.False(result.Success);
         Assert.Empty(result.Files);
@@ -511,7 +511,7 @@ public sealed class SquadRendererSharedContractTests
     }
 
     private static ISquadRenderer RendererFor(SquadTarget target) =>
-        SquadCommandComposition.CreateRenderers().Single(renderer => renderer.SupportedTargets.Contains(target));
+        SquadHostDefaults.CreateRenderers().Single(renderer => renderer.SupportedTargets.Contains(target));
 
     /// <summary>The degradation codes a default render may record, whatever the harness.</summary>
     private static readonly string[] DegradationCodes =

@@ -539,7 +539,7 @@ public sealed class DocumentationAnalyzerTests
     [Fact]
     public void DocGraphProjectionExposesIndexedRelatedDocumentNeighborhoods()
     {
-        DocGraphProjection projection = DocGraphProjection.Build(
+        DocGraphProjection projection = DocGraphProjectionBuilder.Build(
             Set(Document("doc1", "docs/doc1.md", Status.Current, "content")),
             new FakeCodeGraphResolver());
 
@@ -983,7 +983,9 @@ public sealed class DocumentationAnalyzerTests
         new(
             new ClaimExtractor(),
             sources ?? [new GraphClaimCandidateSource(), new SparseLexicalCandidateSource()],
-            embeddingGenerator,
+            embeddingGenerator is null || persistence is null
+                ? null
+                : new EmbeddingCoordinator(embeddingGenerator, persistence),
             persistence);
 
     private static DocumentSet NearDuplicateDocuments() =>
@@ -995,7 +997,7 @@ public sealed class DocumentationAnalyzerTests
         documents.Documents.SelectMany(document => new ClaimExtractor().Extract(document).Claims).ToArray();
 
     private static DocGraphProjection Graph(DocumentSet documents) =>
-        DocGraphProjection.Build(documents, FakeCodeGraphResolver.WithSymbols());
+        DocGraphProjectionBuilder.Build(documents, FakeCodeGraphResolver.WithSymbols());
 
     private static DocumentSet Set(params DocumentModel[] documents) => new() { Documents = documents };
 

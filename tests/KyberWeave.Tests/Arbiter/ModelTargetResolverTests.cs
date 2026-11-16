@@ -1,3 +1,7 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Arbiter.Plans;
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
 using System.Text.Json;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
@@ -116,6 +120,9 @@ public sealed class ModelTargetResolverTests : IDisposable
         new DecisionLog(ArbiterDirectory),
         new NoGitFacts(),
         new PlanFacts(),
+        new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
+            new GateReportFacts(),
+            new FileArbiterStateFactory(),
         TimeProvider.System,
         secondaryTriggers: (primary, ev) => string.Equals(primary, "delegate", StringComparison.Ordinal)
             ? ["delegate.model"]

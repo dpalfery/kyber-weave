@@ -1,4 +1,3 @@
-using KyberWeave.Core.Parsing;
 using KyberWeave.Core.Skills.Model;
 using Markdig;
 using Markdig.Extensions.Yaml;
@@ -14,9 +13,14 @@ namespace KyberWeave.Core.Skills.Parsing;
 /// YAML front matter extension to split front matter from body, YamlDotNet to
 /// deserialize the front matter, and a raw YAML pass to capture unknown keys.
 /// </summary>
+/// <remarks>
+/// The parser is pure: the caller reads the file, lists the skill's bundled files and
+/// resolves the body's references, then passes those facts in. The adapters that do that
+/// work live in the Application layer.
+/// </remarks>
 public static class SkillParser
 {
-    private static readonly MarkdownPipeline Pipeline =
+    internal static readonly MarkdownPipeline Pipeline =
         new MarkdownPipelineBuilder { TrackTrivia = true }.UseYamlFrontMatter().Build();
 
     private static readonly IDeserializer Deserializer =
@@ -30,20 +34,26 @@ public static class SkillParser
         "name", "description", "license", "compatibility", "metadata", "allowed-tools"
     };
 
-    public static Skill ParseFile(string skillFilePath)
-    {
-        if (!File.Exists(skillFilePath))
-            throw new SkillParseException($"SKILL.md not found at '{skillFilePath}'.");
+    /// <summary>Parses the Markdown document with the same pipeline the skill parser uses, for callers that must also resolve the body's references.</summary>
+    /// <param name="content">The SKILL.md text.</param>
+    /// <returns>The parsed document.</returns>
+    internal static MarkdownDocument ParseDocument(string content) => Markdown.Parse(content, Pipeline);
 
-        string raw = File.ReadAllText(skillFilePath);
-        string directory = Path.GetDirectoryName(Path.GetFullPath(skillFilePath))!;
-        return Parse(raw, Path.GetFullPath(skillFilePath), directory);
-    }
-
-    /// <summary>Parse from in-memory content (used by tests). Resource discovery still runs against <paramref name="directoryPath"/> if it exists.</summary>
-    public static Skill Parse(string content, string skillFilePath, string directoryPath)
+    /// <summary>Parses a SKILL.md from its text and the on-disk facts the caller gathered.</summary>
+    /// <param name="content">The file's text.</param>
+    /// <param name="skillFilePath">The absolute path of the SKILL.md.</param>
+    /// <param name="directoryPath">The absolute path of the skill's directory.</param>
+    /// <param name="links">The body's file references, as the caller resolved them.</param>
+    /// <param name="resources">The files bundled with the skill, as the caller listed them.</param>
+    /// <returns>The parsed skill.</returns>
+    public static Skill Parse(
+        string content,
+        string skillFilePath,
+        string directoryPath,
+        IReadOnlyList<SkillReferenceLink> links,
+        IReadOnlyList<SkillResource> resources)
     {
-        MarkdownDocument document = Markdown.Parse(content, Pipeline);
+        MarkdownDocument document = ParseDocument(content);
         YamlFrontMatterBlock yamlBlock = document.Descendants<YamlFrontMatterBlock>().FirstOrDefault()
             ?? throw new SkillParseException("No YAML front matter found. A SKILL.md must begin with a '---' fenced YAML block.");
 
@@ -62,8 +72,6 @@ public static class SkillParser
         CaptureUnknownKeys(rawYaml, frontmatter);
 
         string body = ExtractBody(content, yamlBlock);
-        List<SkillReferenceLink> links = ExtractReferenceLinks(document, directoryPath);
-        List<SkillResource> resources = DiscoverResources(directoryPath, skillFilePath);
 
         return new Skill
         {
@@ -118,24 +126,27 @@ public static class SkillParser
         }
     }
 
-    private static List<SkillReferenceLink> ExtractReferenceLinks(MarkdownDocument document, string directoryPath)
+    /// <summary>Builds the skill's resource list from the files the caller found under <paramref name="directoryPath"/>.</summary>
+    /// <param name="directoryPath">The absolute path of the skill's directory.</param>
+    /// <param name="skillFilePath">The absolute path of the SKILL.md, which is not itself a resource.</param>
+    /// <param name="files">The files the caller enumerated under <paramref name="directoryPath"/>.</param>
+    /// <returns>One resource per file, in the order the caller supplied them.</returns>
+    public static IReadOnlyList<SkillResource> DiscoverResources(
+        string directoryPath,
+        string skillFilePath,
+        IEnumerable<string> files)
     {
-        IReadOnlyList<ExtractedFileReference> extracted = FileReferenceExtractor.ExtractFromDocument(document, directoryPath, FileReferenceOptions.SkillDefault);
-        return extracted.Select(r => new SkillReferenceLink(r.Reference, r.Exists)).ToList();
-    }
+        ArgumentNullException.ThrowIfNull(files);
 
-    private static List<SkillResource> DiscoverResources(string directoryPath, string skillFilePath)
-    {
-        List<SkillResource> resources = new List<SkillResource>();
-        if (!Directory.Exists(directoryPath)) return resources;
-
-        foreach (string file in Directory.EnumerateFiles(directoryPath, "*", SearchOption.AllDirectories))
+        List<SkillResource> resources = [];
+        foreach (string file in files)
         {
             if (string.Equals(Path.GetFullPath(file), skillFilePath, StringComparison.Ordinal)) continue;
             string rel = Path.GetRelativePath(directoryPath, file).Replace('\\', '/');
             SkillResourceKind kind = ClassifyResource(rel);
             resources.Add(new SkillResource(rel, Path.GetFullPath(file), kind));
         }
+
         return resources;
     }
 

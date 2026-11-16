@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
@@ -8,7 +9,7 @@ using Spectre.Console.Cli;
 namespace KyberWeave.Cli.Commands.Arbiter;
 
 /// <summary>Lists the effective Arbiter rules: id, trigger, step, question, answers, effects and facts.</summary>
-public sealed class ArbiterRulesCommand : Command<ArbiterSettings>
+public sealed class ArbiterRulesCommand(IArbiterConfigResolver configs) : Command<ArbiterSettings>
 {
     /// <summary>
     /// Prints one row per rule (one rule per trigger, sharing the rule id).
@@ -19,7 +20,7 @@ public sealed class ArbiterRulesCommand : Command<ArbiterSettings>
     public override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new();
-        if (!ArbiterCommandComposition.TryResolveConfig(settings, report, out KyberWeaveConfig config, out _))
+        if (!configs.TryResolve(settings.Path, settings.Config, report, out KyberWeaveConfig config, out _))
         {
             CommandHelpers.Finish(report, settings, "arbiter rules", "Rule");
             return 1;

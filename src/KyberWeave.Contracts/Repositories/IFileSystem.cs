@@ -1,6 +1,6 @@
 namespace KyberWeave.Contracts.Repositories;
 
-/// <summary>The file system reads the hook needs.</summary>
+/// <summary>The file reads, existence probes and directory listings a command needs.</summary>
 public interface IFileSystem
 {
     /// <summary>Gets whether a file exists.</summary>
@@ -24,4 +24,9 @@ public interface IFileSystem
     /// <param name="recursive">Whether to descend into subdirectories.</param>
     /// <returns>Absolute file paths; empty when the directory is missing.</returns>
     IEnumerable<string> EnumerateFiles(string directory, string searchPattern, bool recursive);
+
+    /// <summary>Lists the immediate child directories of a directory.</summary>
+    /// <param name="directory">The absolute directory.</param>
+    /// <returns>Absolute directory paths; empty when the directory is missing.</returns>
+    IEnumerable<string> EnumerateDirectories(string directory);
 }

@@ -353,9 +353,9 @@ public sealed class SquadInstanceServiceTests : IDisposable
         SquadStateStore stateStore = new(userPaths);
 
         FakeReleaseSource releaseSource = new(_fixture.Path);
-        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
+        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
 
-        SquadLifecycleService lifecycleService = new(
+        SquadLifecycleService lifecycleService = SquadHostDefaults.CreateLifecycleService(
             releaseSource,
             renderer,
             stateStore,
@@ -404,7 +404,7 @@ public sealed class SquadInstanceServiceTests : IDisposable
 
         public SquadInstanceService CreateService()
         {
-            return new SquadInstanceService(LifecycleService, PresetStore, LinkFileSystem, GlobalRoots);
+            return new SquadInstanceService(LifecycleService, PresetStore, LinkFileSystem, GlobalRoots, new FileSquadInstanceLinkSync(), new PhysicalSquadFileAccess());
         }
     }
 

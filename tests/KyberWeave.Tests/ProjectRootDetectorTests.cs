@@ -3,12 +3,13 @@ using System.Text;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review.Catalogue;
+using KyberWeave.Data.Review;
 using Xunit;
 
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// <see cref="ProjectRootDetector"/> finds the project roots of one family in a repository tree. The
+/// <see cref="ProjectRootDetection"/> finds the project roots of one family in a repository tree. The
 /// result must be the same for the same tree, capped at eight roots, and carry a valid slug for each
 /// root so the generated gate ids stay lookup-safe. Dependency and build-output directories and
 /// git-ignored paths are never roots, because a gate pointed at them would check code nobody owns.
@@ -32,6 +33,20 @@ public sealed class ProjectRootDetectorTests : IDisposable
         _fixture.Dispose();
     }
 
+    /// <summary>Detects one family's roots in <paramref name="repositoryRoot"/>, as the renderer does.</summary>
+    private static ProjectRootSet Detect(
+        string repositoryRoot,
+        string[] markers,
+        ProjectRootNesting nesting,
+        bool pair = false,
+        string[]? fallback = null) =>
+        ProjectRootDetection.Detect(
+            new FileRepositoryFileLister(new ProcessProgramRunner()).List(repositoryRoot),
+            markers,
+            nesting,
+            pair,
+            fallback);
+
     /// <summary>A family with no marker in the tree has no roots at all, so no gate is written for it.</summary>
     [Fact]
     public void ATreeWithoutAMarkerHasNoRoots()
@@ -39,7 +54,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
         string repo = _fixture.Path;
         Touch(repo, "src/program.cs");
 
-        ProjectRootSet set = ProjectRootDetector.Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
+        ProjectRootSet set = Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
 
         Assert.Empty(set.Roots);
         Assert.False(set.Capped);
@@ -56,7 +71,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
         Touch(repo, "b/go.mod");
         Touch(repo, "a/go.mod");
 
-        ProjectRootSet set = ProjectRootDetector.Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
+        ProjectRootSet set = Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
 
         Assert.Equal(["a", "b"], set.Roots.Select(root => root.RootDirectory).ToArray());
         Assert.Equal(["a/go.mod", "b/go.mod"], set.Roots.Select(root => root.MarkerPath).ToArray());
@@ -74,7 +89,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
         Touch(repo, "Cargo.toml");
         Touch(repo, "crates/x/Cargo.toml");
 
-        ProjectRootSet set = ProjectRootDetector.Detect(repo, CargoMarkers, ProjectRootNesting.Outermost);
+        ProjectRootSet set = Detect(repo, CargoMarkers, ProjectRootNesting.Outermost);
 
         ProjectRoot root = Assert.Single(set.Roots);
         Assert.Equal(".", root.RootDirectory);
@@ -94,7 +109,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
         Touch(repo, "web/package.json");
         Touch(repo, "web/tsconfig.json");
 
-        ProjectRootSet set = ProjectRootDetector.Detect(
+        ProjectRootSet set = Detect(
             repo,
             PairMarkers,
             ProjectRootNesting.Each,
@@ -116,7 +131,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
         Touch(repo, "scratch/go.mod");
         Touch(repo, "app/go.mod");
 
-        ProjectRootSet set = ProjectRootDetector.Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
+        ProjectRootSet set = Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
 
         Assert.Equal(["app"], set.Roots.Select(root => root.RootDirectory).ToArray());
     }
@@ -140,7 +155,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
             "-c", "commit.gpgsign=false",
             "commit", "-q", "-m", "fixture");
 
-        ProjectRootSet set = ProjectRootDetector.Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
+        ProjectRootSet set = Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
 
         Assert.Equal(["app"], set.Roots.Select(root => root.RootDirectory).ToArray());
     }
@@ -156,7 +171,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
         for (int i = 1; i <= 9; i++)
             Touch(repo, $"m{i}/go.mod");
 
-        ProjectRootSet set = ProjectRootDetector.Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
+        ProjectRootSet set = Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
 
         Assert.True(set.Capped, "More than eight roots must report Capped.");
         Assert.Equal(9, set.Roots.Count);
@@ -170,7 +185,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
         for (int i = 1; i <= 8; i++)
             Touch(repo, $"m{i}/go.mod");
 
-        ProjectRootSet set = ProjectRootDetector.Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
+        ProjectRootSet set = Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
 
         Assert.False(set.Capped);
         Assert.Equal(8, set.Roots.Count);
@@ -190,7 +205,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
         Touch(repo, "apps/Web API/go.mod");
         Touch(repo, "apps/web-api/go.mod");
 
-        ProjectRootSet set = ProjectRootDetector.Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
+        ProjectRootSet set = Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
 
         Assert.Equal(
             [".", "apps/Web API", "apps/web-api"],
@@ -212,7 +227,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
         string repo = _fixture.Path;
         Touch(repo, "web/tsconfig.json");
 
-        ProjectRootSet set = ProjectRootDetector.Detect(
+        ProjectRootSet set = Detect(
             repo,
             PairMarkers,
             ProjectRootNesting.Each,
@@ -232,7 +247,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
         Touch(repo, "web/package.json");
         Touch(repo, "web/tsconfig.json");
 
-        ProjectRootSet set = ProjectRootDetector.Detect(
+        ProjectRootSet set = Detect(
             repo,
             PairMarkers,
             ProjectRootNesting.Each,
@@ -253,7 +268,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
         string repo = _fixture.Path;
         Touch(repo, "src/App.csproj");
 
-        ProjectRootSet set = ProjectRootDetector.Detect(
+        ProjectRootSet set = Detect(
             repo,
             SolutionMarkers,
             ProjectRootNesting.Each,
@@ -275,7 +290,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
         Touch(repo, "a/A.csproj");
         Touch(repo, "b/B.csproj");
 
-        ProjectRootSet set = ProjectRootDetector.Detect(
+        ProjectRootSet set = Detect(
             repo,
             SolutionMarkers,
             ProjectRootNesting.Each,
@@ -296,8 +311,8 @@ public sealed class ProjectRootDetectorTests : IDisposable
         Touch(repo, "a/go.mod");
         Touch(repo, "apps/Web API/go.mod");
 
-        ProjectRootSet first = ProjectRootDetector.Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
-        ProjectRootSet second = ProjectRootDetector.Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
+        ProjectRootSet first = Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
+        ProjectRootSet second = Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
 
         Assert.Equal(Project(first), Project(second));
         Assert.Equal(first.Capped, second.Capped);
@@ -314,7 +329,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
         Touch(repo, "go.mod");
         Touch(repo, "root/go.mod");
 
-        ProjectRootSet set = ProjectRootDetector.Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
+        ProjectRootSet set = Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
 
         Assert.Equal([".", "root"], set.Roots.Select(root => root.RootDirectory).ToArray());
         Assert.Equal(["root", "root-2"], set.Roots.Select(root => root.Slug).ToArray());
@@ -331,7 +346,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
         string repo = _fixture.Path;
         Touch(repo, $"{new string('a', 39)}/{new string('b', 10)}/go.mod");
 
-        ProjectRootSet set = ProjectRootDetector.Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
+        ProjectRootSet set = Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
 
         ProjectRoot root = Assert.Single(set.Roots);
         Assert.Equal(new string('a', 39), root.Slug);
@@ -350,7 +365,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
         Touch(repo, "app/app.sln");
         Touch(repo, "other/Only.csproj");
 
-        ProjectRootSet set = ProjectRootDetector.Detect(
+        ProjectRootSet set = Detect(
             repo,
             SolutionMarkers,
             ProjectRootNesting.Each,
@@ -373,7 +388,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
         Touch(repo, "p-q/go.mod");
         Touch(repo, "p-q-2/go.mod");
 
-        ProjectRootSet set = ProjectRootDetector.Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
+        ProjectRootSet set = Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
 
         Assert.Equal(["p q", "p-q", "p-q-2"], set.Roots.Select(root => root.RootDirectory).ToArray());
         Assert.Equal(["p-q", "p-q-2", "p-q-2-2"], set.Roots.Select(root => root.Slug).ToArray());
@@ -389,7 +404,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
         string repo = _fixture.Path;
         Touch(repo, "___/go.mod");
 
-        ProjectRootSet set = ProjectRootDetector.Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
+        ProjectRootSet set = Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
 
         ProjectRoot root = Assert.Single(set.Roots);
         Assert.Equal("project", root.Slug);
@@ -407,7 +422,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
         Directory.CreateDirectory(Path.Combine(repo, "linked"));
         File.CreateSymbolicLink(Path.Combine(repo, "linked", "go.mod"), Path.Combine(repo, "real", "go.mod"));
 
-        ProjectRootSet set = ProjectRootDetector.Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
+        ProjectRootSet set = Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
 
         Assert.Equal(["real"], set.Roots.Select(root => root.RootDirectory).ToArray());
     }
@@ -431,7 +446,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
             "commit", "-q", "-m", "fixture");
         File.Delete(Path.Combine(repo, "app", "go.mod"));
 
-        ProjectRootSet set = ProjectRootDetector.Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
+        ProjectRootSet set = Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
 
         Assert.Empty(set.Roots);
     }
@@ -453,7 +468,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
         Touch(repo, ".venv/go.mod");
         Touch(repo, "src/go.mod");
 
-        ProjectRootSet set = ProjectRootDetector.Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
+        ProjectRootSet set = Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
 
         Assert.Equal(["src"], set.Roots.Select(root => root.RootDirectory).ToArray());
     }
@@ -466,7 +481,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
 
         Assert.Throws<DirectoryNotFoundException>(() =>
         {
-            ProjectRootDetector.Detect(missing, GoModuleMarkers, ProjectRootNesting.Each);
+            Detect(missing, GoModuleMarkers, ProjectRootNesting.Each);
         });
     }
 
@@ -484,7 +499,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
             Touch(repo, $"m{i}/tsconfig.json");
         }
 
-        ProjectRootSet set = ProjectRootDetector.Detect(
+        ProjectRootSet set = Detect(
             repo,
             PairMarkers,
             ProjectRootNesting.Outermost,

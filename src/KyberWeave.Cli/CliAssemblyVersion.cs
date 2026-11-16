@@ -1,4 +1,5 @@
 using System.Reflection;
+using KyberWeave.Cli.Update;
 
 namespace KyberWeave.Cli;
 
@@ -46,20 +47,6 @@ internal static class CliAssemblyVersion
     /// </remarks>
     internal static string Normalize(string version)
     {
-        ArgumentNullException.ThrowIfNull(version);
-
-        string trimmed = version.Trim();
-        if (trimmed.StartsWith('v') || trimmed.StartsWith('V'))
-        {
-            trimmed = trimmed[1..];
-        }
-
-        int plus = trimmed.IndexOf('+', StringComparison.Ordinal);
-        if (plus >= 0)
-        {
-            trimmed = trimmed[..plus];
-        }
-
-        return trimmed;
+        return ReleaseVersion.StripPrefixAndBuildMetadata(version);
     }
 }

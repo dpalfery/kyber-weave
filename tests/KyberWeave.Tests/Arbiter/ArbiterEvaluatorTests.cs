@@ -1,3 +1,7 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Arbiter.Plans;
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
@@ -177,6 +181,9 @@ public sealed class ArbiterEvaluatorTests : IDisposable
             new DecisionLog(ArbiterDirectory),
             gitFacts ?? new PassThroughGitFacts(),
             planReader ?? new PassThroughPlanReader(),
+            new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
+            new GateReportFacts(),
+            new FileArbiterStateFactory(),
             new FixedClock(fixedNow));
     }
 
@@ -197,8 +204,8 @@ public sealed class ArbiterEvaluatorTests : IDisposable
         Assert.Contains("decisionLog", names);
         Assert.Contains("clock", names);
         Assert.Contains(parameters.Select(parameter => parameter.ParameterType), type => type == typeof(IArbiterProvider));
-        Assert.Contains(parameters.Select(parameter => parameter.ParameterType), type => type == typeof(InFlightLedger));
-        Assert.Contains(parameters.Select(parameter => parameter.ParameterType), type => type == typeof(DecisionLog));
+        Assert.Contains(parameters.Select(parameter => parameter.ParameterType), type => type == typeof(IArbiterLedger));
+        Assert.Contains(parameters.Select(parameter => parameter.ParameterType), type => type == typeof(IArbiterDecisionLog));
         Assert.Contains(parameters.Select(parameter => parameter.ParameterType), type => type == typeof(TimeProvider));
     }
 
@@ -299,6 +306,9 @@ public sealed class ArbiterEvaluatorTests : IDisposable
             new DecisionLog(ArbiterDirectory),
             new PassThroughGitFacts(),
             new PassThroughPlanReader(),
+            new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
+            new GateReportFacts(),
+            new FileArbiterStateFactory(),
             new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)));
         KyberWeaveConfig config = ConfigWith([
             AskRule("KW-ARB-ASK-001", "delegate", "within-task", RuleEffects.Allow),
@@ -574,7 +584,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
     public void PerTaskCommitsDoNotHideScopeDrift()
     {
         using RunStartProbe probe = RunStartProbe.Create();
-        GitSnapshot? snapshot = GitFacts.CaptureSnapshot(probe.Root);
+        GitSnapshot? snapshot = new GitFacts().CaptureSnapshot(probe.Root);
         Assert.NotNull(snapshot);
 
         probe.Git("switch", "-c", "claude/feat/one-task", "origin/main");
@@ -585,7 +595,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
         probe.Git("commit", "-m", "test(squad): one task, one commit");
         Assert.Equal(string.Empty, probe.GitOutput("status", "--porcelain").Trim());
 
-        IReadOnlySet<string> changed = GitFacts.GetChangedPathsSinceSnapshot(probe.Root, snapshot!);
+        IReadOnlySet<string> changed = new GitFacts().GetChangedPathsSinceSnapshot(probe.Root, snapshot!);
 
         Assert.Contains("src/OneTask.cs", changed);
     }

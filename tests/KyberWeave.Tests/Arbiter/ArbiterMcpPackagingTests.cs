@@ -1,3 +1,5 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
 using System.ComponentModel;
 using System.Reflection;
 using System.Xml.Linq;
@@ -112,9 +114,9 @@ public sealed class ArbiterMcpPackagingTests
     }
 
     private static ArbiterTools RealEngineTools(string root, IArbiterProvider provider) =>
-        new(new ArbiterServeContext(
+        ArbiterTestServices.Tools(new ArbiterServeContext(
             root,
-            new ArbiterHookDecisionEngine(_ => provider, homeDirectory: () => root),
+            ArbiterTestServices.Engine(_ => provider, homeDirectory: () => root),
             TextWriter.Null,
             _ => EnabledConfig(),
             _ => false));
@@ -203,7 +205,7 @@ public sealed class ArbiterMcpPackagingTests
     public void EveryResponseLeadsWithTheProvenanceLine()
     {
         using TempDirectory root = new();
-        ArbiterTools tools = new(Context(root.Path, new RecordingEngine()));
+        ArbiterTools tools = ArbiterTestServices.Tools(Context(root.Path, new RecordingEngine()));
         string prefix = $"provenance: root={FullPath(root.Path)} ";
 
         Assert.StartsWith(prefix, tools.Rules(), StringComparison.Ordinal);
@@ -223,13 +225,13 @@ public sealed class ArbiterMcpPackagingTests
 
         Assert.Equal(
             FullPath(flagRoot.Path),
-            ArbiterRootResolver.Resolve(["--repo-root", flagRoot.Path], workingDirectory.Path, envRoot.Path));
+            ArbiterTestServices.Get<ArbiterRootResolver>().Resolve(["--repo-root", flagRoot.Path], workingDirectory.Path, envRoot.Path));
         Assert.Equal(
             FullPath(envRoot.Path),
-            ArbiterRootResolver.Resolve([], workingDirectory.Path, envRoot.Path));
+            ArbiterTestServices.Get<ArbiterRootResolver>().Resolve([], workingDirectory.Path, envRoot.Path));
         Assert.Equal(
             FullPath(workingDirectory.Path),
-            ArbiterRootResolver.Resolve([], workingDirectory.Path, null));
+            ArbiterTestServices.Get<ArbiterRootResolver>().Resolve([], workingDirectory.Path, null));
     }
 
     [Fact]
@@ -237,7 +239,7 @@ public sealed class ArbiterMcpPackagingTests
     {
         using TempDirectory root = new();
         RecordingEngine engine = new() { Outcome = new HookOutcome(HookOutcomeKind.Deny, "ENVELOPE-BODY") };
-        ArbiterTools tools = new(Context(root.Path, engine));
+        ArbiterTools tools = ArbiterTestServices.Tools(Context(root.Path, engine));
 
         string response = tools.Evaluate(
             "lens.spawn",
@@ -260,7 +262,7 @@ public sealed class ArbiterMcpPackagingTests
         // routing block the hook path would see (review 20.1, Major 2).
         using TempDirectory root = new();
         RecordingEngine engine = new() { Outcome = new HookOutcome(HookOutcomeKind.Allow) };
-        ArbiterTools tools = new(Context(root.Path, engine));
+        ArbiterTools tools = ArbiterTestServices.Tools(Context(root.Path, engine));
 
         const string finding =
             "- id: security/key-in-argv\n" +
@@ -286,7 +288,7 @@ public sealed class ArbiterMcpPackagingTests
     {
         using TempDirectory root = new();
         RecordingEngine engine = new() { Outcome = new HookOutcome(HookOutcomeKind.Allow) };
-        ArbiterTools tools = new(Context(root.Path, engine));
+        ArbiterTools tools = ArbiterTestServices.Tools(Context(root.Path, engine));
 
         string response = tools.Evaluate("lens.spawn", new ArbiterFacts { Lens = ["security", "test-adequacy"] });
 
@@ -309,7 +311,7 @@ public sealed class ArbiterMcpPackagingTests
     {
         using TempDirectory root = new();
         RecordingEngine engine = new();
-        ArbiterTools tools = new(Context(root.Path, engine));
+        ArbiterTools tools = ArbiterTestServices.Tools(Context(root.Path, engine));
 
         string response = tools.Evaluate(trigger, new ArbiterFacts { Target = "review-lens" });
 
@@ -327,8 +329,8 @@ public sealed class ArbiterMcpPackagingTests
         File.WriteAllText(
             Path.Combine(root.Path, ".kyber-weave", "kyber-weave.yml"),
             "arbiter:\n  enabled: true\n  provider:\n    kind: none\n");
-        ArbiterHookDecisionEngine realEngine = new(homeDirectory: () => root.Path);
-        ArbiterTools tools = new(new ArbiterServeContext(
+        ArbiterHookDecisionEngine realEngine = ArbiterTestServices.Engine(homeDirectory: () => root.Path);
+        ArbiterTools tools = ArbiterTestServices.Tools(new ArbiterServeContext(
             root.Path, realEngine, TextWriter.Null, _ => EnabledConfig(), _ => false));
 
         const string finding =
@@ -432,7 +434,7 @@ public sealed class ArbiterMcpPackagingTests
     {
         using TempDirectory root = new();
         RecordingEngine engine = new() { Outcome = new HookOutcome(HookOutcomeKind.Allow) };
-        ArbiterTools tools = new(Context(root.Path, engine));
+        ArbiterTools tools = ArbiterTestServices.Tools(Context(root.Path, engine));
 
         string response = tools.Evaluate(
             "lens.spawn",
@@ -446,7 +448,7 @@ public sealed class ArbiterMcpPackagingTests
     {
         using TempDirectory root = new();
         RecordingEngine engine = new();
-        ArbiterTools tools = new(Context(root.Path, engine));
+        ArbiterTools tools = ArbiterTestServices.Tools(Context(root.Path, engine));
 
         string response = tools.Evaluate(
             "delegate",
@@ -460,7 +462,7 @@ public sealed class ArbiterMcpPackagingTests
     public void StatusReportsTheRootRuleSetAndKeyStateButNeverTheKey()
     {
         using TempDirectory root = new();
-        ArbiterTools tools = new(new ArbiterServeContext(
+        ArbiterTools tools = ArbiterTestServices.Tools(new ArbiterServeContext(
             root.Path, new RecordingEngine(), TextWriter.Null, _ => RemoteConfig(), _ => true));
 
         string status = tools.Status();
@@ -482,13 +484,13 @@ public sealed class ArbiterMcpPackagingTests
         File.WriteAllText(
             ArbiterUserSettings.GetPath(home.Path),
             "provider:\n  model: nimble-override\n  endpoint: https://override.example.test/v2\n");
-        ArbiterTools tools = new(new ArbiterServeContext(
+        ArbiterTools tools = ArbiterTestServices.Tools(new ArbiterServeContext(
             root.Path,
             new RecordingEngine(),
             TextWriter.Null,
             _ => RemoteConfig(),
             _ => true,
-            config => ArbiterUserSettings.ApplyTo(config.Arbiter.Provider, home.Path)));
+            config => new FileArbiterUserSettings(new PhysicalFileSystem()).ApplyTo(config.Arbiter.Provider, home.Path)));
 
         string status = tools.Status();
 

@@ -3,7 +3,7 @@ id: squad/architecture
 title: Kyber-Squad architecture
 doc-type: architecture
 component: KyberSquad
-source-root: src/KyberWeave.Core.Squad
+source-root: src/KyberWeave.Domain/Squad
 owner: dpalfery
 last-reviewed: 2026-11-12
 status: current
@@ -2250,7 +2250,7 @@ practice: a conductor run used one route in one autonomy mode and still read eve
 The route, the autonomy and the plan's development mode are known before a model reads anything, so
 `kyber-weave squad brief <agent>` selects the sections that apply and prints only those.
 
-- **One map.** `src/KyberWeave.Core.Squad/Briefs/Resources/briefs.yml`, embedded in the binary, lists each
+- **One map.** `src/KyberWeave.Domain/Squad/Briefs/Resources/briefs.yml`, embedded in the binary, lists each
   agent's reference files in output order. A file carries a condition (`path=plan`, `autonomy=autonomous`,
   `mode=test-first`, clauses joined by `;`) and each heading in it carries one more. A section carries its
   sub-headings.

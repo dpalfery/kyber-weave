@@ -1,4 +1,5 @@
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter.ModelTargets;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -10,41 +11,55 @@ namespace KyberWeave.Cli.Commands.Squad;
 /// <summary>
 /// Clears model preset overrides for target harnesses and restores bundled model configuration.
 /// </summary>
-public sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings>
+internal sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings>
 {
     private const string LockSchemaV1 = "kyber-squad.lock/v1";
     private const string LockSchemaV2 = "kyber-squad.lock/v2";
 
-    private readonly ISquadUserPaths? _userPaths;
-    private readonly SquadStateStore? _stateStore;
-    private readonly ISquadGlobalRootResolver? _globalRoots;
+    private readonly ISquadStateStore _stateStore;
+    private readonly ISquadGlobalRootResolver _globalRoots;
+    private readonly ISquadModelPresetStore _presetStore;
+    private readonly ISquadModelPresetSelectionStore _selectionStore;
+    private readonly ISquadCanonicalProfileResolver _canonicalProfiles;
+    private readonly ISquadDeploymentPlanner _planner;
+    private readonly ISquadTransactionFactory _transactions;
+    private readonly IFileSystemPathSemantics _pathSemantics;
 
-    /// <summary>Creates a new preset clear command using default dependencies.</summary>
-    public SquadPresetClearCommand()
+    /// <summary>Creates the command over the Squad services the host registers.</summary>
+    /// <param name="stateStore">Reads the deployment state.</param>
+    /// <param name="globalRoots">Resolves each target's global root.</param>
+    /// <param name="presetStore">Loads the named presets.</param>
+    /// <param name="selectionStore">Records the project's preset selection.</param>
+    /// <param name="canonicalProfiles">Finds the canonical model profiles to re-render with.</param>
+    /// <param name="planner">Preflights the re-render.</param>
+    /// <param name="transactions">Applies the re-render.</param>
+    public SquadPresetClearCommand(
+        ISquadStateStore stateStore,
+        ISquadGlobalRootResolver globalRoots,
+        ISquadModelPresetStore presetStore,
+        ISquadModelPresetSelectionStore selectionStore,
+        ISquadCanonicalProfileResolver canonicalProfiles,
+        ISquadDeploymentPlanner planner,
+        ISquadTransactionFactory transactions,
+        IFileSystemPathSemantics pathSemantics)
     {
-    }
-
-    /// <summary>Creates a new preset clear command using injectable dependencies.</summary>
-    internal SquadPresetClearCommand(
-        ISquadUserPaths? userPaths = null,
-        SquadStateStore? stateStore = null,
-        ISquadGlobalRootResolver? globalRoots = null,
-        Func<string?, ISquadUserPaths, SquadCanonicalProfiles?>? canonicalProfileResolver = null)
-    {
-        _userPaths = userPaths;
+        ArgumentNullException.ThrowIfNull(stateStore);
+        ArgumentNullException.ThrowIfNull(globalRoots);
+        ArgumentNullException.ThrowIfNull(presetStore);
+        ArgumentNullException.ThrowIfNull(selectionStore);
+        ArgumentNullException.ThrowIfNull(canonicalProfiles);
+        ArgumentNullException.ThrowIfNull(planner);
+        ArgumentNullException.ThrowIfNull(transactions);
+        ArgumentNullException.ThrowIfNull(pathSemantics);
         _stateStore = stateStore;
         _globalRoots = globalRoots;
-        if (canonicalProfileResolver is not null)
-            CanonicalProfileResolver = canonicalProfileResolver;
+        _presetStore = presetStore;
+        _selectionStore = selectionStore;
+        _canonicalProfiles = canonicalProfiles;
+        _planner = planner;
+        _transactions = transactions;
+        _pathSemantics = pathSemantics;
     }
-
-    /// <summary>Resolves canonical model profiles for this command.</summary>
-    /// <remarks>
-    ///     Injectable seam so tests can force the no-checkout path; the production default is the
-    ///     composition static, which prefers a checkout and falls back to the home snapshot store.
-    /// </remarks>
-    internal Func<string?, ISquadUserPaths, SquadCanonicalProfiles?> CanonicalProfileResolver { get; } =
-        SquadCommandComposition.ResolveCanonicalProfiles;
 
     /// <inheritdoc />
     public override int Execute(CommandContext context, SquadPresetClearSettings settings,
@@ -52,10 +67,8 @@ public sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings>
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        SquadStateStore stateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths);
-        ISquadUserPaths userPaths = _userPaths ?? stateStore.UserPaths;
-        IReadOnlyList<SquadModelPresetSelectionStore> selectionStores =
-            SquadCommandComposition.ResolveSelectionStores(userPaths);
+        ISquadStateStore stateStore = _stateStore;
+        IReadOnlyList<ISquadModelPresetSelectionStore> selectionStores = [_selectionStore];
 
         SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(settings.Global);
         string? effectivePath = SquadCommandComposition.CoalesceTargetPath(settings.Path, settings.PathOption);
@@ -165,7 +178,7 @@ public sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings>
         {
             if (!settings.DryRun)
             {
-                foreach (SquadModelPresetSelectionStore store in selectionStores)
+                foreach (ISquadModelPresetSelectionStore store in selectionStores)
                 {
                     foreach (SquadTarget target in targets)
                     {
@@ -196,16 +209,16 @@ public sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings>
         string projectRoot,
         SquadReceipt activeReceipt,
         SquadLock? activeLock,
-        SquadStateStore effectiveStateStore,
-        IReadOnlyList<SquadModelPresetSelectionStore> selectionStores,
+        ISquadStateStore effectiveStateStore,
+        IReadOnlyList<ISquadModelPresetSelectionStore> selectionStores,
         SquadPresetClearSettings settings)
     {
-        ISquadGlobalRootResolver effectiveGlobalRoots = _globalRoots ?? SquadCommandComposition.ResolveGlobalRoots();
+        ISquadGlobalRootResolver effectiveGlobalRoots = _globalRoots;
         HashSet<string> targetTokens =
             targets.Select(SquadTargetCatalog.GetToken).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         SquadCanonicalProfiles? canonical =
-            CanonicalProfileResolver(activeLock?.SquadVersion, effectiveStateStore.UserPaths);
+            _canonicalProfiles.Resolve(activeLock?.SquadVersion);
         if (canonical is null)
         {
             // Clearing restores bundled models, which are meaningless without the release the
@@ -223,7 +236,7 @@ public sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings>
             file =>
             {
                 string physicalPath = scope == SquadDeploymentScope.Global
-                    ? SquadDeploymentPlan.ResolveOwnedFilePath(activeReceipt, anchorRoot, effectiveGlobalRoots, file)
+                    ? SquadDeploymentPlan.ResolveOwnedFilePath(activeReceipt, anchorRoot, effectiveGlobalRoots, file, _pathSemantics)
                     : Path.Combine(anchorRoot, file.RelativePath);
                 return File.Exists(physicalPath) ? File.ReadAllBytes(physicalPath) : null;
             },
@@ -266,7 +279,7 @@ public sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings>
             ModelPresets = applied.Count > 0 ? applied : null
         };
 
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
+        SquadDeploymentPlan plan = _planner.CreateUpdate(
             anchorRoot,
             scope,
             nextLock,
@@ -277,10 +290,10 @@ public sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings>
             TimeProvider.System,
             effectiveGlobalRoots);
 
-        SquadTransaction transaction = new(effectiveStateStore);
+        ISquadTransaction transaction = _transactions.Create(null);
         transaction.Execute(plan);
 
-        foreach (SquadModelPresetSelectionStore store in selectionStores)
+        foreach (ISquadModelPresetSelectionStore store in selectionStores)
         {
             foreach (SquadTarget target in targets)
             {

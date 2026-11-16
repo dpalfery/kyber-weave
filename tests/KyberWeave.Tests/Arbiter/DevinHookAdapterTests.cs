@@ -145,8 +145,8 @@ public sealed class DevinHookAdapterTests
         IHookDecisionEngine engine,
         Func<string, KyberWeaveConfig>? loader = null)
     {
-        HookCommand command = new(
-            HarnessAdapterRegistry.CreateDefault(engine),
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
             loader ?? (_ => EnabledConfig()),
             () => "decision-test-1");
         using StringWriter stdout = new();
@@ -285,8 +285,8 @@ public sealed class DevinHookAdapterTests
     {
         int loads = 0;
         ContextualEngine engine = new();
-        HookCommand command = new(
-            HarnessAdapterRegistry.CreateDefault(engine),
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
             (string repoRoot) => { loads++; return EnabledConfig(); },
             () => "decision-test-1");
         using StringWriter stdout = new();
@@ -309,8 +309,8 @@ public sealed class DevinHookAdapterTests
         ContextualEngine engine = new();
         string stdin = Fixture("pre-run-subagent-dispatch.json").Replace(
             "\"tool_name\": \"run_subagent\"", "\"tool_name\": \"Run_Subagent\"", StringComparison.Ordinal);
-        HookCommand command = new(
-            HarnessAdapterRegistry.CreateDefault(engine),
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
             (string repoRoot) => { loads++; return EnabledConfig(); },
             () => "decision-test-1");
         using StringWriter stdout = new();
@@ -418,7 +418,7 @@ public sealed class DevinHookAdapterTests
     public void Adapters_AreRegisteredForDevinToken()
     {
         ScriptedEngine engine = new();
-        HarnessAdapterRegistry registry = HarnessAdapterRegistry.CreateDefault(engine);
+        HarnessAdapterRegistry registry = ArbiterTestServices.Registry(engine);
 
         Assert.True(registry.TryGet(DevinHookAdapter.Token, out IHarnessHookAdapter? adapter));
         Assert.IsType<DevinHookAdapter>(adapter);

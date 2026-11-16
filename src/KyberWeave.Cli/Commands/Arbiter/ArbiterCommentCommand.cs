@@ -1,3 +1,5 @@
+using KyberWeave.Contracts.Services;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
@@ -14,13 +16,18 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 /// the decision. Without a loadable configuration the comment is classed real. While the comment rule is in shadow the
 /// class printed is real, and a line after it says what the model would have given.
 /// </summary>
-public sealed class ArbiterCommentCommand : Command<ArbiterCommentSettings>
+public sealed class ArbiterCommentCommand(
+    IFileTextFacts fileText,
+    ICommentTriageFactory triageFactory,
+    IArbiterConfigResolver configs,
+    IArbiterDryRunService dryRun) : Command<ArbiterCommentSettings>
 {
     /// <summary>
     /// Builds the provider for a repository root. The command uses the root's configuration; a test substitutes one that
     /// answers, so the printed class does not depend on a live provider.
     /// </summary>
-    internal Func<string, DiagnosticReport, IArbiterProvider?> ProviderFactory { get; init; } = ProviderFor;
+    internal Func<string, DiagnosticReport, IArbiterProvider?> ProviderFactory { get; set; } =
+        (root, report) => ProviderFor(configs, dryRun, root, report);
 
     /// <summary>Prints the class and the decision id. Exits 2 on a usage error, and 1 when the document or the configured provider cannot be used.</summary>
     public override int Execute(CommandContext context, ArbiterCommentSettings settings, CancellationToken cancellationToken)
@@ -46,7 +53,7 @@ public sealed class ArbiterCommentCommand : Command<ArbiterCommentSettings>
         string root = System.IO.Path.GetFullPath(settings.Root);
         // The same containment the served tool applies: a cited path that leaves the root is refused, not read. The check
         // and the triage read use one root, the --root the settings name, so a path cannot pass one and fail the other.
-        if (!settings.Summary && FileTextFacts.ResolveWithinRoot(root, settings.Path) is null)
+        if (!settings.Summary && fileText.ResolveWithinRoot(root, settings.Path) is null)
         {
             AnsiConsole.MarkupLine($"[red]The document '{Markup.Escape(settings.Path)}' was not found under the repository root.[/]");
             return 1;
@@ -67,14 +74,13 @@ public sealed class ArbiterCommentCommand : Command<ArbiterCommentSettings>
         using IDisposable? owner = provider as IDisposable;
         if (settings.Summary)
         {
-            CommentSummaryResult summary = new CommentTriageService(
+            CommentSummaryResult summary = triageFactory.Create(
                     provider,
                     root,
                     System.IO.Path.Combine(root, "artifacts", "arbiter"),
-                    TimeProvider.System,
                     null,
-                    BotLoginsFor(root),
-                    RulesFor(root))
+                    BotLoginsFor(configs, root),
+                    RulesFor(configs, root))
                 .ClassifySummaryAsync(new CommentSummaryRequest(settings.Body, settings.Author), cancellationToken)
                 .GetAwaiter()
                 .GetResult();
@@ -90,12 +96,11 @@ public sealed class ArbiterCommentCommand : Command<ArbiterCommentSettings>
             return 0;
         }
 
-        CommentTriageResult result = new CommentTriageService(
+        CommentTriageResult result = triageFactory.Create(
                 provider,
                 root,
                 System.IO.Path.Combine(root, "artifacts", "arbiter"),
-                TimeProvider.System,
-                rules: RulesFor(root))
+                rules: RulesFor(configs, root))
             .ClassifyAsync(new CommentTriageRequest(settings.Path, settings.Line, settings.Body, settings.CommitSha), cancellationToken)
             .GetAwaiter()
             .GetResult();
@@ -136,11 +141,8 @@ public sealed class ArbiterCommentCommand : Command<ArbiterCommentSettings>
     /// The effective rules the root's configuration holds, with host overrides applied. A root with no loadable
     /// configuration uses the shipped rules, so the comment rule's shipped shadow state applies.
     /// </summary>
-    private static IReadOnlyList<ArbiterRule> RulesFor(string root)
-    {
-        KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(root);
-        return loaded.Success && loaded.Config is not null ? loaded.Config.Arbiter.Rules : ArbiterConfig.ProductDefaults.Rules;
-    }
+    private static IReadOnlyList<ArbiterRule> RulesFor(IArbiterConfigResolver configs, string root) =>
+        configs.TryLoadRepository(root) is { } config ? config.Arbiter.Rules : ArbiterConfig.ProductDefaults.Rules;
 
     /// <summary>Runs the command without cancellation; the entry point tests use.</summary>
     public int Execute(CommandContext context, ArbiterCommentSettings settings) =>
@@ -150,24 +152,24 @@ public sealed class ArbiterCommentCommand : Command<ArbiterCommentSettings>
     /// The provider the root's configuration names. A root with no loadable configuration answers with
     /// <see cref="NoneProvider"/>; a configuration whose provider override cannot be built returns null and reports why.
     /// </summary>
-    private static IArbiterProvider? ProviderFor(string root, DiagnosticReport report)
+    private static IArbiterProvider? ProviderFor(
+        IArbiterConfigResolver configs,
+        IArbiterDryRunService dryRun,
+        string root,
+        DiagnosticReport report)
     {
-        KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(root);
-        if (!loaded.Success || loaded.Config is null)
+        if (configs.TryLoadRepository(root) is not { } config)
         {
             return new NoneProvider();
         }
 
-        return ArbiterCommandComposition.CreateProvider(loaded.Config, null, report, out _) ?? (report.HasErrors ? null : new NoneProvider());
+        return dryRun.CreateProvider(config, null, report, out _) ?? (report.HasErrors ? null : new NoneProvider());
     }
 
     /// <summary>
     /// The bot logins the root's <c>arbiter.comment-triage.bot-logins</c> names. A root with no loadable configuration
     /// has none, so every summary stays real.
     /// </summary>
-    private static IReadOnlyList<string> BotLoginsFor(string root)
-    {
-        KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(root);
-        return loaded.Success && loaded.Config is not null ? loaded.Config.Arbiter.CommentTriage.BotLogins : [];
-    }
+    private static IReadOnlyList<string> BotLoginsFor(IArbiterConfigResolver configs, string root) =>
+        configs.TryLoadRepository(root) is { } config ? config.Arbiter.CommentTriage.BotLogins : [];
 }

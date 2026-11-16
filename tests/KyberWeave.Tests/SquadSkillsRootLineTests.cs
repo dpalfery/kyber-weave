@@ -28,7 +28,7 @@ public sealed class SquadSkillsRootLineTests
     public static TheoryData<SquadTarget, SquadDeploymentScope> TargetsAndScopes()
     {
         TheoryData<SquadTarget, SquadDeploymentScope> data = [];
-        foreach (SquadTarget target in SquadCommandComposition.CreateRenderers().SelectMany(renderer => renderer.SupportedTargets))
+        foreach (SquadTarget target in SquadHostDefaults.CreateRenderers().SelectMany(renderer => renderer.SupportedTargets))
         {
             data.Add(target, SquadDeploymentScope.Project);
             data.Add(target, SquadDeploymentScope.Global);
@@ -107,14 +107,14 @@ public sealed class SquadSkillsRootLineTests
         SquadDeploymentScope scope,
         ISquadGlobalRootResolver? roots)
     {
-        SquadRenderRequest request = new(
+        SquadRenderRequest request = new SquadRenderRequest(
             Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad"),
             [target],
             scope,
             GlobalRoots: roots,
-            PreloadedSource: TestSquadCorpus.CanonicalSource);
+            PreloadedSource: TestSquadCorpus.CanonicalSource).Prepared();
 
-        return SquadCommandComposition.ResolveRenderer().RenderAsync(request);
+        return SquadHostDefaults.ResolveRenderer().RenderAsync(request);
     }
 
     /// <summary>

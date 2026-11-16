@@ -9,6 +9,9 @@ scope. It does not restate the standard.
 
 Tests whose subject is the repository itself (scripts, workflows, gate configuration, docs
 prose, source scans) live in [`../KyberWeave.RepoPolicy.Tests`](../KyberWeave.RepoPolicy.Tests/AGENTS.md).
+Tests that assert only the wording of skills, agents and instructions live in
+[`../KyberWeave.PromptContent.Tests`](../KyberWeave.PromptContent.Tests/AGENTS.md), so this project
+measures behaviour.
 
 ## Fixtures
 

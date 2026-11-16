@@ -1,3 +1,6 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Tests.Arbiter;
+using Microsoft.Extensions.DependencyInjection;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Core.Arbiter;
@@ -17,14 +20,15 @@ public sealed class ArbiterLogWindowReportTests : IDisposable
     private static readonly DateTimeOffset At = new(2026, 11, 10, 9, 0, 0, TimeSpan.Zero);
 
     private readonly TempDirectory _temp = new();
-    private readonly Func<string> _home = ArbiterCommandComposition.HomeDirectory;
+    private readonly ArbiterTestHost _host;
 
     public ArbiterLogWindowReportTests() =>
-        ArbiterCommandComposition.HomeDirectory = () => Path.Combine(_temp.Path, "home");
+        _host = ArbiterTestHost.Create(services =>
+            services.AddSingleton<IProcessEnvironment>(new FakeProcessEnvironment(() => Path.Combine(_temp.Path, "home"))));
 
     public void Dispose()
     {
-        ArbiterCommandComposition.HomeDirectory = _home;
+        _host.Dispose();
         _temp.Dispose();
     }
 
@@ -103,7 +107,7 @@ public sealed class ArbiterLogWindowReportTests : IDisposable
         WriteHostConfig();
         await AppendLedgerPastTheWindowAsync();
 
-        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() => new ArbiterAuditCommand().Execute(
+        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() => _host.Command<ArbiterAuditCommand>().Execute(
             null!, new ArbiterSettings { Path = Root }));
 
         Assert.Contains(ArbiterAuditCommand.LogWindowTruncated, run.Output, StringComparison.Ordinal);
@@ -115,7 +119,7 @@ public sealed class ArbiterLogWindowReportTests : IDisposable
         WriteHostConfig();
         await AppendDecisionsPastTheWindowAsync();
 
-        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() => new ArbiterAuditCommand().Execute(
+        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() => _host.Command<ArbiterAuditCommand>().Execute(
             null!, new ArbiterSettings { Path = Root }));
 
         Assert.Contains(ArbiterAuditCommand.LogWindowTruncated, run.Output, StringComparison.Ordinal);
@@ -128,7 +132,7 @@ public sealed class ArbiterLogWindowReportTests : IDisposable
         Directory.CreateDirectory(ArbiterDirectory);
         await new InFlightLedger(ArbiterDirectory).AppendAsync(Event("event-small", 10));
 
-        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() => new ArbiterAuditCommand().Execute(
+        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() => _host.Command<ArbiterAuditCommand>().Execute(
             null!, new ArbiterSettings { Path = Root }));
 
         // The audit ran to its summary, so the absence below is "the log fit the window", not "the command printed nothing".
@@ -142,7 +146,7 @@ public sealed class ArbiterLogWindowReportTests : IDisposable
         WriteHostConfig();
         Directory.CreateDirectory(Path.Combine(ArbiterDirectory, InFlightLedger.FileName));
 
-        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() => new ArbiterAuditCommand().Execute(
+        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() => _host.Command<ArbiterAuditCommand>().Execute(
             null!, new ArbiterSettings { Path = Root }));
 
         Assert.Equal(1, run.Result);

@@ -1,3 +1,6 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Rules;
@@ -29,7 +32,7 @@ public sealed class ArbiterGateReportRuleTests
     private const string GateReportRule = "KW-ARB-GATE-REPORT-001";
 
     private static readonly string ShippedRulesPath = Path.Combine(
-        KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Core", "Arbiter", "Rules", "default-rules.yml");
+        KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Domain", "Arbiter", "Rules", "default-rules.yml");
 
     /// <summary>
     /// The seventeen rules the file shipped before it that it still ships, pinned so the new one joins without renumbering any.
@@ -167,7 +170,7 @@ public sealed class ArbiterGateReportRuleTests
             File.WriteAllText(reportPath, ReviewJson.Write(report));
 
             string returned = $"TASK_GATE: PASS report={reportPath}";
-            bool? agrees = GateReportFacts.Agrees(returned, tempDir);
+            bool? agrees = new GateReportFacts().Agrees(returned, tempDir);
             Assert.True(agrees);
 
             ArbiterFactSet facts = new ArbiterFactSet()
@@ -195,7 +198,7 @@ public sealed class ArbiterGateReportRuleTests
             File.WriteAllText(reportPath, ReviewJson.Write(report));
 
             string returned = $"TASK_GATE: PASS report={reportPath}";
-            bool? agrees = GateReportFacts.Agrees(returned, tempDir);
+            bool? agrees = new GateReportFacts().Agrees(returned, tempDir);
             Assert.False(agrees);
 
             ArbiterFactSet facts = new ArbiterFactSet()
@@ -221,7 +224,7 @@ public sealed class ArbiterGateReportRuleTests
             File.WriteAllText(passReport, ReviewJson.Write(pass));
 
             string returned = $"TASK_GATE: report={passReport} PASS";
-            bool? agrees = GateReportFacts.Agrees(returned, tempDir);
+            bool? agrees = new GateReportFacts().Agrees(returned, tempDir);
             Assert.True(agrees);
         }
         finally
@@ -246,7 +249,7 @@ public sealed class ArbiterGateReportRuleTests
             File.WriteAllText(passReport, ReviewJson.Write(pass));
 
             string returned = $"TASK_GATE: FAIL report={failReport}\nTASK_GATE: PASS report={passReport}";
-            bool? agrees = GateReportFacts.Agrees(returned, tempDir);
+            bool? agrees = new GateReportFacts().Agrees(returned, tempDir);
             Assert.True(agrees);
         }
         finally
@@ -267,7 +270,7 @@ public sealed class ArbiterGateReportRuleTests
             File.WriteAllText(report, ReviewJson.Write(pass));
 
             string returned = $"TASK_GATE: FAIL report={report}\nTASK_GATE: PASS report={report}";
-            bool? agrees = GateReportFacts.Agrees(returned, tempDir);
+            bool? agrees = new GateReportFacts().Agrees(returned, tempDir);
             Assert.False(agrees);
         }
         finally
@@ -289,7 +292,7 @@ public sealed class ArbiterGateReportRuleTests
 
             string unnormalized = Path.Combine(tempDir, ".", "gates.json");
             string returned = $"TASK_GATE: FAIL report={unnormalized}\nTASK_GATE: PASS report={report}";
-            bool? agrees = GateReportFacts.Agrees(returned, tempDir);
+            bool? agrees = new GateReportFacts().Agrees(returned, tempDir);
             Assert.False(agrees);
         }
         finally
@@ -312,7 +315,7 @@ public sealed class ArbiterGateReportRuleTests
             File.WriteAllText(outsideReport, ReviewJson.Write(pass));
 
             string returned = $"TASK_GATE: PASS report={outsideReport}";
-            bool? agrees = GateReportFacts.Agrees(returned, tempDir);
+            bool? agrees = new GateReportFacts().Agrees(returned, tempDir);
             Assert.Null(agrees);
         }
         finally
@@ -336,7 +339,7 @@ public sealed class ArbiterGateReportRuleTests
             File.WriteAllText(reportPath, ReviewJson.Write(report));
 
             string returned = $"Example: TASK_GATE:\nQuoted: TASK_GATE: PASS\nTASK_GATE: PASS report={reportPath}";
-            bool? agrees = GateReportFacts.Agrees(returned, tempDir);
+            bool? agrees = new GateReportFacts().Agrees(returned, tempDir);
             Assert.True(agrees);
         }
         finally

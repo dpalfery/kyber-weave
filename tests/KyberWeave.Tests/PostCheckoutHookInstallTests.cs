@@ -1,4 +1,6 @@
+using KyberWeave.Application.Doctor;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Domain.Doctor;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -31,7 +33,7 @@ public sealed class PostCheckoutHookInstallTests : IDisposable
     {
         _git.CreateGovernedRepository();
 
-        DoctorCheck? check = PostCheckoutHook.Ensure(_git.Repository, _git.Executor());
+        DoctorCheck? check = DoctorTestServices.PostCheckout.Ensure(_git.Repository, _git.Executor());
 
         string hook = PostCheckoutGitFixture.HookPath(_git.Repository);
         Assert.True(File.Exists(hook), "Ensure must write .git/hooks/post-checkout in a governed repository.");
@@ -41,7 +43,7 @@ public sealed class PostCheckoutHookInstallTests : IDisposable
         }
 
         Assert.NotNull(check);
-        Assert.Equal(PostCheckoutHook.CheckId, check.Id);
+        Assert.Equal(PostCheckoutHookInstaller.CheckId, check.Id);
         Assert.True(check.Passed);
         Assert.Contains("installed", check.Reason ?? string.Empty, StringComparison.OrdinalIgnoreCase);
     }
@@ -58,7 +60,7 @@ public sealed class PostCheckoutHookInstallTests : IDisposable
         string worktree = Path.Combine(_git.Root, "linked");
         _git.GitOk(_git.Repository, "worktree", "add", "-b", "linked-branch", worktree);
 
-        PostCheckoutHook.Ensure(worktree, _git.Executor());
+        DoctorTestServices.PostCheckout.Ensure(worktree, _git.Executor());
 
         Assert.True(File.Exists(PostCheckoutGitFixture.HookPath(_git.Repository)));
         Assert.False(
@@ -72,7 +74,7 @@ public sealed class PostCheckoutHookInstallTests : IDisposable
         _git.CreateGovernedRepository();
         _git.GitOk(_git.Repository, "config", "core.hooksPath", "hooks-local");
 
-        PostCheckoutHook.Ensure(_git.Repository, _git.Executor());
+        DoctorTestServices.PostCheckout.Ensure(_git.Repository, _git.Executor());
 
         Assert.True(File.Exists(Path.Combine(_git.Repository, "hooks-local", "post-checkout")));
         Assert.False(File.Exists(PostCheckoutGitFixture.HookPath(_git.Repository)));
@@ -92,7 +94,7 @@ public sealed class PostCheckoutHookInstallTests : IDisposable
         _git.CommitAll(_git.Repository, "track the hooks folder");
         _git.GitOk(_git.Repository, "config", "core.hooksPath", "githooks");
 
-        DoctorCheck? check = PostCheckoutHook.Ensure(_git.Repository, _git.Executor());
+        DoctorCheck? check = DoctorTestServices.PostCheckout.Ensure(_git.Repository, _git.Executor());
 
         Assert.False(File.Exists(Path.Combine(hooks, "post-checkout")));
         AssertWarning(check);
@@ -110,7 +112,7 @@ public sealed class PostCheckoutHookInstallTests : IDisposable
         string hook = WriteHook("#!/bin/sh\necho mine\n", executable: false);
         byte[] before = File.ReadAllBytes(hook);
 
-        DoctorCheck? check = PostCheckoutHook.Ensure(_git.Repository, _git.Executor());
+        DoctorCheck? check = DoctorTestServices.PostCheckout.Ensure(_git.Repository, _git.Executor());
 
         Assert.Equal(before, File.ReadAllBytes(hook));
         if (!OperatingSystem.IsWindows())
@@ -128,7 +130,7 @@ public sealed class PostCheckoutHookInstallTests : IDisposable
         string hook = WriteHook("#!/usr/bin/env python3\nprint('keep')\n", executable: true);
         byte[] before = File.ReadAllBytes(hook);
 
-        DoctorCheck? check = PostCheckoutHook.Ensure(_git.Repository, _git.Executor());
+        DoctorCheck? check = DoctorTestServices.PostCheckout.Ensure(_git.Repository, _git.Executor());
 
         Assert.Equal(before, File.ReadAllBytes(hook));
         AssertWarning(check);
@@ -142,12 +144,12 @@ public sealed class PostCheckoutHookInstallTests : IDisposable
     public void EnsureWithWorktreeIndexHookFalseRemovesTheInstalledBlockAndKeepsOtherLines()
     {
         _git.CreateGovernedRepository();
-        PostCheckoutHook.Ensure(_git.Repository, _git.Executor());
+        DoctorTestServices.PostCheckout.Ensure(_git.Repository, _git.Executor());
         string hook = PostCheckoutGitFixture.HookPath(_git.Repository);
         File.AppendAllText(hook, "echo keep-me\n");
         PostCheckoutGitFixture.WriteGoverned(_git.Repository, "stop-on-tool-failure: true\nworktree-index-hook: false\n");
 
-        PostCheckoutHook.Ensure(_git.Repository, _git.Executor());
+        DoctorTestServices.PostCheckout.Ensure(_git.Repository, _git.Executor());
 
         Assert.True(File.Exists(hook), "The owner's own line remains, so the file must not be deleted.");
         string text = File.ReadAllText(hook);
@@ -160,7 +162,7 @@ public sealed class PostCheckoutHookInstallTests : IDisposable
     {
         _git.CreateGovernedRepository();
 
-        DoctorCheck? check = PostCheckoutHook.Inspect(_git.Repository, _git.Executor());
+        DoctorCheck? check = DoctorTestServices.PostCheckout.Inspect(_git.Repository, _git.Executor());
 
         Assert.False(File.Exists(PostCheckoutGitFixture.HookPath(_git.Repository)));
         AssertWarning(check);
@@ -171,7 +173,7 @@ public sealed class PostCheckoutHookInstallTests : IDisposable
     {
         _git.CreateRepository();
 
-        DoctorCheck? check = PostCheckoutHook.Ensure(_git.Repository, _git.Executor());
+        DoctorCheck? check = DoctorTestServices.PostCheckout.Ensure(_git.Repository, _git.Executor());
 
         Assert.Null(check);
         Assert.False(File.Exists(PostCheckoutGitFixture.HookPath(_git.Repository)));
@@ -184,7 +186,7 @@ public sealed class PostCheckoutHookInstallTests : IDisposable
     private static void AssertWarning(DoctorCheck? check)
     {
         Assert.NotNull(check);
-        Assert.Equal(PostCheckoutHook.CheckId, check.Id);
+        Assert.Equal(PostCheckoutHookInstaller.CheckId, check.Id);
         Assert.True(check.Passed, "A hook problem is a passing check, so it can never change the exit code.");
         Assert.StartsWith("warning:", check.Reason ?? string.Empty, StringComparison.Ordinal);
     }

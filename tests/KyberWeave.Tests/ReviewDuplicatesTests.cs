@@ -1,7 +1,8 @@
 using KyberWeave.Cli.Commands.Review;
-using KyberWeave.Core.CodeGraph;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
+using KyberWeave.Domain.CodeGraph;
 using Xunit;
 using YamlDotNet.Core;
 
@@ -51,7 +52,7 @@ public class ReviewDuplicatesTests : IDisposable
         new($"id-{kind}-{name}-{startLine}", kind, name, $"N.{name}", file, "csharp", startLine, endLine);
 
     private DuplicateReport Detect(IReadOnlyList<CodeGraphNode> nodes, int minimumLines = 4) =>
-        DuplicateDetector.Detect(
+        ReviewTestServices.Duplicates.Detect(
             _temp.Path,
             nodes,
             new ReviewDuplicates(minimumLines),
@@ -299,7 +300,7 @@ public class ReviewDuplicatesTests : IDisposable
             Method("Total", "A.cs", 1, 7),
             Method("Sum", "B.cs", 1, 7));
 
-        DuplicateReport report = ReviewDuplicatesCommand.Analyze(
+        DuplicateReport report = ReviewTestServices.Duplicates.Analyze(
             _temp.Path, graph, graph, ReviewDuplicates.Default);
 
         Assert.True(report.IndexAvailable);
@@ -313,7 +314,7 @@ public class ReviewDuplicatesTests : IDisposable
         // duplicate-implementation lens skips on the first and reports clean on the second.
         UnavailableGraph graph = new();
 
-        DuplicateReport report = ReviewDuplicatesCommand.Analyze(
+        DuplicateReport report = ReviewTestServices.Duplicates.Analyze(
             _temp.Path, graph, graph, ReviewDuplicates.Default);
 
         Assert.False(report.IndexAvailable);

@@ -3,7 +3,7 @@ id: kyber-utilities/onboarding
 title: Kyber Utilities adoption and activation guide
 doc-type: onboarding
 component: KyberUtilities
-source-root: src/KyberWeave.Core/Utilities
+source-root: src/KyberWeave.Application/Utilities
 owner: dpalfery
 last-reviewed: 2026-09-28
 status: draft

@@ -857,10 +857,35 @@ public sealed class AnalysisPersistenceTests
         _ = process.StandardOutput.ReadToEnd();
         Assert.True(process.WaitForExit(5000), "Process did not exit in time.");
 
-        // Turn off AutoFlush so the write buffers, making Flush() write across the broken pipe and throw IOException.
+        // A single buffered write can succeed before the OS reports the child's closed read end (it
+        // lands in the pipe buffer), so keep writing and flushing within a bounded window until the
+        // broken pipe surfaces as an IOException.
         process.StandardInput.AutoFlush = false;
-        process.StandardInput.Write(' ');
+        Stopwatch window = Stopwatch.StartNew();
+        bool brokenPipeSeen = false;
+        while (!brokenPipeSeen && window.Elapsed < TimeSpan.FromSeconds(5))
+        {
+            try
+            {
+                process.StandardInput.Write(' ');
+                process.StandardInput.Flush();
+            }
+            catch (IOException)
+            {
+                brokenPipeSeen = true;
+            }
 
+            if (!brokenPipeSeen)
+            {
+                Thread.Sleep(10);
+            }
+        }
+
+        Assert.True(brokenPipeSeen, "Writing to the exited child's standard input never raised IOException within 5 seconds.");
+
+        // The failed flush drained the writer's buffer, and flushing an empty buffer sends nothing, so
+        // buffer one more character for the helper's own flush to push across the broken pipe.
+        process.StandardInput.Write(' ');
         Assert.False(IsStandardInputOpen(process));
     }
 

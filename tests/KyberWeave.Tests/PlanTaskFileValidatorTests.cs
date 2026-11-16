@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Arbiter;
 using System.Reflection;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Arbiter;
@@ -12,6 +13,7 @@ using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Core.Processes;
 using Xunit;
 
+using KyberWeave.Tests.Fakes;
 namespace KyberWeave.Tests;
 
 /// <summary>
@@ -489,7 +491,7 @@ public sealed class PlanTaskFileValidatorTests
         {
             Assert.SkipWhen(CanList(locked), "Running with privileges that ignore file modes (such as root), so the folder stays readable.");
 
-            DiagnosticReport report = new PlanTaskFileValidator(fixture.Root, config).Validate(set);
+            DiagnosticReport report = new PlanTaskFileValidator(fixture.Root, config, DocsPorts.Files, DocsPorts.Process).Validate(set);
 
             Diagnostic warning = Assert.Single(report.Items, item => item.Code == SidecarTaskFile && item.Severity == Severity.Warning);
             Assert.Contains("could not be read", warning.Message, StringComparison.OrdinalIgnoreCase);
@@ -886,7 +888,7 @@ internal sealed class ReportedFindings
         };
 
         CapturedConsoleExecution<int> execution =
-            ProcessConsoleCapture.Run(() => new DocsValidateCommand().Execute(null!, settings));
+            ProcessConsoleCapture.Run(() => DocsTestCommands.Validate().Execute(null!, settings));
         Exit = execution.Result;
         Output = execution.Output;
     }
@@ -1393,7 +1395,7 @@ internal static class SpecTaskFileProbe
         ArgumentNullException.ThrowIfNull(fixture);
 
         string path = Path.Combine(fixture.Root, TasksPath.Replace('/', Path.DirectorySeparatorChar));
-        ArbiterPlanCommand command = new();
+        ArbiterPlanCommand command = ArbiterTestServices.Command<ArbiterPlanCommand>();
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
             () => command.Execute(null!, new ArbiterSettings { Path = path, Format = "json" }));
 

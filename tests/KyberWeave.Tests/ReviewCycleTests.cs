@@ -332,8 +332,8 @@ public sealed class ReviewCycleTests : IDisposable
     {
         WriteGates(number, gates);
         Write($".agent_scratchpad/{Task}/review/cycle-{number}/head", head ?? Head());
-        ReviewCycleIdentity current = ReviewWorkTree.IdentityOf(_repo, null)!;
-        ReviewCycles.WriteIdentity(CycleFolder(number), new ReviewCycleIdentity(branch ?? current.Branch, current.Base, head ?? current.Head));
+        ReviewCycleIdentity current = ReviewTestServices.WorkTrees.IdentityOf(_repo, null)!;
+        ReviewTestServices.Cycles.WriteIdentity(CycleFolder(number), new ReviewCycleIdentity(branch ?? current.Branch, current.Base, head ?? current.Head));
         Write(
             $".agent_scratchpad/{Task}/review/cycle-{number}/findings.json",
             ReviewJson.Write(new FindingsReport(FindingsReport.CurrentSchema, findings, [], 0)));
@@ -377,7 +377,7 @@ public sealed class ReviewCycleTests : IDisposable
 
     private static CommandApp CreateApp()
     {
-        CommandApp app = new();
+        CommandApp app = new(ReviewTestServices.Registrar());
         app.Configure(config =>
         {
             config.SetApplicationName("kyber-weave");

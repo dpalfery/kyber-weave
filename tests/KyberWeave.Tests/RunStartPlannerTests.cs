@@ -1,7 +1,11 @@
 using System.Diagnostics;
 using System.Text;
+using KyberWeave.Cli;
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.RunStart;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 using Xunit.Sdk;
 
@@ -446,6 +450,12 @@ internal sealed class RunStartProbe : IDisposable
     private const string CliHostName = "kyber-weave";
 
     /// <summary>
+    ///     The render width of a child whose output is redirected: it does not wrap, so a message is one line
+    ///     and the cases that look for a phrase in it find it whole.
+    /// </summary>
+    private const int UnwrappedWidth = 100_000;
+
+    /// <summary>
     ///     A stand-in for the CodeGraph binary. The run-start step reports exit 3 when it is genuinely
     ///     missing, so a suite that exercised that path everywhere would fail on a machine without it and
     ///     pass on one with it; the stub makes every other case independent of that.
@@ -673,10 +683,32 @@ internal sealed class RunStartProbe : IDisposable
         File.AppendAllText(exclude, ".codegraph/\n", Encoding.UTF8);
     }
 
+    /// <summary>
+    ///     Runs <c>kyber-weave run start</c> as the real host process, for the one smoke case that proves the
+    ///     composition root wires the command end to end.
+    /// </summary>
+    public ProbeResult RunStartInChildProcess(params string[] arguments)
+    {
+        List<string> argv = ["run", "start", .. arguments];
+        return RunCliWith(_pathWithStub, argv);
+    }
+
     private ProbeResult RunStartOn(string path, params string[] arguments)
     {
         List<string> argv = ["run", "start", .. arguments];
-        return RunCliWith(path, argv);
+        ProbeEnvironment environment = new(Root, _home, _tmp, path);
+        ProbeGit git = new(this, path);
+        ProbeExecutor executor = new(this, path);
+
+        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() =>
+            CliApplication.Create(services =>
+            {
+                _ = services.AddSingleton<IProcessEnvironment>(environment);
+                _ = services.AddSingleton<IGitCommandRunner>(git);
+                _ = services.AddSingleton<IProcessExecutor>(executor);
+            }).Run(argv), width: UnwrappedWidth);
+
+        return new ProbeResult(run.Result, run.Output, run.Output + "\n" + run.ErrorOutput);
     }
 
     private ProbeResult RunCliWith(string path, List<string> argv)
@@ -698,7 +730,7 @@ internal sealed class RunStartProbe : IDisposable
         return Run(startInfo);
     }
 
-    private ProbeResult RunGit(string workingDirectory, string[] arguments)
+    private ProbeResult RunGit(string workingDirectory, string[] arguments, string? path = null)
     {
         ProcessStartInfo startInfo = new("git")
         {
@@ -713,6 +745,14 @@ internal sealed class RunStartProbe : IDisposable
         foreach (string argument in arguments) startInfo.ArgumentList.Add(argument);
 
         Isolate(startInfo);
+        if (path is not null)
+        {
+            // A child resolves its program against this process's PATH, not the PATH it is given, so the
+            // program is named in full to make a git wrapper earlier on the probe's PATH win.
+            startInfo.FileName = ResolveOnPath("git", path) ?? "git";
+            startInfo.Environment["PATH"] = path;
+        }
+
         return Run(startInfo);
     }
 
@@ -726,7 +766,8 @@ internal sealed class RunStartProbe : IDisposable
         return new ProbeResult(
             result.ExitCode,
             result.StandardOutput,
-            result.StandardOutput + "\n" + result.StandardError);
+            result.StandardOutput + "\n" + result.StandardError,
+            result.StandardError);
     }
 
     /// <summary>
@@ -847,6 +888,50 @@ internal sealed class RunStartProbe : IDisposable
             UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
     }
 
+    /// <summary>Gives the command the probe's directories and PATH instead of this test host's.</summary>
+    private sealed class ProbeEnvironment(string current, string home, string temp, string path) : IProcessEnvironment
+    {
+        public string CurrentDirectory => current;
+
+        public string HomeDirectory => home;
+
+        public string TempDirectory => temp;
+
+        public bool IsInputRedirected => true;
+
+        public string? GetVariable(string name) => name switch
+        {
+            "PATH" => path,
+            "HOME" or "USERPROFILE" => home,
+            "TMPDIR" or "TEMP" or "TMP" => temp,
+            _ => Environment.GetEnvironmentVariable(name)
+        };
+    }
+
+    /// <summary>Runs git against the probe's PATH, home and temp directory, the way the child process would have.</summary>
+    private sealed class ProbeGit(RunStartProbe probe, string path) : IGitCommandRunner
+    {
+        public GitOutcome Run(string workingDirectory, IReadOnlyList<string> arguments)
+        {
+            ProbeResult result = probe.RunGit(workingDirectory, [.. arguments], path);
+            return new GitOutcome(result.ExitCode, result.StandardOutput, result.StandardError);
+        }
+    }
+
+    /// <summary>Runs the CodeGraph index step's children against the probe's PATH, so the stub answers to its name.</summary>
+    private sealed class ProbeExecutor(RunStartProbe probe, string path) : IProcessExecutor
+    {
+        public ProcessResult Run(ProcessStartInfo startInfo, string standardInput)
+        {
+            string program = startInfo.FileName;
+            startInfo.FileName = ResolveOnPath(program, path) ?? program;
+            probe.Isolate(startInfo);
+            startInfo.Environment["PATH"] = path;
+            ProbeResult result = RunStartProbe.Run(startInfo);
+            return new ProcessResult(result.ExitCode, result.StandardOutput, result.StandardError);
+        }
+    }
+
     private static string CliHostPath()
     {
         string hostName = OperatingSystem.IsWindows() ? CliHostName + ".exe" : CliHostName;
@@ -883,4 +968,5 @@ internal sealed class RunStartProbe : IDisposable
 /// <param name="ExitCode">The exit code the child returned.</param>
 /// <param name="StandardOutput">Its standard output on its own, for the JSON cases.</param>
 /// <param name="Output">Both streams joined, for the cases that assert on a message.</param>
-internal sealed record ProbeResult(int ExitCode, string StandardOutput, string Output);
+/// <param name="StandardError">Its standard error on its own.</param>
+internal sealed record ProbeResult(int ExitCode, string StandardOutput, string Output, string StandardError = "");

@@ -1,12 +1,14 @@
 using System.Diagnostics;
-using KyberWeave.Core.CodeGraph;
+
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Processes;
+using KyberWeave.Data.CodeGraph;
 using KyberWeave.Mcp;
 using Xunit;
+using KyberWeave.Tests.Fakes;
 
 namespace KyberWeave.Tests;
 
@@ -25,7 +27,7 @@ public sealed class McpRepositoryRootTests : IDisposable
     [Fact]
     public void DocsInitEstablishesTheCurrentDirectoryAsAnMcpRoot()
     {
-        DocsScaffolder.Scaffold(_parent.Path);
+        DocsTestCommands.Scaffolding.Scaffold(_parent.Path);
 
         string resolved = RepositoryRootResolver.Resolve([], _parent.Path, null);
 
@@ -39,8 +41,8 @@ public sealed class McpRepositoryRootTests : IDisposable
         string second = Path.Combine(_parent.Path, "second-repository");
         Directory.CreateDirectory(first);
         Directory.CreateDirectory(second);
-        DocsScaffolder.Scaffold(first, owner: "first-team");
-        DocsScaffolder.Scaffold(second, owner: "second-team");
+        DocsTestCommands.Scaffolding.Scaffold(first, owner: "first-team");
+        DocsTestCommands.Scaffolding.Scaffold(second, owner: "second-team");
         WriteMarker(first, "first-only-marker");
         WriteMarker(second, "second-only-marker");
 
@@ -188,8 +190,8 @@ public sealed class McpRepositoryRootTests : IDisposable
         string second = Path.Combine(_parent.Path, "second-repository");
         Directory.CreateDirectory(first);
         Directory.CreateDirectory(second);
-        DocsScaffolder.Scaffold(first, owner: "first-team");
-        DocsScaffolder.Scaffold(second, owner: "second-team");
+        DocsTestCommands.Scaffolding.Scaffold(first, owner: "first-team");
+        DocsTestCommands.Scaffolding.Scaffold(second, owner: "second-team");
         return (first, second);
     }
 

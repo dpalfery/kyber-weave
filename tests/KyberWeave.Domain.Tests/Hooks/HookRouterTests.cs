@@ -9,7 +9,8 @@ public sealed class HookRouterTests
 
     private static HooksConfig WithTestsOn() => HooksConfigMerger.Merge(
         HooksDefaults.Config,
-        new HooksConfigOverlay(null, null, null, null, [new HookRuleOverlay("dotnet-test", null, null, null, null, null, null, true)], []));
+        new HooksConfigOverlay(null, null, null, null, [new HookRuleOverlay("dotnet-test", null, null, null, null, null, null, true)], []),
+        HookConfigSource.Repository);
 
     [Fact]
     public void PlansBothFormatChecksForACSharpFileWithTheProjectAndFile()

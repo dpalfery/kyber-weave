@@ -531,7 +531,7 @@ the failing gate's id; after a passing verification run, the completion digest w
 `FILES` and the `TASK_GATE:` line filled in and `TESTS`, `COMMIT`, `REMOTE_HEAD` and `runs` left
 as placeholders:
 
-`review gates --agent <NAME> --red` judges a test-first task's failing run, after the worker writes its tests and before it implements, and its report is the one `KW-ARB-MODE-002` looks for beside the later passing report. It passes (`KW-REVIEW-051`) when tests ran and at least one failed, or when every failed gate failed only on missing-symbol compiler errors located in the files the task changed (`--paths`); it fails (`KW-REVIEW-052`, exit `1`) when a gate breaks for any other reason, when a missing symbol is in a file the task did not change, or when every test passed. The missing-symbol codes are data in `RedLanguages` (`src/KyberWeave.Core/Review/RedEvidence.cs`): C# `CS0103`, `CS0117`, `CS0234`, `CS0246`, `CS1061`, `CS0400`, `CS0426`; TypeScript `TS2304`, `TS2305`, `TS2307`, `TS2339`. Another language is one more record there (diagnostic line pattern, code-to-symbol patterns, test-summary reader). Without `--red`, a gate that fails only on missing symbols in files the task did not change adds `KW-REVIEW-053`, the line `NOT VERIFIED: <command> — sibling RED tests reference symbols no task has created yet: <symbols>` for a worker to report.
+`review gates --agent <NAME> --red` judges a test-first task's failing run, after the worker writes its tests and before it implements, and its report is the one `KW-ARB-MODE-002` looks for beside the later passing report. It passes (`KW-REVIEW-051`) when tests ran and at least one failed, or when every failed gate failed only on missing-symbol compiler errors located in the files the task changed (`--paths`); it fails (`KW-REVIEW-052`, exit `1`) when a gate breaks for any other reason, when a missing symbol is in a file the task did not change, or when every test passed. The missing-symbol codes are data in `RedLanguages` (`src/KyberWeave.Domain/Review/RedEvidence.cs`): C# `CS0103`, `CS0117`, `CS0234`, `CS0246`, `CS1061`, `CS0400`, `CS0426`; TypeScript `TS2304`, `TS2305`, `TS2307`, `TS2339`. Another language is one more record there (diagnostic line pattern, code-to-symbol patterns, test-summary reader). Without `--red`, a gate that fails only on missing symbols in files the task did not change adds `KW-REVIEW-053`, the line `NOT VERIFIED: <command> — sibling RED tests reference symbols no task has created yet: <symbols>` for a worker to report.
 
 - `--all` runs all declared repository gates for the current OS unconditionally without
   include path filtering. Combining `--all` with `--agent`, `--base`, `--paths` or `--gate`
@@ -702,7 +702,7 @@ risk. The three rules below mirror the contract in
 | Command kind | Non-zero on |
 |---|---|
 | `validate`, `lint`, `sync-check`, `drift` | any error |
-| `scan` | any critical, raised by `--fail-on warning\|error` |
+| `scan` | any critical, raised by `--fail-on warning\|error` (case-insensitive) |
 | `route` | accuracy below `--min-accuracy` |
 | `docs integrity-check` | a finding at or above `--fail-on` (default `none` gates nothing) |
 | `docs init` | `1` on a scaffold failure or a configuration failure (`KW-CONFIG-001`). MCP wiring findings — missing, differing, unlaunchable, undetectable, declined, or refused — never fail the run |

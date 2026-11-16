@@ -1,0 +1,13 @@
+<Project>
+
+  <ItemGroup>
+    <!-- Each technology's gate catalogue, embedded from products/kyber-squad/standards. GateCatalogueRenderer
+         reads them through typeof(GateCatalogueRenderer).Assembly, so they stay in the assembly that holds it. -->
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\csharp\gates.yml" LogicalName="Gates.csharp.yml" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\typescript\gates.yml" LogicalName="Gates.typescript.yml" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\rust\gates.yml" LogicalName="Gates.rust.yml" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\go\gates.yml" LogicalName="Gates.go.yml" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\python\gates.yml" LogicalName="Gates.python.yml" />
+  </ItemGroup>
+
+</Project>

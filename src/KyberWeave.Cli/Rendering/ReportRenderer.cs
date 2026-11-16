@@ -17,6 +17,12 @@ public static class ReportRenderer
     private const string NoFindings = "No findings.";
 
     /// <summary>
+    /// The directory a rooted finding path is shown relative to, so the Location column stays short. Empty leaves a
+    /// rooted path as it is. The composition root sets it from the process environment's current directory.
+    /// </summary>
+    public static string DisplayRoot { get; set; } = string.Empty;
+
+    /// <summary>
     /// Renders a report. <paramref name="subjectLabel"/> names what the findings are
     /// about — "Skill", "Agent", "Document" — because the diagnostic model is shared
     /// across artifact classes and only the caller knows which one it is running over.
@@ -505,19 +511,19 @@ public static class ReportRenderer
     }
 
     /// <summary>
-    /// Absolute paths under the current directory become repo-relative so the Location
-    /// column does not consume the row. JSON and SARIF keep the original path.
+    /// Absolute paths under the display root become relative so the Location column does not consume the row.
+    /// JSON and SARIF keep the original path.
     /// </summary>
     private static string DisplayPath(string filePath)
     {
-        if (!Path.IsPathRooted(filePath))
+        if (DisplayRoot.Length == 0 || !Path.IsPathRooted(filePath))
         {
             return filePath;
         }
 
         try
         {
-            string relative = Path.GetRelativePath(Environment.CurrentDirectory, filePath);
+            string relative = Path.GetRelativePath(DisplayRoot, filePath);
             if (string.IsNullOrEmpty(relative)
                 || relative.StartsWith("..", StringComparison.Ordinal))
             {

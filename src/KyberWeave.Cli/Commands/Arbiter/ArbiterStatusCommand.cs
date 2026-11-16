@@ -1,3 +1,5 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Configuration;
@@ -15,10 +17,16 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 /// for the endpoint origin. A remote provider with no resolving key raises
 /// <c>KW-ARB-KEY-001</c> as a warning, matching <c>doctor</c>.
 /// </remarks>
-public sealed class ArbiterStatusCommand : Command<ArbiterSettings>
+public sealed class ArbiterStatusCommand(
+    IArbiterConfigResolver configs,
+    IArbiterKeyService keys,
+    IProcessEnvironment environment,
+    IUserHostConfigStore userConfig,
+    IArbiterRepositoryLocator locator,
+    IArbiterHarnessGating gating) : Command<ArbiterSettings>
 {
     /// <summary>A remote provider is configured, and no key resolves for its origin.</summary>
-    public const string KeyMissing = "KW-ARB-KEY-001";
+    public const string KeyMissing = ArbiterKeyResolver.MissingKeyCode;
 
     /// <summary>
     /// Prints provider, model, endpoint origin and whether a key was found. Writes
@@ -35,9 +43,9 @@ public sealed class ArbiterStatusCommand : Command<ArbiterSettings>
         return report.HasErrors ? 1 : 0;
     }
 
-    private static void Inspect(ArbiterSettings settings, DiagnosticReport report)
+    private void Inspect(ArbiterSettings settings, DiagnosticReport report)
     {
-        if (!ArbiterCommandComposition.TryResolveConfig(settings, report, out KyberWeaveConfig config, out _))
+        if (!configs.TryResolve(settings.Path, settings.Config, report, out KyberWeaveConfig config, out _))
         {
             return;
         }
@@ -46,11 +54,11 @@ public sealed class ArbiterStatusCommand : Command<ArbiterSettings>
         string? origin = ArbiterKeyResolver.GetOrigin(provider.Endpoint);
         bool remote = provider.Kind != ArbiterProviderKind.None
             && !ArbiterKeyResolver.IsLoopbackEndpoint(provider.Endpoint);
-        string? key = remote ? ArbiterCommandComposition.TryResolveKey(config, provider.Endpoint) : null;
-        string home = ArbiterCommandComposition.HomeDirectory();
-        IReadOnlyList<string> globalTargets = UserHostConfig.ReadGlobalTargets(home);
-        string root = ArbiterCommandComposition.ResolveRepositoryRoot(settings.Path);
-        HarnessGatingReport gating = ArbiterHarnessGating.Build(root, home, config, globalTargets);
+        string? key = remote ? keys.TryResolveKey(config, provider.Endpoint) : null;
+        string home = environment.HomeDirectory;
+        IReadOnlyList<string> globalTargets = userConfig.ReadGlobalTargets(home);
+        string root = locator.ResolveRepositoryRoot(settings.Path);
+        HarnessGatingReport gatingReport = gating.Build(root, home, config, globalTargets);
 
         AnsiConsole.MarkupLine("[bold]Arbiter status[/]");
         AnsiConsole.MarkupLine($"  Provider: [bold]{Markup.Escape(KindName(provider.Kind))}[/]");
@@ -77,7 +85,7 @@ public sealed class ArbiterStatusCommand : Command<ArbiterSettings>
         }
 
         WriteGlobalScope(globalTargets);
-        WriteProjectScope(gating);
+        WriteProjectScope(gatingReport);
     }
 
     /// <summary>Runs the command without cancellation; the entry point tests use.</summary>
@@ -104,7 +112,7 @@ public sealed class ArbiterStatusCommand : Command<ArbiterSettings>
     private static void WriteProjectScope(HarnessGatingReport gating)
     {
         AnsiConsole.MarkupLine("[bold]PROJECT scope[/]");
-        ArbiterHarnessGating.WriteRows(gating, TargetDisplayName);
+        ArbiterGatingConsole.WriteRows(gating, TargetDisplayName);
     }
 
     private static string GlobalReason(string token)

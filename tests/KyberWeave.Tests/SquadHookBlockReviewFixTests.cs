@@ -66,7 +66,7 @@ public sealed class SquadHookBlockReviewFixTests
             store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
         Assert.False(Assert.Single(receipt.Blocks).CreatedFile);
 
-        new SquadTransaction(store).Execute(SquadDeploymentPlan.CreateUninstall(
+        new SquadTransaction(store).Execute(SquadDeploymentPlanner.CreateUninstall(
             fixture.Path, SquadDeploymentScope.Project, receipt));
 
         // Squad did not create the file, so uninstall leaves it behind without our entries.
@@ -104,7 +104,7 @@ public sealed class SquadHookBlockReviewFixTests
 
         SquadReceipt receipt = Assert.IsType<SquadReceipt>(
             store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
-        new SquadTransaction(store).Execute(SquadDeploymentPlan.CreateUninstall(
+        new SquadTransaction(store).Execute(SquadDeploymentPlanner.CreateUninstall(
             fixture.Path, SquadDeploymentScope.Project, receipt));
 
         string after = Read(fixture.Path, ".cursor/hooks.json");
@@ -193,7 +193,7 @@ public sealed class SquadHookBlockReviewFixTests
         // Uninstall disagreed, reporting the block removed and dropping it from the
         // receipt, so the file was left blank with nothing recorded to repair it from.
         // The two sides must make the same call.
-        SquadDeploymentPlan uninstall = SquadDeploymentPlan.CreateUninstall(
+        SquadDeploymentPlan uninstall = SquadDeploymentPlanner.CreateUninstall(
             fixture.Path, SquadDeploymentScope.Project, previous);
 
         // The retained receipt is rewritten, not deleted: it still owns a block, so it stays
@@ -223,7 +223,7 @@ public sealed class SquadHookBlockReviewFixTests
             previous with { Blocks = [.. previous.Blocks.Select(block => block with { Entries = [] })] };
         Write(fixture.Path, ".cursor/hooks.json", string.Empty);
 
-        SquadDeploymentPlan uninstall = SquadDeploymentPlan.CreateUninstall(
+        SquadDeploymentPlan uninstall = SquadDeploymentPlanner.CreateUninstall(
             fixture.Path, SquadDeploymentScope.Project, withoutEntries);
 
         Assert.Equal(SquadStateMutation.Delete, uninstall.ReceiptMutation);
@@ -256,7 +256,7 @@ public sealed class SquadHookBlockReviewFixTests
         string viaPlan = Read(fixture.Path, SquadHookJsonBlock.RelativePath(format));
 
         string filePath = Path.Combine(fixture.Path, "direct", "hooks.json");
-        SquadHookJsonBlock.SpliceFile(
+        SquadHookJsonFile.SpliceFile(
             format,
             filePath,
             [.. block.Entries.Select(e => e.Entry!.DeepClone())],
@@ -268,7 +268,7 @@ public sealed class SquadHookBlockReviewFixTests
     // ----------------------------------------------------------------------------------
 
     private static SquadDeploymentPlan Install(string root, SquadRenderedBlock block) =>
-        SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlanner.CreateInstall(
             root,
             SquadDeploymentScope.Project,
             Lock(),
@@ -279,7 +279,7 @@ public sealed class SquadHookBlockReviewFixTests
             blocks: [block]);
 
     private static SquadDeploymentPlan Update(string root, SquadReceipt previous, SquadRenderedBlock block) =>
-        SquadDeploymentPlan.CreateUpdate(
+        SquadDeploymentPlanner.CreateUpdate(
             root,
             SquadDeploymentScope.Project,
             Lock(),

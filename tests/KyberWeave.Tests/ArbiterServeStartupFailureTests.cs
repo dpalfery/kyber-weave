@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using KyberWeave.Arbiter.Hooks;
+using KyberWeave.Arbiter;
 using KyberWeave.Core.Processes;
 using Xunit;
 
@@ -31,7 +31,7 @@ public sealed class ArbiterServeStartupFailureTests
             UseShellExecute = false,
             WorkingDirectory = repository.Path,
         };
-        startInfo.ArgumentList.Add(typeof(HookCommand).Assembly.Location);
+        startInfo.ArgumentList.Add(typeof(Composition).Assembly.Location);
         startInfo.ArgumentList.Add("serve");
         startInfo.ArgumentList.Add("--repo-root");
         startInfo.ArgumentList.Add(repository.Path);
@@ -60,7 +60,7 @@ public sealed class ArbiterServeStartupFailureTests
             UseShellExecute = false,
             WorkingDirectory = repository.Path,
         };
-        startInfo.ArgumentList.Add(typeof(HookCommand).Assembly.Location);
+        startInfo.ArgumentList.Add(typeof(Composition).Assembly.Location);
         startInfo.ArgumentList.Add("serve");
         startInfo.ArgumentList.Add("--repo-root");
         startInfo.ArgumentList.Add(missing);

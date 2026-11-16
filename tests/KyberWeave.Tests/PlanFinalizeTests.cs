@@ -8,6 +8,7 @@ using KyberWeave.Core.Docs.Closeout;
 using KyberWeave.Core.Docs.Parsing;
 using Xunit;
 
+using KyberWeave.Tests.Fakes;
 namespace KyberWeave.Tests;
 
 /// <summary>
@@ -63,7 +64,7 @@ public sealed class PlanFinalizeTests
         };
 
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(
-            () => new DocsFinalizeCommand().Execute(null!, settings, CancellationToken.None));
+            () => DocsTestCommands.Finalize().Execute(null!, settings, CancellationToken.None));
         return (run.Result, run.Output);
     }
 
@@ -300,7 +301,8 @@ public sealed class PlanFinalizeTests
 
     private static PlanFinalize Finalizer(DocFixture fixture, Action<string>? afterActivePlanCheck = null) =>
         new(fixture.Root, KyberWeaveConfig.ProductDefaults,
-            () => new DocumentLoader(fixture.Root, KyberWeaveConfig.ProductDefaults.Ontology))
+            () => new DocumentLoader(fixture.Root, KyberWeaveConfig.ProductDefaults.Ontology),
+            DocsPorts.Files, DocsPorts.Process, DocsTestCommands.SchemaGate)
         {
             AfterActivePlanCheck = afterActivePlanCheck
         };
@@ -392,7 +394,7 @@ public sealed class PlanFinalizeTests
         using DocFixture fixture = Repository();
         string gone = Absolute(fixture, "6-Docs/vanished/plan.tasks.json");
 
-        PlanFinalize.DeleteIfPresent(gone);
+        PlanFinalize.DeleteIfPresent(DocsPorts.Files, gone);
 
         Assert.False(File.Exists(gone));
         Assert.False(Directory.Exists(Path.GetDirectoryName(gone)));
@@ -406,7 +408,7 @@ public sealed class PlanFinalizeTests
         string folderWhereTheFileBelongs = Absolute(fixture, PlanTaskFileProbe.TaskFilePath);
         Directory.CreateDirectory(folderWhereTheFileBelongs);
 
-        bool gone = PlanFinalize.DeleteIfPresent(folderWhereTheFileBelongs);
+        bool gone = PlanFinalize.DeleteIfPresent(DocsPorts.Files, folderWhereTheFileBelongs);
 
         Assert.False(gone);
         Assert.True(Directory.Exists(folderWhereTheFileBelongs));
@@ -494,8 +496,8 @@ public sealed class PlanFinalizeTests
     {
         using DocFixture fixture = Repository();
 
-        Assert.True(PlanFinalize.DeleteIfPresent(Absolute(fixture, "6-Docs/vanished/plan.tasks.json")));
-        Assert.True(PlanFinalize.DeleteIfPresent(Absolute(fixture, "6-Docs/never-there.json")));
+        Assert.True(PlanFinalize.DeleteIfPresent(DocsPorts.Files, Absolute(fixture, "6-Docs/vanished/plan.tasks.json")));
+        Assert.True(PlanFinalize.DeleteIfPresent(DocsPorts.Files, Absolute(fixture, "6-Docs/never-there.json")));
     }
 
     [Fact]
@@ -505,7 +507,7 @@ public sealed class PlanFinalizeTests
         string file = Absolute(fixture, PlanTaskFileProbe.TaskFilePath);
         File.WriteAllText(file, "{}");
 
-        PlanFinalize.DeleteIfPresent(file);
+        PlanFinalize.DeleteIfPresent(DocsPorts.Files, file);
 
         Assert.False(File.Exists(file));
         Assert.True(Directory.Exists(Path.GetDirectoryName(file)));
@@ -624,5 +626,35 @@ public sealed class PlanFinalizeTests
         Assert.Contains(PlanTaskFileProbe.TaskFilePath, cause.Message, StringComparison.Ordinal);
         Assert.Contains("it is not there", Assert.Single(absent.Items).Message, StringComparison.Ordinal);
         Assert.Contains("not a valid task file", Assert.Single(corrupt.Items).Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void IsLinkAgreesWithTheFileInfoLinkTargetCheckForEveryKindOfPath()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Creating symbolic links needs a privilege on Windows.");
+
+        using DocFixture fixture = Repository();
+        string file = Path.Combine(fixture.Root, "file.txt");
+        string folder = Path.Combine(fixture.Root, "folder");
+        File.WriteAllText(file, "x");
+        Directory.CreateDirectory(folder);
+        string fileLink = Path.Combine(fixture.Root, "file-link");
+        string folderLink = Path.Combine(fixture.Root, "folder-link");
+        string danglingFileLink = Path.Combine(fixture.Root, "dangling-file-link");
+        string danglingFolderLink = Path.Combine(fixture.Root, "dangling-folder-link");
+        File.CreateSymbolicLink(fileLink, file);
+        Directory.CreateSymbolicLink(folderLink, folder);
+        File.CreateSymbolicLink(danglingFileLink, Path.Combine(fixture.Root, "nowhere.txt"));
+        Directory.CreateSymbolicLink(danglingFolderLink, Path.Combine(fixture.Root, "nowhere-folder"));
+        string[] paths = [file, folder, fileLink, folderLink, danglingFileLink, danglingFolderLink, Path.Combine(fixture.Root, "missing")];
+
+        foreach (string path in paths)
+        {
+            Assert.Equal(new FileInfo(path).LinkTarget is not null, PlanFinalize.IsLink(DocsPorts.Files, path));
+        }
+
+        Assert.True(PlanFinalize.IsLink(DocsPorts.Files, danglingFileLink));
+        Assert.True(PlanFinalize.IsLink(DocsPorts.Files, danglingFolderLink));
+        Assert.False(PlanFinalize.IsLink(DocsPorts.Files, Path.Combine(fixture.Root, "missing")));
     }
 }

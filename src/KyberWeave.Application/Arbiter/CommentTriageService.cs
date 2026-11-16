@@ -1,0 +1,258 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Core.Arbiter.Providers;
+using KyberWeave.Core.Arbiter.Rules;
+
+namespace KyberWeave.Core.Arbiter;
+
+/// <summary>
+/// Classifies one bot review comment against the code as it is now, through <c>KW-ARB-COMMENT-001</c>. Every call
+/// writes a decision record. The classification fails safe to <c>real</c>: a missing cited file, an answer below the
+/// rule's floor, an answer that was not sent, or a provider failure all keep the comment real, so a worker never
+/// skips a comment on a shaky answer.
+/// </summary>
+/// <remarks>
+/// The rule ships in shadow, so its effect is recorded as neutral and the class it would have produced as
+/// <c>would-effect</c>. The caller is handed <c>real</c> while the rule is in shadow, so a log-only rule changes no
+/// worker's action; the class it would have given is reported as <c>WouldClass</c>. The raw answer the model gave is
+/// logged even when the floor refuses it, because threshold tuning reads exactly that answer.
+/// </remarks>
+/// <param name="provider">The provider that answers the question; <c>NoneProvider</c> answers nothing.</param>
+/// <param name="repoRoot">The repository root the cited path is read under.</param>
+/// <param name="arbiterDirectory">The directory the decision log is written to.</param>
+/// <param name="clock">Stamps the decision record and allocates its id.</param>
+/// <param name="fileText">Reads the window of the cited file the comment is judged against.</param>
+/// <param name="state">Opens the decision log the decision is written to.</param>
+/// <param name="ruleSet">The rule-set hash the decision records, when the caller has one; empty otherwise.</param>
+/// <param name="botLogins">The logins of review bots whose summaries are classified. Empty means no summary is classified.</param>
+/// <param name="rules">
+/// The effective rules: the shipped rules with the host configuration's overrides applied, as the loaded configuration
+/// holds them. Null means the shipped rules alone. The rule's shadow state is read from here, so a host that sets
+/// <c>shadow</c> on the rule is the one that decides.
+/// </param>
+public sealed class CommentTriageService(
+    IArbiterProvider provider,
+    string repoRoot,
+    string arbiterDirectory,
+    TimeProvider clock,
+    IFileTextFacts fileText,
+    IArbiterStateFactory state,
+    string? ruleSet = null,
+    IReadOnlyList<string>? botLogins = null,
+    IReadOnlyList<ArbiterRule>? rules = null) : ICommentTriage
+{
+    /// <summary>The shipped rule that classifies a comment.</summary>
+    public const string CommentRuleId = "KW-ARB-COMMENT-001";
+
+    private readonly IReadOnlyList<ArbiterRule> _rules = rules ?? ArbiterConfig.ProductDefaults.Rules;
+
+    /// <summary>
+    /// The most summary rows sent to the classifier in one call. Rows past the cap stay real and unasked, so a long
+    /// table costs at most this many provider calls.
+    /// </summary>
+    public const int MaxSummaryRows = 50;
+
+    private const string Real = "real";
+    private const string Nitpick = "nitpick";
+    private const string AlreadyFixed = "already-fixed";
+    private const string TriggerName = "comment.triage";
+
+    /// <summary>Classifies <paramref name="request"/> and records the decision.</summary>
+    /// <param name="request">The comment to classify.</param>
+    /// <param name="ct">Cancels the provider call.</param>
+    /// <returns>The class, the confidence and the decision id; never throws for a provider failure.</returns>
+    public async Task<CommentTriageResult> ClassifyAsync(CommentTriageRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        DateTimeOffset now = clock.GetUtcNow();
+        string decisionId = ArbiterRecordId.New(now);
+        ArbiterRule? rule = CommentRule();
+        FileExcerpt? excerpt = fileText.ReadExcerpt(repoRoot, request.Path, request.Line);
+
+        ArbiterStep1BatchResult? batch = null;
+        string status = ArbiterProviderStatuses.NotEvaluated;
+        if (rule is not null && excerpt is not null)
+        {
+            ArbiterFactSet facts = new(new Dictionary<string, ArbiterFact>(StringComparer.Ordinal)
+            {
+                ["comment.body"] = new(request.Body, ArbiterFactLabel.Asserted),
+                ["comment.path"] = new(request.Path, ArbiterFactLabel.Asserted),
+                ["comment.line"] = new(request.Line.ToString(System.Globalization.CultureInfo.InvariantCulture), ArbiterFactLabel.Asserted),
+                ["file.text-at-line"] = new(excerpt.Text, ArbiterFactLabel.Derived),
+            });
+            try
+            {
+                batch = await provider.AskStep1Async([rule], facts, null, ct).ConfigureAwait(false);
+                status = batch.RequestSent ? ArbiterProviderStatuses.Answered : ArbiterProviderStatuses.NotEvaluated;
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested && ProviderFailures.IsAbsorbable(ex))
+            {
+                // Recorded on the decision as an error status, so the failure is visible in the log.
+                status = ArbiterProviderStatuses.Error;
+            }
+        }
+
+        string? given = null;
+        ArbiterStep1Score? score = null;
+        if (batch is { RequestSent: true } sent)
+        {
+            given = sent.AnswersByRule.TryGetValue(CommentRuleId, out string? raw) ? raw : null;
+            sent.ScoresByRule?.TryGetValue(CommentRuleId, out score);
+        }
+
+        double? confidence = score?.Confidence;
+        double? floor = rule?.Ask?.ConfidenceAtLeast;
+        string answer = Real;
+        if (given is Nitpick or AlreadyFixed
+            && confidence is double cleared
+            && floor is double threshold
+            && cleared >= threshold)
+        {
+            answer = given;
+        }
+
+        // The decision keeps the answer the rule gave; shadow only changes what the caller is handed back.
+        await WriteDecisionAsync(decisionId, now, request, rule, batch, score, given, answer, status, ct).ConfigureAwait(false);
+        bool shadow = rule?.Shadow ?? false;
+        if (!shadow)
+        {
+            return new CommentTriageResult(answer, confidence, decisionId, Shadow: false, WouldClass: null, Status: status);
+        }
+
+        string? wouldClass = given is Real or Nitpick or AlreadyFixed ? answer : null;
+        return new CommentTriageResult(Real, confidence, decisionId, Shadow: true, WouldClass: wouldClass, Status: status);
+    }
+
+    /// <summary>
+    /// The effective <c>KW-ARB-COMMENT-001</c> rule: the one the loaded configuration holds, with any host override applied.
+    /// Null when no such rule is loaded, when it is disabled, or when it has no question to ask. A disabled rule is left
+    /// out here exactly as the evaluator leaves it out: it is never asked, so no provider call is made for it.
+    /// </summary>
+    private ArbiterRule? CommentRule() =>
+        _rules.FirstOrDefault(candidate => string.Equals(candidate.Id, CommentRuleId, StringComparison.Ordinal)
+            && candidate.Enabled
+            && candidate.Ask is not null);
+
+    /// <summary>
+    /// Classifies each row of a bot's summary table through <see cref="ClassifyAsync"/>. Only a summary from a
+    /// configured bot is classified; every other summary's rows are returned real without a provider call.
+    /// </summary>
+    /// <param name="request">The summary and the login that posted it.</param>
+    /// <param name="ct">Cancels the provider calls.</param>
+    /// <returns>One item per table row; empty when the comment has no table or any row is malformed.</returns>
+    public async Task<CommentSummaryResult> ClassifySummaryAsync(CommentSummaryRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.Body);
+
+        IReadOnlyList<CommentSummaryRow> rows = CommentSummaryTable.Parse(request.Body) ?? [];
+        bool classify = IsBotAuthor(request.Author);
+        // A row never sent to the classifier still reports the rule's shadow state, so every row says the same thing.
+        bool shadow = CommentRule()?.Shadow ?? false;
+        List<CommentSummaryItem> items = [];
+        for (int index = 0; index < rows.Count; index++)
+        {
+            CommentSummaryRow row = rows[index];
+            if (!classify || index >= MaxSummaryRows)
+            {
+                items.Add(new CommentSummaryItem(row.Path, row.Line, row.Issue, Real, null, string.Empty, shadow, null, ArbiterProviderStatuses.NotEvaluated));
+                continue;
+            }
+
+            CommentTriageResult result = await ClassifyAsync(
+                new CommentTriageRequest(row.Path, row.Line, row.Issue, null), ct).ConfigureAwait(false);
+            items.Add(new CommentSummaryItem(
+                row.Path,
+                row.Line,
+                row.Issue,
+                result.Class,
+                result.Confidence,
+                result.DecisionId,
+                result.Shadow,
+                result.WouldClass,
+                result.Status));
+        }
+
+        return new CommentSummaryResult(items);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="author"/> is a configured bot. With no logins configured nothing is a bot, and an absent
+    /// author is never assumed to be one. A login ending <c>[bot]</c> counts as a bot, as GitHub app logins do.
+    /// </summary>
+    private bool IsBotAuthor(string? author)
+    {
+        if (string.IsNullOrWhiteSpace(author) || botLogins is not { Count: > 0 })
+        {
+            return false;
+        }
+
+        return author.EndsWith("[bot]", StringComparison.OrdinalIgnoreCase)
+            || botLogins.Any(login => string.Equals(login, author, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private async Task WriteDecisionAsync(
+        string decisionId,
+        DateTimeOffset now,
+        CommentTriageRequest request,
+        ArbiterRule? rule,
+        ArbiterStep1BatchResult? batch,
+        ArbiterStep1Score? score,
+        string? given,
+        string answer,
+        string status,
+        CancellationToken ct)
+    {
+        // The rule's answer as the model gave it; undecidable when the floor or the provider refused it.
+        string loggedAnswer = given ?? (status == ArbiterProviderStatuses.Answered ? RuleEngine.Undecidable : ArbiterStep1BatchResult.NotEvaluated);
+        string mapped = rule is not null && rule.Effects.TryGetValue(loggedAnswer, out string? effect) ? effect : RuleEffects.Keep;
+        bool shadow = rule?.Shadow ?? false;
+        string neutral = ArbiterTriggerFamilies.NeutralEffect(ArbiterTriggerFamilies.ForTrigger(TriggerName));
+        ArbiterDecisionRule ruleRecord = new(
+            CommentRuleId,
+            1,
+            loggedAnswer,
+            score?.Probabilities,
+            score?.Confidence,
+            score?.Threshold,
+            shadow ? neutral : mapped,
+            [
+                new ArbiterRuleFactRef("comment.body", "asserted"),
+                new ArbiterRuleFactRef("file.text-at-line", "derived"),
+            ],
+            request.CommitSha is null ? null : "commit " + request.CommitSha,
+            shadow: shadow,
+            wouldEffect: shadow ? mapped : null);
+        ArbiterProviderRecord providerRecord = new(
+            provider is NoneProvider ? "none" : "systemone",
+            null,
+            batch?.Model,
+            batch?.Usage is { } usage ? new ArbiterProviderUsage(usage.InputTokens, usage.OutputTokens) : null,
+            null,
+            status);
+        ArbiterDecisionRecord record = new(
+            decisionId,
+            now,
+            ArbiterSources.Serve,
+            "serve",
+            null,
+            string.Empty,
+            TriggerName,
+            null,
+            "none",
+            null,
+            null,
+            null,
+            null,
+            ruleSet ?? string.Empty,
+            // No rule entry when the rule did not take part (disabled or absent), as the evaluator records it.
+            rule is null ? [] : [ruleRecord],
+            providerRecord,
+            answer,
+            0,
+            0);
+        await state.OpenDecisionLog(arbiterDirectory).AppendAsync(record, ct).ConfigureAwait(false);
+    }
+}

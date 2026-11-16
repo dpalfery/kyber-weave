@@ -74,16 +74,16 @@ public sealed class SquadRenderSeamContractTests : IDisposable
                 ? "invalid server name with spaces!"
                 : null;
 
-        SquadOperatorChannel.ServerName valid = SquadOperatorChannel.ResolveServerName(validReader);
+        SquadOperatorChannelServerName valid = SquadOperatorChannel.ResolveServerName(validReader);
         Assert.Equal(expectedServerName, valid.Name);
         Assert.Null(valid.Warning);
 
-        SquadOperatorChannel.ServerName missing = SquadOperatorChannel.ResolveServerName(nullReader);
+        SquadOperatorChannelServerName missing = SquadOperatorChannel.ResolveServerName(nullReader);
         Assert.Null(missing.Name);
         Assert.NotNull(missing.Warning);
         Assert.Equal(SquadOperatorChannel.ServerNameMissingCode, missing.Warning.Code);
 
-        SquadOperatorChannel.ServerName invalid = SquadOperatorChannel.ResolveServerName(invalidReader);
+        SquadOperatorChannelServerName invalid = SquadOperatorChannel.ResolveServerName(invalidReader);
         Assert.Null(invalid.Name);
         Assert.NotNull(invalid.Warning);
         Assert.Equal(SquadOperatorChannel.ServerNameInvalidCode, invalid.Warning.Code);
@@ -122,14 +122,14 @@ public sealed class SquadRenderSeamContractTests : IDisposable
             _ => null
         };
 
-        SquadRenderRequest request = new(
+        SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Copilot, SquadTarget.Claude],
             SquadDeploymentScope.Global,
             GlobalRoots: globalRoots,
-            EnvironmentReader: onReader);
+            EnvironmentReader: onReader).Prepared();
 
-        SquadRendererRegistry registry = new([new CopilotRenderer(), new ClaudeRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new CopilotRenderer(), new ClaudeRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(request);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
@@ -171,14 +171,14 @@ public sealed class SquadRenderSeamContractTests : IDisposable
         TestGlobalRootResolver globalRoots = new(copilotDir, claudeDir);
         Func<string, string?> nullReader = static _ => null;
 
-        SquadRenderRequest request = new(
+        SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Copilot, SquadTarget.Claude],
             SquadDeploymentScope.Global,
             GlobalRoots: globalRoots,
-            EnvironmentReader: nullReader);
+            EnvironmentReader: nullReader).Prepared();
 
-        SquadRendererRegistry registry = new([new CopilotRenderer(), new ClaudeRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new CopilotRenderer(), new ClaudeRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(request);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
@@ -207,11 +207,11 @@ public sealed class SquadRenderSeamContractTests : IDisposable
             "kw-nonexistent-" + Guid.NewGuid().ToString("N"));
         Assert.False(Directory.Exists(nonExistentSourceDirectory));
 
-        SquadRenderRequest request = new(
+        SquadRenderRequest request = new SquadRenderRequest(
             nonExistentSourceDirectory,
             [SquadTarget.Copilot],
             SquadDeploymentScope.Project,
-            PreloadedSource: preloadedSource);
+            PreloadedSource: preloadedSource).Prepared();
 
         SquadSource loaded = SquadRenderSource.Load(request, SquadTarget.Copilot);
 
@@ -249,12 +249,12 @@ public sealed class SquadRenderSeamContractTests : IDisposable
             [SquadTarget.Copilot] = preset
         };
 
-        SquadRenderRequest request = new(
+        SquadRenderRequest request = new SquadRenderRequest(
             nonExistentSourceDirectory,
             [SquadTarget.Copilot],
             SquadDeploymentScope.Project,
             ModelPresets: presets,
-            PreloadedSource: preloadedSource);
+            PreloadedSource: preloadedSource).Prepared();
 
         SquadSource loaded = SquadRenderSource.Load(request, SquadTarget.Copilot);
 
@@ -292,14 +292,14 @@ public sealed class SquadRenderSeamContractTests : IDisposable
             [SquadTarget.Copilot] = preset
         };
 
-        SquadRenderRequest request = new(
+        SquadRenderRequest request = new SquadRenderRequest(
             nonExistentSourceDirectory,
             [SquadTarget.Copilot, SquadTarget.Claude],
             SquadDeploymentScope.Project,
             ModelPresets: presets,
-            PreloadedSource: preloadedSource);
+            PreloadedSource: preloadedSource).Prepared();
 
-        SquadRendererRegistry registry = new([new CopilotRenderer(), new ClaudeRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new CopilotRenderer(), new ClaudeRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(request);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));

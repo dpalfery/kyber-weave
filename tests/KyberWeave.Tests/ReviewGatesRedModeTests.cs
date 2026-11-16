@@ -1,3 +1,6 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Core.Arbiter.Plans;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using KyberWeave.Core.Arbiter.Facts;
@@ -247,7 +250,7 @@ public sealed class ReviewGatesRedModeTests : IDisposable
         RedOutcome outcome = RedClassifier.Evaluate(
             [new RedGateObservation("tests", "dotnet test --filter FullyQualifiedName~JobTests", 8, GateSummary("t1-task-gate.json", "tests"))],
             [file],
-            root);
+            projectOf => ReviewTestServices.ProjectFiles.NearestProjectFile(root, projectOf));
 
         Assert.False(outcome.Passed);
         Assert.Contains("zero tests", outcome.Reason, StringComparison.Ordinal);
@@ -405,7 +408,7 @@ public sealed class ReviewGatesRedModeTests : IDisposable
         Assert.Contains("not run — RED build (missing symbols WidgetRepository)", tests.GetProperty("summary").GetString(), StringComparison.Ordinal);
         Assert.True(tests.GetProperty("notApplicable").GetBoolean());
         // KW-ARB-GATE-REPORT-001 reads the claim against this report: it must corroborate, not disagree.
-        Assert.True(GateReportFacts.Agrees($"TASK_GATE: PASS — agent=test-dev gates=2 failed=none skipped=1 report={report} runs=1", root));
+        Assert.True(new GateReportFacts().Agrees($"TASK_GATE: PASS — agent=test-dev gates=2 failed=none skipped=1 report={report} runs=1", root));
     }
 
     [Fact]
@@ -472,7 +475,7 @@ public sealed class ReviewGatesRedModeTests : IDisposable
         Assert.Contains($"FILES: {TestFile}", output, StringComparison.Ordinal);
         string claim = output.Split('\n').Select(line => line.Trim()).Single(line => line.StartsWith("TASK_GATE: ", StringComparison.Ordinal));
         // The worker fills in the run count; the rest of the line is the report's own and must corroborate.
-        Assert.True(GateReportFacts.Agrees(claim.Replace("runs=<k>", "runs=2", StringComparison.Ordinal), root), claim);
+        Assert.True(new GateReportFacts().Agrees(claim.Replace("runs=<k>", "runs=2", StringComparison.Ordinal), root), claim);
     }
 
     [Fact]

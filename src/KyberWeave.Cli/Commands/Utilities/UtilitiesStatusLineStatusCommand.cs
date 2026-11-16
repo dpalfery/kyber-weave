@@ -1,4 +1,7 @@
-using KyberWeave.Core.Utilities.StatusLine;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Domain.StatusLine;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -14,17 +17,30 @@ namespace KyberWeave.Cli.Commands.Utilities;
 /// </remarks>
 public sealed class UtilitiesStatusLineStatusCommand : Command<UtilitiesStatusLineSettings>
 {
-    private readonly StatusLineTargetRoots? _roots;
+    private readonly IProcessEnvironment _environment;
+    private readonly IStatusLineDeploymentService _plans;
+    private readonly IStatusLineHostService _host;
+    private readonly IFileSystemPathSemantics _semantics;
 
-    /// <summary>Creates a status command using the default per-user roots.</summary>
-    public UtilitiesStatusLineStatusCommand()
+    /// <summary>Creates the command over the process environment its per-user roots are read from.</summary>
+    /// <param name="environment">The process state the roots are read from.</param>
+    /// <param name="plans">Reads the receipts.</param>
+    /// <param name="host">Compares each owned file with its recorded digest.</param>
+    /// <param name="semantics">The filesystem's containment rules.</param>
+    public UtilitiesStatusLineStatusCommand(
+        IProcessEnvironment environment,
+        IStatusLineDeploymentService plans,
+        IStatusLineHostService host,
+        IFileSystemPathSemantics semantics)
     {
-    }
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(plans);
+        ArgumentNullException.ThrowIfNull(host);
 
-    /// <summary>Creates a status command using injectable roots.</summary>
-    internal UtilitiesStatusLineStatusCommand(StatusLineTargetRoots? roots = null)
-    {
-        _roots = roots;
+        _environment = environment;
+        _plans = plans;
+        _host = host;
+        _semantics = semantics;
     }
 
     /// <inheritdoc />
@@ -35,7 +51,7 @@ public sealed class UtilitiesStatusLineStatusCommand : Command<UtilitiesStatusLi
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        StatusLineTargetRoots roots = _roots ?? UtilitiesStatusLineCommandComposition.ResolveRoots();
+        StatusLineTargetRoots roots = UtilitiesStatusLineCommandComposition.ResolveRoots(_environment);
 
         AnsiConsole.MarkupLine("[bold]Kyber Utilities status line — status[/]");
 
@@ -47,7 +63,7 @@ public sealed class UtilitiesStatusLineStatusCommand : Command<UtilitiesStatusLi
             string stagingRoot = roots.ResolveStagingRoot(target);
             try
             {
-                receipt = StatusLineDeploymentPlan.ReadReceipt(target, roots);
+                receipt = _plans.ReadReceipt(target, roots);
             }
             catch (Exception ex) when (ex is InvalidDataException or StatusLineDeploymentConflictException)
             {
@@ -92,14 +108,15 @@ public sealed class UtilitiesStatusLineStatusCommand : Command<UtilitiesStatusLi
     }
 
     /// <summary>Reports one owned file. Returns <see langword="false" /> when it is missing or drifted.</summary>
-    private static bool ReportOwnedFile(string stagingRoot, StatusLineOwnedFile file)
+    private bool ReportOwnedFile(string stagingRoot, StatusLineOwnedFile file)
     {
         string physicalPath;
         try
         {
             physicalPath = UtilitiesStatusLineCommandComposition.ResolveOwnedPhysicalPath(
                 stagingRoot,
-                file.RelativePath);
+                file.RelativePath,
+                _semantics);
         }
         catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
         {
@@ -110,7 +127,7 @@ public sealed class UtilitiesStatusLineStatusCommand : Command<UtilitiesStatusLi
         }
 
         UtilitiesStatusLineFileState state =
-            UtilitiesStatusLineFileCheck.Evaluate(physicalPath, file.Sha256);
+            _host.EvaluateOwnedFile(physicalPath, file.Sha256);
         switch (state)
         {
             case UtilitiesStatusLineFileState.Ok:

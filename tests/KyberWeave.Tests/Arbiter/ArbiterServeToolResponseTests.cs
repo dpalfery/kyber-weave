@@ -345,14 +345,14 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
                     .Where(id => id is not ("KW-ARB-DIFFICULTY-001" or "KW-ARB-SCOPE-002"))
                     .Select(id => $"    - id: {id}\n      enabled: false")) + "\n");
 
-        ArbiterHookDecisionEngine engine = new(
+        ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
             providerFactory: _ => new HardProvider(),
             homeDirectory: () => _home.Path);
-        return new ArbiterTools(new ArbiterServeContext(
+        return ArbiterTestServices.Tools(new ArbiterServeContext(
             repoRoot,
             engine,
             TextWriter.Null,
-            Composition.LoadHostConfig,
+            ArbiterTestServices.LoadHostConfig,
             _ => true));
     }
 
@@ -373,14 +373,14 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
                 ArbiterConfigTests.ExpectedRuleIds.Select(
                     id => $"    - id: {id}\n      enabled: false")) + "\n");
 
-        ArbiterHookDecisionEngine engine = new(
+        ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
             providerFactory: _ => new FakeProvider(),
             homeDirectory: () => _home.Path);
-        return new ArbiterTools(new ArbiterServeContext(
+        return ArbiterTestServices.Tools(new ArbiterServeContext(
             _repo.Path,
             engine,
             TextWriter.Null,
-            Composition.LoadHostConfig,
+            ArbiterTestServices.LoadHostConfig,
             keyResolved ?? (_ => true)));
     }
 }

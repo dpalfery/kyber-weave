@@ -1,0 +1,584 @@
+using KyberWeave.Contracts.Repositories;
+using System.Text;
+using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Model;
+using KyberWeave.Core.Squad.Parsing;
+
+namespace KyberWeave.Core.Squad.Rendering;
+
+/// <summary>
+/// Composes registered per-harness renderers into a single <see cref="ISquadRenderer"/>:
+/// gates on target coverage before any renderer runs, dispatches each requested target to
+/// the renderer that owns it, and validates the merged output against the safety
+/// invariants every harness must uphold.
+/// </summary>
+/// <remarks>
+/// The coverage gate and the validation pass both used to be dead code. Coverage was
+/// implicit in whatever APM happened to support, discovered only by APM's own error text.
+/// Validation lived in <c>SquadApmCompiler</c>, exercised solely by its own contract
+/// tests — <see cref="SquadLifecycleService"/> called the render port directly and never
+/// validated what came back. Both are wired into the real install/update path here.
+/// </remarks>
+public sealed class SquadRendererRegistry : ISquadRenderer
+{
+    private readonly IReadOnlyDictionary<SquadTarget, ISquadRenderer> _byTarget;
+    private readonly ISquadRenderInputReader? _inputs;
+
+    /// <summary>Creates the registry over the shipped renderers.</summary>
+    /// <param name="renderers">The renderers, each claiming the targets it supports.</param>
+    /// <param name="inputs">Reads what a render needs from disk before the renderers run; null renders only prepared requests.</param>
+    public SquadRendererRegistry(IEnumerable<ISquadRenderer> renderers, ISquadRenderInputReader? inputs = null)
+    {
+        ArgumentNullException.ThrowIfNull(renderers);
+        _inputs = inputs;
+
+        Dictionary<SquadTarget, ISquadRenderer> byTarget = new();
+        foreach (ISquadRenderer renderer in renderers)
+        {
+            foreach (SquadTarget target in renderer.SupportedTargets)
+            {
+                if (!byTarget.TryAdd(target, renderer))
+                {
+                    throw new ArgumentException(
+                        $"Target '{SquadTargetCatalog.GetToken(target)}' is claimed by more than one renderer.",
+                        nameof(renderers));
+                }
+            }
+        }
+
+        _byTarget = byTarget;
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyCollection<SquadTarget> SupportedTargets => _byTarget.Keys.ToArray();
+
+    /// <inheritdoc />
+    public async Task<SquadRenderResult> RenderAsync(
+        SquadRenderRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        IReadOnlyList<SquadTarget> unsupported = request.Targets
+            .Where(target => !_byTarget.ContainsKey(target))
+            .ToArray();
+        if (unsupported.Count > 0)
+        {
+            string names = string.Join(", ",
+                unsupported.Select(SquadTargetCatalog.GetToken).Order(StringComparer.Ordinal));
+            string supported = string.Join(", ",
+                SupportedTargets.Select(SquadTargetCatalog.GetToken).Order(StringComparer.Ordinal));
+            return new SquadRenderResult(
+                false,
+                [],
+                [],
+                [],
+                [
+                    $"No renderer is implemented yet for target(s): {names}. " +
+                    $"See docs/todo/<target>.md for what is needed to add support. " +
+                    $"Targets available today: {supported}."
+                ]);
+        }
+
+        List<SquadDeploymentFile> files = [];
+        List<SquadDegradationRecord> degradations = [];
+        List<SquadRenderWarning> warnings = [];
+        List<string> errors = [];
+        List<SquadRenderedBlock> blocks = [];
+
+        request = _inputs?.Prepare(request) ?? request;
+        SquadSource sharedSource = request.RequireSource();
+
+        foreach (IGrouping<ISquadRenderer, SquadTarget> group in request.Targets.GroupBy(target => _byTarget[target]))
+        {
+            SquadRenderResult partial = await group.Key.RenderAsync(
+                request with { Targets = group.ToArray(), PreloadedSource = sharedSource },
+                cancellationToken).ConfigureAwait(false);
+
+            files.AddRange(partial.Files);
+            degradations.AddRange(partial.Degradations);
+            warnings.AddRange(partial.Warnings);
+            errors.AddRange(partial.Errors);
+            if (partial.Blocks is not null)
+            {
+                blocks.AddRange(partial.Blocks);
+            }
+        }
+
+        if (errors.Count > 0)
+        {
+            return new SquadRenderResult(false, files, degradations, warnings, errors, blocks);
+        }
+
+        // The model targets table is one file per hooked target, written by the registry because it
+        // reads every target's merged profiles at once rather than one renderer's tree.
+        files.AddRange(ArbiterModelTargetsFile.BuildFiles(request with { PreloadedSource = sharedSource }));
+
+        if (SquadOperatorChannel.IsGateOn(request.RequireEnvironmentReader()))
+        {
+            RecordOperatorChannelNotRendered(sharedSource, request, degradations);
+        }
+
+        ValidateRenderResult(sharedSource, request.Targets, files, degradations);
+        ValidateRenderedBlocks(request.Targets, blocks);
+
+        return new SquadRenderResult(true, files, degradations, warnings, [], blocks);
+    }
+
+    /// <summary>
+    /// Validates merged block fragments the way files are validated: every block names a
+    /// portable canonical path for a target in the requested set. Entry payloads stay the
+    /// producing renderer's responsibility; the deployment plan refuses unknown containers.
+    /// </summary>
+    private static void ValidateRenderedBlocks(
+        IReadOnlyList<SquadTarget> targets,
+        IReadOnlyList<SquadRenderedBlock> blocks)
+    {
+        HashSet<string> targetTokens = targets.Select(SquadTargetCatalog.GetToken).ToHashSet(StringComparer.Ordinal);
+        foreach (SquadRenderedBlock block in blocks)
+        {
+            ArgumentNullException.ThrowIfNull(block);
+
+            try
+            {
+                string normalized = SquadPathPolicy.NormalizeRelativePath(block.RelativePath);
+                if (!string.Equals(normalized, block.RelativePath, StringComparison.Ordinal))
+                {
+                    throw new SquadRenderValidationException(
+                        $"Deployment block path '{block.RelativePath}' is not a canonical portable path.");
+                }
+            }
+            catch (Exception ex) when (ex is not SquadRenderValidationException)
+            {
+                throw new SquadRenderValidationException(
+                    $"Deployment block path '{block.RelativePath}' violates portable path constraints: {ex.Message}",
+                    ex);
+            }
+
+            if (!targetTokens.Contains(block.Target))
+            {
+                throw new SquadRenderValidationException(
+                    $"Deployment block '{block.RelativePath}' specifies target '{block.Target}' which was not in the requested target set.");
+            }
+
+            ArgumentNullException.ThrowIfNull(block.Entries);
+        }
+    }
+
+    /// <summary>
+    /// Records that the operator channel overlay did not render for each requested target that cannot
+    /// carry it. Only Copilot at global scope carries it, so every other target gets an honest record
+    /// instead of a silent omission.
+    /// </summary>
+    private static void RecordOperatorChannelNotRendered(
+        SquadSource source,
+        SquadRenderRequest request,
+        List<SquadDegradationRecord> degradations)
+    {
+        SquadAgent? conductor = source.Agents.FirstOrDefault(agent =>
+            string.Equals(agent.Name, SquadOperatorChannel.ConductorAgentName, StringComparison.Ordinal));
+        if (conductor is null)
+        {
+            return;
+        }
+
+        foreach (SquadTarget target in request.Targets)
+        {
+            if (target == SquadTarget.Copilot && request.Scope == SquadDeploymentScope.Global)
+            {
+                continue;
+            }
+
+            degradations.Add(new SquadDegradationRecord(
+                SquadTargetCatalog.GetToken(target),
+                conductor.Name,
+                conductor.Name,
+                SquadOperatorChannel.NotRenderedCode,
+                conductor.BodyDigest,
+                SquadOperatorChannel.NotRenderedDetails));
+        }
+    }
+
+    private static void ValidateRenderResult(
+        SquadSource source,
+        IReadOnlyList<SquadTarget> targets,
+        IReadOnlyList<SquadDeploymentFile> files,
+        IReadOnlyList<SquadDegradationRecord> degradations)
+    {
+        Dictionary<string, SquadAgent> agentMap = source.Agents.ToDictionary(a => a.Name, StringComparer.Ordinal);
+        HashSet<string> targetTokens = targets.Select(SquadTargetCatalog.GetToken).ToHashSet(StringComparer.Ordinal);
+        HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
+            .SelectMany(profile => profile.SharedIdentities)
+            .ToHashSet(StringComparer.Ordinal);
+        HashSet<string> agentNames = source.Agents
+            .Select(agent => agent.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        HashSet<string> occupiedIdentities = source.Skills
+            .Where(skill => agentNames.Contains(skill.Name))
+            .Select(skill => skill.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        HashSet<string> distinctBodyCollisions = occupiedIdentities
+            .Except(sharedIdentities, StringComparer.Ordinal)
+            .ToHashSet(StringComparer.Ordinal);
+
+        foreach (SquadDeploymentFile file in files)
+        {
+            try
+            {
+                string normalized = SquadPathPolicy.NormalizeRelativePath(file.RelativePath);
+                if (!string.Equals(normalized, file.RelativePath, StringComparison.Ordinal))
+                {
+                    throw new SquadRenderValidationException(
+                        $"Deployment file path '{file.RelativePath}' is not a canonical portable path.");
+                }
+            }
+            catch (Exception ex) when (ex is not SquadRenderValidationException)
+            {
+                throw new SquadRenderValidationException(
+                    $"Deployment file path '{file.RelativePath}' violates portable path constraints: {ex.Message}",
+                    ex);
+            }
+
+            if (!targetTokens.Contains(file.Target))
+            {
+                throw new SquadRenderValidationException(
+                    $"Deployment file '{file.RelativePath}' specifies target '{file.Target}' which was not in the requested target set.");
+            }
+        }
+
+        ValidateResourcePrincipalCollisions(source, targets);
+        ValidatePortableOutputIdentities(files);
+
+        foreach (SquadTarget target in targets)
+        {
+            string token = SquadTargetCatalog.GetToken(target);
+            bool isNative = SquadTargetCatalog.GetAgentProjection(target) == SquadAgentProjection.Native;
+
+            List<SquadDeploymentFile> targetFiles = files
+                .Where(f => string.Equals(f.Target, token, StringComparison.Ordinal))
+                .ToList();
+
+            if (isNative)
+            {
+                foreach (SquadDeploymentFile file in targetFiles)
+                {
+                    if (file.RelativePath.Contains("role-", StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new SquadRenderValidationException(
+                            $"Native target '{token}' emitted role-prefixed file '{file.RelativePath}'.");
+                    }
+                }
+
+                foreach (string sharedIdentity in sharedIdentities)
+                {
+                    // Native targets can emit both agent and skill files for the same shared identity
+                    // (Native Both pattern: separate namespaces). Only check for duplicate files within
+                    // the same projection type (multiple agents or multiple skills), not across types.
+                    List<SquadDeploymentFile> skillFiles = targetFiles.Where(f =>
+                        f.RelativePath.Contains($"/{sharedIdentity}/SKILL.md", StringComparison.Ordinal)).ToList();
+
+                    if (skillFiles.Count > 1)
+                    {
+                        throw new SquadRenderValidationException(
+                            $"Duplicate skill projection detected for '{sharedIdentity}' on native target '{token}'.");
+                    }
+                }
+            }
+            else
+            {
+                if (targetFiles.Any(f => f.RelativePath.Contains("/agents/", StringComparison.OrdinalIgnoreCase)))
+                {
+                    throw new SquadRenderValidationException(
+                        $"Fallback target '{token}' emitted native agent file, which is not supported.");
+                }
+
+                foreach (string sharedIdentity in sharedIdentities)
+                {
+                    List<SquadDeploymentFile> sharedIdentityFiles = targetFiles.Where(f =>
+                        f.RelativePath.Contains($"/{sharedIdentity}/SKILL.md", StringComparison.Ordinal)).ToList();
+
+                    if (sharedIdentityFiles.Count > 1)
+                    {
+                        throw new SquadRenderValidationException(
+                            $"Duplicate skill projection detected for '{sharedIdentity}' on fallback target '{token}'.");
+                    }
+                }
+
+                foreach (string collision in distinctBodyCollisions)
+                {
+                    bool hasCanonicalSkill = targetFiles.Any(f =>
+                        f.RelativePath.Contains($"/{collision}/SKILL.md", StringComparison.Ordinal));
+                    bool hasRoleSkill = targetFiles.Any(f =>
+                        f.RelativePath.Contains($"/role-{collision}/SKILL.md", StringComparison.Ordinal));
+
+                    if (!hasCanonicalSkill || !hasRoleSkill)
+                    {
+                        throw new SquadRenderValidationException(
+                            $"Fallback target '{token}' must contain both canonical skill '{collision}' and lowered role skill 'role-{collision}'.");
+                    }
+                }
+            }
+        }
+
+        foreach (SquadDegradationRecord degradation in degradations)
+        {
+            if (!agentMap.TryGetValue(degradation.CanonicalIdentity, out SquadAgent? agent))
+            {
+                throw new SquadRenderValidationException(
+                    $"Degradation record references unknown agent '{degradation.CanonicalIdentity}'.");
+            }
+
+            if (string.IsNullOrWhiteSpace(degradation.InstructionDigest))
+            {
+                throw new SquadRenderValidationException(
+                    $"Degradation record for agent '{degradation.CanonicalIdentity}' is missing the instruction body digest.");
+            }
+
+            if (!string.Equals(degradation.InstructionDigest, agent.BodyDigest, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new SquadRenderValidationException(
+                    $"Degradation record for agent '{degradation.CanonicalIdentity}' has mismatched instruction digest '{degradation.InstructionDigest}' (expected '{agent.BodyDigest}').");
+            }
+
+            if (string.Equals(degradation.Code, "widened", StringComparison.OrdinalIgnoreCase) ||
+                (degradation.Details is not null &&
+                 degradation.Details.Contains("widening", StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new SquadRenderValidationException(
+                    $"Permission widening detected for agent '{degradation.CanonicalIdentity}'.");
+            }
+        }
+    }
+
+    private static void ValidatePortableOutputIdentities(IReadOnlyList<SquadDeploymentFile> files)
+    {
+        Dictionary<string, string> outputs = new(StringComparer.OrdinalIgnoreCase);
+        foreach (SquadDeploymentFile file in files)
+        {
+            string portableIdentity = SquadPathPolicy.GetPortableIdentity(file.RelativePath);
+            string targetIdentity = $"{file.Target}/{portableIdentity}";
+            if (outputs.TryGetValue(targetIdentity, out string? existingPath))
+            {
+                throw new SquadRenderValidationException(
+                    $"Portable output collision detected between '{existingPath}' and '{file.RelativePath}' for target '{file.Target}'.");
+            }
+
+            outputs.Add(targetIdentity, file.RelativePath);
+        }
+    }
+
+    private static void ValidateResourcePrincipalCollisions(
+        SquadSource source,
+        IReadOnlyList<SquadTarget> targets)
+    {
+        HashSet<string> skillNames = source.Skills
+            .Select(skill => skill.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
+            .SelectMany(profile => profile.SharedIdentities)
+            .ToHashSet(StringComparer.Ordinal);
+        // A primary shared identity's canonical skill is emitted (it is the entry point), so it
+        // claims an output path like any other skill. Only a suppressed subagent shared identity
+        // claims nothing, because its agent file is the sole projection.
+        HashSet<string> suppressedSkillIdentities =
+            SquadSharedIdentityProjection.SuppressedSkillIdentities(source, sharedIdentities);
+
+        foreach (SquadTarget target in targets)
+        {
+            Dictionary<string, string> principalOutputs = new(StringComparer.Ordinal);
+            foreach (SquadAgent agent in source.Agents)
+            {
+                string? outputPath = AgentOutputPath(
+                    target,
+                    agent,
+                    skillNames,
+                    sharedIdentities,
+                    source.FallbackProfiles.Profiles);
+                if (outputPath is not null)
+                {
+                    principalOutputs.Add(agent.SourcePath, outputPath);
+                }
+            }
+
+            foreach (SquadSkill skill in source.Skills)
+            {
+                string? outputPath = SkillOutputPath(target, skill.Name, suppressedSkillIdentities);
+                if (outputPath is not null)
+                {
+                    principalOutputs.Add(skill.SourcePath, outputPath);
+                }
+            }
+
+            foreach (SquadAgent owner in source.Agents)
+            {
+                ValidateOwnerResources(owner.SourcePath, owner.Resources, principalOutputs);
+            }
+
+            foreach (SquadSkill owner in source.Skills)
+            {
+                ValidateOwnerResources(owner.SourcePath, owner.Resources, principalOutputs);
+            }
+        }
+    }
+
+    private static void ValidateOwnerResources(
+        string ownerSourcePath,
+        IReadOnlyList<SquadResource> resources,
+        IReadOnlyDictionary<string, string> principalOutputs)
+    {
+        int separator = ownerSourcePath.LastIndexOf('/');
+        string ownerDirectory = separator < 0 ? string.Empty : ownerSourcePath[..separator];
+        foreach (SquadResource resource in resources)
+        {
+            string sourcePath = ownerDirectory.Length == 0
+                ? resource.RelativePath
+                : $"{ownerDirectory}/{resource.RelativePath}";
+            if (principalOutputs.TryGetValue(sourcePath, out string? outputPath))
+            {
+                throw PrincipalCollision(ownerSourcePath, resource.RelativePath, outputPath);
+            }
+        }
+    }
+
+    private static SquadRenderValidationException PrincipalCollision(
+        string ownerSourcePath,
+        string resourcePath,
+        string outputPath)
+    {
+        return new SquadRenderValidationException(
+            $"Resource '{resourcePath}' owned by '{ownerSourcePath}' aliases another principal and causes a portable output collision at '{outputPath}'.");
+    }
+
+    /// <remarks>
+    /// Takes the whole <see cref="SquadAgent"/> and the loaded fallback profiles, not just a
+    /// name, because some native targets' output paths depend on <see cref="SquadAgent.Invocation"/>
+    /// and the fallback profile's <c>no-primary-agent</c> value. Pi lowers a primary-invocation
+    /// agent to <c>.pi/skills/&lt;name&gt;/SKILL.md</c> when <c>no-primary-agent: skill</c>.
+    /// Claude adds an entry-point skill at <c>.claude/skills/&lt;name&gt;/SKILL.md</c> alongside
+    /// the kept subagent <c>.claude/agents/&lt;name&gt;.md</c>, so a primary agent is the one
+    /// target with two principals (subagent enforced, skill the unenforced main-thread entry).
+    /// Cursor joins Pi, ZCode, and Devin as a native target whose output path depends on
+    /// <see cref="SquadAgent.Invocation"/> (Claude instead keeps both principals for a primary
+    /// agent): a primary-invocation agent lowers to <c>.cursor/skills/&lt;name&gt;/SKILL.md</c>
+    /// when its fallback profile's <c>no-primary-agent</c> value is <c>skill</c> (the Pi-renderer
+    /// skill-only precedent — no agent file is emitted), and claims nothing under
+    /// <c>omit</c>. The remaining native targets render every agent uniformly without a
+    /// hard-coded special case here. The <c>Cursor</c> switch arm above is intentionally
+    /// unchanged: resource-principal collision validation keys on source paths, so the
+    /// lowered skill identity needs no arm change.
+    /// </remarks>
+    private static string? AgentOutputPath(
+        SquadTarget target,
+        SquadAgent agent,
+        IReadOnlySet<string> skillNames,
+        IReadOnlySet<string> sharedIdentities,
+        IReadOnlyDictionary<string, SquadFallbackProfile> fallbackProfiles)
+    {
+        return target switch
+        {
+            SquadTarget.Copilot => $".github/agents/{agent.Name}.agent.md",
+            SquadTarget.Cursor => $".cursor/agents/{agent.Name}.md",
+            SquadTarget.Claude => $".claude/agents/{agent.Name}.md",
+            SquadTarget.Codex => $".codex/agents/{agent.Name}.toml",
+            SquadTarget.OpenCode => $".opencode/agents/{agent.Name}.md",
+            SquadTarget.Kilo => $".kilo/agents/{agent.Name}.md",
+            SquadTarget.Factory => $".factory/droids/{agent.Name}.md",
+            SquadTarget.Antigravity => $".agents/agents/{agent.Name}/agent.md",
+            SquadTarget.Warp =>
+                $".warp/skills/{ResolveFallbackOutputIdentity(agent.Name, skillNames, sharedIdentities)}/SKILL.md",
+            SquadTarget.Pi => ResolvePiAgentOutputPath(agent, fallbackProfiles),
+            SquadTarget.ZCode => ResolveZCodeAgentOutputPath(agent, fallbackProfiles),
+            SquadTarget.Devin => ResolveDevinAgentOutputPath(agent, fallbackProfiles),
+            SquadTarget.CommandCode => $".commandcode/agents/{agent.Name}.md",
+            _ => null
+        };
+    }
+
+    private static string? ResolvePiAgentOutputPath(
+        SquadAgent agent,
+        IReadOnlyDictionary<string, SquadFallbackProfile> fallbackProfiles)
+    {
+        if (agent.Invocation == SquadInvocation.Subagent)
+        {
+            return $".pi/agents/{agent.Name}.md";
+        }
+
+        // Primary invocation: Pi core has no primary-agent primitive (see PiRenderer remarks),
+        // so this claims the lowered skill identity only when the fallback profile actually
+        // lowers to a skill. "omit" claims no output path, matching PiRenderer emitting nothing.
+        return fallbackProfiles.TryGetValue(agent.Fallback, out SquadFallbackProfile? profile) &&
+               string.Equals(profile.NoPrimaryAgent, "skill", StringComparison.Ordinal)
+            ? $".pi/skills/{agent.Name}/SKILL.md"
+            : null;
+    }
+
+    /// <remarks>
+    /// ZCode is the second native target whose output path depends on
+    /// <see cref="SquadAgent.Invocation"/>, and the only one that lowers a primary agent onto
+    /// a primitive that is neither an agent nor a skill. A subagent-invocation agent claims
+    /// <c>.zcode/agents/&lt;name&gt;.md</c>; a primary-invocation agent claims
+    /// <c>.zcode/commands/&lt;name&gt;.md</c> when its fallback profile's
+    /// <c>no-primary-agent</c> value is <c>skill</c>, because ZCode has no primary-agent
+    /// primitive but does have a project-scoped slash command (see
+    /// <see cref="ZCodeRenderer"/>). <c>omit</c> claims no output path, matching the renderer
+    /// emitting nothing.
+    /// </remarks>
+    private static string? ResolveZCodeAgentOutputPath(
+        SquadAgent agent,
+        IReadOnlyDictionary<string, SquadFallbackProfile> fallbackProfiles)
+    {
+        if (agent.Invocation == SquadInvocation.Subagent)
+        {
+            return $".zcode/agents/{agent.Name}.md";
+        }
+
+        return fallbackProfiles.TryGetValue(agent.Fallback, out SquadFallbackProfile? profile) &&
+               string.Equals(profile.NoPrimaryAgent, "skill", StringComparison.Ordinal)
+            ? $".zcode/commands/{agent.Name}.md"
+            : null;
+    }
+
+    /// <remarks>
+    /// Devin reads a custom subagent from either <c>agents/&lt;name&gt;.md</c> or
+    /// <c>agents/&lt;name&gt;/AGENT.md</c>; <see cref="DevinRenderer"/> uses the directory form
+    /// only, so a subagent claims <c>.devin/agents/&lt;name&gt;/AGENT.md</c>. A primary-invocation
+    /// agent claims <c>.devin/skills/&lt;name&gt;/SKILL.md</c> when its fallback profile lowers
+    /// to a skill, because Devin Local is the only top-level agent; <c>omit</c> claims nothing.
+    /// </remarks>
+    private static string? ResolveDevinAgentOutputPath(
+        SquadAgent agent,
+        IReadOnlyDictionary<string, SquadFallbackProfile> fallbackProfiles)
+    {
+        if (agent.Invocation == SquadInvocation.Subagent)
+        {
+            return $".devin/agents/{agent.Name}/AGENT.md";
+        }
+
+        return fallbackProfiles.TryGetValue(agent.Fallback, out SquadFallbackProfile? profile) &&
+               string.Equals(profile.NoPrimaryAgent, "skill", StringComparison.Ordinal)
+            ? $".devin/skills/{agent.Name}/SKILL.md"
+            : null;
+    }
+
+    /// <summary>The distinct project-scope skill directories of every target.</summary>
+    internal static IReadOnlyList<string> ProjectSkillRoots() => SquadSkillOutputPaths.ProjectSkillRoots();
+
+    /// <summary>The directory a target installs project-scope skills to, or null when it has none.</summary>
+    internal static string? ProjectSkillsRoot(SquadTarget target) => SquadSkillOutputPaths.ProjectSkillsRoot(target);
+
+    private static string? SkillOutputPath(
+        SquadTarget target,
+        string name,
+        IReadOnlySet<string> suppressedSkillIdentities) =>
+        SquadSkillOutputPaths.SkillOutputPath(target, name, suppressedSkillIdentities);
+
+    private static string ResolveFallbackOutputIdentity(
+        string name,
+        IReadOnlySet<string> skillNames,
+        IReadOnlySet<string> sharedIdentities)
+    {
+        return skillNames.Contains(name) && !sharedIdentities.Contains(name)
+            ? $"role-{name}"
+            : name;
+    }
+}

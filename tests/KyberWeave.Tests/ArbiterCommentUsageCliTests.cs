@@ -1,3 +1,9 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Tests.Arbiter;
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Core.Arbiter.Plans;
+using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Cli.Commands.Arbiter;
 using Xunit;
 
@@ -16,7 +22,7 @@ public sealed class ArbiterCommentUsageCliTests : IDisposable
     [Fact]
     public void ACommentWithoutAPathIsAUsageErrorNotAnException()
     {
-        ArbiterCommentCommand command = new();
+        ArbiterCommentCommand command = ArbiterTestServices.Command<ArbiterCommentCommand>();
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
@@ -35,7 +41,7 @@ public sealed class ArbiterCommentUsageCliTests : IDisposable
     [Fact]
     public void ACommentWithoutABodyIsAUsageErrorNotAnException()
     {
-        ArbiterCommentCommand command = new();
+        ArbiterCommentCommand command = ArbiterTestServices.Command<ArbiterCommentCommand>();
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,

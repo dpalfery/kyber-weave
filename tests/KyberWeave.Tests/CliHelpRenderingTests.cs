@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Xml.Linq;
+using KyberWeave.Cli;
 using KyberWeave.Core.Processes;
 using Xunit;
 
@@ -37,6 +38,17 @@ public sealed class CliHelpRenderingTests
     }
 
     [Fact]
+    public void TheRealHostRendersTheRootHelp()
+    {
+        ProcessResult result = RunCli(["--help"]);
+        string output = result.StandardOutput + "\n" + result.StandardError;
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.DoesNotContain("Could not find color or style", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("Error:", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void EveryCommandAndBranchRendersItsHelp()
     {
         string[][] paths = [.. CommandPaths()];
@@ -45,13 +57,13 @@ public sealed class CliHelpRenderingTests
         List<string> failures = [];
         foreach (string[] path in paths)
         {
-            ProcessResult result = RunCli([.. path, "--help"]);
-            string output = result.StandardOutput + "\n" + result.StandardError;
-            if (result.ExitCode != 0
+            CapturedConsoleExecution<int> result = RunInProcess([.. path, "--help"]);
+            string output = result.Output;
+            if (result.Result != 0
                 || output.Contains("Could not find color or style", StringComparison.Ordinal)
                 || output.Contains("Error:", StringComparison.Ordinal))
             {
-                failures.Add($"{string.Join(' ', path)} (exit {result.ExitCode}): {Tail(output)}");
+                failures.Add($"{string.Join(' ', path)} (exit {result.Result}): {Tail(output)}");
             }
         }
 
@@ -67,9 +79,9 @@ public sealed class CliHelpRenderingTests
 
     private static IEnumerable<string[]> CommandPaths()
     {
-        ProcessResult model = RunCli(["cli", "xmldoc"]);
-        Assert.Equal(0, model.ExitCode);
-        XElement root = XDocument.Parse(model.StandardOutput).Root!;
+        CapturedConsoleExecution<int> model = RunInProcess(["cli", "xmldoc"], width: 100_000);
+        Assert.Equal(0, model.Result);
+        XElement root = XDocument.Parse(model.Output).Root!;
         return Walk(root, []);
 
         static IEnumerable<string[]> Walk(XElement parent, string[] prefix)
@@ -82,6 +94,11 @@ public sealed class CliHelpRenderingTests
                     yield return inner;
             }
         }
+    }
+
+    private static CapturedConsoleExecution<int> RunInProcess(string[] args, int width = 0)
+    {
+        return ProcessConsoleCapture.Run(() => CliApplication.Create().Run(args), width);
     }
 
     private static ProcessResult RunCli(string[] args)

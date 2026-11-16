@@ -1,3 +1,6 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Core.Arbiter.Plans;
 using System.Text;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Arbiter;
@@ -59,7 +62,7 @@ public sealed class ArbiterStepOneFactsTests : IDisposable
         string baseCommit = _probe.GitOutput("rev-parse", "HEAD").Trim();
         Write("query.sql", "++ one\n  keep\n  keep\n  keep\n++ two\n");
 
-        string? summary = GitFacts.GetDiffSummary(_probe.Root, baseCommit, ["query.sql"]);
+        string? summary = new GitFacts().GetDiffSummary(_probe.Root, baseCommit, ["query.sql"]);
 
         Assert.Equal("query.sql\n@@ -1 +1 @@\n@@ -5 +5 @@", summary);
     }
@@ -73,7 +76,7 @@ public sealed class ArbiterStepOneFactsTests : IDisposable
         string baseCommit = _probe.GitOutput("rev-parse", "HEAD").Trim();
         _probe.Git("rm", "gone.txt");
 
-        string? summary = GitFacts.GetDiffSummary(_probe.Root, baseCommit, ["gone.txt"]);
+        string? summary = new GitFacts().GetDiffSummary(_probe.Root, baseCommit, ["gone.txt"]);
 
         Assert.Equal("gone.txt\n@@ -1 +0,0 @@", summary);
     }
@@ -81,7 +84,7 @@ public sealed class ArbiterStepOneFactsTests : IDisposable
     [Fact]
     public void DiffSummaryStaysAbsentWhenTheBaseCannotBeRead()
     {
-        Assert.Null(GitFacts.GetDiffSummary(_probe.Root, "no-such-ref", ["a.cs"]));
+        Assert.Null(new GitFacts().GetDiffSummary(_probe.Root, "no-such-ref", ["a.cs"]));
     }
 
     [Fact]
@@ -203,6 +206,6 @@ public sealed class ArbiterStepOneFactsTests : IDisposable
 
         TriggerClassification classification = TriggerClassifier.ClassifySingle(ev, "review-lens", prompt);
         ArbiterFactSet facts = TriggerFactBuilder.Build(classification, prompt, KyberWeaveConfig.ProductDefaults);
-        return new HookGitFacts(_probe.Root, _home.Path).Enrich(facts, classification, ev);
+        return ArbiterTestServices.HookGitFacts(_probe.Root, _home.Path).Enrich(facts, classification, ev);
     }
 }

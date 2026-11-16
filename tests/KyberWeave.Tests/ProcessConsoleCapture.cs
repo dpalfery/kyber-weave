@@ -15,6 +15,7 @@ internal static class ProcessConsoleCapture
 {
     private static readonly Lock InitLock = new();
     private static readonly AsyncLocal<StringWriter?> CurrentWriter = new();
+    private static readonly AsyncLocal<StringWriter?> CurrentErrorWriter = new();
     private static readonly AsyncLocal<IAnsiConsole?> CurrentAnsiConsole = new();
     private static bool _installed;
 
@@ -43,8 +44,10 @@ internal static class ProcessConsoleCapture
             }
 
             TextWriter originalOut = Console.Out;
+            TextWriter originalError = Console.Error;
             IAnsiConsole originalAnsiConsole = AnsiConsole.Console;
-            Console.SetOut(new AsyncLocalTextWriter(originalOut));
+            Console.SetOut(new AsyncLocalTextWriter(originalOut, CurrentWriter));
+            Console.SetError(new AsyncLocalTextWriter(originalError, CurrentErrorWriter));
             AnsiConsole.Console = new AsyncLocalAnsiConsole(originalAnsiConsole);
             _installed = true;
         }
@@ -60,21 +63,25 @@ internal static class ProcessConsoleCapture
         EnsureInstalled();
 
         using StringWriter writer = new();
+        using StringWriter errorWriter = new();
         IAnsiConsole capture = CreateCaptureConsole(writer, width);
 
         StringWriter? priorWriter = CurrentWriter.Value;
+        StringWriter? priorErrorWriter = CurrentErrorWriter.Value;
         IAnsiConsole? priorAnsiConsole = CurrentAnsiConsole.Value;
 
         CurrentWriter.Value = writer;
+        CurrentErrorWriter.Value = errorWriter;
         CurrentAnsiConsole.Value = capture;
         try
         {
             T result = execute();
-            return new CapturedConsoleExecution<T>(result, writer.ToString());
+            return new CapturedConsoleExecution<T>(result, writer.ToString(), errorWriter.ToString());
         }
         finally
         {
             CurrentAnsiConsole.Value = priorAnsiConsole;
+            CurrentErrorWriter.Value = priorErrorWriter;
             CurrentWriter.Value = priorWriter;
         }
     }
@@ -130,12 +137,15 @@ internal static class ProcessConsoleCapture
             Justification = "Process-lifetime fallback console is owned by the process, not this wrapper.")]
         private readonly TextWriter _fallback;
 
-        public AsyncLocalTextWriter(TextWriter fallback)
+        private readonly AsyncLocal<StringWriter?> _current;
+
+        public AsyncLocalTextWriter(TextWriter fallback, AsyncLocal<StringWriter?> current)
         {
             _fallback = fallback;
+            _current = current;
         }
 
-        private TextWriter Active => CurrentWriter.Value ?? _fallback;
+        private TextWriter Active => _current.Value ?? _fallback;
 
         public override Encoding Encoding => Active.Encoding;
         public override IFormatProvider FormatProvider => Active.FormatProvider;
@@ -199,4 +209,4 @@ internal static class ProcessConsoleCapture
     }
 }
 
-internal sealed record CapturedConsoleExecution<T>(T Result, string Output);
+internal sealed record CapturedConsoleExecution<T>(T Result, string Output, string ErrorOutput = "");

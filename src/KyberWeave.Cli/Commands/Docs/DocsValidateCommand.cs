@@ -1,14 +1,15 @@
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Model;
-using KyberWeave.Core.Docs.Parsing;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Docs.Validation;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Docs;
 
 /// <summary>Schema tier: frontmatter conformance. Needs no code index.</summary>
-public sealed class DocsValidateCommand : Command<DocsValidateSettings>
+public sealed class DocsValidateCommand(IDocsSchemaGate gate, IDocumentSourceFactory documents) : Command<DocsValidateSettings>
 {
     /// <summary>
     /// Runs every frontmatter and inventory validator, and the open-work gate when
@@ -25,13 +26,13 @@ public sealed class DocsValidateCommand : Command<DocsValidateSettings>
             return 1;
         }
 
-        DocumentSet set = new DocumentLoader(settings.Path, ontology).Load();
+        DocumentSet set = documents.Create(settings.Path, ontology).Load();
         KyberWeaveConfig effective = config.WithOntology(ontology);
-        report.AddRange(DocsSchemaGate.Validate(
+        report.AddRange(gate.Validate(
             settings.Path,
             effective,
             set,
-            () => new DocumentLoader(settings.Path, ontology),
+            () => documents.Create(settings.Path, ontology),
             settings.MergeReady,
             settings.Base).Items);
 

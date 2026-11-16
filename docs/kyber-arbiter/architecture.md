@@ -3,7 +3,7 @@ id: kyber-arbiter/architecture
 title: Kyber Arbiter architecture
 doc-type: architecture
 component: KyberArbiter
-source-root: src/KyberWeave.Core/Arbiter
+source-root: src/KyberWeave.Domain/Arbiter
 owner: dpalfery
 last-reviewed: 2026-11-12
 status: current

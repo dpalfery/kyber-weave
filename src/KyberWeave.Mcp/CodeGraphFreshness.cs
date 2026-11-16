@@ -1,8 +1,11 @@
 using System.Diagnostics;
+
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
-using KyberWeave.Core.CodeGraph;
+using KyberWeave.Contracts.Docs;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
-using KyberWeave.Core.Doctor;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Domain.Doctor;
 using KyberWeave.Core.Processes;
 
 namespace KyberWeave.Mcp;
@@ -21,7 +24,7 @@ namespace KyberWeave.Mcp;
 /// <para>
 /// The refresh is not a second way to prepare an index: it takes the same cross-process lock and
 /// runs the same verbs as <c>kyber-weave doctor</c>, through
-/// <see cref="CodeGraphProvisioner.Provision"/>. Two things differ. The lock is taken with no
+/// <see cref="ICodeGraphProvisioner.Provision"/>. Two things differ. The lock is taken with no
 /// wait, because waiting would put another process's index on this call's critical path. And a
 /// lock another process holds is reported as a note rather than a failure, because the index on
 /// disk is then at worst one refresh behind, not broken.
@@ -40,7 +43,7 @@ namespace KyberWeave.Mcp;
 /// is left answering from whatever is on disk, exactly as it did before this refresh existed.
 /// </para>
 /// </remarks>
-public sealed class CodeGraphFreshness
+public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
 {
     /// <summary>How long one refresh may take before it is stopped and reported as failed.</summary>
     private static readonly TimeSpan RefreshBound = TimeSpan.FromSeconds(30);
@@ -67,10 +70,13 @@ public sealed class CodeGraphFreshness
 
     private readonly string _repositoryRoot;
     private readonly bool _refreshEnabled;
+    private readonly ICodeGraphProvisioner _provisioner;
+    private readonly IKyberWeaveConfigRepository _config;
+    private readonly TimeProvider _time;
     private readonly IProcessExecutor _executor;
     private readonly Lock _gate = new();
 
-    private DateTime _lastAttemptUtc = DateTime.MinValue;
+    private DateTimeOffset? _lastAttempt;
     private CodeGraphGate _last = CodeGraphGate.Clear;
 
     /// <summary>Freshness checks for the index of <paramref name="repositoryRoot"/>.</summary>
@@ -79,6 +85,9 @@ public sealed class CodeGraphFreshness
     /// False when the process was started with <c>--no-codegraph-refresh</c>, which is how
     /// <c>doctor --check</c> keeps its promise that the server never writes an index.
     /// </param>
+    /// <param name="provisioner">Brings the index up to date under the cross-process lock.</param>
+    /// <param name="config">Reads the repository's declaration and its stop rule at each attempt.</param>
+    /// <param name="time">Supplies the clock the refresh interval is measured against.</param>
     /// <param name="executor">
     /// Runs the CodeGraph child the provisioner starts, or null for one bounded by
     /// <see cref="RefreshBound"/>. The provisioner takes its executor from the caller for the same
@@ -89,10 +98,19 @@ public sealed class CodeGraphFreshness
     public CodeGraphFreshness(
         string repositoryRoot,
         bool refreshEnabled,
+        ICodeGraphProvisioner provisioner,
+        IKyberWeaveConfigRepository config,
+        TimeProvider time,
         IProcessExecutor? executor = null)
     {
+        ArgumentNullException.ThrowIfNull(provisioner);
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(time);
         _repositoryRoot = Path.GetFullPath(repositoryRoot);
         _refreshEnabled = refreshEnabled;
+        _provisioner = provisioner;
+        _config = config;
+        _time = time;
         _executor = executor ?? new BoundedExecutor(RefreshBound);
     }
 
@@ -101,7 +119,7 @@ public sealed class CodeGraphFreshness
     /// CodeGraph failed in a way the caller has to be told about.
     /// </summary>
     /// <param name="resolverFactory">Builds the CodeGraph port the docs tools answer from.</param>
-    internal CodeGraphGate Evaluate(Func<ICodeGraphResolver> resolverFactory)
+    public CodeGraphGate Evaluate(Func<ICodeGraphResolver> resolverFactory)
     {
         ArgumentNullException.ThrowIfNull(resolverFactory);
 
@@ -114,21 +132,21 @@ public sealed class CodeGraphFreshness
 
         try
         {
-            DateTime now = DateTime.UtcNow;
-            if (_lastAttemptUtc != DateTime.MinValue && now - _lastAttemptUtc < RefreshInterval)
+            DateTimeOffset now = _time.GetUtcNow();
+            if (_lastAttempt is { } last && now - last < RefreshInterval)
                 return _last;
 
             try
             {
                 _last = Refresh(resolverFactory);
-                _lastAttemptUtc = now;
+                _lastAttempt = now;
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(_repositoryRoot);
+                KyberWeaveConfigLoadResult loaded = _config.TryLoad(_repositoryRoot);
                 bool stops = loaded is { Success: true, Config: not null } ? loaded.Config.StopsOnToolFailure : true;
                 _last = Failure(stops, exception.Message, null);
-                _lastAttemptUtc = now;
+                _lastAttempt = now;
             }
 
             return _last;
@@ -141,7 +159,7 @@ public sealed class CodeGraphFreshness
 
     private CodeGraphGate Refresh(Func<ICodeGraphResolver> resolverFactory)
     {
-        KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(_repositoryRoot);
+        KyberWeaveConfigLoadResult loaded = _config.TryLoad(_repositoryRoot);
         if (loaded is not { Success: true, Config: not null })
             return CodeGraphGate.Clear;
 
@@ -157,7 +175,7 @@ public sealed class CodeGraphFreshness
         string lockDirectory = Path.GetTempPath();
 
         DoctorOptions options = new(RefreshBound, RefreshBound, CodeGraphExecutable, "kyber-weave-mcp");
-        DoctorCheck provisioned = CodeGraphProvisioner.Provision(
+        DoctorCheck provisioned = _provisioner.Provision(
             _repositoryRoot,
             options,
             _executor,
@@ -166,7 +184,7 @@ public sealed class CodeGraphFreshness
 
         if (!provisioned.Passed)
         {
-            return CodeGraphProvisioner.IsBusy(provisioned)
+            return CodeGraphIndexRules.IsBusy(provisioned)
                 ? CodeGraphGate.Advisory(BusyNote)
                 : Failure(stops, provisioned.Reason, provisioned.Fix);
         }
@@ -226,19 +244,4 @@ public sealed class CodeGraphFreshness
         public ProcessResult Run(ProcessStartInfo startInfo, string standardInput) =>
             ProcessRunner.Run(startInfo, standardInput, timeout);
     }
-}
-
-/// <summary>What one CodeGraph check means for the tool call that asked for it.</summary>
-/// <param name="Failure">The block a tool returns instead of its own answer, or null.</param>
-/// <param name="Note">One line the answer carries above its body, or null.</param>
-internal sealed record CodeGraphGate(string? Failure, string? Note)
-{
-    /// <summary>CodeGraph is usable, and the call proceeds unchanged.</summary>
-    public static CodeGraphGate Clear { get; } = new(null, null);
-
-    /// <summary>The call must report the failure instead of answering.</summary>
-    public static CodeGraphGate Blocking(string failure) => new(failure, null);
-
-    /// <summary>The call answers, and says what happened in one line first.</summary>
-    public static CodeGraphGate Advisory(string note) => new(null, note);
 }

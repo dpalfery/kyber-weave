@@ -41,6 +41,13 @@
 # class list or filter as the product suite. A C#-only edit runs only the two policy tests that
 # read source text (POLICY_SOURCE_SCANS): the rest read scripts, workflows, project files and docs.
 #
+# THE PROMPT-CONTENT TESTS
+#
+# tests/KyberWeave.PromptContent.Tests holds the tests that assert the wording of skills, agents and
+# instructions. They run with the policy tests, under the same condition. The class list does not name
+# them, so with no filter the whole project runs; a --class or --method filter applies to it as it does
+# to the others.
+#
 # WHAT MAKES THE EXCLUDED CLASSES SLOW
 #
 # Not process spawning: it is filesystem work, chiefly path canonicalisation that lists
@@ -63,10 +70,20 @@ cd "${repo_root}"
 CONFIGURATION=Release
 TEST_DLL="tests/KyberWeave.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Tests.dll"
 POLICY_TEST_DLL="tests/KyberWeave.RepoPolicy.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.RepoPolicy.Tests.dll"
+PROMPT_TEST_DLL="tests/KyberWeave.PromptContent.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.PromptContent.Tests.dll"
+# The layer projects (Domain, Application, Hooks, Architecture): pure or fake-backed, so they run whole
+# on every .NET loop, whatever --class / --method names a legacy project.
+LAYER_TEST_DLLS=(
+  "tests/KyberWeave.Domain.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Domain.Tests.dll"
+  "tests/KyberWeave.Application.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Application.Tests.dll"
+  "tests/KyberWeave.Hooks.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Hooks.Tests.dll"
+  "tests/KyberWeave.Architecture.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Architecture.Tests.dll"
+)
 CLASS_LIST="scripts/fast-loop-classes.txt"
-# The two policy tests that read source text. A C#-only edit can trip them (an unlisted process
-# spawn, a banned upstream name), and they only read files, so they run on every .NET loop.
-POLICY_SOURCE_SCANS=(-class KyberWeave.Tests.ProcessSpawnSitesTests -class KyberWeave.Tests.UpstreamSeveranceTests)
+# The policy tests that read source text. A C#-only edit can trip them (an unlisted process
+# spawn, a banned upstream name, ambient I/O in Domain), and they only read files, so they run
+# on every .NET loop.
+POLICY_SOURCE_SCANS=(-class KyberWeave.Tests.ProcessSpawnSitesTests -class KyberWeave.Tests.UpstreamSeveranceTests -class KyberWeave.Tests.DomainPurityTests)
 
 step() { printf '\n=== %s ===\n' "$1"; }
 
@@ -281,6 +298,9 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
   step "build (Release, warnings-as-errors, AnalysisMode=all)"
   dotnet build KyberWeave.sln -c "${CONFIGURATION}"
 
+  # The user's filter, if any, before the class list is added: the prompt-content project takes it
+  # alone, so with the class list it runs whole.
+  prompt_args=("${test_args[@]+"${test_args[@]}"}")
   if [[ ${#test_args[@]} -eq 0 ]]; then
     while IFS= read -r class || [[ -n "${class}" ]]; do
       class="${class%$'\r'}"
@@ -309,8 +329,9 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
   policy_status=0
   dotnet "${TEST_DLL}" "${test_args[@]+"${test_args[@]}"}" | tee "${test_log}" || product_status=$?
   if [[ "${needs_policy}" -eq 1 ]]; then
-    step "repository-policy tests (same filter)"
+    step "repository-policy and prompt-content tests (same filter)"
     dotnet "${POLICY_TEST_DLL}" "${test_args[@]+"${test_args[@]}"}" | tee -a "${test_log}" || policy_status=$?
+    dotnet "${PROMPT_TEST_DLL}" "${prompt_args[@]+"${prompt_args[@]}"}" | tee -a "${test_log}" || policy_status=$?
   else
     # Checked on its own: the product suite's total must not stand in for a scan run that matched nothing.
     step "repository-policy source scans"
@@ -322,10 +343,19 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
       policy_status=1
     fi
   fi
+  step "layer tests (Domain, Application, Hooks, Architecture)"
+  layers_status=0
+  for layer_dll in "${LAYER_TEST_DLLS[@]}"; do
+    dotnet "${layer_dll}" || layers_status=$?
+  done
   if [[ "${product_status}" -ne 0 || "${policy_status}" -ne 0 ]]; then
     printf '\ntests failed: product suite exit %s, repository-policy tests exit %s\n' \
       "${product_status}" "${policy_status}" >&2
     exit $(( product_status != 0 ? product_status : policy_status ))
+  fi
+  if [[ "${layers_status}" -ne 0 ]]; then
+    printf '\nlayer tests failed: exit %s\n' "${layers_status}" >&2
+    exit "${layers_status}"
   fi
   if ! sed $'s/\x1b\\[[0-9;]*m//g' "${test_log}" | grep -Eq 'Total: [1-9][0-9]*,'; then
     printf 'no tests ran; check the --class / --method filter\n' >&2

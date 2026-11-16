@@ -1,5 +1,6 @@
 using System.Text.Json;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Domain.Doctor;
 
 namespace KyberWeave.Cli.Commands.Doctor;
 

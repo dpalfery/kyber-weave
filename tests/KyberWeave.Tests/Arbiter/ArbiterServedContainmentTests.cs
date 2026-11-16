@@ -1,3 +1,8 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Tests.Arbiter;
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Core.Arbiter.Plans;
 using System.Text.Json;
 using KyberWeave.Arbiter;
 using KyberWeave.Arbiter.Hooks;
@@ -45,14 +50,14 @@ public sealed class ArbiterServedContainmentTests : IDisposable
 
     private ArbiterTools Tools()
     {
-        ArbiterHookDecisionEngine engine = new(
+        ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
             providerFactory: _ => new NoProviderAnswers(),
             homeDirectory: () => _home.Path);
-        return new ArbiterTools(new ArbiterServeContext(
+        return ArbiterTestServices.Tools(new ArbiterServeContext(
             _repo.Path,
             engine,
             TextWriter.Null,
-            Composition.LoadHostConfig,
+            ArbiterTestServices.LoadHostConfig,
             _ => true));
     }
 
@@ -115,7 +120,7 @@ public sealed class ArbiterServedContainmentTests : IDisposable
     [Fact]
     public void TheCommentCommandRefusesAFileOutsideTheRoot()
     {
-        ArbiterCommentCommand command = new();
+        ArbiterCommentCommand command = ArbiterTestServices.Command<ArbiterCommentCommand>();
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
             new ArbiterCommentSettings

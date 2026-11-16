@@ -69,8 +69,8 @@ public sealed class SquadCliCommandTests : IDisposable
         Assert.Null(SquadPackSourceLocator.Resolve(childDir));
 
         // Assert CLI, Core and Squad assemblies have no embedded resource for products/kyber-squad corpus
-        Assembly cliAssembly = typeof(SquadPackSourceLocator).Assembly;
-        Assembly coreAssembly = typeof(KyberWeaveConfig).Assembly;
+        Assembly cliAssembly = typeof(KyberWeave.Cli.CliApplication).Assembly;
+        Assembly coreAssembly = typeof(KyberWeaveConfigLoader).Assembly;
         Assembly squadAssembly = typeof(SquadSource).Assembly;
 
         string[] cliResources = cliAssembly.GetManifestResourceNames();
@@ -122,7 +122,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string outDir = Path.Combine(_temp.Path, "pack-out");
 
         FakeProcessExecutor executor = new FakeProcessExecutor();
-        SquadPackCommand command = new SquadPackCommand(executor, workingDirectory: workingDir);
+        SquadPackCommand command = SquadTestCommands.Pack(workingDir);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -148,7 +148,7 @@ public sealed class SquadCliCommandTests : IDisposable
     public void Pack_InvalidFormatToken_ExitsTwo(string format)
     {
         FakeProcessExecutor executor = new FakeProcessExecutor();
-        SquadPackCommand command = new SquadPackCommand(executor, workingDirectory: _temp.Path);
+        SquadPackCommand command = SquadTestCommands.Pack(_temp.Path);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -174,7 +174,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string outDir = Path.Combine(_temp.Path, "pack-output");
 
         FakeProcessExecutor executor = new FakeProcessExecutor();
-        SquadPackCommand command = new SquadPackCommand(executor, workingDirectory: repoPath);
+        SquadPackCommand command = SquadTestCommands.Pack(repoPath);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -203,7 +203,7 @@ public sealed class SquadCliCommandTests : IDisposable
         Directory.CreateDirectory(targetDir);
 
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadStatusCommand command = new SquadStatusCommand(userPaths);
+        SquadStatusCommand command = SquadTestCommands.Status(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -230,7 +230,7 @@ public sealed class SquadCliCommandTests : IDisposable
             ("agents/architect.md", "You are architect.\nPlan first.\n"),
             ("skills/test-dev/SKILL.md", "Use when writing tests.\n"));
 
-        SquadStatusCommand command = new SquadStatusCommand(userPaths);
+        SquadStatusCommand command = SquadTestCommands.Status(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -262,7 +262,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string driftedFilePath = Path.Combine(targetDir, "agents", "architect.md");
         File.WriteAllText(driftedFilePath, "Locally modified content.");
 
-        SquadStatusCommand command = new SquadStatusCommand(userPaths);
+        SquadStatusCommand command = SquadTestCommands.Status(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -293,7 +293,7 @@ public sealed class SquadCliCommandTests : IDisposable
         // Delete one file
         File.Delete(Path.Combine(targetDir, "skills", "test-dev", "SKILL.md"));
 
-        SquadStatusCommand command = new SquadStatusCommand(userPaths);
+        SquadStatusCommand command = SquadTestCommands.Status(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -324,7 +324,7 @@ public sealed class SquadCliCommandTests : IDisposable
 
         // A global receipt's paths resolve beneath each target's own global root, so the
         // seeded deployment is only verifiable through a resolver that maps codex there.
-        SquadStatusCommand command = new SquadStatusCommand(
+        SquadStatusCommand command = SquadTestCommands.Status(
             userPaths,
             stateStore,
             new FakeGlobalRootResolver(SquadTarget.Codex, globalRoot));
@@ -369,7 +369,7 @@ public sealed class SquadCliCommandTests : IDisposable
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
 
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadDoctorCommand command = new SquadDoctorCommand(executor, userPaths, workingDirectory: installedDir);
+        SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: installedDir);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -393,7 +393,7 @@ public sealed class SquadCliCommandTests : IDisposable
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
 
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadDoctorCommand command = new SquadDoctorCommand(executor, userPaths, workingDirectory: workingDir);
+        SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: workingDir);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -448,7 +448,7 @@ public sealed class SquadCliCommandTests : IDisposable
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
         SquadGlobalRoots globalRoots = new(_ => null, Path.Combine(_temp.Path, "doctor-devin-home"), isWindows: false);
-        SquadDoctorCommand command = new SquadDoctorCommand(
+        SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
             userPaths,
             workingDirectory: workingDir,
@@ -481,7 +481,7 @@ public sealed class SquadCliCommandTests : IDisposable
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadDoctorCommand command = new SquadDoctorCommand(executor, userPaths, workingDirectory: workingDir);
+        SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: workingDir);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -507,7 +507,7 @@ public sealed class SquadCliCommandTests : IDisposable
             .WithFailure("kyber-weave-mcp", "The 'kyber-weave-mcp' executable is not available on PATH.");
 
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadDoctorCommand command = new SquadDoctorCommand(executor, userPaths, workingDirectory: workingDir);
+        SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: workingDir);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -536,7 +536,7 @@ public sealed class SquadCliCommandTests : IDisposable
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
 
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadDoctorCommand command = new SquadDoctorCommand(executor, userPaths, workingDirectory: repoPath);
+        SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: repoPath);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -568,7 +568,7 @@ public sealed class SquadCliCommandTests : IDisposable
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
-        SquadDoctorCommand command = new SquadDoctorCommand(
+        SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
             userPaths,
             workingDirectory: KyberWeaveTestPaths.ToolRoot,
@@ -607,7 +607,7 @@ public sealed class SquadCliCommandTests : IDisposable
                 ? "relative-dir"
                 : null,
             tempHome);
-        SquadDoctorCommand command = new SquadDoctorCommand(
+        SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
             userPaths,
             workingDirectory: KyberWeaveTestPaths.ToolRoot,
@@ -645,7 +645,7 @@ public sealed class SquadCliCommandTests : IDisposable
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "invalid-source-user"));
-        SquadDoctorCommand command = new SquadDoctorCommand(
+        SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
             userPaths,
             workingDirectory: repoPath,
@@ -675,9 +675,9 @@ public sealed class SquadCliCommandTests : IDisposable
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
         SquadStateStore stateStore = new(userPaths);
         using CorpusSquadReleaseSource releaseSource = new();
-        SquadLifecycleService service = new(
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
             releaseSource,
-            SquadCommandComposition.ResolveRenderer(),
+            SquadHostDefaults.ResolveRenderer(),
             stateStore,
             globalRoots: globalRoots);
 
@@ -707,7 +707,7 @@ public sealed class SquadCliCommandTests : IDisposable
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n")
             .WithMatchingArbiterProbe();
-        SquadDoctorCommand command = new(
+        SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
             userPaths,
             workingDirectory: KyberWeaveTestPaths.ToolRoot,
@@ -767,7 +767,7 @@ public sealed class SquadCliCommandTests : IDisposable
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-        SquadDoctorCommand command = new(
+        SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
             userPaths,
             workingDirectory: KyberWeaveTestPaths.ToolRoot,
@@ -807,7 +807,7 @@ public sealed class SquadCliCommandTests : IDisposable
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-        SquadDoctorCommand command = new(
+        SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
             userPaths,
             workingDirectory: KyberWeaveTestPaths.ToolRoot,
@@ -843,7 +843,7 @@ public sealed class SquadCliCommandTests : IDisposable
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-        SquadDoctorCommand command = new(
+        SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
             userPaths,
             workingDirectory: KyberWeaveTestPaths.ToolRoot,
@@ -878,9 +878,9 @@ public sealed class SquadCliCommandTests : IDisposable
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "install-global-user"));
         SquadStateStore stateStore = new(userPaths);
         using CorpusSquadReleaseSource releaseSource = new();
-        SquadLifecycleService service = new(
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
             releaseSource,
-            SquadCommandComposition.ResolveRenderer(),
+            SquadHostDefaults.ResolveRenderer(),
             stateStore,
             globalRoots: globalRoots);
 
@@ -906,7 +906,7 @@ public sealed class SquadCliCommandTests : IDisposable
         Directory.CreateDirectory(targetDir);
 
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadUninstallCommand command = new SquadUninstallCommand(userPaths);
+        SquadUninstallCommand command = SquadTestCommands.Uninstall(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -943,7 +943,7 @@ public sealed class SquadCliCommandTests : IDisposable
         Assert.True(File.Exists(receiptPath));
         Assert.True(File.Exists(lockPath));
 
-        SquadUninstallCommand command = new SquadUninstallCommand(userPaths);
+        SquadUninstallCommand command = SquadTestCommands.Uninstall(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -977,7 +977,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string deployedFile1 = Path.Combine(targetDir, "agents", "architect.md");
         string receiptPath = Path.Combine(HomeProjectStateDirectory(userPaths, targetDir), "squad.receipt.json");
 
-        SquadUninstallCommand command = new SquadUninstallCommand(userPaths);
+        SquadUninstallCommand command = SquadTestCommands.Uninstall(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -1006,7 +1006,7 @@ public sealed class SquadCliCommandTests : IDisposable
         Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
         File.WriteAllText(receiptPath, "invalid json {[[");
 
-        SquadUninstallCommand command = new SquadUninstallCommand(userPaths, stateStore);
+        SquadUninstallCommand command = SquadTestCommands.Uninstall(userPaths, stateStore);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -1026,7 +1026,7 @@ public sealed class SquadCliCommandTests : IDisposable
     {
         (string targetDir, FakeUserPaths userPaths, string codexFile, string cursorFile, string receiptPath) =
             SeedCodexAndCursorProject("uninstall-one-harness");
-        SquadUninstallCommand command = new SquadUninstallCommand(userPaths);
+        SquadUninstallCommand command = SquadTestCommands.Uninstall(userPaths);
 
         CommandExecution first = Capture(() => command.Execute(
             null!,
@@ -1054,7 +1054,7 @@ public sealed class SquadCliCommandTests : IDisposable
         (string targetDir, FakeUserPaths userPaths, string codexFile, string cursorFile, string receiptPath) =
             SeedCodexAndCursorProject("uninstall-one-harness-dry-run");
 
-        CommandExecution execution = Capture(() => new SquadUninstallCommand(userPaths).Execute(
+        CommandExecution execution = Capture(() => SquadTestCommands.Uninstall(userPaths).Execute(
             null!,
             new SquadUninstallSettings { Harness = "cursor", Project = true, PathOption = targetDir, DryRun = true }));
 
@@ -1069,7 +1069,7 @@ public sealed class SquadCliCommandTests : IDisposable
     {
         (string targetDir, FakeUserPaths userPaths, string codexFile, string cursorFile, string receiptPath) =
             SeedCodexAndCursorProject("uninstall-invalid-harness-input");
-        SquadUninstallCommand command = new SquadUninstallCommand(userPaths);
+        SquadUninstallCommand command = SquadTestCommands.Uninstall(userPaths);
 
         (SquadUninstallSettings Settings, string ExpectedMessage)[] invalid =
         [
@@ -1113,7 +1113,7 @@ public sealed class SquadCliCommandTests : IDisposable
             "a".PadRight(64, '0'),
             "b".PadRight(64, '0'),
             new SquadApmIdentity("0.28.0", "c".PadRight(40, '0'), "d".PadRight(64, '0')));
-        new SquadTransaction(stateStore).Execute(SquadDeploymentPlan.CreateInstall(
+        new SquadTransaction(stateStore).Execute(SquadDeploymentPlanner.CreateInstall(
             home,
             SquadDeploymentScope.Global,
             squadLock,
@@ -1129,7 +1129,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string cursorFile = Path.Combine(roots.ResolveGlobalRoot(SquadTarget.Cursor), "agents", "reviewer.md");
         Assert.True(File.Exists(codexFile));
         Assert.True(File.Exists(cursorFile));
-        SquadUninstallCommand command = new(userPaths, stateStore, null, false, null, roots);
+        SquadUninstallCommand command = SquadTestCommands.Uninstall(userPaths, stateStore, null, false, null, roots);
 
         CommandExecution first = Capture(() => command.Execute(
             null!,
@@ -1158,7 +1158,7 @@ public sealed class SquadCliCommandTests : IDisposable
         (string targetDir, FakeUserPaths userPaths, string codexFile, string cursorFile, string receiptPath) =
             SeedCodexAndCursorProject("uninstall-directory-as-harness");
 
-        CommandExecution execution = Capture(() => new SquadUninstallCommand(userPaths).Execute(
+        CommandExecution execution = Capture(() => SquadTestCommands.Uninstall(userPaths).Execute(
             null!,
             new SquadUninstallSettings { Harness = directory, PathOption = targetDir }));
 
@@ -1177,7 +1177,7 @@ public sealed class SquadCliCommandTests : IDisposable
     {
         (string targetDir, FakeUserPaths userPaths, string codexFile, string cursorFile, string receiptPath) =
             SeedCodexAndCursorProject("uninstall-blank-path");
-        SquadUninstallCommand command = new(userPaths);
+        SquadUninstallCommand command = SquadTestCommands.Uninstall(userPaths);
 
         foreach (SquadUninstallSettings settings in new[]
                  {
@@ -1199,7 +1199,7 @@ public sealed class SquadCliCommandTests : IDisposable
     [Fact]
     public void Uninstall_GlobalAndProjectWithoutAHarness_ExitsTwo()
     {
-        CommandExecution execution = Capture(() => new SquadUninstallCommand(
+        CommandExecution execution = Capture(() => SquadTestCommands.Uninstall(
             new FakeUserPaths(Path.Combine(_temp.Path, "uninstall-global-and-project"))).Execute(
             null!,
             new SquadUninstallSettings { Global = true, Project = true }));
@@ -1215,7 +1215,7 @@ public sealed class SquadCliCommandTests : IDisposable
             SeedCodexAndCursorProject("uninstall-corrupt-receipt");
         File.WriteAllText(receiptPath, "{ not json", Encoding.UTF8);
 
-        CommandExecution execution = Capture(() => new SquadUninstallCommand(userPaths).Execute(
+        CommandExecution execution = Capture(() => SquadTestCommands.Uninstall(userPaths).Execute(
             null!,
             new SquadUninstallSettings { Harness = "cursor", Project = true, PathOption = targetDir }));
 
@@ -1267,7 +1267,7 @@ public sealed class SquadCliCommandTests : IDisposable
         Directory.CreateDirectory(targetDir);
 
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadInstallCommand command = new SquadInstallCommand(userPaths);
+        SquadInstallCommand command = SquadTestCommands.Install(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -1297,7 +1297,7 @@ public sealed class SquadCliCommandTests : IDisposable
         FakeUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
         SquadStateStore stateStore = new(userPaths);
 
-        SquadInstallCommand command = new(
+        SquadInstallCommand command = SquadTestCommands.Install(
             userPaths: userPaths,
             stateStore: stateStore,
             releaseSource: releaseSource,
@@ -1333,7 +1333,7 @@ public sealed class SquadCliCommandTests : IDisposable
         FakeUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
         SquadStateStore stateStore = new(userPaths);
 
-        SquadInstallCommand command = new(
+        SquadInstallCommand command = SquadTestCommands.Install(
             userPaths: userPaths,
             stateStore: stateStore,
             releaseSource: releaseSource,
@@ -1364,7 +1364,7 @@ public sealed class SquadCliCommandTests : IDisposable
         Directory.CreateDirectory(targetDir);
 
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadInstallCommand command = new SquadInstallCommand(userPaths);
+        SquadInstallCommand command = SquadTestCommands.Install(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -1387,7 +1387,7 @@ public sealed class SquadCliCommandTests : IDisposable
         Directory.CreateDirectory(targetDir);
 
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadInstallCommand command = new SquadInstallCommand(userPaths);
+        SquadInstallCommand command = SquadTestCommands.Install(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -1409,7 +1409,7 @@ public sealed class SquadCliCommandTests : IDisposable
         Directory.CreateDirectory(targetDir);
 
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadInstallCommand command = new SquadInstallCommand(userPaths);
+        SquadInstallCommand command = SquadTestCommands.Install(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -1435,7 +1435,7 @@ public sealed class SquadCliCommandTests : IDisposable
         SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
             ("agents/architect.md", "You are architect.\nPlan first.\n"));
 
-        SquadUpdateCommand command = new SquadUpdateCommand(userPaths);
+        SquadUpdateCommand command = SquadTestCommands.Update(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -1465,7 +1465,7 @@ public sealed class SquadCliCommandTests : IDisposable
         SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
             (".codex/agents/architect.toml", "name = \"architect\"\n"));
 
-        SquadUpdateCommand command = new(
+        SquadUpdateCommand command = SquadTestCommands.Update(
             userPaths: userPaths,
             stateStore: stateStore,
             releaseSource: releaseSource,
@@ -1507,7 +1507,7 @@ public sealed class SquadCliCommandTests : IDisposable
 
         // Confirmation is a separate gate from target selection. Pin it closed so a
         // pty cannot turn this regression into a hung prompt.
-        SquadUpdateCommand command = new(
+        SquadUpdateCommand command = SquadTestCommands.Update(
             userPaths: userPaths,
             stateStore: stateStore,
             releaseSource: releaseSource,
@@ -1566,7 +1566,7 @@ public sealed class SquadCliCommandTests : IDisposable
         byte[] receiptBefore = File.ReadAllBytes(receiptPath);
         int desiredFileCount = RenderedDeploymentFileCount(SquadTarget.Codex, SquadTarget.Claude);
 
-        SquadUpdateCommand command = new(
+        SquadUpdateCommand command = SquadTestCommands.Update(
             userPaths: userPaths,
             stateStore: stateStore,
             releaseSource: releaseSource,
@@ -1600,7 +1600,7 @@ public sealed class SquadCliCommandTests : IDisposable
         Directory.CreateDirectory(targetDir);
 
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadUpdateCommand command = new SquadUpdateCommand(userPaths);
+        SquadUpdateCommand command = SquadTestCommands.Update(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -1635,7 +1635,7 @@ public sealed class SquadCliCommandTests : IDisposable
             Files: []);
         File.WriteAllText(receiptPath, stateStore.SerializeReceipt(emptyReceipt), Encoding.UTF8);
 
-        SquadUpdateCommand command = new SquadUpdateCommand(userPaths, stateStore);
+        SquadUpdateCommand command = SquadTestCommands.Update(userPaths, stateStore);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -1655,7 +1655,7 @@ public sealed class SquadCliCommandTests : IDisposable
         Directory.CreateDirectory(targetDir);
 
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadUpdateCommand command = new SquadUpdateCommand(userPaths);
+        SquadUpdateCommand command = SquadTestCommands.Update(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -1672,12 +1672,12 @@ public sealed class SquadCliCommandTests : IDisposable
     [Fact]
     public void SquadCommands_DefaultConstructors_InstantiateSuccessfully()
     {
-        SquadInstallCommand install = new SquadInstallCommand();
-        SquadUpdateCommand update = new SquadUpdateCommand();
-        SquadUninstallCommand uninstall = new SquadUninstallCommand();
-        SquadStatusCommand status = new SquadStatusCommand();
-        SquadDoctorCommand doctor = new SquadDoctorCommand();
-        SquadPackCommand pack = new SquadPackCommand();
+        SquadInstallCommand install = SquadTestCommands.Install();
+        SquadUpdateCommand update = SquadTestCommands.Update();
+        SquadUninstallCommand uninstall = SquadTestCommands.Uninstall();
+        SquadStatusCommand status = SquadTestCommands.Status();
+        SquadDoctorCommand doctor = SquadTestCommands.Doctor();
+        SquadPackCommand pack = SquadTestCommands.Pack();
 
         Assert.NotNull(install);
         Assert.NotNull(update);
@@ -1694,13 +1694,13 @@ public sealed class SquadCliCommandTests : IDisposable
     [Fact]
     public void SquadCommandComposition_ResolveStateStore_ReturnsConfiguredOrSharedPaths()
     {
-        SquadStateStore defaultStore = SquadCommandComposition.ResolveStateStore();
+        SquadStateStore defaultStore = SquadHostDefaults.ResolveStateStore();
         Assert.NotNull(defaultStore);
 
         string existingDir = _temp.Path;
         string appDataDir = Path.Combine(_temp.Path, "custom-appdata");
         FakeUserPaths fakePaths = new FakeUserPaths(appDataDir);
-        SquadStateStore customStore = SquadCommandComposition.ResolveStateStore(fakePaths);
+        SquadStateStore customStore = SquadHostDefaults.ResolveStateStore(fakePaths);
         Assert.NotNull(customStore);
         Assert.StartsWith(
             appDataDir,
@@ -1722,15 +1722,15 @@ public sealed class SquadCliCommandTests : IDisposable
     [Fact]
     public void SquadCommandComposition_ResolveTransaction_ReturnsTransactionWithResolvedState()
     {
-        SquadTransaction txDefault = SquadCommandComposition.ResolveTransaction();
+        SquadTransaction txDefault = SquadHostDefaults.ResolveTransaction();
         Assert.NotNull(txDefault);
 
         FakeUserPaths fakePaths = new FakeUserPaths("/custom/appdata");
         SquadStateStore store = new SquadStateStore(fakePaths);
-        SquadTransaction txWithStore = SquadCommandComposition.ResolveTransaction(store);
+        SquadTransaction txWithStore = SquadHostDefaults.ResolveTransaction(store);
         Assert.NotNull(txWithStore);
 
-        SquadTransaction txWithPaths = SquadCommandComposition.ResolveTransaction(null, fakePaths);
+        SquadTransaction txWithPaths = SquadHostDefaults.ResolveTransaction(null, fakePaths);
         Assert.NotNull(txWithPaths);
     }
 
@@ -1778,7 +1778,7 @@ public sealed class SquadCliCommandTests : IDisposable
             RepositoryRoot(),
             "src",
             "KyberWeave.Cli",
-            "Program.cs"));
+            "CliApplication.cs"));
 
         Assert.Contains("AddBranch(\"squad\"", program, StringComparison.Ordinal);
         Assert.Contains("AddCommand<SquadInstallCommand>(\"install\")", program, StringComparison.Ordinal);
@@ -1827,7 +1827,7 @@ public sealed class SquadCliCommandTests : IDisposable
             (".codex/agents/conductor.toml", "conductor content"));
 
         SquadGlobalRoots globalRoots = new(_ => null, Path.Combine(fixture.Path, "fake-home"));
-        SquadStatusCommand command = new(userPaths: userPaths, globalRoots: globalRoots);
+        SquadStatusCommand command = SquadTestCommands.Status(userPaths: userPaths, globalRoots: globalRoots);
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new SquadStatusSettings
@@ -1866,7 +1866,7 @@ public sealed class SquadCliCommandTests : IDisposable
             Encoding.UTF8);
 
         SquadGlobalRoots globalRoots = new(_ => null, Path.Combine(fixture.Path, "fake-home"));
-        SquadStatusCommand command = new(userPaths: userPaths, globalRoots: globalRoots);
+        SquadStatusCommand command = SquadTestCommands.Status(userPaths: userPaths, globalRoots: globalRoots);
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new SquadStatusSettings
@@ -1911,8 +1911,8 @@ public sealed class SquadCliCommandTests : IDisposable
         // still fails if this branch ever does consult a resolver.
         SquadGlobalRoots globalRoots = new(_ => null, Path.Combine(fixture.Path, "fake-home"));
         using CorpusSquadReleaseSource releaseSource = new();
-        SquadLifecycleService lifecycleService = new(releaseSource, SquadCommandComposition.ResolveRenderer(), stateStore, globalRoots: globalRoots);
-        SquadUninstallCommand command = new(userPaths: userPaths, lifecycleService: lifecycleService);
+        SquadLifecycleService lifecycleService = SquadHostDefaults.CreateLifecycleService(releaseSource, SquadHostDefaults.ResolveRenderer(), stateStore, globalRoots: globalRoots);
+        SquadUninstallCommand command = SquadTestCommands.Uninstall(userPaths: userPaths, lifecycleService: lifecycleService);
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new SquadUninstallSettings
@@ -1967,7 +1967,7 @@ public sealed class SquadCliCommandTests : IDisposable
             new SquadRenderRequest(
                 SourceDirectory: ".",
                 Targets: targets,
-                Scope: SquadDeploymentScope.Project)).GetAwaiter().GetResult();
+                Scope: SquadDeploymentScope.Project).Prepared()).GetAwaiter().GetResult();
         return result.Files.Count;
     }
 
@@ -1993,7 +1993,7 @@ public sealed class SquadCliCommandTests : IDisposable
             ".kyber-weave",
             "squad",
             "projects",
-            SquadPhysicalRootIdentity.Resolve(projectRoot).Key);
+            SquadPhysicalRootIdentity.Resolve(projectRoot, SquadFileSystemPathSemantics.Instance).Key);
 
     private static void SeedDeployment(
         string targetRoot,

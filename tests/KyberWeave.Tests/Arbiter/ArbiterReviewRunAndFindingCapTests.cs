@@ -1,3 +1,7 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Arbiter.Plans;
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
@@ -107,6 +111,9 @@ public sealed class ArbiterReviewRunAndFindingCapTests : IDisposable
             new DecisionLog(arbiterDirectory),
             new PassThroughGitFacts(),
             new PassThroughPlanReader(),
+            new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
+            new GateReportFacts(),
+            new FileArbiterStateFactory(),
             new FixedClock(Now),
             (_, _) => []);
 

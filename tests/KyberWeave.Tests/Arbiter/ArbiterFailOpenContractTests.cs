@@ -1,3 +1,7 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Arbiter.Plans;
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
@@ -34,7 +38,7 @@ public sealed class ArbiterFailOpenContractTests : IDisposable
     private sealed class RealPlanReader(string root) : IArbiterPlanReader
     {
         public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification) =>
-            Core.Arbiter.Plans.PlanFacts.Enrich(facts, classification, root);
+            new KyberWeave.Core.Arbiter.Plans.PlanFacts(new PlanPathResolver()).Enrich(facts, classification, root);
     }
 
     /// <summary>Answers named rules with the given confidence and leaves every other question unevaluated.</summary>
@@ -69,6 +73,9 @@ public sealed class ArbiterFailOpenContractTests : IDisposable
         new DecisionLog(ArbiterEvaluatorFixtures.DirectoryFor(_root)),
         git ?? new ChangedPaths("src/a.cs"),
         new RealPlanReader(_root),
+        new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
+            new GateReportFacts(),
+            new FileArbiterStateFactory(),
         TimeProvider.System);
 
     private static KyberWeaveConfig ShippedConfig() =>
@@ -223,7 +230,7 @@ public sealed class ArbiterFailOpenContractTests : IDisposable
             Core.Review.ReviewJson.Write(new Core.Review.GateReport(
                 Core.Review.GateReport.CurrentSchema, [new Core.Review.GateResult("build", true, 0, "pass")])));
 
-        Assert.True(GateReportFacts.Agrees($"TASK_GATE: PASS report={report}", _root));
+        Assert.True(new GateReportFacts().Agrees($"TASK_GATE: PASS report={report}", _root));
     }
 
     [Fact]

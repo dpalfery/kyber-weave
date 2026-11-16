@@ -1,4 +1,6 @@
-using KyberWeave.Core.Utilities.StatusLine;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Domain.StatusLine;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -15,17 +17,19 @@ namespace KyberWeave.Cli.Commands.Utilities;
 /// </remarks>
 public sealed class UtilitiesStatusLineRemoveCommand : Command<UtilitiesStatusLineSettings>
 {
-    private readonly StatusLineTargetRoots? _roots;
+    private readonly IProcessEnvironment _environment;
+    private readonly IStatusLineDeploymentService _plans;
 
-    /// <summary>Creates a remove command using the default per-user roots.</summary>
-    public UtilitiesStatusLineRemoveCommand()
+    /// <summary>Creates the command over the process environment its per-user roots are read from.</summary>
+    /// <param name="environment">The process state the roots are read from.</param>
+    /// <param name="plans">Plans and applies the removal.</param>
+    public UtilitiesStatusLineRemoveCommand(IProcessEnvironment environment, IStatusLineDeploymentService plans)
     {
-    }
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(plans);
 
-    /// <summary>Creates a remove command using injectable roots.</summary>
-    internal UtilitiesStatusLineRemoveCommand(StatusLineTargetRoots? roots = null)
-    {
-        _roots = roots;
+        _environment = environment;
+        _plans = plans;
     }
 
     /// <inheritdoc />
@@ -39,7 +43,7 @@ public sealed class UtilitiesStatusLineRemoveCommand : Command<UtilitiesStatusLi
         StatusLineTargetRoots roots;
         try
         {
-            roots = _roots ?? UtilitiesStatusLineCommandComposition.ResolveRoots();
+            roots = UtilitiesStatusLineCommandComposition.ResolveRoots(_environment);
             foreach (StatusLineTarget target in UtilitiesStatusLineTargetCatalog.All)
             {
                 _ = roots.ResolveStagingRoot(target);
@@ -63,9 +67,9 @@ public sealed class UtilitiesStatusLineRemoveCommand : Command<UtilitiesStatusLi
             StatusLineDeploymentPlan plan;
             try
             {
-                if (StatusLineDeploymentPlan.ReadReceipt(target, roots) is null) continue;
+                if (_plans.ReadReceipt(target, roots) is null) continue;
 
-                plan = StatusLineDeploymentPlan.CreateRemove(target, roots);
+                plan = _plans.CreateRemove(target, roots);
             }
             catch (Exception ex) when (
                 ex is StatusLineDeploymentConflictException or InvalidDataException or
@@ -80,7 +84,7 @@ public sealed class UtilitiesStatusLineRemoveCommand : Command<UtilitiesStatusLi
             anyReceipt = true;
             try
             {
-                plan.Apply();
+                _plans.Apply(plan);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {

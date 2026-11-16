@@ -89,8 +89,8 @@ public sealed class CopilotHookAdapterTests
         ScriptedEngine engine,
         Func<string, KyberWeaveConfig>? loader = null)
     {
-        HookCommand command = new(
-            HarnessAdapterRegistry.CreateDefault(engine),
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
             loader ?? (_ => EnabledConfig()),
             () => "decision-test-1");
         using StringWriter stdout = new();
@@ -195,8 +195,8 @@ public sealed class CopilotHookAdapterTests
     {
         int loads = 0;
         ScriptedEngine engine = new();
-        HookCommand command = new(
-            HarnessAdapterRegistry.CreateDefault(engine),
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
             (string repoRoot) => { loads++; return EnabledConfig(); },
             () => "decision-test-1");
         using StringWriter stdout = new();
@@ -302,8 +302,8 @@ public sealed class CopilotHookAdapterTests
     {
         int loads = 0;
         ScriptedEngine engine = new();
-        HookCommand command = new(
-            HarnessAdapterRegistry.CreateDefault(engine),
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
             (string repoRoot) => { loads++; return EnabledConfig(); },
             () => "decision-test-1");
         using StringWriter stdout = new();
@@ -325,8 +325,8 @@ public sealed class CopilotHookAdapterTests
         string stdin = CliFixture("pre-task-object.json").Replace(
             "\"toolName\": \"task\"", "\"toolName\": \"read\"", StringComparison.Ordinal);
         ScriptedEngine engine = new();
-        HookCommand command = new(
-            HarnessAdapterRegistry.CreateDefault(engine),
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
             (string repoRoot) => { loads++; return EnabledConfig(); },
             () => "decision-test-1");
         using StringWriter stdout = new();
@@ -470,7 +470,7 @@ public sealed class CopilotHookAdapterTests
     public void Adapters_AreRegisteredForBothTokens()
     {
         ScriptedEngine engine = new();
-        HarnessAdapterRegistry registry = HarnessAdapterRegistry.CreateDefault(engine);
+        HarnessAdapterRegistry registry = ArbiterTestServices.Registry(engine);
 
         Assert.True(registry.TryGet(CopilotHookAdapter.VsCodeToken, out IHarnessHookAdapter? vscode));
         Assert.True(registry.TryGet(CopilotHookAdapter.CliToken, out IHarnessHookAdapter? cli));

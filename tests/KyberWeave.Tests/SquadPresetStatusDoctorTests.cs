@@ -64,7 +64,7 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
         SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore, presets,
             ("agents/architect.md", "You are architect.\nPlan first.\n"));
 
-        SquadStatusCommand command = new(userPaths, stateStore);
+        SquadStatusCommand command = SquadTestCommands.Status(userPaths, stateStore);
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
@@ -94,7 +94,7 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
         SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore, null,
             ("agents/architect.md", "You are architect.\nPlan first.\n"));
 
-        SquadStatusCommand command = new(userPaths, stateStore);
+        SquadStatusCommand command = SquadTestCommands.Status(userPaths, stateStore);
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
@@ -135,7 +135,7 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
         // Mutate preset on disk so digest no longer matches lock
         WritePreset(userPaths, "zai", ModifiedPresetYaml);
 
-        SquadStatusCommand command = new(userPaths, stateStore);
+        SquadStatusCommand command = SquadTestCommands.Status(userPaths, stateStore);
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
@@ -170,7 +170,7 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
         SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore, presets,
             ("agents/architect.md", "You are architect.\nPlan first.\n"));
 
-        SquadStatusCommand command = new(userPaths, stateStore);
+        SquadStatusCommand command = SquadTestCommands.Status(userPaths, stateStore);
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
@@ -212,7 +212,7 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
         DoctorPresetTestRenderer renderer = new();
 
-        SquadDoctorCommand command = new(
+        SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
             userPaths,
             KyberWeaveTestPaths.ToolRoot,
@@ -271,7 +271,7 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
         DoctorPresetTestRenderer renderer = new();
 
-        SquadDoctorCommand command = new(
+        SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
             userPaths,
             KyberWeaveTestPaths.ToolRoot,
@@ -307,7 +307,7 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
         string lockPath = stateStore.ResolveLockPath(targetDir, SquadDeploymentScope.Project);
         File.WriteAllText(lockPath, "{ this is corrupt lock yaml : [ unclosed", Encoding.UTF8);
 
-        SquadStatusCommand command = new(userPaths, stateStore);
+        SquadStatusCommand command = SquadTestCommands.Status(userPaths, stateStore);
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,

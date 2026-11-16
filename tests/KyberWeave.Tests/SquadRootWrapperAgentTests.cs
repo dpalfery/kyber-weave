@@ -208,7 +208,7 @@ public sealed class SquadRootWrapperAgentTests
             renderer.RenderAsync(new SquadRenderRequest(
                 fixture.ProductRoot,
                 [SquadTarget.Claude],
-                SquadDeploymentScope.Project)));
+                SquadDeploymentScope.Project).Prepared()));
 
         // Assert the collision-specific wording, not just the agent name: any
         // validation error that happens to mention "conductor" would satisfy a
@@ -272,7 +272,7 @@ public sealed class SquadRootWrapperAgentTests
 
     private static SquadRendererRegistry AllRenderers()
     {
-        return new SquadRendererRegistry(
+        return SquadTestRegistry.Create(
         [
             new CopilotRenderer(),
             new CursorRenderer(),

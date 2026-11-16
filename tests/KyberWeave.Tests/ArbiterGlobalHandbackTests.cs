@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fixtures;
@@ -37,7 +38,7 @@ public sealed class ArbiterGlobalHandbackTests : IDisposable
             Targets: [SquadTarget.Claude],
             Scope: SquadDeploymentScope.Global,
             GlobalRoots: globalRoots,
-            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)));
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)).Prepared());
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         SquadRenderedBlock block = Assert.Single(result.Blocks!, b => b.Target == "claude");

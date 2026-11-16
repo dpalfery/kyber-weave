@@ -1,9 +1,11 @@
 using System.Collections.ObjectModel;
 using System.Text.Json;
-using KyberWeave.Core.CodeGraph;
+
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Docs.Export;
 using KyberWeave.Core.Docs.Graph;
 using KyberWeave.Core.Docs.Model;
+using KyberWeave.Domain.CodeGraph;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -25,7 +27,7 @@ public sealed class DocGraphProjectionTests
             .WithRoute("GET /billing", Node("route:billing", "GET /billing", "route"));
         DocumentSet set = FullRelationshipSet();
 
-        DocGraphProjection projection = DocGraphProjection.Build(set, resolver);
+        DocGraphProjection projection = DocGraphProjectionBuilder.Build(set, resolver);
 
         Assert.Contains(projection.Nodes, n => n is { Id: "doc:architecture/billing", Label: "Document" });
         Assert.Contains(projection.Nodes, n => n is { Id: "component:Billing", Label: "Component" });
@@ -58,7 +60,7 @@ public sealed class DocGraphProjectionTests
         ];
         StubContributor contributor = new(nodes, edges);
 
-        DocGraphProjection projection = DocGraphProjection.Build(
+        DocGraphProjection projection = DocGraphProjectionBuilder.Build(
             new DocumentSet { Documents = [] },
             FakeCodeGraphResolver.WithSymbols(),
             contributors: [contributor]);
@@ -81,7 +83,7 @@ public sealed class DocGraphProjectionTests
             ]
         };
 
-        DocGraphProjection projection = DocGraphProjection.Build(set, FakeCodeGraphResolver.WithSymbols());
+        DocGraphProjection projection = DocGraphProjectionBuilder.Build(set, FakeCodeGraphResolver.WithSymbols());
 
         Assert.True(projection.AreDocumentsRelated("doc:architecture/parent", "doc:reference/child"));
     }
@@ -98,7 +100,7 @@ public sealed class DocGraphProjectionTests
             ]
         };
 
-        DocGraphProjection projection = DocGraphProjection.Build(set, FakeCodeGraphResolver.WithSymbols());
+        DocGraphProjection projection = DocGraphProjectionBuilder.Build(set, FakeCodeGraphResolver.WithSymbols());
 
         Assert.Contains(projection.Nodes, node => node is { Id: "doc:docs/left.md", Label: "Document" });
         Assert.Contains(projection.Nodes, node => node is { Id: "doc:docs/right.md", Label: "Document" });
@@ -115,7 +117,7 @@ public sealed class DocGraphProjectionTests
             .WithEdge(new CodeGraphEdge("code:left", "code:right", kind));
         DocumentSet set = TwoCodeReferenceDocuments();
 
-        DocGraphProjection projection = DocGraphProjection.Build(set, resolver);
+        DocGraphProjection projection = DocGraphProjectionBuilder.Build(set, resolver);
 
         Assert.True(projection.AreDocumentsRelated("doc:left", "doc:right"));
         Assert.Equal(1, resolver.NeighborhoodRequestCount);
@@ -130,7 +132,7 @@ public sealed class DocGraphProjectionTests
             .WithSymbol("Right", Node("code:right", "Right"))
             .WithEdge(new CodeGraphEdge("code:left", "code:right", "imports"));
 
-        DocGraphProjection projection = DocGraphProjection.Build(TwoCodeReferenceDocuments(), resolver);
+        DocGraphProjection projection = DocGraphProjectionBuilder.Build(TwoCodeReferenceDocuments(), resolver);
 
         Assert.False(projection.AreDocumentsRelated("doc:left", "doc:right"));
     }
@@ -144,7 +146,7 @@ public sealed class DocGraphProjectionTests
             .WithEdge(new CodeGraphEdge("code:hub", "code:right", "calls"))
             .WithEdge(new CodeGraphEdge("code:hub", "code:third", "calls"));
 
-        DocGraphProjection projection = DocGraphProjection.Build(
+        DocGraphProjection projection = DocGraphProjectionBuilder.Build(
             TwoCodeReferenceDocuments(), resolver, 1);
 
         Assert.False(projection.AreDocumentsRelated("doc:left", "doc:right"));
@@ -163,7 +165,7 @@ public sealed class DocGraphProjectionTests
             ]
         };
 
-        DocGraphProjection projection = DocGraphProjection.Build(set, FakeCodeGraphResolver.WithSymbols());
+        DocGraphProjection projection = DocGraphProjectionBuilder.Build(set, FakeCodeGraphResolver.WithSymbols());
 
         Assert.True(projection.AreDocumentsRelated("doc:first", "doc:second"));
     }
@@ -180,7 +182,7 @@ public sealed class DocGraphProjectionTests
             ]
         };
 
-        DocGraphProjection projection = DocGraphProjection.Build(set, FakeCodeGraphResolver.WithSymbols());
+        DocGraphProjection projection = DocGraphProjectionBuilder.Build(set, FakeCodeGraphResolver.WithSymbols());
 
         Assert.False(projection.AreDocumentsRelated("doc:first", "doc:second"));
     }

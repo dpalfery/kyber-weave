@@ -1,17 +1,18 @@
-using KyberWeave.Core.CodeGraph;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Export;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
-using Spectre.Console;
 using Spectre.Console.Cli;
+using Spectre.Console;
 
 namespace KyberWeave.Cli.Commands.Docs;
 
 /// <summary>Emits the documentation graph as newline-delimited JSON.</summary>
-public sealed class DocsExportGraphCommand : Command<DocsExportGraphSettings>
+public sealed class DocsExportGraphCommand(IManagedGlossaryFactory glossaries) : Command<DocsExportGraphSettings>
 {
     public override int Execute(CommandContext context, DocsExportGraphSettings settings, CancellationToken cancellationToken)
     {
@@ -40,10 +41,7 @@ public sealed class DocsExportGraphCommand : Command<DocsExportGraphSettings>
         ManagedGlossaryGraphContributor glossaryContributor;
         try
         {
-            ManagedGlossaryLoadResult glossary = new ManagedGlossaryService(
-                settings.Path,
-                config,
-                TimeProvider.System).Load();
+            ManagedGlossaryLoadResult glossary = glossaries.Open(settings.Path, config).Load();
             glossaryContributor = new ManagedGlossaryGraphContributor(glossary);
         }
         catch (Exception exception) when (DocsAnalysisCommandErrors.IsOperational(exception))
@@ -52,7 +50,7 @@ public sealed class DocsExportGraphCommand : Command<DocsExportGraphSettings>
                 exception,
                 settings,
                 "docs export-graph",
-                ManagedGlossaryService.ValidationRuleCode);
+                ManagedGlossary.ValidationRuleCode);
             return 1;
         }
         DocGraphExportResult result = new DocGraphExporter(resolver).Export(

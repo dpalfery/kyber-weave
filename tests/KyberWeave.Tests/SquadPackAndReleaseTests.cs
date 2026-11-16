@@ -9,6 +9,7 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Packaging;
+using KyberWeave.Domain.CopilotPrompt;
 using KyberWeave.Mcp;
 using KyberWeave.Tests.Fakes;
 using Xunit;
@@ -98,8 +99,8 @@ public sealed class SquadPackAndReleaseTests : IDisposable
 
         FakeProcessExecutor executor = new FakeProcessExecutor();
 
-        SquadPackCommand command1 = new SquadPackCommand(executor, workingDirectory: repo.Path);
-        SquadPackCommand command2 = new SquadPackCommand(executor, workingDirectory: repo.Path);
+        SquadPackCommand command1 = SquadTestCommands.Pack(repo.Path);
+        SquadPackCommand command2 = SquadTestCommands.Pack(repo.Path);
 
         // Act
         CommandExecution exec1 = Capture(() => command1.Execute(null!, new SquadPackSettings { Format = "apm", Out = outDir1 }));
@@ -227,7 +228,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             ".pi/agents/x.md",
             "---\nname: x\ndescription: Rendered Pi agent.\ntools: read\n---\nYou are x.\n");
         string outDir = Path.Combine(_temp.Path, "apm-pi-out");
-        SquadPackCommand command = new SquadPackCommand(new FakeProcessExecutor(), workingDirectory: repo.Path);
+        SquadPackCommand command = SquadTestCommands.Pack(repo.Path);
 
         // Act
         CommandExecution execution = Capture(() => command.Execute(null!, new SquadPackSettings { Format = "apm", Out = outDir }));
@@ -255,7 +256,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             ".devin/agents/x/AGENT.md",
             "---\nname: x\ndescription: Rendered Devin agent.\nallowed-tools:\n- read\n---\nYou are x.\n");
         string outDir = Path.Combine(_temp.Path, "apm-devin-out");
-        SquadPackCommand command = new SquadPackCommand(new FakeProcessExecutor(), workingDirectory: repo.Path);
+        SquadPackCommand command = SquadTestCommands.Pack(repo.Path);
 
         // Act
         CommandExecution execution = Capture(() => command.Execute(null!, new SquadPackSettings { Format = "apm", Out = outDir }));
@@ -281,8 +282,8 @@ public sealed class SquadPackAndReleaseTests : IDisposable
 
         FakeProcessExecutor executor = new FakeProcessExecutor();
 
-        SquadPackCommand command1 = new SquadPackCommand(executor, workingDirectory: repo.Path);
-        SquadPackCommand command2 = new SquadPackCommand(executor, workingDirectory: repo.Path);
+        SquadPackCommand command1 = SquadTestCommands.Pack(repo.Path);
+        SquadPackCommand command2 = SquadTestCommands.Pack(repo.Path);
 
         // Act
         CommandExecution exec1 = Capture(() => command1.Execute(null!, new SquadPackSettings { Format = "plugins", Out = outDir1 }));
@@ -376,7 +377,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         const string skillContent = "# Unit test patterns\n\nPin observable behaviour.\n";
         repo.AddResourceClosure(agentResource, agentContent, skillResource, skillContent);
         string outDirectory = Path.Combine(_temp.Path, "resource-pack");
-        SquadPackCommand command = new(new FakeProcessExecutor(), workingDirectory: repo.Path);
+        SquadPackCommand command = SquadTestCommands.Pack(repo.Path);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -442,7 +443,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         using QualifiedSquadRepoFixture? ownedRepo = repo;
 
         FakeProcessExecutor executor = new FakeProcessExecutor();
-        SquadPackCommand command = new SquadPackCommand(executor, workingDirectory: workingDir);
+        SquadPackCommand command = SquadTestCommands.Pack(workingDir);
 
         // Act
         CommandExecution execution = Capture(() => command.Execute(
@@ -473,7 +474,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         string outDir = Path.Combine(_temp.Path, "release-dist");
 
         FakeProcessExecutor executor = new FakeProcessExecutor();
-        SquadPackCommand command = new SquadPackCommand(executor, workingDirectory: repo.Path);
+        SquadPackCommand command = SquadTestCommands.Pack(repo.Path);
 
         // Act
         CommandExecution execution = Capture(() => command.Execute(
@@ -516,16 +517,18 @@ public sealed class SquadPackAndReleaseTests : IDisposable
     {
         // Assert that CLI, Core, Squad, Docs and MCP assemblies do not bundle the raw products/kyber-squad corpus in embedded resources
         Assembly cliAssembly = typeof(SquadPackCommand).Assembly;
-        Assembly coreAssembly = typeof(KyberWeaveConfig).Assembly;
+        Assembly coreAssembly = typeof(KyberWeaveConfigLoader).Assembly;
         Assembly squadAssembly = typeof(SquadSource).Assembly;
         Assembly docsAssembly = typeof(KyberStandardsTemplates).Assembly;
         Assembly mcpAssembly = typeof(DocsTools).Assembly;
+        Assembly domainAssembly = typeof(CopilotPromptFile).Assembly;
 
         string[] cliResources = cliAssembly.GetManifestResourceNames();
         string[] coreResources = coreAssembly.GetManifestResourceNames();
         string[] squadResources = squadAssembly.GetManifestResourceNames();
         string[] docsResources = docsAssembly.GetManifestResourceNames();
         string[] mcpResources = mcpAssembly.GetManifestResourceNames();
+        string[] domainResources = domainAssembly.GetManifestResourceNames();
 
         string[] forbiddenCorpusTokens =
         [
@@ -544,6 +547,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             Assert.DoesNotContain(squadResources, name => name.Contains(token, StringComparison.OrdinalIgnoreCase));
             Assert.DoesNotContain(docsResources, name => name.Contains(token, StringComparison.OrdinalIgnoreCase));
             Assert.DoesNotContain(mcpResources, name => name.Contains(token, StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(domainResources, name => name.Contains(token, StringComparison.OrdinalIgnoreCase));
         }
 
         // Also assert that project files do not declare EmbeddedResource or Content targeting products/kyber-squad
@@ -554,7 +558,9 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             Path.Combine(toolRoot, "src", "KyberWeave.Core", "KyberWeave.Core.csproj"),
             Path.Combine(toolRoot, "src", "KyberWeave.Core.Docs", "KyberWeave.Core.Docs.csproj"),
             Path.Combine(toolRoot, "src", "KyberWeave.Core.Squad", "KyberWeave.Core.Squad.csproj"),
-            Path.Combine(toolRoot, "src", "KyberWeave.Mcp", "KyberWeave.Mcp.csproj")
+            Path.Combine(toolRoot, "src", "KyberWeave.Mcp", "KyberWeave.Mcp.csproj"),
+            Path.Combine(toolRoot, "src", "KyberWeave.Domain", "KyberWeave.Domain.csproj"),
+            .. LayerPropsFiles("KyberWeave.Domain")
         ];
 
         foreach (string projPath in projectFilePaths)
@@ -754,6 +760,17 @@ public sealed class SquadPackAndReleaseTests : IDisposable
 
     private static readonly string[] TextFileExtensions =
         [".md", ".yml", ".yaml", ".json", ".toml", ".txt"];
+
+    /// <summary>
+    /// A layer keeps its resources and packages in <c>Areas/&lt;Area&gt;.props</c>, imported by its
+    /// project file, so a layer can gain an embedded resource without every agent editing the same
+    /// project file. Those files declare resources too, so the corpus scan has to read them.
+    /// </summary>
+    private static string[] LayerPropsFiles(string project)
+    {
+        string areas = System.IO.Path.Combine(KyberWeaveTestPaths.ToolRoot, "src", project, "Areas");
+        return Directory.Exists(areas) ? Directory.GetFiles(areas, "*.props") : [];
+    }
 
     private static bool IsTextFile(string entryName) =>
         TextFileExtensions.Contains(

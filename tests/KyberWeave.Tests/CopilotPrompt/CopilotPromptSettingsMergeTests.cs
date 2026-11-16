@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Squad;
-using KyberWeave.Core.CopilotPrompt;
+using KyberWeave.Domain.CopilotPrompt;
 using Xunit;
 
 namespace KyberWeave.Tests.CopilotPrompt;
@@ -362,8 +362,8 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
         string xdgConfigHome = Path.Combine(Home, "xdg-config");
         Directory.CreateDirectory(Path.Combine(xdgConfigHome, "Code"));
 
-        Assert.Equal([VsCodeFlavour.Stable], VsCodeUserSettingsPaths.Detect(Home, null, OSPlatform.Linux, xdgConfigHome));
-        Assert.Empty(VsCodeUserSettingsPaths.Detect(Home, null, OSPlatform.Linux));
+        Assert.Equal([VsCodeFlavour.Stable], VsCodeUserSettingsPaths.Detect(Home, null, OSPlatform.Linux, Directory.Exists, xdgConfigHome));
+        Assert.Empty(VsCodeUserSettingsPaths.Detect(Home, null, OSPlatform.Linux, Directory.Exists));
     }
 
     [Fact]

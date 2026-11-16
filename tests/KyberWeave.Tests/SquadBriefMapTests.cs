@@ -18,7 +18,7 @@ public sealed class SquadBriefMapTests
 
     /// <summary>
     ///     A renamed or removed reference file or heading fails here with the exact name to fix in
-    ///     <c>src/KyberWeave.Core.Squad/Briefs/Resources/briefs.yml</c>, instead of the brief silently
+    ///     <c>src/KyberWeave.Domain/Squad/Briefs/Resources/briefs.yml</c>, instead of the brief silently
     ///     treating the new text as unmapped.
     /// </summary>
     [Fact]

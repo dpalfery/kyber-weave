@@ -5,8 +5,12 @@ using YamlDotNet.Serialization;
 
 namespace KyberWeave.Data.Hooks;
 
-/// <summary>Reads <c>.kyber-weave/hooks.yml</c> and merges it over the built-in defaults.</summary>
-internal sealed class YamlHooksConfigSource(IFileSystem fileSystem) : IHooksConfigSource
+/// <summary>
+/// Reads the edit hook's two configuration files and merges them over the built-in defaults: the repository's
+/// <c>.kyber-weave/hooks.yml</c> first, which may only tune the built-in rules, then the user's
+/// <c>~/.kyber-weave/hooks.yml</c>, which may also add rules whose commands the operator wrote.
+/// </summary>
+internal sealed class YamlHooksConfigSource(IFileSystem fileSystem, IProcessEnvironment environment) : IHooksConfigSource
 {
     private static readonly string[] TopKeys = ["time-budget-seconds", "stop-on-first-blocking", "max-output-lines", "max-output-bytes", "rules"];
     private static readonly string[] RuleKeys = ["id", "kind", "include", "exclude", "run", "timeout-seconds", "blocking", "enabled"];
@@ -29,32 +33,39 @@ internal sealed class YamlHooksConfigSource(IFileSystem fileSystem) : IHooksConf
 
     public HooksConfig Load(string repositoryRoot)
     {
-        string path = Path.Combine(repositoryRoot, ".kyber-weave", "hooks.yml");
+        // The repository file is read first and may only tune what ships; the user file is read second and may add
+        // a rule, because a command is the operator's decision and not something a cloned repository can set.
+        HooksConfig config = LoadFile(HooksConfigPath.Repository(repositoryRoot), "hooks.yml", HookConfigSource.Repository, HooksDefaults.Config);
+        return LoadFile(HooksConfigPath.User(environment.HomeDirectory), "user hooks.yml", HookConfigSource.User, config);
+    }
+
+    private HooksConfig LoadFile(string path, string displayName, HookConfigSource source, HooksConfig current)
+    {
         if (!fileSystem.FileExists(path))
         {
-            return HooksDefaults.Config;
+            return current;
         }
 
         object? document = Deserializer.Deserialize<object>(fileSystem.ReadAllText(path));
         if (document is null)
         {
-            return HooksDefaults.Config;
+            return current;
         }
 
         if (document is not Dictionary<object, object> map)
         {
-            throw new InvalidDataException("hooks.yml must be a mapping at the top level.");
+            throw new InvalidDataException($"{displayName} must be a mapping at the top level.");
         }
 
-        return HooksConfigMerger.Merge(HooksDefaults.Config, ToOverlay(map));
+        return HooksConfigMerger.Merge(current, ToOverlay(map, displayName, source), source);
     }
 
-    private static HooksConfigOverlay ToOverlay(Dictionary<object, object> map)
+    private static HooksConfigOverlay ToOverlay(Dictionary<object, object> map, string displayName, HookConfigSource source)
     {
         List<string> warnings = [];
         foreach (string key in UnknownKeys(map, TopKeys))
         {
-            warnings.Add($"hooks.yml: unknown key '{key}' ignored.");
+            warnings.Add($"{displayName}: unknown key '{key}' ignored.");
         }
 
         List<HookRuleOverlay> rules = [];
@@ -62,7 +73,7 @@ internal sealed class YamlHooksConfigSource(IFileSystem fileSystem) : IHooksConf
         {
             if (rawRules is not List<object> list)
             {
-                warnings.Add("hooks.yml: 'rules' must be a list and was ignored.");
+                warnings.Add($"{displayName}: 'rules' must be a list and was ignored.");
             }
             else
             {
@@ -70,9 +81,9 @@ internal sealed class YamlHooksConfigSource(IFileSystem fileSystem) : IHooksConf
                 {
                     if (item is not Dictionary<object, object> rule)
                     {
-                        warnings.Add("hooks.yml: a rule that is not a mapping was ignored.");
+                        warnings.Add($"{displayName}: a rule that is not a mapping was ignored.");
                     }
-                    else if (ToRule(rule, warnings) is { } parsed)
+                    else if (ToRule(rule, displayName, source, warnings) is { } parsed)
                     {
                         rules.Add(parsed);
                     }
@@ -81,24 +92,37 @@ internal sealed class YamlHooksConfigSource(IFileSystem fileSystem) : IHooksConf
         }
 
         return new HooksConfigOverlay(
-            Read(map, "time-budget-seconds", "hooks.yml", warnings, PositiveInt),
-            Read(map, "stop-on-first-blocking", "hooks.yml", warnings, Boolean),
-            Read(map, "max-output-lines", "hooks.yml", warnings, PositiveInt),
-            Read(map, "max-output-bytes", "hooks.yml", warnings, PositiveInt),
+            Read(map, "time-budget-seconds", displayName, warnings, PositiveInt),
+            Read(map, "stop-on-first-blocking", displayName, warnings, Boolean),
+            Read(map, "max-output-lines", displayName, warnings, PositiveInt),
+            Read(map, "max-output-bytes", displayName, warnings, PositiveInt),
             rules,
             warnings);
     }
 
-    private static HookRuleOverlay? ToRule(Dictionary<object, object> map, List<string> warnings)
+    private static HookRuleOverlay? ToRule(
+        Dictionary<object, object> map,
+        string displayName,
+        HookConfigSource source,
+        List<string> warnings)
     {
         string id = map.TryGetValue("id", out object? rawId) ? Convert.ToString(rawId, CultureInfo.InvariantCulture) ?? string.Empty : string.Empty;
         if (string.IsNullOrWhiteSpace(id))
         {
-            warnings.Add("hooks.yml: a rule without an id was ignored.");
+            warnings.Add($"{displayName}: a rule without an id was ignored.");
             return null;
         }
 
-        string scope = $"hooks.yml: rule '{id}'";
+        string scope = $"{displayName}: rule '{id}'";
+
+        // The trust rule is stated where the operator reads it rather than only in the merge, so a repository file
+        // that names a command says why it was refused at the point it did so.
+        if (source != HookConfigSource.User && map.TryGetValue("run", out _))
+        {
+            warnings.Add(
+                $"{scope}: a repository file may tune the built-in rules but cannot name a command; " +
+                "the command was ignored. Put a new rule in ~/.kyber-weave/hooks.yml.");
+        }
         foreach (string key in UnknownKeys(map, RuleKeys))
         {
             warnings.Add($"{scope}: unknown key '{key}' ignored.");

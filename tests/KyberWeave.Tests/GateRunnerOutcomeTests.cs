@@ -30,7 +30,7 @@ public sealed class GateRunnerOutcomeTests : IDisposable
     {
         PlannedTaskGate gate = new("missing-tool", true, 30, [], [MissingProgram, "--check"]);
 
-        TaskGateRun run = GateRunner.RunTaskGates([gate], _root.Path, fix: false);
+        TaskGateRun run = ReviewTestServices.Gates.RunTaskGates([gate], _root.Path, fix: false);
 
         GateResult result = Assert.Single(run.Report.Gates);
         Assert.Equal(GateOutcome.NotStarted, result.Outcome);
@@ -46,7 +46,7 @@ public sealed class GateRunnerOutcomeTests : IDisposable
             : ["sleep", "30"];
         PlannedTaskGate gate = new("slow-gate", true, 1, [], sleep);
 
-        TaskGateRun run = GateRunner.RunTaskGates([gate], _root.Path, fix: false);
+        TaskGateRun run = ReviewTestServices.Gates.RunTaskGates([gate], _root.Path, fix: false);
 
         GateResult result = Assert.Single(run.Report.Gates);
         Assert.Equal(GateOutcome.TimedOut, result.Outcome);
@@ -60,7 +60,7 @@ public sealed class GateRunnerOutcomeTests : IDisposable
         PlannedTaskGate passing = new("git-version", true, 30, [], ["git", "--version"]);
         PlannedTaskGate failing = new("git-no-such-command", true, 30, [], ["git", "kw-no-such-subcommand"]);
 
-        TaskGateRun run = GateRunner.RunTaskGates([passing, failing], _root.Path, fix: false);
+        TaskGateRun run = ReviewTestServices.Gates.RunTaskGates([passing, failing], _root.Path, fix: false);
 
         Assert.Equal(2, run.Report.Gates.Count);
         Assert.All(run.Report.Gates, result => Assert.Equal(GateOutcome.Completed, result.Outcome));
@@ -77,7 +77,7 @@ public sealed class GateRunnerOutcomeTests : IDisposable
     {
         PlannedTaskGate gate = new("prints", true, 30, [], ["git", "--version"]) { FailOnOutput = true };
 
-        TaskGateRun run = GateRunner.RunTaskGates([gate], _root.Path, fix: false);
+        TaskGateRun run = ReviewTestServices.Gates.RunTaskGates([gate], _root.Path, fix: false);
 
         GateResult result = Assert.Single(run.Report.Gates);
         Assert.False(result.Passed);
@@ -91,7 +91,7 @@ public sealed class GateRunnerOutcomeTests : IDisposable
         RunGit(_root.Path, "init", "-q");
         PlannedTaskGate gate = new("silent", true, 30, [], ["git", "status", "--porcelain"]) { FailOnOutput = true };
 
-        TaskGateRun run = GateRunner.RunTaskGates([gate], _root.Path, fix: false);
+        TaskGateRun run = ReviewTestServices.Gates.RunTaskGates([gate], _root.Path, fix: false);
 
         Assert.True(Assert.Single(run.Report.Gates).Passed);
     }
@@ -103,7 +103,7 @@ public sealed class GateRunnerOutcomeTests : IDisposable
         RunGit(_root.Path, "init", "-q");
         PlannedTaskGate gate = new("blank", true, 30, [], ["git", "rev-parse", "--show-prefix"]) { FailOnOutput = true };
 
-        TaskGateRun run = GateRunner.RunTaskGates([gate], _root.Path, fix: false);
+        TaskGateRun run = ReviewTestServices.Gates.RunTaskGates([gate], _root.Path, fix: false);
 
         Assert.True(Assert.Single(run.Report.Gates).Passed);
     }
@@ -113,7 +113,7 @@ public sealed class GateRunnerOutcomeTests : IDisposable
     {
         PlannedTaskGate gate = new("broken", true, 30, [], ["git", "kw-no-such-subcommand"]) { FailOnOutput = true };
 
-        TaskGateRun run = GateRunner.RunTaskGates([gate], _root.Path, fix: false);
+        TaskGateRun run = ReviewTestServices.Gates.RunTaskGates([gate], _root.Path, fix: false);
 
         Assert.False(Assert.Single(run.Report.Gates).Passed);
     }
@@ -124,7 +124,7 @@ public sealed class GateRunnerOutcomeTests : IDisposable
     {
         PlannedTaskGate gate = new("prints", true, 30, [], ["git", "--version"]);
 
-        TaskGateRun run = GateRunner.RunTaskGates([gate], _root.Path, fix: false);
+        TaskGateRun run = ReviewTestServices.Gates.RunTaskGates([gate], _root.Path, fix: false);
 
         Assert.True(Assert.Single(run.Report.Gates).Passed);
     }
@@ -141,7 +141,7 @@ public sealed class GateRunnerOutcomeTests : IDisposable
             ]
         };
 
-        GateReport report = GateRunner.Run(config, _root.Path);
+        GateReport report = ReviewTestServices.Gates.Run(config, _root.Path);
 
         Assert.False(report.Gates[0].Passed);
         Assert.True(report.Gates[1].Passed);
@@ -165,7 +165,7 @@ public sealed class GateRunnerOutcomeTests : IDisposable
         PlannedTaskGate inWeb = new("probe-in-web", true, 30, [], probe, WorkingDirectory: "web");
         PlannedTaskGate atRoot = new("probe-at-root", true, 30, [], probe);
 
-        TaskGateRun run = GateRunner.RunTaskGates([inWeb, atRoot], _root.Path, fix: false);
+        TaskGateRun run = ReviewTestServices.Gates.RunTaskGates([inWeb, atRoot], _root.Path, fix: false);
 
         Assert.True(run.Report.Gates[0].Passed, run.Report.Gates[0].Summary);
         Assert.False(run.Report.Gates[1].Passed, "The same probe at the repository root must not find web/marker.txt.");

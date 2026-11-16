@@ -1,8 +1,8 @@
 using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Skills.Model;
-using KyberWeave.Core.Skills.Parsing;
 using KyberWeave.Core.Skills.Routing;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -44,12 +44,12 @@ public sealed class RouteSettings : CommandSettings
     public bool Json { get; set; }
 }
 
-public sealed class RouteCommand : Command<RouteSettings>
+public sealed class RouteCommand(ISkillGovernanceService skills) : Command<RouteSettings>
 {
     /// <inheritdoc />
     public override int Execute(CommandContext context, RouteSettings settings, CancellationToken cancellationToken)
     {
-        SkillSet set = SkillLoader.LoadSet(settings.SkillsPath);
+        SkillSet set = skills.LoadSet(settings.SkillsPath);
         if (set.Count == 0)
         {
             AnsiConsole.MarkupLine($"[red]No skills found under '{Markup.Escape(settings.SkillsPath)}'.[/]");
@@ -115,16 +115,16 @@ public sealed class RouteCommand : Command<RouteSettings>
         return 0;
     }
 
-    private static int RunEval(RouteSettings settings, SkillSet set, IRoutingStrategy strategy)
+    private int RunEval(RouteSettings settings, SkillSet set, IRoutingStrategy strategy)
     {
-        if (!File.Exists(settings.EvalFile))
+        RoutingEvalSummary? evaluated = skills.Evaluate(settings.EvalFile!, strategy, set);
+        if (evaluated is null)
         {
             AnsiConsole.MarkupLine($"[red]Eval file not found: {Markup.Escape(settings.EvalFile!)}[/]");
             return 2;
         }
 
-        RoutingEvalFile evalFile = RoutingEvalFile.Load(settings.EvalFile!);
-        RoutingEvalSummary summary = new RoutingEvaluator(strategy).Evaluate(evalFile, set);
+        RoutingEvalSummary summary = evaluated;
 
         if (settings.Json)
         {

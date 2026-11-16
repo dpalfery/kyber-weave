@@ -1,9 +1,11 @@
+using KyberWeave.Contracts.Services;
 using System.Diagnostics;
 using KyberWeave.Cli.Commands.Doctor;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Domain.Doctor;
 using KyberWeave.Core.Docs.Mcp;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Processes;
@@ -24,6 +26,18 @@ namespace KyberWeave.Cli.Commands.Docs;
 /// </remarks>
 public sealed class DocsInitCommand : Command<DocsInitSettings>
 {
+    private readonly IMcpWiringService _wiring;
+    private readonly IDocsScaffoldingService _scaffolder;
+
+    /// <summary>Creates the command over the services the container resolves.</summary>
+    /// <param name="wiring">Inspects, repairs and renames the harness MCP configuration.</param>
+    /// <param name="scaffolder">Bootstraps the documentation corpus.</param>
+    public DocsInitCommand(IMcpWiringService wiring, IDocsScaffoldingService scaffolder)
+    {
+        _wiring = wiring ?? throw new ArgumentNullException(nameof(wiring));
+        _scaffolder = scaffolder ?? throw new ArgumentNullException(nameof(scaffolder));
+    }
+
     /// <summary>The package APM installs to obtain the authoring skill.</summary>
     private const string SkillPackage = "dpalfery/kyber-weave";
 
@@ -71,7 +85,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// <inheritdoc />
     public override int Execute(CommandContext context, DocsInitSettings settings, CancellationToken cancellationToken)
     {
-        (int ExitCode, ScaffoldResult? Result, string? Error) attempt = TryScaffold(settings);
+        (int ExitCode, ScaffoldResult? Result, string? Error) attempt = TryScaffold(_scaffolder, settings);
         if (attempt.ExitCode != 0)
         {
             AnsiConsole.MarkupLine($"[red]Could not scaffold: {Markup.Escape(attempt.Error!)}[/]");
@@ -158,12 +172,16 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     }
 
     /// <summary>Runs the scaffold step and translates expected operator failures to exit 1.</summary>
+    /// <param name="scaffolder">The scaffolding service to run.</param>
+    /// <param name="settings">The operator's options.</param>
     internal static (int ExitCode, ScaffoldResult? Result, string? Error) TryScaffold(
-        DocsInitSettings settings)
+        IDocsScaffoldingService scaffolder, DocsInitSettings settings)
     {
+        ArgumentNullException.ThrowIfNull(scaffolder);
+
         try
         {
-            ScaffoldResult result = DocsScaffolder.Scaffold(
+            ScaffoldResult result = scaffolder.Scaffold(
                 settings.Path,
                 settings.DocsRoot,
                 settings.Owner,
@@ -390,7 +408,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// that just wrote a repository's <c>mcp:</c> section checks that section instead of the empty
     /// one the repository had a moment earlier.
     /// </remarks>
-    private static int ReportMcpWiring(DocsInitSettings settings)
+    private int ReportMcpWiring(DocsInitSettings settings)
     {
         if (settings.NoMcpCheck)
         {
@@ -427,13 +445,13 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
             return 0;
 
         McpConfig mcp = config.Mcp;
-        McpWiringReport report = McpWiringInspector.Inspect(root, mcp);
+        McpWiringReport report = _wiring.Inspect(root, mcp);
 
         AnsiConsole.WriteLine();
         PrintWiringSection(report, mcp);
         AnsiConsole.WriteLine();
 
-        IReadOnlyList<McpWiringFix> fixes = McpWiringFixes.Derive(report, root);
+        IReadOnlyList<McpWiringFix> fixes = _wiring.Derive(report, root);
         if (fixes.Count > 0 && CanPrompt())
             OfferRepair(root, mcp, fixes);
 
@@ -451,11 +469,11 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// at all — and it is worth saying at adoption, which is when a repository's declaration and its
     /// harnesses most often disagree.
     /// </remarks>
-    private static void PrintRenameNotices(string root)
+    private void PrintRenameNotices(string root)
     {
         IReadOnlyList<McpRenameChange> leftovers =
         [
-            .. McpServerRenamer.Scan(root)
+            .. _wiring.Scan(root, null)
                 .Where(change => string.Equals(change.Code, McpServerRenamer.RenameCode, StringComparison.Ordinal))
         ];
 
@@ -596,7 +614,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// on a decline, and nothing is written when the prompt could not be shown at all — the
     /// <see cref="CanPrompt"/> gate is the caller's, so a redirected run never reaches this method.
     /// </remarks>
-    private static void OfferRepair(string root, McpConfig config, IReadOnlyList<McpWiringFix> fixes)
+    private void OfferRepair(string root, McpConfig config, IReadOnlyList<McpWiringFix> fixes)
     {
         Func<IReadOnlyList<McpWiringFix>, bool> confirm = ConfirmFixOverride ?? ConfirmRepair;
 
@@ -671,16 +689,17 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// reported with its own rule id and remedy and does not fail the run: the corpus was scaffolded,
     /// which is what this command exists to do.
     /// </remarks>
-    private static void WriteRepair(string root, McpConfig config, IReadOnlyList<McpWiringFix> fixes)
+    private void WriteRepair(string root, McpConfig config, IReadOnlyList<McpWiringFix> fixes)
     {
         // The root goes to the resolver so this repair and the dedicated verb read a relative launch
         // command the same way; without it the same confirmation would write different bytes
         // depending on the directory the operator ran `docs init` from.
-        McpWiringRepairReport repair = McpWiringRepairer.Repair(
+        McpWiringRepairReport repair = _wiring.Repair(
             root,
             config,
-            LaunchCommandResolver.FromEnvironment(root),
-            McpWiringFixes.Harnesses(fixes));
+            _wiring.ResolverFor(root),
+            _wiring.Harnesses(fixes),
+            dryRun: false);
 
         CommandHelpers.WriteUnfolded(() =>
         {

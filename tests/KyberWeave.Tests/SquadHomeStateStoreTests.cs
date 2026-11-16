@@ -74,7 +74,7 @@ public sealed class SquadHomeStateStoreTests
         Directory.CreateSymbolicLink(symlinkAlias, root);
         string lexicalAlias = Path.Combine(root, "..", "project");
         SquadStateStore store = StoreFor(home);
-        string key = SquadPhysicalRootIdentity.Resolve(root).Key;
+        string key = SquadPhysicalRootIdentity.Resolve(root, SquadFileSystemPathSemantics.Instance).Key;
         string projectState = Path.Combine(
             PhysicalPathOf(home),
             ".kyber-weave",
@@ -335,7 +335,7 @@ public sealed class SquadHomeStateStoreTests
             Directory.Exists(homeStore),
             "A committed transaction must write its state under the home store.");
         SortedSet<string> before = DirectoriesUnder(homeStore);
-        SquadDeploymentPlan update = SquadDeploymentPlan.CreateUpdate(
+        SquadDeploymentPlan update = SquadDeploymentPlanner.CreateUpdate(
             root,
             scope,
             Lock("1.2.4"),
@@ -361,7 +361,7 @@ public sealed class SquadHomeStateStoreTests
     }
 
     private static string PhysicalPathOf(string path) =>
-        SquadPhysicalRootIdentity.Resolve(path).PhysicalPath;
+        SquadPhysicalRootIdentity.Resolve(path, SquadFileSystemPathSemantics.Instance).PhysicalPath;
 
     private static SquadStateStore StoreFor(string home) =>
         new(new HomeOnlyUserPaths(home));
@@ -427,7 +427,7 @@ public sealed class SquadHomeStateStoreTests
         string root,
         SquadDeploymentScope scope,
         params SquadDeploymentFile[] files) =>
-        SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlanner.CreateInstall(
             root,
             scope,
             Lock(),

@@ -1,3 +1,6 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Plans;
@@ -102,6 +105,9 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
         new DecisionLog(ArbiterDirectory),
         new NoGitFacts(),
         new PlanFacts(),
+        new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
+            new GateReportFacts(),
+            new FileArbiterStateFactory(),
         TimeProvider.System);
 
     private static KyberWeaveConfig Config() => new()

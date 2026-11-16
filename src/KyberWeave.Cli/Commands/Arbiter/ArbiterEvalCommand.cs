@@ -1,3 +1,5 @@
+using KyberWeave.Contracts.Services;
+using KyberWeave.Contracts.Repositories;
 using System.Text.Json;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
@@ -11,7 +13,11 @@ using KyberWeave.Core.FileSystem;
 namespace KyberWeave.Cli.Commands.Arbiter;
 
 /// <summary>Evaluates a recorded event offline through the evaluator's dry run.</summary>
-public sealed class ArbiterEvalCommand : Command<ArbiterSettings>
+public sealed class ArbiterEvalCommand(
+    IArbiterConfigResolver configs,
+    IArbiterRepositoryLocator locator,
+    IArbiterDryRunService dryRun,
+    IFileSystem files) : Command<ArbiterSettings>
 {
     private static readonly JsonSerializerOptions EventJson = new()
     {
@@ -29,7 +35,7 @@ public sealed class ArbiterEvalCommand : Command<ArbiterSettings>
     public override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new();
-        if (!ArbiterCommandComposition.TryResolveConfig(settings, report, out KyberWeaveConfig config, out _))
+        if (!configs.TryResolve(settings.Path, settings.Config, report, out KyberWeaveConfig config, out _))
         {
             CommandHelpers.Finish(report, settings, "arbiter eval", "Dispatch");
             return 1;
@@ -53,7 +59,7 @@ public sealed class ArbiterEvalCommand : Command<ArbiterSettings>
             }
         }
 
-        if (string.IsNullOrWhiteSpace(settings.Event) || !File.Exists(settings.Event))
+        if (string.IsNullOrWhiteSpace(settings.Event) || !files.FileExists(settings.Event))
         {
             report.Add(new Diagnostic(
                 RuleValidator.MalformedSection,
@@ -70,7 +76,7 @@ public sealed class ArbiterEvalCommand : Command<ArbiterSettings>
         ArbiterEvent ev;
         try
         {
-            string json = File.ReadAllText(settings.Event);
+            string json = files.ReadAllText(settings.Event);
             ev = JsonSerializer.Deserialize<ArbiterEvent>(json, EventJson)
                 ?? throw new JsonException("The event file holds no event.");
         }
@@ -85,8 +91,8 @@ public sealed class ArbiterEvalCommand : Command<ArbiterSettings>
             return 1;
         }
 
-        string repositoryRoot = ArbiterCommandComposition.ResolveRepositoryRoot(settings.Path);
-        using ArbiterEvaluatorSession? session = ArbiterCommandComposition.CreateEvaluator(
+        string repositoryRoot = locator.ResolveRepositoryRoot(settings.Path);
+        using IArbiterEvaluatorSession? session = dryRun.CreateEvaluator(
             config, repositoryRoot, settings.Provider, report);
         if (session is null)
         {

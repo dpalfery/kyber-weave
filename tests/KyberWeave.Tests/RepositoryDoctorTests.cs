@@ -2,6 +2,7 @@ using Xunit;
 using System.Diagnostics;
 using KyberWeave.Cli.Commands.Doctor;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Domain.Doctor;
 using KyberWeave.Core.Processes;
 using KyberWeave.Tests.Fakes;
 
@@ -163,13 +164,7 @@ public sealed class RepositoryDoctorTests : IDisposable
     public void Doctor_NonInteractive_Bare_BehavesAsCheck_PrintsHint()
     {
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
-        DoctorCommand command = new()
-        {
-            Executor = executor,
-            IsTerminal = () => false,
-            ReadEnvironment = name => name == "CI" ? "true" : null,
-            McpExecutable = "kyber-weave-mcp-absent",
-        };
+        DoctorCommand command = new(DoctorServices.Doctor, new DoctorTestEnvironment(false, name => name == "CI" ? "true" : null), executor, "kyber-weave-mcp-absent");
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
             command.Execute(null!, new DoctorSettings { Path = Root }, CancellationToken.None));
@@ -432,13 +427,7 @@ public sealed class RepositoryDoctorTests : IDisposable
     public void Doctor_BlankPath_Exits2()
     {
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
-        DoctorCommand command = new()
-        {
-            Executor = executor,
-            IsTerminal = () => false,
-            ReadEnvironment = _ => null,
-            McpExecutable = "kyber-weave-mcp-absent",
-        };
+        DoctorCommand command = new(DoctorServices.Doctor, new DoctorTestEnvironment(false, _ => null), executor, "kyber-weave-mcp-absent");
 
         int exitCode = ProcessConsoleCapture.Run(() =>
             command.Execute(null!, new DoctorSettings { Path = string.Empty }, CancellationToken.None)).Result;
@@ -514,13 +503,7 @@ public sealed class RepositoryDoctorTests : IDisposable
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
 
         int exitCode = DoctorAppHarness.Run(
-            new KyberWeave.Cli.Commands.Doctor.DoctorCommand
-            {
-                Executor = executor,
-                IsTerminal = () => false,
-                ReadEnvironment = _ => null,
-                McpExecutable = AppendingStub(callLog)
-            },
+            new KyberWeave.Cli.Commands.Doctor.DoctorCommand(DoctorServices.Doctor, new DoctorTestEnvironment(false, _ => null), executor, AppendingStub(callLog)),
             "doctor",
             "--ensure",
             Root);

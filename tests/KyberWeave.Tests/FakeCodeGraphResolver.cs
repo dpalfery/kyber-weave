@@ -1,4 +1,5 @@
-using KyberWeave.Core.CodeGraph;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Domain.CodeGraph;
 
 namespace KyberWeave.Tests;
 

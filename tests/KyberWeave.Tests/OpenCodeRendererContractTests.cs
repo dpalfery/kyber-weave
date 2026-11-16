@@ -128,11 +128,11 @@ public sealed class OpenCodeRendererContractTests : IDisposable
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
         HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
-        SquadRendererRegistry registry = new([new OpenCodeRenderer()]);
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new OpenCodeRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.OpenCode],
-            SquadDeploymentScope.Project);
+            SquadDeploymentScope.Project).Prepared();
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -513,13 +513,13 @@ public sealed class OpenCodeRendererContractTests : IDisposable
         fixture.WriteAgentResource("references/x.markdown", "X markdown alias.\n");
         fixture.AppendAgentLink("[X md](bug-crusher-investigator/references/x.md)");
         fixture.AppendAgentLink("[X markdown](bug-crusher-investigator/references/x.markdown)");
-        SquadRendererRegistry registry = new([new OpenCodeRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new OpenCodeRenderer()]);
 
         SquadRenderValidationException exception = await Assert.ThrowsAsync<SquadRenderValidationException>(() =>
             registry.RenderAsync(new SquadRenderRequest(
                 fixture.ProductRoot,
                 [SquadTarget.OpenCode],
-                SquadDeploymentScope.Project)));
+                SquadDeploymentScope.Project).Prepared()));
 
         Assert.Contains(ResourceBearingSquadFixture.AgentName, exception.Message, StringComparison.Ordinal);
         Assert.Contains("references/x.md", exception.Message, StringComparison.Ordinal);
@@ -534,11 +534,11 @@ public sealed class OpenCodeRendererContractTests : IDisposable
     public async Task RenderAsync_OpenCode_TextOnlyAgentResourcesProjectVerbatim()
     {
         using ResourceBearingSquadFixture fixture = ResourceBearingSquadFixture.CreateWithTextOnlyAgentResources();
-        SquadRendererRegistry registry = new([new OpenCodeRenderer()]);
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new OpenCodeRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
             fixture.ProductRoot,
             [SquadTarget.OpenCode],
-            SquadDeploymentScope.Project);
+            SquadDeploymentScope.Project).Prepared();
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -587,11 +587,11 @@ public sealed class OpenCodeRendererContractTests : IDisposable
     public async Task RenderAsync_OpenCode_UnlinkedMarkdownResourceReportsRenameWithoutLinkRewrite()
     {
         using ResourceBearingSquadFixture fixture = ResourceBearingSquadFixture.CreateWithUnlinkedMarkdownResource();
-        SquadRendererRegistry registry = new([new OpenCodeRenderer()]);
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new OpenCodeRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
             fixture.ProductRoot,
             [SquadTarget.OpenCode],
-            SquadDeploymentScope.Project);
+            SquadDeploymentScope.Project).Prepared();
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -618,11 +618,11 @@ public sealed class OpenCodeRendererContractTests : IDisposable
     public async Task RenderAsync_NativeSingleProjectionRule_SharedIdentityEmitsAgentAndSuppressesSkill()
     {
         using SharedIdentitySquadFixture fixture = SharedIdentitySquadFixture.Create();
-        SquadRendererRegistry registry = new([new OpenCodeRenderer()]);
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new OpenCodeRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
             fixture.Path,
             [SquadTarget.OpenCode],
-            SquadDeploymentScope.Project);
+            SquadDeploymentScope.Project).Prepared();
 
         SquadRenderResult result = await registry.RenderAsync(request);
 

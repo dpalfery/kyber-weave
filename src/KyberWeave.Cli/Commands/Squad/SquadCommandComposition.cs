@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Update;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Squad.Deployment;
@@ -65,63 +66,6 @@ internal static class SquadCommandComposition
         CommandHelpers.WriteUnfolded(() => AnsiConsole.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(message)}[/]"));
     }
 
-    /// <summary>Resolves user paths from environment variables (HOME / USERPROFILE / APPDATA) or system folders.</summary>
-    public static ISquadUserPaths ResolveUserPaths(ISquadUserPaths? userPaths = null,
-        Func<string, string?>? environmentReader = null)
-    {
-        if (userPaths is not null) return userPaths;
-
-        Func<string, string?> reader = environmentReader ?? Environment.GetEnvironmentVariable;
-        string? home = reader("HOME");
-        if (string.IsNullOrWhiteSpace(home)) home = reader("USERPROFILE");
-        if (string.IsNullOrWhiteSpace(home)) home = ArbiterCommandComposition.HomeDirectory();
-        if (string.IsNullOrWhiteSpace(home)) home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-
-        string? appData = reader("APPDATA");
-        if (string.IsNullOrWhiteSpace(appData))
-            appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-
-        if (string.IsNullOrWhiteSpace(appData) && !string.IsNullOrWhiteSpace(home))
-            appData = Path.Combine(home, ".config");
-
-        return new CliSquadUserPaths(home ?? string.Empty, appData ?? string.Empty);
-    }
-
-    /// <summary>
-    ///     Creates preset selection stores covering primary home directory.
-    /// </summary>
-    public static IReadOnlyList<SquadModelPresetSelectionStore> ResolveSelectionStores(ISquadUserPaths userPaths)
-    {
-        ArgumentNullException.ThrowIfNull(userPaths);
-        return [new SquadModelPresetSelectionStore(userPaths)];
-    }
-
-    public static SquadStateStore ResolveStateStore(ISquadUserPaths? userPaths = null,
-        Func<string, string?>? environmentReader = null)
-    {
-        return new SquadStateStore(userPaths ?? ResolveUserPaths(null, environmentReader));
-    }
-
-    /// <summary>
-    ///     Resolves the per-target global deployment root resolver. Commands that read deployed
-    ///     files back — status, uninstall dry-runs — need the same roots install resolved,
-    ///     because a global receipt's relative paths are only meaningful beneath each target's
-    ///     own root.
-    /// </summary>
-    public static ISquadGlobalRootResolver ResolveGlobalRoots(Func<string, string?>? environmentReader = null)
-    {
-        Func<string, string?> reader = environmentReader ?? Environment.GetEnvironmentVariable;
-        string? home = reader("HOME");
-        if (string.IsNullOrWhiteSpace(home)) home = reader("USERPROFILE");
-        if (string.IsNullOrWhiteSpace(home)) home = ArbiterCommandComposition.HomeDirectory();
-        if (string.IsNullOrWhiteSpace(home)) home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-
-        return new SquadGlobalRoots(
-            reader,
-            home ?? string.Empty,
-            ReadFileTextOrNull);
-    }
-
     /// <summary>
     ///     Resolves each selected target's physical global root — the directory a
     ///     <c>--global</c> lifecycle actually writes — through the same resolver (and
@@ -136,12 +80,9 @@ internal static class SquadCommandComposition
     /// </remarks>
     public static IReadOnlyList<(SquadTarget Target, string GlobalRoot)> ResolveGlobalTargetRoots(
         IReadOnlyList<SquadTarget> targets,
-        ISquadGlobalRootResolver? injectedGlobalRoots = null,
-        Func<string, string?>? environmentReader = null)
+        ISquadGlobalRootResolver globalRoots)
     {
-        // The injected resolver is the one the lifecycle plans with, so the confirmation must name the
-        // same roots. Only an unseamed run falls through to the environment and the real profile.
-        ISquadGlobalRootResolver globalRoots = injectedGlobalRoots ?? ResolveGlobalRoots(environmentReader);
+        // The resolver is the one the lifecycle plans with, so the confirmation names the same roots.
         List<(SquadTarget Target, string GlobalRoot)> resolved = [];
         foreach (SquadTarget target in targets)
             try
@@ -177,9 +118,9 @@ internal static class SquadCommandComposition
     ///     the same state and fails under the command's exit-1 convention.
     /// </remarks>
     public static IReadOnlyList<(SquadTarget Target, string GlobalRoot)> ResolveUninstallGlobalTargetRoots(
-        SquadStateStore stateStore,
+        ISquadStateStore stateStore,
         string targetRoot,
-        ISquadGlobalRootResolver? injectedGlobalRoots = null,
+        ISquadGlobalRootResolver injectedGlobalRoots,
         SquadTarget? onlyTarget = null)
     {
         SquadReceipt? receipt;
@@ -220,7 +161,7 @@ internal static class SquadCommandComposition
     ///     true so the lifecycle call surfaces the real error instead of a misleading "not installed".
     /// </summary>
     public static bool ReceiptHasTarget(
-        SquadStateStore stateStore,
+        ISquadStateStore stateStore,
         string targetRoot,
         SquadDeploymentScope scope,
         SquadTarget target)
@@ -290,243 +231,6 @@ internal static class SquadCommandComposition
     {
         ArgumentNullException.ThrowIfNull(arbiter);
         return new SquadArbiterWiring(arbiter.Enabled, Core.Arbiter.ArbiterHookTimeout.SecondsFor(arbiter.Provider.TimeoutMs));
-    }
-
-    /// <summary>
-    ///     Resolves the renderer used to lower canonical Squad source into harness-native
-    ///     files. Copilot, Cursor, Claude, Codex, OpenCode, Kilo, Pi, Factory, Command Code, and Antigravity are native;
-    ///     Warp is fallback role-skill lowering (to <c>.warp/skills/</c>). Antigravity is native via
-    ///     per-agent directories at <c>.agents/agents/{name}/agent.md</c> with canonical skills at
-    ///     <c>.agents/skills/{name}/SKILL.md</c> (the "Native Both" pattern). Pi is native through the
-    ///     third-party <c>@tintinweb/pi-subagents</c> extension's custom-agent format, with its one
-    ///     <c>invocation: primary</c> agent lowered to a top-level skill because Pi core has no
-    ///     primary-agent primitive (see <see cref="PiRenderer" /> remarks). Devin is native through
-    ///     per-agent directories at <c>.devin/agents/{name}/AGENT.md</c>, with its primary agent
-    ///     lowered to a skill for the same reason (see <see cref="DevinRenderer" /> remarks).
-    ///     Every other approved target fails closed with a pointer to its <c>docs/todo/</c>
-    ///     entry rather than being silently dropped from the roster.
-    /// </summary>
-    public static ISquadRenderer ResolveRenderer()
-    {
-        return new SquadRendererRegistry(CreateRenderers());
-    }
-
-    /// <summary>
-    ///     Creates one instance of every shipped harness renderer. The cross-harness contract
-    ///     suite runs against this same list, so a renderer added here inherits that contract
-    ///     without anyone remembering to copy it.
-    /// </summary>
-    internal static IReadOnlyList<ISquadRenderer> CreateRenderers() =>
-    [
-        new CopilotRenderer(),
-        new CursorRenderer(),
-        new ClaudeRenderer(),
-        new AntigravityRenderer(),
-        new CodexRenderer(),
-        new OpenCodeRenderer(),
-        new KiloRenderer(),
-        new PiRenderer(),
-        new FactoryRenderer(),
-        new WarpRenderer(),
-        new ZCodeRenderer(),
-        new DevinRenderer(),
-        new CommandCodeRenderer()
-    ];
-
-    /// <summary>Resolves the platform filesystem abstraction for creating and inspecting links without administrator rights.</summary>
-    public static ISquadLinkFileSystem ResolveLinkFileSystem(ISquadLinkFileSystem? customFileSystem = null)
-    {
-        return customFileSystem ?? (OperatingSystem.IsWindows()
-            ? new WindowsSquadLinkFileSystem()
-            : new UnixSquadLinkFileSystem());
-    }
-
-    /// <summary>Resolves a deployment transaction using the specified or default state store.</summary>
-    public static SquadTransaction ResolveTransaction(
-        SquadStateStore? stateStore = null,
-        ISquadUserPaths? userPaths = null,
-        ISquadTransactionObserver? observer = null)
-    {
-        return new SquadTransaction(stateStore ?? ResolveStateStore(userPaths), observer);
-    }
-
-    /// <summary>Creates a Squad lifecycle service using injected or default collaborators.</summary>
-    [SuppressMessage(
-        "Reliability",
-        "CA2000:Dispose objects before losing scope",
-        Justification = "Collaborator lifecycles are managed across the command execution.")]
-    [SuppressMessage(
-        "Reliability",
-        "CA2000:Dispose objects before losing scope",
-        Justification = "Caller manages lifecycle.")]
-    private static ISquadReleaseSource ResolveDefaultReleaseSource(Func<string, string?>? environmentReader = null)
-    {
-        string? localProductPath = TryFindLocalProductSquadRoot();
-        if (localProductPath is not null) return new LocalCheckoutSquadReleaseSource(localProductPath);
-
-        return new GitHubSquadReleaseSource(ReleaseOrigin
-            .Resolve(environmentReader ?? Environment.GetEnvironmentVariable).ApiRoot);
-    }
-
-    private static string? TryFindLocalProductSquadRoot()
-    {
-        try
-        {
-            DirectoryInfo? dir = new(AppContext.BaseDirectory);
-            while (dir is not null)
-            {
-                string candidate = Path.Combine(dir.FullName, "products", "kyber-squad");
-                if (File.Exists(Path.Combine(candidate, "squad.yml"))) return candidate;
-
-                dir = dir.Parent;
-            }
-        }
-        catch (Exception ex) when (FileFailure.Is(ex))
-        {
-        }
-
-        return null;
-    }
-
-    [SuppressMessage(
-        "Reliability",
-        "CA2000:Dispose objects before losing scope",
-        Justification = "Collaborator lifecycles are managed across the command execution.")]
-    public static SquadLifecycleService CreateLifecycleService(
-        ISquadUserPaths? userPaths = null,
-        SquadStateStore? stateStore = null,
-        ISquadReleaseSource? releaseSource = null,
-        ISquadRenderer? renderer = null,
-        ISquadTransactionObserver? observer = null,
-        TimeProvider? timeProvider = null,
-        ISquadGlobalRootResolver? globalRoots = null,
-        Func<string, string?>? environmentReader = null)
-    {
-        SquadStateStore resolvedStateStore = stateStore ?? ResolveStateStore(userPaths, environmentReader);
-        ISquadReleaseSource resolvedReleaseSource = releaseSource
-                                                    ?? new GitHubSquadReleaseSource(ReleaseOrigin
-                                                        .Resolve(
-                                                            environmentReader ?? Environment.GetEnvironmentVariable)
-                                                        .ApiRoot);
-        ISquadRenderer resolvedRenderer = renderer ?? ResolveRenderer();
-        ISquadGlobalRootResolver resolvedGlobalRoots = globalRoots ?? ResolveGlobalRoots(environmentReader);
-
-        return new SquadLifecycleService(
-            resolvedReleaseSource,
-            resolvedRenderer,
-            resolvedStateStore,
-            timeProvider,
-            observer,
-            resolvedGlobalRoots,
-            environmentReader: environmentReader);
-    }
-
-    /// <summary>
-    ///     Resolves canonical Squad source from an extraction root or checkout products.
-    /// </summary>
-    public static SquadSource? TryResolveSquadSource(string? extractionRoot = null)
-    {
-        if (!string.IsNullOrWhiteSpace(extractionRoot))
-            try
-            {
-                string squadPath = Path.Combine(extractionRoot, "squad.yml");
-                if (File.Exists(squadPath))
-                {
-                    string text = File.ReadAllText(squadPath);
-                    if (text.Contains("name:", StringComparison.Ordinal)) return SquadSourceLoader.Load(extractionRoot);
-                }
-            }
-            catch (Exception ex) when (FileFailure.Is(ex) || ex is SquadSourceValidationException)
-            {
-                // Fall through to checkout lookup.
-            }
-
-        try
-        {
-            DirectoryInfo? dir = new(AppContext.BaseDirectory);
-            while (dir is not null)
-            {
-                string candidate = Path.Combine(dir.FullName, "products", "kyber-squad");
-                if (File.Exists(Path.Combine(candidate, "squad.yml"))) return SquadSourceLoader.Load(candidate);
-
-                dir = dir.Parent;
-            }
-        }
-        catch (Exception ex) when (FileFailure.Is(ex) || ex is SquadSourceValidationException)
-        {
-            // Ignore and return null.
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    ///     Resolves canonical Squad model profiles for the preset verbs: checkout first, then the
-    ///     snapshot for the preferred Squad version, then the newest snapshot.
-    /// </summary>
-    /// <param name="preferredVersion">
-    ///     The active lock's <c>SquadVersion</c> for use and clear, or null for show which has no
-    ///     deployment context.
-    /// </param>
-    /// <param name="userPaths">The user paths locating the home snapshot store.</param>
-    /// <returns>The canonical profiles and agent roster, or null when none resolves.</returns>
-    /// <remarks>
-    ///     Checkout-first keeps repo-built behaviour and the existing checkout-backed tests
-    ///     unchanged. The version-keyed snapshot carries what that deployment was actually
-    ///     rendered from, so an installed CLI resolves the active release's models without ever
-    ///     downloading; the newest snapshot serves show. A null result means the caller fails
-    ///     closed with the squad update remedy. The checkout-built result is labelled with the
-    ///     preferred version because a checkout carries no release version, and the label is
-    ///     never persisted — snapshots are written only by install and update from release
-    ///     results. Both roster origins are case-insensitive (checkout builds it that way, as
-    ///     the preset verbs always did; the snapshot store parses it that way), so a
-    ///     differently-cased deployed identity resolves the same entry on a checkout and
-    ///     on an installed CLI instead of rewriting on one and silently skipping on the other.
-    /// </remarks>
-    public static SquadCanonicalProfiles? ResolveCanonicalProfiles(string? preferredVersion, ISquadUserPaths userPaths)
-    {
-        ArgumentNullException.ThrowIfNull(userPaths);
-
-        SquadSource? source = TryResolveSquadSource();
-        if (source is not null)
-        {
-            Dictionary<string, string> checkoutRoster = source.Agents.ToDictionary(
-                agent => agent.Name,
-                agent => agent.ModelProfile,
-                StringComparer.OrdinalIgnoreCase);
-            return new SquadCanonicalProfiles(preferredVersion ?? string.Empty, source.ModelProfiles, checkoutRoster);
-        }
-
-        SquadCanonicalProfileStore store = new(userPaths);
-        if (!string.IsNullOrWhiteSpace(preferredVersion))
-        {
-            SquadCanonicalProfiles? versioned = TryReadVersionedSnapshot(store, preferredVersion);
-            if (versioned is not null)
-                return versioned;
-        }
-
-        return store.TryReadLatest();
-    }
-
-    /// <summary>
-    ///     Reads one versioned snapshot, treating an invalid snapshot name as absent.
-    /// </summary>
-    /// <remarks>
-    ///     The store reports missing, unreadable, and corrupt snapshots as null but rejects a
-    ///     malformed version with <see cref="ArgumentException" />. A lock version can only reach
-    ///     that shape through home-state damage, so it falls through to the newest snapshot the
-    ///     same way a missing one does rather than throwing over state the verbs never wrote.
-    /// </remarks>
-    private static SquadCanonicalProfiles? TryReadVersionedSnapshot(SquadCanonicalProfileStore store, string version)
-    {
-        try
-        {
-            return store.TryRead(version);
-        }
-        catch (ArgumentException)
-        {
-            return null;
-        }
     }
 
     /// <summary>
@@ -620,7 +324,7 @@ internal static class SquadCommandComposition
     ///     then applies the looser, canonicalizing rule: it strips a leading 'v' and '+build'
     ///     metadata (so 'v1.2.3+sha' becomes '1.2.3') and rejects input that is not a Release
     ///     tag shape at all. The strict SemVer check runs last and reuses
-    ///     <see cref="GitHubSquadReleaseSource.IsValidReleaseVersion" /> — the one rule the
+    ///     <see cref="ReleaseVersion.IsStrictSemVer" /> — the one rule the
     ///     release source itself enforces, reused rather than duplicated so the two cannot
     ///     diverge — to reject tag-shaped forms the stricter rule still forbids, like '1.0'
     ///     or '01.2.3'. The release source keeps its own check as defense-in-depth.
@@ -641,7 +345,7 @@ internal static class SquadCommandComposition
 
         EnsureValidBuildMetadata(version);
         string normalized = ReleaseVersion.Normalize(version);
-        if (!GitHubSquadReleaseSource.IsValidReleaseVersion(normalized))
+        if (!ReleaseVersion.IsStrictSemVer(normalized))
             throw new ArgumentException(
                 "--version must be a semantic version (X.Y.Z or X.Y.Z-prerelease); " +
                 "a leading 'v' and '+build' metadata are accepted and stripped. " +
@@ -713,7 +417,7 @@ internal static class SquadCommandComposition
     /// <param name="stateStore">The store the global receipt is read from. Its user paths name the home.</param>
     /// <param name="suppliedPath">The path the operator gave, or null when none was given.</param>
     /// <param name="dryRun">Whether the run only plans, so the home directory is not created.</param>
-    public static string ResolveGlobalAnchorRoot(SquadStateStore stateStore, string? suppliedPath, bool dryRun)
+    public static string ResolveGlobalAnchorRoot(ISquadStateStore stateStore, string? suppliedPath, bool dryRun)
     {
         ArgumentNullException.ThrowIfNull(stateStore);
 
@@ -795,7 +499,7 @@ internal static class SquadCommandComposition
     ///     The home global receipt when it is a pre-#91 single-root receipt, whose files resolve beneath the one
     ///     root it records rather than beneath each target's own global root. Null when there is no such receipt.
     /// </summary>
-    private static SquadReceipt? TryReadLegacySingleRootHomeReceipt(SquadStateStore stateStore, string home)
+    private static SquadReceipt? TryReadLegacySingleRootHomeReceipt(ISquadStateStore stateStore, string home)
     {
         try
         {
@@ -819,14 +523,13 @@ internal static class SquadCommandComposition
     ///     optional because global verbs have no project to import.
     /// </remarks>
     public static SquadMigrationReport EnsureStateMigrated(
-        SquadStateStore stateStore,
+        ISquadStateMigration migration,
         string? invokingCwd,
         string? projectRoot,
         bool dryRun)
     {
-        ArgumentNullException.ThrowIfNull(stateStore);
+        ArgumentNullException.ThrowIfNull(migration);
 
-        SquadStateMigration migration = new(stateStore, stateStore.UserPaths);
         SquadMigrationReport global = migration.MigrateGlobal(invokingCwd, dryRun);
 
         List<string> imported = [];
@@ -881,18 +584,23 @@ internal static class SquadCommandComposition
     ///     Imports one project's in-repo state into the home registry when its home state is absent. A project
     ///     whose home receipt already exists is left alone, because the home receipt is the authority.
     /// </summary>
-    /// <param name="stateStore">The home state store whose registry the import updates.</param>
+    /// <param name="stateStore">The home state store whose receipt decides whether the import is needed.</param>
+    /// <param name="migration">Imports the project into the home registry.</param>
     /// <param name="root">The project root whose in-repo state may be imported.</param>
     /// <param name="dryRun">Whether the run only plans. A dry run writes nothing and reports the import it would make.</param>
-    public static SquadMigrationReport ImportProjectIfHomeStateAbsent(SquadStateStore stateStore, string root,
+    public static SquadMigrationReport ImportProjectIfHomeStateAbsent(
+        ISquadStateStore stateStore,
+        ISquadStateMigration migration,
+        string root,
         bool dryRun)
     {
         ArgumentNullException.ThrowIfNull(stateStore);
+        ArgumentNullException.ThrowIfNull(migration);
 
         if (stateStore.ReadReceipt(root, SquadDeploymentScope.Project) is not null)
             return new SquadMigrationReport([], [], [], []);
 
-        return new SquadStateMigration(stateStore, stateStore.UserPaths).ImportProject(root, dryRun);
+        return migration.ImportProject(root, dryRun);
     }
 
     /// <summary>
@@ -953,7 +661,7 @@ internal static class SquadCommandComposition
     ///     by canonical identity, so the operator can name a project through an alias or a link.
     /// </remarks>
     /// <exception cref="ArgumentException">A path is neither registered nor importable.</exception>
-    internal static IReadOnlyList<string> ResolveNamedProjects(IReadOnlyList<string> paths, SquadStateStore stateStore)
+    internal static IReadOnlyList<string> ResolveNamedProjects(IReadOnlyList<string> paths, ISquadStateStore stateStore)
     {
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(stateStore);
@@ -1013,32 +721,4 @@ internal static class SquadCommandComposition
         return isGlobal ? SquadDeploymentScope.Global : SquadDeploymentScope.Project;
     }
 
-    /// <summary>Creates a Squad instance service using injected or default collaborators.</summary>
-    [SuppressMessage(
-        "Reliability",
-        "CA2000:Dispose objects before losing scope",
-        Justification = "Collaborator lifecycles are managed across the command execution.")]
-    public static SquadInstanceService CreateInstanceService(ISquadUserPaths? userPaths = null)
-    {
-        ISquadUserPaths resolvedPaths = userPaths ?? ResolveUserPaths();
-        SquadStateStore stateStore = ResolveStateStore(resolvedPaths);
-        ISquadReleaseSource releaseSource = ResolveDefaultReleaseSource();
-        SquadLifecycleService lifecycleService = CreateLifecycleService(resolvedPaths, stateStore, releaseSource);
-        SquadModelPresetStore presetStore = new(resolvedPaths);
-        ISquadLinkFileSystem linkFileSystem = ResolveLinkFileSystem();
-        ISquadGlobalRootResolver globalRoots = ResolveGlobalRoots();
-        return new SquadInstanceService(lifecycleService, presetStore, linkFileSystem, globalRoots, stateStore);
-    }
-
-    internal sealed class CliSquadUserPaths : ISquadUserPaths
-    {
-        public CliSquadUserPaths(string homeDirectory, string applicationDataDirectory)
-        {
-            HomeDirectory = homeDirectory;
-            ApplicationDataDirectory = applicationDataDirectory;
-        }
-
-        public string ApplicationDataDirectory { get; }
-        public string HomeDirectory { get; }
-    }
 }

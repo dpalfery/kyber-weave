@@ -1,8 +1,6 @@
 using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
-using KyberWeave.Core.Skills.Model;
-using KyberWeave.Core.Skills.Parsing;
 using Spectre.Console;
 using KyberWeave.Core.FileSystem;
 
@@ -10,38 +8,6 @@ namespace KyberWeave.Cli.Commands;
 
 public static class CommandHelpers
 {
-    /// <summary>
-    /// Loads skills from a path. Adds any parse failures to <paramref name="report"/> as
-    /// errors and returns the successfully parsed set. Returns null only when the path
-    /// itself is invalid (nothing to do).
-    /// </summary>
-    public static SkillSet LoadOrReport(string path, DiagnosticReport report)
-    {
-        IReadOnlyList<SkillLoadResult> results = SkillLoader.Load(path);
-        List<Skill> skills = new List<Skill>();
-
-        foreach (SkillLoadResult r in results)
-        {
-            if (r.Success)
-            {
-                skills.Add(r.Skill!);
-            }
-            else
-            {
-                report.Add(new Diagnostic("KW-PARSE-000", Severity.Error,
-                    r.Error ?? "Failed to parse skill.", Path.GetFileName(Path.GetDirectoryName(r.Path) ?? r.Path), r.Path));
-            }
-        }
-
-        // If nothing parsed and the only result is a "path not found / none found" message, treat as fatal-but-reported.
-        if (skills.Count == 0 && results.All(r => !r.Success))
-        {
-            return new SkillSet(skills); // report already carries the errors; caller decides exit code
-        }
-
-        return new SkillSet(skills);
-    }
-
     /// <summary>
     /// Loads <c>.kyber-weave/kyber-weave.yml</c> for CLI commands. On failure, adds
     /// <see cref="KyberWeaveConfigLoader.ConfigLoadErrorCode"/> and returns false.

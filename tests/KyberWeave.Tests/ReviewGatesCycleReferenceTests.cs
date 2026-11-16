@@ -1,4 +1,4 @@
-using KyberWeave.Cli.Commands.Review;
+using KyberWeave.Core.Review;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -17,7 +17,7 @@ public sealed class ReviewGatesCycleReferenceTests
     [InlineData(true, "references/verifier-cycle.md")]
     public void EachCycleTypeNamesAReferenceTheSkillShips(bool verifier, string expected)
     {
-        string reference = ReviewGatesCommand.CycleReference(verifier);
+        string reference = ReviewGateReporting.CycleReference(verifier);
 
         Assert.Equal(expected, reference);
         Assert.True(File.Exists(Path.Combine(SkillRoot, reference.Replace('/', Path.DirectorySeparatorChar))), reference);

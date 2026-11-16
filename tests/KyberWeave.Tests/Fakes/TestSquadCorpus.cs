@@ -153,17 +153,17 @@ public static class TestSquadCorpus
     private static async Task<SquadRenderResult> RenderCoreAsync(SquadTarget target, SquadDeploymentScope scope)
     {
         ISquadGlobalRootResolver? globalRoots = scope == SquadDeploymentScope.Global
-            ? SquadCommandComposition.ResolveGlobalRoots()
+            ? SquadHostDefaults.ResolveGlobalRoots()
             : null;
 
-        SquadRenderRequest request = new(
+        SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
             [target],
             scope,
             GlobalRoots: globalRoots,
-            PreloadedSource: CanonicalSource);
+            PreloadedSource: CanonicalSource).Prepared();
 
-        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
+        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
         SquadRenderResult result = await renderer.RenderAsync(request).ConfigureAwait(false);
         if (!result.Success || result.Errors.Count > 0)
         {

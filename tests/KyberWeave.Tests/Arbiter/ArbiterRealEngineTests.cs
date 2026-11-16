@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using System.Text.Json;
 using KyberWeave.Arbiter;
 using KyberWeave.Arbiter.Hooks;
@@ -111,18 +112,26 @@ public sealed class ArbiterRealEngineTests : IDisposable
         IArbiterProvider provider,
         IArbiterGitFacts? gitFacts = null,
         Func<ICredentialStore>? credentialStoreFactory = null,
-        Func<string, string?>? environment = null)
+        Func<string, string?>? environment = null,
+        IPlanRootResolver? planRoots = null)
     {
-        ArbiterHookDecisionEngine engine = new(
+        ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
             providerFactory: _ => provider,
             gitFactsFactory: gitFacts is null ? null : _ => gitFacts,
             homeDirectory: () => _home.Path,
             credentialStoreFactory: credentialStoreFactory,
-            environment: environment);
-        return new HookCommand(
-            HarnessAdapterRegistry.CreateDefault(engine),
-            Composition.LoadHostConfig,
+            environment: environment,
+            planRoots: planRoots);
+        return ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
+            ArbiterTestServices.LoadHostConfig,
             () => "decision-test-1");
+    }
+
+    /// <summary>A plan root resolver that faults, standing in for a collaborator the engine cannot build or reach.</summary>
+    private sealed class ThrowingPlanRoots : IPlanRootResolver
+    {
+        public string Resolve(string hookRoot, string prompt, Func<string, IReadOnlyList<string>>? listWorktrees = null) => throw new NotSupportedException("container exploded");
     }
 
     private string Payload(string hookEvent, string target, string prompt, string? status = null, string agentType = "conductor")
@@ -289,6 +298,23 @@ public sealed class ArbiterRealEngineTests : IDisposable
         Assert.Contains(HookCommand.FailClosedCode, note, StringComparison.Ordinal);
         Assert.Contains("git facts exploded", note, StringComparison.Ordinal);
         Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RealEngine_ContainerFault_AllowsWithHookCodeAndStdoutCarriesOnlyTheDecision()
+    {
+        WriteConfig(DisabledShippedRules());
+        HookCommand command = CreateCommand(
+            new FakeProvider(),
+            planRoots: new ThrowingPlanRoots());
+
+        (int exit, string stdout, string log) = Run(command, Payload("PreToolUse", "csharp-dev", Prompt));
+
+        Assert.Equal(0, exit);
+        using JsonDocument doc = JsonDocument.Parse(stdout);
+        Assert.Equal("allow", doc.RootElement.GetProperty("hookSpecificOutput").GetProperty("permissionDecision").GetString());
+        Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
+        Assert.Contains("container exploded", log, StringComparison.Ordinal);
     }
 
     /// <summary>

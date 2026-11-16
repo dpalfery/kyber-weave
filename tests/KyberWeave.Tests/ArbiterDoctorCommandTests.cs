@@ -1,3 +1,9 @@
+using KyberWeave.Data.Configuration;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Tests.Arbiter;
+using Microsoft.Extensions.DependencyInjection;
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
 using System.Text.RegularExpressions;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Core.Configuration;
@@ -13,17 +19,17 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
 {
     private readonly TempDirectory _home = new();
     private readonly TempDirectory _repo = new();
-    private readonly Func<string> _savedHome;
+    private readonly ArbiterTestHost _host;
 
     public ArbiterDoctorCommandTests()
     {
-        _savedHome = ArbiterCommandComposition.HomeDirectory;
-        ArbiterCommandComposition.HomeDirectory = () => _home.Path;
+        _host = ArbiterTestHost.Create(services =>
+            services.AddSingleton<IProcessEnvironment>(new FakeProcessEnvironment(() => _home.Path)));
     }
 
     public void Dispose()
     {
-        ArbiterCommandComposition.HomeDirectory = _savedHome;
+        _host.Dispose();
         _home.Dispose();
         _repo.Dispose();
     }
@@ -31,14 +37,14 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
     [Fact]
     public void Doctor_ReportsScopeSummary_AndWarnsWhenProjectEnabledWithoutHooks()
     {
-        UserHostConfig.WriteGlobalTargets(_home.Path, ["warp", "opencode", "pi"]);
+        new FileUserHostConfigStore().WriteGlobalTargets(_home.Path, ["warp", "opencode", "pi"]);
         WriteProjectConfig(
             """
             arbiter:
               enabled: true
             """);
 
-        CommandExecution execution = Capture(() => new ArbiterDoctorCommand().Execute(
+        CommandExecution execution = Capture(() => _host.Command<ArbiterDoctorCommand>().Execute(
             null!,
             new ArbiterSettings { Path = _repo.Path }));
 
@@ -97,7 +103,7 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
     [Fact]
     public void Doctor_WarnsModelMissingWhenTargetingIsOnAndTheHookedTargetHasNoTargetsFile()
     {
-        UserHostConfig.WriteGlobalTargets(_home.Path, ["claude"]);
+        new FileUserHostConfigStore().WriteGlobalTargets(_home.Path, ["claude"]);
         WriteProjectConfig(ShadowModelTargetingYaml);
 
         CommandExecution execution = RunDoctor();
@@ -110,7 +116,7 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
     [Fact]
     public void Doctor_WarnsModelUnreadableWhenTheTargetsFileDoesNotParse()
     {
-        UserHostConfig.WriteGlobalTargets(_home.Path, ["claude"]);
+        new FileUserHostConfigStore().WriteGlobalTargets(_home.Path, ["claude"]);
         WriteProjectConfig(ShadowModelTargetingYaml);
         WriteFile(GlobalModelTargetsPath, "{not json");
 
@@ -127,7 +133,7 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
     [Fact]
     public void Doctor_WarnsModelStaleWhenTheTargetsFileIsOlderThanTheSquadLock()
     {
-        UserHostConfig.WriteGlobalTargets(_home.Path, ["claude"]);
+        new FileUserHostConfigStore().WriteGlobalTargets(_home.Path, ["claude"]);
         WriteProjectConfig(ShadowModelTargetingYaml);
         WriteFile(GlobalModelTargetsPath, ModelTargetsJson);
         WriteFile(GlobalLockPath, "schema: kyber-squad.lock/v2\n");
@@ -144,7 +150,7 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
     [Fact]
     public void Doctor_DoesNotWarnModelWhenTheTargetsFileIsCurrent()
     {
-        UserHostConfig.WriteGlobalTargets(_home.Path, ["claude"]);
+        new FileUserHostConfigStore().WriteGlobalTargets(_home.Path, ["claude"]);
         WriteProjectConfig(ShadowModelTargetingYaml);
         WriteFile(GlobalModelTargetsPath, ModelTargetsJson);
         WriteFile(GlobalLockPath, "schema: kyber-squad.lock/v2\n");
@@ -160,7 +166,7 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
     [Fact]
     public void Doctor_DoesNotWarnModelWhenTargetingIsOff()
     {
-        UserHostConfig.WriteGlobalTargets(_home.Path, ["claude"]);
+        new FileUserHostConfigStore().WriteGlobalTargets(_home.Path, ["claude"]);
         WriteProjectConfig(
             """
             arbiter:
@@ -178,7 +184,7 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
     [Fact]
     public void Doctor_DoesNotWarnModelWhenNoHookedTargetIsInstalled()
     {
-        UserHostConfig.WriteGlobalTargets(_home.Path, ["warp"]);
+        new FileUserHostConfigStore().WriteGlobalTargets(_home.Path, ["warp"]);
         WriteProjectConfig(ShadowModelTargetingYaml);
 
         CommandExecution execution = RunDoctor();
@@ -187,7 +193,7 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
     }
 
     private CommandExecution RunDoctor() =>
-        Capture(() => new ArbiterDoctorCommand().Execute(
+        Capture(() => _host.Command<ArbiterDoctorCommand>().Execute(
             null!,
             new ArbiterSettings { Path = _repo.Path }));
 

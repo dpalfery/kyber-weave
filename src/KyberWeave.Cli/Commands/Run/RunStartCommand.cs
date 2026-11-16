@@ -2,12 +2,15 @@ using System.Globalization;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Doctor;
 using System.Text.Json.Nodes;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Cli.Commands.Squad.Brief;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Domain.Doctor;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.RunStart;
 using KyberWeave.Core.Squad.Briefs;
@@ -51,31 +54,41 @@ public sealed class RunStartCommand : Command<RunStartSettings>
 
     private const string CommandName = "kyber-weave run start";
 
-    /// <summary>
-    ///     The bound on one child. A fetch that reaches a slow remote is the only one expected to take real
-    ///     time; a hung child must not hold the run open, which is why no call here is unbounded.
-    /// </summary>
-    private static readonly TimeSpan ToolTimeout = TimeSpan.FromSeconds(120);
-
-    /// <summary>The bound on the CodeGraph index run, the same default <c>doctor --ensure</c> uses.</summary>
-    private static readonly TimeSpan IndexTimeout = TimeSpan.FromSeconds(DoctorSettings.DefaultIndexTimeoutSeconds);
-
-    private static readonly TimeSpan McpTimeout = TimeSpan.FromSeconds(DoctorSettings.DefaultMcpTimeoutSeconds);
-
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
+    private readonly IRunStartRunnerFactory _runners;
+    private readonly IRunStartService _starts;
+    private readonly ISquadBriefBuilder _briefs;
+    private readonly IConfigLoadService _configs;
+    private readonly IProcessEnvironment _environment;
     private readonly IProcessExecutor? _executor;
 
-    /// <summary>Creates the command with the production process executor.</summary>
-    public RunStartCommand()
+    /// <summary>Creates the command over the services it reads and writes through.</summary>
+    /// <param name="runners">Opens the git runner for the repository the run starts in.</param>
+    /// <param name="starts">Fetches, resolves the base and creates the branch.</param>
+    /// <param name="briefs">Builds the conductor's brief.</param>
+    /// <param name="configs">Loads the repository's configuration.</param>
+    /// <param name="environment">The current directory.</param>
+    /// <param name="executor">The executor the CodeGraph index run goes through; the bounded production executor when none is registered.</param>
+    public RunStartCommand(
+        IRunStartRunnerFactory runners,
+        IRunStartService starts,
+        ISquadBriefBuilder briefs,
+        IConfigLoadService configs,
+        IProcessEnvironment environment,
+        IProcessExecutor? executor = null)
     {
-    }
+        ArgumentNullException.ThrowIfNull(runners);
+        ArgumentNullException.ThrowIfNull(starts);
+        ArgumentNullException.ThrowIfNull(briefs);
+        ArgumentNullException.ThrowIfNull(configs);
+        ArgumentNullException.ThrowIfNull(environment);
 
-    /// <summary>Creates the command with an injected process seam, for a caller that supplies its own.</summary>
-    /// <param name="executor">The executor every git and CodeGraph child runs through.</param>
-    internal RunStartCommand(IProcessExecutor executor)
-    {
-        ArgumentNullException.ThrowIfNull(executor);
+        _runners = runners;
+        _starts = starts;
+        _briefs = briefs;
+        _configs = configs;
+        _environment = environment;
         _executor = executor;
     }
 
@@ -102,322 +115,82 @@ public sealed class RunStartCommand : Command<RunStartSettings>
             return Refuse("--path and --autonomy only apply with --brief.");
         }
 
-        if (settings.Brief && !SquadBriefBuilder.AcceptsFacts(settings.Path, settings.Autonomy, out string briefRefusal))
+        if (settings.Brief && !_briefs.AcceptsFacts(settings.Path, settings.Autonomy, out string briefRefusal))
         {
             return Refuse(briefRefusal);
         }
 
-        IProcessExecutor executor = _executor ?? ProcessExecutor.WithTimeout(ToolTimeout);
-
-        string? repositoryRoot = new RunStartRunner(executor, Environment.CurrentDirectory).DetectRepositoryRoot();
+        string currentDirectory = _environment.CurrentDirectory;
+        string? repositoryRoot = _runners.Open(currentDirectory).DetectRepositoryRoot();
         if (repositoryRoot is null)
         {
             return Fail(
-                $"'{Environment.CurrentDirectory}' is not inside a git repository, so there is no checkout " +
+                $"'{currentDirectory}' is not inside a git repository, so there is no checkout " +
                 "to fetch into or to create the branch in.");
         }
 
-        RunStartRunner runner = new(executor, repositoryRoot);
-
         DiagnosticReport report = new();
-        if (!CommandHelpers.TryLoadConfig(repositoryRoot, null, report, out KyberWeaveConfig config, out string? configPath))
+        if (!_configs.TryLoad(repositoryRoot, null, report, out KyberWeaveConfig config, out string? configPath))
         {
             WriteDiagnostics(report);
             return ToolFailure;
         }
 
-        // Before the tool checks, on purpose. A worker that cannot reach the standards and gates this
-        // repository chose cannot use the tools anyway, and a tool failure reported first would send the
-        // operator to repair a remote that was never the thing standing in the way.
-        if (RunStartPlanner.NeedsOnboarding(config, configPath is not null))
-        {
-            return StopForOnboarding(config, configPath, repositoryRoot);
-        }
+        RunStartOutcome outcome = _starts.Start(
+            new RunStartRequest(repositoryRoot, branch, settings.Resume, config, configPath, _executor));
+        WriteMessages(outcome.Messages, settings.Json);
 
-        if (!RunStartRunner.CodeGraphBinaryIsAvailable())
+        if (outcome.Facts is not { } facts)
         {
-            AnsiConsole.MarkupLine(
-                $"[red]{Markup.Escape(CommandName)}: error:[/] 'codegraph' is not on PATH, so the tools a " +
-                "run depends on cannot be indexed or tested.");
-            AnsiConsole.MarkupLine(
-                "[grey]→ install the CodeGraph CLI so that 'codegraph' resolves on PATH, then start the run " +
-                "again.[/]");
-            return CodeGraphMissing;
-        }
-
-        GitOutcome fetch = runner.Fetch();
-        if (!fetch.Succeeded)
-        {
-            if (config.ConfigReg.StopsOnToolFailure)
+            return outcome.Status switch
             {
-                AnsiConsole.MarkupLine(
-                    $"[red]{Markup.Escape(CommandName)}: error:[/] 'git fetch origin --prune' failed: " +
-                    $"{Markup.Escape(fetch.FirstErrorLine)}");
-                AnsiConsole.MarkupLine(
-                    "[grey]→ a run that cannot refresh its base plans against stale history. Fix the remote, " +
-                    "or set 'stop-on-tool-failure: false' in .kyber-weave/kyber-weave.yml to continue from " +
-                    "the base this checkout last fetched.[/]");
-                return ToolFailure;
-            }
-
-            AnsiConsole.MarkupLine(
-                $"[yellow]warn[/] 'git fetch origin --prune' failed ({Markup.Escape(fetch.FirstErrorLine)}); " +
-                "continuing from the base this checkout last fetched.");
+                RunStartStatus.RefusedInput => RefusedInput,
+                RunStartStatus.CodeGraphMissing => CodeGraphMissing,
+                _ => ToolFailure,
+            };
         }
 
-        string baseRef = RunStartPlanner.BaseRefFor(config.ConfigReg.RunBaseBranch);
-        string? originHead = runner.OriginHeadSymbolicRef();
-        string baseBranch = RunStartPlanner.BaseBranchName(baseRef, originHead);
-        string? startRef = ResolveStartRef(runner, baseRef, originHead);
-        if (startRef is null)
-        {
-            AnsiConsole.MarkupLine(
-                $"[red]{Markup.Escape(CommandName)}: error:[/] no ref for the base " +
-                $"{Markup.Escape(baseRef)} resolves, so there is nothing to create the branch from.");
-            AnsiConsole.MarkupLine(
-                "[grey]→ set 'run.base-branch' in .kyber-weave/kyber-weave.yml to the branch the run is " +
-                "compared against, or re-run once the fetch can reach origin.[/]");
-            return ToolFailure;
-        }
-
-        string? resume = string.IsNullOrWhiteSpace(settings.Resume) ? null : settings.Resume.Trim();
-        string resumeRef = string.Empty;
-        string? resumeTarget = null;
-        if (resume is not null)
-        {
-            string remotePrefix = RunStartPlanner.Remote + "/";
-            bool isExplicitRemote = resume.StartsWith(remotePrefix, StringComparison.Ordinal);
-            string stripped = isExplicitRemote
-                ? resume[remotePrefix.Length..]
-                : resume;
-
-            if (string.Equals(stripped, "HEAD", StringComparison.Ordinal))
-            {
-                return Refuse(
-                    $"'{resume}' is a symbolic reference, not a branch name. Pass the " +
-                    "branch a plan or pull request already owns.");
-            }
-
-            if (isExplicitRemote)
-            {
-                if (runner.HasRemoteBranch(stripped))
-                {
-                    resumeRef = remotePrefix + stripped;
-                    resumeTarget = stripped;
-                }
-                else
-                {
-                    return Refuse(
-                        $"No local or origin branch is named '{resume}', so there is nothing to resume. Pass the " +
-                        "branch a plan or pull request already owns.");
-                }
-            }
-            else if (runner.HasLocalBranch(resume))
-            {
-                resumeRef = resume;
-                resumeTarget = resume;
-            }
-            else if (runner.HasRemoteBranch(resume))
-            {
-                resumeRef = remotePrefix + resume;
-                resumeTarget = resume;
-            }
-            else
-            {
-                return Refuse(
-                    $"No local or origin branch is named '{resume}', so there is nothing to resume. Pass the " +
-                    "branch a plan or pull request already owns.");
-            }
-        }
-
-        // Checked after the fetch, so a branch pushed from elsewhere counts. Git's own error would not say that
-        // resuming is the way to continue the branch.
-        if (resume is null && (runner.HasLocalBranch(branch) || runner.HasRemoteBranch(branch)))
-        {
-            return Refuse(BranchExists(branch));
-        }
-
-        // The finished tasks come from the resumed branch's own commits, read while it is still the branch
-        // named rather than the one checked out. A branch carrying none is a normal beginning, not a
-        // failure, and a log that cannot be read is reported without stopping a resume that can still
-        // continue the work.
-        IReadOnlyList<RunStartCompletedTask> completed = [];
-        string? completedWarning = null;
-        if (resumeRef.Length > 0)
-        {
-            TryReadResumeLog(
-                () => runner.CommitMessages(startRef, resumeRef),
-                resumeRef,
-                out completed,
-                out completedWarning);
-        }
-
-        // Read before anything is switched: the versions and the divergence describe the checkout as the
-        // operator left it, which is the state a defect was observed in. A resumed branch is described by
-        // its own tip, because that is what continuing on it means.
-        string? headRevision = runner.ResolveRevision("HEAD");
-        string? baseRevision = runner.ResolveRevision(startRef);
-        string headVersion = runner.Describe("HEAD") ?? "unknown";
-        string baseVersion = runner.Describe(startRef) ?? "unknown";
-        string alignmentRef = resume is null ? "HEAD" : resumeRef;
-        string? alignmentRevision = runner.ResolveRevision(alignmentRef);
-        (int? ahead, int? behind) = runner.Divergence(alignmentRef, startRef);
-        string? originUrl = runner.OriginAddress();
-
-        GitOutcome status = runner.CheckoutStatus();
-        if (!status.Succeeded)
-        {
-            return Fail($"git status failed: {status.FirstErrorLine}");
-        }
-
-        GitOutcome worktrees = runner.WorktreeList();
-        if (!worktrees.Succeeded)
-        {
-            return Fail($"git worktree list failed: {worktrees.FirstErrorLine}");
-        }
-
-        bool anotherWorktreeIsAttached = RunStartRunner.HasMultipleWorktrees(worktrees.StandardOutput);
-
-        RunStartLocation location = RunStartPlanner.DecideLocation(
-            status.StandardOutput.Trim().Length == 0,
-            anotherWorktreeIsAttached);
-
-        string target = resumeTarget ?? branch;
-        string? worktreePath = null;
-        GitOutcome created;
-        if (location == RunStartLocation.InPlace)
-        {
-            created = resumeTarget is null
-                ? runner.CreateBranchInPlace(target, startRef)
-                : runner.SwitchToBranch(target);
-        }
-        else
-        {
-            string? held = resumeTarget is null
-                ? null
-                : RunStartRunner.WorktreeHolding(worktrees.StandardOutput, resumeTarget);
-            if (held is not null && Directory.Exists(held))
-            {
-                // Git allows a branch in one worktree only, so a resume continues in the one that holds it.
-                worktreePath = held;
-                created = new GitOutcome(0, string.Empty, string.Empty);
-            }
-            else
-            {
-                // A folder deleted by hand stays registered and would still claim the branch. Pruning removes
-                // only entries whose folder is gone.
-                if (held is not null)
-                {
-                    GitOutcome pruned = runner.Git("worktree", "prune");
-                    if (!pruned.Succeeded)
-                    {
-                        return Fail(
-                            $"git worktree prune failed, so the deleted folder '{held}' still claims " +
-                            $"'{target}': {pruned.FirstErrorLine}");
-                    }
-                }
-
-                worktreePath = runner.WorktreePathFor(target, DateTimeOffset.UtcNow);
-                try
-                {
-                    created = resumeTarget is null
-                        ? runner.CreateBranchInWorktree(target, startRef, worktreePath)
-                        : runner.AddWorktreeForBranch(target, worktreePath, resumeRef);
-                }
-                finally
-                {
-                    // Released whether git succeeded, failed, or threw, so no claim outlives its run.
-                    RunStartRunner.ReleaseWorktreeClaim(worktreePath);
-                }
-            }
-        }
-
-        // The check before creation can lose to another run of the same slug. That loser gets the same refusal
-        // and exit code as a branch that existed from the start, not a generic git failure.
-        if (!created.Succeeded && resume is null && runner.HasLocalBranch(branch))
-            return Refuse(BranchExists(branch));
-
-        if (!created.Succeeded)
-        {
-            return Fail(
-                $"git could not put '{target}' in place: {created.FirstErrorLine}");
-        }
-
-        // The branch is placed: record the base it was created from where a later dispatch
-        // hook can read it. The record is auxiliary — the run's own report below still names
-        // the base — so a missing home degrades to the hook's default base rather than
-        // failing a run that is otherwise ready.
-        // Where the run works is recorded with it, so the dispatch guard can tell a started run from none.
-        string? repository = GitFacts.GetCommonDirectory(repositoryRoot);
-        RecordBase(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            target,
-            startRef,
-            repository is null ? null : new RunStartPlace(repository, worktreePath ?? repositoryRoot, DateTimeOffset.UtcNow));
-
-        // A new worktree has no index of its own, so the index goes where the run works. A failure here does not
-        // undo the branch: the operator repairs the index and the run continues in that tree.
-        string indexTree = worktreePath ?? repositoryRoot;
-        IProcessExecutor indexExecutor = _executor ?? ProcessExecutor.WithTimeout(IndexTimeout);
-        WorktreeIndexOutcome index = WorktreeIndexGuard.Ensure(
-            indexTree,
-            new DoctorOptions(
-                IndexTimeout,
-                McpTimeout,
-                DoctorCommand.CodeGraphExecutable,
-                DoctorCommand.DefaultMcpExecutable),
-            indexExecutor,
-            Path.GetTempPath());
-        string indexLabel = IndexLabel(index);
-
-        if (index.StopsRun)
-        {
-            ReportIndexStop(settings.Json, indexTree, target, index);
-            return ToolFailure;
-        }
-
-        if (index.Status is WorktreeIndexStatus.Failed or WorktreeIndexStatus.BinaryMissing)
-            ReportIndexWarning(settings.Json, indexTree, index);
-
+        string indexTree = facts.IndexTree;
+        string? worktreePath = facts.WorktreePath;
         BriefResult? brief = settings.Brief
             ? BuildBrief(settings, config, indexTree, repositoryRoot, worktreePath is not null, runHarness: settings.Harness)
             : null;
 
         if (settings.Json)
         {
-            object facts = new
+            object json = new
             {
-                @base = baseBranch,
-                baseRef = startRef,
-                branch = target,
+                @base = facts.BaseBranch,
+                baseRef = facts.StartRef,
+                branch = facts.Branch,
                 worktree = worktreePath,
-                location = location == RunStartLocation.InPlace ? "in-place" : "worktree",
-                revision = baseRevision,
-                resumed = resume is not null,
-                index = indexLabel,
-                completed = completed.Select(task => new { id = task.Id, report = task.Report }),
-                completedWarning,
+                location = facts.Location == RunStartLocation.InPlace ? "in-place" : "worktree",
+                revision = facts.BaseRevision,
+                resumed = facts.ResumeTarget is not null,
+                index = facts.IndexLabel,
+                completed = facts.Completed.Select(task => new { id = task.Id, report = task.Report }),
+                completedWarning = facts.CompletedWarning,
                 versions = new
                 {
                     failing = settings.FailingVersion,
-                    head = headVersion,
-                    @base = baseVersion
+                    head = facts.HeadVersion,
+                    @base = facts.BaseVersion
                 },
                 serverAlignment = new
                 {
                     remote = RunStartPlanner.Remote,
-                    host = HostOf(originUrl),
-                    remoteUrl = originUrl,
-                    head = alignmentRevision,
-                    ahead,
-                    behind,
-                    aligned = ahead is not null && behind is not null
-                            ? ahead == 0 && behind == 0
+                    host = RunStartPlanner.HostOf(facts.OriginAddress),
+                    remoteUrl = facts.OriginAddress,
+                    head = facts.AlignmentRevision,
+                    ahead = facts.Ahead,
+                    behind = facts.Behind,
+                    aligned = facts.Ahead is not null && facts.Behind is not null
+                            ? facts.Ahead == 0 && facts.Behind == 0
                             : (bool?)null
                 }
             };
 
-            JsonNode document = JsonSerializer.SerializeToNode(facts, JsonOptions)!;
+            JsonNode document = JsonSerializer.SerializeToNode(json, JsonOptions)!;
             if (brief is not null)
             {
                 document["brief"] = JsonNode.Parse(BriefFormatter.ToJson(brief));
@@ -428,22 +201,22 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         }
 
         WriteReport(
-            baseBranch,
-            startRef,
-            target,
-            location,
+            facts.BaseBranch,
+            facts.StartRef,
+            facts.Branch,
+            facts.Location,
             worktreePath,
-            baseRevision,
-            resumeTarget,
+            facts.BaseRevision,
+            facts.ResumeTarget,
             settings.FailingVersion,
-            headVersion,
-            baseVersion,
-            ahead,
-            behind,
-            headRevision,
-            completed,
-            completedWarning,
-            indexLabel);
+            facts.HeadVersion,
+            facts.BaseVersion,
+            facts.Ahead,
+            facts.Behind,
+            facts.HeadRevision,
+            facts.Completed,
+            facts.CompletedWarning,
+            facts.IndexLabel);
 
         if (brief is not null)
         {
@@ -451,6 +224,43 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         }
 
         return Ready;
+    }
+
+    /// <summary>Prints what the step has to tell the operator, in the order it came.</summary>
+    /// <param name="messages">The lines the service collected.</param>
+    /// <param name="json">Whether standard output must stay one JSON document.</param>
+    private static void WriteMessages(IReadOnlyList<RunStartMessage> messages, bool json)
+    {
+        foreach (RunStartMessage message in messages)
+        {
+            if (json && message.StandardErrorWhenJson)
+            {
+                Console.Error.WriteLine(message.Kind switch
+                {
+                    RunStartMessageKind.Error => $"{CommandName}: error: {message.Text}",
+                    RunStartMessageKind.Remedy => $"→ {message.Text}",
+                    RunStartMessageKind.Warning => $"{CommandName}: warn: {message.Text}",
+                    _ => message.Text,
+                });
+                continue;
+            }
+
+            AnsiConsole.MarkupLine(message.Kind switch
+            {
+                RunStartMessageKind.Error => $"[red]{Markup.Escape(CommandName)}: error:[/] {Markup.Escape(message.Text)}",
+                RunStartMessageKind.Remedy => $"[grey]→ {Markup.Escape(message.Text)}[/]",
+                RunStartMessageKind.Warning => $"[yellow]warn[/] {Markup.Escape(message.Text)}",
+                _ => $"[grey]  {Markup.Escape(message.Text)}[/]",
+            });
+        }
+    }
+
+    /// <summary>The two-argument overload the rest of this branch's commands carry.</summary>
+    /// <param name="context">The command context Spectre supplies.</param>
+    /// <param name="settings">The parsed settings.</param>
+    public int Execute(CommandContext context, RunStartSettings settings)
+    {
+        return Execute(context, settings, CancellationToken.None);
     }
 
     /// <summary>
@@ -479,7 +289,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
             roots,
             config);
 
-        if (SquadBriefBuilder.TryBuild(request, out BriefResult? result, out string error))
+        if (_briefs.TryBuild(request, out BriefResult? result, out string error))
         {
             return result;
         }
@@ -495,204 +305,6 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         }
 
         return null;
-    }
-
-    /// <summary>The index state as the <c>index</c> JSON field and the report line name it.</summary>
-    private static string IndexLabel(WorktreeIndexOutcome index) => index.Status switch
-    {
-        WorktreeIndexStatus.Ready => index.Created ? "created" : "ready",
-        WorktreeIndexStatus.NotGoverned => "not-governed",
-        _ => "warning",
-    };
-
-    /// <summary>The first failed check's reason, which says what stopped the index.</summary>
-    private static string IndexReason(WorktreeIndexOutcome index) =>
-        index.Checks.FirstOrDefault(check => !check.Passed)?.Reason ?? "no reason was reported";
-
-    /// <summary>
-    ///     Reports an index that stops the run. In <c>--json</c> mode standard output must stay a JSON document, so the
-    ///     text goes to standard error instead.
-    /// </summary>
-    private static void ReportIndexStop(bool json, string tree, string branch, WorktreeIndexOutcome index)
-    {
-        string error =
-            $"the CodeGraph index for '{tree}' is not usable ({IndexReason(index)}), so the run stops here. " +
-            $"The branch '{branch}' is in place.";
-        string remedy =
-            $"repair the index with: kyber-weave doctor --ensure {ShellQuote.Quote(tree)} (the branch needs no " +
-            "second run start: once that command passes, the run continues in that tree).";
-
-        if (json)
-        {
-            Console.Error.WriteLine($"{CommandName}: error: {error}");
-            Console.Error.WriteLine($"→ {remedy}");
-            return;
-        }
-
-        AnsiConsole.MarkupLine($"[red]{Markup.Escape(CommandName)}: error:[/] {Markup.Escape(error)}");
-        AnsiConsole.MarkupLine($"[grey]→ {Markup.Escape(remedy)}[/]");
-    }
-
-    /// <summary>Reports an index that failed on a repository that continues past tool failures.</summary>
-    private static void ReportIndexWarning(bool json, string tree, WorktreeIndexOutcome index)
-    {
-        string warning =
-            $"the CodeGraph index for '{tree}' could not be prepared ({IndexReason(index)}), so the run continues " +
-            $"without it. Repair it with: kyber-weave doctor --ensure {ShellQuote.Quote(tree)}";
-
-        if (json)
-        {
-            Console.Error.WriteLine($"{CommandName}: warn: {warning}");
-            return;
-        }
-
-        AnsiConsole.MarkupLine($"[yellow]warn[/] {Markup.Escape(warning)}");
-    }
-
-    /// <summary>
-    /// Records the base <paramref name="branch" /> was created from where a later dispatch
-    /// hook can read it. Best effort: false when there is nowhere to record (or the record
-    /// cannot be written), in which case the hook falls back to its default base.
-    /// </summary>
-    internal static bool RecordBase(string homeDirectory, string branch, string baseRef, RunStartPlace? place = null)
-    {
-        if (string.IsNullOrWhiteSpace(homeDirectory))
-        {
-            return false;
-        }
-
-        try
-        {
-            RunBaseState.Write(homeDirectory, branch, baseRef, place);
-            return true;
-        }
-        catch (Exception exception) when (FileFailure.Is(exception))
-        {
-            return false;
-        }
-    }
-
-    /// <summary>The two-argument overload the rest of this branch's commands carry.</summary>
-    /// <param name="context">The command context Spectre supplies.</param>
-    /// <param name="settings">The parsed settings.</param>
-    public int Execute(CommandContext context, RunStartSettings settings)
-    {
-        return Execute(context, settings, CancellationToken.None);
-    }
-
-    /// <summary>
-    /// Reads the resumed branch's finished tasks from its commit log. A log that cannot be read
-    /// is a warning on a resume that can still continue the work; anything else is reported
-    /// through <paramref name="completedWarning" /> with no finished tasks.
-    /// </summary>
-    /// <remarks>
-    /// The catch stays narrow on purpose: a cancelled wait escapes, and an
-    /// <c>ArgumentException</c> — the guards on <c>RunStartRunner.CommitMessages</c> throw it for
-    /// an empty ref — is a programming error, not a log that cannot be read, so it escapes too
-    /// instead of passing as a soft warning.
-    /// </remarks>
-    /// <param name="readLog">Reads the commit log between the base and the resumed ref.</param>
-    /// <param name="resumeRef">The resumed ref, named in the warning when the log cannot be read.</param>
-    /// <param name="completed">The finished tasks the log names, or empty when it cannot be read.</param>
-    /// <param name="completedWarning">Null when the log read cleanly.</param>
-    internal static void TryReadResumeLog(
-        Func<GitOutcome> readLog,
-        string resumeRef,
-        out IReadOnlyList<RunStartCompletedTask> completed,
-        out string? completedWarning)
-    {
-        ArgumentNullException.ThrowIfNull(readLog);
-
-        GitOutcome log;
-        try
-        {
-            log = readLog();
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException and not ArgumentException)
-        {
-            completed = [];
-            completedWarning =
-                $"git log could not read the commits on '{resumeRef}': {ex.Message}";
-            return;
-        }
-
-        if (log.Succeeded)
-        {
-            completed = RunStartResumeReader.Read(log.StandardOutput);
-            completedWarning = null;
-        }
-        else
-        {
-            completed = [];
-            completedWarning =
-                $"git log could not read the commits on '{resumeRef}': {log.FirstErrorLine}";
-        }
-    }
-
-    /// <summary>
-    ///     The first ref that resolves for the base: the configured branch, then the default branch, and the
-    ///     local branch of that name as a last resort so a repository without remote-tracking refs still has
-    ///     somewhere to start.
-    /// </summary>
-    private static string? ResolveStartRef(RunStartRunner runner, string baseRef, string? originHead)
-    {
-        foreach (string candidate in StartRefCandidates(baseRef, originHead))
-        {
-            if (runner.ResolveRevision(candidate) is not null)
-                return candidate;
-        }
-
-        return null;
-    }
-
-    private static List<string> StartRefCandidates(string baseRef, string? originHead)
-    {
-        List<string> candidates = [];
-
-        if (!string.Equals(baseRef, RunStartPlanner.RemoteHead, StringComparison.Ordinal))
-        {
-            candidates.Add(baseRef);
-            candidates.Add(RunStartPlanner.BaseBranchName(baseRef, originHead));
-            return candidates;
-        }
-
-        if (!string.IsNullOrWhiteSpace(originHead))
-        {
-            candidates.Add(originHead);
-            candidates.Add(RunStartPlanner.BaseBranchName(originHead, null));
-        }
-
-        candidates.Add(RunStartPlanner.RemoteHead);
-        return candidates;
-    }
-
-    /// <summary>
-    ///     The host a remote URL names, or null when the URL is a local path this command cannot attribute to
-    ///     a server.
-    /// </summary>
-    private static string? HostOf(string? remoteUrlText)
-    {
-        if (string.IsNullOrWhiteSpace(remoteUrlText))
-            return null;
-
-        string text = remoteUrlText.Trim();
-        if (Uri.TryCreate(text, UriKind.Absolute, out Uri? url) && !url.IsFile && url.Host.Length > 0)
-            return url.Host;
-
-        // The scp-like form git also accepts: [user@]host:path. It carries no scheme, so Uri cannot read it.
-        int at = text.LastIndexOf('@');
-        string afterUser = at >= 0 ? text[(at + 1)..] : text;
-        int separator = afterUser.IndexOfAny([':', '/']);
-        if (separator <= 0)
-            return null;
-
-        string host = afterUser[..separator];
-        if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase))
-            return host;
-
-        // A bare path or a drive letter is not a server, and only a dotted name is read as one: reporting
-        // "C" as the host a checkout is aligned with would be worse than reporting nothing.
-        return host.Contains('.', StringComparison.Ordinal) ? host : null;
     }
 
     private static void WriteReport(
@@ -788,10 +400,6 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         }
     }
 
-    private static string BranchExists(string branch) =>
-        $"A branch named '{branch}' already exists. To continue it, re-run with --resume {branch}. " +
-        "To start separate work, choose a different --slug.";
-
     private static int Refuse(string message)
     {
         AnsiConsole.MarkupLine(
@@ -803,41 +411,6 @@ public sealed class RunStartCommand : Command<RunStartSettings>
     {
         AnsiConsole.MarkupLine(
             $"[red]{Markup.Escape(CommandName)}: error:[/] {Markup.Escape(message)}");
-        return ToolFailure;
-    }
-
-    /// <summary>
-    /// Reports that the repository never answered the onboarding question, and what answers it.
-    /// </summary>
-    /// <param name="config">The configuration the run loaded, read for the autonomy setting only.</param>
-    /// <remarks>
-    /// The message names the skill and the verb rather than only the missing key: a stop that says
-    /// "onboarding is unset" leaves the operator to find both. In autonomous mode it also says that this run
-    /// will neither ask nor record an answer, because the setting stays exactly as it was found.
-    /// </remarks>
-    private static int StopForOnboarding(KyberWeaveConfig config, string? configPath, string repoRoot)
-    {
-        string location = configPath is not null
-            ? Path.GetRelativePath(repoRoot, configPath).Replace('\\', '/')
-            : ".kyber-weave/kyber-weave.yml";
-
-        AnsiConsole.MarkupLine(
-            $"[red]{Markup.Escape(CommandName)}: error:[/] this repository has not completed onboarding: " +
-            $"{Markup.Escape(location)} sets no 'onboarding:' value, so a run would plan against " +
-            "gates and standards that nobody chose for it.");
-        AnsiConsole.MarkupLine(
-            $"[grey]→ run the {Markup.Escape(RunStartPlanner.OnboardingSkill)} skill to choose this " +
-            "repository's technologies, gates and standards, then record the answer with " +
-            "'kyber-weave docs onboarding done' — or 'kyber-weave docs onboarding declined' to record " +
-            "that you chose not to.[/]");
-
-        if (string.Equals(config.ConfigReg.Autonomy, ConfigRegConfig.AutonomousAutonomy, StringComparison.Ordinal))
-        {
-            AnsiConsole.MarkupLine(
-                "[grey]  This run is autonomous, so it has asked nothing and written nothing: record the " +
-                "answer once, and every later run reads it.[/]");
-        }
-
         return ToolFailure;
     }
 

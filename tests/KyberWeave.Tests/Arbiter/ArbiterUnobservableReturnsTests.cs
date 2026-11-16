@@ -196,12 +196,12 @@ public sealed class ArbiterUnobservableReturnsTests
 
     private static HookCommand RealCommand(WiringRepo repo, string home, bool answerWaiting = false)
     {
-        ArbiterHookDecisionEngine engine = new(
+        ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
             providerFactory: _ => new WiringProvider { AnswerWaiting = answerWaiting },
             homeDirectory: () => home);
-        return new HookCommand(
-            HarnessAdapterRegistry.CreateDefault(engine),
-            Composition.LoadHostConfig,
+        return ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
+            ArbiterTestServices.LoadHostConfig,
             () => "wiring-decision-1");
     }
 

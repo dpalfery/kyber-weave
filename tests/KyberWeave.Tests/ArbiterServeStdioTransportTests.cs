@@ -1,6 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
-using KyberWeave.Arbiter.Hooks;
+using KyberWeave.Arbiter;
 using KyberWeave.Core.Processes;
 using Xunit;
 
@@ -45,7 +45,7 @@ public sealed class ArbiterServeStdioTransportTests
             UseShellExecute = false,
             WorkingDirectory = repository.Path,
         };
-        startInfo.ArgumentList.Add(typeof(HookCommand).Assembly.Location);
+        startInfo.ArgumentList.Add(typeof(Composition).Assembly.Location);
         startInfo.ArgumentList.Add("serve");
         startInfo.ArgumentList.Add("--repo-root");
         startInfo.ArgumentList.Add(repository.Path);

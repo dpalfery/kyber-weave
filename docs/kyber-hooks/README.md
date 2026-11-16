@@ -23,8 +23,9 @@ The first harness is Claude Code (a `PostToolUse` hook on `Edit|Write|MultiEdit`
 1. The hook reads the harness JSON on stdin and takes `tool_input.file_path` and `cwd`.
 2. It finds the repository root (the nearest folder with `.git` or `.kyber-weave`) and makes the
    path repository-relative.
-3. It merges `.kyber-weave/hooks.yml` over the built-in rules, picks the enabled rules whose
-   `include` globs match and `exclude` globs do not, and runs lint rules before test rules.
+3. It merges the repository's `.kyber-weave/hooks.yml` and then the user's `~/.kyber-weave/hooks.yml`
+   over the built-in rules, picks the enabled rules whose `include` globs match and `exclude` globs
+   do not, and runs lint rules before test rules.
 4. Each command gets its own timeout, capped by what is left of the total time budget.
 
 Install it with `dotnet tool install` for the `KyberWeave.Hooks` package, then add the hook to
@@ -99,8 +100,20 @@ test runner. A file with no covering test class gets no test run.
 
 ## Configuration
 
-Everything is optional. `.kyber-weave/hooks.yml` is merged over the built-in rules, and
-[`.kyber-weave/hooks.schema.json`](../../.kyber-weave/hooks.schema.json) gives editors validation.
+Everything is optional. Two files are merged over the built-in rules, in this order:
+
+| File | May tune the built-in rules | May add a rule that names a command |
+|---|---|---|
+| `.kyber-weave/hooks.yml` (repository) | yes | **no** |
+| `~/.kyber-weave/hooks.yml` (user) | yes | yes |
+
+The repository file is the one a clone carries, so it cannot name a command: an agent's edit must
+never execute a line a repository shipped. A rule the repository file adds is ignored with a warning
+that says to put it in the user file. The user file is the operator's own decision, so it may add a
+command, and it is merged last, so it wins over the repository for the same rule id.
+
+[`.kyber-weave/hooks.schema.json`](../../.kyber-weave/hooks.schema.json) gives editors validation for
+the repository file.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -129,7 +142,8 @@ Tokens in `run`: `{file}`, `{marker}`, `{project}` and `{target}` (the project, 
 repository-relative, `{root}` (absolute repository root), `{testProject}` (the test project holding the covering tests), and a standalone
 `{testClasses}` argument, which expands to one argument per class. `{testClasses}` is not expanded inside a longer
 argument such as `--filter={testClasses}`; a rule written that way never runs. Commands run from the repository
-root. A new rule (an id that is not built in) must set `kind`, `include` and `run`.
+root. A new rule (an id that is not built in) must set `kind`, `include` and `run`, and is accepted only
+from the user's file.
 
 Unknown keys, wrong value types and incomplete new rules produce a warning in the feedback and are
 otherwise ignored.
@@ -145,9 +159,9 @@ rules:
 
 ## Add a technology
 
-Add a rule that names the tool and the files it covers. The hook has no built-in knowledge of
-other stacks. For example, KyberDash TypeScript through the repository's process guard, and the
-Rust tray crate:
+Add a rule in `~/.kyber-weave/hooks.yml` that names the tool and the files it covers; a rule in the
+repository file is refused. The hook has no built-in knowledge of other stacks. For example,
+KyberDash TypeScript through the repository's process guard, and the Rust tray crate:
 
 ```yaml
 rules:

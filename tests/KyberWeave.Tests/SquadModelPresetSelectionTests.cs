@@ -1,4 +1,5 @@
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Tests.Fakes;
 using Xunit;
@@ -59,7 +60,7 @@ public sealed class SquadModelPresetSelectionTests : IDisposable
         store.Set(projectRoot, SquadTarget.Claude, "zai");
 
         // Assert
-        string canonicalPath = SquadPhysicalRootIdentity.Resolve(projectRoot).PhysicalPath;
+        string canonicalPath = SquadPhysicalRootIdentity.Resolve(projectRoot, SquadFileSystemPathSemantics.Instance).PhysicalPath;
         string rootKey = SquadPhysicalRootIdentity.KeyOf(canonicalPath);
         string expectedFilePath =
             Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "selections", $"{rootKey}.yml");
@@ -88,7 +89,7 @@ public sealed class SquadModelPresetSelectionTests : IDisposable
 
         // Assert
         Assert.NotNull(selection);
-        string canonicalPath = SquadPhysicalRootIdentity.Resolve(projectRoot).PhysicalPath;
+        string canonicalPath = SquadPhysicalRootIdentity.Resolve(projectRoot, SquadFileSystemPathSemantics.Instance).PhysicalPath;
         Assert.Equal(canonicalPath, selection.Root);
         Assert.NotNull(selection.ModelPresets);
         Assert.True(selection.ModelPresets.TryGetValue(SquadTarget.Claude, out string? presetName));
@@ -170,7 +171,7 @@ public sealed class SquadModelPresetSelectionTests : IDisposable
         SquadModelPresetSelectionStore store = new(userPaths);
         store.Set(projectRoot, SquadTarget.Claude, "zai");
 
-        string canonicalPath = SquadPhysicalRootIdentity.Resolve(projectRoot).PhysicalPath;
+        string canonicalPath = SquadPhysicalRootIdentity.Resolve(projectRoot, SquadFileSystemPathSemantics.Instance).PhysicalPath;
         string rootKey = SquadPhysicalRootIdentity.KeyOf(canonicalPath);
         string expectedFilePath =
             Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "selections", $"{rootKey}.yml");
@@ -228,8 +229,8 @@ public sealed class SquadModelPresetSelectionTests : IDisposable
         Assert.NotNull(fromSymlink);
         Assert.Equal("zai", fromSymlink.ModelPresets[SquadTarget.Claude]);
 
-        string keyFromCanonical = SquadPhysicalRootIdentity.Resolve(canonicalProjectRoot).Key;
-        string keyFromSymlink = SquadPhysicalRootIdentity.Resolve(symlinkProjectRoot).Key;
+        string keyFromCanonical = SquadPhysicalRootIdentity.Resolve(canonicalProjectRoot, SquadFileSystemPathSemantics.Instance).Key;
+        string keyFromSymlink = SquadPhysicalRootIdentity.Resolve(symlinkProjectRoot, SquadFileSystemPathSemantics.Instance).Key;
         Assert.Equal(keyFromCanonical, keyFromSymlink);
     }
 
@@ -270,7 +271,7 @@ public sealed class SquadModelPresetSelectionTests : IDisposable
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore, selectionStore: selectionStore);
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore, selectionStore: selectionStore);
 
         SquadInstallRequest request = new(
             projectRoot,
@@ -306,7 +307,7 @@ public sealed class SquadModelPresetSelectionTests : IDisposable
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore, selectionStore: selectionStore);
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore, selectionStore: selectionStore);
 
         SquadInstallRequest request = new(
             projectRoot,
@@ -353,7 +354,7 @@ public sealed class SquadModelPresetSelectionTests : IDisposable
         SquadModelPresetSelection? selection = store.Read(projectRoot);
 
         Assert.NotNull(selection);
-        string expectedPath = SquadPhysicalRootIdentity.Resolve(projectRoot).PhysicalPath;
+        string expectedPath = SquadPhysicalRootIdentity.Resolve(projectRoot, SquadFileSystemPathSemantics.Instance).PhysicalPath;
         Assert.Equal(expectedPath, selection.Root);
         Assert.True(selection.ModelPresets.TryGetValue(SquadTarget.Claude, out string? presetName));
         Assert.Equal("fast", presetName);

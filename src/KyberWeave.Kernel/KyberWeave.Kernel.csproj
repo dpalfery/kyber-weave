@@ -19,6 +19,8 @@
     <InternalsVisibleTo Include="KyberWeave.Core" />
     <InternalsVisibleTo Include="KyberWeave.Core.Docs" />
     <InternalsVisibleTo Include="KyberWeave.Core.Squad" />
+    <InternalsVisibleTo Include="KyberWeave.Data" />
+    <InternalsVisibleTo Include="KyberWeave.Application" />
   </ItemGroup>
 
   <!-- Each area owns one Areas\<Area>.props for its resources and package references, so parallel moves never edit the same lines. -->

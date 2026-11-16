@@ -172,7 +172,7 @@ internal sealed class KyberDashCapturePluginStep
         IReadOnlyList<SquadTarget> deployedTargets,
         bool noCapturePlugin,
         bool dryRun,
-        ISquadGlobalRootResolver? globalRoots)
+        ISquadGlobalRootResolver globalRoots)
     {
         if (step is null || noCapturePlugin)
             return;
