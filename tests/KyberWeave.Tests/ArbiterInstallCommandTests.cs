@@ -1,3 +1,4 @@
+using KyberWeave.Data.Configuration;
 using KyberWeave.Cli;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Squad;
@@ -89,7 +90,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
     public void Install_GlobalScope_ExplicitGlobal_IsAcceptedAndWritesToHomeConfigAndGlobalRoot()
     {
         string host = NewDir("install-global");
-        UserHostConfig.WriteGlobalTargets(_home.Path, ["claude", "warp"]);
+        new FileUserHostConfigStore().WriteGlobalTargets(_home.Path, ["claude", "warp"]);
 
         ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
@@ -110,7 +111,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
         string globalRoot = new SquadGlobalRoots(_ => null, _home.Path).ResolveGlobalRoot(SquadTarget.Claude);
         Assert.True(Directory.Exists(globalRoot), "the explicit global install should write beneath the target's global root");
 
-        string config = File.ReadAllText(UserHostConfig.GetPath(_home.Path));
+        string config = File.ReadAllText(UserHostConfigPath.Of(_home.Path));
         Assert.Contains("claude", config, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("global", config, StringComparison.OrdinalIgnoreCase);
     }
@@ -380,7 +381,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
     public void Install_DefaultScope_GlobalWritesToHomeConfigAndGlobalRoot()
     {
         string host = NewDir("install-global-default");
-        UserHostConfig.WriteGlobalTargets(_home.Path, ["claude", "warp"]);
+        new FileUserHostConfigStore().WriteGlobalTargets(_home.Path, ["claude", "warp"]);
 
         ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
@@ -400,7 +401,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
         string globalRoot = new SquadGlobalRoots(_ => null, _home.Path).ResolveGlobalRoot(SquadTarget.Claude);
         Assert.True(Directory.Exists(globalRoot), "the default install should write beneath the target's global root");
 
-        string config = File.ReadAllText(UserHostConfig.GetPath(_home.Path));
+        string config = File.ReadAllText(UserHostConfigPath.Of(_home.Path));
         Assert.Contains("claude", config, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("global", config, StringComparison.OrdinalIgnoreCase);
     }
@@ -414,7 +415,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
     public void Install_DefaultGlobalScope_WithoutUserConfig_CreatesUserConfigAndNoDocsScaffold()
     {
         string host = NewDir("install-global-default-empty-home");
-        Assert.False(File.Exists(UserHostConfig.GetPath(_home.Path)));
+        Assert.False(File.Exists(UserHostConfigPath.Of(_home.Path)));
         Assert.False(Directory.Exists(Path.Combine(_home.Path, "docs")));
         Assert.False(File.Exists(Path.Combine(_home.Path, "AGENTS.md")));
 
@@ -429,7 +430,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
             }));
 
         Assert.Equal(0, execution.ExitCode);
-        Assert.True(File.Exists(UserHostConfig.GetPath(_home.Path)), "the default global install should create the user config");
+        Assert.True(File.Exists(UserHostConfigPath.Of(_home.Path)), "the default global install should create the user config");
         Assert.False(Directory.Exists(Path.Combine(_home.Path, "docs")), "a global install must not scaffold docs under the home directory");
         Assert.False(File.Exists(Path.Combine(_home.Path, "AGENTS.md")), "a global install must not scaffold AGENTS.md under the home directory");
     }
@@ -444,7 +445,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
     public void Install_D13Output_ListsTierPathReasonAndTrustStepForEachGlobalHarness()
     {
         string host = NewDir("install-d13");
-        UserHostConfig.WriteGlobalTargets(_home.Path, ["claude", "warp", "copilot"]);
+        new FileUserHostConfigStore().WriteGlobalTargets(_home.Path, ["claude", "warp", "copilot"]);
 
         ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
@@ -594,7 +595,7 @@ public sealed class ArbiterInstallCommandTests : IDisposable
     public void Install_ThreeGlobalTargetsSharingOneHookFileName_AllExitZeroAndOneReceiptHoldsThreeBlocks()
     {
         string host = NewDir("install-three-global-blocks");
-        UserHostConfig.WriteGlobalTargets(_home.Path, ["cursor", "codex", "factory"]);
+        new FileUserHostConfigStore().WriteGlobalTargets(_home.Path, ["cursor", "codex", "factory"]);
         ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
 
         CommandExecution cursor = Capture(() => command.Execute(

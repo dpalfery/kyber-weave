@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Data.Configuration;
 using KyberWeave.Core.Configuration;
 using Xunit;
 
@@ -15,8 +16,8 @@ public sealed class UserHostConfigTests
         string home = Path.Combine(Path.GetTempPath(), "kyber-weave-user-host-config-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(home);
 
-        string path = UserHostConfig.GetPath(home);
-        string yaml = UserHostConfig.EnsureUserConfig(home);
+        string path = UserHostConfigPath.Of(home);
+        string yaml = new FileUserHostConfigStore().EnsureUserConfig(home);
 
         Assert.Equal(Path.Combine(home, ".kyber-weave", "kyber-weave.yml"), path);
         Assert.True(File.Exists(path));
@@ -30,7 +31,7 @@ public sealed class UserHostConfigTests
         string home = Path.Combine(Path.GetTempPath(), "kyber-weave-user-host-config-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(home);
 
-        string path = UserHostConfig.GetPath(home);
+        string path = UserHostConfigPath.Of(home);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path,
             "# keep this comment\n" +
@@ -41,14 +42,14 @@ public sealed class UserHostConfigTests
             "  provider:\n" +
             "    kind: none\n");
 
-        string yaml = UserHostConfig.EnsureUserConfig(home);
+        string yaml = new FileUserHostConfigStore().EnsureUserConfig(home);
 
         Assert.Contains("# keep this comment", yaml, StringComparison.Ordinal);
         Assert.Contains("ontology:", yaml, StringComparison.Ordinal);
         Assert.Contains("docs-root: docs", yaml, StringComparison.Ordinal);
         Assert.Contains("enabled: true", yaml, StringComparison.Ordinal);
         Assert.Contains("provider:\n    kind: none", yaml, StringComparison.Ordinal);
-        Assert.Equal(yaml, UserHostConfig.EnsureUserConfig(home));
+        Assert.Equal(yaml, new FileUserHostConfigStore().EnsureUserConfig(home));
     }
 
     [Fact]
@@ -57,11 +58,11 @@ public sealed class UserHostConfigTests
         string home = Path.Combine(Path.GetTempPath(), "kyber-weave-user-host-config-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(home);
 
-        string path = UserHostConfig.GetPath(home);
+        string path = UserHostConfigPath.Of(home);
         string configDirectory = Path.GetDirectoryName(path)!;
 
-        UserHostConfig.EnsureUserConfig(home);
-        UserHostConfig.WriteGlobalTargets(home, ["harness-token-01", "harness-token-02"]);
+        new FileUserHostConfigStore().EnsureUserConfig(home);
+        new FileUserHostConfigStore().WriteGlobalTargets(home, ["harness-token-01", "harness-token-02"]);
 
         string expected = "arbiter:\n" +
                           "  enabled: true\n" +
@@ -82,14 +83,14 @@ public sealed class UserHostConfigTests
         string home = Path.Combine(Path.GetTempPath(), "kyber-weave-user-host-config-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(home);
 
-        UserHostConfig.WriteGlobalTargets(home, ["harness-token-01", "harness-token-02"]);
+        new FileUserHostConfigStore().WriteGlobalTargets(home, ["harness-token-01", "harness-token-02"]);
 
-        string yaml = File.ReadAllText(UserHostConfig.GetPath(home));
+        string yaml = File.ReadAllText(UserHostConfigPath.Of(home));
         Assert.Contains("arbiter:", yaml, StringComparison.Ordinal);
         Assert.Contains("global:", yaml, StringComparison.Ordinal);
         Assert.Contains("targets:", yaml, StringComparison.Ordinal);
         Assert.Contains("harness-token-01", yaml, StringComparison.Ordinal);
         Assert.Contains("harness-token-02", yaml, StringComparison.Ordinal);
-        Assert.Equal(["harness-token-01", "harness-token-02"], UserHostConfig.ReadGlobalTargets(home));
+        Assert.Equal(["harness-token-01", "harness-token-02"], new FileUserHostConfigStore().ReadGlobalTargets(home));
     }
 }

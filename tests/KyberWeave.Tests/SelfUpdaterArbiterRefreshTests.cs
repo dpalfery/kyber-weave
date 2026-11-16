@@ -5,6 +5,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
+using KyberWeave.Data.Configuration;
 using KyberWeave.Cli.Update;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Processes;
@@ -59,7 +60,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             _ => null,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
-            arbiterTargets: new CliArbiterRefreshTargets(_ => null));
+            arbiterTargets: new CliArbiterRefreshTargets(_ => null, new FileUserHostConfigStore()));
         using SelfUpdater updater = new(
             handler,
             host,
@@ -67,7 +68,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             _ => null,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
-            arbiterTargets: new CliArbiterRefreshTargets(_ => null),
+            arbiterTargets: new CliArbiterRefreshTargets(_ => null, new FileUserHostConfigStore()),
             finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
@@ -94,7 +95,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             _ => null,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
-            arbiterTargets: new CliArbiterRefreshTargets(_ => null));
+            arbiterTargets: new CliArbiterRefreshTargets(_ => null, new FileUserHostConfigStore()));
         using SelfUpdater updater = new(
             handler,
             host,
@@ -102,7 +103,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             _ => null,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
-            arbiterTargets: new CliArbiterRefreshTargets(_ => null),
+            arbiterTargets: new CliArbiterRefreshTargets(_ => null, new FileUserHostConfigStore()),
             finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
@@ -137,7 +138,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             runProcess,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
-            arbiterTargets: new CliArbiterRefreshTargets(_ => null));
+            arbiterTargets: new CliArbiterRefreshTargets(_ => null, new FileUserHostConfigStore()));
         using SelfUpdater updater = new(
             handler,
             host,
@@ -146,7 +147,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             runProcess,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
-            arbiterTargets: new CliArbiterRefreshTargets(_ => null),
+            arbiterTargets: new CliArbiterRefreshTargets(_ => null, new FileUserHostConfigStore()),
             finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
@@ -208,7 +209,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             environment,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
-            arbiterTargets: new CliArbiterRefreshTargets(environment));
+            arbiterTargets: new CliArbiterRefreshTargets(environment, new FileUserHostConfigStore()));
         using SelfUpdater updater = new(
             handler,
             host,
@@ -216,7 +217,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             environment,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
-            arbiterTargets: new CliArbiterRefreshTargets(environment),
+            arbiterTargets: new CliArbiterRefreshTargets(environment, new FileUserHostConfigStore()),
             finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
@@ -236,7 +237,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     {
         string home = Path.Combine(_install.Path, "home");
         Directory.CreateDirectory(home);
-        UserHostConfig.WriteGlobalTargets(home, ["cursor"]);
+        new FileUserHostConfigStore().WriteGlobalTargets(home, ["cursor"]);
         string hookPath = WriteLegacyGlobalHook(home, SquadTarget.Cursor, "/legacy/kyber-weave-arbiter hook");
 
         List<string> log = [];
@@ -247,7 +248,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             _ => null,
         };
 
-        ArbiterHookRefresher refresher = new(log.Add, environment);
+        ArbiterHookRefresher refresher = new(new FileUserHostConfigStore(), log.Add, environment);
         ArbiterHookRefreshResult outcome = refresher.Refresh([]);
 
         Assert.Equal(1, outcome.Refreshed);
@@ -266,7 +267,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     {
         string home = Path.Combine(_install.Path, "home");
         Directory.CreateDirectory(home);
-        UserHostConfig.WriteGlobalTargets(home, ["factory"]);
+        new FileUserHostConfigStore().WriteGlobalTargets(home, ["factory"]);
         string hookPath = Path.Combine(new SquadGlobalRoots(_ => null, home).ResolveGlobalRoot(SquadTarget.Factory), "hooks.json");
         Directory.CreateDirectory(Path.GetDirectoryName(hookPath)!);
         File.WriteAllText(hookPath, """
@@ -288,7 +289,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             _ => null,
         };
 
-        ArbiterHookRefresher refresher = new(_ => { }, environment);
+        ArbiterHookRefresher refresher = new(new FileUserHostConfigStore(), _ => { }, environment);
         ArbiterHookRefreshResult outcome = refresher.Refresh([]);
 
         Assert.Equal(1, outcome.Refreshed);
@@ -308,7 +309,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     {
         string home = Path.Combine(_install.Path, "home");
         Directory.CreateDirectory(home);
-        UserHostConfig.WriteGlobalTargets(home, ["cursor"]);
+        new FileUserHostConfigStore().WriteGlobalTargets(home, ["cursor"]);
         string hookPath = WriteLegacyGlobalHook(home, SquadTarget.Cursor, "/legacy/kyber-weave-arbiter hook");
 
         string foreign = Path.Combine(new SquadGlobalRoots(_ => null, home).ResolveGlobalRoot(SquadTarget.Cursor), "foreign.json");
@@ -325,7 +326,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             _ => null,
         };
 
-        ArbiterHookRefresher refresher = new(log.Add, environment);
+        ArbiterHookRefresher refresher = new(new FileUserHostConfigStore(), log.Add, environment);
         LoopbackFinishingProcess loopback = new(
             handler,
             host,
@@ -333,7 +334,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             environment,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
-            arbiterTargets: new CliArbiterRefreshTargets(environment));
+            arbiterTargets: new CliArbiterRefreshTargets(environment, new FileUserHostConfigStore()));
         using SelfUpdater updater = new(
             handler,
             host,
@@ -341,7 +342,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             environment,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
-            arbiterTargets: new CliArbiterRefreshTargets(environment),
+            arbiterTargets: new CliArbiterRefreshTargets(environment, new FileUserHostConfigStore()),
             finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
@@ -372,7 +373,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
         SquadGlobalRoots roots = new(_ => null, home);
         SquadStateStore store = new(userPaths);
         SeedGlobalBlocks(store, roots, home);
-        UserHostConfig.WriteGlobalTargets(home, ["cursor", "codex"]);
+        new FileUserHostConfigStore().WriteGlobalTargets(home, ["cursor", "codex"]);
         StaleHookTimeouts(GlobalHookFile(roots, SquadTarget.Cursor));
         StaleHookTimeouts(GlobalHookFile(roots, SquadTarget.Codex));
 
@@ -384,7 +385,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             _ => null,
         };
 
-        ArbiterHookRefresher refresher = new(log.Add, environment);
+        ArbiterHookRefresher refresher = new(new FileUserHostConfigStore(), log.Add, environment);
         LoopbackFinishingProcess loopback = new(
             handler,
             host,
@@ -392,7 +393,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             environment,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
-            arbiterTargets: new CliArbiterRefreshTargets(environment));
+            arbiterTargets: new CliArbiterRefreshTargets(environment, new FileUserHostConfigStore()));
         using SelfUpdater updater = new(
             handler,
             host,
@@ -400,7 +401,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             environment,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
-            arbiterTargets: new CliArbiterRefreshTargets(environment),
+            arbiterTargets: new CliArbiterRefreshTargets(environment, new FileUserHostConfigStore()),
             finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 

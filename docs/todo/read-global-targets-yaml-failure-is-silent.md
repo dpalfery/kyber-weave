@@ -10,7 +10,7 @@ last-reviewed: 2026-11-09
 
 # ReadGlobalTargets turns a YAML problem into no targets without a word
 
-`UserHostConfig.ReadGlobalTargets` (`src/KyberWeave.Core/Configuration/UserHostConfig.cs`) parses the
+`IUserHostConfigStore.ReadGlobalTargets` (`FileUserHostConfigStore` in `src/KyberWeave.Data/Configuration/FileUserHostConfigStore.cs`) parses the
 global arbiter targets file with YamlDotNet. A malformed file gives back an empty target list, so the
 arbiter hook refresh does nothing and says nothing.
 
