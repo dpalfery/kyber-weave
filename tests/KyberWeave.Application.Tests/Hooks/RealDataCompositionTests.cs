@@ -13,6 +13,16 @@ public sealed class RealDataCompositionTests : IDisposable
 
     public void Dispose() => root.Delete(recursive: true);
 
+    private string UserHome => Path.Combine(root.FullName, "home");
+
+    /// <summary>Writes the user's own hooks file, the only one that may name a command.</summary>
+    private void WriteUser(string yaml)
+    {
+        string path = HooksConfigPath.User(UserHome);
+        _ = Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, yaml);
+    }
+
     private string Write(string relative, string content)
     {
         string path = Path.Combine(root.FullName, relative);
@@ -25,6 +35,7 @@ public sealed class RealDataCompositionTests : IDisposable
     {
         ServiceCollection services = [];
         _ = services.AddSingleton<IProcessRunner>(runner);
+        _ = services.AddSingleton<IProcessEnvironment>(new SandboxEnvironment(UserHome));
         _ = services.AddWeaveApplication();
         return services.BuildServiceProvider();
     }
@@ -63,12 +74,16 @@ public sealed class RealDataCompositionTests : IDisposable
                 enabled: false
               - id: dotnet-format-style
                 enabled: false
+            """);
+        WriteUser("""
+            rules:
               - id: ghost
                 kind: lint
                 include: ["src/**/*.cs"]
                 run: [kyber-weave-no-such-command-xyz, "{file}"]
             """);
         ServiceCollection services = [];
+        _ = services.AddSingleton<IProcessEnvironment>(new SandboxEnvironment(UserHome));
         _ = services.AddWeaveApplication();
         using ServiceProvider provider = services.BuildServiceProvider();
 
@@ -104,6 +119,9 @@ public sealed class RealDataCompositionTests : IDisposable
             rules:
               - id: dotnet-format-style
                 enabled: false
+            """);
+        WriteUser("""
+            rules:
               - id: ts-lint
                 kind: lint
                 include: ["web/**/*.ts"]
@@ -131,8 +149,7 @@ public sealed class RealDataCompositionTests : IDisposable
     public void WrongValueTypesWarnAndFallBackToTheDefaults()
     {
         _ = Repository();
-        _ = Write(
-            ".kyber-weave/hooks.yml",
+        WriteUser(
             """
             time-budget-seconds: soon
             stop-on-first-blocking: maybe
@@ -175,8 +192,7 @@ public sealed class RealDataCompositionTests : IDisposable
     public void NonScalarListItemRejectsTheRuleWithAWarning(string field)
     {
         _ = Repository();
-        _ = Write(
-            ".kyber-weave/hooks.yml",
+        WriteUser(
             $"rules:\n  - id: bad-rule\n    kind: lint\n    include: [\"**/*.ts\"]\n    run: [tool]\n    {field}\n  - id: good-rule\n    kind: lint\n    include: [\"**/*.ts\"]\n    run: [tool]\n");
         using ServiceProvider provider = Provider(new FakeProcessRunner(clock));
 
@@ -308,4 +324,19 @@ public sealed class RealDataCompositionTests : IDisposable
 
         public int GetHashCode(TestClassResolution obj) => obj.ProjectPath?.GetHashCode(StringComparison.Ordinal) ?? 0;
     }
+}
+
+/// <summary>A process environment whose home is the test's own directory, so no real user file is read.</summary>
+/// <param name="home">The sandboxed home directory.</param>
+internal sealed class SandboxEnvironment(string home) : IProcessEnvironment
+{
+    public string CurrentDirectory => home;
+
+    public bool IsInputRedirected => true;
+
+    public string HomeDirectory => home;
+
+    public string TempDirectory => Path.GetTempPath();
+
+    public string? GetVariable(string name) => name is "HOME" or "USERPROFILE" ? home : null;
 }

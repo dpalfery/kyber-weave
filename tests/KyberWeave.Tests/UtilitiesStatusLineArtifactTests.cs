@@ -1317,7 +1317,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
                 WriteStub(Path.Combine(StubDirectory, networkCommand), NetworkStubScript);
             WriteStub(Path.Combine(KyberdashDirectory, "kyberdash"), KyberdashStubScript);
 
-            RuntimeDirectories = ResolveRuntimeDirectories();
+            RuntimeDirectory = LinkRuntimeCommands(temp.Path);
         }
 
         public string HomeDirectory { get; }
@@ -1352,7 +1352,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
 
         public string CommandCodeHarnessPath { get; }
 
-        public IReadOnlyList<string> RuntimeDirectories { get; }
+        public string RuntimeDirectory { get; }
 
         public void SetPorcelain(string porcelain)
         {
@@ -1393,9 +1393,20 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
             if (withKyberdash)
                 entries.Add(KyberdashDirectory);
             entries.Add(StubDirectory);
-            entries.AddRange(RuntimeDirectories);
+            entries.Add(RuntimeDirectory);
+            entries.AddRange(SystemDirectories);
             return string.Join(Path.PathSeparator, entries);
         }
+
+        /// <summary>
+        /// The operating system's own utility directories: the stub scripts and the artifacts use
+        /// <c>cat</c>, <c>tr</c> and <c>sed</c>. A product tool is installed beside the runtimes
+        /// (Homebrew's <c>kyberdash</c>), never here, so naming these keeps the sandbox hermetic.
+        /// </summary>
+        private static IReadOnlyList<string> SystemDirectories => SystemUtilityDirectories;
+
+        private static readonly string[] SystemUtilityDirectories =
+            [.. new[] { "/bin", "/usr/bin", "/usr/sbin", "/sbin" }.Where(Directory.Exists)];
 
         private static void WriteStub(string path, string content)
         {
@@ -1409,19 +1420,35 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
                 UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
         }
 
-        private static IReadOnlyList<string> ResolveRuntimeDirectories()
+        /// <summary>
+        /// The sandbox's own PATH directory: one link per runtime the artifacts may use.
+        /// </summary>
+        /// <remarks>
+        /// Adding the host directory each runtime lives in would also expose every other program
+        /// beside it — on a developer machine <c>/opt/homebrew/bin/kyberdash</c> joins the sandbox
+        /// that way and records the hand-off into the sandbox's HOME. Linking only the named
+        /// runtimes keeps the host's tools out while leaving the runtimes runnable.
+        /// </remarks>
+        /// <param name="temp">The sandbox's temporary root.</param>
+        /// <returns>The directory holding the links.</returns>
+        private static string LinkRuntimeCommands(string temp)
         {
-            List<string> directories = [];
+            string directory = Path.Combine(temp, "runtimes");
+            Directory.CreateDirectory(directory);
             foreach (string command in RuntimeCommands)
             {
                 string? resolved = FindOnPath(command);
-                string? directory = resolved is null ? null : Path.GetDirectoryName(resolved);
-                if (directory is null || directories.Contains(directory, StringComparer.Ordinal))
+                if (resolved is null)
                     continue;
-                directories.Add(directory);
+
+                string link = Path.Combine(directory, command);
+                if (File.Exists(link))
+                    continue;
+
+                File.CreateSymbolicLink(link, resolved);
             }
 
-            return directories;
+            return directory;
         }
     }
 

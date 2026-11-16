@@ -50,7 +50,7 @@ public sealed class HooksDefaultsTests
     {
         HooksConfigOverlay overlay = new(null, true, null, null, [new HookRuleOverlay("dotnet-test", null, null, null, null, null, null, true)], []);
 
-        HooksConfig merged = HooksConfigMerger.Merge(HooksDefaults.Config, overlay);
+        HooksConfig merged = HooksConfigMerger.Merge(HooksDefaults.Config, overlay, HookConfigSource.Repository);
 
         HookRule test = Assert.Single(merged.Rules, r => r.Id == "dotnet-test");
         Assert.True(test.Enabled);
@@ -60,7 +60,7 @@ public sealed class HooksDefaultsTests
     }
 
     [Fact]
-    public void MergeAppendsACompleteNewRuleAndDropsAnIncompleteOne()
+    public void TheUserFileAppendsACompleteNewRuleAndDropsAnIncompleteOne()
     {
         HooksConfigOverlay overlay = new(
             null,
@@ -73,7 +73,7 @@ public sealed class HooksDefaultsTests
             ],
             []);
 
-        HooksConfig merged = HooksConfigMerger.Merge(HooksDefaults.Config, overlay);
+        HooksConfig merged = HooksConfigMerger.Merge(HooksDefaults.Config, overlay, HookConfigSource.User);
 
         HookRule added = Assert.Single(merged.Rules, r => r.Id == "ts");
         Assert.True(added.Enabled);
@@ -93,7 +93,7 @@ public sealed class HooksDefaultsTests
             [new HookRuleOverlay("dotnet-test", null, null, null, null, 100_000, null, null)],
             []);
 
-        HooksConfig merged = HooksConfigMerger.Merge(HooksDefaults.Config, overlay);
+        HooksConfig merged = HooksConfigMerger.Merge(HooksDefaults.Config, overlay, HookConfigSource.Repository);
 
         Assert.Equal(1, merged.TimeBudgetSeconds);
         Assert.Equal(500, merged.MaxOutputLines);
@@ -104,12 +104,51 @@ public sealed class HooksDefaultsTests
         Assert.Equal(4, merged.Warnings.Count);
     }
 
+    /// <summary>
+    /// A cloned repository names no command: an id that is not built in is refused, and the warning says where the
+    /// rule belongs. Failure this guards: a repository ships a `run` line and an agent's edit executes it.
+    /// </summary>
+    [Fact]
+    public void ARepositoryFileCannotAddARuleThatNamesACommand()
+    {
+        HooksConfigOverlay overlay = new(
+            null,
+            null,
+            null,
+            null,
+            [new HookRuleOverlay("publish", HookRuleKind.Test, ["**/*.cs"], null, ["rm", "-rf", "{root}"], null, null, null)],
+            []);
+
+        HooksConfig merged = HooksConfigMerger.Merge(HooksDefaults.Config, overlay, HookConfigSource.Repository);
+
+        Assert.DoesNotContain(merged.Rules, r => r.Id == "publish");
+        Assert.Contains(merged.Warnings, w => w.Contains("user file", StringComparison.Ordinal) && w.Contains("publish", StringComparison.Ordinal));
+    }
+
+    /// <summary>The same overlay from the user's own file is honoured: that file is the operator's decision.</summary>
+    [Fact]
+    public void TheUserFileMayAddARuleThatNamesACommand()
+    {
+        HooksConfigOverlay overlay = new(
+            null,
+            null,
+            null,
+            null,
+            [new HookRuleOverlay("publish", HookRuleKind.Test, ["**/*.cs"], null, ["dotnet", "test", "{project}"], null, null, null)],
+            []);
+
+        HooksConfig merged = HooksConfigMerger.Merge(HooksDefaults.Config, overlay, HookConfigSource.User);
+
+        HookRule added = Assert.Single(merged.Rules, r => r.Id == "publish");
+        Assert.Equal(["dotnet", "test", "{project}"], added.Run);
+    }
+
     [Fact]
     public void MergeLeavesInRangeNumbersAlone()
     {
         HooksConfigOverlay overlay = new(60, null, 10, 2000, [], []);
 
-        HooksConfig merged = HooksConfigMerger.Merge(HooksDefaults.Config, overlay);
+        HooksConfig merged = HooksConfigMerger.Merge(HooksDefaults.Config, overlay, HookConfigSource.Repository);
 
         Assert.Equal((60, 10, 2000), (merged.TimeBudgetSeconds, merged.MaxOutputLines, merged.MaxOutputBytes));
         Assert.Empty(merged.Warnings);
