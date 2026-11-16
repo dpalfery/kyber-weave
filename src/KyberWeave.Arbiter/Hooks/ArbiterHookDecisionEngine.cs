@@ -69,7 +69,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         Func<string, string?>? environment = null,
         Func<IServiceProvider>? services = null)
     {
-        _services = new Lazy<IServiceProvider>(services ?? ArbiterServices.Create);
+        _services = new Lazy<IServiceProvider>(services ?? (() => ArbiterServices.Shared));
         _homeDirectory = homeDirectory ?? (() => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
         Func<string> home = _homeDirectory;
         _providerFactory = providerFactory ?? (config => CreateProvider(ApplyUserProvider(config, home)));

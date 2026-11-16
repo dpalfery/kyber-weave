@@ -70,7 +70,7 @@ public sealed class SquadCliCommandTests : IDisposable
 
         // Assert CLI, Core and Squad assemblies have no embedded resource for products/kyber-squad corpus
         Assembly cliAssembly = typeof(SquadPackSourceLocator).Assembly;
-        Assembly coreAssembly = typeof(KyberWeaveConfig).Assembly;
+        Assembly coreAssembly = typeof(KyberWeaveConfigLoader).Assembly;
         Assembly squadAssembly = typeof(SquadSource).Assembly;
 
         string[] cliResources = cliAssembly.GetManifestResourceNames();
