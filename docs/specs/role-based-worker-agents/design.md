@@ -396,8 +396,8 @@ from the prompt before a worker starts.
 | Copilot CLI | yes | `CopilotHookAdapter.RenderCliAllowStrip` rewrites `prompt` in the call's arguments. |
 | Copilot in VS Code | yes, with limits | `CopilotHookAdapter.RenderLocalPreAllowStrip` writes `updatedInput`. Hooks there are a preview that needs `chat.useHooks` and a trusted workspace, and the sub-agent dispatch is not confirmed by name. |
 | Codex, Cursor, Pi, Kilo, OpenCode | yes | Each adapter's strip writes the rewritten input (architecture, delivery per harness). |
-| Antigravity | no | "It documents no input-rewrite field for `hooks.json`". |
-| The remaining harnesses | not checked | Confirmed in the first task of phase 2. |
+| Antigravity | yes by its current docs; not yet used by Kyber-Weave | The hooks page (read 2026-11-16) documents a `PreToolUse` output field `overwrite`: "Replacement arguments merged (shallow top-level merge) into `toolCall.args` before execution." The repository's note that no rewrite field exists is out of date. Two things to prove in a test: the merge is top-level, so the whole `Subagents` list must be replaced, and `decision` is required, so the hook must pick a value that does not skip the user's approval. |
+| Devin, Factory and any other harness | not checked | Confirmed in the first task of phase 2. |
 
 **Fallback: a file.** Where the hook cannot rewrite the dispatch, the prompt is written to
 `.agent_scratchpad/<task>/prompt.md`, the dispatch names that file, and the worker's first step is
