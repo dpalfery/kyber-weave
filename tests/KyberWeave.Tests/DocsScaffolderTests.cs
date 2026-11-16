@@ -1019,7 +1019,7 @@ public sealed class DocsScaffolderTests : IDisposable
         DocumentSet set = new DocumentLoader(_temp.Path, config.Ontology).Load();
         DiagnosticReport report = new DocSpecValidator(_temp.Path, config.Ontology).Validate(set);
         Assert.False(report.HasErrors, string.Join("; ", report.Items.Select(i => $"{i.Code} {i.Message}")));
-        Assert.Equal(3 + DocsLayout.Folders.Count + (KyberStandardsTemplates.All.Count * 3), set.Documents.Count);
+        Assert.Equal(3 + DocsLayout.Folders.Count + (KyberStandardsTemplates.All.Count * 3) + 1, set.Documents.Count);
     }
 
     /// <summary>

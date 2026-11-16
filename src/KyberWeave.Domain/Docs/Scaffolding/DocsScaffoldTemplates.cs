@@ -5,20 +5,23 @@ namespace KyberWeave.Core.Docs.Scaffolding;
 /// <summary>The text of every file <c>docs init</c> scaffolds. Pure: the date it stamps comes from the caller.</summary>
 public static class DocsScaffoldTemplates
 {
-    public static string HostConfig(string docsRoot, bool kyberStandards = false)
+    public static string HostConfig(
+        string docsRoot,
+        bool kyberStandards = false,
+        IReadOnlyList<string>? technologies = null,
+        IReadOnlyList<string>? roles = null)
     {
         string yamlDocsRoot = HostConfigYaml.QuoteScalar(docsRoot);
-        string technologiesBlock;
-        if (kyberStandards)
-        {
-            technologiesBlock = "technologies:\n" + string.Join(
-                "\n",
-                KyberStandardsTemplates.All.Select(t => $"    - {t}"));
-        }
-        else
-        {
-            technologiesBlock = "technologies: []";
-        }
+        IReadOnlyList<string> declared = technologies
+            ?? (kyberStandards ? KyberStandardsTemplates.All : []);
+        string technologiesBlock = declared.Count == 0
+            ? "technologies: []"
+            : "technologies:\n" + string.Join("\n", declared.Select(t => $"    - {t}"));
+        string rolesBlock = roles is { Count: > 0 }
+            ? "\n  # Roles this repository declares a folder for. A role scopes its standard,\n" +
+              "  # rules and skills instead of a technology.\n  roles:\n" +
+              string.Join("\n", roles.Select(r => $"    - {r}"))
+            : string.Empty;
 
         return $"""
         # Kyber-Weave host configuration. Every ontology default is overridable here.
@@ -34,6 +37,7 @@ public static class DocsScaffoldTemplates
           # re-running 'docs init' creates {docsRoot}/standards/<technology>/, publishes its
           # registry property, and legalizes that value in the standard's 'technology' key.
           {technologiesBlock}
+        {rolesBlock}
 
         {McpDeclarationBlockWriter.DeclarationYaml}
 
@@ -276,6 +280,83 @@ public static class DocsScaffoldTemplates
         $"# Machine rules the Arbiter evaluates for the '{technology}' folder.\n" +
         "# An empty list is valid: most folders declare none.\n" +
         "rules: []\n";
+
+    /// <summary>Builds the standard stub for a declared role with no shipped template.</summary>
+    public static string RoleStandard(string role, string owner, string today)
+    {
+        string yamlOwner = HostConfigYaml.QuoteScalar(owner);
+        return $"""
+        ---
+        id: standards/{role}
+        title: "{role} standard"
+        doc-type: coding-standard
+        status: draft
+        role: {role}
+        owner: {yamlOwner}
+        last-reviewed: {today}
+        ---
+
+        # {role} standard
+
+        How the {role} role does its work in this repository. Agents resolve this document as
+        `<{role}-coding-standard>`.
+
+        ## Naming and layout
+
+        ## Coding standards
+
+        ## Testing
+
+        ## Commands
+
+        ## Security and data handling
+
+        ## Done checklist
+
+        """;
+    }
+
+    /// <summary>Builds the prose rules stub for a declared role.</summary>
+    public static string RoleRules(string role, string owner, string today)
+    {
+        string yamlOwner = HostConfigYaml.QuoteScalar(owner);
+        return $"""
+        ---
+        id: standards/{role}/rules
+        title: "{role} rules"
+        doc-type: rule
+        status: draft
+        role: {role}
+        owner: {yamlOwner}
+        last-reviewed: {today}
+        ---
+
+        # {role} rules
+
+        Rules that apply wherever the {role} role works.
+        """;
+    }
+
+    /// <summary>Builds the skills stub for a declared role.</summary>
+    public static string RoleSkills(string role, string owner, string today)
+    {
+        string yamlOwner = HostConfigYaml.QuoteScalar(owner);
+        return $"""
+        ---
+        id: standards/{role}/skills
+        title: "{role} skills"
+        doc-type: skill
+        status: draft
+        role: {role}
+        owner: {yamlOwner}
+        last-reviewed: {today}
+        ---
+
+        # {role} skills
+
+        How to carry out the {role} role's work in this repository.
+        """;
+    }
 
     public static string DocumentationIndex(string docsRoot, string owner, string today)
     {

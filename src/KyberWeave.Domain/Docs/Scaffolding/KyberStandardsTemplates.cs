@@ -228,6 +228,30 @@ public static class KyberStandardsTemplates
         return rendered;
     }
 
+    /// <summary>
+    /// Attempts to render the shared rules file that sits beside a host's standards folders.
+    /// </summary>
+    public static bool TryRenderSharedRules(
+        string owner,
+        string date,
+        [NotNullWhen(true)] out string? rendered)
+    {
+        ArgumentNullException.ThrowIfNull(owner);
+        ArgumentNullException.ThrowIfNull(date);
+
+        Assembly assembly = typeof(KyberStandardsTemplates).Assembly;
+        using Stream? stream = assembly.GetManifestResourceStream($"{ResourcePrefix}shared-rules.md");
+        if (stream is null)
+        {
+            rendered = null;
+            return false;
+        }
+
+        using StreamReader reader = new StreamReader(stream, Encoding.UTF8);
+        rendered = InjectFrontmatter(reader.ReadToEnd(), owner, date);
+        return true;
+    }
+
     private static string InjectFrontmatter(string template, string owner, string date)
     {
         string[] lines = template.Split('\n');

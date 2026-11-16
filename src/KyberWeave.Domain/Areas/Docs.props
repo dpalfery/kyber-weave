@@ -109,6 +109,7 @@
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\jira\jira.rules.md" LogicalName="Standards.jira.rules.md" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\jira\jira.skills.md" LogicalName="Standards.jira.skills.md" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\jira\jira.arbiter-rules.yml" LogicalName="Standards.jira.arbiter-rules.yml" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\shared-rules.md" LogicalName="Standards.shared-rules.md" />
   </ItemGroup>
 
 </Project>

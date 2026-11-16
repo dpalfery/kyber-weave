@@ -35,6 +35,18 @@ public sealed class DocsInitSettings : CommandSettings
     [Description("Scaffolds the full suite of rich Kyber Squad coding standards templates into the standards folder.")]
     public bool KyberStandards { get; set; }
 
+    [CommandOption("--standards <NAMES>")]
+    [Description("Comma list of technology, role or platform template folders to install, for example csharp,python,reviewer,github. Each name is declared in the ontology.")]
+    public string? Standards { get; set; }
+
+    /// <summary>
+    /// The template folders the operator named, split on commas and whitespace. Empty when
+    /// <c>--standards</c> was not supplied; <c>--kyber-standards</c> is handled separately.
+    /// </summary>
+    public IReadOnlyList<string> ChosenStandards => string.IsNullOrWhiteSpace(Standards)
+        ? []
+        : Standards.Split([',', ' ', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
     [CommandOption("--provision")]
     [Description("After scaffolding succeeds, provision the repository's CodeGraph index and prove the docs MCP server (kyber-weave doctor --provision). Off by default: scaffolding alone starts no process.")]
     public bool Provision { get; set; }

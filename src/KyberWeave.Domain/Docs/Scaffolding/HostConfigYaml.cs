@@ -1024,23 +1024,37 @@ public static partial class HostConfigYaml
     /// <c>[</c>) is merged in place; a non-empty scalar is rejected so the operator can
     /// replace it with a sequence rather than this command guessing a conversion.
     /// </remarks>
-    public static string WithTechnologies(string yaml, IReadOnlyList<string> technologies)
+    public static string WithTechnologies(string yaml, IReadOnlyList<string> technologies) =>
+        WithOntologyList(yaml, "technologies", technologies, "Technology");
+
+    /// <summary>
+    /// Returns <paramref name="yaml"/> with <paramref name="roles"/> merged into
+    /// <c>ontology.roles</c>, creating the block or the ontology section when absent.
+    /// </summary>
+    public static string WithRoles(string yaml, IReadOnlyList<string> roles) =>
+        WithOntologyList(yaml, "roles", roles, "Role");
+
+    private static string WithOntologyList(
+        string yaml,
+        string key,
+        IReadOnlyList<string> values,
+        string noun)
     {
         ArgumentNullException.ThrowIfNull(yaml);
-        ArgumentNullException.ThrowIfNull(technologies);
+        ArgumentNullException.ThrowIfNull(values);
 
-        if (technologies.Count == 0)
+        if (values.Count == 0)
         {
             return yaml;
         }
 
-        foreach (string tech in technologies)
+        foreach (string value in values)
         {
-            ArgumentException.ThrowIfNullOrWhiteSpace(tech);
-            if (tech.Any(char.IsControl))
+            ArgumentException.ThrowIfNullOrWhiteSpace(value);
+            if (value.Any(char.IsControl))
             {
-                throw new ArgumentException("Technology names may not contain control characters.",
-                    nameof(technologies));
+                throw new ArgumentException($"{noun} names may not contain control characters.",
+                    nameof(values));
             }
         }
 
@@ -1049,7 +1063,7 @@ public static partial class HostConfigYaml
         int ontology = IndexOfOntologyKey(lines);
         if (ontology < 0)
         {
-            return AppendOntologyWithTechnologies(lines, technologies).ToText();
+            return AppendOntologyWithList(lines, key, values).ToText();
         }
 
         int blockEnd = EndOfBlock(lines, ontology);
@@ -1057,7 +1071,7 @@ public static partial class HostConfigYaml
 
         for (int i = ontology + 1; i < blockEnd; i++)
         {
-            Match match = TechnologiesKey().Match(lines[i]);
+            Match match = OntologyKeyRegex(key).Match(lines[i]);
             if (!match.Success || !string.Equals(
                     match.Groups["indent"].Value,
                     blockIndent,
@@ -1070,22 +1084,22 @@ public static partial class HostConfigYaml
 
             if (value.StartsWith('['))
             {
-                return MergeFlowSequence(yaml, lines, i, value, technologies);
+                return MergeFlowSequence(yaml, lines, i, value, key, values);
             }
 
             if (value.Length > 0)
             {
                 throw new InvalidDataException(
-                    "ontology.technologies is a scalar, not a sequence. Replace the scalar " +
+                    $"ontology.{key} is a scalar, not a sequence. Replace the scalar " +
                     "with a YAML sequence (a block list or a [...] flow list) before adding " +
-                    "technologies — merging would otherwise leave a scalar followed by " +
+                    $"{key} — merging would otherwise leave a scalar followed by " +
                     "orphaned list items.");
             }
 
-            return MergeBlockSequence(yaml, lines, i, blockIndent, blockEnd, technologies);
+            return MergeBlockSequence(yaml, lines, i, blockIndent, blockEnd, key, values);
         }
 
-        return InsertTechnologiesBlock(lines, ontology, blockIndent, blockEnd, technologies);
+        return InsertOntologyListBlock(lines, ontology, blockIndent, blockEnd, key, values);
     }
 
     private static string MergeFlowSequence(
@@ -1093,23 +1107,24 @@ public static partial class HostConfigYaml
         HostConfigLines lines,
         int keyIndex,
         string value,
-        IReadOnlyList<string> technologies)
+        string key,
+        IReadOnlyList<string> values)
     {
         if (!TryCollectFlowSequence(lines, keyIndex, value, out string flow))
         {
             throw new InvalidDataException(
-                "ontology.technologies looks like a flow sequence but its brackets do not " +
+                $"ontology.{key} looks like a flow sequence but its brackets do not " +
                 "balance. Fix the list by hand.");
         }
 
         if (!TryParseSequenceAllowEmpty("value: " + flow, out IReadOnlyList<string> existingTechs))
         {
             throw new InvalidDataException(
-                "ontology.technologies looks like a flow sequence but could not be read. " +
+                $"ontology.{key} looks like a flow sequence but could not be read. " +
                 "Fix the list by hand.");
         }
 
-        List<string> toAdd = technologies
+        List<string> toAdd = values
             .Where(t => !existingTechs.Contains(t, StringComparer.Ordinal))
             .Distinct(StringComparer.Ordinal)
             .ToList();
@@ -1172,7 +1187,8 @@ public static partial class HostConfigYaml
         int keyIndex,
         string blockIndent,
         int blockEnd,
-        IReadOnlyList<string> technologies)
+        string key,
+        IReadOnlyList<string> values)
     {
         List<string> existingTechs = new();
         int lastItemIndex = keyIndex;
@@ -1217,7 +1233,7 @@ public static partial class HostConfigYaml
             }
         }
 
-        List<string> toAdd = technologies
+        List<string> toAdd = values
             .Where(t => !existingTechs.Contains(t, StringComparer.Ordinal))
             .Distinct(StringComparer.Ordinal)
             .ToList();
@@ -1237,12 +1253,13 @@ public static partial class HostConfigYaml
         return lines.ToText();
     }
 
-    private static string InsertTechnologiesBlock(
+    private static string InsertOntologyListBlock(
         HostConfigLines lines,
         int ontologyIndex,
         string blockIndent,
         int blockEnd,
-        IReadOnlyList<string> technologies)
+        string key,
+        IReadOnlyList<string> values)
     {
         int insertIndex = blockEnd;
         while (insertIndex > ontologyIndex + 1 && string.IsNullOrWhiteSpace(lines[insertIndex - 1]))
@@ -1252,22 +1269,23 @@ public static partial class HostConfigYaml
 
         List<string> toInsert =
         [
-            blockIndent + "technologies:"
+            blockIndent + key + ":"
         ];
 
         string itemIndent = blockIndent + DefaultIndent;
-        foreach (string tech in technologies.Distinct(StringComparer.Ordinal))
+        foreach (string value in values.Distinct(StringComparer.Ordinal))
         {
-            toInsert.Add(itemIndent + "- " + QuoteScalar(tech));
+            toInsert.Add(itemIndent + "- " + QuoteScalar(value));
         }
 
         lines.InsertRange(insertIndex, toInsert);
         return lines.ToText();
     }
 
-    private static HostConfigLines AppendOntologyWithTechnologies(
+    private static HostConfigLines AppendOntologyWithList(
         HostConfigLines lines,
-        IReadOnlyList<string> technologies)
+        string key,
+        IReadOnlyList<string> values)
     {
         if (lines.Count > 0 && lines[^1].Trim().Length > 0)
         {
@@ -1275,10 +1293,10 @@ public static partial class HostConfigYaml
         }
 
         lines.Add("ontology:");
-        lines.Add(DefaultIndent + "technologies:");
-        foreach (string tech in technologies.Distinct(StringComparer.Ordinal))
+        lines.Add(DefaultIndent + key + ":");
+        foreach (string value in values.Distinct(StringComparer.Ordinal))
         {
-            lines.Add(DefaultIndent + DefaultIndent + "- " + QuoteScalar(tech));
+            lines.Add(DefaultIndent + DefaultIndent + "- " + QuoteScalar(value));
         }
 
         return lines;
@@ -1425,6 +1443,13 @@ public static partial class HostConfigYaml
     /// </summary>
     [GeneratedRegex(@"^(?<prefix>(?<indent>[ \t]+)docs-root[ \t]*:[ \t]*)(?<rest>.*)$")]
     private static partial Regex DocsRootKey();
+
+    /// <summary>
+    /// Splits an ontology list key's line into the part before its value and the remaining text.
+    /// </summary>
+    private static Regex OntologyKeyRegex(string key) => new(
+        $@"^(?<prefix>(?<indent>[ \t]+){Regex.Escape(key)}[ \t]*:[ \t]*)(?<rest>.*)$",
+        RegexOptions.Compiled);
 
     /// <summary>
     /// Splits a <c>technologies</c> line into the part before its value and the remaining text.
