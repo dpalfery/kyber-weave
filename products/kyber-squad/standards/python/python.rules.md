@@ -10,5 +10,5 @@ last-reviewed: 2026-11-16
 
 # python rules
 
-Rules that apply to every task written in python. Technology rules beat parent rules,
-parent rules beat shared rules, and rules beat skills.
+The rules that hold for every technology, including secrets and input validation, are
+in the shared rules file beside this folder.

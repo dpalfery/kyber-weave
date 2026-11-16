@@ -27,7 +27,9 @@ public sealed class KyberStandardsTemplatesTests
         "sql",
         "tauri",
         "test",
-        "typescript"
+        "typescript",
+        "aws",
+        "sql-server"
     ];
 
     private static readonly string[] InnerLoopCommands = ["build", "test", "format"];

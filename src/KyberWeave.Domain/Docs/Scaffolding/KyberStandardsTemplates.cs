@@ -46,6 +46,7 @@ public static class KyberStandardsTemplates
 
     private static readonly string[] CanonicalTechnologies =
     [
+        "aws",
         "azure",
         "csharp",
         "data-access-layer",
@@ -57,6 +58,7 @@ public static class KyberStandardsTemplates
         "react",
         "rust",
         "sql",
+        "sql-server",
         "tauri",
         "test",
         "typescript"

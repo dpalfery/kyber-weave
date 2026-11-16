@@ -69,6 +69,14 @@
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\typescript\typescript.rules.md" LogicalName="Standards.typescript.rules.md" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\typescript\typescript.skills.md" LogicalName="Standards.typescript.skills.md" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\typescript\typescript.arbiter-rules.yml" LogicalName="Standards.typescript.arbiter-rules.yml" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\aws\aws.standards.md" LogicalName="Standards.aws.standards.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\aws\aws.rules.md" LogicalName="Standards.aws.rules.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\aws\aws.skills.md" LogicalName="Standards.aws.skills.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\aws\aws.arbiter-rules.yml" LogicalName="Standards.aws.arbiter-rules.yml" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\sql-server\sql-server.standards.md" LogicalName="Standards.sql-server.standards.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\sql-server\sql-server.rules.md" LogicalName="Standards.sql-server.rules.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\sql-server\sql-server.skills.md" LogicalName="Standards.sql-server.skills.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\sql-server\sql-server.arbiter-rules.yml" LogicalName="Standards.sql-server.arbiter-rules.yml" />
   </ItemGroup>
 
 </Project>

@@ -31,6 +31,9 @@ _Nothing specific yet._
 
 ### Components
 
+- Layouts are responsive: every screen works at the narrow and the wide breakpoint the
+  standard names.
+
 - **One responsibility per component.** A component that both fetches and renders a
   non-trivial tree is two components.
 - **Repeated logic becomes a custom hook**, not a copied block or a utility that takes seven

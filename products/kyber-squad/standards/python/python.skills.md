@@ -10,5 +10,14 @@ last-reviewed: 2026-11-16
 
 # python skills
 
-How to carry out the common work in python: the commands, tool servers and query patterns
-this repository uses.
+## What this folder covers
+
+- Type annotations checked by Pylance.
+- Automated refactoring and keeping imports and modules honest.
+- Packaging metadata and the local environment.
+- Pylance documentation for an unfamiliar symbol.
+
+## Hand-off
+
+When ceding work to delivery, provide the build, test and run commands and any image or
+runtime need.

@@ -10,5 +10,15 @@ last-reviewed: 2026-11-16
 
 # maui skills
 
-How to carry out the common work in maui: the commands, tool servers and query patterns
-this repository uses.
+## What this folder covers
+
+- XAML pages, resources and styles.
+- Shell navigation and route registration.
+- MVVM with CommunityToolkit.
+- `CollectionView`, data binding and virtualisation.
+- Cross-platform device features and their permission entries.
+
+## Hand-off
+
+When ceding work to delivery, provide the publish and build commands and the RID or
+workload needs.

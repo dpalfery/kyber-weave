@@ -10,5 +10,12 @@ last-reviewed: 2026-11-16
 
 # azure skills
 
-How to carry out the common work in azure: the commands, tool servers and query patterns
-this repository uses.
+## Tools
+
+- Use the Azure MCP Server, the Azure Resources tools and Microsoft Docs tools to inspect
+  resources, configuration, topology, health and runtime state.
+- Cross-check an observation against Microsoft documentation when it informs a decision.
+
+## Output
+
+Report concisely: the fact observed, the resource it belongs to, and any uncertainty.

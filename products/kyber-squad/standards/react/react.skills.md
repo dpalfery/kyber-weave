@@ -10,5 +10,11 @@ last-reviewed: 2026-11-16
 
 # react skills
 
-How to carry out the common work in react: the commands, tool servers and query patterns
-this repository uses.
+## What this folder covers
+
+- Component structure, props and composition.
+- State, effects and the rules for when a value belongs to neither.
+- Styling through the mechanism the standard names.
+- Accessibility tooling and the lint rules the repository enforces.
+- Bundle splitting, asset sizing and render-cost measurement.
+- Unit and component tests with React Testing Library.

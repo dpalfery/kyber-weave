@@ -10,5 +10,11 @@ last-reviewed: 2026-11-16
 
 # pulumi rules
 
-Rules that apply to every task written in pulumi. Technology rules beat parent rules,
-parent rules beat shared rules, and rules beat skills.
+## Preview and apply
+
+- Never apply a change whose preview was not inspected, and never hide a replacement inside
+  an unreviewed apply.
+- Provision the database resource; do not design its schema.
+- Live-state questions go to the platform research agent. Intended state is the Pulumi
+  program and its preview.
+

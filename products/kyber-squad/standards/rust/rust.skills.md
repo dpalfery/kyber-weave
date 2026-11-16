@@ -10,5 +10,15 @@ last-reviewed: 2026-11-16
 
 # rust skills
 
-How to carry out the common work in rust: the commands, tool servers and query patterns
-this repository uses.
+## What this folder covers
+
+- Error types and crate boundaries.
+- Async and the tokio runtime.
+- `unsafe` review and documentation.
+- Cross-compilation and target triples.
+- The format, lint, build and test commands.
+
+## Hand-off
+
+When ceding work to delivery, provide the target triples, the build, lint and test commands,
+and any native toolchain need.

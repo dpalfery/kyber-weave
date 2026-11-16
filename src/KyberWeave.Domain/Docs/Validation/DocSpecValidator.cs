@@ -645,7 +645,9 @@ public sealed class DocSpecValidator
         DiagnosticReport report)
     {
         IReadOnlyList<string> expected = DocsLayout.StandardHeadings;
-        IReadOnlyList<DocumentSection> sections = document.Sections;
+        IReadOnlyList<DocumentSection> sections = document.Sections
+            .Where(section => !string.IsNullOrEmpty(section.Heading))
+            .ToList();
 
         for (int i = 0; i < expected.Count; i++)
         {

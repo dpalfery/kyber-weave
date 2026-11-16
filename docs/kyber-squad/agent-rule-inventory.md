@@ -35,7 +35,7 @@ Paths are relative to `products/kyber-squad/standards/`.
 | `csharp-dev` | Never edit environment secrets or deployment credentials. | `shared-rules.md` | Security and data handling | Moved |
 | `dal-dev` | Implements the persistence layer to the data-access, C# and SQL standards. | `data-access-layer/data-access-layer.standards.md` | Naming and layout | Stated |
 | `dal-dev` | Scope is `ISqlConnectionFactory`, `IRepository<T>` implementations, FluentMigrator migrations that match an approved schema, and their tests. | `data-access-layer/data-access-layer.standards.md` | Coding standards | Stated |
-| `dal-dev` | Never apply a migration to a shared database. | `data-access-layer/data-access-layer.rules.md` | Security and data handling | Moved |
+| `dal-dev` | Never apply a migration to a shared database. | `data-access-layer/data-access-layer.rules.md` | Approved schema | Moved |
 | `dal-dev` | Before repository or migration code, confirm the approved schema: column names, data types, nullability, keys and indexes. A script that would diverge is not applied; the divergence is reported. | `data-access-layer/data-access-layer.standards.md` | Coding standards | Moved |
 | `dal-dev` | Deliver `IRepository<T>` implementations that satisfy the interfaces in the Contracts project the standard names. | `data-access-layer/data-access-layer.standards.md` | Naming and layout | Moved |
 | `dal-dev` | Confirm `Microsoft.Data.SqlClient` and FluentMigrator APIs against current documentation before use. | `data-access-layer/data-access-layer.skills.md` | Whole file | Moved |
@@ -71,7 +71,7 @@ Paths are relative to `products/kyber-squad/standards/`.
 | `maui-dev` | Implements MAUI client UI to the MAUI standard, with language-level C# from the C# standard. | `maui/maui.standards.md` | Naming and layout | Stated |
 | `maui-dev` | XAML pages, Shell navigation, MVVM/CommunityToolkit, CollectionView and binding are the route the MAUI skill covers. | `maui/maui.skills.md` | Whole file | Moved |
 | `maui-dev` | Register every added type where the standard requires it; ViewModels take interfaces rather than constructing services. | `maui/maui.standards.md` | Coding standards | Stated |
-| `maui-dev` | Never edit signing keys or publish credentials. | `maui/maui.rules.md` | Security and data handling | Moved |
+| `maui-dev` | Never edit signing keys or publish credentials. | `shared-rules.md` | Security and data handling | Moved |
 | `maui-dev` | Consume the API contracts the backend exposes; do not implement server endpoints. | `maui/maui.rules.md` | Whole file | Moved |
 | `maui-dev` | When ceding work to delivery, provide the publish/build commands and RID/workload needs. | `maui/maui.skills.md` | Whole file | Moved |
 | `tauri-dev` | Target Tauri v2; verify version-sensitive APIs, config keys and plugin behaviour against `v2.tauri.app` and `docs.rs/tauri`. | `tauri/tauri.standards.md` | Naming and layout | Stated |
@@ -79,8 +79,8 @@ Paths are relative to `products/kyber-squad/standards/`.
 | `tauri-dev` | Treat the WebView as untrusted; validate every argument crossing the IPC boundary. | `tauri/tauri.standards.md` | Security and data handling | Stated |
 | `tauri-dev` | Default-deny exposure: expose only the commands the frontend needs, granted through capabilities with the least permission and narrowest scope. | `tauri/tauri.standards.md` | Security and data handling | Stated |
 | `tauri-dev` | Never expose a generic run-arbitrary-command, shell, SQL or path surface; wrap each privileged operation in a specific validated command. | `tauri/tauri.standards.md` | Security and data handling | Moved |
-| `tauri-dev` | Keep secrets, tokens and credentials in the Rust core, never in frontend-reachable code. | `tauri/tauri.rules.md` | Security and data handling | Moved |
-| `tauri-dev` | Keep `tauri` and plugin crates on the pinned versions and never widen the CSP to make something load. | `tauri/tauri.rules.md` | Security and data handling | Moved |
+| `tauri-dev` | Keep secrets, tokens and credentials in the Rust core, never in frontend-reachable code. | `tauri/tauri.standards.md` | Security and data handling | Moved |
+| `tauri-dev` | Keep `tauri` and plugin crates on the pinned versions and never widen the CSP to make something load. | `tauri/tauri.standards.md` | Security and data handling | Moved |
 | `tauri-dev` | Register every command in a single `tauri::generate_handler!` call; a second `invoke_handler` silently wins. | `tauri/tauri.standards.md` | Coding standards | Moved |
 | `tauri-dev` | Commands in `lib.rs` are not `pub`; commands in separate modules are `pub`; command names are unique across modules. | `tauri/tauri.standards.md` | Naming and layout | Moved |
 | `tauri-dev` | Arguments and returns implement `serde::Deserialize`/`Serialize`; arguments arrive camelCase and use `rename_all = "snake_case"` when the JS side differs. | `tauri/tauri.standards.md` | Coding standards | Moved |
@@ -97,7 +97,7 @@ Paths are relative to `products/kyber-squad/standards/`.
 | `pulumi-dev` | Pin registry documentation to the package version in use when behaviour matters. | `pulumi/pulumi.skills.md` | Whole file | Moved |
 | `pulumi-dev` | Run `pulumi preview` and keep the diff small, reviewable and idempotent; call out replacement, data-loss and cross-stack risk before apply. | `pulumi/pulumi.standards.md` | Commands | Stated |
 | `pulumi-dev` | Never apply a change whose preview was not inspected, and never hide a replacement inside an unreviewed apply. | `pulumi/pulumi.rules.md` | Whole file | Stated |
-| `pulumi-dev` | Never print, log, serialize or write decrypted secret values. | `pulumi/pulumi.rules.md` | Security and data handling | Moved |
+| `pulumi-dev` | Never print, log, serialize or write decrypted secret values. | `shared-rules.md` | Security and data handling | Moved |
 | `pulumi-dev` | Agree stack output names (registry login server, app name, managed-identity client id) with delivery before either side writes. | `pulumi/pulumi.skills.md` | Whole file | Moved |
 | `pulumi-dev` | Live-state questions go to the platform research agent; intended state is the Pulumi program and its preview. | `pulumi/pulumi.rules.md` | Whole file | Moved |
 | `pulumi-dev` | Provision the database resource; do not design its schema. | `pulumi/pulumi.rules.md` | Whole file | Moved |

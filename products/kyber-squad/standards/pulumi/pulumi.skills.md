@@ -10,5 +10,17 @@ last-reviewed: 2026-11-16
 
 # pulumi skills
 
-How to carry out the common work in pulumi: the commands, tool servers and query patterns
-this repository uses.
+## Names
+
+- Construct every Azure resource name through the `azure-naming` skill; do not improvise a
+  convention.
+
+## Documentation
+
+- Pin registry documentation to the package version in use when behaviour matters.
+
+## Hand-off
+
+Agree stack output names (registry login server, app name, managed-identity client id) with
+delivery before either side writes. Emit them so the pipeline reads them with
+`pulumi stack output`.

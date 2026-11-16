@@ -10,5 +10,11 @@ last-reviewed: 2026-11-16
 
 # maui rules
 
-Rules that apply to every task written in maui. Technology rules beat parent rules,
-parent rules beat shared rules, and rules beat skills.
+## Boundaries
+
+- Consume the API contracts the backend exposes; do not implement server endpoints.
+- ViewModels take interfaces rather than constructing services.
+
+## Security and data handling
+
+- Never edit signing keys or publish credentials.
