@@ -13,6 +13,7 @@ using KyberWeave.Mcp;
 using ModelContextProtocol.Server;
 using Xunit;
 
+using KyberWeave.Tests.Fakes;
 namespace KyberWeave.Tests;
 
 /// <summary>
@@ -198,7 +199,7 @@ public sealed class McpDocsProvenanceTests : IDisposable
             $"gitdir: {Path.Combine(root, ".git-missing")}{Environment.NewLine}");
 
     private static DocsTools CreateTools(string root) =>
-        DocsToolsComposition.Create(CreateHost(root), new RepositoryDocsAnalysisReader(root));
+        DocsToolsComposition.Create(CreateHost(root), McpTestServices.AnalysisReader(root));
 
     private static DocumentIndexHost CreateHost(string root)
     {

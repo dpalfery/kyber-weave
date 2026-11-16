@@ -25,7 +25,7 @@ public sealed class McpPlanLifecycleToolsTests
     {
         IServiceProvider provider = services ?? DocsTestCommands.Services();
         return DocsRootRegistry.CreateTools(root, codeGraphRefreshEnabled: false,
-            new DocsRootRegistry(root, path => DocsRootRegistry.CreateTools(path, codeGraphRefreshEnabled: false, registry: null, provider)),
+            DocsTestCommands.Registry(root, path => DocsRootRegistry.CreateTools(path, codeGraphRefreshEnabled: false, registry: null, provider)),
             provider);
     }
 

@@ -2,6 +2,7 @@ using System.Text.Json;
 using KyberWeave.Cli.Commands.Docs;
 using Xunit;
 
+using KyberWeave.Tests.Fakes;
 namespace KyberWeave.Tests;
 
 /// <summary>Pins managed-glossary contribution at the public docs export-graph command boundary.</summary>
@@ -20,7 +21,7 @@ public sealed class DocsGraphCliCommandTests : IDisposable
         Directory.CreateDirectory(codeGraphDirectory);
         File.Copy(codeGraph.DatabasePath, Path.Combine(codeGraphDirectory, "codegraph.db"));
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => new DocsExportGraphCommand().Execute(
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => DocsTestCommands.ExportGraph().Execute(
             null!,
             new DocsExportGraphSettings { Path = _repository.Path, Out = _output.Path }));
         int exitCode = execution.Result;
@@ -73,7 +74,7 @@ public sealed class DocsGraphCliCommandTests : IDisposable
         Directory.CreateDirectory(codeGraphDirectory);
         File.Copy(codeGraph.DatabasePath, Path.Combine(codeGraphDirectory, "codegraph.db"));
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => new DocsExportGraphCommand().Execute(
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => DocsTestCommands.ExportGraph().Execute(
             null!,
             new DocsExportGraphSettings { Path = _repository.Path, Out = _output.Path, Format = "json" }));
 

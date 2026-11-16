@@ -1154,13 +1154,13 @@
       "bound": "ProcessRunner timeout kills the child tree on expiry; GitTimeout; read-only git argv."
     },
     {
-      "file": "src/KyberWeave.Mcp/DocsRootRegistry.cs",
+      "file": "src/KyberWeave.Data/Docs/Mcp/GitWorktreeIdentity.cs",
       "text": "ProcessStartInfo startInfo = new(\"git\")",
       "count": 1,
       "bound": "ProcessRunner timeout kills the child tree on expiry; started by the Run below with GitTimeout; read-only git rev-parse argv."
     },
     {
-      "file": "src/KyberWeave.Mcp/DocsRootRegistry.cs",
+      "file": "src/KyberWeave.Data/Docs/Mcp/GitWorktreeIdentity.cs",
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);",
       "count": 1,
       "bound": "ProcessRunner timeout kills the child tree on expiry; GitTimeout; read-only git argv."

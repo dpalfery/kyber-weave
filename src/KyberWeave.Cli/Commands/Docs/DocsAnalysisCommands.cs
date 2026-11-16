@@ -1,4 +1,3 @@
-using JetBrains.Annotations;
 using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis;
@@ -24,10 +23,7 @@ public sealed class DocsIntegrityCheckCommand : Command<DocsIntegrityCheckSettin
 {
     private readonly IDocsAnalysisCommandService _service;
 
-    [UsedImplicitly]
-    public DocsIntegrityCheckCommand() : this(new RepositoryDocsAnalysisCommandService()) { }
-
-    internal DocsIntegrityCheckCommand(IDocsAnalysisCommandService service) =>
+    public DocsIntegrityCheckCommand(IDocsAnalysisCommandService service) =>
         _service = service ?? throw new ArgumentNullException(nameof(service));
 
     public override int Execute(CommandContext context, DocsIntegrityCheckSettings settings, CancellationToken cancellationToken)
@@ -72,10 +68,7 @@ public sealed class DocsReviewExportCommand : Command<DocsReviewExportSettings>
 {
     private readonly IDocsAnalysisCommandService _service;
 
-    [UsedImplicitly]
-    public DocsReviewExportCommand() : this(new RepositoryDocsAnalysisCommandService()) { }
-
-    internal DocsReviewExportCommand(IDocsAnalysisCommandService service) =>
+    public DocsReviewExportCommand(IDocsAnalysisCommandService service) =>
         _service = service ?? throw new ArgumentNullException(nameof(service));
 
     public override int Execute(CommandContext context, DocsReviewExportSettings settings, CancellationToken cancellationToken)
@@ -112,10 +105,7 @@ public sealed class DocsReviewImportCommand : Command<DocsReviewImportSettings>
 {
     private readonly IDocsAnalysisCommandService _service;
 
-    [UsedImplicitly]
-    public DocsReviewImportCommand() : this(new RepositoryDocsAnalysisCommandService()) { }
-
-    internal DocsReviewImportCommand(IDocsAnalysisCommandService service) =>
+    public DocsReviewImportCommand(IDocsAnalysisCommandService service) =>
         _service = service ?? throw new ArgumentNullException(nameof(service));
 
     public override int Execute(CommandContext context, DocsReviewImportSettings settings, CancellationToken cancellationToken)
@@ -144,10 +134,7 @@ public sealed class DocsGlossaryCommand : Command<DocsGlossarySettings>
 {
     private readonly IDocsAnalysisCommandService _service;
 
-    [UsedImplicitly]
-    public DocsGlossaryCommand() : this(new RepositoryDocsAnalysisCommandService()) { }
-
-    internal DocsGlossaryCommand(IDocsAnalysisCommandService service) =>
+    public DocsGlossaryCommand(IDocsAnalysisCommandService service) =>
         _service = service ?? throw new ArgumentNullException(nameof(service));
 
     public override int Execute(CommandContext context, DocsGlossarySettings settings, CancellationToken cancellationToken)
@@ -168,7 +155,7 @@ public sealed class DocsGlossaryCommand : Command<DocsGlossarySettings>
                 exception,
                 settings,
                 "docs glossary",
-                ManagedGlossaryService.ValidationRuleCode);
+                ManagedGlossary.ValidationRuleCode);
             return 1;
         }
     }

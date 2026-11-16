@@ -4,6 +4,7 @@ using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Delivery;
 using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Mcp;
 using Microsoft.Extensions.DependencyInjection;
 using KyberWeave.Application;
 
@@ -62,7 +63,30 @@ internal static class DocsTestCommands
 
     public static IDocsSchemaGate SchemaGate => Services().GetRequiredService<IDocsSchemaGate>();
 
+    internal static RepositoryDocsAnalysisCommandService AnalysisService(DocsAnalysisCompositionFactories factories)
+    {
+        IServiceProvider provider = Services();
+        return new RepositoryDocsAnalysisCommandService(
+            factories, provider.GetRequiredService<IManagedGlossaryFactory>(), provider.GetRequiredService<IDocumentSourceFactory>());
+    }
+
+    public static DocsExportGraphCommand ExportGraph() => new(Services().GetRequiredService<IManagedGlossaryFactory>());
+
+    public static DocsRootRegistry Registry(string root, Func<string, DocsTools> factory)
+    {
+        IServiceProvider provider = Services();
+        return new DocsRootRegistry(root, factory, provider.GetRequiredService<IGitWorktreeIdentity>(), provider.GetRequiredService<IFileSystem>());
+    }
+
     public static IPacketHostFacts HostFacts => Services().GetRequiredService<IPacketHostFacts>();
 
     public static RunDeliveryPorts DeliveryPorts => Services().GetRequiredService<RunDeliveryPorts>();
+}
+
+/// <summary>The MCP host's collaborators built over the container the real host builds.</summary>
+internal static class McpTestServices
+{
+    /// <summary>The analysis reader over <paramref name="repositoryRoot"/>.</summary>
+    public static RepositoryDocsAnalysisReader AnalysisReader(string repositoryRoot) =>
+        DocsToolsComposition.AnalysisReader(DocsTestCommands.Services(), repositoryRoot);
 }

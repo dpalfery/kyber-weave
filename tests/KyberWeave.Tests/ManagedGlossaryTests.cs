@@ -27,7 +27,7 @@ public sealed class ManagedGlossaryTests
         string expectedPath)
     {
         using GlossaryRepository repository = Repository(docsRoots: ["docs", "components/gameplay/docs"]);
-        ManagedGlossaryService service = Service(repository, glossaryPath: configuredPath);
+        ManagedGlossary service = Service(repository, glossaryPath: configuredPath);
 
         GlossaryUpdateResult result = service.Preview([Proposal("loop", "component:Gameplay", "claim-1")]);
 
@@ -41,7 +41,7 @@ public sealed class ManagedGlossaryTests
     public void WriteMissingGlossaryCreatesConformantReferenceUsingFirstCatalogOwnerAndUtcDate()
     {
         using GlossaryRepository repository = Repository();
-        ManagedGlossaryService service = Service(repository);
+        ManagedGlossary service = Service(repository);
 
         GlossaryUpdateResult result = service.Write([Proposal("loop", "component:Gameplay", "claim-1")]);
 
@@ -57,7 +57,7 @@ public sealed class ManagedGlossaryTests
     public void WriteCatalogHasNoDataOwnerFailsBeforeCreatingGlossary()
     {
         using GlossaryRepository repository = Repository(catalogRows: []);
-        ManagedGlossaryService service = Service(repository);
+        ManagedGlossary service = Service(repository);
 
         InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
             service.Write([Proposal("loop", "component:Gameplay", "claim-1")]));
@@ -70,7 +70,7 @@ public sealed class ManagedGlossaryTests
     public void WriteNewProposalUsesExactTableShapeStatusScopeAndMarkedEvidence()
     {
         using GlossaryRepository repository = Repository();
-        ManagedGlossaryService service = Service(repository);
+        ManagedGlossary service = Service(repository);
 
         service.Write([Proposal("loop", "component:Gameplay", "claim-1", aliases: ["gameplay loop"])]);
 
@@ -98,7 +98,7 @@ public sealed class ManagedGlossaryTests
 
             Human notes that must also stay intact.
             """));
-        ManagedGlossaryService service = Service(repository);
+        ManagedGlossary service = Service(repository);
 
         service.Write([Proposal("loop", "component:Runtime", "claim-2")]);
 
@@ -115,7 +115,7 @@ public sealed class ManagedGlossaryTests
     public void WriteProposalEvidenceChangesRefreshesEvidenceAndDemotesCurrentDocument()
     {
         using GlossaryRepository repository = Repository();
-        ManagedGlossaryService service = Service(repository);
+        ManagedGlossary service = Service(repository);
         service.Write([Proposal("loop", "component:Gameplay", "old-claim", aliases: ["gameplay loop"])]);
         repository.ReplaceInGlossary("status: needs-review", "status: current");
         repository.ReplaceInGlossary("last-reviewed: 2026-08-11", "last-reviewed: 2026-07-01");
@@ -134,7 +134,7 @@ public sealed class ManagedGlossaryTests
     public void WriteUntouchedGeneratedProposalLosesAllEvidenceRemovesProposal()
     {
         using GlossaryRepository repository = Repository();
-        ManagedGlossaryService service = Service(repository);
+        ManagedGlossary service = Service(repository);
         service.Write([Proposal("loop", "component:Gameplay", "old-claim", aliases: ["gameplay loop"])]);
 
         service.Write([]);
@@ -171,7 +171,7 @@ public sealed class ManagedGlossaryTests
     public void WriteGeneratedProposalEvidenceWasHumanEditedPreservesRowAndEvidence()
     {
         using GlossaryRepository repository = Repository();
-        ManagedGlossaryService service = Service(repository);
+        ManagedGlossary service = Service(repository);
         service.Write([Proposal("loop", "component:Gameplay", "claim-1", aliases: ["gameplay loop"])]);
         repository.ReplaceInGlossary("- claim-1", "- human evidence note");
 
@@ -256,7 +256,7 @@ public sealed class ManagedGlossaryTests
             |---|---|---|---|---|
             | loop-gameplay | approved | The gameplay update cycle. | component:Gameplay | gameplay loop |
             """));
-        ManagedGlossaryService service = Service(repository);
+        ManagedGlossary service = Service(repository);
         GlossaryProposal[] proposals = [Proposal("loop", "component:Agents", "claim-1")];
 
         GlossaryUpdateResult preview = service.Preview(proposals);
@@ -288,7 +288,7 @@ public sealed class ManagedGlossaryTests
             - old-claim
             <!-- kyber-weave:glossary-evidence:end -->
             """));
-        ManagedGlossaryService service = Service(repository);
+        ManagedGlossary service = Service(repository);
 
         service.Write([]);
 
@@ -316,7 +316,7 @@ public sealed class ManagedGlossaryTests
 
         DiagnosticReport report = Service(repository).Validate();
 
-        Assert.Contains(report.Items, item => item.Code == ManagedGlossaryService.ValidationRuleCode);
+        Assert.Contains(report.Items, item => item.Code == ManagedGlossary.ValidationRuleCode);
         Assert.All(report.Items, item => Assert.Equal("KW-DOC-GLOSSARY-001", item.Code));
     }
 
@@ -519,7 +519,7 @@ public sealed class ManagedGlossaryTests
         Assert.Equal(1, exitCode);
     }
 
-    private static ManagedGlossaryService Service(GlossaryRepository repository, string? glossaryPath = null) =>
+    private static ManagedGlossary Service(GlossaryRepository repository, string? glossaryPath = null) =>
         new(
             repository.Root,
             new KyberWeaveConfig
@@ -527,7 +527,8 @@ public sealed class ManagedGlossaryTests
                 Ontology = repository.Ontology,
                 DocsAnalysis = new DocsAnalysisConfig { GlossaryPath = glossaryPath }
             },
-            new FixedTimeProvider(Today));
+            new FixedTimeProvider(Today),
+            DocsPorts.Files);
 
     private static GlossaryProposal Proposal(
         string term,

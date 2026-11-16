@@ -32,6 +32,8 @@ internal static class CliApplication
         configure?.Invoke(services);
         services.TryAddSingleton<IRepositoryToolSettings, ConfigFileToolSettings>();
         services.TryAddSingleton<IMcpDeclarationReader, McpDeclarationReader>();
+        services.TryAddSingleton<DocsAnalysisCompositionFactories>();
+        services.TryAddSingleton<IDocsAnalysisCommandService, RepositoryDocsAnalysisCommandService>();
         _ = services.AddSquadCliServices();
         _ = services.AddWeaveApplication();
         CommandApp app = new(new ServiceCollectionTypeRegistrar(services));

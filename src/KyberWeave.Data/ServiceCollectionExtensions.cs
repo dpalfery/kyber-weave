@@ -39,6 +39,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IBoundedProcessExecutor>(_ => new KernelBoundedProcessExecutor());
         services.TryAddSingleton<IExclusiveFileWriter>(_ => new ExclusiveFileWriter());
         services.TryAddSingleton<IDocumentSourceFactory>(_ => new DocumentLoaderFactory());
+        services.TryAddSingleton<IGitWorktreeIdentity>(_ => new GitWorktreeIdentity());
         services.TryAddSingleton<IDoctorFileSystem>(_ => new PhysicalDoctorFileSystem());
         services.TryAddSingleton<IProcessRunner>(_ => new KernelProcessRunner());
         services.TryAddSingleton<IGitCommandRunner>(_ => new ProcessGitCommandRunner(ProcessGitCommandRunner.DefaultTimeout));

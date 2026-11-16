@@ -102,13 +102,13 @@ OntologyConfig ontology = DocsRootRegistry.ResolveOntology(repoRoot);
 // Composition root. The shared layers register their own services first; every registration below this line
 // is a host decision made once from this process's own argv and root. Core never invents these collaborators.
 builder.Services.AddWeaveApplication();
-builder.Services.AddSingleton(new DocumentIndexHost(
+builder.Services.AddSingleton(services => new DocumentIndexHost(
     repoRoot,
-    () => CodeGraphResolvers.ForRepository(repoRoot).Resolver,
-    () => new DocumentLoader(repoRoot, ontology).Load(),
+    () => services.GetRequiredService<ICodeGraphPortsFactory>().ForRepository(repoRoot).Resolver,
+    () => services.GetRequiredService<IDocumentSourceFactory>().Create(repoRoot, ontology).Load(),
     ontology.DocsRoots,
     ontology.ResolvedCatalogPath));
-builder.Services.AddSingleton<IDocsAnalysisReader>(new RepositoryDocsAnalysisReader(repoRoot));
+builder.Services.AddSingleton<IDocsAnalysisReader>(services => DocsToolsComposition.AnalysisReader(services, repoRoot));
 
 // The refresh schedule is a process-wide decision, made once from this process's own argv. The
 // tools receive it by injection so a test that asks them directly gets the default cadence.

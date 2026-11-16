@@ -1,11 +1,9 @@
-using System.Diagnostics;
-
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
-using KyberWeave.Core.CodeGraph;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
-using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Search;
-using KyberWeave.Core.Processes;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace KyberWeave.Mcp;
 
@@ -34,10 +32,10 @@ public sealed class DocsRootRegistry
     /// <summary>How many non-server roots are kept at once.</summary>
     public const int Capacity = 4;
 
-    private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(5);
-
     private readonly string _serverRoot;
     private readonly Func<string, DocsTools> _factory;
+    private readonly IGitWorktreeIdentity _git;
+    private readonly IFileSystem _files;
     private readonly Lock _gate = new();
     private readonly LinkedList<(string Root, DocsTools Tools)> _recent = new();
     private (string? TopLevel, string? CommonDirectory, string? Error)? _serverIdentity;
@@ -45,10 +43,16 @@ public sealed class DocsRootRegistry
     /// <summary>A registry for the repository bound at <paramref name="serverRoot"/>.</summary>
     /// <param name="serverRoot">The root the server was started with.</param>
     /// <param name="factory">Builds the tools for another worktree root of the same repository.</param>
-    public DocsRootRegistry(string serverRoot, Func<string, DocsTools> factory)
+    /// <param name="git">Names the working tree a directory belongs to.</param>
+    /// <param name="files">Checks that a named project path is a directory.</param>
+    public DocsRootRegistry(string serverRoot, Func<string, DocsTools> factory, IGitWorktreeIdentity git, IFileSystem files)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverRoot);
         ArgumentNullException.ThrowIfNull(factory);
+        ArgumentNullException.ThrowIfNull(git);
+        ArgumentNullException.ThrowIfNull(files);
+        _git = git;
+        _files = files;
         _serverRoot = Path.GetFullPath(serverRoot);
         _factory = factory;
     }
@@ -61,7 +65,11 @@ public sealed class DocsRootRegistry
         string serverRoot,
         bool codeGraphRefreshEnabled,
         IServiceProvider? services = null) =>
-        new(serverRoot, root => CreateTools(root, codeGraphRefreshEnabled, null, services));
+        new(
+            serverRoot,
+            root => CreateTools(root, codeGraphRefreshEnabled, null, services),
+            DocsToolsComposition.ServicesOrDefault(services).GetRequiredService<IGitWorktreeIdentity>(),
+            DocsToolsComposition.ServicesOrDefault(services).GetRequiredService<IFileSystem>());
 
     /// <summary>The tools for one checkout: its own document host, analysis reader and refresh schedule.</summary>
     /// <param name="repoRoot">The checkout root.</param>
@@ -78,16 +86,19 @@ public sealed class DocsRootRegistry
         IProcessExecutor? deliveryExecutor = null,
         string? deliveryHome = null)
     {
+        IServiceProvider provider = DocsToolsComposition.ServicesOrDefault(services);
         OntologyConfig ontology = ResolveOntology(repoRoot);
+        ICodeGraphPortsFactory codeGraph = provider.GetRequiredService<ICodeGraphPortsFactory>();
+        IDocumentSourceFactory documents = provider.GetRequiredService<IDocumentSourceFactory>();
         DocumentIndexHost host = new(
             repoRoot,
-            () => CodeGraphResolvers.ForRepository(repoRoot).Resolver,
-            () => new DocumentLoader(repoRoot, ontology).Load(),
+            () => codeGraph.ForRepository(repoRoot).Resolver,
+            () => documents.Create(repoRoot, ontology).Load(),
             ontology.DocsRoots,
             ontology.ResolvedCatalogPath);
         return DocsToolsComposition.Create(
             host,
-            new RepositoryDocsAnalysisReader(repoRoot),
+            DocsToolsComposition.AnalysisReader(provider, repoRoot),
             new CodeGraphFreshness(repoRoot, codeGraphRefreshEnabled),
             registry,
             services,
@@ -147,7 +158,7 @@ public sealed class DocsRootRegistry
             return false;
         }
 
-        if (!Directory.Exists(candidate))
+        if (!_files.DirectoryExists(candidate))
         {
             refusal = $"projectPath '{candidate}' is not a directory. Pass the absolute path of your worktree.";
             return false;
@@ -161,7 +172,7 @@ public sealed class DocsRootRegistry
             return false;
         }
 
-        if (!TryGitRoots(candidate, out string? topLevel, out string? common, out string? error))
+        if (!_git.TryRoots(candidate, out string? topLevel, out string? common, out string? error))
         {
             refusal = $"projectPath '{candidate}' is not inside a git repository ({error}). "
                 + "Pass the absolute path of a worktree of this repository.";
@@ -202,7 +213,7 @@ public sealed class DocsRootRegistry
         lock (_gate)
         {
             if (_serverIdentity is { CommonDirectory: not null } known) return known;
-            _serverIdentity = TryGitRoots(_serverRoot, out string? top, out string? common, out string? error)
+            _serverIdentity = _git.TryRoots(_serverRoot, out string? top, out string? common, out string? error)
                 ? (top, common, null)
                 : (null, null, error);
             return _serverIdentity.Value;
@@ -213,53 +224,4 @@ public sealed class DocsRootRegistry
         OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
-
-    /// <summary>Asks git for the working tree's top level and the git directory its worktrees share.</summary>
-    private static bool TryGitRoots(string directory, out string? topLevel, out string? commonDirectory, out string? error)
-    {
-        topLevel = null;
-        commonDirectory = null;
-        ProcessStartInfo startInfo = new("git")
-        {
-            WorkingDirectory = directory,
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-        };
-        foreach (string argument in new[] { "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir" })
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
-
-        try
-        {
-            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);
-            if (result.ExitCode != 0)
-            {
-                error = CorpusProvenance.FirstLine(result.StandardError);
-                return false;
-            }
-
-            string[] lines = result.StandardOutput.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
-            if (lines.Length < 2)
-            {
-                error = "git reported no working tree";
-                return false;
-            }
-
-            topLevel = Path.GetFullPath(lines[0].Trim());
-            commonDirectory = Path.GetFullPath(lines[1].Trim());
-            error = null;
-            return true;
-        }
-        catch (Exception exception) when (exception is System.ComponentModel.Win32Exception
-            or InvalidOperationException
-            or TimeoutException)
-        {
-            error = exception.Message;
-            return false;
-        }
-    }
 }
