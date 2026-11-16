@@ -33,8 +33,9 @@ public sealed class ArbiterPlanReadRuleTests
 {
     private const string PlanReadRule = "KW-ARB-PLANREAD-001";
 
-    private static readonly string ShippedRulesPath =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Domain", "Arbiter", "Rules", "default-rules.yml");
+    private static readonly string ConductorRulesPath = Path.Combine(
+        KyberWeaveTestPaths.ToolRoot,
+        "products", "kyber-squad", "standards", "conductor", "conductor.arbiter-rules.yml");
 
     /// <summary>A dispatch prompt with the routing header block, a task, and a body.</summary>
     private static string Prompt(string body) =>
@@ -194,23 +195,18 @@ public sealed class ArbiterPlanReadRuleTests
     public void TheShippedFileDeclaresTheRuleAsTheTwentySixth()
     {
         Assert.True(
-            File.Exists(ShippedRulesPath),
-            $"the shipped rules file must live at '{ShippedRulesPath}'.");
-        string[] lines = File.ReadAllLines(ShippedRulesPath);
-
-        Assert.Contains("36 shipped Arbiter rules", lines[0], StringComparison.Ordinal);
-
+            File.Exists(ConductorRulesPath),
+            $"the conductor rules file must live at '{ConductorRulesPath}'.");
         string[] ids =
         [
-            .. lines
+            .. File.ReadAllLines(ConductorRulesPath)
                 .Select(line => line.Trim())
                 .Where(line => line.StartsWith("- id: ", StringComparison.Ordinal))
                 .Select(line => line["- id: ".Length..].Trim())
         ];
 
-        Assert.Equal(36, ids.Length);
+        Assert.Equal(21, ids.Length);
         Assert.Contains(PlanReadRule, ids);
-        Assert.Equal("KW-ARB-MODE-002", ids[^3]);
         Assert.Equal("delegate", Rule().Trigger);
     }
 }
