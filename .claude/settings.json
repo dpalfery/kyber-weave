@@ -15,6 +15,18 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if command -v kyber-weave-hooks >/dev/null 2>&1; then kyber-weave-hooks run --harness claude; fi",
+            "timeout": 60
+          }
+        ]
+      }
     ]
   }
 }

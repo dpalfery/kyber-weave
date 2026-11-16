@@ -4,7 +4,7 @@ title: CI Pipelines architecture
 doc-type: architecture
 status: current
 component: CI Pipelines
-source-root: src/KyberWeave.Core/Diagnostics
+source-root: src/KyberWeave.Kernel/Diagnostics
 owner: dpalfery
 last-reviewed: 2026-08-15
 keywords:

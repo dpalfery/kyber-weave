@@ -146,6 +146,16 @@ Start at the [Kyber Arbiter overview](kyber-arbiter/README.md) for the idea and 
 | [Architecture](kyber-arbiter/architecture.md) | Engine, rules, facts, provider, configuration, harness facts |
 | [Runbook](kyber-arbiter/runbook.md) | Hooks, trust steps, fail-closed behaviour, `setup`, `doctor`, `audit` |
 
+## Feature 4b — Kyber edit hook
+
+A post-edit hook for coding agents: lints, formats and optionally tests the file an agent just
+edited, within a time budget, and returns failures as immediate feedback. Fails open.
+Start at the [edit hook page](kyber-hooks/README.md).
+
+| Page | Covers |
+|---|---|
+| [Kyber edit hook](kyber-hooks/README.md) | What it does, exit codes, fail-open behavior, built-in rules, `hooks.yml` keys, adding a technology |
+
 ## Feature 5 — Review council
 
 Parallel code review: a council of specialist lenses over the diff, the host's deterministic
