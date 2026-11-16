@@ -237,6 +237,7 @@ public class ServerStateRepositoryTests : IDisposable
             Assert.Equal(descriptor, repository.ReadEngineDescriptor(directory.Path));
 
             Assert.True(await repository.RequestEngineShutdownAsync(directory.Path));
+            // EngineOwner dispatches onShutdownRequested via Task.Run; await completion to eliminate thread pool dispatch races on loaded runners.
             await shutdownRequested.Task.WaitAsync(TimeSpan.FromSeconds(5));
             Assert.True(shutdownRequested.Task.IsCompleted);
         }
