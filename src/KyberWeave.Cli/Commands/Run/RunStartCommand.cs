@@ -146,7 +146,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         // Before the tool checks, on purpose. A worker that cannot reach the standards and gates this
         // repository chose cannot use the tools anyway, and a tool failure reported first would send the
         // operator to repair a remote that was never the thing standing in the way.
-        if (RunStartPlanner.NeedsOnboarding(config, configPath is not null))
+        if (RunStartPlanner.NeedsOnboarding(config.ConfigReg, configPath is not null))
         {
             return StopForOnboarding(config, configPath, repositoryRoot);
         }
