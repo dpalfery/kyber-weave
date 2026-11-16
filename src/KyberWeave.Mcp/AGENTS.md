@@ -96,6 +96,23 @@ with `gh`. Its only local write is a commit of plan files the archive left stage
 calls go through an `IProcessExecutor` that tests replace (`DeliveryExecutor`), so no test contacts
 GitHub ([ADR 0081](../../docs/adr/0081-the-conductor-delivers-a-run-through-one-docs-tool.md)).
 
+## One tool runs the doctor
+
+`docs_run_tooling_check_and_repair_code_index` (`DocsTools.ToolingCheck.cs`) is the run-start tooling check for a
+caller with no shell. It has the same shape as the writing tools: a thin wrapper
+(`ToolingCheckService`) over `IRepositoryDoctor` in ensure mode, which `kyber-weave doctor --ensure`
+also runs, with `projectPath` required. It writes only what that command writes: the checkout's
+`.codegraph/` index, tracked files the index run rewrote (restored), and the post-checkout hook block.
+
+- **The response is the CLI's.** After the provenance line and `result: passed | failed`, the check
+  lines come from `DoctorReportLines`, which the CLI's renderer also prints, then `EXIT: <code>` last.
+- **The exit code alone decides the failure token.** Any non-zero code adds the whole line
+  `STATUS: TOOL_FAILURE` above `EXIT:`. The doctor has already applied `stop-on-tool-failure`, so the
+  tool never reads that setting itself.
+- **It skips the CodeGraph gate**, because it is the repair for that gate.
+- **Its children never reach stdout.** git and CodeGraph run through the bounded process executor,
+  which captures both streams; tests replace it and the server executable the check starts.
+
 ## Staleness is handled for you
 
 `DocumentIndexHost.Current()` rebuilds whichever half has gone stale on each call. Do not
@@ -119,7 +136,7 @@ so a tool call never blocks on the provisioner's 600-second index timeout.
 - **Two tools answer anyway, deliberately.** `docs_get_source_repository_and_revision` always
   answers so a failure can be diagnosed, and `docs_detect_drift_between_documents_and_code` answers
   with the failure because its verdict is the failure report. The two plan lifecycle tools read no
-  code join and skip the gate. The other six go through `CheckCodeGraph` and return the block.
+  code join and skip the gate, and the tooling-check tool skips it because it is the repair. The other six go through `CheckCodeGraph` and return the block.
 - **Where it applies.** Only where the bound repository lists `codegraph` under
   `mcp.required-servers` (`McpConfig.DeclaresCodeGraph`). A host that never declared it takes no
   lock and reports nothing. Settings are read at each refresh, so an edit needs no restart.

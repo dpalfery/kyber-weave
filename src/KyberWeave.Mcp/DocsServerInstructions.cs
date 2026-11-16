@@ -35,6 +35,11 @@ public static class DocsServerInstructions
         pushes the run branch and opens or updates its draft pull request on GitHub. All three need
         projectPath and refuse, changing nothing, when their checks fail.
 
+        One tool checks and repairs the tooling of a checkout: docs_run_tooling_check_and_repair_code_index
+        runs the same check as kyber-weave doctor --ensure for the projectPath it is given, without
+        a shell. It returns one PASS or FAIL line per check, a fix: line under each failure, and a
+        last line EXIT: <code>. Call it at the start of a run, in the tree the run will work in.
+
         Every response starts with a provenance line naming the repository root, its branch, its
         git directory, the short revision, whether the working tree is dirty, and the document
         count. Two answers with the same git directory are the same repository, even when their
@@ -42,7 +47,8 @@ public static class DocsServerInstructions
 
         Responses also report a broken code index rather than guessing around it. If a response
         carries the line STATUS: TOOL_FAILURE, the tool could not read the CodeGraph index its
-        code joins come from: stop and fix that instead of answering without it. A repository that
+        code joins come from, or the tooling check exited non-zero: stop and fix that instead of
+        answering without it. A repository that
         sets stop-on-tool-failure: false gets a warning line instead, and the answer still comes
         back.
         """;

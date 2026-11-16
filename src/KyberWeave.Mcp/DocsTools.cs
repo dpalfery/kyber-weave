@@ -7,7 +7,7 @@ namespace KyberWeave.Mcp;
 
 /// <summary>
 /// The documentation retrieval tools: a thin MCP adapter over <see cref="IDocsQueryService"/>,
-/// <see cref="IPlanLifecycleService"/> and <see cref="IRunDeliveryService"/>. It owns the tool names,
+/// <see cref="IPlanLifecycleService"/>, <see cref="IRunDeliveryService"/> and <see cref="IToolingCheckService"/>. It owns the tool names,
 /// descriptions and schemas, and the per-call <c>projectPath</c> routing; every answer is composed
 /// by the services.
 /// </summary>
@@ -17,22 +17,26 @@ public sealed partial class DocsTools
     private readonly IDocsQueryService _query;
     private readonly IPlanLifecycleService _planLifecycle;
     private readonly IRunDeliveryService _delivery;
+    private readonly IToolingCheckService _toolingCheck;
     private readonly DocsRootRegistry? _roots;
 
     /// <summary>Tools over <paramref name="query"/> that also answer for other worktrees through <paramref name="roots"/>.</summary>
     /// <param name="query">The documentation query service for the root this server was started with.</param>
     /// <param name="planLifecycle">The plan lifecycle service for that root.</param>
     /// <param name="delivery">The run delivery service for that root.</param>
+    /// <param name="toolingCheck">The tooling check service for that root.</param>
     /// <param name="roots">Resolves a per-call <c>projectPath</c>, or null when this host serves one root only.</param>
     public DocsTools(
         IDocsQueryService query,
         IPlanLifecycleService planLifecycle,
         IRunDeliveryService delivery,
+        IToolingCheckService toolingCheck,
         DocsRootRegistry? roots = null)
     {
         _query = query ?? throw new ArgumentNullException(nameof(query));
         _planLifecycle = planLifecycle ?? throw new ArgumentNullException(nameof(planLifecycle));
         _delivery = delivery ?? throw new ArgumentNullException(nameof(delivery));
+        _toolingCheck = toolingCheck ?? throw new ArgumentNullException(nameof(toolingCheck));
         _roots = roots;
     }
 

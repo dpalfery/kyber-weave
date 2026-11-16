@@ -78,13 +78,17 @@ public sealed class DocsRootRegistry
     /// <param name="services">The container the shared collaborators are resolved from, or null for the default one.</param>
     /// <param name="deliveryExecutor">Runs git and gh for the deliver tool, or null for the bounded default.</param>
     /// <param name="deliveryHome">The home directory holding the run records, or null for the user profile.</param>
+    /// <param name="toolingExecutor">Runs git and CodeGraph for the tooling-check tool, or null for the bounded default.</param>
+    /// <param name="toolingMcpExecutable">The docs server executable the tooling check proves, or null for the one on <c>PATH</c>.</param>
     public static DocsTools CreateTools(
         string repoRoot,
         bool codeGraphRefreshEnabled,
         DocsRootRegistry? registry,
         IServiceProvider? services = null,
         IProcessExecutor? deliveryExecutor = null,
-        string? deliveryHome = null)
+        string? deliveryHome = null,
+        IProcessExecutor? toolingExecutor = null,
+        string? toolingMcpExecutable = null)
     {
         IServiceProvider provider = DocsToolsComposition.ServicesOrDefault(services);
         OntologyConfig ontology = ResolveOntology(repoRoot, provider);
@@ -108,7 +112,9 @@ public sealed class DocsRootRegistry
             registry,
             services,
             deliveryExecutor,
-            deliveryHome);
+            deliveryHome,
+            toolingExecutor,
+            toolingMcpExecutable);
     }
 
     /// <summary>

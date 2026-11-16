@@ -247,7 +247,7 @@ with no shell was the only index it would ever see. It now refreshes the index i
   `STATUS: TOOL_FAILURE` with `tool:`, `reason:` and `fix:` lines under the stop rule, or the
   same detail as a `warning:` line under `stop-on-tool-failure: false`. The token is a whole
   line so a passing mention cannot satisfy an orchestrator that routes on it. Seven of the
-  eight tools return the block; `docs_get_source_repository_and_revision` always answers so a
+  eight read-only tools return the block; `docs_get_source_repository_and_revision` always answers so a
   failure can be diagnosed, and
   `docs_detect_drift_between_documents_and_code` answers **with** the failure because its
   verdict is the failure report.

@@ -139,6 +139,13 @@ builder.Services.AddSingleton<IRunDeliveryService>(services =>
         services.GetRequiredService<IDocsQueryService>(),
         services.GetRequiredService<IDocsHostConfiguration>(),
         services.GetRequiredService<RunDeliveryPorts>()));
+builder.Services.AddSingleton<IToolingCheckService>(services =>
+    new ToolingCheckService(
+        repoRoot,
+        services.GetRequiredService<IDocsQueryService>(),
+        services.GetRequiredService<IRepositoryDoctor>(),
+        services.GetRequiredService<IBoundedProcessExecutor>(),
+        services.GetRequiredService<IProcessEnvironment>()));
 
 // A tool call may name another worktree of this repository with projectPath. Those are served by
 // tools of their own, built on demand and kept in a small least-recently-used set.

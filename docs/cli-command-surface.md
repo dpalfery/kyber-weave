@@ -592,7 +592,7 @@ and is unrelated.
 
 | Verb | Flags (beyond `[path]`) | What it does |
 |---|---|---|
-| [`doctor`](docgraph/mcp-runbook.md#the-live-check-doctor---check) | `[path]`, `--check`, `--provision`, `--ensure`, `--post-checkout`, `--index-timeout <SECONDS>` (default `600`), `--mcp-timeout <SECONDS>` (default `20`), `--json` | Check CodeGraph and the docs MCP server for the git repository that holds `[path]`, and provision or repair the CodeGraph index when asked. `--check`, `--provision`, `--ensure` and `--post-checkout` are mutually exclusive (exit `2`). `--ensure` also installs, refreshes or removes the git post-checkout hook block that indexes new worktrees; `--check` and `--provision` only report it ([runbook](docgraph/mcp-runbook.md#the-worktree-index-hook)). |
+| [`doctor`](docgraph/mcp-runbook.md#the-live-check-doctor---check) | `[path]`, `--check`, `--provision`, `--ensure`, `--post-checkout`, `--index-timeout <SECONDS>` (default `600`), `--mcp-timeout <SECONDS>` (default `20`), `--json` | Check CodeGraph and the docs MCP server for the git repository that holds `[path]`, and provision or repair the CodeGraph index when asked. `--check`, `--provision`, `--ensure` and `--post-checkout` are mutually exclusive (exit `2`). `--ensure` also installs, refreshes or removes the git post-checkout hook block that indexes new worktrees; `--check` and `--provision` only report it ([runbook](docgraph/mcp-runbook.md#the-worktree-index-hook)). The docs MCP tool [`docs_run_tooling_check_and_repair_code_index`](docgraph/mcp-runbook.md#docs_run_tooling_check_and_repair_code_indexprojectpath) runs `--ensure` for a caller with no shell. |
 
 Mode rule:
 

@@ -249,7 +249,8 @@ stop-on-tool-failure: false
 - **`false` warns and continues.** The failure is reported and the work proceeds, with code joins
   possibly missing.
 - **Who reads it.** `kyber-weave doctor --ensure` reads it and applies it to its own exit code, so
-  no agent has to judge a degraded result; the docs MCP server reads it at each refresh to decide
+  no agent has to judge a degraded result, and the docs MCP tool
+  `docs_run_tooling_check_and_repair_code_index` reports that same exit code; the docs MCP server reads it at each refresh to decide
   between `STATUS: TOOL_FAILURE` and a `warning:` line; the conductor and `bug-crusher` instructions
   route the exit code rather than interpreting it. `kyber-weave run start` reads it for the index of
   the tree it places the branch in.

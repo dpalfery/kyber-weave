@@ -41,27 +41,9 @@ internal static class DoctorReportRenderer
             return;
         }
 
-        foreach (DoctorCheck check in report.Checks)
-        {
-            if (check.Passed)
-            {
-                Console.Out.WriteLine($"PASS {check.Id} {SingleLine(check.Reason)}".TrimEnd());
-                continue;
-            }
-
-            // One line each, always. A reason can carry a child's first output line and a fix is a command; a line
-            // break inside either would split one failing check into what reads as two, and the line contract is
-            // what a script parses.
-            Console.Out.WriteLine($"FAIL {check.Id} {SingleLine(check.Reason)}".TrimEnd());
-            Console.Out.WriteLine($"  fix: {SingleLine(check.Fix)}".TrimEnd());
-        }
+        foreach (string line in DoctorReportLines.For(report))
+            Console.Out.WriteLine(line);
     }
-
-    /// <summary>Collapses line breaks so one check stays on one line, with no empty line left between them.</summary>
-    private static string SingleLine(string? text) =>
-        text is null
-            ? string.Empty
-            : string.Join(' ', text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
 
     /// <summary>The wire name of the mode the run actually used. It matches the option that selected it.</summary>
     /// <remarks>
