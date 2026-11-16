@@ -68,7 +68,7 @@ established id breaks every reference to it.
 ### `KW-DOC-SPEC-007` — technology or role on the wrong document
 
 `technology` is set on a document that is not a `coding-standard`, a `rule` or a
-`skill`; `role` is set on a document that is not a `rule` or a `skill`; or the value
+`skill`; `role` is set on a document that is not one of those three; or the value
 does not match the folder the file sits in.
 
 Clear a misplaced key by dropping it, or by making the document the type that takes the
@@ -78,12 +78,12 @@ folder's name. A file anywhere else is cleared by moving it there; changing its 
 does not make the scope resolve. The folder name, the key, and `ontology.technologies`
 (or `ontology.roles`) are one value.
 
-### `KW-DOC-SPEC-011` — a skill names neither scope
+### `KW-DOC-SPEC-011` — neither scope declared
 
-A `skill` document must carry `technology` or `role`, and sit in that scope's folder
-under `<docs-root>/standards/`. Pick the one scope the skill teaches: a skill about a
-stack is scoped by technology, a skill about a role's procedure by role. A skill that
-covers both is two documents.
+A `skill` document, or a standard, must carry `technology` or `role`, and sit in that
+scope's folder under `<docs-root>/standards/`. Pick the one scope the document covers: a
+skill about a stack is scoped by technology, a skill about a role's procedure by role. A
+document that covers both is two documents.
 
 ## Drift — `docs drift`
 

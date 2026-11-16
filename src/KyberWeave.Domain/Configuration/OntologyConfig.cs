@@ -211,9 +211,11 @@ public sealed class OntologyConfig
             [DocType.Spec] = ["component"],
             [DocType.Todo] = ["component"],
 
-            // A standard is scoped by technology, not by component: a C# standard governs
-            // code in every component the catalog lists, so requiring one of them would be
-            // a false claim about which code it covers.
-            [DocType.CodingStandard] = ["technology"]
+            // A standard is scoped by the technology or role whose folder it sits in, not by
+            // component: a C# standard governs code in every component the catalog lists, so
+            // requiring one of them would be a false claim about which code it covers. The
+            // scope key is checked as "technology or role" in ValidateScope, which the
+            // required-key matrix cannot express.
+            [DocType.CodingStandard] = []
         };
 }

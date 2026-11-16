@@ -108,10 +108,57 @@ public class SkillAndScopeTests
         # Scoped document
         """;
 
+    private static DocFixture CompleteFolder(DocFixture fixture, string scope, string scopeKey)
+    {
+        string standard = $"""
+            ---
+            id: standards/{scope}
+            title: {scope} standard
+            doc-type: coding-standard
+            status: current
+            {scopeKey}: {scope}
+            owner: Maintainers
+            last-reviewed: 2026-07-21
+            ---
+
+            # {scope}
+
+            ## Naming and layout
+
+            ## Coding standards
+
+            ## Testing
+
+            ## Commands
+
+            ## Security and data handling
+
+            ## Done checklist
+            """;
+        string rules = $"""
+            ---
+            id: standards/{scope}/rules
+            title: {scope} rules
+            doc-type: rule
+            status: current
+            {scopeKey}: {scope}
+            owner: Maintainers
+            last-reviewed: 2026-07-21
+            ---
+
+            # {scope} rules
+            """;
+
+        return fixture
+            .Write($"6-Docs/standards/{scope}/{scope}.standards.md", standard)
+            .Write($"6-Docs/standards/{scope}/{scope}.rules.md", rules)
+            .Write($"6-Docs/standards/{scope}/{scope}.arbiter-rules.yml", "rules: []\n");
+    }
+
     [Fact]
     public void ASkillInItsTechnologysFolderIsValid()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = CompleteFolder(new DocFixture().WithCatalog(), "dotnet", "technology")
             .Write("6-Docs/standards/dotnet/dotnet.skills.md", Document("skill", "dotnet", null));
 
         Assert.False(fixture.Validate(Scoped).HasErrors);
@@ -120,7 +167,7 @@ public class SkillAndScopeTests
     [Fact]
     public void ASkillInItsRolesFolderIsValid()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = CompleteFolder(new DocFixture().WithCatalog(), "reviewer", "role")
             .Write("6-Docs/standards/reviewer/reviewer.skills.md", Document("skill", null, "reviewer"));
 
         Assert.False(fixture.Validate(Scoped).HasErrors);
@@ -140,8 +187,8 @@ public class SkillAndScopeTests
     [Fact]
     public void ARuleNamingATechnologyInItsFolderIsValid()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
-            .Write("6-Docs/standards/dotnet/dotnet.rules.md", Document("rule", "dotnet", null));
+        using DocFixture fixture = CompleteFolder(new DocFixture().WithCatalog(), "dotnet", "technology")
+            .Write("6-Docs/standards/dotnet/dotnet.skills.md", Document("skill", "dotnet", null));
 
         Assert.False(fixture.Validate(Scoped).HasErrors);
     }
@@ -229,7 +276,7 @@ public class TechnologyDeclarationTests
     }
 
     [Fact]
-    public void MissingTechnologyOnAStandardIsSPEC003()
+    public void MissingScopeOnAStandardIsSPEC011()
     {
         using DocFixture fixture = new DocFixture().WithCatalog()
             .Write("6-Docs/standards/dotnet/README.md", """
@@ -245,7 +292,7 @@ public class TechnologyDeclarationTests
 
         DiagnosticReport report = fixture.Validate(DotnetDeclared);
 
-        Assert.Contains(report.Items, i => i.Code == DocSpecValidator.MissingRequiredKey);
+        Assert.Contains(report.Items, i => i.Code == DocSpecValidator.MissingScope);
     }
 
     [Fact]
@@ -279,7 +326,7 @@ public class TechnologyDeclarationTests
     public void AStandardNeedsNoComponent()
     {
         Assert.False(OntologyConfig.ProductDefaults.IsRequired(DocType.CodingStandard, "component"));
-        Assert.True(OntologyConfig.ProductDefaults.IsRequired(DocType.CodingStandard, "technology"));
+        Assert.False(OntologyConfig.ProductDefaults.IsRequired(DocType.CodingStandard, "technology"));
     }
 }
 

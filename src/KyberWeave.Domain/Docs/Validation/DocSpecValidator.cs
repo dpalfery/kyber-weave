@@ -127,6 +127,8 @@ public sealed class DocSpecValidator
 
         ValidateLinkFragments(byPath, headingSlugsByPath, report);
 
+        ValidateStandardsFolders(byPath, report);
+
         return report;
     }
 
@@ -410,13 +412,14 @@ public sealed class DocSpecValidator
         string? technology = doc.Frontmatter.Technology?.Trim();
         string? role = doc.Frontmatter.Role?.Trim();
 
-        if (doc.DocType == DocType.Skill
+        if (doc.DocType is DocType.Skill or DocType.CodingStandard
             && string.IsNullOrWhiteSpace(technology)
             && string.IsNullOrWhiteSpace(role))
         {
+            string kind = doc.DocType == DocType.Skill ? "skills document" : "standard";
             report.Add(new Diagnostic(
                 MissingScope, Severity.Error,
-                "a skills document names neither a technology nor a role.",
+                $"a {kind} names neither a technology nor a role.",
                 doc.Subject, doc.RelativePath,
                 "Add 'technology: <name>' or 'role: <name>', and put the document in the " +
                 "folder of that name under the standards root."));
@@ -436,8 +439,8 @@ public sealed class DocSpecValidator
         {
             ValidateScopeKey(
                 doc, "role", role, _config.Roles,
-                doc.DocType is DocType.Rule or DocType.Skill,
-                "Only a rule or a skill is scoped by role.",
+                doc.DocType is DocType.CodingStandard or DocType.Rule or DocType.Skill,
+                "Only a coding-standard, a rule or a skill is scoped by role.",
                 report);
         }
     }
@@ -485,9 +488,128 @@ public sealed class DocSpecValidator
         }
     }
 
-    /// <summary>Name of the directory a repository-relative path sits in, or empty.</summary>
-    private static string ContainingFolder(string relativePath)
+    /// <summary>
+    /// Checks each declared technology and role folder that exists on disk for the four files
+    /// a complete scope folder holds, and for the six headings a standard carries.
+    /// </summary>
+    /// <remarks>
+    /// A host that still holds its standard as <c>README.md</c> gets one warning naming the
+    /// migration command and no further findings for that folder: it is the shape every host
+    /// had before this check existed, and it must keep validating for two minor releases.
+    /// A folder that does not exist is skipped — <c>docs init</c> creates it, and a technology
+    /// declared before its folder exists is a scaffolding concern, not a validation error.
+    /// </remarks>
+    private void ValidateStandardsFolders(
+        Dictionary<string, DocumentModel> byPath,
+        DiagnosticReport report)
     {
+        HashSet<string> checkedFolders = new(StringComparer.Ordinal);
+        IEnumerable<string> scopes = _config.Technologies.Concat(_config.Roles);
+
+        foreach (string scope in scopes.Distinct(StringComparer.Ordinal))
+        {
+            foreach (string docsRoot in _config.DocsRoots)
+            {
+                string relativeFolder = $"{docsRoot}/{DocsLayout.Standards}/{scope}";
+                if (!checkedFolders.Add(relativeFolder)) continue;
+
+                string absoluteFolder = Combine(relativeFolder);
+                if (!Directory.Exists(absoluteFolder)) continue;
+
+                string standard = DocsLayout.StandardFile(docsRoot, scope);
+                string legacy = $"{relativeFolder}/README.md";
+
+                if (!File.Exists(Combine(standard)))
+                {
+                    if (File.Exists(Combine(legacy)))
+                    {
+                        report.Add(new Diagnostic(
+                            MissingFolderFile, Severity.Warning,
+                            $"the '{scope}' folder still holds its standard as README.md.",
+                            scope, legacy,
+                            "Run 'kyber-weave docs standards migrate' to rename it to " +
+                            $"'{scope}{DocsLayout.StandardsSuffix}' and add the missing folder files."));
+                    }
+                    else
+                    {
+                        report.Add(new Diagnostic(
+                            MissingFolderFile, Severity.Error,
+                            $"the '{scope}' folder is missing '{scope}{DocsLayout.StandardsSuffix}'.",
+                            scope, relativeFolder,
+                            "Run 'kyber-weave docs standards migrate' to add the missing folder files."));
+                    }
+
+                    continue;
+                }
+
+                if (byPath.TryGetValue(standard, out DocumentModel? document))
+                {
+                    ValidateStandardHeadings(document, scope, report);
+                }
+
+                foreach (string file in new[]
+                         {
+                             DocsLayout.RulesFile(docsRoot, scope),
+                             DocsLayout.SkillsFile(docsRoot, scope),
+                             DocsLayout.ArbiterRulesFile(docsRoot, scope)
+                         })
+                {
+                    if (File.Exists(Combine(file))) continue;
+
+                    report.Add(new Diagnostic(
+                        MissingFolderFile, Severity.Error,
+                        $"the '{scope}' folder is missing '{Path.GetFileName(file)}'.",
+                        scope, relativeFolder,
+                        "Run 'kyber-weave docs standards migrate' to add the missing folder files."));
+                }
+            }
+        }
+    }
+
+    private static void ValidateStandardHeadings(
+        DocumentModel document,
+        string scope,
+        DiagnosticReport report)
+    {
+        IReadOnlyList<string> expected = DocsLayout.StandardHeadings;
+        IReadOnlyList<DocumentSection> sections = document.Sections;
+
+        for (int i = 0; i < expected.Count; i++)
+        {
+            string? actual = i < sections.Count ? sections[i].Heading.Trim() : null;
+            if (string.Equals(actual, expected[i], StringComparison.OrdinalIgnoreCase)) continue;
+
+            report.Add(new Diagnostic(
+                StandardHeadings, Severity.Error,
+                actual is null
+                    ? $"the '{scope}' standard is missing the heading '## {expected[i]}'."
+                    : $"the '{scope}' standard has '## {actual}' where '## {expected[i]}' belongs.",
+                document.Subject,
+                document.RelativePath,
+                $"Use these six headings in order: {string.Join("; ", expected.Select(h => $"## {h}"))}.",
+                i < sections.Count ? sections[i].LineNumber : null));
+            return;
+        }
+
+        if (sections.Count > expected.Count)
+        {
+            DocumentSection extra = sections[expected.Count];
+            report.Add(new Diagnostic(
+                StandardHeadings, Severity.Error,
+                $"the '{scope}' standard has an extra heading '## {extra.Heading.Trim()}'.",
+                document.Subject,
+                document.RelativePath,
+                "A standard holds exactly these six sections: " +
+                $"{string.Join("; ", expected.Select(h => $"## {h}"))}.",
+                extra.LineNumber));
+        }
+    }
+
+    private string Combine(string relativePath) =>
+        Path.Combine(_repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+
+    /// <summary>Name of the directory a repository-relative path sits in, or empty.</summary>
+    private static string ContainingFolder(string relativePath)    {
         int end = relativePath.LastIndexOf('/');
         if (end <= 0) return string.Empty;
 
