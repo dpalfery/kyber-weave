@@ -38,6 +38,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<IEditHookService, EditHookService>();
         services.TryAddSingleton<IRunStartRunnerFactory, RunStartRunnerFactory>();
+        services.TryAddSingleton<IRunStartEvidence, RunStartEvidenceService>();
         services.TryAddSingleton<ISquadBriefService, SquadBriefService>();
         services.TryAddSingleton<IManagedGlossaryFactory>(sp => new ManagedGlossaryFactory(
             sp.GetRequiredService<IRepositoryFileStore>(), sp.GetRequiredService<TimeProvider>()));

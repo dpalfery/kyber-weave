@@ -1,3 +1,4 @@
+using KyberWeave.Application.Doctor;
 using KyberWeave.Cli.Commands.Doctor;
 using KyberWeave.Core.Doctor;
 using KyberWeave.Domain.Doctor;
@@ -217,7 +218,7 @@ public sealed class DoctorPostCheckoutTests : IDisposable
             _ => null,
             _locks.Path);
 
-        DoctorCheck hook = Assert.Single(report.Checks, check => check.Id == PostCheckoutHook.CheckId);
+        DoctorCheck hook = Assert.Single(report.Checks, check => check.Id == PostCheckoutHookInstaller.CheckId);
         Assert.True(hook.Passed);
         Assert.StartsWith("warning:", hook.Reason ?? string.Empty, StringComparison.Ordinal);
         Assert.Equal(0, report.ExitCode);
