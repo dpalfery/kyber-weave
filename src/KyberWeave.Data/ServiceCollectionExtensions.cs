@@ -1,8 +1,10 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Data.Doctor;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Host;
 using KyberWeave.Data.RunStart;
+using KyberWeave.Kernel.FileSystem;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -23,6 +25,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IFileSystem>(sp => sp.GetRequiredService<IWritableFileSystem>());
         services.TryAddSingleton<IProcessEnvironment>(_ => new ProcessEnvironment());
         services.TryAddSingleton<IProductRootLocator>(sp => new CheckoutProductRootLocator(sp.GetRequiredService<IWritableFileSystem>()));
+        services.TryAddSingleton<IDoctorFileSystem>(_ => new PhysicalDoctorFileSystem());
         services.TryAddSingleton<IProcessRunner>(_ => new KernelProcessRunner());
         services.TryAddSingleton<IGitCommandRunner>(_ => new ProcessGitCommandRunner(ProcessGitCommandRunner.DefaultTimeout));
         services.TryAddSingleton<ICheckedOutBranchReader>(sp => new GitCheckedOutBranchReader(sp.GetRequiredService<IGitCommandRunner>()));

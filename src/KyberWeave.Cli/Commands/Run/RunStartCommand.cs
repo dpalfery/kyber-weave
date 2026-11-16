@@ -10,6 +10,7 @@ using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Domain.Doctor;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.RunStart;
 using KyberWeave.Core.Squad.Briefs;

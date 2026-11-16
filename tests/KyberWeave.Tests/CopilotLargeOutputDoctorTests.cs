@@ -1,4 +1,5 @@
 using KyberWeave.Core.Doctor;
+using KyberWeave.Domain.Doctor;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
@@ -26,7 +27,7 @@ public sealed class CopilotLargeOutputDoctorTests : IDisposable
 
     private DoctorCheck Single(string? value)
     {
-        IReadOnlyList<DoctorCheck> checks = CopilotLargeOutputProbe.Run(_repository.Path, _home.Path, Env(value));
+        IReadOnlyList<DoctorCheck> checks = CopilotLargeOutputProbe.Run(_repository.Path, _home.Path, Env(value), Directory.Exists, File.Exists);
         return Assert.Single(checks);
     }
 
@@ -94,8 +95,8 @@ public sealed class CopilotLargeOutputDoctorTests : IDisposable
     [Fact]
     public void CopilotNotInUse_ReportsNothing()
     {
-        Assert.Empty(CopilotLargeOutputProbe.Run(_repository.Path, _home.Path, Env(null)));
-        Assert.Empty(CopilotLargeOutputProbe.Run(_repository.Path, null, Env(null)));
+        Assert.Empty(CopilotLargeOutputProbe.Run(_repository.Path, _home.Path, Env(null), Directory.Exists, File.Exists));
+        Assert.Empty(CopilotLargeOutputProbe.Run(_repository.Path, null, Env(null), Directory.Exists, File.Exists));
     }
 
     [Fact]
@@ -103,6 +104,6 @@ public sealed class CopilotLargeOutputDoctorTests : IDisposable
     {
         Directory.CreateDirectory(Path.Combine(_repository.Path, ".github", "agents"));
 
-        Assert.Single(CopilotLargeOutputProbe.Run(_repository.Path, _home.Path, Env(null)));
+        Assert.Single(CopilotLargeOutputProbe.Run(_repository.Path, _home.Path, Env(null), Directory.Exists, File.Exists));
     }
 }

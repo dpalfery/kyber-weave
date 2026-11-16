@@ -1,5 +1,5 @@
-using KyberWeave.Core.CopilotPrompt;
 using KyberWeave.Core.FileSystem;
+using KyberWeave.Domain.CopilotPrompt;
 
 namespace KyberWeave.Cli.Update;
 

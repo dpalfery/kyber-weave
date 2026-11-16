@@ -1,9 +1,10 @@
 using System.Diagnostics;
-using KyberWeave.Core.CodeGraph;
+
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Core.Processes;
+using KyberWeave.Data.CodeGraph;
 using Xunit;
 
 namespace KyberWeave.Tests;

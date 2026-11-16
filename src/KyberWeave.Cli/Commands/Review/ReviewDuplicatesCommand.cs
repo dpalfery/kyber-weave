@@ -1,7 +1,9 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Review;
+using KyberWeave.Domain.CodeGraph;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Review;
@@ -35,8 +37,8 @@ public sealed class ReviewDuplicatesCommand : Command<ReviewDuplicatesSettings>
         }
 
         ReviewDuplicates options = config.Review.Duplicates;
-        CodeGraphResolverAdapter graph = CodeGraphResolverAdapter.ForRepository(root);
-        DuplicateReport duplicates = Analyze(root, graph, graph, options);
+        CodeGraphPorts graph = CodeGraphResolvers.ForRepository(root);
+        DuplicateReport duplicates = Analyze(root, graph.Resolver, graph.Enumerator, options);
 
         if (!duplicates.IndexAvailable)
         {

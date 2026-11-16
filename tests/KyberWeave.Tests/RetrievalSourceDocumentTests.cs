@@ -1,8 +1,9 @@
-using KyberWeave.Core.CodeGraph;
+
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Search;
+using KyberWeave.Data.CodeGraph;
 using Xunit;
 
 namespace KyberWeave.Tests;

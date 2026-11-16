@@ -1,5 +1,5 @@
 using KyberWeave.Cli.Update;
-using KyberWeave.Core.CopilotPrompt;
+using KyberWeave.Domain.CopilotPrompt;
 using Xunit;
 
 namespace KyberWeave.Tests.CopilotPrompt;

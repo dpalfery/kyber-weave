@@ -1,8 +1,9 @@
-using KyberWeave.Core.CodeGraph;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Docs.Search;
+using KyberWeave.Domain.CodeGraph;
 using KyberWeave.Mcp;
 using Xunit;
 

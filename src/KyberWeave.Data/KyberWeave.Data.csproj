@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="KyberWeave.Application.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.Core" />
   </ItemGroup>
 
   <ItemGroup>

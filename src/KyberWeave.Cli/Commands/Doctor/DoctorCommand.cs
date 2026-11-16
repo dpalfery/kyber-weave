@@ -1,5 +1,6 @@
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Domain.Doctor;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Doctor;

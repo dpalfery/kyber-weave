@@ -1,4 +1,4 @@
-using KyberWeave.Core.CopilotPrompt;
+using KyberWeave.Domain.CopilotPrompt;
 using Xunit;
 using YamlDotNet.RepresentationModel;
 

@@ -2,9 +2,10 @@ using System.Collections.Immutable;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
-using KyberWeave.Core.CodeGraph;
+
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.FileSystem;
+using KyberWeave.Domain.CodeGraph;
 
 namespace KyberWeave.Core.Review;
 

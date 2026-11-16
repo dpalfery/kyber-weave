@@ -3,8 +3,9 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Configuration;
-using KyberWeave.Core.CopilotPrompt;
 using KyberWeave.Core.Processes;
+using KyberWeave.Domain.CopilotPrompt;
+using KyberWeave.Domain.Doctor;
 
 namespace KyberWeave.Core.Doctor;
 
@@ -88,10 +89,10 @@ public static class RepositoryDoctor
         // The Copilot prompt override is opt-in: with no installed prompt file the probe adds nothing. It runs for any
         // repository the user's home contains, because the override is machine-wide and not a per-repository setting.
         if (!string.IsNullOrWhiteSpace(home))
-            checks = [.. checks, .. CopilotPromptProbe.Run(mode, home, environment("APPDATA"), CurrentPlatform(), environment("XDG_CONFIG_HOME"))];
+            checks = [.. checks, .. CopilotPromptProbe.Run(mode, home, environment("APPDATA"), CurrentPlatform(), DoctorFileSystem.Default, environment("XDG_CONFIG_HOME"))];
 
         // Advisory only: a passing check with a warning, in every mode, so it never changes the exit code.
-        checks = [.. checks, .. CopilotLargeOutputProbe.Run(repositoryRoot, home, environment)];
+        checks = [.. checks, .. CopilotLargeOutputProbe.Run(repositoryRoot, home, environment, Directory.Exists, File.Exists)];
 
         int exitCode = codegraph.BinaryMissing
             ? 3

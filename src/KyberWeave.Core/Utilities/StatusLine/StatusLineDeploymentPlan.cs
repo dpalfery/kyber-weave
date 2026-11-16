@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Domain.StatusLine;
 
 namespace KyberWeave.Core.Utilities.StatusLine;
 

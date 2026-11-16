@@ -1,9 +1,11 @@
-using KyberWeave.Core.CodeGraph;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Export;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Data.CodeGraph;
+using KyberWeave.Domain.CodeGraph;
 using Xunit;
 
 namespace KyberWeave.Tests;

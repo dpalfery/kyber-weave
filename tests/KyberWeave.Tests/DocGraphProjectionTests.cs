@@ -1,9 +1,11 @@
 using System.Collections.ObjectModel;
 using System.Text.Json;
-using KyberWeave.Core.CodeGraph;
+
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Docs.Export;
 using KyberWeave.Core.Docs.Graph;
 using KyberWeave.Core.Docs.Model;
+using KyberWeave.Domain.CodeGraph;
 using Xunit;
 
 namespace KyberWeave.Tests;

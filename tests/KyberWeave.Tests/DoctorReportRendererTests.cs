@@ -2,6 +2,7 @@ using System.Text.Json;
 using Xunit;
 using KyberWeave.Cli.Commands.Doctor;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Domain.Doctor;
 
 namespace KyberWeave.Tests;
 

@@ -4,6 +4,7 @@ using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Domain.Doctor;
 using KyberWeave.Core.Docs.Mcp;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Processes;

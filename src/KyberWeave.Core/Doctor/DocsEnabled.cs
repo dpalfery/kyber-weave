@@ -1,4 +1,5 @@
 using KyberWeave.Core.Configuration;
+using KyberWeave.Domain.Doctor;
 using YamlDotNet.Core;
 using YamlDotNet.Serialization;
 
@@ -19,17 +20,19 @@ public static class DocsEnabled
     /// <summary>Whether the repository at <paramref name="root"/> has governed docs.</summary>
     /// <param name="root">The repository root.</param>
     /// <param name="readText">Reads a file's text, or returns null when it is absent. Injected so the caller decides the source.</param>
-    public static bool IsEnabled(string root, Func<string, string?> readText)
+    /// <param name="directoryExists">Reports whether a directory exists. Injected so this stays free of I/O.</param>
+    public static bool IsEnabled(string root, Func<string, string?> readText, Func<string, bool> directoryExists)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentNullException.ThrowIfNull(readText);
+        ArgumentNullException.ThrowIfNull(directoryExists);
 
         string? config = readText(Path.Combine(root, ".kyber-weave", "kyber-weave.yml"));
         if (config is null)
             return false;
 
         string docsRoot = DeclaredDocsRoot(config) ?? DefaultDocsRoot;
-        return TryResolveContained(root, docsRoot, out string directory) && Directory.Exists(directory);
+        return TryResolveContained(root, docsRoot, out string directory) && directoryExists(directory);
     }
 
     /// <summary>

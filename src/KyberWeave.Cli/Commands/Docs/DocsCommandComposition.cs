@@ -1,11 +1,12 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
-using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Core.Docs.Analysis.Candidates;
 using KyberWeave.Core.Docs.Analysis.Claims;
 using KyberWeave.Core.Docs.Analysis.Embeddings;
 using KyberWeave.Core.Docs.Analysis.Persistence;
+using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Core.Docs.Parsing;
 
 namespace KyberWeave.Cli.Commands.Docs;
@@ -96,7 +97,7 @@ internal static class DocsCommandComposition
     }
 
     public static ICodeGraphResolver CreateResolver(DocsSettings settings) =>
-        CodeGraphResolverAdapter.ForRepository(settings.Path);
+        CodeGraphResolvers.ForRepository(settings.Path).Resolver;
 
     public static bool TryCreateAnalysisRuntime(
         DocsSettings settings,
@@ -197,7 +198,7 @@ internal sealed class DocsAnalysisCompositionFactories
     public Func<IEmbeddingGenerator> CreateEmbeddingGenerator { get; init; } =
         () => new OpenAiCompatibleEmbeddingGenerator();
     public Func<string, ICodeGraphResolver> CreateResolver { get; init; } =
-        CodeGraphResolverAdapter.ForRepository;
+        repositoryRoot => CodeGraphResolvers.ForRepository(repositoryRoot).Resolver;
 }
 
 internal sealed class DocsAnalysisRuntime(

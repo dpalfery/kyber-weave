@@ -1,7 +1,8 @@
 using KyberWeave.Cli.Commands.Review;
-using KyberWeave.Core.CodeGraph;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
+using KyberWeave.Domain.CodeGraph;
 using Xunit;
 using YamlDotNet.Core;
 

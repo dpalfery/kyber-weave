@@ -4,6 +4,7 @@ using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Domain.Doctor;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review;
 using Spectre.Console.Cli;

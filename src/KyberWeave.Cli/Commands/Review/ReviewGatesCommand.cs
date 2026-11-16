@@ -1,4 +1,5 @@
 using System.ComponentModel;
+
 using KyberWeave.Cli.Commands.Doctor;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Rendering;
@@ -7,11 +8,12 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Domain.Doctor;
+using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review;
-using Spectre.Console;
 using Spectre.Console.Cli;
-using KyberWeave.Core.FileSystem;
+using Spectre.Console;
 
 namespace KyberWeave.Cli.Commands.Review;
 
@@ -491,8 +493,8 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
         GateReport written,
         DiagnosticReport report)
     {
-        CodeGraphResolverAdapter graph = CodeGraphResolverAdapter.ForRepository(root);
-        DuplicateReport duplicates = ReviewDuplicatesCommand.Analyze(root, graph, graph, config.Review.Duplicates);
+        CodeGraphPorts graph = CodeGraphResolvers.ForRepository(root);
+        DuplicateReport duplicates = ReviewDuplicatesCommand.Analyze(root, graph.Resolver, graph.Enumerator, config.Review.Duplicates);
         CommandHelpers.TryWriteReport(
             Path.Combine(cycle.Folder!, "duplicates.json"), ReviewJson.Write(duplicates), ReportWriteFailed, report);
         (IReadOnlyList<string>? changed, _) = ResolveCouncilChangedSet(root, settings);

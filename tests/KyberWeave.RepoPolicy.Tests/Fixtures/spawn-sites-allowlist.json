@@ -734,7 +734,7 @@
       "bound": "Process.Start in StartFinishingProcess. The hand-off waits at most FinishUpdateTimeout = 15 min (longer than the child's own bounds: 120 s engine, 5 min tray, two 120 s plugin steps); the rehearsal waits at most RehearsalTimeout = 30 s. On expiry the whole process tree is killed and TimeoutException is raised."
     },
     {
-      "file": "src/KyberWeave.Core/CodeGraph/CodeGraphResolverAdapter.cs",
+      "file": "src/KyberWeave.Data/CodeGraph/CodeGraphResolverAdapter.cs",
       "text": "ProcessStartInfo startInfo = new ProcessStartInfo(\"sqlite3\")",
       "count": 1,
       "bound": "Builds only; nothing starts on this line. Started by ProcessRunner.Run at CodeGraphResolverAdapter.cs:203 with SqliteReadTimeout = 60 s."
@@ -872,7 +872,7 @@
       "bound": "Process.Start for `kyberdash menubar --update`. RunProcess waits TrayUpdateTimeout = 5 min (SelfUpdater.cs:56); on expiry it kills the tree, waits 5 s, and throws TimeoutException (SelfUpdater.cs:617-632)."
     },
     {
-      "file": "src/KyberWeave.Core/CodeGraph/CodeGraphResolverAdapter.cs",
+      "file": "src/KyberWeave.Data/CodeGraph/CodeGraphResolverAdapter.cs",
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, SqliteReadTimeout);",
       "count": 1,
       "bound": "ProcessRunner.Run with SqliteReadTimeout = 60 s (CodeGraphResolverAdapter.cs:36); the tree is killed on expiry."
@@ -1178,13 +1178,13 @@
       "bound": "ProcessRunner timeout kills the child tree on expiry; 60 s; git argv only, in a temp repository."
     },
     {
-      "file": "src/KyberWeave.Core/CodeGraph/CodeGraphIndexStaleness.cs",
+      "file": "src/KyberWeave.Kernel/VersionControl/CodeGraphIndexStaleness.cs",
       "text": "ProcessStartInfo startInfo = new(\"git\")",
       "count": 1,
       "bound": "ProcessRunner timeout kills the child tree on expiry; started by the Run below with GitTimeout; read-only git rev-parse/log argv."
     },
     {
-      "file": "src/KyberWeave.Core/CodeGraph/CodeGraphIndexStaleness.cs",
+      "file": "src/KyberWeave.Kernel/VersionControl/CodeGraphIndexStaleness.cs",
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);",
       "count": 1,
       "bound": "ProcessRunner timeout kills the child tree on expiry; GitTimeout; read-only git argv."

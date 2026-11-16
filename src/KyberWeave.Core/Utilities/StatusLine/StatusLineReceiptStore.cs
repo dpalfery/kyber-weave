@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Domain.StatusLine;
 
 namespace KyberWeave.Core.Utilities.StatusLine;
 

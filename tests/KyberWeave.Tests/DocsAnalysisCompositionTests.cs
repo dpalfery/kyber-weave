@@ -1,13 +1,15 @@
 using System.Diagnostics.CodeAnalysis;
+
 using KyberWeave.Cli.Commands.Docs;
-using KyberWeave.Core.CodeGraph;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
-using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Core.Docs.Analysis.Embeddings;
 using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Analysis.Model;
 using KyberWeave.Core.Docs.Analysis.Review;
+using KyberWeave.Core.Docs.Analysis;
+using KyberWeave.Domain.CodeGraph;
 using Xunit;
 
 namespace KyberWeave.Tests;

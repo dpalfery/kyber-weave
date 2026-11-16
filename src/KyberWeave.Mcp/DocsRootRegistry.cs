@@ -1,4 +1,5 @@
 using System.Diagnostics;
+
 using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
@@ -66,7 +67,7 @@ public sealed class DocsRootRegistry
         OntologyConfig ontology = ResolveOntology(repoRoot);
         DocumentIndexHost host = new(
             repoRoot,
-            () => CodeGraphResolverAdapter.ForRepository(repoRoot),
+            () => CodeGraphResolvers.ForRepository(repoRoot).Resolver,
             () => new DocumentLoader(repoRoot, ontology).Load(),
             ontology.DocsRoots,
             ontology.ResolvedCatalogPath);

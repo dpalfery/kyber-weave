@@ -1,13 +1,14 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
-using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Core.Docs.Analysis.Candidates;
 using KyberWeave.Core.Docs.Analysis.Claims;
 using KyberWeave.Core.Docs.Analysis.Embeddings;
 using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Analysis.Model;
 using KyberWeave.Core.Docs.Analysis.Persistence;
+using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Core.Docs.Graph;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
@@ -39,7 +40,7 @@ public sealed class RepositoryDocsAnalysisReader : IDocsAnalysisReader
         KyberWeaveConfig config = LoadConfig();
         DocumentSet documents = new DocumentLoader(_repositoryRoot, config.Ontology).Load();
         cancellationToken.ThrowIfCancellationRequested();
-        CodeGraphResolverAdapter codeGraph = CodeGraphResolverAdapter.ForRepository(_repositoryRoot);
+        ICodeGraphResolver codeGraph = CodeGraphResolvers.ForRepository(_repositoryRoot).Resolver;
         DocGraphProjection graph = DocGraphProjection.Build(
             documents,
             codeGraph,

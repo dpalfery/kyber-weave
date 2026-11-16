@@ -1,4 +1,4 @@
-using KyberWeave.Core.CodeGraph;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Text;
