@@ -39,8 +39,11 @@ Three mechanical refusals back that rule (best-effort; limits in the test standa
 non-interactive shell; and the shipped gate catalogue writes `full-suite: true` on every whole-suite gate.
 
 Inside a Squad run, your task packet names the test command and your agent rules say when to
-run it. Otherwise, run `scripts/fast-loop.sh` while iterating: it inspects modified files and
-routes to targeted checks for .NET, KyberDash, the tray crate, and governed docs. `--help` lists
+run it. Otherwise, run `scripts/fast-loop.sh --touched` while iterating: it inspects modified files and
+routes to targeted checks for .NET, KyberDash, the tray crate, and governed docs. For .NET it runs only the
+product test classes that name a type from a changed C# file, the layer test projects at the same time, and checks
+format and style on the changed files only (about 45 seconds warm, against several minutes for the whole suite);
+when nothing matches it falls back to the fast tier. `--help` lists
 its modes; `--full` and `--scoped` reach the `test` gate, so they are not for dev agents and exit 89 from a non-terminal shell. It is
 **not** evidence and must never be cited as such ([`REVIEW.md`](REVIEW.md)).
 

@@ -2,6 +2,7 @@
 # The fast local inner loop. Answers "did this edit break something" in seconds.
 #
 #   scripts/fast-loop.sh                  # component-aware fast checks based on changed files
+#   scripts/fast-loop.sh --touched        # only the product test classes that name a changed file's types
 #   scripts/fast-loop.sh --class 'KyberWeave.Tests.Area*'  # one area (.NET); the pattern matches the full name
 #   scripts/fast-loop.sh --method <FQN>   # one test (.NET)
 #   scripts/fast-loop.sh --full           # the declared gate suite, all gates (--all); not for dev agents
@@ -110,6 +111,9 @@ Fast local inner loop for Kyber-Weave developers.
 
 Options:
   (no options)     Component-aware fast checks based on changed workspace files.
+  --touched        Run only the product test classes that mention a type declared in a changed
+                   C# file, or that sit in a changed test file. Falls back to the fast tier when
+                   nothing matches or more than 40 classes match.
   --class PATTERN  Run .NET tests whose fully qualified class name matches
                    (KyberWeave.Tests.Area*). A bare Area* matches nothing.
   --method FQN     Run one specific .NET test method.
@@ -209,7 +213,9 @@ fi
 
 # Parse and validate arguments before the build so a typo fails before the (slower) build.
 test_args=()
+touched=0
 case "${1:-}" in
+  --touched) touched=1 ;;
   --class)  test_args+=(-class "${2:?--class needs a pattern}") ;;
   --method) test_args+=(-method "${2:?--method needs a fully-qualified name}") ;;
   "") ;;
@@ -218,6 +224,7 @@ esac
 
 # Component routing: if --class or --method was supplied, focus on .NET and docs validate.
 # Otherwise, inspect changed workspace paths to run targeted fast checks.
+changed_cs=()
 needs_dotnet=0
 needs_dash_server=0
 needs_dash=0
@@ -237,6 +244,13 @@ else
     [[ -z "${file}" ]] && continue
     changed_files+=("${file}")
   done < <({ git diff --name-only HEAD 2>/dev/null; git diff --name-only --cached 2>/dev/null; git ls-files --others --exclude-standard 2>/dev/null; } | sort -u)
+
+  changed_cs=()
+  for file in "${changed_files[@]+"${changed_files[@]}"}"; do
+    if [[ "${file}" == *.cs && -f "${file}" ]]; then
+      changed_cs+=("${file}")
+    fi
+  done
 
   if [[ ${#changed_files[@]} -eq 0 ]]; then
     needs_dotnet=1
@@ -301,6 +315,43 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
   # The user's filter, if any, before the class list is added: the prompt-content project takes it
   # alone, so with the class list it runs whole.
   prompt_args=("${test_args[@]+"${test_args[@]}"}")
+  if [[ "${touched}" -eq 1 && ${#test_args[@]} -eq 0 ]]; then
+    # A changed file's own types, found by name in the product test sources. It is a heuristic over text, not a
+    # call graph: it can miss a test that reaches the type only indirectly, which is why CI still runs everything.
+    touched_types=()
+    for file in "${changed_cs[@]+"${changed_cs[@]}"}"; do
+      while IFS= read -r type_name; do
+        touched_types+=("${type_name}")
+      done < <(grep -oE '^[[:space:]]*(public|internal)[[:space:]]+([a-z]+[[:space:]]+)*(class|record|struct|interface|enum)[[:space:]]+[A-Za-z0-9_]+' "${file}" | awk '{print $NF}')
+    done
+    touched_files=()
+    for file in "${changed_cs[@]+"${changed_cs[@]}"}"; do
+      [[ "${file}" == tests/KyberWeave.Tests/*.cs ]] && touched_files+=("${file}")
+    done
+    for type_name in "${touched_types[@]+"${touched_types[@]}"}"; do
+      while IFS= read -r file; do
+        touched_files+=("${file}")
+      done < <(grep -rlwF --include='*.cs' -- "${type_name}" tests/KyberWeave.Tests 2>/dev/null)
+    done
+    touched_classes=()
+    while IFS= read -r file; do
+      [[ -z "${file}" ]] && continue
+      namespace_name="$(sed -nE 's/^namespace[[:space:]]+([A-Za-z0-9_.]+).*/\1/p' "${file}" | head -1)"
+      [[ -z "${namespace_name}" ]] && namespace_name="KyberWeave.Tests"
+      while IFS= read -r class_name; do
+        touched_classes+=("${namespace_name}.${class_name}")
+      done < <(grep -oE '^[[:space:]]*public[[:space:]]+(sealed[[:space:]]+|partial[[:space:]]+)*class[[:space:]]+[A-Za-z0-9_]+' "${file}" | awk '{print $NF}')
+    done < <(printf '%s\n' "${touched_files[@]+"${touched_files[@]}"}" | sort -u)
+    if [[ ${#touched_classes[@]} -gt 0 && ${#touched_classes[@]} -le 40 ]]; then
+      while IFS= read -r class; do
+        test_args+=(-class "${class}")
+      done < <(printf '%s\n' "${touched_classes[@]}" | sort -u)
+      step "tests (touched: $(printf '%s\n' "${touched_classes[@]}" | sort -u | wc -l | tr -d ' ') classes)"
+    else
+      printf 'fast-loop: --touched found %s test classes; running the fast tier instead.\n' "${#touched_classes[@]}" >&2
+    fi
+  fi
+
   if [[ ${#test_args[@]} -eq 0 ]]; then
     while IFS= read -r class || [[ -n "${class}" ]]; do
       class="${class%$'\r'}"
@@ -344,9 +395,26 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
     fi
   fi
   step "layer tests (Domain, Application, Hooks, Architecture)"
+  # The four projects are independent and small, so they run at the same time. Each is its own background
+  # process and its status comes back through `wait <pid>`: a variable set inside a backgrounded command
+  # never reaches this shell, which is how a failing project would otherwise read as a pass.
   layers_status=0
+  layer_pids=()
+  layer_logs=()
   for layer_dll in "${LAYER_TEST_DLLS[@]}"; do
-    dotnet "${layer_dll}" || layers_status=$?
+    layer_log="$(mktemp "${TMPDIR:-/tmp}/kw-fast-loop-layer.XXXXXX")"
+    layer_logs+=("${layer_log}")
+    dotnet "${layer_dll}" >"${layer_log}" 2>&1 &
+    layer_pids+=($!)
+  done
+  for index in "${!layer_pids[@]}"; do
+    layer_exit=0
+    wait "${layer_pids[${index}]}" || layer_exit=$?
+    cat "${layer_logs[${index}]}"
+    rm -f "${layer_logs[${index}]}"
+    if [[ "${layer_exit}" -ne 0 ]]; then
+      layers_status="${layer_exit}"
+    fi
   done
   if [[ "${product_status}" -ne 0 || "${policy_status}" -ne 0 ]]; then
     printf '\ntests failed: product suite exit %s, repository-policy tests exit %s\n' \
@@ -362,8 +430,18 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
     exit 1
   fi
 
-  step "format (whitespace)"
-  dotnet format KyberWeave.sln whitespace --verify-no-changes --no-restore -v minimal
+  # Format and style are checked on the changed C# files only: the formatter loads and analyses the whole
+  # solution either way, but verifying every file costs about a minute that a loop does not need. With no
+  # changed file to name (a clean tree, or --class / --method), the whole solution is checked as before.
+  # CI checks the whole solution, so a rule that reaches across files is still caught there.
+  format_scope=()
+  if [[ ${#changed_cs[@]} -gt 0 ]]; then
+    format_scope=(--include "${changed_cs[@]}")
+  fi
+  step "format (whitespace${format_scope:+, changed files})"
+  dotnet format KyberWeave.sln whitespace --verify-no-changes --no-restore -v minimal "${format_scope[@]+"${format_scope[@]}"}"
+  step "format (style${format_scope:+, changed files})"
+  dotnet format KyberWeave.sln style --verify-no-changes --no-restore -v minimal "${format_scope[@]+"${format_scope[@]}"}"
 fi
 
 if [[ "${needs_dash_server}" -eq 1 ]]; then
