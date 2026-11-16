@@ -52,16 +52,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Each technology's gate catalogue, embedded from products/kyber-squad/standards. The
-         standards templates beside them belong to KyberWeave.Core.Docs. -->
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\csharp\gates.yml" LogicalName="Gates.csharp.yml" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\typescript\gates.yml" LogicalName="Gates.typescript.yml" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\rust\gates.yml" LogicalName="Gates.rust.yml" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\go\gates.yml" LogicalName="Gates.go.yml" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\python\gates.yml" LogicalName="Gates.python.yml" />
-  </ItemGroup>
-
-  <ItemGroup>
     <!--
       Compile-time only, and PrivateAssets="all" keeps it out of the shipped nupkg's
       dependency graph: consumers of KyberWeave.Core still take only Markdig and YamlDotNet.

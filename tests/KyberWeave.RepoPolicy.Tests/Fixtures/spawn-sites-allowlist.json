@@ -779,19 +779,7 @@
       "file": "src/KyberWeave.Data/Review/ProcessProgramRunner.cs",
       "text": "return ProcessRunner.Run(startInfo, string.Empty, timeout, maxOutputBytes, cancellationToken);",
       "count": 1,
-      "bound": "ProcessRunner.Run with the caller's timeout: the process tree is killed on expiry or when the caller's token is cancelled, and maxOutputBytes caps what is buffered. Callers: git reads in GitChangeReader (60 s) and SuppressionScanService (60 s, 10 MB output cap); git argv only, never a shell."
-    },
-    {
-      "file": "src/KyberWeave.Core/Review/Catalogue/ProjectRootDetector.cs",
-      "text": "ProcessStartInfo startInfo = new(\"git\")",
-      "count": 1,
-      "bound": "Builds only; nothing starts on this line. Started at ProjectRootDetector.cs:252 with GitTimeout = 60 s."
-    },
-    {
-      "file": "src/KyberWeave.Core/Review/Catalogue/ProjectRootDetector.cs",
-      "text": "result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);",
-      "count": 1,
-      "bound": "ProcessRunner.Run with GitTimeout = 60 s (ProjectRootDetector.cs:33); the process tree is killed on expiry."
+      "bound": "ProcessRunner.Run with the caller's timeout: the process tree is killed on expiry or when the caller's token is cancelled, and maxOutputBytes caps what is buffered. Callers: git reads in GitChangeReader, SuppressionScanService (10 MB output cap) and FileRepositoryFileLister, each 60 s; git argv only, never a shell."
     },
     {
       "file": "src/KyberWeave.Core/Review/GateRunner.cs",

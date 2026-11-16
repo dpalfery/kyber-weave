@@ -200,11 +200,11 @@ public sealed class GateCatalogueResourceTests
     private static string ReadFamilyText(string family)
     {
         string resourceName = $"Gates.{family}.yml";
-        using Stream? stream = typeof(GateCatalogue).Assembly.GetManifestResourceStream(resourceName);
+        using Stream? stream = typeof(GateCatalogueRenderer).Assembly.GetManifestResourceStream(resourceName);
         if (stream is null)
         {
             Assert.Fail(
-                $"Embedded resource '{resourceName}' is missing from KyberWeave.Core. Declare it as an " +
+                $"Embedded resource '{resourceName}' is missing from KyberWeave.Domain. Declare it as an " +
                 $"EmbeddedResource with LogicalName=\"{resourceName}\" next to the other Gates.<family>.yml entries.");
         }
 
