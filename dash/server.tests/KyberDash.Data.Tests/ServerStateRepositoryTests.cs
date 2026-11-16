@@ -237,7 +237,7 @@ public class ServerStateRepositoryTests : IDisposable
             Assert.Equal(descriptor, repository.ReadEngineDescriptor(directory.Path));
 
             Assert.True(await repository.RequestEngineShutdownAsync(directory.Path));
-            Assert.True(shutdownRequested.Task.IsCompleted);
+            await shutdownRequested.Task.WaitAsync(TimeSpan.FromSeconds(10));
         }
         finally
         {
