@@ -123,8 +123,8 @@ public sealed class AntigravityHookAdapterTests
         IHookDecisionEngine engine,
         Func<string, KyberWeaveConfig>? loader = null)
     {
-        HookCommand command = new(
-            HarnessAdapterRegistry.CreateDefault(engine),
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
             loader ?? (_ => EnabledConfig()),
             () => "decision-test-1");
         using StringWriter stdout = new();
@@ -313,8 +313,8 @@ public sealed class AntigravityHookAdapterTests
         string stdin,
         Func<string, KyberWeaveConfig> loader)
     {
-        HookCommand command = new(
-            HarnessAdapterRegistry.CreateDefault(new ScriptedEngine()),
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(new ScriptedEngine()),
             loader,
             () => "decision-test-1");
         using StringWriter stdout = new();
@@ -440,7 +440,7 @@ public sealed class AntigravityHookAdapterTests
     public void Adapters_AreRegisteredForAntigravityToken()
     {
         ScriptedEngine engine = new();
-        HarnessAdapterRegistry registry = HarnessAdapterRegistry.CreateDefault(engine);
+        HarnessAdapterRegistry registry = ArbiterTestServices.Registry(engine);
 
         Assert.True(registry.TryGet(AntigravityHookAdapter.Token, out IHarnessHookAdapter? adapter));
         Assert.IsType<AntigravityHookAdapter>(adapter);

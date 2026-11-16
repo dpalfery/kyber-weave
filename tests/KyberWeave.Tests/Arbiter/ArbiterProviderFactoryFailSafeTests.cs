@@ -29,14 +29,14 @@ public sealed class ArbiterProviderFactoryFailSafeTests : IDisposable
     /// <summary>The tools over an enabled Arbiter, so the provider factory is reached rather than skipped.</summary>
     private ArbiterTools Tools(Func<KyberWeaveConfig, IArbiterProvider> factory)
     {
-        ArbiterHookDecisionEngine engine = new(
+        ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
             providerFactory: factory,
             homeDirectory: () => _home.Path);
         KyberWeaveConfig configured = new()
         {
             Arbiter = ArbiterConfig.ProductDefaults with { Enabled = true },
         };
-        return new ArbiterTools(new ArbiterServeContext(
+        return ArbiterTestServices.Tools(new ArbiterServeContext(
             _repo.Path,
             engine,
             TextWriter.Null,

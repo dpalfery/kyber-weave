@@ -1,15 +1,11 @@
 using KyberWeave.Arbiter;
-using KyberWeave.Contracts.Repositories;
-using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Arbiter.Mcp;
-using KyberWeave.Core.Arbiter;
-using KyberWeave.Core.Arbiter.Credentials;
-using KyberWeave.Core.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using KyberWeave.Contracts.Services;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 
@@ -45,35 +41,16 @@ return exitCode;
 // logging is pinned to stderr, as the docs server pins it.
 static async Task<int> ServeAsync(string[] args)
 {
-    string repoRoot;
-    try
-    {
-        repoRoot = ArbiterRootResolver.Resolve(
-            args,
-            Directory.GetCurrentDirectory(),
-            Environment.GetEnvironmentVariable(ArbiterRootResolver.EnvironmentVariable));
-    }
-    catch (Exception ex)
-    {
-        // Every failure here is a configuration mistake the message already names:
-        // Path.GetFullPath rejects more than the two types the resolver documents, and
-        // the exit is 1 either way. Stdout carries protocol frames only, so the message
-        // goes to stderr and never a stack trace.
-        await Console.Error.WriteLineAsync($"kyber-weave-arbiter serve: {ex.Message}").ConfigureAwait(false);
-        return 1;
-    }
-
     try
     {
         HostApplicationBuilder builder = Host.CreateApplicationBuilder(args);
         builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
-        builder.Services.AddSingleton(new ArbiterServeContext(
-            repoRoot,
-            new ArbiterHookDecisionEngine(),
-            Console.Error,
-            root => Composition.LoadHostConfig(root),
-            ServeKeyResolved,
-            ServeEffectiveProvider));
+        _ = builder.Services.AddArbiterHost();
+
+        // Every failure resolving the context is a configuration mistake the message already names: the root flag
+        // carries no path, or the root is not a directory. Stdout carries protocol frames only, so the message goes
+        // to stderr and never a stack trace.
+        builder.Services.AddSingleton(sp => sp.GetRequiredService<IArbiterServeContextFactory>().Create(args, Console.Error));
 
         builder.Services
             .AddMcpServer()
@@ -90,7 +67,9 @@ static async Task<int> ServeAsync(string[] args)
                 services.GetRequiredService<IOptions<McpServerOptions>>().Value.ServerInfo?.Name ?? "kyber-weave-arbiter",
                 services.GetService<ILoggerFactory>())));
 
-        await builder.Build().RunAsync().ConfigureAwait(false);
+        using IHost host = builder.Build();
+        _ = host.Services.GetRequiredService<ArbiterServeContext>();
+        await host.RunAsync().ConfigureAwait(false);
         return 0;
     }
     catch (Exception ex)
@@ -101,29 +80,5 @@ static async Task<int> ServeAsync(string[] args)
         // names the client's own arguments back at them.
         await Console.Error.WriteLineAsync($"kyber-weave-arbiter serve: {ex.Message}").ConfigureAwait(false);
         return 1;
-    }
-}
-
-// Presence only: the key is read from the store or the environment and discarded here.
-// Status reports the answer, never the value.
-static ArbiterProviderConfig ServeEffectiveProvider(KyberWeaveConfig config) =>
-    ArbiterServices.Shared.GetRequiredService<IArbiterUserSettings>().ApplyTo(
-        config.Arbiter.Provider,
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
-
-static bool ServeKeyResolved(KyberWeaveConfig config)
-{
-    try
-    {
-        ArbiterProviderConfig repository = config.Arbiter.Provider;
-        ArbiterProviderConfig effective = ServeEffectiveProvider(config);
-        string? userOverride = string.Equals(effective.Endpoint, repository.Endpoint, StringComparison.Ordinal)
-            ? null
-            : effective.Endpoint;
-        return ArbiterKeyResolver.Resolve(effective.Endpoint, ArbiterServices.Shared.GetRequiredService<ICredentialStore>(), Environment.GetEnvironmentVariable, userOverride) is not null;
-    }
-    catch (Exception)
-    {
-        return false;
     }
 }

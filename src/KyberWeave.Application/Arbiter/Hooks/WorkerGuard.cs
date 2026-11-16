@@ -1,0 +1,237 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Arbiter;
+using KyberWeave.Core.Configuration;
+
+namespace KyberWeave.Arbiter.Hooks;
+
+/// <summary>
+/// The guard on a Squad subagent's own tool calls, from machine facts only. It refuses a write into the
+/// repository's canonical checkout while a live run works in a worktree of its own
+/// (<c>KW-ARB-CHECKOUT-001</c>), and it ends a developer dispatch that has run past its budget of tool calls
+/// or minutes, and tells a developer dispatch once that a tool call ran past its limit (<c>KW-ARB-BUDGET-001</c>).
+/// </summary>
+/// <remarks>
+/// It runs on every tool call a harness reports, so it starts no process and calls no model: the run records,
+/// the checkout's git files and one append-only counter file per subagent are all it reads. A root agent (a
+/// person's own session, or the conductor) is never guarded, and neither is an agent outside the Squad
+/// catalog. Any error allows, and the log says why (ADR 0072).
+/// </remarks>
+/// <param name="budgets">The per-subagent budget files.</param>
+/// <param name="checkouts">Tells whether a write lands in a canonical checkout while a run works elsewhere.</param>
+/// <param name="hostConfig">Loads the project's configuration, for the budget it sets and whether it turns the Arbiter off.</param>
+/// <param name="process">The operator's home.</param>
+/// <param name="clock">The clock the budget window is measured on.</param>
+public sealed class WorkerGuard(
+    IWorkerBudgetStore budgets,
+    IRunCheckout checkouts,
+    IHostConfigLoader hostConfig,
+    IProcessEnvironment process,
+    TimeProvider clock) : IWorkerGuard
+{
+    /// <summary>The rule id a stray write is refused under.</summary>
+    public const string CheckoutRuleId = WorkerGuardRules.CheckoutRuleId;
+
+    /// <summary>The rule id an exhausted budget is refused under.</summary>
+    public const string BudgetRuleId = WorkerGuardRules.BudgetRuleId;
+
+    /// <summary>The status line a worker whose budget ran out returns.</summary>
+    public const string BudgetExceededStatus = WorkerGuardRules.BudgetExceededStatus;
+
+    /// <summary>The Copilot CLI harness token.</summary>
+    public const string CopilotCliHarness = WorkerGuardRules.CopilotCliHarness;
+
+    /// <summary>The Claude Code harness token.</summary>
+    public const string ClaudeHarness = WorkerGuardRules.ClaudeHarness;
+
+    /// <summary>The closing line a seat stopped by its budget writes, naming what it did not examine.</summary>
+    public const string SeatBudgetLine = WorkerGuardRules.SeatBudgetLine;
+
+    /// <summary>Whether the guard could refuse this event, decided from the event alone, so a process builds nothing for an event it would allow.</summary>
+    /// <param name="harness">The harness token.</param>
+    /// <param name="stdin">The hook event as JSON.</param>
+    /// <returns>False only when the guard would allow without reading a file.</returns>
+    public static bool NeedsDecision(string harness, string stdin) => WorkerGuardRules.NeedsDecision(harness, stdin);
+
+    /// <inheritdoc/>
+    public int Run(
+        string harness,
+        string stdin,
+        TextWriter stdout,
+        TextWriter log,
+        string? homeDirectory = null,
+        Func<DateTimeOffset>? now = null,
+        Func<string, ArbiterDispatchBudgetConfig?>? budgetLoader = null,
+        Func<string, ArbiterDispatchBudgetConfig?>? seatBudgetLoader = null)
+    {
+        ArgumentNullException.ThrowIfNull(harness);
+        ArgumentNullException.ThrowIfNull(stdin);
+        ArgumentNullException.ThrowIfNull(stdout);
+        ArgumentNullException.ThrowIfNull(log);
+
+        try
+        {
+            string home = homeDirectory ?? process.HomeDirectory;
+            WorkerGuardRules.ToolCall? call = WorkerGuardRules.Read(harness, stdin);
+            if (call is null)
+            {
+                return 0;
+            }
+
+            bool seat = string.Equals(call.Agent.CapabilityProfile, WorkerGuardRules.SeatProfile, StringComparison.Ordinal);
+            string? reason = BudgetRefusal(
+                                 call,
+                                 home,
+                                 (now ?? (() => clock.GetUtcNow()))(),
+                                 seat ? seatBudgetLoader ?? LoadSeatBudget : budgetLoader ?? LoadBudget)
+                             ?? WriteRefusal(call, home);
+            if (reason is not null)
+            {
+                stdout.Write(WorkerGuardRules.Deny(harness, reason));
+            }
+        }
+        catch (Exception ex)
+        {
+            TryLog(log, $"{HookCommand.FailClosedCode}: worker guard could not decide ({WorkerGuardRules.OneLine(ex.Message)}); the tool call continues.");
+        }
+
+        return 0;
+    }
+
+    /// <summary>
+    /// The stray-write refusal, unless the project turns the Arbiter off. The configuration is read only when
+    /// there is something to refuse, so an ordinary write costs no YAML parse.
+    /// </summary>
+    private string? WriteRefusal(WorkerGuardRules.ToolCall call, string home)
+    {
+        string? refusal = call.WritePath is null
+            ? null
+            : checkouts.StrayWriteRefusal(call.WritePath, call.Cwd ?? string.Empty, home);
+        return refusal is not null && ArbiterTurnedOff(call.Cwd) ? null : refusal;
+    }
+
+    private bool ArbiterTurnedOff(string? workingDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(workingDirectory))
+        {
+            return false;
+        }
+
+        HostConfigLoadResult loaded = hostConfig.TryLoad(workingDirectory);
+        return loaded.Success && loaded.Config?.Arbiter.ExplicitlyEnabled == false;
+    }
+
+    /// <summary>
+    /// Counts this call against the subagent's budget and refuses it once the count or the elapsed time is past
+    /// the limit. The first call writes the header (start time and limits); every call appends one timestamped
+    /// line, so parallel hook processes never lose a count.
+    /// </summary>
+    /// <remarks>
+    /// A harness may resume the same subagent for a rework, under the same id. A window therefore ends when the
+    /// subagent has been idle longer than the budget's minutes, or for a minute after it ran past its budget
+    /// (the worker returned): the resumed dispatch starts a fresh window.
+    /// </remarks>
+    private string? BudgetRefusal(
+        WorkerGuardRules.ToolCall call,
+        string home,
+        DateTimeOffset now,
+        Func<string, ArbiterDispatchBudgetConfig?> budgetLoader)
+    {
+        bool seat = string.Equals(call.Agent.CapabilityProfile, WorkerGuardRules.SeatProfile, StringComparison.Ordinal);
+        if (!seat && !WorkerGuardRules.IsBudgeted(call.Agent.CapabilityProfile))
+        {
+            return null;
+        }
+
+        budgets.EnsureDirectory(home);
+        string key = WorkerGuardRules.KeyOf(call.Harness, call.AgentId);
+        string[] earlier = budgets.ReadLines(home, key);
+        if (earlier.Length > 0 && WorkerGuardRules.WindowEnded(earlier, now))
+        {
+            budgets.Delete(home, key);
+            earlier = [];
+        }
+
+        // The guard sees only the start of each call, so the gap since the previous one is how long that call (and
+        // the model's turn after it) ran. Read before this call's line is appended.
+        DateTimeOffset? previousCall = earlier.Length > 1 && WorkerGuardRules.Window.Read(earlier) is { } before ? before.LastCall : null;
+
+        if (!budgets.Exists(home, key))
+        {
+            ArbiterDispatchBudgetConfig? budget = budgetLoader(call.Cwd ?? string.Empty);
+            if (budget is null)
+            {
+                return null;
+            }
+
+            budgets.Sweep(home, now, WorkerGuardRules.BudgetRetention);
+            budgets.TryCreate(home, key, WorkerGuardRules.HeaderLine(now, budget, call.Agent.Name));
+        }
+
+        budgets.Append(home, key, WorkerGuardRules.CallLine(now));
+
+        string[] lines = budgets.ReadLines(home, key);
+        if (WorkerGuardRules.Window.Read(lines) is not { } window)
+        {
+            return null;
+        }
+
+        TimeSpan elapsed = now - window.Start;
+        if (!window.IsOver(now))
+        {
+            return previousCall is { } previous && now - previous > TimeSpan.FromMinutes(window.CallMinutes)
+                ? WorkerGuardRules.StalledCallRefusal(now - previous, window.CallMinutes)
+                : null;
+        }
+
+        return seat && call.WritePath is not null
+            ? null
+            : WorkerGuardRules.ExhaustedRefusal(seat, writesSeatFile: false, window.Calls, elapsed, window.MaxCalls, window.Minutes);
+    }
+
+    /// <summary>The project's budget, or the shipped one; null when the project turns the Arbiter off.</summary>
+    private ArbiterDispatchBudgetConfig? LoadBudget(string workingDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(workingDirectory))
+        {
+            return ArbiterDispatchBudgetConfig.Defaults;
+        }
+
+        HostConfigLoadResult loaded = hostConfig.TryLoad(workingDirectory);
+        if (!loaded.Success || loaded.Config is null)
+        {
+            return ArbiterDispatchBudgetConfig.Defaults;
+        }
+
+        return loaded.Config.Arbiter.ExplicitlyEnabled == false ? null : loaded.Config.Arbiter.DispatchBudget;
+    }
+
+    /// <summary>The project's seat budget, or the shipped one; null when the project turns the Arbiter off.</summary>
+    private ArbiterDispatchBudgetConfig? LoadSeatBudget(string workingDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(workingDirectory))
+        {
+            return ArbiterDispatchBudgetConfig.SeatDefaults;
+        }
+
+        HostConfigLoadResult loaded = hostConfig.TryLoad(workingDirectory);
+        if (!loaded.Success || loaded.Config is null)
+        {
+            return ArbiterDispatchBudgetConfig.SeatDefaults;
+        }
+
+        return loaded.Config.Arbiter.ExplicitlyEnabled == false ? null : loaded.Config.Arbiter.SeatBudget;
+    }
+
+    private static void TryLog(TextWriter log, string message)
+    {
+        try
+        {
+            log.WriteLine(message);
+        }
+        catch (Exception)
+        {
+            // The log is best effort.
+        }
+    }
+}

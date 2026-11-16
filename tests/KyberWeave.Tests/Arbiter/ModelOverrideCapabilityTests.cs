@@ -122,7 +122,7 @@ public sealed class ModelOverrideCapabilityTests
     public void HookCommandCopiesTheDeclarationIntoTheHookContext()
     {
         RecordingAdapter adapter = new();
-        HookCommand command = new(
+        HookCommand command = ArbiterTestServices.Command(
             new HarnessAdapterRegistry(new IHarnessHookAdapter[] { adapter }),
             _ => EnabledConfig(),
             () => "decision-model-1");
@@ -167,8 +167,8 @@ public sealed class ModelOverrideCapabilityTests
     [Fact]
     public void ANullModelTokenLeavesClaudesAllowDocumentUnchanged()
     {
-        HookCommand command = new(
-            HarnessAdapterRegistry.CreateDefault(new AllowEngine()),
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(new AllowEngine()),
             _ => EnabledConfig(),
             () => "decision-model-2");
         using StringWriter stdout = new();
@@ -193,8 +193,8 @@ public sealed class ModelOverrideCapabilityTests
 
     private static IReadOnlyList<IHarnessHookAdapter> AllAdapters()
     {
-        IHookDecisionEngine engine = new ArbiterHookDecisionEngine();
-        return [.. CommandHookAdapters.All(engine), .. PluginHookAdapters.All(engine)];
+        IHookDecisionEngine engine = ArbiterTestServices.Engine();
+        return [.. ArbiterTestServices.CommandAdapters(engine), .. PluginHookAdapters.All(engine)];
     }
 
     private static KyberWeaveConfig EnabledConfig() =>

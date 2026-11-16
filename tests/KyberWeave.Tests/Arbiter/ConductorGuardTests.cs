@@ -260,7 +260,7 @@ public sealed class ConductorGuardTests
     public void ARelativeCopilotHome_GrantsNothing()
     {
         using StringWriter stdout = new();
-        ConductorGuard.Run(Event("view", new { path = ".copilot/agents/conductor/x.md" }), stdout, TextWriter.Null, copilotHome: ".copilot");
+        ArbiterTestServices.Get<IConductorGuard>().Run(Event("view", new { path = ".copilot/agents/conductor/x.md" }), stdout, TextWriter.Null, copilotHome: ".copilot");
 
         Assert.Contains("deny", stdout.ToString(), StringComparison.Ordinal);
     }
@@ -276,7 +276,7 @@ public sealed class ConductorGuardTests
     public void AllowedMcpServer_IsPermittedOnlyWhenNamed()
     {
         using StringWriter stdout = new();
-        ConductorGuard.Run(Event("operator-channel-send", new { }), stdout, TextWriter.Null, "operator-channel", CopilotHome);
+        ArbiterTestServices.Get<IConductorGuard>().Run(Event("operator-channel-send", new { }), stdout, TextWriter.Null, "operator-channel", CopilotHome);
 
         Assert.Empty(stdout.ToString());
         Assert.NotEmpty(ReasonFor(Event("operator-channel-send", new { })));
@@ -322,7 +322,7 @@ public sealed class ConductorGuardTests
         using StringWriter closed = new();
         closed.Dispose();
 
-        Assert.Equal(0, ConductorGuard.Run(Event("edit", new { }), closed, TextWriter.Null, copilotHome: CopilotHome));
+        Assert.Equal(0, ArbiterTestServices.Get<IConductorGuard>().Run(Event("edit", new { }), closed, TextWriter.Null, copilotHome: CopilotHome));
     }
 
     [Fact]
@@ -330,7 +330,7 @@ public sealed class ConductorGuardTests
     {
         using StringWriter stdout = new();
         using StringWriter log = new();
-        ConductorGuard.Run("{\"toolName\":\"bash\",\"toolArgs\":\"not\\njson\"}", stdout, log, copilotHome: CopilotHome);
+        ArbiterTestServices.Get<IConductorGuard>().Run("{\"toolName\":\"bash\",\"toolArgs\":\"not\\njson\"}", stdout, log, copilotHome: CopilotHome);
 
         Assert.Single(log.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries));
     }
@@ -406,14 +406,14 @@ public sealed class ConductorGuardTests
     private static string Run(string json)
     {
         using StringWriter stdout = new();
-        Assert.Equal(0, ConductorGuard.Run(json, stdout, TextWriter.Null, copilotHome: CopilotHome));
+        Assert.Equal(0, ArbiterTestServices.Get<IConductorGuard>().Run(json, stdout, TextWriter.Null, copilotHome: CopilotHome));
         return stdout.ToString();
     }
 
     private static string RunIn(string cwd, string path, string? home = null)
     {
         using StringWriter stdout = new();
-        ConductorGuard.Run(
+        ArbiterTestServices.Get<IConductorGuard>().Run(
             JsonSerializer.Serialize(new { cwd, toolName = "view", toolArgs = new { path } }),
             stdout,
             TextWriter.Null,

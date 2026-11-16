@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Arbiter;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -168,7 +169,7 @@ public sealed class ArbiterKiloReviewRemediationTests
         Assert.Contains("failed to load project config", combined, StringComparison.OrdinalIgnoreCase);
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
-            Composition.LoadHostConfig(projectDir.Path, HookScope.Global, homeDir.Path));
+            ArbiterTestServices.LoadHostConfig(projectDir.Path, HookScope.Global, homeDir.Path));
         Assert.Contains("KW-ARB-HOOK-001", ex.Message, StringComparison.Ordinal);
         Assert.Contains("failed to load project config", ex.Message, StringComparison.OrdinalIgnoreCase);
     }

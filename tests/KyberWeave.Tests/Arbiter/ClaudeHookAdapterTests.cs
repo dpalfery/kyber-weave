@@ -53,8 +53,8 @@ public sealed class ClaudeHookAdapterTests
     private static (int Exit, string Stdout) Run(
         string stdin, string? caller, ScriptedEngine engine)
     {
-        HookCommand command = new(
-            HarnessAdapterRegistry.CreateDefault(engine),
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
             _ => EnabledConfig(),
             () => "decision-test-1");
         using StringWriter stdout = new();
@@ -314,8 +314,8 @@ public sealed class ClaudeHookAdapterTests
 
     private static (int Exit, string Stdout, string Log) RunContextual(string stdin, IHookDecisionEngine engine)
     {
-        HookCommand command = new(
-            HarnessAdapterRegistry.CreateDefault(engine),
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
             _ => EnabledConfig(),
             () => "decision-test-27");
         using StringWriter stdout = new();
@@ -667,8 +667,8 @@ public sealed class ClaudeHookAdapterTests
         JsonNode root = JsonNode.Parse(ShellPayload("Bash", "git status", "architect"))
             ?? throw new InvalidOperationException("The shell payload is not a JSON document.");
         root.AsObject().Remove("tool_input");
-        HookCommand command = new(
-            HarnessAdapterRegistry.CreateDefault(new ScriptedEngine()),
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(new ScriptedEngine()),
             _ => EnabledConfig(),
             () => "decision-shell-no-input");
         using StringWriter stdout = new();

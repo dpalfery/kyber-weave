@@ -29,18 +29,12 @@ public static class ServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        services.TryAddSingleton<IWritableFileSystem>(_ => new PhysicalFileSystem());
-        services.TryAddSingleton<IFileSystem>(sp => sp.GetRequiredService<IWritableFileSystem>());
-        services.TryAddSingleton<IProcessEnvironment>(_ => new ProcessEnvironment());
+        _ = services.AddWeaveRunData();
         services.TryAddSingleton<IProductRootLocator>(sp => new CheckoutProductRootLocator(sp.GetRequiredService<IWritableFileSystem>()));
         services.TryAddSingleton<IRepositoryFileStore>(_ => new PhysicalRepositoryFileStore());
         services.TryAddSingleton<IBoundedProcessExecutor>(_ => new KernelBoundedProcessExecutor());
         services.TryAddSingleton<IDoctorFileSystem>(_ => new PhysicalDoctorFileSystem());
         services.TryAddSingleton<IProcessRunner>(_ => new KernelProcessRunner());
-        services.TryAddSingleton<IGitCommandRunner>(_ => new ProcessGitCommandRunner(ProcessGitCommandRunner.DefaultTimeout));
-        services.TryAddSingleton<ICheckedOutBranchReader>(sp => new GitCheckedOutBranchReader(sp.GetRequiredService<IGitCommandRunner>()));
-        services.TryAddSingleton<IRunStateStore>(sp => new FileRunStateStore(sp.GetRequiredService<IWritableFileSystem>(), sp.GetRequiredService<ICheckedOutBranchReader>()));
-        services.TryAddSingleton<IRunCheckout>(sp => new RunCheckoutGuard(sp.GetRequiredService<IWritableFileSystem>(), sp.GetRequiredService<IRunStateStore>()));
         services.TryAddSingleton<IHooksConfigSource>(sp => new YamlHooksConfigSource(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<ITestClassResolver>(sp => new ConventionTestClassResolver(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<ICodeGraphPortsFactory, CodeGraphPortsFactory>();
@@ -65,6 +59,24 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IContainedFileReader>(_ => new FileContainedFileReader());
         services.TryAddSingleton<IBoundedFileReader>(_ => new FileBoundedFileReader());
         _ = services.AddWeaveArbiterData();
+        return services;
+    }
+
+    /// <summary>
+    /// Registers the adapters a hook process needs on every event: the file system, the process, git and the run records.
+    /// A host that needs only these (the Arbiter guards, which run on every tool call) registers them alone and skips the rest.
+    /// </summary>
+    /// <param name="services">The collection to populate.</param>
+    /// <returns>The same collection, for chaining.</returns>
+    internal static IServiceCollection AddWeaveRunData(this IServiceCollection services)
+    {
+        services.TryAddSingleton<IWritableFileSystem>(_ => new PhysicalFileSystem());
+        services.TryAddSingleton<IFileSystem>(sp => sp.GetRequiredService<IWritableFileSystem>());
+        services.TryAddSingleton<IProcessEnvironment>(_ => new ProcessEnvironment());
+        services.TryAddSingleton<IGitCommandRunner>(_ => new ProcessGitCommandRunner(ProcessGitCommandRunner.DefaultTimeout));
+        services.TryAddSingleton<ICheckedOutBranchReader>(sp => new GitCheckedOutBranchReader(sp.GetRequiredService<IGitCommandRunner>()));
+        services.TryAddSingleton<IRunStateStore>(sp => new FileRunStateStore(sp.GetRequiredService<IWritableFileSystem>(), sp.GetRequiredService<ICheckedOutBranchReader>()));
+        services.TryAddSingleton<IRunCheckout>(sp => new RunCheckoutGuard(sp.GetRequiredService<IWritableFileSystem>(), sp.GetRequiredService<IRunStateStore>()));
         return services;
     }
 }

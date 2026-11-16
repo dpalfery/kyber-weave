@@ -179,6 +179,9 @@ public sealed class FileTextFacts : IFileTextFacts
         return KyberWeave.Core.Configuration.DocsRootPath.IsContainedFile(root, relative, []) ? full : null;
     }
 
+    /// <inheritdoc/>
+    public long LengthOf(string fullPath) => new FileInfo(fullPath).Length;
+
     /// <summary>
     /// Reads one line into <paramref name="line"/>, keeping at most <see cref="MaxLineCharacters"/> characters and
     /// discarding the rest. Every character consumed is taken from <paramref name="budget"/>; once it is spent the

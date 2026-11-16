@@ -63,8 +63,8 @@ public sealed class ArbiterHookHostTests
         ScriptedEngine engine,
         Func<string, KyberWeaveConfig>? loader = null,
         Func<string>? ids = null) =>
-        new(
-            HarnessAdapterRegistry.CreateDefault(engine),
+        ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
             loader ?? (_ => EnabledConfig()),
             ids ?? (() => "decision-test-1"));
 

@@ -395,7 +395,7 @@ public sealed class HookGitFactsSnapshotTests : IDisposable
         TriggerClassification classification = TriggerClassifier.ClassifySingle(pre, "architect", prompt);
         Assert.Equal("delegate.planner", classification.Trigger);
         ArbiterFactSet facts = TriggerFactBuilder.Build(classification, prompt, KyberWeaveConfig.ProductDefaults);
-        new HookGitFacts(new GitFacts(), new PlanPathResolver(), _probe.Root, null, _arbiter.Path).Enrich(facts, classification, pre);
+        ArbiterTestServices.HookGitFacts(_probe.Root, null, _arbiter.Path).Enrich(facts, classification, pre);
     }
 
     private ArbiterFactSet PostFacts(string prompt, string? callId)
@@ -414,7 +414,7 @@ public sealed class HookGitFactsSnapshotTests : IDisposable
         TriggerClassification classification = TriggerClassifier.ClassifySingle(post, "architect", prompt);
         Assert.Equal("delegate.planner.returned", classification.Trigger);
         ArbiterFactSet facts = TriggerFactBuilder.Build(classification, prompt, KyberWeaveConfig.ProductDefaults);
-        return new HookGitFacts(new GitFacts(), new PlanPathResolver(), _probe.Root, null, _arbiter.Path).Enrich(facts, classification, post);
+        return ArbiterTestServices.HookGitFacts(_probe.Root, null, _arbiter.Path).Enrich(facts, classification, post);
     }
 
     private IReadOnlyList<string> SinceDispatch(string prompt, string? callId)

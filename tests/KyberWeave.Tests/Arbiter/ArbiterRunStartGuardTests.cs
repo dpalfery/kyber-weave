@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Services;
 using KyberWeave.Data.Arbiter;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Core.Arbiter.Plans;
@@ -245,7 +246,7 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
             toolArgs = new { agent_type = "csharp-dev", prompt = "Add the widget." },
         });
 
-        ConductorGuard.Run(json, stdout, log, copilotHome: "/nowhere/.copilot", homeDirectory: _home.Path);
+        ArbiterTestServices.Get<IConductorGuard>().Run(json, stdout, log, copilotHome: "/nowhere/.copilot", homeDirectory: _home.Path);
 
         Assert.Empty(stdout.ToString());
         Assert.Contains("could not read whether a run was started", log.ToString(), StringComparison.Ordinal);
@@ -292,7 +293,7 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
         };
         TriggerClassification classification = TriggerClassifier.ClassifySingle(ev, target, ev.Prompt);
         ArbiterFactSet facts = TriggerFactBuilder.Build(classification, ev.Prompt, KyberWeaveConfig.ProductDefaults);
-        facts = new HookGitFacts(new GitFacts(), new PlanPathResolver(), _repo, _home.Path).Enrich(facts, classification, ev);
+        facts = ArbiterTestServices.HookGitFacts(_repo, _home.Path).Enrich(facts, classification, ev);
         return facts.TryGet("run.started", out ArbiterFact? fact) ? fact.Value : null;
     }
 
@@ -307,7 +308,7 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
     private string Guard(string json)
     {
         using StringWriter stdout = new();
-        ConductorGuard.Run(json, stdout, TextWriter.Null, copilotHome: "/nowhere/.copilot", homeDirectory: _home.Path);
+        ArbiterTestServices.Get<IConductorGuard>().Run(json, stdout, TextWriter.Null, copilotHome: "/nowhere/.copilot", homeDirectory: _home.Path);
         return stdout.ToString();
     }
 
