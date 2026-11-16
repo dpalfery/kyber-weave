@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.ModelTargets;
@@ -50,8 +51,8 @@ public sealed record ArbiterEvaluatorOptions(
 /// </summary>
 /// <remarks>
 /// Every collaborator arrives through the constructor: the provider, the key
-/// resolver, the ledger, the decision log, git facts, the plan reader and the
-/// clock. Core constructs none of them. The ledger event is appended before
+/// resolver, the ledger, the decision log, git facts, the plan reader, the
+/// model targets reader and the clock. Core constructs none of them. The ledger event is appended before
 /// evaluation so a hook killed mid-evaluation still leaves an undecided entry;
 /// one decision record per trigger is appended after, the primary first and
 /// each secondary behind it, all sharing the event's ledger id. A provider
@@ -74,6 +75,7 @@ public sealed class ArbiterEvaluator
     private readonly DecisionLog _decisionLog;
     private readonly IArbiterGitFacts _gitFacts;
     private readonly IArbiterPlanReader _planReader;
+    private readonly IArbiterModelTargetsReader _modelTargets;
     private readonly TimeProvider _clock;
     private readonly Func<string, ArbiterEvent, IReadOnlyList<string>> _secondaryTriggers;
 
@@ -84,6 +86,7 @@ public sealed class ArbiterEvaluator
     /// <param name="decisionLog">The decision log.</param>
     /// <param name="gitFacts">Git-derived facts.</param>
     /// <param name="planReader">Plan-derived facts.</param>
+    /// <param name="modelTargets">Reads the harness's model targets table.</param>
     /// <param name="clock">The evaluation clock.</param>
     /// <param name="secondaryTriggers">Derives the secondary triggers of a primary dispatch; defaults to none.</param>
     public ArbiterEvaluator(
@@ -93,6 +96,7 @@ public sealed class ArbiterEvaluator
         DecisionLog decisionLog,
         IArbiterGitFacts gitFacts,
         IArbiterPlanReader planReader,
+        IArbiterModelTargetsReader modelTargets,
         TimeProvider clock,
         Func<string, ArbiterEvent, IReadOnlyList<string>>? secondaryTriggers = null)
     {
@@ -102,6 +106,7 @@ public sealed class ArbiterEvaluator
         ArgumentNullException.ThrowIfNull(decisionLog);
         ArgumentNullException.ThrowIfNull(gitFacts);
         ArgumentNullException.ThrowIfNull(planReader);
+        ArgumentNullException.ThrowIfNull(modelTargets);
         ArgumentNullException.ThrowIfNull(clock);
         _provider = provider;
         _keyResolver = keyResolver;
@@ -109,6 +114,7 @@ public sealed class ArbiterEvaluator
         _decisionLog = decisionLog;
         _gitFacts = gitFacts;
         _planReader = planReader;
+        _modelTargets = modelTargets;
         _clock = clock;
         _secondaryTriggers = secondaryTriggers ?? SecondaryTriggers.For;
     }
@@ -125,7 +131,7 @@ public sealed class ArbiterEvaluator
         ArbiterEvaluatorOptions effective = options ?? new ArbiterEvaluatorOptions();
         Stopwatch elapsed = Stopwatch.StartNew();
         IReadOnlyList<ArbiterRule> rules = ModelTargetingRules.Apply(config.Arbiter.Rules, config.Arbiter.ModelTargeting.Mode);
-        ArbiterModelTargets? table = ArbiterModelTargets.TryRead(_ledger.DirectoryPath, ev.Harness);
+        ArbiterModelTargets? table = _modelTargets.TryRead(_ledger.DirectoryPath, ev.Harness);
 
         // Allocated outside the try so the error result can name the ledger entry that
         // was already appended. A fault after the append leaves exactly one record that

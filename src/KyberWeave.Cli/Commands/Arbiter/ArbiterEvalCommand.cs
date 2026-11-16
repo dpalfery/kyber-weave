@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using System.Text.Json;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
@@ -11,7 +12,7 @@ using KyberWeave.Core.FileSystem;
 namespace KyberWeave.Cli.Commands.Arbiter;
 
 /// <summary>Evaluates a recorded event offline through the evaluator's dry run.</summary>
-public sealed class ArbiterEvalCommand : Command<ArbiterSettings>
+public sealed class ArbiterEvalCommand(IArbiterModelTargetsReader modelTargets) : Command<ArbiterSettings>
 {
     private static readonly JsonSerializerOptions EventJson = new()
     {
@@ -87,7 +88,7 @@ public sealed class ArbiterEvalCommand : Command<ArbiterSettings>
 
         string repositoryRoot = ArbiterCommandComposition.ResolveRepositoryRoot(settings.Path);
         using ArbiterEvaluatorSession? session = ArbiterCommandComposition.CreateEvaluator(
-            config, repositoryRoot, settings.Provider, report);
+            config, repositoryRoot, settings.Provider, report, modelTargets);
         if (session is null)
         {
             CommandHelpers.Finish(report, settings, "arbiter eval", "Dispatch");

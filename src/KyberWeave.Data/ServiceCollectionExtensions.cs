@@ -1,5 +1,6 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Data.Arbiter;
 using KyberWeave.Data.Doctor;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Host;
@@ -40,6 +41,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<INotSeatedStore>(_ => new FileNotSeatedStore());
         services.TryAddSingleton<IReviewEvidenceStore>(_ => new FileReviewEvidenceStore());
         services.TryAddSingleton<IBoundedFileReader>(_ => new FileBoundedFileReader());
+        _ = services.AddWeaveArbiterData();
         return services;
     }
 }

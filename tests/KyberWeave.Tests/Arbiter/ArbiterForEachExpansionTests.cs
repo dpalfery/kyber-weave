@@ -1,3 +1,5 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
@@ -122,6 +124,7 @@ public sealed class ArbiterForEachExpansionTests : IDisposable
             new DecisionLog(ArbiterDirectory),
             new PassThroughGitFacts(),
             new FileListPlanReader(),
+            new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)));
 
         await evaluator.EvaluateAsync(DelegateEvent(), ConfigWith([ForEachRule()]));
@@ -140,6 +143,7 @@ public sealed class ArbiterForEachExpansionTests : IDisposable
             new DecisionLog(ArbiterDirectory),
             new PassThroughGitFacts(),
             new FileListPlanReader(),
+            new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)));
 
         await evaluator.EvaluateAsync(DelegateEvent(), ConfigWith([ForEachRule()]));

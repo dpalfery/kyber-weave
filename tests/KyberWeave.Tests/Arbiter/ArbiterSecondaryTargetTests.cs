@@ -1,3 +1,5 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
@@ -70,6 +72,7 @@ public sealed class ArbiterSecondaryTargetTests : IDisposable
         new DecisionLog(ArbiterDirectory),
         new NoGitFacts(),
         new PlanFacts(),
+        new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
         TimeProvider.System);
 
     /// <summary>A multi-dispatch event. The event's own target is left unset: each dispatch names its own.</summary>

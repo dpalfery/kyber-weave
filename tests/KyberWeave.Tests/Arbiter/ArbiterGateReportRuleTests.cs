@@ -29,7 +29,7 @@ public sealed class ArbiterGateReportRuleTests
     private const string GateReportRule = "KW-ARB-GATE-REPORT-001";
 
     private static readonly string ShippedRulesPath = Path.Combine(
-        KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Core", "Arbiter", "Rules", "default-rules.yml");
+        KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Domain", "Arbiter", "Rules", "default-rules.yml");
 
     /// <summary>
     /// The seventeen rules the file shipped before it that it still ships, pinned so the new one joins without renumbering any.
