@@ -491,7 +491,7 @@ public sealed class PlanTaskFileValidatorTests
         {
             Assert.SkipWhen(CanList(locked), "Running with privileges that ignore file modes (such as root), so the folder stays readable.");
 
-            DiagnosticReport report = new PlanTaskFileValidator(fixture.Root, config, DocsPorts.Files, DocsPorts.Process).Validate(set);
+            DiagnosticReport report = new PlanTaskFileValidator(fixture.Root, config, DocsPorts.Files).Validate(set);
 
             Diagnostic warning = Assert.Single(report.Items, item => item.Code == SidecarTaskFile && item.Severity == Severity.Warning);
             Assert.Contains("could not be read", warning.Message, StringComparison.OrdinalIgnoreCase);

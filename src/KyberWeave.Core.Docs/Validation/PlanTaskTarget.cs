@@ -18,7 +18,7 @@ namespace KyberWeave.Core.Docs.Validation;
 public static partial class PlanTaskTarget
 {
     private static readonly IPlanTaskTargetService Service = new PlanTaskTargetService(
-        new PlanTaskService(LegacyPorts.Files, LegacyPorts.Process),
+        new PlanTaskService(LegacyPorts.Files),
         new TaskGateSelectionService(new FileRepositoryTreeProbe(), new FileTestClassSources()));
 
     /// <inheritdoc cref="IPlanTaskTargetService.Find" />

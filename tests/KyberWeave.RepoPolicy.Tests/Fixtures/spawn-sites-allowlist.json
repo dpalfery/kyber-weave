@@ -740,16 +740,10 @@
       "bound": "Builds only; nothing starts on this line. Started by ProcessRunner.Run at CodeGraphResolverAdapter.cs:203 with SqliteReadTimeout = 60 s."
     },
     {
-      "file": "src/KyberWeave.Application/Docs/Validation/PlanFileScope.cs",
-      "text": "ProcessStartInfo start = new(\"git\") { RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true, UseShellExecute = false, WorkingDirectory = _root };",
-      "count": 1,
-      "bound": "Builds only; nothing starts on this line. Started through IBoundedProcessExecutor in PlanFileScope.ReadExtensions with a 20 s timeout."
-    },
-    {
       "file": "src/KyberWeave.Data/Docs/FileSystem/KernelBoundedProcessExecutor.cs",
       "text": "ProcessRunner.Run(startInfo, standardInput, timeout);",
       "count": 1,
-      "bound": "The kernel's deadlock-safe runner with the caller's timeout, which kills the process tree on expiry. Callers: the plan lifecycle's git add, diff, status and commit (60 s, never push) and PlanFileScope's git ls-files (20 s)."
+      "bound": "The kernel's deadlock-safe runner with the caller's timeout, which kills the process tree on expiry. Callers: the plan lifecycle's git add, diff, status and commit (60 s, never push)."
     },
     {
       "file": "src/KyberWeave.Data/Docs/Analysis/Persistence/AnalysisCacheSafety.cs",

@@ -46,6 +46,9 @@ public static partial class PlanTaskFileRules
     /// <summary>A model that read only a task's packet says a developer could not do the task from it. A warning.</summary>
     public const string PacketNotSelfContained = "KW-DOC-TASKS-011";
 
+    /// <summary>A task lists a path under the run's scratch folder as one of its files, so no task file is written.</summary>
+    public const string ScratchPathInFiles = "KW-DOC-TASKS-013";
+
     /// <summary>The schema version this build reads.</summary>
     internal const int SchemaVersion = 1;
 

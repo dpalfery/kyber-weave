@@ -110,7 +110,7 @@ public sealed class PlanTaskAgentPickTests : IDisposable
         Write(Picker(new StubProvider("dal-dev", 0.97)));
         StubProvider second = new("csharp-dev", 0.99);
 
-        PlanTaskFileOutcome check = new PlanTaskFileGenerator(_repo.Path, KyberWeaveConfig.ProductDefaults, DocsPorts.Files, DocsPorts.Process,
+        PlanTaskFileOutcome check = new PlanTaskFileGenerator(_repo.Path, KyberWeaveConfig.ProductDefaults, DocsPorts.Files,
             Picker(second)).Run(Plan, PlanTaskFileMode.Check);
         PlanTaskFile rewritten = Write(Picker(second));
 
@@ -129,7 +129,7 @@ public sealed class PlanTaskAgentPickTests : IDisposable
 
     private PlanTaskFile Write(IPlanTaskAgentPicker? picker)
     {
-        PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(_repo.Path, KyberWeaveConfig.ProductDefaults, DocsPorts.Files, DocsPorts.Process, picker)
+        PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(_repo.Path, KyberWeaveConfig.ProductDefaults, DocsPorts.Files, picker)
             .Run(Plan, PlanTaskFileMode.Write);
         Assert.False(outcome.Report.HasErrors, string.Join("; ", outcome.Report.Items.Select(item => item.Message)));
         return outcome.File!;
