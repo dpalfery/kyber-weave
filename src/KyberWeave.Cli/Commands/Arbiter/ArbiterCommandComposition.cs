@@ -1,3 +1,5 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
 using KyberWeave.Contracts.Repositories;
 using System.Diagnostics;
 using System.Globalization;
@@ -109,6 +111,9 @@ public static class ArbiterCommandComposition
     private static Func<string?> DefaultKeyPrompt { get; } = PromptKeyMasked;
 
     private static Func<IProcessExecutor> DefaultArbiterProbeExecutor { get; } = () => ProcessExecutor.Instance;
+
+    /// <summary>Reads the per-user Arbiter provider override. The CLI's one composition point for it.</summary>
+    public static IArbiterUserSettings UserSettings { get; } = new FileArbiterUserSettings(new PhysicalFileSystem());
 
     /// <summary>Creates the OS credential store for the Arbiter key.</summary>
     public static ICredentialStore CreateCredentialStore()
@@ -337,7 +342,7 @@ public static class ArbiterCommandComposition
         try
         {
             ArbiterProviderConfig repository = config.Arbiter.Provider;
-            ArbiterProviderConfig merged = ArbiterUserSettings.ApplyTo(repository, HomeDirectory());
+            ArbiterProviderConfig merged = UserSettings.ApplyTo(repository, HomeDirectory());
             if (!merged.Equals(repository))
             {
                 config = new KyberWeaveConfig
@@ -572,7 +577,7 @@ public static class ArbiterCommandComposition
 
         ICredentialStore store = CredentialStore();
         string? userOverrideEndpoint = UserOverrideEndpoint(config);
-        keyResolver = uri => ArbiterKeyResolver.Resolve(uri.ToString(), store, userOverrideEndpoint);
+        keyResolver = uri => ArbiterKeyResolver.Resolve(uri.ToString(), store, Environment.GetEnvironmentVariable, userOverrideEndpoint);
 
         ArbiterProviderKind kind = config.Arbiter.Provider.Kind;
         if (providerOverride is not null)
@@ -665,7 +670,7 @@ public static class ArbiterCommandComposition
         try
         {
             ArbiterProviderConfig repository = config.Arbiter.Provider;
-            ArbiterProviderConfig merged = ArbiterUserSettings.ApplyTo(repository, HomeDirectory());
+            ArbiterProviderConfig merged = UserSettings.ApplyTo(repository, HomeDirectory());
             return string.Equals(merged.Endpoint, repository.Endpoint, StringComparison.Ordinal)
                 ? null
                 : merged.Endpoint;

@@ -76,7 +76,7 @@ public sealed class ArbiterCalibrationTests
         CancellationToken cancellationToken = TestContext.Current.CancellationToken;
         string endpoint = Environment.GetEnvironmentVariable(EndpointVariable) ?? DefaultEndpoint;
         Uri requestUri = SystemOneContracts.RequestUri(new Uri(endpoint));
-        string? key = ArbiterKeyResolver.Resolve(endpoint, CreateStore());
+        string? key = ArbiterKeyResolver.Resolve(endpoint, CreateStore(), Environment.GetEnvironmentVariable);
         Assert.False(string.IsNullOrWhiteSpace(key), "No key resolved for the endpoint.");
 
         string[] models = ParseModels(Environment.GetEnvironmentVariable(ModelsVariable));

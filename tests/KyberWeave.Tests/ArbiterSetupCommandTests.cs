@@ -142,7 +142,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
             }));
 
         Assert.Equal(0, execution.ExitCode);
-        ArbiterProviderConfig applied = ArbiterUserSettings.ApplyTo(
+        ArbiterProviderConfig applied = new FileArbiterUserSettings(new PhysicalFileSystem()).ApplyTo(
             ArbiterConfig.ProductDefaults.Provider,
             _home.Path);
         Assert.Equal(model.Trim(), applied.Model);

@@ -252,7 +252,7 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
         string home = ArbiterCommandComposition.HomeDirectory();
         try
         {
-            return ArbiterUserSettings.ApplyTo(config.Arbiter.Provider, home).Kind
+            return ArbiterCommandComposition.UserSettings.ApplyTo(config.Arbiter.Provider, home).Kind
                    != ArbiterProviderKind.None;
         }
         catch (Exception exception) when (FileFailure.Is(exception) || exception is YamlDotNet.Core.YamlException)

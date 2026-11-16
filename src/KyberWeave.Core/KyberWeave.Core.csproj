@@ -14,19 +14,6 @@
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
   </PropertyGroup>
 
-  <PropertyGroup>
-    <!--
-      The LibraryImport source generator emits unsafe pinning code for the advapi32
-      string marshalling in Arbiter/Credentials/WindowsCredentialStore.cs (CredWriteW /
-      CredReadW take UTF-16 strings). The unsafe is confined to those generated stubs,
-      which never load off Windows: every call site is gated by
-      OperatingSystem.IsWindows(). AllowUnsafeBlocks applies assembly-wide, so it
-      permits hand-written unsafe too; none is present, and a source-scan test guards
-      that invariant.
-    -->
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-  </PropertyGroup>
-
   <ItemGroup>
     <!-- The legacy engine is being drained into these layers (ADR 0057 split, superseded by the layering
          in LayerReferenceTests). It references them; they never reference it. -->

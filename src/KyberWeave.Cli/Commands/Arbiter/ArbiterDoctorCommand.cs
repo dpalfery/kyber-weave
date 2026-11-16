@@ -118,7 +118,7 @@ public sealed class ArbiterDoctorCommand(IArbiterModelTargetsReader modelTargets
         ArbiterProviderConfig effective;
         try
         {
-            effective = ArbiterUserSettings.ApplyTo(config.Arbiter.Provider, home);
+            effective = ArbiterCommandComposition.UserSettings.ApplyTo(config.Arbiter.Provider, home);
         }
         catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or YamlDotNet.Core.YamlException)
         {

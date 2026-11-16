@@ -10,6 +10,11 @@ namespace KyberWeave.Arbiter;
 /// </remarks>
 internal static class ArbiterServices
 {
+    private static readonly Lazy<IServiceProvider> SharedProvider = new(Create);
+
+    /// <summary>The serve path's container, built once on first use from the same registrations the hook path uses.</summary>
+    internal static IServiceProvider Shared => SharedProvider.Value;
+
     /// <summary>Builds the container over the application layer's registrations.</summary>
     /// <returns>A provider that resolves lazily.</returns>
     internal static IServiceProvider Create()

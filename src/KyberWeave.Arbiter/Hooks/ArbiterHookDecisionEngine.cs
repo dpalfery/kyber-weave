@@ -75,7 +75,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         _gitFactsFactory = gitFactsFactory;
         _planReaderFactory = planReaderFactory ?? (root => new HookPlanReader(root));
         _clock = clock ?? TimeProvider.System;
-        _credentialStoreFactory = credentialStoreFactory ?? CreateCredentialStore;
+        _credentialStoreFactory = credentialStoreFactory ?? (() => _services.Value.GetRequiredService<ICredentialStore>());
         _environment = environment ?? Environment.GetEnvironmentVariable;
     }
 
@@ -646,21 +646,6 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         return uri => ArbiterKeyResolver.Resolve(uri.ToString(), store, _environment, userOverrideEndpoint);
     }
 
-    private static ICredentialStore CreateCredentialStore()
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            return new WindowsCredentialStore();
-        }
-
-        if (OperatingSystem.IsMacOS())
-        {
-            return new MacKeychainCredentialStore(new ProcessRunnerCredentialProcessRunner());
-        }
-
-        return new SecretServiceCredentialStore(new ProcessRunnerCredentialProcessRunner());
-    }
-
     /// <inheritdoc/>
     public IArbiterProvider ProviderFor(KyberWeaveConfig config)
     {
@@ -696,14 +681,14 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
             keyResolver);
     }
 
-    private static KyberWeaveConfig ApplyUserProvider(KyberWeaveConfig config, Func<string> homeDirectory)
+    private KyberWeaveConfig ApplyUserProvider(KyberWeaveConfig config, Func<string> homeDirectory)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(homeDirectory);
         try
         {
             ArbiterProviderConfig repository = config.Arbiter.Provider;
-            ArbiterProviderConfig merged = ArbiterUserSettings.ApplyTo(repository, homeDirectory());
+            ArbiterProviderConfig merged = _services.Value.GetRequiredService<IArbiterUserSettings>().ApplyTo(repository, homeDirectory());
             if (merged.Equals(repository))
             {
                 return config;
@@ -729,12 +714,12 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         }
     }
 
-    private static string? UserOverrideEndpoint(KyberWeaveConfig config, Func<string> homeDirectory)
+    private string? UserOverrideEndpoint(KyberWeaveConfig config, Func<string> homeDirectory)
     {
         try
         {
             ArbiterProviderConfig repository = config.Arbiter.Provider;
-            ArbiterProviderConfig merged = ArbiterUserSettings.ApplyTo(repository, homeDirectory());
+            ArbiterProviderConfig merged = _services.Value.GetRequiredService<IArbiterUserSettings>().ApplyTo(repository, homeDirectory());
             return string.Equals(merged.Endpoint, repository.Endpoint, StringComparison.Ordinal)
                 ? null
                 : merged.Endpoint;

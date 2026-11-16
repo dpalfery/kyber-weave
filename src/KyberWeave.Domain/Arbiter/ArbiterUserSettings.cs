@@ -25,40 +25,16 @@ public static class ArbiterUserSettings
     }
 
     /// <summary>
-    /// Applies the user override to the repository provider, field by field. Returns the
-    /// repository provider unchanged when the file is absent.
+    /// Parses the override file's text into its <c>provider:</c> mapping and checks that it holds nothing else.
     /// </summary>
-    public static ArbiterProviderConfig ApplyTo(ArbiterProviderConfig repository, string homeDirectory)
+    /// <param name="yaml">The file's text.</param>
+    /// <param name="path">The file's path, named in every failure.</param>
+    /// <returns>The <c>provider:</c> mapping, or null when the file declares none.</returns>
+    /// <exception cref="YamlException">The text is malformed or holds a key other than <c>provider</c>.</exception>
+    internal static ArbiterProviderYaml? ParseProvider(string yaml, string path)
     {
-        ArgumentNullException.ThrowIfNull(repository);
-        ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
-        ArbiterProviderYaml? userProvider = LoadProvider(homeDirectory);
-        return ArbiterConfigLoader.ApplyUserProviderOverride(repository, userProvider);
-    }
-
-    /// <summary>
-    /// Loads the override's <c>provider:</c> mapping, or null when the file is absent.
-    /// </summary>
-    internal static ArbiterProviderYaml? LoadProvider(string homeDirectory)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
-        string path = GetPath(homeDirectory);
-        if (!File.Exists(path))
-        {
-            return null;
-        }
-
-        string yaml;
-        try
-        {
-            yaml = File.ReadAllText(path);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            throw new YamlException(
-                $"[{RuleValidator.MalformedSection}] The user override '{path}' could not be read.",
-                exception);
-        }
+        ArgumentNullException.ThrowIfNull(yaml);
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
         Dictionary<string, object?>? raw;
         ArbiterYamlSection? section;

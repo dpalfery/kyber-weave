@@ -1,4 +1,6 @@
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Arbiter.Credentials;
+using KyberWeave.Data.Arbiter.Credentials;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -13,6 +15,9 @@ internal static class ArbiterDataServiceCollectionExtensions
     internal static IServiceCollection AddWeaveArbiterData(this IServiceCollection services)
     {
         services.TryAddSingleton<IArbiterModelTargetsReader>(sp => new FileArbiterModelTargetsReader(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<IArbiterUserSettings>(sp => new FileArbiterUserSettings(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<ICredentialStore>(_ => OperatingSystemCredentialStore.Create());
+        services.TryAddSingleton(sp => new ConfiguredArbiterProviderFactory(sp.GetRequiredService<IArbiterUserSettings>()));
         return services;
     }
 }

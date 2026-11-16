@@ -30,24 +30,12 @@ public interface ICredentialStore
 /// <remarks>
 /// The stores shell out to <c>security</c> and <c>secret-tool</c> through this seam so
 /// tests can assert the exact argv and stdin without those tools installed. Production
-/// uses <see cref="ProcessRunnerCredentialProcessRunner"/>, which delegates to
-/// <see cref="ProcessRunner"/>. Core defines the port; the composition root picks the
-/// implementation.
+/// uses <c>ProcessRunnerCredentialProcessRunner</c>, which delegates to the kernel
+/// process runner. The domain defines the port because <see cref="ArbiterKeyResolver"/>'s
+/// resolution order reads it; the composition root picks the implementation.
 /// </remarks>
 public interface ICredentialProcessRunner
 {
     /// <summary>Runs a child process to completion with the given stdin.</summary>
     ProcessResult Run(ProcessStartInfo startInfo, string standardInput);
-}
-
-/// <summary>Production <see cref="ICredentialProcessRunner"/> over <see cref="ProcessRunner"/>.</summary>
-public sealed class ProcessRunnerCredentialProcessRunner : ICredentialProcessRunner
-{
-    /// <inheritdoc />
-    public ProcessResult Run(ProcessStartInfo startInfo, string standardInput)
-    {
-        ArgumentNullException.ThrowIfNull(startInfo);
-        ArgumentNullException.ThrowIfNull(standardInput);
-        return ProcessRunner.Run(startInfo, standardInput);
-    }
 }

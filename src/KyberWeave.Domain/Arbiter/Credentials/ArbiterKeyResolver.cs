@@ -61,15 +61,6 @@ public static class ArbiterKeyResolver
         return string.IsNullOrWhiteSpace(stored) ? null : stored;
     }
 
-    /// <summary>
-    /// Resolves the key for <paramref name="endpoint"/> against the process environment.
-    /// </summary>
-    public static string? Resolve(
-        string endpoint,
-        ICredentialStore? store,
-        string? userOverrideEndpoint = null) =>
-        Resolve(endpoint, store, Environment.GetEnvironmentVariable, userOverrideEndpoint);
-
     /// <summary>Derives the <c>scheme://host[:port]</c> origin of an endpoint URL.</summary>
     /// <returns>The origin, or null when the endpoint is not an absolute http(s) URL.</returns>
     public static string? GetOrigin(string endpoint)
