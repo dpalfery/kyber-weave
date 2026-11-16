@@ -1,3 +1,4 @@
+using KyberWeave.Application.Configuration;
 using KyberWeave.Application.Doctor;
 using KyberWeave.Application.Arbiter;
 using KyberWeave.Application.Hooks;
@@ -47,6 +48,8 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IRunStartEvidence, RunStartEvidenceService>();
         services.TryAddSingleton<IRunStartService, RunStartService>();
         services.TryAddSingleton<ISquadBriefService, SquadBriefService>();
+        services.TryAddSingleton<ISquadBriefBuilder, SquadBriefBuilder>();
+        services.TryAddSingleton<IConfigLoadService, ConfigLoadService>();
         services.TryAddSingleton<IManagedGlossaryFactory>(sp => new ManagedGlossaryFactory(
             sp.GetRequiredService<IRepositoryFileStore>(), sp.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton<IPlanTaskService>(sp => new PlanTaskService(
@@ -123,6 +126,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IReviewDecisionSteps, ReviewDecisionSteps>();
         services.TryAddSingleton<ITaskGateSelectionService, TaskGateSelectionService>();
         services.TryAddSingleton<IReviewDecisionModelFactory, ReviewDecisionModelFactory>();
+        services.TryAddSingleton<IReviewVerdictService, ReviewVerdictService>();
         _ = services.AddWeaveArbiterApplication();
         return services;
     }

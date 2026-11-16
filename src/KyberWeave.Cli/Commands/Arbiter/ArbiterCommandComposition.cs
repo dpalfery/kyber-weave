@@ -12,9 +12,9 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 /// Arbiter services and holds no seam of its own. The Arbiter commands take those services by constructor.
 /// </summary>
 /// <remarks>
-/// Kept only while three callers outside the Arbiter commands remain: <c>DocsTasksCommand</c> (BLOCKED-BY DC),
-/// <c>ReviewDecisionModelFactory</c> (BLOCKED-BY RV) and <c>SquadHostDefaults</c> (BLOCKED-BY SQ). Delete it when the last
-/// of them takes <see cref="IArbiterKeyService"/> and <see cref="IArbiterDryRunService"/> from the container.
+/// Kept only while two callers outside the Arbiter commands remain: <c>DocsTasksCommand</c> (BLOCKED-BY DC) and
+/// <c>SquadHostDefaults</c> (BLOCKED-BY SQ). Delete it when the last of them takes <see cref="IArbiterKeyService"/>
+/// and <see cref="IArbiterDryRunService"/> from the container.
 /// </remarks>
 public static class ArbiterCommandComposition
 {

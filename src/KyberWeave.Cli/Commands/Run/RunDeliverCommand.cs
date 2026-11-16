@@ -1,4 +1,3 @@
-using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -11,7 +10,7 @@ namespace KyberWeave.Cli.Commands.Run;
 /// Pushes a finished run's branch and creates or updates its draft pull request on GitHub, with the description
 /// assembled from what the run recorded. The same step the docs server's deliver tool runs (ADR 0081).
 /// </summary>
-public sealed class RunDeliverCommand(IRunDeliveryRunner delivery) : Command<RunDeliverSettings>
+public sealed class RunDeliverCommand(IRunDeliveryRunner delivery, IConfigLoadService configs) : Command<RunDeliverSettings>
 {
     /// <summary>The command description shared by the real registration and the help tests.</summary>
     public const string Description =
@@ -23,7 +22,7 @@ public sealed class RunDeliverCommand(IRunDeliveryRunner delivery) : Command<Run
         ArgumentNullException.ThrowIfNull(settings);
 
         DiagnosticReport report = new();
-        if (!DocsCommandComposition.TryResolveConfig(settings, report, out KyberWeaveConfig config, out OntologyConfig ontology))
+        if (!configs.TryLoadWithDocsRoots(settings.Path, settings.Config, settings.DocsRoots, report, out KyberWeaveConfig config, out OntologyConfig ontology))
         {
             CommandHelpers.Finish(report, settings, "run deliver", "Run");
             return 1;
