@@ -1,6 +1,7 @@
 using KyberWeave.Application.Hooks;
 using KyberWeave.Contracts.Docs;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Docs.Mcp;
 using KyberWeave.Mcp;
 using KyberWeave.Application.RunStart;
 using KyberWeave.Core.Squad.Briefs;
@@ -31,6 +32,16 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IEditHookService, EditHookService>();
         services.TryAddSingleton<IRunStartRunnerFactory, RunStartRunnerFactory>();
         services.TryAddSingleton<ISquadBriefService, SquadBriefService>();
+        services.TryAddSingleton(sp => new McpWiringInspector(sp.GetRequiredService<IMcpConfigFiles>()));
+        services.TryAddSingleton(sp => new McpWiringRepairer(sp.GetRequiredService<IMcpConfigFiles>()));
+        services.TryAddSingleton(sp => new McpServerRenamer(sp.GetRequiredService<IMcpConfigFiles>(), sp.GetRequiredService<IMcpDeclarationReader>()));
+        services.TryAddSingleton(sp => new McpWiringFixes(sp.GetRequiredService<IMcpConfigFiles>(), sp.GetRequiredService<McpServerRenamer>()));
+        services.TryAddSingleton<IMcpWiringService>(sp => new McpWiringService(
+            sp.GetRequiredService<McpWiringInspector>(),
+            sp.GetRequiredService<McpWiringRepairer>(),
+            sp.GetRequiredService<McpServerRenamer>(),
+            sp.GetRequiredService<McpWiringFixes>(),
+            sp.GetRequiredService<ILaunchCommandResolverFactory>()));
         services.TryAddSingleton<ICorpusProvenance>(sp => new CorpusProvenanceService(sp.GetRequiredService<IGitCheckoutProbe>()));
         return services;
     }

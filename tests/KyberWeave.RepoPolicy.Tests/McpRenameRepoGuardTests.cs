@@ -177,7 +177,7 @@ public sealed class McpRenameRepoGuardTests
     private static readonly IReadOnlyList<AllowListEntry> ExemptFiles =
     [
         new AllowListEntry(
-            "src/KyberWeave.Core.Docs/Mcp/McpServerRenamer.cs",
+            "src/KyberWeave.Application/Docs/Mcp/McpServerRenamer.cs",
             "Holds the retired server keys as the rename table `docs mcp-migrate` applies. A rename " +
             "table that could not name the keys it renames could not rename them."),
         new AllowListEntry(

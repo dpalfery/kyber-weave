@@ -35,6 +35,8 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IHooksConfigSource>(sp => new YamlHooksConfigSource(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<ITestClassResolver>(sp => new ConventionTestClassResolver(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<IGitCheckoutProbe>(_ => new GitCheckoutProbe());
+        services.TryAddSingleton<IMcpConfigFiles>(_ => new PhysicalMcpConfigFiles());
+        services.TryAddSingleton<ILaunchCommandResolverFactory>(_ => new KyberWeave.Core.Docs.Mcp.EnvironmentLaunchCommandResolverFactory());
         return services;
     }
 }

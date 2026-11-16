@@ -1,3 +1,8 @@
+using KyberWeave.Application;
+using KyberWeave.Cli.Composition;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Docs.Mcp;
+using Microsoft.Extensions.DependencyInjection;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Cli.Commands.Review;
@@ -84,7 +89,10 @@ internal static class CommandAppFixture
     /// </summary>
     private static CommandApp Build(bool strictParsing, params Action<IConfigurator>[] branches)
     {
-        CommandApp app = new();
+        ServiceCollection services = [];
+        services.AddSingleton<IMcpDeclarationReader, McpDeclarationReader>();
+        _ = services.AddWeaveApplication();
+        CommandApp app = new(new ServiceCollectionTypeRegistrar(services));
         app.Configure(config =>
         {
             config.SetApplicationName(ApplicationName);

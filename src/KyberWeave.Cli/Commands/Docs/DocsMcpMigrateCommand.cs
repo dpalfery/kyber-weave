@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Mcp;
 using Spectre.Console;
@@ -47,26 +48,23 @@ public sealed class DocsMcpMigrateCommand : Command<DocsMcpMigrateSettings>
                 .Select(row => row.Harness)
                 .Append(McpServerRenamer.DeclarationTarget));
 
+    private readonly IMcpWiringService _wiring;
     private readonly Func<string?> _home;
 
     /// <summary>
-    /// Creates the command Spectre resolves: the operator's home is the process user profile.
+    /// Creates the command over the MCP wiring service the container resolves, with an injectable home reader so the
+    /// home-directory refusal can be exercised against a fixture rather than the developer's own profile.
     /// </summary>
-    public DocsMcpMigrateCommand()
-        : this(null)
-    {
-    }
-
-    /// <summary>
-    /// Creates the command with an injectable home reader, so the home-directory refusal can be
-    /// exercised against a fixture rather than the developer's own profile.
-    /// </summary>
+    /// <param name="wiring">Inspects, repairs and renames the harness MCP configuration.</param>
     /// <param name="home">
     /// Resolves the operator's home directory, or null for
     /// <see cref="Environment.SpecialFolder.UserProfile"/> under the process environment.
     /// </param>
-    public DocsMcpMigrateCommand(Func<string?>? home) =>
+    public DocsMcpMigrateCommand(IMcpWiringService wiring, Func<string?>? home = null)
+    {
+        _wiring = wiring ?? throw new ArgumentNullException(nameof(wiring));
         _home = home ?? (() => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+    }
 
     /// <inheritdoc />
     public override int Execute(
@@ -94,8 +92,8 @@ public sealed class DocsMcpMigrateCommand : Command<DocsMcpMigrateSettings>
         IReadOnlyList<string> targets = DocsMcpWireCommand.Targets(settings.Target);
         bool preview = targets.Count == 0;
         IReadOnlyList<McpRenameChange> changes = preview
-            ? McpServerRenamer.Scan(root)
-            : McpServerRenamer.Migrate(root, targets, settings.DryRun);
+            ? _wiring.Scan(root, null)
+            : _wiring.Migrate(root, targets, settings.DryRun);
 
         CommandHelpers.WriteUnfolded(() =>
         {

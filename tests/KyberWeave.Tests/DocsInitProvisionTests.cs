@@ -1,3 +1,8 @@
+using KyberWeave.Application;
+using KyberWeave.Cli.Composition;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Docs.Mcp;
+using Microsoft.Extensions.DependencyInjection;
 using System.Diagnostics;
 using Xunit;
 using KyberWeave.Cli.Commands.Docs;
@@ -55,7 +60,7 @@ public sealed class DocsInitProvisionTests : IDisposable
         using TempDirectory stubs = new();
         string repo = _repo.Path;
         ScriptedProcessExecutor executor = DoctorHarness.Executor(repo);
-        DocsInitCommand command = new()
+        DocsInitCommand command = new(McpWiringTestServices.Wiring)
         {
             Executor = executor,
             McpExecutable = DoctorHarness.HealthyStub(stubs.Path, repo),
@@ -88,7 +93,10 @@ public sealed class DocsInitProvisionTests : IDisposable
 
     private static CommandApp DocsApp()
     {
-        CommandApp app = new();
+        ServiceCollection services = [];
+        services.AddSingleton<IMcpDeclarationReader, McpDeclarationReader>();
+        _ = services.AddWeaveApplication();
+        CommandApp app = new(new ServiceCollectionTypeRegistrar(services));
         app.Configure(config =>
         {
             config.SetApplicationName("kyber-weave");

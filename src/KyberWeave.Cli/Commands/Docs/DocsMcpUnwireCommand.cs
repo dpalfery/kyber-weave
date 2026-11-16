@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Mcp;
 using Spectre.Console;
@@ -29,6 +30,13 @@ public sealed class DocsMcpUnwireCommand : Command<DocsMcpUnwireSettings>
     /// <summary>The remedy command, spelled once so the listing and the usage agree on it.</summary>
     private const string UnwireCommand = "kyber-weave docs mcp-unwire --target";
 
+    private readonly IMcpWiringService _wiring;
+
+    /// <summary>Creates the command over the MCP wiring service the container resolves.</summary>
+    /// <param name="wiring">Inspects, repairs and renames the harness MCP configuration.</param>
+    public DocsMcpUnwireCommand(IMcpWiringService wiring) =>
+        _wiring = wiring ?? throw new ArgumentNullException(nameof(wiring));
+
     /// <inheritdoc />
     public override int Execute(
         CommandContext context,
@@ -54,7 +62,7 @@ public sealed class DocsMcpUnwireCommand : Command<DocsMcpUnwireSettings>
             return 0;
         }
 
-        McpWiringRepairReport removal = McpWiringRepairer.Unwire(root, targets);
+        McpWiringRepairReport removal = _wiring.Unwire(root, targets);
 
         CommandHelpers.WriteUnfolded(() =>
         {

@@ -1,7 +1,7 @@
 namespace KyberWeave.Core.Docs.Mcp;
 
 /// <summary>Which segment of a configuration path stopped the guard, and why.</summary>
-internal enum McpLinkObstruction
+public enum McpLinkObstruction
 {
     /// <summary>Every segment is a real file or directory, so the path may be read or written.</summary>
     None,
@@ -20,7 +20,7 @@ internal enum McpLinkObstruction
 /// <param name="Segment">
 /// The repository-relative segment, with <c>/</c> separators, or null when nothing stopped the walk.
 /// </param>
-internal readonly record struct McpLinkProbe(McpLinkObstruction Obstruction, string? Segment);
+public readonly record struct McpLinkProbe(McpLinkObstruction Obstruction, string? Segment);
 
 /// <summary>
 /// Finds the symbolic link, if any, that stands between a repository root and one of its
@@ -46,7 +46,7 @@ internal readonly record struct McpLinkProbe(McpLinkObstruction Obstruction, str
 /// answers waiting to differ.
 /// </para>
 /// </remarks>
-internal static class McpConfigurationLink
+public static class McpConfigurationLink
 {
     /// <summary>
     /// The repository-relative path of the first segment of <paramref name="absolutePath"/> that is
@@ -59,8 +59,12 @@ internal static class McpConfigurationLink
     /// catalog's own ZCode walk is the one place a parent directory is read deliberately, and it
     /// reports what it finds rather than writing there.
     /// </remarks>
-    public static string? LinkedSegment(string repositoryRoot, string absolutePath) =>
-        Probe(repositoryRoot, absolutePath) is { Obstruction: McpLinkObstruction.Link } probe
+    /// <param name="inspect">Classifies one path component; the file system access stays with the caller.</param>
+    public static string? LinkedSegment(
+        string repositoryRoot,
+        string absolutePath,
+        Func<string, McpLinkObstruction> inspect) =>
+        Probe(repositoryRoot, absolutePath, inspect) is { Obstruction: McpLinkObstruction.Link } probe
             ? probe.Segment
             : null;
 
@@ -76,10 +80,15 @@ internal static class McpConfigurationLink
     /// "outside the root" answered "no link" for a path that was one — the check, the repair and the
     /// removal would all then read and write through it.
     /// </remarks>
-    public static McpLinkProbe Probe(string repositoryRoot, string absolutePath)
+    /// <param name="inspect">Classifies one path component; the file system access stays with the caller.</param>
+    public static McpLinkProbe Probe(
+        string repositoryRoot,
+        string absolutePath,
+        Func<string, McpLinkObstruction> inspect)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(absolutePath);
+        ArgumentNullException.ThrowIfNull(inspect);
 
         string relative = Path.GetRelativePath(repositoryRoot, absolutePath);
         string[] segments = relative.Split(
@@ -97,7 +106,7 @@ internal static class McpConfigurationLink
             current = Path.Combine(current, segment);
             traversed = traversed.Length == 0 ? segment : traversed + "/" + segment;
 
-            McpLinkObstruction found = Inspect(current);
+            McpLinkObstruction found = inspect(current);
 
             if (found != McpLinkObstruction.None)
                 return new McpLinkProbe(found, traversed);
@@ -140,50 +149,4 @@ internal static class McpConfigurationLink
         probe.Obstruction == McpLinkObstruction.Denied
             ? $"{relativePath} could not be inspected: access to '{probe.Segment}' was denied"
             : Describe(relativePath, probe.Segment ?? string.Empty);
-
-    /// <summary>
-    /// Which of the three states one path component is in: an ordinary entry, a symbolic link, or one
-    /// this process may not inspect.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// A component that does not exist is an ordinary entry, so a file the repair is about to create
-    /// is not refused.
-    /// </para>
-    /// <para>
-    /// <see cref="FileSystemInfo.LinkTarget"/> cannot answer the denial question on its own: it
-    /// returns null both for a real file and for one it failed to read, so a guard built only on it
-    /// reports a file this process may not touch as "not a link" — and the repair, told the file is
-    /// not there, takes the path that creates one over it. <see cref="File.GetAttributes(string)"/> is
-    /// the call that raises the denial, so it is the call that answers this.
-    /// </para>
-    /// </remarks>
-    private static McpLinkObstruction Inspect(string path)
-    {
-        FileSystemInfo entry = Directory.Exists(path)
-            ? new DirectoryInfo(path)
-            : new FileInfo(path);
-
-        try
-        {
-            // LinkTarget answers even for a link whose target is gone, which is the one case a
-            // File.Exists pre-check would have hidden.
-            if (entry.LinkTarget is not null)
-                return McpLinkObstruction.Link;
-
-            FileAttributes attributes = File.GetAttributes(path);
-
-            return attributes.HasFlag(FileAttributes.ReparsePoint)
-                ? McpLinkObstruction.Link
-                : McpLinkObstruction.None;
-        }
-        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
-        {
-            return McpLinkObstruction.None;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            return McpLinkObstruction.Denied;
-        }
-    }
 }

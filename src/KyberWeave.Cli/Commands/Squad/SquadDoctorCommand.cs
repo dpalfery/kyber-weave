@@ -1,3 +1,4 @@
+using KyberWeave.Cli.Composition;
 using System.Text.Json;
 using KyberWeave.Cli;
 using KyberWeave.Cli.Commands.Docs;
@@ -240,7 +241,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     {
         IReadOnlyList<McpRenameChange> leftovers =
         [
-            .. McpServerRenamer.Scan(workingDirectory)
+            .. LegacyMcpWiring.Service.Scan(workingDirectory, null)
                 .Where(change => change.Code is McpServerRenamer.RenameCode
                     or McpServerRenamer.LeftAloneCode
                     or McpServerRenamer.RefusedCode)

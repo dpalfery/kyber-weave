@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Services;
 using System.Diagnostics;
 using KyberWeave.Cli.Commands.Doctor;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
@@ -25,6 +26,13 @@ namespace KyberWeave.Cli.Commands.Docs;
 /// </remarks>
 public sealed class DocsInitCommand : Command<DocsInitSettings>
 {
+    private readonly IMcpWiringService _wiring;
+
+    /// <summary>Creates the command over the MCP wiring service the container resolves.</summary>
+    /// <param name="wiring">Inspects, repairs and renames the harness MCP configuration.</param>
+    public DocsInitCommand(IMcpWiringService wiring) =>
+        _wiring = wiring ?? throw new ArgumentNullException(nameof(wiring));
+
     /// <summary>The package APM installs to obtain the authoring skill.</summary>
     private const string SkillPackage = "dpalfery/kyber-weave";
 
@@ -391,7 +399,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// that just wrote a repository's <c>mcp:</c> section checks that section instead of the empty
     /// one the repository had a moment earlier.
     /// </remarks>
-    private static int ReportMcpWiring(DocsInitSettings settings)
+    private int ReportMcpWiring(DocsInitSettings settings)
     {
         if (settings.NoMcpCheck)
         {
@@ -428,13 +436,13 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
             return 0;
 
         McpConfig mcp = config.Mcp;
-        McpWiringReport report = McpWiringInspector.Inspect(root, mcp);
+        McpWiringReport report = _wiring.Inspect(root, mcp);
 
         AnsiConsole.WriteLine();
         PrintWiringSection(report, mcp);
         AnsiConsole.WriteLine();
 
-        IReadOnlyList<McpWiringFix> fixes = McpWiringFixes.Derive(report, root);
+        IReadOnlyList<McpWiringFix> fixes = _wiring.Derive(report, root);
         if (fixes.Count > 0 && CanPrompt())
             OfferRepair(root, mcp, fixes);
 
@@ -452,11 +460,11 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// at all — and it is worth saying at adoption, which is when a repository's declaration and its
     /// harnesses most often disagree.
     /// </remarks>
-    private static void PrintRenameNotices(string root)
+    private void PrintRenameNotices(string root)
     {
         IReadOnlyList<McpRenameChange> leftovers =
         [
-            .. McpServerRenamer.Scan(root)
+            .. _wiring.Scan(root, null)
                 .Where(change => string.Equals(change.Code, McpServerRenamer.RenameCode, StringComparison.Ordinal))
         ];
 
@@ -597,7 +605,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// on a decline, and nothing is written when the prompt could not be shown at all — the
     /// <see cref="CanPrompt"/> gate is the caller's, so a redirected run never reaches this method.
     /// </remarks>
-    private static void OfferRepair(string root, McpConfig config, IReadOnlyList<McpWiringFix> fixes)
+    private void OfferRepair(string root, McpConfig config, IReadOnlyList<McpWiringFix> fixes)
     {
         Func<IReadOnlyList<McpWiringFix>, bool> confirm = ConfirmFixOverride ?? ConfirmRepair;
 
@@ -672,16 +680,17 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// reported with its own rule id and remedy and does not fail the run: the corpus was scaffolded,
     /// which is what this command exists to do.
     /// </remarks>
-    private static void WriteRepair(string root, McpConfig config, IReadOnlyList<McpWiringFix> fixes)
+    private void WriteRepair(string root, McpConfig config, IReadOnlyList<McpWiringFix> fixes)
     {
         // The root goes to the resolver so this repair and the dedicated verb read a relative launch
         // command the same way; without it the same confirmation would write different bytes
         // depending on the directory the operator ran `docs init` from.
-        McpWiringRepairReport repair = McpWiringRepairer.Repair(
+        McpWiringRepairReport repair = _wiring.Repair(
             root,
             config,
-            LaunchCommandResolver.FromEnvironment(root),
-            McpWiringFixes.Harnesses(fixes));
+            _wiring.ResolverFor(root),
+            _wiring.Harnesses(fixes),
+            dryRun: false);
 
         CommandHelpers.WriteUnfolded(() =>
         {

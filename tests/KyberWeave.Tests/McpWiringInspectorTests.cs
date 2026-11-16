@@ -184,7 +184,7 @@ public sealed class McpWiringInspectorTests : IDisposable
     /// recognized by, and on Windows the colon outside the volume position makes
     /// <see cref="Path.GetFullPath(string, string)"/> answer <see cref="NotSupportedException"/>
     /// rather than a path. The resolver caught only the argument and length failures, so that
-    /// answer escaped out of <see cref="McpWiringInspector.Inspect(string, McpConfig, LaunchCommandResolver)"/>
+    /// answer escaped out of <see cref="McpWiringTestServices.Wiring.Inspect(string, McpConfig, LaunchCommandResolver)"/>
     /// instead of becoming the <c>KW-MCP-WIRE-003</c> gap an absent binary produces.
     /// </para>
     /// <para>
@@ -237,7 +237,7 @@ public sealed class McpWiringInspectorTests : IDisposable
     /// binary that was sitting in their checkout.
     /// </para>
     /// <para>
-    /// The compiled <see cref="McpWiringInspector.Inspect(string, McpConfig)"/> overload is driven
+    /// The compiled <see cref="McpWiringTestServices.Wiring.Inspect(string, McpConfig)"/> overload is driven
     /// rather than an injected resolver, because the root it passes down is the whole behaviour
     /// under test. It reads nothing of the machine: a path-shaped command is resolved against the
     /// root and never searched for on <c>PATH</c>.
@@ -263,7 +263,7 @@ public sealed class McpWiringInspectorTests : IDisposable
 
         McpConfig declared = McpWiringFixture.Declare(RepositoryRelativeServer(relativeCommand));
 
-        McpWiringReport rootless = McpWiringInspector.Inspect(
+        McpWiringReport rootless = McpWiringTestServices.Wiring.Inspect(
             Repo,
             declared,
             LaunchCommandResolver.FromEnvironment());
@@ -271,7 +271,7 @@ public sealed class McpWiringInspectorTests : IDisposable
             FindingsFor(rootless, ClaudeCode),
             finding => finding.Code == BinaryAbsentCode);
 
-        McpWiringReport report = McpWiringInspector.Inspect(Repo, declared);
+        McpWiringReport report = McpWiringTestServices.Wiring.Inspect(Repo, declared);
 
         AssertNoFindingFor(report, ClaudeCode);
     }
@@ -383,7 +383,7 @@ public sealed class McpWiringInspectorTests : IDisposable
         Assert.Contains("is not a JSON object", finding.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("mcp-wire", finding.Hint, StringComparison.Ordinal);
         Assert.NotEmpty(finding.Hint);
-        Assert.Empty(McpWiringFixes.Derive(report, Repo));
+        Assert.Empty(McpWiringTestServices.Wiring.Derive(report, Repo));
     }
 
     /// <summary>
@@ -981,7 +981,7 @@ public sealed class McpWiringInspectorTests : IDisposable
     }
 
     private McpWiringReport Inspect(McpConfig config, params string[] searchPaths) =>
-        McpWiringInspector.Inspect(Repo, config, new LaunchCommandResolver(searchPaths));
+        McpWiringTestServices.Wiring.Inspect(Repo, config, new LaunchCommandResolver(searchPaths));
 
     private static RequiredMcpServer FirstPartyServer(
         string repoRootArgument = ".",

@@ -1,4 +1,7 @@
 using System.Reflection;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Docs.Mcp;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using KyberWeave.Cli.Commands.Agents;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Doctor;
@@ -26,6 +29,7 @@ internal static class CliApplication
     {
         ServiceCollection services = [];
         configure?.Invoke(services);
+        services.TryAddSingleton<IMcpDeclarationReader, McpDeclarationReader>();
         _ = services.AddWeaveApplication();
         CommandApp app = new(new ServiceCollectionTypeRegistrar(services));
         app.Configure(config =>

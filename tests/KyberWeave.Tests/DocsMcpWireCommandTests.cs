@@ -970,12 +970,12 @@ public sealed class DocsMcpWireCommandTests : IDisposable
     }
 
     private CapturedConsoleExecution<int> Wire(string targets, bool dryRun = false) =>
-        ProcessConsoleCapture.Run(() => new DocsMcpWireCommand().Execute(
+        ProcessConsoleCapture.Run(() => new DocsMcpWireCommand(McpWiringTestServices.Wiring).Execute(
             null!,
             new DocsMcpWireSettings { Path = Repo, Target = targets, DryRun = dryRun }));
 
     private CapturedConsoleExecution<int> Unwire(string targets) =>
-        ProcessConsoleCapture.Run(() => new DocsMcpUnwireCommand().Execute(
+        ProcessConsoleCapture.Run(() => new DocsMcpUnwireCommand(McpWiringTestServices.Wiring).Execute(
             null!,
             new DocsMcpUnwireSettings { Path = Repo, Target = targets }));
 
