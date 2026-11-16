@@ -1,50 +1,38 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
-using KyberWeave.Core.Squad.Briefs;
-using KyberWeave.Contracts.Repositories;
-using KyberWeave.Contracts.Services;
-using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Docs.Closeout;
 using KyberWeave.Core.FileSystem;
+using KyberWeave.Core.Squad.Deployment;
 
-namespace KyberWeave.Cli.Commands.Squad.Brief;
-
-/// <summary>What a brief is built from. Facts left null are resolved by the machine where they can be.</summary>
-/// <param name="Agent">The agent whose reference files are read.</param>
-/// <param name="Path">The route, or null.</param>
-/// <param name="Autonomy">The autonomy for this run, or null to read the repository's.</param>
-/// <param name="Mode">The development mode, or null to read the plan's.</param>
-/// <param name="Plan">A plan file in any spelling the plan resolver accepts, or null.</param>
-/// <param name="Harness">The harness the references are installed for, or null to try every harness.</param>
-/// <param name="From">A directory holding the reference files, or null to find the installed ones.</param>
-/// <param name="RepositoryRoot">The repository root the configuration and plans are read from.</param>
-/// <param name="ProjectRoots">The checkouts to look under for project-scope installs, most specific first.</param>
-/// <param name="Config">The loaded configuration, or null when it did not load.</param>
-internal sealed record SquadBriefRequest(
-    string Agent,
-    string? Path,
-    string? Autonomy,
-    string? Mode,
-    string? Plan,
-    string? Harness,
-    string? From,
-    string RepositoryRoot,
-    IReadOnlyList<string> ProjectRoots,
-    KyberWeaveConfig? Config);
+namespace KyberWeave.Core.Squad.Briefs;
 
 /// <summary>Resolves a brief's facts and reference directory, then assembles it.</summary>
-internal static class SquadBriefBuilder
+/// <param name="briefs">Assembles the brief and finds each reference file.</param>
+/// <param name="files">Reads the plan, the root AGENTS.md and probes the reference directories.</param>
+/// <param name="plans">Probes the planning folders a plan argument is resolved in.</param>
+/// <param name="globalRoots">Resolves each harness's global install root.</param>
+/// <param name="squadSources">Finds the canonical Squad source of a checkout.</param>
+/// <param name="environment">The directory a relative plan argument is read against.</param>
+public sealed class SquadBriefBuilder(
+    ISquadBriefService briefs,
+    IFileSystem files,
+    IRepositoryFileStore plans,
+    ISquadGlobalRootResolver globalRoots,
+    ISquadSourceLocator squadSources,
+    IProcessEnvironment environment) : ISquadBriefBuilder
 {
-    /// <summary>
-    /// Builds the brief. A failure is a message, not an exception: a refused fact, an unknown agent, a plan
-    /// that cannot be read, or reference files that cannot be found each say what to change.
-    /// </summary>
-    public static bool TryBuild(SquadBriefRequest request, ISquadBriefService briefs, IFileSystem files, out BriefResult? result, out string error)
+    private const string AmbiguousPlan = "KW-DOC-PLANREF-001";
+
+    /// <inheritdoc />
+    public bool TryBuild(SquadBriefRequest request, out BriefResult? result, out string refusal)
     {
         result = null;
         Dictionary<string, string> sources = new(StringComparer.Ordinal);
 
-        if (!Accepts("path", request.Path, out error) || !Accepts("autonomy", request.Autonomy, out error) || !Accepts("mode", request.Mode, out error))
+        if (!Accepts("path", request.Path, out refusal) || !Accepts("autonomy", request.Autonomy, out refusal) || !Accepts("mode", request.Mode, out refusal))
         {
             return false;
         }
@@ -64,7 +52,7 @@ internal static class SquadBriefBuilder
 
         if (!string.IsNullOrWhiteSpace(request.Plan))
         {
-            if (!TryReadPlan(request, files, out PlanDocument? plan, out error))
+            if (!TryReadPlan(request, out PlanDocument? plan, out refusal))
             {
                 return false;
             }
@@ -83,7 +71,7 @@ internal static class SquadBriefBuilder
             }
         }
 
-        string? agentsMarkdown = ReadRootAgents(request.RepositoryRoot, files);
+        string? agentsMarkdown = ReadRootAgents(request.RepositoryRoot);
         (string autonomy, string autonomySource) = BriefFacts.ResolveAutonomy(
             request.Autonomy, agentsMarkdown, request.Config?.ConfigReg.Autonomy);
         sources["autonomy"] = request.Autonomy is null ? autonomySource : "given";
@@ -97,17 +85,17 @@ internal static class SquadBriefBuilder
         }
         catch (BriefMapException exception)
         {
-            error = exception.Message;
+            refusal = exception.Message;
             return false;
         }
 
         if (map.FilesOf(request.Agent) is null)
         {
-            error = $"No brief is defined for agent '{request.Agent}'. Agents with one: {string.Join(", ", map.Agents)}.";
+            refusal = $"No brief is defined for agent '{request.Agent}'. Agents with one: {string.Join(", ", map.Agents)}.";
             return false;
         }
 
-        if (!TryFindReferences(request, map, briefs, files, out string? directory, out error))
+        if (!TryFindReferences(request, map, out string? directory, out refusal))
         {
             return false;
         }
@@ -119,14 +107,14 @@ internal static class SquadBriefBuilder
         }
         catch (BriefMapException exception)
         {
-            error = exception.Message;
+            refusal = exception.Message;
             return false;
         }
     }
 
-    /// <summary>Checks the facts a caller may give on the command line against the vocabulary.</summary>
-    public static bool AcceptsFacts(string? path, string? autonomy, out string error) =>
-        Accepts("path", path, out error) && Accepts("autonomy", autonomy, out error);
+    /// <inheritdoc />
+    public bool AcceptsFacts(string? path, string? autonomy, out string refusal) =>
+        Accepts("path", path, out refusal) && Accepts("autonomy", autonomy, out refusal);
 
     private static bool Accepts(string fact, string? value, out string error)
     {
@@ -140,12 +128,12 @@ internal static class SquadBriefBuilder
         return false;
     }
 
-    private static bool TryReadPlan(SquadBriefRequest request, IFileSystem files, out PlanDocument? plan, out string error)
+    private bool TryReadPlan(SquadBriefRequest request, out PlanDocument? plan, out string error)
     {
         plan = null;
         DiagnosticReport report = new();
         KyberWeaveConfig config = request.Config ?? KyberWeaveConfig.ProductDefaults;
-        if (!PlanArguments.TryResolve(request.RepositoryRoot, config, request.Plan!, null, "squad brief", report, out string relative))
+        if (!TryResolvePlan(request.RepositoryRoot, config, request.Plan!, report, out string relative))
         {
             error = string.Join(" ", report.Items.Select(item => item.Message));
             return false;
@@ -163,7 +151,34 @@ internal static class SquadBriefBuilder
         return true;
     }
 
-    private static string? ReadRootAgents(string repositoryRoot, IFileSystem files)
+    private bool TryResolvePlan(string root, KyberWeaveConfig config, string argument, DiagnosticReport report, out string relative)
+    {
+        string current = System.IO.Path.GetFullPath(environment.CurrentDirectory);
+        PlanPathResolution resolution = new PlanFileResolver(root, config, plans).Resolve(argument, current);
+        if (resolution.Found)
+        {
+            relative = resolution.Path!;
+            return true;
+        }
+
+        if (resolution.Ambiguous)
+        {
+            report.Add(new Diagnostic(
+                AmbiguousPlan,
+                Severity.Error,
+                $"'{argument}' matches {resolution.Candidates.Count} plans: {string.Join(", ", resolution.Candidates)}.",
+                "squad brief",
+                Hint: "Name one of them: its full file name including the date prefix, or its path."));
+            relative = argument;
+            return false;
+        }
+
+        string full = System.IO.Path.GetFullPath(argument, current);
+        relative = System.IO.Path.GetRelativePath(root, full).Replace('\\', '/');
+        return true;
+    }
+
+    private string? ReadRootAgents(string repositoryRoot)
     {
         string file = System.IO.Path.Combine(repositoryRoot, "AGENTS.md");
         try
@@ -176,7 +191,7 @@ internal static class SquadBriefBuilder
         }
     }
 
-    private static bool TryFindReferences(SquadBriefRequest request, BriefMap map, ISquadBriefService briefs, IFileSystem files, out string? directory, out string error)
+    private bool TryFindReferences(SquadBriefRequest request, BriefMap map, out string? directory, out string error)
     {
         directory = null;
         error = string.Empty;
@@ -202,14 +217,14 @@ internal static class SquadBriefBuilder
         List<string> candidates = Installed(request, target);
         foreach (string root in request.ProjectRoots)
         {
-            string? source = SquadPackSourceLocator.Resolve(root);
+            string? source = squadSources.Resolve(root);
             if (source is not null)
             {
                 candidates.Add(SquadReferenceLocator.InSource(source, request.Agent));
             }
         }
 
-        directory = candidates.Distinct(StringComparer.Ordinal).FirstOrDefault(candidate => HoldsAny(candidate, mapped, briefs, files));
+        directory = candidates.Distinct(StringComparer.Ordinal).FirstOrDefault(candidate => HoldsAny(candidate, mapped));
         if (directory is not null)
         {
             return true;
@@ -225,11 +240,11 @@ internal static class SquadBriefBuilder
     /// Project-scope candidates, then global ones. A global root that cannot be resolved, such as an override
     /// variable that is not an absolute path, drops global scope instead of failing the brief.
     /// </summary>
-    private static List<string> Installed(SquadBriefRequest request, SquadTarget? target)
+    private List<string> Installed(SquadBriefRequest request, SquadTarget? target)
     {
         try
         {
-            return [.. SquadReferenceLocator.Candidates(request.Agent, target, request.ProjectRoots, SquadHostDefaults.ResolveGlobalRoots())];
+            return [.. SquadReferenceLocator.Candidates(request.Agent, target, request.ProjectRoots, globalRoots)];
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
         {
@@ -237,7 +252,7 @@ internal static class SquadBriefBuilder
         }
     }
 
-    private static bool HoldsAny(string directory, string[] mappedFiles, ISquadBriefService briefs, IFileSystem files)
+    private bool HoldsAny(string directory, string[] mappedFiles)
     {
         if (!files.DirectoryExists(directory))
         {

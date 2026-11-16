@@ -58,8 +58,8 @@ public sealed class RunStartCommand : Command<RunStartSettings>
 
     private readonly IRunStartRunnerFactory _runners;
     private readonly IRunStartService _starts;
-    private readonly ISquadBriefService _briefs;
-    private readonly IWritableFileSystem _files;
+    private readonly ISquadBriefBuilder _briefs;
+    private readonly IConfigLoadService _configs;
     private readonly IProcessEnvironment _environment;
     private readonly IProcessExecutor? _executor;
 
@@ -67,27 +67,27 @@ public sealed class RunStartCommand : Command<RunStartSettings>
     /// <param name="runners">Opens the git runner for the repository the run starts in.</param>
     /// <param name="starts">Fetches, resolves the base and creates the branch.</param>
     /// <param name="briefs">Builds the conductor's brief.</param>
-    /// <param name="files">The file system the brief reads reference files through.</param>
+    /// <param name="configs">Loads the repository's configuration.</param>
     /// <param name="environment">The current directory.</param>
     /// <param name="executor">The executor the CodeGraph index run goes through; the bounded production executor when none is registered.</param>
     public RunStartCommand(
         IRunStartRunnerFactory runners,
         IRunStartService starts,
-        ISquadBriefService briefs,
-        IWritableFileSystem files,
+        ISquadBriefBuilder briefs,
+        IConfigLoadService configs,
         IProcessEnvironment environment,
         IProcessExecutor? executor = null)
     {
         ArgumentNullException.ThrowIfNull(runners);
         ArgumentNullException.ThrowIfNull(starts);
         ArgumentNullException.ThrowIfNull(briefs);
-        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(configs);
         ArgumentNullException.ThrowIfNull(environment);
 
         _runners = runners;
         _starts = starts;
         _briefs = briefs;
-        _files = files;
+        _configs = configs;
         _environment = environment;
         _executor = executor;
     }
@@ -115,7 +115,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
             return Refuse("--path and --autonomy only apply with --brief.");
         }
 
-        if (settings.Brief && !SquadBriefBuilder.AcceptsFacts(settings.Path, settings.Autonomy, out string briefRefusal))
+        if (settings.Brief && !_briefs.AcceptsFacts(settings.Path, settings.Autonomy, out string briefRefusal))
         {
             return Refuse(briefRefusal);
         }
@@ -130,7 +130,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         }
 
         DiagnosticReport report = new();
-        if (!CommandHelpers.TryLoadConfig(repositoryRoot, null, report, out KyberWeaveConfig config, out string? configPath))
+        if (!_configs.TryLoad(repositoryRoot, null, report, out KyberWeaveConfig config, out string? configPath))
         {
             WriteDiagnostics(report);
             return ToolFailure;
@@ -179,7 +179,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
                 serverAlignment = new
                 {
                     remote = RunStartPlanner.Remote,
-                    host = HostOf(facts.OriginAddress),
+                    host = RunStartPlanner.HostOf(facts.OriginAddress),
                     remoteUrl = facts.OriginAddress,
                     head = facts.AlignmentRevision,
                     ahead = facts.Ahead,
@@ -289,7 +289,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
             roots,
             config);
 
-        if (SquadBriefBuilder.TryBuild(request, _briefs, _files, out BriefResult? result, out string error))
+        if (_briefs.TryBuild(request, out BriefResult? result, out string error))
         {
             return result;
         }
@@ -305,35 +305,6 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         }
 
         return null;
-    }
-
-    /// <summary>
-    ///     The host a remote URL names, or null when the URL is a local path this command cannot attribute to
-    ///     a server.
-    /// </summary>
-    private static string? HostOf(string? remoteUrlText)
-    {
-        if (string.IsNullOrWhiteSpace(remoteUrlText))
-            return null;
-
-        string text = remoteUrlText.Trim();
-        if (Uri.TryCreate(text, UriKind.Absolute, out Uri? url) && !url.IsFile && url.Host.Length > 0)
-            return url.Host;
-
-        // The scp-like form git also accepts: [user@]host:path. It carries no scheme, so Uri cannot read it.
-        int at = text.LastIndexOf('@');
-        string afterUser = at >= 0 ? text[(at + 1)..] : text;
-        int separator = afterUser.IndexOfAny([':', '/']);
-        if (separator <= 0)
-            return null;
-
-        string host = afterUser[..separator];
-        if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase))
-            return host;
-
-        // A bare path or a drive letter is not a server, and only a dotted name is read as one: reporting
-        // "C" as the host a checkout is aligned with would be worse than reporting nothing.
-        return host.Contains('.', StringComparison.Ordinal) ? host : null;
     }
 
     private static void WriteReport(

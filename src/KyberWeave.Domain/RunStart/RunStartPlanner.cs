@@ -21,6 +21,36 @@ namespace KyberWeave.Core.RunStart;
 /// </remarks>
 public static class RunStartPlanner
 {
+    /// <summary>
+    ///     The host a remote URL names, or null when the URL is a local path a run cannot attribute to
+    ///     a server.
+    /// </summary>
+    /// <param name="remoteAddress">The remote's address as git reports it.</param>
+    public static string? HostOf(string? remoteAddress)
+    {
+        if (string.IsNullOrWhiteSpace(remoteAddress))
+            return null;
+
+        string text = remoteAddress.Trim();
+        if (Uri.TryCreate(text, UriKind.Absolute, out Uri? url) && !url.IsFile && url.Host.Length > 0)
+            return url.Host;
+
+        // The scp-like form git also accepts: [user@]host:path. It carries no scheme, so Uri cannot read it.
+        int at = text.LastIndexOf('@');
+        string afterUser = at >= 0 ? text[(at + 1)..] : text;
+        int separator = afterUser.IndexOfAny([':', '/']);
+        if (separator <= 0)
+            return null;
+
+        string host = afterUser[..separator];
+        if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase))
+            return host;
+
+        // A bare path or a drive letter is not a server, and only a dotted name is read as one: reporting
+        // "C" as the host a checkout is aligned with would be worse than reporting nothing.
+        return host.Contains('.', StringComparison.Ordinal) ? host : null;
+    }
+
     /// <summary>The harness token for work named after no harness.</summary>
     public const string ManualHarness = RunStartNaming.ManualHarness;
 
