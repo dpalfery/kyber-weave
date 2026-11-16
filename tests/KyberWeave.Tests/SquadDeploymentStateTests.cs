@@ -3913,7 +3913,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         ];
         string semanticsPath = Path.Combine(
             sourceRoot,
-            "KyberWeave.Domain",
+            "KyberWeave.Data",
             "Squad",
             "Deployment",
             "SquadFileSystemPathSemantics.cs");
