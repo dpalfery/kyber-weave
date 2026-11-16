@@ -23,6 +23,7 @@ internal sealed class SquadRunCommand : Command<SquadRunSettings>
     private readonly ISquadModelPresetSelectionStore _selectionStore;
     private readonly ISquadModelPresetStore _presetStore;
     private readonly SquadRunOptions _options;
+    private readonly Func<ProcessStartInfo, int>? _runner;
 
     /// <summary>Creates the run command over the Squad services the host registers.</summary>
     /// <param name="instances">Ensures the instance the harness runs in.</param>
@@ -43,6 +44,7 @@ internal sealed class SquadRunCommand : Command<SquadRunSettings>
         _selectionStore = selectionStore;
         _presetStore = presetStore;
         _options = options;
+        _runner = options.Runner;
     }
 
     /// <inheritdoc />
@@ -162,7 +164,7 @@ internal sealed class SquadRunCommand : Command<SquadRunSettings>
 
         startInfo.WorkingDirectory = projectRoot;
 
-        Func<ProcessStartInfo, int> runner = _options.Runner ?? ProcessRunner.RunInteractive;
+        Func<ProcessStartInfo, int> runner = _runner ?? ProcessRunner.RunInteractive;
         return runner(startInfo);
     }
 }

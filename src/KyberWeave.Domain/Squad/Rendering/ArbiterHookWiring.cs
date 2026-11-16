@@ -1,3 +1,4 @@
+using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 
@@ -77,8 +78,8 @@ public static class ArbiterHookWiring
     private static readonly HashSet<string> GuardedCapabilityProfiles =
         new(StringComparer.Ordinal) { "worker", "publishing-worker" };
 
-    /// <summary>The capability profile of the architect agent; a test pins it to <c>ArbiterSquadCatalog.ArchitectCapabilityProfile</c>.</summary>
-    public const string ArchitectCapabilityProfile = "architect";
+    /// <summary>The capability profile of the architect agent; it is the catalog's own constant.</summary>
+    public const string ArchitectCapabilityProfile = ArbiterSquadCatalog.ArchitectCapabilityProfile;
 
     /// <summary>The capability profiles whose agents' Bash and PowerShell calls the architect shell guard checks.</summary>
     private static readonly HashSet<string> ShellGuardedCapabilityProfiles =
