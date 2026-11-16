@@ -17,7 +17,7 @@ namespace KyberWeave.Cli.Commands.Review;
 ///     Whether a cycle is a verifier cycle used to depend on how the conductor worded the dispatch. It is now a fact
 ///     of the folders: a run with a finished cycle is in a verifier cycle. The command reads and writes nothing else.
 /// </remarks>
-public sealed class ReviewCycleCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, IFileSystem files)
+public sealed class ReviewCycleCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IReviewCycleSelector selector)
     : Command<ReviewCycleSettings>
 {
     /// <summary>The command description shared by the real registration and the help tests.</summary>
@@ -43,11 +43,15 @@ public sealed class ReviewCycleCommand(IReviewWorkTreeService trees, IReviewCycl
         // worktree has its own .agent_scratchpad, and the canonical checkout's is never read on its behalf.
         string tree = trees.Containing(root);
         string scratchpad = ReviewWorkTree.Scratchpad(tree);
-        if (!ReviewCycleView.TryChooseTask(cycles, git, tree, scratchpad, settings.Task, out string task, out string? chosen, out string? problem))
+        ReviewTaskChoice choice = selector.ChooseTask(tree, scratchpad, settings.Task);
+        if (!choice.Chosen)
         {
-            WriteClientInputError(problem!);
+            WriteClientInputError(choice.Error!);
             return ClientInputExitCode;
         }
+
+        string task = choice.Task;
+        string? chosen = choice.Note;
 
         bool json = settings.ParsedFormat == KyberWeave.Cli.Rendering.OutputFormat.Json;
         if (chosen is not null && !json)
@@ -63,13 +67,20 @@ public sealed class ReviewCycleCommand(IReviewWorkTreeService trees, IReviewCycl
             prior.Valid,
             config.Review.Gates,
             OperatingSystem.IsWindows() ? "windows" : "unix",
-            commit => ReviewCycleView.TryChangedSince(git, tree, commit));
+            commit => selector.ChangedSince(tree, commit));
 
-        List<ReviewFinding> recheck = [];
-        if (plan.Prior is { } priorCycle && !ReviewCycleView.TryReadRecheck(files, priorCycle, config.Review.Policy, report, recheck, UnreadableInput, Severity.Error, "review cycle"))
+        IReadOnlyList<ReviewFinding> recheck = [];
+        if (plan.Prior is { } priorCycle)
         {
-            CommandHelpers.Finish(report, settings, "review cycle", "Review");
-            return 1;
+            (bool ok, IReadOnlyList<ReviewFinding> found) = selector.ReadRecheck(
+                priorCycle, config.Review.Policy, report, UnreadableInput, Severity.Error, "review cycle");
+            if (!ok)
+            {
+                CommandHelpers.Finish(report, settings, "review cycle", "Review");
+                return 1;
+            }
+
+            recheck = found;
         }
 
         string folder = Path.Combine(reviewFolder, $"cycle-{plan.Number}");
@@ -82,7 +93,7 @@ public sealed class ReviewCycleCommand(IReviewWorkTreeService trees, IReviewCycl
         return 0;
     }
 
-    private static void WriteLines(string tree, ReviewCyclePlan plan, string folder, List<ReviewFinding> recheck, IReadOnlyList<IgnoredCycle> ignored, string command)
+    private static void WriteLines(string tree, ReviewCyclePlan plan, string folder, IReadOnlyList<ReviewFinding> recheck, IReadOnlyList<IgnoredCycle> ignored, string command)
     {
         Say($"cycle: {plan.Number}");
         Say($"mode: {ReviewCycleView.Mode(plan)}");
@@ -103,7 +114,7 @@ public sealed class ReviewCycleCommand(IReviewWorkTreeService trees, IReviewCycl
 
     private static void Say(string line) => Console.WriteLine(line);
 
-    private static string ToJson(string tree, ReviewCyclePlan plan, string folder, List<ReviewFinding> recheck, IReadOnlyList<IgnoredCycle> ignored, string? liveRun, string command)
+    private static string ToJson(string tree, ReviewCyclePlan plan, string folder, IReadOnlyList<ReviewFinding> recheck, IReadOnlyList<IgnoredCycle> ignored, string? liveRun, string command)
     {
         JsonObject answer = new()
         {

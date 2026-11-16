@@ -33,6 +33,9 @@ internal static class ReviewTestServices
     /// <summary>Finds the work tree a review belongs to and the change checked out in it.</summary>
     public static IReviewWorkTreeService WorkTrees { get; } = Provider.GetRequiredService<IReviewWorkTreeService>();
 
+    /// <summary>Finds the review folder and the recorded findings a command works from.</summary>
+    public static IReviewCycleSelector CycleSelector { get; } = Provider.GetRequiredService<IReviewCycleSelector>();
+
     /// <summary>Names the change and produces its diff.</summary>
     public static IGitChangeReader Git { get; } = Provider.GetRequiredService<IGitChangeReader>();
 

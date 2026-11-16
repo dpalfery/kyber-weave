@@ -144,7 +144,7 @@ public sealed class ReviewGatesIndexTests : IDisposable
     {
         CommandApp app = new(new SeamRegistrar(new ReviewGatesCommand(
             ReviewTestServices.WorkTrees, ReviewTestServices.Cycles, ReviewTestServices.Git, ReviewTestServices.Evidence, ReviewTestServices.NotSeated, ReviewTestServices.ProjectFiles, ReviewTestServices.Gates, ReviewTestServices.Duplicates,
-            ReviewTestServices.CodeGraphs, ReviewTestServices.WorktreeIndex, ReviewTestServices.Files, ReviewTestServices.Environment, executor)));
+            ReviewTestServices.CodeGraphs, ReviewTestServices.WorktreeIndex, ReviewTestServices.Files, ReviewTestServices.Environment, ReviewTestServices.CycleSelector, executor)));
         app.Configure(configuration =>
         {
             configuration.SetApplicationName("kyber-weave");

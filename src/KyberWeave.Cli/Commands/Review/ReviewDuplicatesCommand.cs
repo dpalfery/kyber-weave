@@ -91,16 +91,3 @@ public sealed class ReviewDuplicatesCommand(IDuplicateDetectionService detector,
         return report.HasErrors ? 1 : 0;
     }
 }
-
-/// <summary>Rule identifiers for duplicate-detection outcomes.</summary>
-public static class ReviewDuplicateOutcome
-{
-    /// <summary>No CodeGraph index was available, so the gate produced no evidence.</summary>
-    public const string NoIndex = "KW-REVIEW-030";
-
-    /// <summary>A set of symbols sharing one body.</summary>
-    public const string Cluster = "KW-REVIEW-031";
-
-    /// <summary>The index disagrees with the working tree.</summary>
-    public const string StaleIndex = "KW-REVIEW-032";
-}

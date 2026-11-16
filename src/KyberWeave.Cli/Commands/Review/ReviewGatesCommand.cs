@@ -23,24 +23,11 @@ namespace KyberWeave.Cli.Commands.Review;
 ///     Runs the deterministic gates the host declares under <c>review.gates</c>, or, with <c>--agent</c>,
 ///     one developer agent's gates under <c>review.task-gates</c> against the change that agent made.
 /// </summary>
-public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, IReviewEvidenceService evidenceWriter, INotSeatedStore notSeatedStore, IProjectFileLocator projectFiles, IGateRunService gateRunner, IDuplicateDetectionService duplicateDetection, ICodeGraphPortsFactory graphs, IWorktreeIndexGuard worktreeIndex, IWritableFileSystem files, IProcessEnvironment environment, IProcessExecutor? indexExecutor = null) : Command<ReviewGatesSettings>
+public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, IReviewEvidenceService evidenceWriter, INotSeatedStore notSeatedStore, IProjectFileLocator projectFiles, IGateRunService gateRunner, IDuplicateDetectionService duplicateDetection, ICodeGraphPortsFactory graphs, IWorktreeIndexGuard worktreeIndex, IWritableFileSystem files, IProcessEnvironment environment, IReviewCycleSelector selector, IProcessExecutor? indexExecutor = null) : Command<ReviewGatesSettings>
 {
-    private const string NoGatesDeclared = "KW-REVIEW-020";
-    private const string IndexState = "KW-REVIEW-038";
-    private const string GateNotRun = VerdictEngine.GateNotRun;
-    private const string ReportWriteFailed = "KW-REVIEW-025";
-    private const string GateSkipped = "KW-REVIEW-026";
-    private const string NoGatesForAgent = "KW-REVIEW-027";
-    private const string InvalidInput = "KW-REVIEW-028";
-    private const string FixFailed = "KW-REVIEW-029";
-    private const string GateNotStarted = "KW-REVIEW-033";
-    private const string ChangedSetUnknown = "KW-REVIEW-034";
-    private const string PriorFindingsUnreadable = "KW-REVIEW-023";
-    private const string GateCarried = "KW-REVIEW-048";
-    private const string RedAccepted = "KW-REVIEW-051";
-    private const string RedRejected = "KW-REVIEW-052";
-    private const string SiblingTestsMissingSymbols = "KW-REVIEW-053";
-    private const string CouncilDefaultBase = "origin/HEAD";
+    private const string ReportWriteFailed = ReviewGateReporting.ReportWriteFailed;
+    private const string NoGatesForAgent = ReviewGateReporting.NoGatesForAgent;
+    private const string PriorFindingsUnreadable = ReviewGateReporting.PriorFindingsUnreadable;
     private const int ClientInputExitCode = 2;
 
     /// <summary>The bound on the CodeGraph index run, the same default <c>doctor --ensure</c> uses.</summary>
@@ -65,7 +52,7 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
         if (empty.Length > 0)
         {
             WriteClientInputError(
-                $"{InvalidInput}: {string.Join(", ", empty)} was given an empty value. Name a value, or leave the " +
+                $"{ReviewGateReporting.InvalidInput}: {string.Join(", ", empty)} was given an empty value. Name a value, or leave the " +
                 "option out.");
             return ClientInputExitCode;
         }
@@ -75,7 +62,7 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
         if (settings.All && scopesTheRun)
         {
             WriteClientInputError(
-                $"{InvalidInput}: --all runs all declared repository gates unscoped and cannot be combined with " +
+                $"{ReviewGateReporting.InvalidInput}: --all runs all declared repository gates unscoped and cannot be combined with " +
                 "--agent, --base, --paths, or --gate.");
             return ClientInputExitCode;
         }
@@ -85,7 +72,7 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
         if (settings.Deadline && (settings.Gate.Length > 0 || settings.Agent is not null))
         {
             WriteClientInputError(
-                $"{InvalidInput}: --deadline bounds the full council run, so it cannot be combined with " +
+                $"{ReviewGateReporting.InvalidInput}: --deadline bounds the full council run, so it cannot be combined with " +
                 (settings.Gate.Length > 0 ? "--gate, which re-checks named gates outside that budget." :
                     "--agent, which runs one agent's task gates."));
             return ClientInputExitCode;
@@ -96,7 +83,7 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
         if (settings.Gate.Length > 0 && settings.Agent is not null)
         {
             WriteClientInputError(
-                $"{InvalidInput}: --gate names a gate declared under review.gates, so it cannot be combined with " +
+                $"{ReviewGateReporting.InvalidInput}: --gate names a gate declared under review.gates, so it cannot be combined with " +
                 "--agent, which runs one agent's task gates.");
             return ClientInputExitCode;
         }
@@ -147,7 +134,7 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
             // review with no evidence, and the reviewer needs to know that is the situation
             // rather than reading an empty gate report as "everything passed".
             report.Add(new Diagnostic(
-                NoGatesDeclared,
+                ReviewGateReporting.NoGatesDeclared,
                 Severity.Warning,
                 "No gates are declared, so this review has no executed evidence behind it.",
                 "review.gates",
@@ -164,7 +151,7 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
         if (settings.Gate.Length > 0)
         {
             List<string> gateRefusals = [];
-            declared = SelectNamedGates(config.Review.Gates, settings.Gate, gateRefusals);
+            declared = ReviewGateReporting.SelectNamedGates(config.Review.Gates, settings.Gate, gateRefusals);
             if (gateRefusals.Count > 0)
             {
                 return RefuseInput(
@@ -204,19 +191,19 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
             indexExecutor ?? ProcessExecutor.WithTimeout(IndexTimeout),
             environment.TempDirectory);
         if (index.Status is not WorktreeIndexStatus.NotGoverned)
-            AddIndexDiagnostic(report, indexRoot, index);
+            ReviewGateReporting.AddIndexDiagnostic(report, indexRoot, index);
 
         // The changed set is only needed when a gate is scoped by include; it is never computed for gates alone.
         IReadOnlyList<string>? changed = null;
         string? unknownReason = null;
-        if (!settings.All && NeedsChangedSet(declared))
+        if (!settings.All && ReviewGateReporting.NeedsChangedSet(declared))
         {
             (changed, unknownReason) = ResolveCouncilChangedSet(root, settings);
             if (changed is null)
             {
                 // Fail closed: every gate runs, and the report says why none was skipped for include.
                 report.Add(new Diagnostic(
-                    ChangedSetUnknown,
+                    ReviewGateReporting.ChangedSetUnknown,
                     Severity.Info,
                     $"changed set unknown ({unknownReason}); gates with include ran unscoped.",
                     "review.gates",
@@ -234,20 +221,15 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
             }
         }
 
-        CouncilGatePlan plan = CouncilGateSelection.Plan(declared, changed, CurrentOs());
-        foreach (SkippedTaskGate skip in plan.Skipped)
-            report.Add(new Diagnostic(
-                GateSkipped,
-                Severity.Info,
-                $"{skip.Id}: skipped, {skip.Reason}.",
-                skip.Id));
+        CouncilGatePlan plan = CouncilGateSelection.Plan(declared, changed, ReviewGateReporting.CurrentOs());
+        ReviewGateReporting.AddSkips(report, plan.Skipped);
 
         // Full-suite gates run only for the council or CI, or for a person at a terminal. A refusal is a blocking
         // error that never starts its gate, so it is reported as not started, never as a gate that ran and failed.
         FullSuiteSelection fullSuite = FullSuiteGate.Select(plan.Run, settings.Council, !Console.IsInputRedirected);
         foreach (FullSuiteRefusal refusal in fullSuite.Refused)
             report.Add(new Diagnostic(
-                GateNotStarted,
+                ReviewGateReporting.GateNotStarted,
                 Severity.Error,
                 $"{refusal.GateId}: refused. {refusal.Message}",
                 refusal.GateId));
@@ -284,12 +266,12 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
             deadline);
 
         foreach (GateResult gate in gates.Gates)
-            AddGateDiagnostic(report, gate, settings.Deadline);
+            ReviewGateReporting.AddGateDiagnostic(report, gate, settings.Deadline);
 
         GateReport written = gates;
         if (cycle is { Verifier: true })
         {
-            written = WithCarriedGates(config.Review.Gates, gates, cycle, report);
+            written = ReviewGateReporting.WithCarriedGates(config.Review.Gates, gates, cycle.Plan, report);
             report.AddMetric("carried", written.Gates.Count - gates.Gates.Count);
         }
 
@@ -389,6 +371,8 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
         string reviewFolder;
         int? thisCycle = null;
         string? folder = null;
+        string scratchpad = ReviewWorkTree.Scratchpad(tree);
+        ReviewTaskChoice choice = selector.ChooseTask(tree, scratchpad, null);
         if (settings.Out is not null && ReviewCycleView.TryFromOutPath(settings.Out, out string fromOut, out int number))
         {
             reviewFolder = fromOut;
@@ -397,9 +381,9 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
             if (!ReviewCycleView.IsUnder(tree, fromOut))
                 notes.Add($"worktree: --out is outside {tree}, so this review writes to {folder}; use {ReviewWorkTree.Scratchpad(tree)} for this worktree's review folders.");
         }
-        else if (ReviewCycleView.TryChooseTask(cycles, git, tree, ReviewWorkTree.Scratchpad(tree), null, out string task, out _, out _))
+        else if (choice.Chosen)
         {
-            reviewFolder = Path.Combine(ReviewWorkTree.Scratchpad(tree), task, "review");
+            reviewFolder = Path.Combine(scratchpad, choice.Task, "review");
         }
         else
         {
@@ -413,11 +397,15 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
         IReadOnlyList<ReviewCycleRecord> finished = prior.Valid;
 
         ReviewCyclePlan plan = ReviewCyclePlanning.Plan(
-            finished, config.Review.Gates, CurrentOs(), commit => ReviewCycleView.TryChangedSince(git, tree, commit));
+            finished, config.Review.Gates, ReviewGateReporting.CurrentOs(), commit => selector.ChangedSince(tree, commit));
         folder ??= Path.Combine(reviewFolder, $"cycle-{plan.Number}");
-        List<ReviewFinding> recheck = [];
+        IReadOnlyList<ReviewFinding> recheck = [];
         if (plan.Prior is { } priorCycle)
-            ReviewCycleView.TryReadRecheck(files, priorCycle, config.Review.Policy, report, recheck, PriorFindingsUnreadable, Severity.Warning, "review gates");
+        {
+            (_, IReadOnlyList<ReviewFinding> found) = selector.ReadRecheck(
+                priorCycle, config.Review.Policy, report, PriorFindingsUnreadable, Severity.Warning, "review gates");
+            recheck = found;
+        }
 
         return new CouncilCycle(
             plan,
@@ -450,7 +438,7 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
             string path = evidenceWriter.Write(
                 cycle.Folder!,
                 root,
-                settings.BaseRef ?? CouncilDefaultBase,
+                settings.BaseRef ?? ReviewGateReporting.CouncilDefaultBase,
                 written,
                 settings.Out!,
                 cycle.Verifier ? cycle.Plan.Prior?.Head : null,
@@ -526,7 +514,7 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
     private static void WriteCycleHeader(CouncilCycle cycle)
     {
         Console.WriteLine($"cycle: {cycle.Plan.Number} mode: {cycle.Mode}");
-        Console.WriteLine($"next: read {CycleReference(cycle.Verifier)} in the code-review skill");
+        Console.WriteLine($"next: read {ReviewGateReporting.CycleReference(cycle.Verifier)} in the code-review skill");
         if (cycle.Folder is not null)
             Console.WriteLine($"folder: {cycle.Folder}");
 
@@ -543,44 +531,6 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
         }
 
         Console.Out.Flush();
-    }
-
-    /// <summary>The code-review skill reference a reviewer reads for this kind of cycle.</summary>
-    internal static string CycleReference(bool verifier) =>
-        verifier ? "references/verifier-cycle.md" : "references/first-review.md";
-
-    /// <summary>
-    ///     The gate report with an earlier passing result in place of each gate this cycle did not run, in declaration
-    ///     order, so the report is complete and the verdict reads the same evidence it would from a full run.
-    /// </summary>
-    private static GateReport WithCarriedGates(
-        IReadOnlyList<ReviewGate> declared, GateReport ran, CouncilCycle cycle, DiagnosticReport report)
-    {
-        List<GateResult> results = [];
-        foreach (ReviewGate gate in declared)
-        {
-            if (ran.Gates.FirstOrDefault(result => string.Equals(result.Id, gate.Id, StringComparison.Ordinal)) is { } own)
-            {
-                results.Add(own);
-                continue;
-            }
-
-            GateCycleDecision? decision = cycle.Plan.Gates.FirstOrDefault(
-                candidate => candidate is { Action: GateCycleAction.Carry, Carried: not null }
-                             && string.Equals(candidate.GateId, gate.Id, StringComparison.Ordinal));
-            if (decision?.Carried is not { } carried)
-                continue;
-
-            results.Add(carried with { Summary = $"carried from cycle {decision.FromCycle}: {carried.Summary}" });
-            report.Add(new Diagnostic(
-                GateCarried,
-                Severity.Info,
-                $"{gate.Id}: carried from cycle {decision.FromCycle} ({decision.Reason}).",
-                gate.Id));
-        }
-
-        results.AddRange(ran.Gates.Where(result => !results.Contains(result)));
-        return ran with { Gates = results };
     }
 
     /// <summary>
@@ -603,17 +553,7 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
             return ran;
         }
 
-        List<GateResult> results = [];
-        foreach (ReviewGate gate in declared)
-        {
-            GateResult? pick = ran.Gates.FirstOrDefault(result => string.Equals(result.Id, gate.Id, StringComparison.Ordinal))
-                               ?? existing.Gates.FirstOrDefault(result => string.Equals(result.Id, gate.Id, StringComparison.Ordinal));
-            if (pick is not null)
-                results.Add(pick);
-        }
-
-        results.AddRange(existing.Gates.Where(old => results.All(kept => !string.Equals(kept.Id, old.Id, StringComparison.Ordinal))));
-        return ran with { Gates = results };
+        return ReviewGateReporting.MergedWithExisting(declared, ran, existing);
     }
 
     private static string? BaseRef(string? baseRef) =>
@@ -714,17 +654,12 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
 
         string repoRoot = EnclosingRepositoryRoot(root);
         TaskGatePlan plan = TaskGateSelection.Plan(
-            agentGates, changed, settings.TaskSlug, CurrentOs(), repoRoot, config.Review.TestMap,
+            agentGates, changed, settings.TaskSlug, ReviewGateReporting.CurrentOs(), repoRoot, config.Review.TestMap,
             target is null ? null : PlanTaskTarget.DeclaredClasses(target.Row));
         if (plan.Refusals.Count > 0)
             return RefuseInput(report, settings, plan.Refusals);
 
-        foreach (SkippedTaskGate skip in plan.Skipped)
-            report.Add(new Diagnostic(
-                GateSkipped,
-                Severity.Info,
-                $"{skip.Id}: skipped, {skip.Reason}.",
-                skip.Id));
+        ReviewGateReporting.AddSkips(report, plan.Skipped);
 
         // The classifiers read what each verify command printed, so a build that fails on missing symbols is told
         // apart from one that fails on anything else.
@@ -751,20 +686,21 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
         RedOutcome? redOutcome = null;
         if (settings.Red)
         {
-            (finalReport, redOutcome) = ApplyRed(run.Report, plan.Gates, outputs, changed, repoRoot, report);
+            (finalReport, redOutcome) = ReviewGateReporting.ApplyRed(
+                run.Report, plan.Gates, outputs, changed, file => projectFiles.NearestProjectFile(repoRoot, file), report);
         }
 
         foreach (GateResult gate in finalReport.Gates)
-            AddGateDiagnostic(report, gate, timeIsNotRun: false);
+            ReviewGateReporting.AddGateDiagnostic(report, gate, timeIsNotRun: false);
 
         if (!settings.Red)
         {
-            AddSiblingNotes(report, plan.Gates, run.Report, outputs, changed);
+            ReviewGateReporting.AddSiblingNotes(report, plan.Gates, run.Report, outputs, changed);
         }
 
         foreach (GateResult fix in run.FixFailures)
             report.Add(new Diagnostic(
-                FixFailed,
+                ReviewGateReporting.FixFailed,
                 Severity.Warning,
                 $"{fix.Id}: fix did not succeed ({fix.Summary}). The verify step still decides.",
                 fix.Id));
@@ -788,7 +724,7 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
             WriteLines(digest);
             if (redOutcome is not null)
             {
-                WriteRedLines(redOutcome, agent, finalReport, settings.Out);
+                WriteLines(ReviewGateReporting.RedLines(redOutcome, agent, finalReport, settings.Out));
                 WriteLines(TaskGateNextStep.AfterFailingRun(redOutcome.Passed, agent, changed, settings.TaskSlug, fromPlan: target is not null));
             }
             else
@@ -848,141 +784,6 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
         Console.Out.Flush();
     }
 
-    /// <summary>
-    ///     The last lines of a RED run: the task-gate status for the report just written, then <c>RED_EVIDENCE:</c>,
-    ///     the classifier's summary, when the run is a valid failing run, or <c>RED_REJECTED:</c> with the reason when it
-    ///     is not. The report is the proof; neither line goes into the completion digest.
-    /// </summary>
-    private static void WriteRedLines(RedOutcome outcome, string agent, GateReport report, string? reportPath)
-    {
-        int skipped = report.Gates.Count(gate => gate.NotApplicable);
-        string failed = outcome.Passed
-            ? "none"
-            : string.Join(",", report.Gates.Where(gate => !gate.Passed && !gate.NotApplicable).Select(gate => gate.Id).DefaultIfEmpty("none"));
-        Console.WriteLine(
-            $"TASK_GATE: {(outcome.Passed ? "PASS" : "FAIL")} — agent={agent} gates={report.Gates.Count} failed={failed} skipped={skipped} report={reportPath ?? "<none>"} runs=1");
-        Console.WriteLine(outcome.Passed ? outcome.EvidenceLine : $"RED_REJECTED: {outcome.Reason}");
-        Console.Out.Flush();
-    }
-
-    /// <summary>
-    ///     Judges a RED task's gate runs. A failed gate the classifier accepts is reported as passed with the reason, one
-    ///     it rejects keeps its failure, and the verdict is one diagnostic carrying the classifier's summary or the next step.
-    /// </summary>
-    private (GateReport Report, RedOutcome Outcome) ApplyRed(
-        GateReport ran,
-        IReadOnlyList<PlannedTaskGate> planned,
-        Dictionary<string, string> outputs,
-        IReadOnlyList<string> changed,
-        string repositoryRoot,
-        DiagnosticReport report)
-    {
-        List<RedGateObservation> observations = [];
-        foreach (GateResult gate in ran.Gates)
-        {
-            PlannedTaskGate? plannedGate = planned.FirstOrDefault(candidate => string.Equals(candidate.Id, gate.Id, StringComparison.Ordinal));
-            if (plannedGate is not null && outputs.TryGetValue(gate.Id, out string? output))
-                observations.Add(new RedGateObservation(gate.Id, string.Join(' ', plannedGate.Run), gate.ExitCode, output));
-        }
-
-        RedOutcome outcome = RedClassifier.Evaluate(observations, changed, file => projectFiles.NearestProjectFile(repositoryRoot, file));
-        List<GateResult> results = [];
-        foreach (GateResult gate in ran.Gates)
-        {
-            if (outcome.AcceptedGates.TryGetValue(gate.Id, out string? why))
-                results.Add(gate with { ExitCode = 0, Summary = "RED accepted: " + why });
-            else
-                results.Add(gate);
-        }
-
-        if (outcome.Passed)
-        {
-            report.Add(new Diagnostic(
-                RedAccepted,
-                Severity.Info,
-                outcome.EvidenceLine,
-                "review gates --red",
-                Hint: "The failing run is recorded in this run's report; now implement the task and run the task gate again without --red."));
-        }
-        else
-        {
-            report.Add(new Diagnostic(
-                RedRejected,
-                Severity.Error,
-                $"Not valid RED evidence: {outcome.Reason}",
-                "review gates --red",
-                Hint: "Valid RED is tests that ran and failed on an assertion, or a build that failed only on missing-symbol "
-                      + "errors in the files this task changed. Fix what the message names, then run the same command again."));
-        }
-
-        return (ran with { Gates = results }, outcome);
-    }
-
-    /// <summary>
-    ///     Tells a developer whose build fails only because other tasks' tests name symbols nobody has created that this
-    ///     is the cause, in the exact words to report, so it does not have to guess.
-    /// </summary>
-    private static void AddSiblingNotes(
-        DiagnosticReport report,
-        IReadOnlyList<PlannedTaskGate> planned,
-        GateReport ran,
-        Dictionary<string, string> outputs,
-        IReadOnlyList<string> changed)
-    {
-        foreach (GateResult gate in ran.Gates.Where(result => !result.Passed))
-        {
-            PlannedTaskGate? plannedGate = planned.FirstOrDefault(candidate => string.Equals(candidate.Id, gate.Id, StringComparison.Ordinal));
-            if (plannedGate is null || !outputs.TryGetValue(gate.Id, out string? output))
-                continue;
-
-            RedGateObservation observation = new(gate.Id, string.Join(' ', plannedGate.Run), gate.ExitCode, output);
-            if (RedClassifier.SiblingSymbols(observation, changed) is not { Count: > 0 } symbols)
-                continue;
-
-            report.Add(new Diagnostic(
-                SiblingTestsMissingSymbols,
-                Severity.Warning,
-                $"NOT VERIFIED: {observation.Command} — sibling RED tests reference symbols no task has created yet: {string.Join(", ", symbols)}",
-                gate.Id,
-                Hint: "Every compiler error is a missing symbol in a file this task did not change. Build the production projects "
-                      + "this task touched, report the line above in the digest, and do not edit those tests."));
-        }
-    }
-
-    /// <summary>
-    ///     The declared gates the caller named with <c>--gate</c>, in declaration order, or an empty list with a
-    ///     refusal naming what is wrong.
-    /// </summary>
-    /// <remarks>
-    ///     Declaration order rather than the order the ids were given, because the gate report reads in the order the
-    ///     host declares its suite. An id that names no declared gate is refused: a run that quietly executed nothing
-    ///     would report zero gates, which a reader is entitled to take as a review that passed.
-    /// </remarks>
-    private static IReadOnlyList<ReviewGate> SelectNamedGates(
-        IReadOnlyList<ReviewGate> gates, IReadOnlyList<string> named, List<string> refusals)
-    {
-        HashSet<string> wanted = new(named, StringComparer.Ordinal);
-        List<string> unknown = [];
-        foreach (string id in named)
-        {
-            if (!gates.Any(gate => string.Equals(gate.Id, id, StringComparison.Ordinal))
-                && !unknown.Contains(id, StringComparer.Ordinal))
-            {
-                unknown.Add(id);
-            }
-        }
-
-        if (unknown.Count > 0)
-        {
-            refusals.Add(
-                $"--gate names no declared repository gate: {string.Join(", ", unknown)}. " +
-                $"review.gates declares {string.Join(", ", gates.Select(gate => gate.Id))}.");
-            return [];
-        }
-
-        return [.. gates.Where(gate => wanted.Contains(gate.Id))];
-    }
-
     /// <summary>Reports every refusal, then ends the run before any gate process has started.</summary>
     private static int RefuseInput(
         DiagnosticReport report,
@@ -990,46 +791,11 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
         IEnumerable<string> reasons,
         string? hint = null)
     {
-        string defaultHint = "Refused before any gate started. Pass repository-relative paths, and a task slug " +
-                             "made of lowercase alphanumerics and single hyphens.";
-        foreach (string reason in reasons)
-            report.Add(new Diagnostic(
-                InvalidInput,
-                Severity.Error,
-                reason,
-                "review gates",
-                Hint: hint ?? defaultHint));
-
+        ReviewGateReporting.AddRefusals(report, reasons, hint);
         CommandHelpers.Finish(report, settings, "review gates", "Gate");
         return 1;
     }
 
-    /// <summary>
-    ///     Reports the index state under <see cref="IndexState" />. A failed index is a warning and never stops the
-    ///     gates: a review is a read-only run, and ADR 0061 keeps read-only runs going without an index.
-    /// </summary>
-    private static void AddIndexDiagnostic(DiagnosticReport report, string root, WorktreeIndexOutcome index)
-    {
-        if (index.Status is WorktreeIndexStatus.Ready)
-        {
-            report.Add(new Diagnostic(
-                IndexState,
-                Severity.Info,
-                $"The CodeGraph index for '{root}' was {(index.Created ? "created" : "synced")}.",
-                "review.gates"));
-            return;
-        }
-
-        report.Add(new Diagnostic(
-            IndexState,
-            Severity.Warning,
-            $"The CodeGraph index for '{root}' could not be prepared ({IndexReason(index)}), so the gates run anyway.",
-            "review.gates",
-            Hint: $"kyber-weave doctor --ensure {ShellQuote.Quote(root)}"));
-    }
-
-    private static string IndexReason(WorktreeIndexOutcome index) =>
-        index.Checks.FirstOrDefault(check => !check.Passed)?.Reason ?? "no reason was reported";
 
     /// <summary>
     ///     The paths the council's include patterns are matched against: the <c>--paths</c> given, else the diff from
@@ -1045,7 +811,7 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
         try
         {
             IReadOnlyList<string> changed = ChangedFiles
-                .ResolveSinceMergeBase(root, settings.BaseRef ?? CouncilDefaultBase)
+                .ResolveSinceMergeBase(root, settings.BaseRef ?? ReviewGateReporting.CouncilDefaultBase)
                 .Select(change => change.Path)
                 .ToArray();
             return (changed, null);
@@ -1056,72 +822,10 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
         }
     }
 
-    /// <summary>
-    ///     Reports one gate. A gate whose program never started is <see cref="GateNotStarted" />, kept apart from a
-    ///     check that ran and failed (<see cref="ReviewGateOutcome.Failed" />), because they are fixed in different places.
-    ///     Under <c>--deadline</c>, a gate that time stopped is <see cref="GateNotRun" />, a warning: it reached no
-    ///     result, so it neither passed nor failed and does not decide the exit code. Without it, a timed-out gate
-    ///     is a failed check, as it always was, so CI and task gates keep failing on a gate that hangs.
-    /// </summary>
-    private static void AddGateDiagnostic(DiagnosticReport report, GateResult gate, bool timeIsNotRun)
-    {
-        string detail = $"{gate.Id}: {gate.Summary} ({gate.DurationMilliseconds} ms)";
-
-        if (gate.NotApplicableReason is not null)
-        {
-            report.Add(new Diagnostic(
-                ReviewGateOutcome.NotApplicable,
-                Severity.Info,
-                detail,
-                gate.Id));
-            return;
-        }
-
-        if (timeIsNotRun && VerdictEngine.IsStoppedForTime(gate))
-        {
-            // A deadline cut is the council running out of budget, not a slow gate, so raising the gate's own
-            // timeout would change nothing; the remedy is to run it alone.
-            string hint = gate.Outcome == GateOutcome.DeadlinePassed
-                ? $"Re-run it alone with 'kyber-weave review gates --gate {gate.Id}'."
-                : $"Re-run it alone with 'kyber-weave review gates --gate {gate.Id}', or give it a longer time limit.";
-            report.Add(new Diagnostic(
-                GateNotRun,
-                Severity.Warning,
-                $"{detail}. NOT RUN to a result, so what it checks is unverified.",
-                gate.Id,
-                Hint: hint));
-            return;
-        }
-
-        if (gate.Outcome == GateOutcome.NotStarted)
-        {
-            report.Add(new Diagnostic(
-                GateNotStarted,
-                gate.Blocking ? Severity.Error : Severity.Warning,
-                detail,
-                gate.Id));
-            return;
-        }
-
-        report.Add(new Diagnostic(
-            gate.Passed ? ReviewGateOutcome.Passed : ReviewGateOutcome.Failed,
-            gate.Passed ? Severity.Info : gate.Blocking ? Severity.Error : Severity.Warning,
-            detail,
-            gate.Id));
-    }
-
     private static void WriteClientInputError(string message)
     {
         AnsiConsole.MarkupLine($"[red]kyber-weave review gates: error: {Markup.Escape(message)}[/]");
     }
-
-    /// <summary>
-    /// Whether the changed set must be computed before gates run. A gate can be scoped
-    /// either by <c>include</c> or by <c>applies-when.paths</c>; either one makes a null
-    /// changed set mean "run everything".
-    /// </summary>
-    internal static bool NeedsChangedSet(IReadOnlyList<ReviewGate> gates) =>
-        gates.Any(gate => gate.Include.Count > 0 || gate.AppliesWhen is not null);
 
     private string EnclosingRepositoryRoot(string path)
     {
@@ -1133,22 +837,4 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
         }
         return path;
     }
-
-    private static string CurrentOs()
-    {
-        return OperatingSystem.IsWindows() ? "windows" : "unix";
-    }
-}
-
-/// <summary>Rule identifiers for individual gate outcomes.</summary>
-public static class ReviewGateOutcome
-{
-    /// <summary>A gate that succeeded.</summary>
-    public const string Passed = "KW-REVIEW-021";
-
-    /// <summary>A gate that did not succeed.</summary>
-    public const string Failed = "KW-REVIEW-022";
-
-    /// <summary>A gate that does not apply to the change and was not executed.</summary>
-    public const string NotApplicable = "KW-REVIEW-026";
 }

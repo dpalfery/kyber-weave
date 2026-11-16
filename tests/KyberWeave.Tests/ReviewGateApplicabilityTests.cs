@@ -52,7 +52,7 @@ public sealed class ReviewGateApplicabilityTests : IDisposable
             ["dotnet"],
             AppliesWhen: new ReviewGateAppliesWhen(["e2e/**"]));
 
-        Assert.True(ReviewGatesCommand.NeedsChangedSet([gate]));
+        Assert.True(ReviewGateReporting.NeedsChangedSet([gate]));
     }
 
     [Fact]

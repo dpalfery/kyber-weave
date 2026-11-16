@@ -89,7 +89,7 @@ public static class ReviewGateReporting
     /// <param name="named">The ids given.</param>
     /// <param name="refusals">Receives the refusal.</param>
     public static IReadOnlyList<ReviewGate> SelectNamedGates(
-        IReadOnlyList<ReviewGate> gates, IReadOnlyList<string> named, List<string> refusals)
+        IReadOnlyList<ReviewGate> gates, IReadOnlyList<string> named, ICollection<string> refusals)
     {
         HashSet<string> wanted = new(named, StringComparer.Ordinal);
         List<string> unknown = [];

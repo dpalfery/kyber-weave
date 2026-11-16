@@ -28,7 +28,7 @@ namespace KyberWeave.Cli.Commands.Review;
 /// <see cref="VerdictEngine"/>, which stays the only judge.
 /// </para>
 /// </remarks>
-public sealed partial class ReviewVerdictCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, INotSeatedStore notSeatedStore, ISeverityOverrideSource severityOverrides, ICitedLineChecker citedLines, IWritableFileSystem files, ISeatFolder seatFolder, TimeProvider clock) : Command<ReviewVerdictSettings>
+public sealed partial class ReviewVerdictCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, INotSeatedStore notSeatedStore, ISeverityOverrideSource severityOverrides, ICitedLineChecker citedLines, IWritableFileSystem files, ISeatFolder seatFolder, IReviewCycleSelector selector, TimeProvider clock) : Command<ReviewVerdictSettings>
 {
     /// <summary>The command description shared by the real registration and the help tests.</summary>
     public const string Description = "Compute approve / request-changes from findings and gates.";
@@ -938,10 +938,16 @@ public sealed partial class ReviewVerdictCommand(IReviewWorkTreeService trees, I
         string scratchpad = ReviewWorkTree.Scratchpad(tree);
         string? cycle = null;
         string? problem = null;
-        if (ReviewCycleView.TryChooseTask(cycles, git, tree, scratchpad, settings.Task, out string task, out _, out problem))
+        ReviewTaskChoice choice = selector.ChooseTask(tree, scratchpad, settings.Task);
+        if (choice.Chosen)
         {
+            string task = choice.Task;
             cycle = notSeatedStore.LatestCycle(Path.Combine(scratchpad, task, "review"));
             problem = cycle is null ? $"no cycle folder with seats under {Path.Combine(scratchpad, task, "review")}" : null;
+        }
+        else
+        {
+            problem = choice.Error;
         }
 
         if (cycle is null)

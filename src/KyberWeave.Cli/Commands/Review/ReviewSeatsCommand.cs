@@ -19,7 +19,7 @@ namespace KyberWeave.Cli.Commands.Review;
 ///     cycle folder, writes the diff and the change half of the evidence, writes every packet and prints each seat's
 ///     dispatch block, the lenses a catalogue file pattern rules out, and the gate command to run alongside.
 /// </summary>
-public sealed class ReviewSeatsCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, IReviewEvidenceService evidenceWriter, INotSeatedStore notSeatedStore, ISeverityOverrideSource severityOverrides, IWorktreeIndexGuard worktreeIndex, IWritableFileSystem files, IProcessEnvironment environment, IProcessExecutor? indexExecutor = null) : Command<ReviewSeatsSettings>
+public sealed class ReviewSeatsCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, IReviewEvidenceService evidenceWriter, INotSeatedStore notSeatedStore, ISeverityOverrideSource severityOverrides, IWorktreeIndexGuard worktreeIndex, IWritableFileSystem files, IProcessEnvironment environment, IReviewCycleSelector selector, IProcessExecutor? indexExecutor = null) : Command<ReviewSeatsSettings>
 {
     /// <summary>The command description shared by the real registration and the help tests.</summary>
     public const string Description =
@@ -54,11 +54,14 @@ public sealed class ReviewSeatsCommand(IReviewWorkTreeService trees, IReviewCycl
 
         string tree = trees.Containing(root);
         string scratchpad = ReviewWorkTree.Scratchpad(tree);
-        if (!ReviewCycleView.TryChooseTask(cycles, git, tree, scratchpad, settings.Task, out string task, out _, out string? problem))
+        ReviewTaskChoice choice = selector.ChooseTask(tree, scratchpad, settings.Task);
+        if (!choice.Chosen)
         {
-            Say($"kyber-weave review seats: error: {problem}");
+            Say($"kyber-weave review seats: error: {choice.Error}");
             return ClientInputExitCode;
         }
+
+        string task = choice.Task;
 
         string reviewFolder = Path.Combine(scratchpad, task, "review");
         PriorCycles prior = trees.Prior(tree, settings.BaseRef, cycles.ReadFinished(reviewFolder));
@@ -66,13 +69,19 @@ public sealed class ReviewSeatsCommand(IReviewWorkTreeService trees, IReviewCycl
             prior.Valid,
             config.Review.Gates,
             OperatingSystem.IsWindows() ? "windows" : "unix",
-            commit => ReviewCycleView.TryChangedSince(git, tree, commit));
-        List<ReviewFinding> recheck = [];
-        if (plan.Prior is { } priorCycle
-            && !ReviewCycleView.TryReadRecheck(files, priorCycle, config.Review.Policy, report, recheck, UnreadableInput, Severity.Error, "review seats"))
+            commit => selector.ChangedSince(tree, commit));
+        IReadOnlyList<ReviewFinding> recheck = [];
+        if (plan.Prior is { } priorCycle)
         {
-            CommandHelpers.Finish(report, settings, "review seats", "Review");
-            return 1;
+            (bool ok, IReadOnlyList<ReviewFinding> found) = selector.ReadRecheck(
+                priorCycle, config.Review.Policy, report, UnreadableInput, Severity.Error, "review seats");
+            if (!ok)
+            {
+                CommandHelpers.Finish(report, settings, "review seats", "Review");
+                return 1;
+            }
+
+            recheck = found;
         }
 
         // The index is synced before any seat starts, so no seat reads an index older than the diff.
@@ -216,7 +225,7 @@ public sealed class ReviewSeatsCommand(IReviewWorkTreeService trees, IReviewCycl
         int fixLines = 0;
         if (prior.Head is { } head)
         {
-            fixPaths = ReviewCycleView.TryChangedSince(git, tree, head);
+            fixPaths = selector.ChangedSince(tree, head);
             try
             {
                 fixLines = ChangedLineCount(git.DiffSince(tree, head));

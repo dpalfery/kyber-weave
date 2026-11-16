@@ -109,6 +109,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IDuplicateDetectionService, DuplicateDetectionService>();
         services.TryAddSingleton<IReviewDecisionSteps, ReviewDecisionSteps>();
         services.TryAddSingleton<ITaskGateSelectionService, TaskGateSelectionService>();
+        services.TryAddSingleton<IReviewCycleSelector, ReviewCycleSelector>();
         services.TryAddSingleton<IReviewDecisionModelFactory, ReviewDecisionModelFactory>();
         _ = services.AddWeaveArbiterApplication();
         return services;
