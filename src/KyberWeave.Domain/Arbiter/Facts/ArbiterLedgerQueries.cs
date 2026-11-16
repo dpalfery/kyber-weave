@@ -68,11 +68,13 @@ public static class ArbiterLedgerQueries
     /// <param name="excludeEventId">The pre event being gated now, if it is already recorded.</param>
     /// <param name="session">When set, only dispatches from this session count.</param>
     /// <param name="notDispatched">Pre events that were refused, so never ran.</param>
+    /// <param name="run">When set, only dispatches of this run count.</param>
     public static IReadOnlyList<string> InFlightPaths(
         IReadOnlyList<ArbiterLedgerEvent> events,
         string? excludeEventId = null,
         string? session = null,
-        IReadOnlySet<string>? notDispatched = null)
+        IReadOnlySet<string>? notDispatched = null,
+        ArbiterRunScope? run = null)
     {
         HashSet<string> paired = events
             .Where(e => e.Phase == ArbiterLedgerPhases.Post && e.PreId is not null)
@@ -86,6 +88,7 @@ public static class ArbiterLedgerQueries
                 && (now is null || now.Value - e.At <= UnreturnedDispatchHorizon)
                 && notDispatched?.Contains(e.Id) != true
                 && (session is null || string.Equals(e.Session, session, StringComparison.Ordinal))
+                && run?.Includes(e) != false
                 && string.Equals(e.Trigger, "delegate", StringComparison.Ordinal))
             .SelectMany(e => e.TaskFiles ?? [])
             .Distinct(StringComparer.Ordinal)
@@ -176,8 +179,10 @@ public static class ArbiterLedgerQueries
     /// </summary>
     /// <param name="events">The events a ledger read returned, in append order.</param>
     /// <param name="planFile">When set, only returns for this plan count.</param>
-    public static IReadOnlyList<string> CompletedTasks(IReadOnlyList<ArbiterLedgerEvent> events, string? planFile = null) =>
-        [.. ReturnsFor(events, planFile)
+    /// <param name="run">When set, only returns of this run's dispatches count.</param>
+    public static IReadOnlyList<string> CompletedTasks(
+        IReadOnlyList<ArbiterLedgerEvent> events, string? planFile = null, ArbiterRunScope? run = null) =>
+        [.. ReturnsFor(events, planFile, run)
             .SelectMany(item => CompletedTasksOf(item.Post, item.Task))
             .Distinct(StringComparer.Ordinal)
             .OrderBy(task => task, StringComparer.Ordinal)];
@@ -186,7 +191,8 @@ public static class ArbiterLedgerQueries
     /// Each post event with the task it answers. A specialist's headers are stripped
     /// before it runs, so its post event names no task and the paired pre event supplies it.
     /// </summary>
-    private static List<(ArbiterLedgerEvent Post, string? Task)> ReturnsFor(IReadOnlyList<ArbiterLedgerEvent> events, string? planFile)
+    private static List<(ArbiterLedgerEvent Post, string? Task)> ReturnsFor(
+        IReadOnlyList<ArbiterLedgerEvent> events, string? planFile, ArbiterRunScope? run)
     {
         Dictionary<string, ArbiterLedgerEvent> pres = events
             .Where(e => e.Phase == ArbiterLedgerPhases.Pre)
@@ -197,9 +203,16 @@ public static class ArbiterLedgerQueries
         foreach (ArbiterLedgerEvent post in events.Where(e => e.Phase == ArbiterLedgerPhases.Post))
         {
             ArbiterLedgerHeaders? headers = post.Headers;
-            if (headers is null && post.PreId is not null && pres.TryGetValue(post.PreId, out ArbiterLedgerEvent? pre))
+            ArbiterLedgerEvent? pre = post.PreId is not null && pres.TryGetValue(post.PreId, out ArbiterLedgerEvent? found) ? found : null;
+            if (headers is null && pre is not null)
             {
                 headers = pre.Headers;
+            }
+
+            // A return belongs to the run of the dispatch it answers; one that paired with none is placed by itself.
+            if (run?.Includes(pre ?? post) == false)
+            {
+                continue;
             }
 
             if (planFile is null || (headers?.PlanFile is { } named && SamePlan(named, planFile)))

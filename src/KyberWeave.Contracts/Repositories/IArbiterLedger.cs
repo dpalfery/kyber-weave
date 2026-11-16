@@ -29,10 +29,12 @@ public interface IArbiterLedger
     /// <param name="excludeEventId">The pre event being gated now, if it is already recorded.</param>
     /// <param name="session">When set, only dispatches from this session count.</param>
     /// <param name="notDispatched">Pre events that were refused, so never ran.</param>
+    /// <param name="run">When set, only dispatches of this run count.</param>
     IReadOnlyList<string> InFlightPaths(
         string? excludeEventId = null,
         string? session = null,
-        IReadOnlySet<string>? notDispatched = null);
+        IReadOnlySet<string>? notDispatched = null,
+        ArbiterRunScope? run = null);
 
     /// <summary>The writer dispatches in flight at any moment between a dispatch and its return.</summary>
     /// <param name="preId">The pre event of the dispatch that returned, or null when the return paired with none.</param>
@@ -46,5 +48,6 @@ public interface IArbiterLedger
 
     /// <summary>The tasks whose return passed review or attested completion.</summary>
     /// <param name="planFile">When set, only returns for this plan count.</param>
-    IReadOnlyList<string> CompletedTasks(string? planFile = null);
+    /// <param name="run">When set, only returns of this run's dispatches count.</param>
+    IReadOnlyList<string> CompletedTasks(string? planFile = null, ArbiterRunScope? run = null);
 }

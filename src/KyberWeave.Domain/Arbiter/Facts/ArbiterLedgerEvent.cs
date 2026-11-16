@@ -121,6 +121,31 @@ public sealed record ArbiterSnapshot(
     [property: JsonPropertyName("head")] string Head,
     [property: JsonPropertyName("blobs")] IReadOnlyDictionary<string, string> Blobs);
 
+/// <summary>
+/// The run a dispatch is judged within: the directory the run works in and when it started. One project ledger
+/// serves every run of a repository, and two runs can use the same plan path, task ids and files, so a dispatch
+/// counts as in flight or complete only for the run it belongs to.
+/// </summary>
+/// <param name="Root">The directory the run works in: its worktree, or the checkout it branched in place.</param>
+/// <param name="StartedAt">When <c>run start</c> recorded the run; null when the record carries no time.</param>
+public sealed record ArbiterRunScope(string Root, DateTimeOffset? StartedAt)
+{
+    /// <summary>
+    /// Whether a pre event belongs to this run: it was recorded after the run started and names this run's
+    /// directory. An event that names no run (written before the field existed, or evaluated outside any run)
+    /// is placed by its time alone.
+    /// </summary>
+    /// <param name="pre">The pre event.</param>
+    public bool Includes(ArbiterLedgerEvent pre)
+    {
+        ArgumentNullException.ThrowIfNull(pre);
+        return (StartedAt is null || pre.At >= StartedAt)
+            && (pre.Run is null || string.Equals(Normalize(pre.Run), Normalize(Root), StringComparison.Ordinal));
+    }
+
+    private static string Normalize(string path) => path.Replace('\\', '/').TrimEnd('/');
+}
+
 /// <summary>The markers a hook read from a dispatch output.</summary>
 /// <param name="TaskReview">The <c>task-review</c> marker: <c>PASS</c> or <c>FAIL</c> from <c>^RESULT:\s+(PASS|FAIL)\b</c>.</param>
 /// <param name="PlannerStatus">The <c>planner-status</c> marker: the <c>STATUS:</c> value.</param>
@@ -167,6 +192,10 @@ public sealed record ArbiterLedgerEvent(
     /// <summary>On a post event, the pre event it was matched to.</summary>
     [JsonPropertyName("pre-id")]
     public string? PreId { get; init; }
+
+    /// <summary>On a pre event, the directory of the run the dispatch belongs to, when a run works there.</summary>
+    [JsonPropertyName("run")]
+    public string? Run { get; init; }
 
     /// <summary>The calling agent, as classified.</summary>
     [JsonPropertyName("caller")]

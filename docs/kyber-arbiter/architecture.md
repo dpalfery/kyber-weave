@@ -223,6 +223,16 @@ files of this session's dispatches that have not returned; a dispatch still unre
 started stops holding its files. A refused dispatch holds no files.
 A task counts as complete on its worker's own report: no separate reviewer confirms it.
 
+One project ledger serves every run of a repository, and two runs can use the same plan path, task ids
+and files. Completed tasks, in-flight files and the stored reports are therefore counted for one run
+only. The run is the record `kyber-weave run start` wrote for the directory the dispatch is evaluated
+in: a dispatch belongs to it when its pre event was recorded after that record's `StartedAt` and names
+the same directory in its `run` field (an event with no `run` field is placed by its time alone). The
+start time is the boundary because it is the one fact that exists for every run and changes with each:
+a session id can outlive a run, a branch name and a worktree path can be reused, and a plan's digest
+changes when the plan is revised inside one run. A dispatch evaluated where no run is recorded is
+counted as before, against the whole ledger.
+
 ## The rules
 
 Thirty-four rules ship with permanent `KW-ARB-*` ids, tuned by id through `enabled`,

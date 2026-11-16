@@ -2,8 +2,10 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Arbiter.Hooks;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Processes;
 using Xunit;
 
@@ -134,6 +136,107 @@ public sealed class CopilotBackgroundReturnHookProcessTests : IDisposable
         Run(["worker-guard", "--harness", "copilot-cli"], Stop(BackendAgent, "csharp-dev", BackendFirstTurn));
         Assert.Empty(Directory.GetFiles(budgets, "*.log"));
     }
+
+    [Fact]
+    public void ADispatchAnEarlierRunNeverSawReturn_DoesNotHoldItsFilesForTheNextRun()
+    {
+        // A live case: run 5's two background workers never got a return row, and run 6, started later over the
+        // same plan path and files, had its first two dispatches refused as overlapping them.
+        StartRun("run-a");
+        Hook(Pre("csharp-dev", "T1"));
+        AssertDispatched();
+        Hook(BackgroundStart("csharp-dev", "T1", BackendAgent, "call_Kiv5uIqrjMOUoE5TQNeEZqLx"));
+
+        StartRun("run-b");
+        string answer = Hook(Pre("csharp-dev", "T1"));
+
+        Assert.Equal("ready", ReadyAnswer());
+        Assert.DoesNotContain("KW-ARB-READY-001", answer, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WithinOneRun_AnUnreturnedDispatchStillHoldsItsFiles()
+    {
+        StartRun("run-a");
+        Hook(Pre("csharp-dev", "T1"));
+        AssertDispatched();
+        Hook(BackgroundStart("csharp-dev", "T1", BackendAgent, "call_Kiv5uIqrjMOUoE5TQNeEZqLx"));
+
+        string answer = Hook(Pre("csharp-dev", "T1"));
+
+        Assert.Equal("overlaps-in-flight", ReadyAnswer());
+        Assert.Contains("KW-ARB-READY-001", answer, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TasksAnEarlierRunCompleted_DoNotCompleteTheSameNamedTasksOfTheNextRun()
+    {
+        StartRun("run-a");
+        ReturnBothDependencies(BackendAgent, FrontendAgent);
+        Hook(Pre("test-dev", "T3"));
+        Assert.Equal("ready", ReadyAnswer());
+
+        StartRun("run-b");
+        Hook(Pre("test-dev", "T3"));
+        // The ledger no longer says ready, so the question goes to the model; with none configured it is unanswered.
+        Assert.Equal(ArbiterStep1BatchResult.NotEvaluated, ReadyAnswer());
+
+        // That dispatch ran (no model refused it) and ends blocked, so it holds no files when it is tried again.
+        const string VerifierAgent = "33333333-9085-4edf-a169-44bd0cdfbffc";
+        Hook(BackgroundStart("test-dev", "T3", VerifierAgent, "call_Z6JSwlrA2mQeT1yUo8pLkNbV"));
+        Hook(Stop(VerifierAgent, "test-dev", "STATUS: BLOCKED\nBLOCKER: T1 and T2 are not committed yet."));
+
+        ReturnBothDependencies("11111111-0e61-4a61-8785-43b058ab723a", "22222222-20dd-4012-a22b-041605f7a556");
+        Hook(Pre("test-dev", "T3"));
+        Assert.Equal("ready", ReadyAnswer());
+    }
+
+    private void ReturnBothDependencies(string backendAgent, string frontendAgent)
+    {
+        Hook(Pre("csharp-dev", "T1"));
+        AssertDispatched();
+        Hook(Pre("react-dev", "T2"));
+        AssertDispatched();
+        Hook(BackgroundStart("csharp-dev", "T1", backendAgent, "call_Kiv5uIqrjMOUoE5TQNeEZqLx"));
+        Hook(BackgroundStart("react-dev", "T2", frontendAgent, "call_e2Tq0oDqJ2nUO6rVY7sC1kLm"));
+        Hook(Stop(frontendAgent, "react-dev", FrontendTurn));
+        Hook(Stop(backendAgent, "csharp-dev", BackendFirstTurn));
+    }
+
+    /// <summary>The newest task dispatch was let through, so its worker ran and holds its files.</summary>
+    private void AssertDispatched()
+    {
+        ArbiterDecisionRecord decision = Decisions().Last(d => d.Trigger == "delegate");
+        Assert.True(
+            decision.Outcome != "escalate",
+            string.Join(", ", decision.Rules.Where(rule => rule.Effect == "escalate").Select(rule => $"{rule.Id}={rule.Answer}")));
+    }
+
+    /// <summary>
+    /// Writes the record <c>kyber-weave run start</c> leaves for a run that works in the repository in place, on
+    /// the branch it has checked out, so the run is live.
+    /// </summary>
+    private void StartRun(string name)
+    {
+        string head = File.ReadAllText(Path.Combine(_probe.Root, ".git", "HEAD")).Trim();
+        string branch = head["ref: refs/heads/".Length..];
+        string runs = Path.Combine(_home.Path, ".kyber-weave", "runs");
+        Directory.CreateDirectory(runs);
+        File.WriteAllText(
+            Path.Combine(runs, name + ".json"),
+            new JsonObject
+            {
+                ["BaseRef"] = "origin/main",
+                ["Repository"] = ArbiterTestServices.Get<IGitRepositoryFacts>().GetCommonDirectory(_probe.Root),
+                ["Branch"] = branch,
+                ["Worktree"] = _probe.Root,
+                ["StartedAt"] = DateTimeOffset.UtcNow.ToString("O"),
+            }.ToJsonString());
+    }
+
+    /// <summary>What the readiness rule answered on the newest task dispatch.</summary>
+    private string ReadyAnswer() =>
+        Assert.Single(Decisions().Last(d => d.Trigger == "delegate").Rules, rule => rule.Id == "KW-ARB-READY-001").Answer;
 
     private static string Prompt(string task) =>
         $"KYBER-ARBITER: true\nPLAN_FILE: {Plan}\nTASK: {task}\n\n{Body(task)}";
