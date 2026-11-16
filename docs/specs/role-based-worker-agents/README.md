@@ -13,17 +13,20 @@ impact-components: [KyberSquad, ReviewCouncil, DocGraph, KyberArbiter]
 
 **Status:** Draft. Nothing is approved and nothing is built.
 
-Adds three role agents (`server-dev`, `client-dev`, `devops-dev`) beside today's per-technology
-worker agents, so the two sets can be compared on the same work. Each task names its technologies;
-the worker fetches the matching standards bundle through the docs tool; task gates resolve from the
-task's technologies. No current agent is deleted. Retiring the per-technology agents is a later
-decision that waits for a measured comparison.
+Replaces the eleven per-technology worker agents with three developer agents that differ only in
+model strength (`dev-easy`, `dev-medium`, `dev-hard`). Each task carries a difficulty and its
+technologies. Everything a technology agent knows moves into that technology's folder (standard,
+rules, skills, Arbiter rules), which ships as a template. One docs tool builds the whole prompt for
+a task. The Arbiter reads its rules from role and technology folders. `test-dev`,
+`sql-database-architect` and `azure-reader` go away; a read-only command-line research agent
+replaces the last. The old agents stay selectable until a comparison has been run.
 
-It depends on the stitched standards bundle planned on
+It depends on the technology folder layout planned on
 [pull request 625](https://github.com/dpalfery/kyber-weave/pull/625).
 
 | Document | Covers |
 |---|---|
-| [Requirements](requirements.md) | 12 requirements in EARS form. Draft. |
-| [Design](design.md) | Evidence from the code, where the evidence is against the idea, the roster, task technologies, technology-resolved task gates, the roster switch, 14 decisions and 4 open questions. Draft. |
-| [Tasks](tasks.md) | 21 tasks in four shippable phases plus closeout, test-first. Draft; no task file written. |
+| [Requirements](requirements.md) | 14 requirements in EARS form. Draft. |
+| [Design](design.md) | Evidence from the code, where the evidence is against the idea, the roster, difficulty and the step-up, model profiles, technology folders and templates, the task prompt tool, technology-resolved task gates, Arbiter rules by folder, five phases, 18 decisions and 7 open questions. Draft. |
+
+The task list is not written yet. It follows once the requirements and design are approved.
