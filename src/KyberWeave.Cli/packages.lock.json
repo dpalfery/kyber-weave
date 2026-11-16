@@ -86,6 +86,7 @@
       "kyberweave.core.docs": {
         "type": "Project",
         "dependencies": {
+          "KyberWeave.Application": "[0.1.0, )",
           "KyberWeave.Core": "[0.1.0, )",
           "KyberWeave.Domain": "[0.1.0, )",
           "Markdig": "[1.5.1, )",

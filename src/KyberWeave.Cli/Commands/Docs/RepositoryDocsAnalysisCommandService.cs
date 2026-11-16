@@ -92,7 +92,7 @@ internal sealed class RepositoryDocsAnalysisCommandService : IDocsAnalysisComman
         try
         {
             DocumentSet documents = new DocumentLoader(created.RepositoryRoot, created.Ontology).Load();
-            DocGraphProjection graph = DocGraphProjection.Build(
+            DocGraphProjection graph = DocGraphProjectionBuilder.Build(
                 documents,
                 created.Resolver,
                 created.Config.DocsAnalysis.Search.MaxCodeNeighbors);

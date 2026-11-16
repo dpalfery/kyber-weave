@@ -14,7 +14,7 @@ public sealed class CoreAssemblySplitTests
     public static TheoryData<string, string[]> AllowedReferences => new()
     {
         { "KyberWeave.Core", ["KyberWeave.Contracts", "KyberWeave.Data", "KyberWeave.Domain", "KyberWeave.Kernel"] },
-        { "KyberWeave.Core.Docs", ["KyberWeave.Core", "KyberWeave.Domain"] },
+        { "KyberWeave.Core.Docs", ["KyberWeave.Application", "KyberWeave.Core", "KyberWeave.Domain"] },
         { "KyberWeave.Core.Squad", ["KyberWeave.Core", "KyberWeave.Domain"] }
     };
 

@@ -1,11 +1,6 @@
 <Project>
 
   <ItemGroup>
-    <!-- CopilotPromptFile.Validate reads the prompt file's YAML with the representation model. -->
-    <PackageReference Include="YamlDotNet" Version="18.1.0" />
-  </ItemGroup>
-
-  <ItemGroup>
     <!-- The Copilot system prompt `squad copilot-prompt install` writes. Its logical name is what
          CopilotPromptFile reads, so the reader and the prompt must stay in the same assembly. -->
     <EmbeddedResource Include="..\..\products\kyber-squad\copilot\system-prompt.yaml" LogicalName="CopilotPrompt.system-prompt.yaml" />

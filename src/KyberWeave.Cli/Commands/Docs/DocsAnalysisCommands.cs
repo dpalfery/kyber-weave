@@ -200,6 +200,6 @@ internal static class DocsAnalysisCommandErrors
         Exception exception,
         DocsSettings settings,
         string command,
-        string code = DocumentationReviewExchange.ReviewRuleCode) =>
+        string code = DocumentationAnalysisRuleIds.ReviewRuleCode) =>
         CommandHelpers.Finish(Report(exception, code), settings, command, "Operation");
 }

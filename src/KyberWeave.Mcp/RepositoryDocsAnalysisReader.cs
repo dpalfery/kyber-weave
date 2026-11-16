@@ -1,4 +1,5 @@
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -41,7 +42,7 @@ public sealed class RepositoryDocsAnalysisReader : IDocsAnalysisReader
         DocumentSet documents = new DocumentLoader(_repositoryRoot, config.Ontology).Load();
         cancellationToken.ThrowIfCancellationRequested();
         ICodeGraphResolver codeGraph = CodeGraphResolvers.ForRepository(_repositoryRoot).Resolver;
-        DocGraphProjection graph = DocGraphProjection.Build(
+        DocGraphProjection graph = DocGraphProjectionBuilder.Build(
             documents,
             codeGraph,
             config.DocsAnalysis.Search.MaxCodeNeighbors);
@@ -50,10 +51,13 @@ public sealed class RepositoryDocsAnalysisReader : IDocsAnalysisReader
         using OpenAiCompatibleEmbeddingGenerator? embeddingGenerator = config.DocsAnalysis.Embeddings.Mode == DocsAnalysisEmbeddingMode.Off
             ? null
             : new OpenAiCompatibleEmbeddingGenerator();
+        IEmbeddingResolver? embeddingResolver = embeddingGenerator is null
+            ? null
+            : new EmbeddingCoordinator(embeddingGenerator, persistence);
         DocumentationAnalyzer analyzer = new DocumentationAnalyzer(
             new ClaimExtractor(),
             [new GraphClaimCandidateSource(), new SparseLexicalCandidateSource()],
-            embeddingGenerator,
+            embeddingResolver,
             persistence);
         ManagedGlossaryLoadResult glossary = new ManagedGlossaryService(
             _repositoryRoot,
