@@ -10,8 +10,8 @@ last-reviewed: 2026-10-10
 # Rules
 
 Repository-wide rules that govern how the system is built, independent of any one technology.
-A rule about how C# is written belongs in the [C# coding standard](../standards/csharp/README.md);
-a rule about how tests are written belongs in the [test coding standard](../standards/test/README.md);
+A rule about how C# is written belongs in the [C# coding standard](../standards/csharp/csharp.standards.md);
+a rule about how tests are written belongs in the [test coding standard](../standards/test/test.standards.md);
 a rule that would still hold if this repository were rewritten in another language belongs
 here. The placement test and the size budget for what every agent reads are in
 [Rules and standards](../documentation-ontology.md#rules-and-standards).

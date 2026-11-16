@@ -13,7 +13,9 @@ last-reviewed: 2026-11-11
 How Go is written in this repository, once it is. Agents and skills resolve this document as
 `<go-coding-standard>` in the repository root [`AGENTS.md`](../../../AGENTS.md).
 
-## Status: no Go code yet
+## Naming and layout
+
+### Status: no Go code yet
 
 This repository has no Go code today. There is no `go.mod`, no `*.go` file, and no Go gate in
 the repository's gate configuration. This standard applies when Go is introduced. It states the
@@ -28,25 +30,24 @@ mechanical gate behind it, and a reviewer must say so rather than report it clea
 The Go layout, the toolchain version, and the cross-platform targets are not decided here. The
 change that introduces Go records them in its own design, and this standard is updated to match.
 
-## Modules and build
+### Modules and build
 
 - `go.mod` and `go.sum` are committed. No `replace` directive pointing at a local path is
   committed.
 - Shipped binaries are built with `CGO_ENABLED=0`. A cgo dependency needs a reason in the change
   description. Tests and `go test -race` run with cgo on, because the race detector needs it.
 
-## Formatting and vet
+### Dependencies and structure
 
-`gofmt` and `go vet` are the first reviewers for formatting and mechanical rules. Do not restate
-their rules here, and do not merge code that fails them. Naming and documentation rules that
-the tools do not check are below.
+- Application code takes its collaborators as parameters, accepts interfaces, and returns
+  concrete types. It does not construct clients, connections, or clocks internally, and does
+  not read a package-level variable for something a caller could pass.
+- Package-level mutable state is avoided, so tests can construct the code under test directly.
+- `govulncheck` is run before a dependency upgrade merges, once Go is in the repository.
 
-- Names use MixedCaps, never underscores. Initialisms keep one case: `ID`, `URL`, `HTTP`.
-- Package names are short, lowercase, and singular. `util`, `common`, and `helpers` are not used.
-- An exported name is not stuttered: `config.Load`, not `config.LoadConfig`.
-- Every exported identifier has a doc comment that starts with its name.
+## Coding standards
 
-## Errors
+### Errors
 
 Parsers fail closed (KW-STD-INPUT-001). Code that parses or converts a value from outside the process refuses any input it does not recognise, with an error or diagnostic that names the input; it never silently drops, defaults or coerces it. The one exception is an unknown field in a format whose specification says to ignore unknown fields, and the code names that specification where it skips the field.
 
@@ -58,7 +59,7 @@ Parsers fail closed (KW-STD-INPUT-001). Code that parses or converts a value fro
 - `panic` is not used for an expected failure. Libraries return errors. `log.Fatal` and
   `os.Exit` appear only in `main`.
 
-## Context
+### Context
 
 - `ctx context.Context` is the first parameter of every function that does I/O or blocks.
 - `context.Background()` appears only in `main`, in tests, and at the root of a background job.
@@ -66,7 +67,7 @@ Parsers fail closed (KW-STD-INPUT-001). Code that parses or converts a value fro
 - A context is not stored in a struct. Every `WithTimeout` or `WithCancel` is followed by
   `defer cancel()`.
 
-## Concurrency
+### Concurrency
 
 - Every goroutine has a defined exit: it returns when its context is cancelled or its input
   channel closes. The code that starts it waits for it, with a `sync.WaitGroup` or
@@ -78,26 +79,37 @@ Parsers fail closed (KW-STD-INPUT-001). Code that parses or converts a value fro
 - `go test -race` passes. A data race is a bug even when the test is green.
 - A service shuts down gracefully on `os.Interrupt` and `SIGTERM`, using `signal.NotifyContext`.
 
-## Safety
+## Testing
+
+### Tests
+
+Test authorship follows the [test coding standard](../test/README.md) and belongs to `test-dev`.
+Go tests are `_test.go` files beside the code they exercise, run by `go test`.
+
+## Commands
+
+### Formatting and vet
+
+`gofmt` and `go vet` are the first reviewers for formatting and mechanical rules. Do not restate
+their rules here, and do not merge code that fails them. Naming and documentation rules that
+the tools do not check are below.
+
+- Names use MixedCaps, never underscores. Initialisms keep one case: `ID`, `URL`, `HTTP`.
+- Package names are short, lowercase, and singular. `util`, `common`, and `helpers` are not used.
+- An exported name is not stuttered: `config.Load`, not `config.LoadConfig`.
+- Every exported identifier has a doc comment that starts with its name.
+
+## Security and data handling
+
+### Safety
 
 - `os/exec` takes an argument list. Interpolated input is never passed to `sh -c`.
 - SQL is parameterized. Templates that render HTML use `html/template`, not `text/template`.
 - Secrets come from the environment or a secret store, never a literal, and are not logged.
 
-## Dependencies and structure
+## Done checklist
 
-- Application code takes its collaborators as parameters, accepts interfaces, and returns
-  concrete types. It does not construct clients, connections, or clocks internally, and does
-  not read a package-level variable for something a caller could pass.
-- Package-level mutable state is avoided, so tests can construct the code under test directly.
-- `govulncheck` is run before a dependency upgrade merges, once Go is in the repository.
-
-## Tests
-
-Test authorship follows the [test coding standard](../test/README.md) and belongs to `test-dev`.
-Go tests are `_test.go` files beside the code they exercise, run by `go test`.
-
-## Completion
+### Completion
 
 No Go gate exists today. When Go is introduced, its change adds these gates, and this section is
 updated to name them exactly:

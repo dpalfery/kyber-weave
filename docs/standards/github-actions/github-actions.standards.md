@@ -34,21 +34,9 @@ not restate the review rules.
 This is a decision record. Rules that the workflow runner, the actions themselves, or a pinned
 policy test already enforce are named by the test, not restated as prose.
 
-## Triggers select work by job, not by workflow
+## Naming and layout
 
-- `ci.yml` runs on `pull_request`, on `push` to `main`, on a weekly `schedule` (the CodeQL and
-  dependency scans have to run when the tree is quiet), and on `workflow_dispatch`.
-- **A path filter is a job-level `if:` on an output of the `changes` job, never a workflow-level
-  `paths:`.** Only `CI Summary` is a required check, and a skipped job counts as passed while a
-  required check that never starts stays pending. `ci.yml` also re-runs every job when `ci.yml`
-  itself or `.github/codeql/` changes, so an edit to the filters is exercised by the same run.
-- `gate-catalogue-toolchains.yml` is the one workflow with a workflow-level `paths:` filter. It is
-  not a required check: it exists to prove the catalogue's gates against their fixture projects.
-- `pull_request_target` and `workflow_run` run with the base repository's secrets. Neither is used
-  here, and neither is introduced. A workflow that never checks out and executes fork code cannot
-  leak those secrets.
-
-## Names are identifiers
+### Names are identifiers
 
 - `CI Summary` is the required status check. Renaming it, or wrapping it in a second workflow,
   removes the merge gate without anything turning red.
@@ -65,58 +53,80 @@ policy test already enforce are named by the test, not restated as prose.
   step that runs a gate repeats that gate's argv rather than an equivalent, so the command in the
   workflow and the command in the gate cannot disagree. `ts-gates` states this at the job.
 
-## Permissions
+### Templates are a product contract
 
-- Every workflow declares a top-level `permissions:` block; `contents: read` is the floor. A
-  workflow that needs more says which job needs it and what for.
-- Every job narrows with its own `permissions:`. `ci.yml` says why at the Trivy job: a job without
-  a block would inherit `security-events: write` it never needs.
-- `security-events: write` appears only where a SARIF file is uploaded. `id-token: write` appears
-  only in the job that mints the Sigstore signing certificate, and that block carries a comment
-  naming what each permission is for — the `attest-sbom` job is the model.
+- Every toolchain step in
+  [`templates/github-actions/kyber-weave-review-gate.yml`](../../../templates/github-actions/kyber-weave-review-gate.yml)
+  is `if: false` until the host enables it. A template that installs and builds stacks the host
+  does not use spends that host's minutes and proves nothing. The test name says it:
+  `EveryToolchainStepIsDisabledUntilTheHostEnablesIt`.
+- A template checkout takes `fetch-depth: 0`, because `--base` resolves through `git merge-base`
+  and a single-commit checkout cannot answer it.
+- A template's `kyber-weave review gates` call passes `--council`, because the CI caller is allowed
+  to run the full suite and the gates would otherwise refuse it.
+- Changing a template is a change to what hosts copy, so it is pinned by content tests and reviewed
+  as a contract change rather than as a YAML tidy-up.
 
-## Supply chain
+## Coding standards
 
-- **Every `uses:` pins a full commit SHA, with the version in a trailing comment**:
-  `actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7`. A tag is mutable, so the
-  action reviewed is not necessarily the action that runs. This holds for first-party `actions/*`
-  too.
-- Dependabot tracks the `github-actions` ecosystem (`.github/dependabot.yml`). A bump changes the
-  pin, so it is reviewed like any other workflow change.
-- Nothing downloads and executes an unread script. The install script in the templates and the
-  runbook is downloaded to a file and then run, so a SAST tool can read the step — the review-gate
-  template says so at the install step.
+### Triggers select work by job, not by workflow
 
-## Untrusted input never reaches a shell
+- `ci.yml` runs on `pull_request`, on `push` to `main`, on a weekly `schedule` (the CodeQL and
+  dependency scans have to run when the tree is quiet), and on `workflow_dispatch`.
+- **A path filter is a job-level `if:` on an output of the `changes` job, never a workflow-level
+  `paths:`.** Only `CI Summary` is a required check, and a skipped job counts as passed while a
+  required check that never starts stays pending. `ci.yml` also re-runs every job when `ci.yml`
+  itself or `.github/codeql/` changes, so an edit to the filters is exercised by the same run.
+- `gate-catalogue-toolchains.yml` is the one workflow with a workflow-level `paths:` filter. It is
+  not a required check: it exists to prove the catalogue's gates against their fixture projects.
+- `pull_request_target` and `workflow_run` run with the base repository's secrets. Neither is used
+  here, and neither is introduced. A workflow that never checks out and executes fork code cannot
+  leak those secrets.
 
-A pull request's branch name, title and event payload are attacker-controlled text. `${{ github.* }}`
-never appears in a `run:` block; it arrives through `env:` and is quoted at the point of use. The
-`changes` job takes `EVENT_NAME` and `BASE_SHA` this way, and the docs gate takes `EVENT_NAME`,
-`BASE_REF` and `EVENT_BEFORE`. `ci.yml` states the rule where it happens:
-"a hostile ref cannot reach the shell".
-
-`ReviewGateWorkflowTemplateTests.NoRunBlockInterpolatesGitHubContextIntoShell` pins it for the
-templates, which is where a host copies the mistake from.
-
-## Secrets
-
-- A secret reaches a step through `env:`, never interpolated into the command line. It is never
-  echoed, never written to an artifact, and never put in a step summary.
-- Secrets are scoped to the environment that uses them. The Apple signing and notarization
-  credentials live in `environment: release`, and `build-tray` says why it is the one build job
-  that names it. The human approval lives in `environment: release-approval`.
-- Prefer a federated, short-lived credential. `attest-sbom` signs with the OIDC token rather than a
-  stored key, and `release.yml` records in its header that no PAT is needed: `GITHUB_TOKEN` mints
-  the tag after approval.
-
-## Concurrency
+### Concurrency
 
 - CI takes `group: ci-${{ github.workflow }}-${{ github.ref }}` with `cancel-in-progress` true only
   for pull requests, so a force-push cancels its own superseded run and nothing else.
 - Release takes a per-ref group with `cancel-in-progress: false`. A cancelled release has already
   pushed a tag and not its assets, which is a state a human has to clean up by hand.
 
-## Release shape
+### Advisory is marked as advisory
+
+`trivy`, `semgrep` and `gitleaks` carry `continue-on-error: true`, still upload their SARIF, and
+read as "(advisory)" in the summary table. They are the only jobs that do. **`continue-on-error`
+appears nowhere else**: a blocking step that can fail silently makes the reviewer re-check by hand
+what the workflow was supposed to check. A disabled test or scan needs a linked issue and a date.
+
+### Determinism
+
+- `global.json` pins SDK `10.0.100` with `rollForward: latestFeature`. Workflows read the band from
+  `env.DOTNET_VERSION` (`10.0.x`), so a patch release arrives without a workflow edit while the
+  exact SDK still comes from the file.
+- Template toolchain steps name a concrete runtime version (`node-version: "24"`).
+  `ReviewGateWorkflowTemplateTests.RuntimeVersionsArePinnedNotFloating` rejects a floating value.
+  `latest` in CI means the build that passes today fails on a morning nobody changed anything.
+- Jobs run on a Linux runner except where the platform is the subject — the Windows capture tests,
+  and the macOS signing and notarization in the release builds — and the job says why it is
+  somewhere else.
+
+## Testing
+
+### Tests that pin workflows
+
+The workflow YAML is a test subject in
+[`tests/KyberWeave.RepoPolicy.Tests/`](../../../tests/KyberWeave.RepoPolicy.Tests/AGENTS.md):
+`ReviewGateWorkflowTemplateTests`, `ReviewGateFullSuiteConfigTests`,
+`ReleaseTests`, `ReleaseNotesTests` and `SbomTests` read it. They run as the `test-policy` gate,
+which selects on the same paths as `build`.
+
+- An edit to a workflow that one of them reads runs that class by name before the change is
+  reported done; the project's `AGENTS.md` gives the filtered command.
+- A new structural invariant gets a test there rather than a paragraph here. A rule this document
+  states without a test behind it is a rule a future edit can remove silently.
+
+## Commands
+
+### Release shape
 
 - **Build and publish are separate.** Every publish job depends on the builds and the SBOM jobs, so
   nothing reaches a GitHub Release before its inputs exist.
@@ -131,7 +141,7 @@ templates, which is where a host copies the mistake from.
   Homebrew are the distribution paths.
 - A release job is safe to re-run against the same tag.
 
-## Timeouts, caches and leftovers
+### Timeouts, caches and leftovers
 
 - A job whose suite can hang carries `timeout-minutes` (`dash-e2e` is 25), and a long single step
   carries its own budget rather than inheriting the six-hour runner default.
@@ -142,7 +152,7 @@ templates, which is where a host copies the mistake from.
   check-leftovers`) is retired, so a job that starts a server, a watcher or a browser states its
   bound in the step's own timeout and cleans up in an `if: always()` step.
 
-## The workflow runs the commands a contributor runs
+### The workflow runs the commands a contributor runs
 
 - The argv in `review.gates` of [`.kyber-weave/kyber-weave.yml`](../../../.kyber-weave/kyber-weave.yml)
   is the command, and a workflow step repeats it. CI therefore reproduces a local failure instead
@@ -155,7 +165,7 @@ templates, which is where a host copies the mistake from.
 - The skill and docs gates build the pull request's own CLI and run it with `--no-build`; they
   never install a released binary. The behaviour under test is the commit's.
 
-## Docs and skill gates
+### Docs and skill gates
 
 - Each skill directory is gated under the same three verbs (`skill validate`, `skill lint`,
   `skill scan`), and each run uploads its own SARIF under a path-derived category. A new skill
@@ -168,53 +178,55 @@ templates, which is where a host copies the mistake from.
   without provisioning that index. Local authors and reviewers still run it — root `AGENTS.md`
   requires it before a pull request.
 
-## Advisory is marked as advisory
+## Security and data handling
 
-`trivy`, `semgrep` and `gitleaks` carry `continue-on-error: true`, still upload their SARIF, and
-read as "(advisory)" in the summary table. They are the only jobs that do. **`continue-on-error`
-appears nowhere else**: a blocking step that can fail silently makes the reviewer re-check by hand
-what the workflow was supposed to check. A disabled test or scan needs a linked issue and a date.
+### Permissions
 
-## Determinism
+- Every workflow declares a top-level `permissions:` block; `contents: read` is the floor. A
+  workflow that needs more says which job needs it and what for.
+- Every job narrows with its own `permissions:`. `ci.yml` says why at the Trivy job: a job without
+  a block would inherit `security-events: write` it never needs.
+- `security-events: write` appears only where a SARIF file is uploaded. `id-token: write` appears
+  only in the job that mints the Sigstore signing certificate, and that block carries a comment
+  naming what each permission is for — the `attest-sbom` job is the model.
 
-- `global.json` pins SDK `10.0.100` with `rollForward: latestFeature`. Workflows read the band from
-  `env.DOTNET_VERSION` (`10.0.x`), so a patch release arrives without a workflow edit while the
-  exact SDK still comes from the file.
-- Template toolchain steps name a concrete runtime version (`node-version: "24"`).
-  `ReviewGateWorkflowTemplateTests.RuntimeVersionsArePinnedNotFloating` rejects a floating value.
-  `latest` in CI means the build that passes today fails on a morning nobody changed anything.
-- Jobs run on a Linux runner except where the platform is the subject — the Windows capture tests,
-  and the macOS signing and notarization in the release builds — and the job says why it is
-  somewhere else.
+### Supply chain
 
-## Templates are a product contract
+- **Every `uses:` pins a full commit SHA, with the version in a trailing comment**:
+  `actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7`. A tag is mutable, so the
+  action reviewed is not necessarily the action that runs. This holds for first-party `actions/*`
+  too.
+- Dependabot tracks the `github-actions` ecosystem (`.github/dependabot.yml`). A bump changes the
+  pin, so it is reviewed like any other workflow change.
+- Nothing downloads and executes an unread script. The install script in the templates and the
+  runbook is downloaded to a file and then run, so a SAST tool can read the step — the review-gate
+  template says so at the install step.
 
-- Every toolchain step in
-  [`templates/github-actions/kyber-weave-review-gate.yml`](../../../templates/github-actions/kyber-weave-review-gate.yml)
-  is `if: false` until the host enables it. A template that installs and builds stacks the host
-  does not use spends that host's minutes and proves nothing. The test name says it:
-  `EveryToolchainStepIsDisabledUntilTheHostEnablesIt`.
-- A template checkout takes `fetch-depth: 0`, because `--base` resolves through `git merge-base`
-  and a single-commit checkout cannot answer it.
-- A template's `kyber-weave review gates` call passes `--council`, because the CI caller is allowed
-  to run the full suite and the gates would otherwise refuse it.
-- Changing a template is a change to what hosts copy, so it is pinned by content tests and reviewed
-  as a contract change rather than as a YAML tidy-up.
+### Untrusted input never reaches a shell
 
-## Tests that pin workflows
+A pull request's branch name, title and event payload are attacker-controlled text. `${{ github.* }}`
+never appears in a `run:` block; it arrives through `env:` and is quoted at the point of use. The
+`changes` job takes `EVENT_NAME` and `BASE_SHA` this way, and the docs gate takes `EVENT_NAME`,
+`BASE_REF` and `EVENT_BEFORE`. `ci.yml` states the rule where it happens:
+"a hostile ref cannot reach the shell".
 
-The workflow YAML is a test subject in
-[`tests/KyberWeave.RepoPolicy.Tests/`](../../../tests/KyberWeave.RepoPolicy.Tests/AGENTS.md):
-`ReviewGateWorkflowTemplateTests`, `ReviewGateFullSuiteConfigTests`,
-`ReleaseTests`, `ReleaseNotesTests` and `SbomTests` read it. They run as the `test-policy` gate,
-which selects on the same paths as `build`.
+`ReviewGateWorkflowTemplateTests.NoRunBlockInterpolatesGitHubContextIntoShell` pins it for the
+templates, which is where a host copies the mistake from.
 
-- An edit to a workflow that one of them reads runs that class by name before the change is
-  reported done; the project's `AGENTS.md` gives the filtered command.
-- A new structural invariant gets a test there rather than a paragraph here. A rule this document
-  states without a test behind it is a rule a future edit can remove silently.
+### Secrets
 
-## Completion
+- A secret reaches a step through `env:`, never interpolated into the command line. It is never
+  echoed, never written to an artifact, and never put in a step summary.
+- Secrets are scoped to the environment that uses them. The Apple signing and notarization
+  credentials live in `environment: release`, and `build-tray` says why it is the one build job
+  that names it. The human approval lives in `environment: release-approval`.
+- Prefer a federated, short-lived credential. `attest-sbom` signs with the OIDC token rather than a
+  stored key, and `release.yml` records in its header that no PAT is needed: `GITHUB_TOKEN` mints
+  the tag after approval.
+
+## Done checklist
+
+### Completion
 
 A workflow change is proved the way a code change is — a build, the tests covering it, and a
 format check — and the three are not optional because the file is YAML:

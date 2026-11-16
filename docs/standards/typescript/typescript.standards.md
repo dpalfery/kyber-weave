@@ -20,7 +20,21 @@ establishing a separate React architecture standard. The shared C# application a
 boundaries remain defined by [KyberDash architecture](../../dash/architecture.md) and the
 [display-layer rule](../../rules/kyberdash-display-layer.md).
 
-## Types at boundaries
+## Naming and layout
+
+### Runtime and modules
+
+KyberDash web, tray UI, and script tooling target Node.js `>=22.13.0` and use ESM (`node:`-prefixed
+imports for Node built-ins in scripts and test helpers). Use type-only imports when a dependency
+is needed only for types.
+
+Use existing dependencies for existing capabilities. A new dependency or drive-by version
+upgrade needs a concrete reason tied to the change; do not add a package merely to avoid a
+small, clear implementation.
+
+## Coding standards
+
+### Types at boundaries
 
 Parsers fail closed (KW-STD-INPUT-001). Code that parses or converts a value from outside the process refuses any input it does not recognise, with an error or diagnostic that names the input; it never silently drops, defaults or coerces it. The one exception is an unknown field in a format whose specification says to ignore unknown fields, and the code names that specification where it skips the field.
 
@@ -36,7 +50,7 @@ of quietly falling through to a default. Keep type assertions local and explain 
 is safe when the type system cannot express the invariant. Do not spread assertions or
 weaken compiler settings to make an unrelated change compile.
 
-## Preserve meaning in data
+### Preserve meaning in data
 
 Represent absence as absence. Do not turn missing, unknown, unavailable, or not-yet-measured
 data into zero, an empty string, or an empty collection unless that is the actual domain
@@ -45,7 +59,7 @@ cost basis where downstream code could otherwise mistake one for the other. Keep
 compatible with their consumers and make availability explicit when a capability may not be
 present.
 
-## KyberDash boundaries and bounded work
+### KyberDash boundaries and bounded work
 
 The CLI engine and `kyberdash web` server own domain logic and jobs. The web dashboard and
 tray are display layers over the same `canon.db` and `/api/kyber/*` API. A surface must not
@@ -63,17 +77,7 @@ Synchronous SQLite work cannot be interrupted by a JavaScript timer. Do not pres
 around synchronous work as a hard cancellation bound; use an actually bounded operation or
 make the limitation explicit in its contract.
 
-## Runtime and modules
-
-KyberDash web, tray UI, and script tooling target Node.js `>=22.13.0` and use ESM (`node:`-prefixed
-imports for Node built-ins in scripts and test helpers). Use type-only imports when a dependency
-is needed only for types.
-
-Use existing dependencies for existing capabilities. A new dependency or drive-by version
-upgrade needs a concrete reason tied to the change; do not add a package merely to avoid a
-small, clear implementation.
-
-## Async work, resources, and errors
+### Async work, resources, and errors
 
 Await work whose completion or failure matters. Bound HTTP requests, retries, and timers;
 cancel them where the caller can stop waiting. Remove listeners and close resources on both
@@ -89,14 +93,14 @@ Inject clocks, filesystem roots, fetch functions, and stores at seams where test
 deterministic control. Tests must use temporary or injected paths and must not read or write
 the developer's home directory or live KyberDash database.
 
-## Output and display
+### Output and display
 
 Keep machine-readable stdout free of progress and diagnostics; send diagnostics to stderr.
 In React views, distinguish missing data, derived values, and measured zero in both the
 display and accessible text where the distinction affects interpretation. Do not make a
 missing value look like a healthy zero.
 
-## Style
+### Style
 
 The repository's ESLint configuration is authoritative: TypeScript uses the recommended
 `typescript-eslint` rules, rejects explicit `any`, and treats lint findings as errors. Keep
@@ -104,7 +108,21 @@ the strict compiler settings enabled. Follow nearby formatting: two-space indent
 single-quoted strings, and generally no semicolons. There is no separate Prettier pass here, so
 the format check is the lint gate below rather than a formatter of its own.
 
-## Completion
+## Testing
+
+_Nothing specific yet._
+
+## Commands
+
+_Nothing specific yet._
+
+## Security and data handling
+
+_Nothing specific yet._
+
+## Done checklist
+
+### Completion
 
 For changes under `dash/`, run the applicable gates from the repository instructions:
 

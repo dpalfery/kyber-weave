@@ -130,6 +130,18 @@ internal static class CliApplication
                     .WithExample("docs", "validate", ".")
                     .WithExample("docs", "validate", ".", "--merge-ready");
 
+                docs.AddBranch("standards", standards =>
+                {
+                    standards.SetDescription("Inspect and migrate a host's technology, role and platform folders.");
+
+                    standards.AddCommand<DocsStandardsMigrateCommand>("migrate")
+                        .WithDescription(
+                            "Rename each legacy standards README.md to the folder-prefixed standard and add the " +
+                            "four files a folder holds.")
+                        .WithExample("docs", "standards", "migrate", ".")
+                        .WithExample("docs", "standards", "migrate", ".", "--dry-run");
+                });
+
                 docs.AddCommand<DocsTasksCommand>("tasks")
                     .WithDescription(
                         "Derive a plan's task file (<plan>.tasks.json) and its execution digest from the plan; write or check it (KW-DOC-TASKS-*).")

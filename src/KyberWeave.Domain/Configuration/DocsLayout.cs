@@ -41,7 +41,7 @@ public static class DocsLayout
     /// should be able to read it in one step.
     /// </summary>
     public static string TechnologyStandard(string docsRoot, string technology) =>
-        $"{docsRoot}/{Standards}/{technology}/README.md";
+        StandardFile(docsRoot, technology);
 
     /// <summary>The standard's file name inside a technology, role or platform folder.</summary>
     public const string StandardsSuffix = ".standards.md";

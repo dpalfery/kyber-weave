@@ -27,7 +27,9 @@ for everything below. The shared application and display-layer boundaries are de
 This is a local decision record, not a summary of the language. Rules that the compiler,
 `rustfmt`, or `clippy` already enforce are not restated.
 
-## Crate layout and toolchain
+## Naming and layout
+
+### Crate layout and toolchain
 
 - The tray is a standalone crate, not a member of a Cargo workspace. Its manifest declares
   `edition = "2021"` and `rust-version = "1.77"`. Raise either deliberately, in its own change.
@@ -38,18 +40,32 @@ This is a local decision record, not a summary of the language. Rules that the c
   with a comment naming the advisory it works around. A patch entry carries that comment, and
   it is removed when the upstream stack no longer needs it.
 
-## Formatting and lints
+### Dependencies
 
-`rustfmt` and `clippy` are the first reviewers. Do not restate their rules here, and do not
-merge code that fails them.
+- Prefer crates.io releases. A git dependency is pinned by full commit SHA, never by branch
+  or tag, and carries a comment saying why it is not from crates.io.
+- Use the dependency already in the lockfile for an existing capability. The tray's HTTP client
+  is `reqwest` with the blocking feature; a second HTTP client is a finding.
+- A new dependency needs a reason in the change description. `cargo deny` is not configured:
+  there is no `deny.toml` in the crate, so no licence or advisory gate runs today.
+- Platform-only dependencies sit under `[target.'cfg(...)'.dependencies]`, as `libc`,
+  `objc2`, and `windows-sys` already do.
 
-- Formatting uses default `rustfmt` settings; the crate has no `rustfmt.toml`.
-- Clippy runs with every warning denied. An `#[allow(...)]` is scoped to the smallest item
-  that needs it and carries a comment saying why. A crate-level `allow` is not used.
-- Naming follows the Rust API guidelines: `snake_case` for functions, modules, and variables;
-  `UpperCamelCase` for types and traits; `SCREAMING_SNAKE_CASE` for constants and statics.
+### Cross-platform
 
-## Errors
+The bundled targets are `darwin-arm64`, `darwin-x64`, and `win-x64`, as the `Cargo.toml` header
+states, and the bundle targets in `tauri.conf.json` are macOS and Windows installers.
+
+- Paths use `Path` and `PathBuf`. Joining with string concatenation is a finding.
+- Platform code sits behind `#[cfg(unix)]`, `#[cfg(windows)]`, or `#[cfg(target_os = "macos")]`
+  with a counterpart for each other platform the crate builds on. `pid_is_alive` in
+  `supervisor.rs` is the model.
+- A change that touches a `cfg`-gated item is checked on the platform it names, because clippy
+  on one OS does not compile the other OS's branch.
+
+## Coding standards
+
+### Errors
 
 Parsers fail closed (KW-STD-INPUT-001). Code that parses or converts a value from outside the process refuses any input it does not recognise, with an error or diagnostic that names the input; it never silently drops, defaults or coerces it. The one exception is an unknown field in a format whose specification says to ignore unknown fields, and the code names that specification where it skips the field.
 
@@ -69,7 +85,7 @@ Parsers fail closed (KW-STD-INPUT-001). Code that parses or converts a value fro
 - **Callers see a failure as a state, not a panic.** A supervision or polling failure becomes
   a phase the popover shows, as `supervisor.rs` does. It does not abort the process.
 
-## Process and async work
+### Process and async work
 
 - The tray runs blocking work off the async runtime. Filesystem, process, and blocking HTTP
   work reached from a Tauri command goes through `tauri::async_runtime::spawn_blocking`, as
@@ -79,38 +95,24 @@ Parsers fail closed (KW-STD-INPUT-001). Code that parses or converts a value fro
   (see `supervisor.rs`).
 - A `std::sync::Mutex` guard is not held across an `.await`.
 
-## Dependencies
+### Existing exceptions
 
-- Prefer crates.io releases. A git dependency is pinned by full commit SHA, never by branch
-  or tag, and carries a comment saying why it is not from crates.io.
-- Use the dependency already in the lockfile for an existing capability. The tray's HTTP client
-  is `reqwest` with the blocking feature; a second HTTP client is a finding.
-- A new dependency needs a reason in the change description. `cargo deny` is not configured:
-  there is no `deny.toml` in the crate, so no licence or advisory gate runs today.
-- Platform-only dependencies sit under `[target.'cfg(...)'.dependencies]`, as `libc`,
-  `objc2`, and `windows-sys` already do.
+These places in the tray predate this standard. They are not exempt from it for new or changed
+code, and a change that touches one brings it to the rule where that is reasonable.
 
-## `unsafe`
+- `anyhow::Result` is returned from public functions of the library crate (for example
+  `api::report_url` and `ipc::open_view_url`), where the rule says a library returns a typed
+  error. The library and binary share one crate, so the public surface is the crate's.
+- `expect` in production code: `ipc.rs` (`view_path_patterns`, a compiled-in JSON list),
+  `lib.rs` (the `popover` window lookup, and the `tauri::generate_context!` build call).
+- `unsafe` in `tray_badge.rs` (Windows small-icon metric) has no `// SAFETY:` comment, and the
+  crate root does not carry `#![deny(unsafe_op_in_unsafe_fn)]`.
+- `clippy::unwrap_used`, `clippy::expect_used`, and `clippy::undocumented_unsafe_blocks` are not
+  set to `deny`; the gate is `-D warnings` only.
 
-- `unsafe` is not added to the tray. When one is unavoidable (a platform call with no safe
-  binding), it is confined to a small function behind a safe signature.
-- Every `unsafe` block has a `// SAFETY:` comment stating the invariant that makes it sound.
-  See `supervisor.rs` for the form.
-- The existing `unsafe` blocks in `tray_badge.rs` are listed in [Existing exceptions](#existing-exceptions).
+## Testing
 
-## Cross-platform
-
-The bundled targets are `darwin-arm64`, `darwin-x64`, and `win-x64`, as the `Cargo.toml` header
-states, and the bundle targets in `tauri.conf.json` are macOS and Windows installers.
-
-- Paths use `Path` and `PathBuf`. Joining with string concatenation is a finding.
-- Platform code sits behind `#[cfg(unix)]`, `#[cfg(windows)]`, or `#[cfg(target_os = "macos")]`
-  with a counterpart for each other platform the crate builds on. `pid_is_alive` in
-  `supervisor.rs` is the model.
-- A change that touches a `cfg`-gated item is checked on the platform it names, because clippy
-  on one OS does not compile the other OS's branch.
-
-## Tests
+### Tests
 
 - Unit tests live in a `#[cfg(test)] mod tests` beside the code they exercise. Contract tests
   that pin a file or manifest live in `dash/tray/src-tauri/tests/`.
@@ -120,7 +122,32 @@ states, and the bundle targets in `tauri.conf.json` are macOS and Windows instal
 - Test authorship follows the [test coding standard](../test/README.md) and belongs to
   `test-dev`.
 
-## Completion
+## Commands
+
+### Formatting and lints
+
+`rustfmt` and `clippy` are the first reviewers. Do not restate their rules here, and do not
+merge code that fails them.
+
+- Formatting uses default `rustfmt` settings; the crate has no `rustfmt.toml`.
+- Clippy runs with every warning denied. An `#[allow(...)]` is scoped to the smallest item
+  that needs it and carries a comment saying why. A crate-level `allow` is not used.
+- Naming follows the Rust API guidelines: `snake_case` for functions, modules, and variables;
+  `UpperCamelCase` for types and traits; `SCREAMING_SNAKE_CASE` for constants and statics.
+
+## Security and data handling
+
+### `unsafe`
+
+- `unsafe` is not added to the tray. When one is unavoidable (a platform call with no safe
+  binding), it is confined to a small function behind a safe signature.
+- Every `unsafe` block has a `// SAFETY:` comment stating the invariant that makes it sound.
+  See `supervisor.rs` for the form.
+- The existing `unsafe` blocks in `tray_badge.rs` are listed in [Existing exceptions](#existing-exceptions).
+
+## Done checklist
+
+### Completion
 
 The gates a Rust change must pass, run from the repository root:
 
@@ -152,18 +179,3 @@ must be installed, or clippy and the tests cannot build the Tauri dependency tre
 
 The popover UI that the same tray ships has its own gates, listed in the root
 [`AGENTS.md`](../../../AGENTS.md) and in [`dash/tray/AGENTS.md`](../../../dash/tray/AGENTS.md).
-
-## Existing exceptions
-
-These places in the tray predate this standard. They are not exempt from it for new or changed
-code, and a change that touches one brings it to the rule where that is reasonable.
-
-- `anyhow::Result` is returned from public functions of the library crate (for example
-  `api::report_url` and `ipc::open_view_url`), where the rule says a library returns a typed
-  error. The library and binary share one crate, so the public surface is the crate's.
-- `expect` in production code: `ipc.rs` (`view_path_patterns`, a compiled-in JSON list),
-  `lib.rs` (the `popover` window lookup, and the `tauri::generate_context!` build call).
-- `unsafe` in `tray_badge.rs` (Windows small-icon metric) has no `// SAFETY:` comment, and the
-  crate root does not carry `#![deny(unsafe_op_in_unsafe_fn)]`.
-- `clippy::unwrap_used`, `clippy::expect_used`, and `clippy::undocumented_unsafe_blocks` are not
-  set to `deny`; the gate is `-D warnings` only.

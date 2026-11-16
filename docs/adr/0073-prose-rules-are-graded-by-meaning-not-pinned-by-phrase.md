@@ -83,6 +83,6 @@ answers the Arbiter's questions through `SystemOneClient`
 
 ## Related
 
-- [Test coding standard: prose rules](../standards/test/README.md#prose-rules)
+- [Test coding standard: prose rules](../standards/test/test.standards.md#prose-rules)
 - [Worker rule map](../kyber-squad/worker-rule-map.md)
 - [ADR 0072](0072-the-arbiter-blocks-only-on-machine-facts-and-confident-model-answers.md)

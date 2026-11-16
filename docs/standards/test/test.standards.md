@@ -20,14 +20,27 @@ the defaults a portable agent shipped with. Language-level C# in test files foll
 This is not a summary of xUnit. It records the decisions this repository has made and
 would otherwise have to re-argue in review.
 
-## Stack
+## Naming and layout
+
+### Stack
 
 **xUnit**, one project covering all three artifact classes. The suite is fast — the whole
 run stays well under a second — and it should stay that way.
 
 Assertions are xUnit's. This repository does not take NSubstitute or FluentAssertions.
 
-## Real files, and fakes that earn their keep
+### A test name is an assertion
+
+`AFreshlyScaffoldedCorpusPassesDocsValidate`, not `TestScaffold2`, and not
+`MethodName_StateUnderTest_ExpectedBehavior`. The name states the guarantee.
+
+When the reason is not obvious, put the failure it prevents in a `<summary>`. Several
+tests here exist because a specific regression happened; that context is what stops
+someone deleting them later.
+
+## Coding standards
+
+### Real files, and fakes that earn their keep
 
 The loader and validator read the file system, so fixtures build a real directory tree in
 a temp folder and dispose it. Never write into the repository tree from a test.
@@ -40,16 +53,7 @@ for one job — proving the adapter reads a real index the same way the fake cla
 not reach for it to test behaviour a fake can express; it makes the suite depend on a tool
 the machine may not have.
 
-## A test name is an assertion
-
-`AFreshlyScaffoldedCorpusPassesDocsValidate`, not `TestScaffold2`, and not
-`MethodName_StateUnderTest_ExpectedBehavior`. The name states the guarantee.
-
-When the reason is not obvious, put the failure it prevents in a `<summary>`. Several
-tests here exist because a specific regression happened; that context is what stops
-someone deleting them later.
-
-## Test the decision, not the implementation
+### Test the decision, not the implementation
 
 Parsers fail closed (KW-STD-INPUT-001). Code that parses or converts a value from outside the process refuses any input it does not recognise, with an error or diagnostic that names the input; it never silently drops, defaults or coerces it. The one exception is an unknown field in a format whose specification says to ignore unknown fields, and the code names that specification where it skips the field.
 
@@ -67,7 +71,7 @@ guarantee breaks.
 New behaviour ships with the test that would fail without it. A bug fix ships with a
 regression test whose name encodes the scenario that was broken.
 
-## Isolation and assertions
+### Isolation and assertions
 
 Tests run in any order and do not depend on each other. Each test arranges its own data.
 
@@ -79,31 +83,7 @@ Failure messages should identify the offender. Where a report is asserted empty,
 findings into the assertion message so a failure names the rule and document rather than
 just `False != True`.
 
-## Concurrency and zero-flakiness isolation
-
-Tests run concurrently across classes. Never introduce hidden cross-test coupling, process-wide mutation, or unisolated state:
-
-- **No process-wide environment variable mutation**: Never call `Environment.SetEnvironmentVariable` in test code. An xUnit collection setting `DisableParallelization = true` only serializes tests inside that collection; tests in other collections continue running concurrently and observe mutated process state. Inject delegate resolvers (`Func<string, string?>? getEnvironmentVariable = null`, defaulting to `Environment.GetEnvironmentVariable`) or pass `SquadRenderRequest.EnvironmentReader`.
-- **Lock-free `AsyncLocal` execution context scopes**: CLI console redirection and durability overrides isolate per async context rather than using process-wide locks or mutable statics. `ProcessConsoleCapture` uses `AsyncLocalTextWriter` and `AsyncLocalAnsiConsole` so parallel CLI test classes never contend on a static lock or bleed console output. `SquadTransaction.UseSyncToDiskScope(bool)` uses an `AsyncLocal<bool?>` scope routing store flushes through `SquadTransaction.SyncToDisk` so durability tests never leak macOS APFS `F_FULLFSYNC` barriers onto concurrent test threads.
-- **Serial collections policy**: xUnit `DisableParallelization = true` (e.g. `ScaleAcceptanceCollection`) is reserved strictly for benchmarks monitoring thread allocations (`GC.GetAllocatedBytesForCurrentThread()`) or hard execution-time ceilings across high-volume iterations (such as 10,000 DocGraph claims). Never use collection serialization to mask shared static mutable state.
-- **Parallel repository-wide scans**: Whole-repository assertion sweeps (such as `UpstreamSeveranceTests`) partition tracked file sets across all available cores using `Parallel.ForEach` with thread-safe collectors (`ConcurrentBag<string>`) to avoid multi-second single-threaded disk I/O bottlenecks.
-
-## Release sources and immutable corpus fixtures
-
-Tests avoid redundant disk extraction, file copying, and YAML/Markdown parsing through focused test fixtures:
-
-- **Synthetic release sources for plumbing and lifecycle**: Tests verifying deployment state machines, receipts, locks, and CLI exit codes use `SyntheticValidSquadReleaseSource` (~15 small files) rather than copying the full 203-file corpus on every run. Reserve `CorpusSquadReleaseSource` for end-to-end installation contracts and canonical prose checks.
-- **Immutable test corpus caching**: Read-only contract tests asserting renderer templates and model presets (such as `SquadModelPresetRenderTests`, `CopilotRendererTests`, `AntigravityRendererContractTests`, and `SquadRustGoSpecialistTests`) consume lazy, thread-safe instances via `TestSquadCorpus.CanonicalSource` and cached unpreset baseline renders, avoiding hundreds of redundant disk reads and YAML/Markdown parsing across test theories.
-- **One cross-harness renderer contract**: What every Squad renderer owes whatever its harness lives once in `SquadRendererSharedContractTests`. The target checks — claiming exactly one target, refusing a request for another, rendering the corpus byte-for-byte the same twice — run automatically for every renderer `SquadCommandComposition.CreateRenderers()` returns. Resource projection and the `capability-not-isolable` record where the shell implies write depend on the harness, so a new renderer adds its row to `ResourceProjectionContracts` and, when it cannot isolate the shell from writes, to `ShellWithoutWriteContracts`. A harness's own suite asserts only that harness's file format. Do not copy a shared invariant into it; add the harness's row to the shared suite instead.
-- **Git repository templates**: Tests requiring git repositories (such as Review Council gate command tests) use `TestGitRepositoryTemplate.CreateRepositoryCopy` to copy a pre-seeded, committed repository directory (<2ms, 0 child processes) instead of spawning repeated `git init`/`add`/`commit` OS child processes per fixture.
-
-## Internals are in scope
-
-`InternalsVisibleTo` exposes `KyberWeave.Core` internals here, so helpers like link
-normalization, vocabulary parsing, and docs-root detection are tested directly. Marking a
-helper `internal` is not a reason to test it only through a command.
-
-## Documented behaviour
+### Documented behaviour
 
 Ranking weights, thresholds, and rule severities are described in the governed corpus. A
 test that pins one of those numbers is pinning a documented claim — if you change it,
@@ -111,7 +91,7 @@ change the document in the same commit. `RetrievalRegressionTests` in particular
 whether real questions find real answers; treat a failure there as a product regression,
 not a test to adjust.
 
-## Prose rules
+### Prose rules
 
 Agent and docs prose (`products/kyber-squad/**`, governed docs) is tested for what it says, not for
 its words ([ADR 0073](../../adr/0073-prose-rules-are-graded-by-meaning-not-pinned-by-phrase.md)):
@@ -175,7 +155,33 @@ writes every answer as JSON lines and the report beside it, and `KW_PROSE_GRADE_
 another catalog. A full run is about 1,100 questions, 3 million input tokens, $0.13 and 30 seconds; the
 test stops at 12 million tokens or $2.
 
-## Fixtures
+## Testing
+
+### Concurrency and zero-flakiness isolation
+
+Tests run concurrently across classes. Never introduce hidden cross-test coupling, process-wide mutation, or unisolated state:
+
+- **No process-wide environment variable mutation**: Never call `Environment.SetEnvironmentVariable` in test code. An xUnit collection setting `DisableParallelization = true` only serializes tests inside that collection; tests in other collections continue running concurrently and observe mutated process state. Inject delegate resolvers (`Func<string, string?>? getEnvironmentVariable = null`, defaulting to `Environment.GetEnvironmentVariable`) or pass `SquadRenderRequest.EnvironmentReader`.
+- **Lock-free `AsyncLocal` execution context scopes**: CLI console redirection and durability overrides isolate per async context rather than using process-wide locks or mutable statics. `ProcessConsoleCapture` uses `AsyncLocalTextWriter` and `AsyncLocalAnsiConsole` so parallel CLI test classes never contend on a static lock or bleed console output. `SquadTransaction.UseSyncToDiskScope(bool)` uses an `AsyncLocal<bool?>` scope routing store flushes through `SquadTransaction.SyncToDisk` so durability tests never leak macOS APFS `F_FULLFSYNC` barriers onto concurrent test threads.
+- **Serial collections policy**: xUnit `DisableParallelization = true` (e.g. `ScaleAcceptanceCollection`) is reserved strictly for benchmarks monitoring thread allocations (`GC.GetAllocatedBytesForCurrentThread()`) or hard execution-time ceilings across high-volume iterations (such as 10,000 DocGraph claims). Never use collection serialization to mask shared static mutable state.
+- **Parallel repository-wide scans**: Whole-repository assertion sweeps (such as `UpstreamSeveranceTests`) partition tracked file sets across all available cores using `Parallel.ForEach` with thread-safe collectors (`ConcurrentBag<string>`) to avoid multi-second single-threaded disk I/O bottlenecks.
+
+### Release sources and immutable corpus fixtures
+
+Tests avoid redundant disk extraction, file copying, and YAML/Markdown parsing through focused test fixtures:
+
+- **Synthetic release sources for plumbing and lifecycle**: Tests verifying deployment state machines, receipts, locks, and CLI exit codes use `SyntheticValidSquadReleaseSource` (~15 small files) rather than copying the full 203-file corpus on every run. Reserve `CorpusSquadReleaseSource` for end-to-end installation contracts and canonical prose checks.
+- **Immutable test corpus caching**: Read-only contract tests asserting renderer templates and model presets (such as `SquadModelPresetRenderTests`, `CopilotRendererTests`, `AntigravityRendererContractTests`, and `SquadRustGoSpecialistTests`) consume lazy, thread-safe instances via `TestSquadCorpus.CanonicalSource` and cached unpreset baseline renders, avoiding hundreds of redundant disk reads and YAML/Markdown parsing across test theories.
+- **One cross-harness renderer contract**: What every Squad renderer owes whatever its harness lives once in `SquadRendererSharedContractTests`. The target checks — claiming exactly one target, refusing a request for another, rendering the corpus byte-for-byte the same twice — run automatically for every renderer `SquadCommandComposition.CreateRenderers()` returns. Resource projection and the `capability-not-isolable` record where the shell implies write depend on the harness, so a new renderer adds its row to `ResourceProjectionContracts` and, when it cannot isolate the shell from writes, to `ShellWithoutWriteContracts`. A harness's own suite asserts only that harness's file format. Do not copy a shared invariant into it; add the harness's row to the shared suite instead.
+- **Git repository templates**: Tests requiring git repositories (such as Review Council gate command tests) use `TestGitRepositoryTemplate.CreateRepositoryCopy` to copy a pre-seeded, committed repository directory (<2ms, 0 child processes) instead of spawning repeated `git init`/`add`/`commit` OS child processes per fixture.
+
+### Internals are in scope
+
+`InternalsVisibleTo` exposes `KyberWeave.Core` internals here, so helpers like link
+normalization, vocabulary parsing, and docs-root detection are tested directly. Marking a
+helper `internal` is not a reason to test it only through a command.
+
+### Fixtures
 
 | Helper | For |
 |---|---|
@@ -190,7 +196,7 @@ test stops at 12 million tokens or $2.
 | `SyntheticValidSquadReleaseSource` | Lightweight ~15-file valid Squad source tree for state, lock, receipt, and lifecycle tests |
 | `TestGitRepositoryTemplate` | Pre-initialized git repository template directory copied without spawning OS child processes |
 
-## Tests that start processes
+### Tests that start processes
 
 A test that starts a process can start more of them. In 2026-10 a dashboard test did exactly
 that and fork-bombed `node`. The rules below keep every process a test starts bounded, and the
@@ -246,7 +252,17 @@ timeout by design. Do not give it one; a timeout would end a live session.
 the file, the API name or line text, and the bound. If the site cannot state a bound, it does not
 belong in a test: remove it or inject a fake.
 
-## Completion
+## Commands
+
+_Nothing specific yet._
+
+## Security and data handling
+
+_Nothing specific yet._
+
+## Done checklist
+
+### Completion
 
 This is how a change to a test is proved. Build once, run the classes the change touches, run the
 format check, then report. Run these `dotnet` commands directly from the repository root.
