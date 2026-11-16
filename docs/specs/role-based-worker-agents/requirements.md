@@ -54,7 +54,7 @@ Owner decisions made on 2026-11-16 that shape these requirements:
    profile: it runs on the model the user or the headless caller starts it with.
 7. **Technology folders** follow the plan on
    [pull request 625](https://github.com/dpalfery/kyber-weave/pull/625), with the standard named
-   `<technology>.standards.md` beside `rules.md` and `skills.md`. This specification adds a machine
+   `<name>.standards.md` beside `<name>.rules.md` and `<name>.skills.md`. This specification adds a machine
    rules file for the Arbiter beside them. Role folders have the same four files.
 11. **The old agents stay for now.** They remain selectable until the owner decides to remove them.
 8. **Standards are templates.** Kyber-Weave ships one template folder per technology, the community
@@ -72,7 +72,10 @@ Terms used below:
   `architect`, `reviewer`, `devops`).
 - **Platform folder**: a technology folder for a delivery platform (`github`, `azure-devops`,
   `gitlab`, `jira`).
-- **Machine rules file**: `arbiter-rules.yml`, rules the Arbiter evaluates. `rules.md` is prose a
+- **Folder file names**: every file in a technology or role folder starts with the folder's name,
+  shown below as `<name>`: `csharp.standards.md`, `csharp.rules.md`, `csharp.skills.md`,
+  `csharp.arbiter-rules.yml`.
+- **Machine rules file**: `<name>.arbiter-rules.yml`, rules the Arbiter evaluates. `<name>.rules.md` is prose a
   model reads; the Arbiter cannot evaluate it.
 - **Task prompt**: the single text a worker receives for one task.
 - **Decision model**: the small model the Arbiter asks for judgement calls (JEV).
@@ -221,9 +224,9 @@ place.
 
 #### Acceptance Criteria
 
-5.1. A technology folder SHALL hold `<technology>.standards.md` (the standard), `rules.md`,
-`skills.md` and `arbiter-rules.yml`; a role folder SHALL hold the same four files, with the standard
-named `<role>.standards.md`.
+5.1. A technology folder and a role folder SHALL each hold four files, every one named with the
+folder's own name as its prefix: `<name>.standards.md` (the standard), `<name>.rules.md`,
+`<name>.skills.md` and `<name>.arbiter-rules.yml`.
 
 5.2. THE standard SHALL use these six headings, in this order: Naming and layout; Coding standards;
 Testing; Commands; Security and data handling; Done checklist.
@@ -246,7 +249,7 @@ technology's template before the agent that held it is removed.
 5.8. `docs validate` SHALL report a technology folder that lacks one of the four files, or a
 standard that lacks one of the six headings, naming the folder and what is missing.
 
-5.9. `arbiter-rules.yml` SHALL be valid when it declares no rule.
+5.9. `<name>.arbiter-rules.yml` SHALL be valid when it declares no rule.
 
 ### Requirement 6: Standards ship as templates
 
@@ -320,15 +323,15 @@ cloud or platform through its own tools, so that plans rest on how a deployed sy
 8.1. THE `platform-researcher` agent SHALL take the technology to inspect from its task (for example
 `azure`, `aws`, `kubernetes`) and SHALL load that technology's skills and rules.
 
-8.2. THE technology's `skills.md` SHALL state how to sign in, which command-line tools and tool
+8.2. THE technology's `<name>.skills.md` SHALL state how to sign in, which command-line tools and tool
 servers to use, how to query, and how to shape output.
 
-8.3. THE technology's `rules.md` SHALL state that the agent changes nothing and prints no secret.
+8.3. THE technology's `<name>.rules.md` SHALL state that the agent changes nothing and prints no secret.
 
 8.4. THE agent's capability profile SHALL deny file writes, publishing and delegation, and SHALL
 allow command execution.
 
-8.5. THE technology's `arbiter-rules.yml` SHALL be able to declare the command forms that are
+8.5. THE technology's `<name>.arbiter-rules.yml` SHALL be able to declare the command forms that are
 allowed, and a command outside them SHALL be refused on a harness where the Arbiter sees a
 sub-agent's own tool calls.
 
@@ -423,7 +426,7 @@ SHALL state for each that is not YAML whether it converts and when.
 11.3. IF a file's format changes THEN the system SHALL read the old format for at least two minor
 releases and SHALL report it as a warning that names the conversion command.
 
-11.4. Prose files (`README.md`, `rules.md`, `skills.md`, agent files) SHALL stay Markdown.
+11.4. Prose files (`README.md`, `<name>.rules.md`, `<name>.skills.md`, agent files) SHALL stay Markdown.
 
 11.5. THE task file SHALL be written as YAML.
 

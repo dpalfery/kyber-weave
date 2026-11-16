@@ -211,11 +211,11 @@ Stated so the owner can weigh them. The design follows the owner's direction in 
    one body rendered three times. They exist because choosing an agent is the one way to choose a
    model that works on all thirteen harnesses.
 
-2. **No Arbiter rule is technology-specific today.** Every technology's `arbiter-rules.yml` starts
+2. **No Arbiter rule is technology-specific today.** Every technology's `<name>.arbiter-rules.yml` starts
    empty. All 36 rules land in three role folders. The technology files earn their place only when
    a rule such as the command allow-list of Requirement 8 is written.
-3. **`rules.md` and `arbiter-rules.yml` are different things with one name.** The first is prose a
-   model reads. The second is evaluated by the Arbiter. A host can read a rule in `rules.md` and
+3. **`<name>.rules.md` and `<name>.arbiter-rules.yml` are different things with one name.** The first is prose a
+   model reads. The second is evaluated by the Arbiter. A host can read a rule in `<name>.rules.md` and
    assume it is enforced. The template header of each file must say which it is.
 4. **The whole brief passes through the conductor.** A tool that returns the prompt puts shared
    rules, technology rules, skills and standard sections into the conductor's context once per
@@ -325,20 +325,24 @@ The Arbiter's existing model targeting is untouched. It stays in shadow by defau
 ```text
 docs/standards/
   shared-rules.md
-  <technology>/
-    <technology>.standards.md   the standard, six headings
-    rules.md                    prose rules a model reads
-    skills.md                   how to do the work
-    arbiter-rules.yml           rules the Arbiter evaluates; may declare none
-  conductor/  architect/  reviewer/  devops/
-    <role>.standards.md  rules.md  skills.md  arbiter-rules.yml
-  github/  azure-devops/  gitlab/  jira/
-    the same four files, one folder per delivery platform
+  <name>/                        one folder per technology, role or platform
+    <name>.standards.md          the standard, six headings
+    <name>.rules.md              prose rules a model reads
+    <name>.skills.md             how to do the work
+    <name>.arbiter-rules.yml     rules the Arbiter evaluates; may declare none
+
+  technologies:  csharp/  typescript/  sql-server/  ...
+  roles:         conductor/  architect/  reviewer/  devops/
+  platforms:     github/  azure-devops/  gitlab/  jira/
 ```
 
-`rules.md`, `skills.md` and `shared-rules.md` are the plan on pull request 625. This design names
-the standard `<technology>.standards.md` instead of that plan's `README.md`, and adds
-`arbiter-rules.yml`, the six headings, the role folders and the platform folders.
+`<name>` is the folder's own name, so `csharp/` holds `csharp.standards.md`, `csharp.rules.md`,
+`csharp.skills.md` and `csharp.arbiter-rules.yml`. Every file says what it is and whose it is when
+opened on its own.
+
+The rules file, the skills file and `shared-rules.md` are the plan on pull request 625, which names
+them `rules.md`, `skills.md` and `README.md`. This design renames all three with the folder prefix,
+and adds the Arbiter rules file, the six headings, the role folders and the platform folders.
 
 The standard's headings, in order:
 
@@ -385,7 +389,7 @@ Returned, in order:
 2. The task's own prompt from the task file.
 3. Host facts, as `PacketHostFacts` builds them today, with gates resolved by technology.
 4. Shared rules.
-5. Per technology: its `rules.md`, its `skills.md`, then its standard.
+5. Per technology: its `<name>.rules.md`, its `<name>.skills.md`, then its standard.
 6. A list of anything left out.
 
 Stitching happens when the prompt is built. Nothing is written into the task file, so its digest and
@@ -443,7 +447,7 @@ do not change.
 Each id above carries the `KW-ARB-` prefix.
 
 Loading order: the shipped role templates; the host's role folders (a host declaration of the same
-id wins); for an event that concerns a task, the `arbiter-rules.yml` of each technology the task
+id wins); for an event that concerns a task, the `<name>.arbiter-rules.yml` of each technology the task
 names; then the host's `arbiter.rules` settings, which keep working as they do today. A file that
 fails to parse, or names a trigger or fact the Arbiter lacks, is an `arbiter validate` error and
 the shipped rules for that folder are used.
@@ -464,14 +468,14 @@ new trigger, `worker.command`, raised by the existing worker guard.
 
 ### The platform research agent
 
-`platform-researcher` takes one or more technologies from its task and receives their `skills.md` and
-`rules.md` through the task prompt tool, the same way a developer agent does.
+`platform-researcher` takes one or more technologies from its task and receives their `<name>.skills.md` and
+`<name>.rules.md` through the task prompt tool, the same way a developer agent does.
 
 - New capability profile `platform-reader`: `read-only` plus `process.execute: allow`.
-- A technology's `skills.md` covers sign-in, the command-line tools and tool servers to use, query
+- A technology's `<name>.skills.md` covers sign-in, the command-line tools and tool servers to use, query
   patterns and output shaping. Tool servers stay first choice where they exist, as `azure-reader`
   works today.
-- A technology's `arbiter-rules.yml` may declare allowed command forms, for example `az * list`,
+- A technology's `<name>.arbiter-rules.yml` may declare allowed command forms, for example `az * list`,
   `az * show`, `aws * describe-*`, `aws * list-*`. A command outside them is refused.
 - Enforced on Claude and Copilot CLI, where the worker guard sees the call. On the other eleven
   harnesses the allow-list is stated in the prompt and is an instruction only.
@@ -507,7 +511,7 @@ Not scheduled. The old agents stay until the owner decides, after the comparison
 | File | Today | After |
 |---|---|---|
 | Host configuration, model and capability profiles, gate catalogue | YAML | unchanged |
-| Arbiter rules | YAML, one file | YAML, one file per folder (`arbiter-rules.yml`) |
+| Arbiter rules | YAML, one file | YAML, one file per folder (`<name>.arbiter-rules.yml`) |
 | Task file | JSON (`tasks.json`, `<plan>.tasks.json`) | YAML, converted in the phase that already raises its schema version; JSON is read for two minor releases with a warning |
 | Standards, rules, skills, agents | Markdown | unchanged |
 | Tool output (the standards bundle, the task prompt) | text with tagged sections | not a stored file (open question 1) |
@@ -537,7 +541,7 @@ Each phase ships on its own and leaves a working product.
 | Host configuration | `worker-roster`; `review.technology-gates`; `ontology.roles`; a task prompt budget. |
 | Plan and specification task text | Optional `Difficulty:` and `Technologies:` lines. |
 | Task file | Schema version plus one; YAML; top-level `worker-roster`; per entry `difficulty`, `difficulty-source`, `technologies`. |
-| Technology, role and platform folders | The standard is `<name>.standards.md`; new `arbiter-rules.yml`. |
+| Technology, role and platform folders | The standard is `<name>.standards.md`; new `<name>.arbiter-rules.yml`. |
 | Arbiter | Trigger `worker.command`; fact `plan.task.files-all-tests`. |
 | Docs tool server | New tool `docs_build_task_prompt_for_agent_dispatch`. |
 
@@ -553,7 +557,7 @@ Each phase ships on its own and leaves a working product.
 | Prompt over budget | Rules kept; skills then standard sections cut; cuts listed. |
 | Task file missing or stale | No prompt; the reply names the repair command. |
 | Developer agent, no gate resolves | Gate run error, non-zero exit. |
-| `arbiter-rules.yml` unreadable or naming an unknown trigger or fact | `arbiter validate` error; shipped rules used for that folder. |
+| `<name>.arbiter-rules.yml` unreadable or naming an unknown trigger or fact | `arbiter validate` error; shipped rules used for that folder. |
 | Technology folder missing a file, or a standard missing a heading | `docs validate` error naming the folder and what is missing. |
 | Command outside a technology's allow-list | Refused where the worker guard runs; an instruction elsewhere. |
 | JSON task file | Read, with a warning, for two minor releases. |
@@ -598,7 +602,7 @@ Estimates, for planning only.
 | D5 | Are the old agents deleted at once? | No. They stay selectable for now; removal waits for the owner's decision after a comparison. | Keeps every earlier phase additive. | user: explicit decision 2026-11-16 |
 | D6 | How is the model assigned? | By the agent: each agent names a model profile, as today. Nothing assigns a model at dispatch. The conductor has no profile. | Run-time assignment was drafted and removed by the owner. Choosing an agent works on all thirteen harnesses. | user: explicit decision 2026-11-16 |
 | D7 | Which model profiles change? | `dev-hard` is added, separate from the planning profiles. `orchestration` is removed. Nothing is renamed. | `dev-easy` uses `fast` and `dev-medium` uses `general`, so no preset breaks. | user: `dev-hard` separate and no conductor profile, 2026-11-16; reuse of `fast` and `general` is autonomous, pending owner approval |
-| D8 | What does a technology or role folder hold? | `<name>.standards.md`, `rules.md`, `skills.md`, `arbiter-rules.yml`. | `rules.md` and `skills.md` are the plan on pull request 625; that plan's `README.md` standard is renamed. | user: explicit decision 2026-11-16 |
+| D8 | What does a technology or role folder hold? | `<name>.standards.md`, `<name>.rules.md`, `<name>.skills.md`, `<name>.arbiter-rules.yml`. | `<name>.rules.md` and `<name>.skills.md` are the plan on pull request 625; that plan's `README.md` standard is renamed. | user: explicit decision 2026-11-16 |
 | D9 | What are the standard's headings? | Naming and layout; Coding standards; Testing; Commands; Security and data handling; Done checklist. | | user: explicit decision 2026-11-16 |
 | D10 | Where do the 36 Arbiter rules go? | Into `conductor`, `architect` and `reviewer` role folders, split by trigger. | The owner named conductor and architect. `reviewer` is added because 13 rules are review rules. | user: explicit decision 2026-11-16; `reviewer` folder is autonomous, pending owner approval |
 | D11 | Is any Arbiter rule locked? | No. | The owner's view, and the code agrees: every rule can already be set to log only. | user: explicit decision 2026-11-16 |
