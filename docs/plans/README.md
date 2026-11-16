@@ -64,7 +64,9 @@ its `tasks.json` is caught rather than carried as dead weight.
 
 ## Active Plans
 
-No plans are open.
+| Plan | Status | Date | Goal |
+|---|---|---|---|
+| [Stitched standards bundles from per-tech rules, skills, and standards](2026-11-16-standards-skill-rule-stitch.md) | Draft | 2026-11-16 | One XML bundle per technology from shared rules, tech rules, skills, and the standard; tech-scoped docs discounted in retrieval. |
 
 ## Archived Plans
 
