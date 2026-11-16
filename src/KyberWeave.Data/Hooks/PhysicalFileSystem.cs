@@ -40,6 +40,9 @@ public sealed class PhysicalFileSystem : IWritableFileSystem
 
     public string ReadAllText(string path) => File.ReadAllText(path);
 
+    public IEnumerable<string> EnumerateDirectories(string directory) =>
+        Directory.Exists(directory) ? Directory.EnumerateDirectories(directory) : [];
+
     public IEnumerable<string> EnumerateFiles(string directory, string searchPattern, bool recursive)
     {
         if (!Directory.Exists(directory))

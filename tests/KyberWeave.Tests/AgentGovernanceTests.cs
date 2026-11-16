@@ -31,7 +31,7 @@ public class AgentGovernanceTests
             TomlAgentParser parser = new TomlAgentParser();
             Assert.True(parser.CanParse(tempFile));
 
-            AgentModel agent = parser.Parse(tempFile, HarnessKind.Codex);
+            AgentModel agent = parser.Parse(content, tempFile, HarnessKind.Codex);
             Assert.Equal("architect", agent.RoleName);
             Assert.Equal("Produces an implementation plan before coding.", agent.Description);
             Assert.Equal("gpt-5.6-sol", agent.ModelPreference);
@@ -62,7 +62,7 @@ public class AgentGovernanceTests
 
         try
         {
-            AgentModel agent = new MarkdownAgentParser().Parse(tempFile, HarnessKind.Claude);
+            AgentModel agent = new MarkdownAgentParser().Parse(content, tempFile, HarnessKind.Claude);
             Assert.Equal("github-devops", agent.RoleName);
             Assert.Equal("David R Palfery", agent.FrontmatterOrMetadata["author"]);
             Assert.Equal("1.0.0", agent.FrontmatterOrMetadata["version"]);
@@ -95,7 +95,7 @@ public class AgentGovernanceTests
             MarkdownAgentParser parser = new MarkdownAgentParser();
             Assert.True(parser.CanParse(tempFile));
 
-            AgentModel agent = parser.Parse(tempFile, HarnessKind.Cursor);
+            AgentModel agent = parser.Parse(content, tempFile, HarnessKind.Cursor);
             Assert.Equal("csharp-dev", agent.RoleName);
             Assert.Equal("Use when writing C# and .NET code.", agent.Description);
             Assert.Contains("senior .NET engineer", agent.InstructionsBody, StringComparison.Ordinal);
@@ -123,7 +123,7 @@ public class AgentGovernanceTests
         ];
 
         AgentSet set = new AgentSet(agents);
-        DiagnosticReport report = AgentSyncLinter.LintSet(set, "/tmp");
+        DiagnosticReport report = AgentSyncLinter.LintSet(set, "/tmp", File.Exists);
 
         // Conductor is mapped as a skill for Claude/Cursor/Antigravity/Codex, so role satisfaction should not fail for them if skills exist
         List<Diagnostic> missingErrors = report.Items.Where(i => i is { Code: AgentSyncLinter.RuleUnsatisfiedRole, Subject: "conductor" }).ToList();
@@ -207,18 +207,18 @@ public class AgentGovernanceTests
 
         try
         {
-            IReadOnlyList<(string AgentsDir, HarnessKind Kind, string HarnessFolder)> discovered = AgentLoader.DiscoverHarnessAgentDirs(root);
+            IReadOnlyList<(string AgentsDir, HarnessKind Kind, string HarnessFolder)> discovered = GovernanceTestFiles.Agents.DiscoverHarnessAgentDirs(root);
             Assert.Contains(discovered, d => d.Kind == HarnessKind.Cursor);
 
-            AgentSet all = AgentLoader.LoadAll(root);
+            AgentSet all = GovernanceTestFiles.Agents.LoadAll(root);
             Assert.Single(all.Agents);
             Assert.Equal("architect", all.Agents[0].RoleName);
             Assert.Equal(HarnessKind.Cursor, all.Agents[0].Harness);
 
-            AgentSet filtered = AgentLoader.LoadAll(root, HarnessKind.Claude);
+            AgentSet filtered = GovernanceTestFiles.Agents.LoadAll(root, HarnessKind.Claude);
             Assert.Empty(filtered.Agents);
 
-            Assert.True(AgentLoader.TryParseHarnessFilter("cursor", out HarnessKind? kind, out string? error));
+            Assert.True(AgentHarnessFilter.TryParse("cursor", out HarnessKind? kind, out string? error));
             Assert.Equal(HarnessKind.Cursor, kind);
             Assert.Null(error);
         }
@@ -289,7 +289,7 @@ public class AgentSyncLinterTests
         AgentModel agent = CreateAgent(description);
         AgentSet agentSet = new AgentSet([agent]);
 
-        DiagnosticReport report = AgentSyncLinter.LintSet(agentSet, "/tmp");
+        DiagnosticReport report = AgentSyncLinter.LintSet(agentSet, "/tmp", File.Exists);
 
         Diagnostic? diagnostic = report.Items.FirstOrDefault(d => d.Code == "KW-AGENT-LINT-002");
         Assert.NotNull(diagnostic);
@@ -310,7 +310,7 @@ public class AgentSyncLinterTests
         AgentModel agent = CreateAgent(description);
         AgentSet agentSet = new AgentSet([agent]);
 
-        DiagnosticReport report = AgentSyncLinter.LintSet(agentSet, "/tmp");
+        DiagnosticReport report = AgentSyncLinter.LintSet(agentSet, "/tmp", File.Exists);
 
         Assert.DoesNotContain(report.Items, d => d.Code == "KW-AGENT-LINT-002");
     }

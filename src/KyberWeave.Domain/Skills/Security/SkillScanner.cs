@@ -12,8 +12,14 @@ namespace KyberWeave.Core.Skills.Security;
 /// </summary>
 public sealed class SkillScanner
 {
-    public IEnumerable<Diagnostic> Scan(Skill skill)
+    /// <summary>Scans the skill's prose, its bundled scripts and its provenance.</summary>
+    /// <param name="skill">The skill to scan.</param>
+    /// <param name="readScriptText">Reads one bundled script; returning null skips it, as an unreadable script always has.</param>
+    /// <returns>One diagnostic per finding, in prose, script and provenance order.</returns>
+    public IEnumerable<Diagnostic> Scan(Skill skill, Func<SkillResource, string?> readScriptText)
     {
+        ArgumentNullException.ThrowIfNull(readScriptText);
+
         string id = skill.Frontmatter.Name ?? skill.DirectoryName;
         string file = skill.SkillFilePath;
         InstructionSurfaceRuleCodes codes = InstructionSurfaceRuleCodes.ForSkills;
@@ -24,9 +30,11 @@ public sealed class SkillScanner
 
         foreach (SkillResource script in skill.Scripts)
         {
-            string text;
-            try { text = File.ReadAllText(script.AbsolutePath); }
+            string? text;
+            try { text = readScriptText(script); }
             catch { continue; }
+
+            if (text is null) continue;
 
             foreach (Diagnostic d in InstructionSurfaceScanner.ScanScriptText(
                          text, script.RelativePath, script.AbsolutePath, id, codes))

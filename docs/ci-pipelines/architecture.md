@@ -85,7 +85,7 @@ different risk:
 | `docs validate`, `docs drift` | any error |
 | `skill validate`, `skill lint` | any error |
 | `agent validate`, `agent sync-check` | any error |
-| `skill scan`, `agent scan` | any critical — raise with `--fail-on warning\|error` |
+| `skill scan`, `agent scan` | any critical — raise with `--fail-on warning\|error` (case-insensitive) |
 | `skill route` | accuracy below `--min-accuracy` |
 | `squad install`, `squad update`, `squad pack` | configuration, prerequisite, integrity, transaction, or pack failure (exit code 1 or 2); on install and update, a declined target-root confirmation (exit code 2) |
 | `squad uninstall`, `squad doctor` | prerequisite, transaction, or tool failure (exit code 1); on uninstall, a declined target-root confirmation (exit code 2) |

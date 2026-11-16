@@ -8,7 +8,7 @@ source-root: src/KyberWeave.Domain/Skills
 owner: dpalfery
 last-reviewed: 2026-10-31
 code-refs:
-  - SkillLoader
+  - SkillFileReader
   - RoutingLinter
   - DescriptionScorer
   - LexicalRoutingStrategy

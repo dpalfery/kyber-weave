@@ -9,20 +9,25 @@ public static class FailOnPolicy
     /// <param name="report">The findings of the scan.</param>
     /// <param name="failOn">The <c>--fail-on</c> value.</param>
     /// <remarks>
-    ///     The value is upper-cased before it is compared with the lower-case names, so only the default
-    ///     (critical) threshold is ever reached. The behaviour is pinned as it shipped; changing it changes
-    ///     exit codes CI already depends on.
+    ///     The value is compared case-insensitively with the lower-case names, so
+    ///     <c>warning</c>, <c>error</c> and <c>critical</c> match in any letter case. An unknown value
+    ///     falls back to the default (critical) threshold.
     /// </remarks>
     public static int ExitCode(DiagnosticReport report, string failOn)
     {
         ArgumentNullException.ThrowIfNull(report);
         ArgumentNullException.ThrowIfNull(failOn);
 
-        return failOn.ToUpperInvariant() switch
+        if (string.Equals(failOn, "warning", StringComparison.OrdinalIgnoreCase))
         {
-            "warning" => report.Warnings > 0 || report.HasErrors ? 1 : 0,
-            "error" => report.HasErrors ? 1 : 0,
-            _ => report.HasCritical ? 1 : 0
-        };
+            return report.Warnings > 0 || report.HasErrors ? 1 : 0;
+        }
+
+        if (string.Equals(failOn, "error", StringComparison.OrdinalIgnoreCase))
+        {
+            return report.HasErrors ? 1 : 0;
+        }
+
+        return report.HasCritical ? 1 : 0;
     }
 }

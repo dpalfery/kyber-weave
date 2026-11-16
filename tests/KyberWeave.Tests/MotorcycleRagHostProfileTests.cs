@@ -127,7 +127,7 @@ public class MotorcycleRagHostProfileTests
                 $"Host profile must map conductor for {harness}.");
         }
 
-        DiagnosticReport report = AgentSyncLinter.LintSet(repo.LoadAgentSet(), repo.Root, config.Harness);
+        DiagnosticReport report = AgentSyncLinter.LintSet(repo.LoadAgentSet(), repo.Root, config.Harness, File.Exists);
 
         List<Diagnostic> conductorMissing = report.Items
             .Where(i => i is { Code: AgentSyncLinter.RuleUnsatisfiedRole, Subject: "conductor" })
@@ -323,7 +323,7 @@ public class MotorcycleRagHostProfileTests
         public void WriteLegacyRootConfig(string yaml) =>
             File.WriteAllText(Path.Combine(Root, "kyber-weave.yml"), yaml);
 
-        public AgentSet LoadAgentSet() => AgentLoader.LoadAll(Root);
+        public AgentSet LoadAgentSet() => GovernanceTestFiles.Agents.LoadAll(Root);
 
         public void Dispose()
         {

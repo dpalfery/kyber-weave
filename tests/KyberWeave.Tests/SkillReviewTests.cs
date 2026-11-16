@@ -16,7 +16,7 @@ public sealed class SkillReviewTests
     private static Skill MakeSkill(string name, string description, string dir = "/tmp/skills")
     {
         string content = $"---\nname: {name}\ndescription: {description}\n---\n\n# {name}\nBody instructions.";
-        return SkillParser.Parse(content, $"{dir}/{name}/SKILL.md", $"{dir}/{name}");
+        return GovernanceTestFiles.Skills.Read(content, $"{dir}/{name}/SKILL.md", $"{dir}/{name}");
     }
 
     private static AgentModel MakeAgent(string roleName, string description, HarnessKind harness = HarnessKind.Claude)

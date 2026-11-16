@@ -14,8 +14,8 @@ scans such as the spawn-site audit and the root instruction pointers. Read
   test in either project. `KyberWeaveTestPaths`, `TempDirectory` and `TestTempRoot` are linked
   from `KyberWeave.Tests`, not copied.
 - It runs as the `test-policy` gate, its own CI step, and in `scripts/fast-loop.sh` whenever a
-  change is more than C# under `src/` or `tests/KyberWeave.Tests/`. The two tests that read
-  source text run on every .NET loop; they are named in `POLICY_SOURCE_SCANS` in that script.
+  change is more than C# under `src/` or `tests/KyberWeave.Tests/`. The tests that read source
+  text run on every .NET loop; they are named in `POLICY_SOURCE_SCANS` in that script.
 - To run one class, build once and filter, running `dotnet` directly from the repository root. A filter
   that matches nothing exits 8 ("Zero tests ran").
 

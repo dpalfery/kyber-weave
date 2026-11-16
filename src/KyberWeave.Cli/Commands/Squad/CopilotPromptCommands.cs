@@ -492,7 +492,7 @@ internal static class CopilotPromptCommandSupport
     /// <summary>The detected builds in scope: all of them, or only the one the person named.</summary>
     internal static IReadOnlyList<VsCodeFlavour> DetectedTargets(CopilotPromptEnvironment environment, VsCodeFlavour? requested)
     {
-        IReadOnlyList<VsCodeFlavour> detected = VsCodeUserSettingsPaths.Detect(Home(environment), environment.AppDataDirectory, environment.Platform, environment.XdgConfigHome);
+        IReadOnlyList<VsCodeFlavour> detected = VsCodeUserSettingsPaths.Detect(Home(environment), environment.AppDataDirectory, environment.Platform, Directory.Exists, environment.XdgConfigHome);
         return requested is null ? detected : detected.Where(flavour => flavour == requested.Value).ToList();
     }
 
