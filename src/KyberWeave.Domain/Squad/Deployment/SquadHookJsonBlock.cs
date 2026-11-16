@@ -219,9 +219,14 @@ public static class SquadHookJsonBlock
             return true;
         }
 
-        JsonObject? parent = format is SquadHookBlockFormat.Cursor or SquadHookBlockFormat.Codex or SquadHookBlockFormat.Claude
-            ? root["hooks"] as JsonObject
-            : root;
+        bool nested = format is SquadHookBlockFormat.Cursor or SquadHookBlockFormat.Codex or SquadHookBlockFormat.Claude;
+        if (nested && root["hooks"] is not null and not JsonObject)
+        {
+            // A hooks value of the wrong shape is the user's content, not an empty block: never report it deletable.
+            return false;
+        }
+
+        JsonObject? parent = nested ? root["hooks"] as JsonObject : root;
         if (parent is null)
         {
             return true;
