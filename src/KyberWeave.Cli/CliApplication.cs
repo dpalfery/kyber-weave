@@ -140,6 +140,12 @@ internal static class CliApplication
                             "four files a folder holds.")
                         .WithExample("docs", "standards", "migrate", ".")
                         .WithExample("docs", "standards", "migrate", ".", "--dry-run");
+
+                    standards.AddCommand<DocsStandardsDiffCommand>("diff")
+                        .WithDescription(
+                            "Show how a host's standards folder differs from the current template, and write nothing.")
+                        .WithExample("docs", "standards", "diff", ".")
+                        .WithExample("docs", "standards", "diff", ".", "csharp");
                 });
 
                 docs.AddCommand<DocsTasksCommand>("tasks")
