@@ -824,13 +824,13 @@
       "bound": "Delegating call to the six-argument overload. It builds a ProcessStartInfo and starts nothing."
     },
     {
-      "file": "src/KyberWeave.Mcp/CorpusProvenance.cs",
+      "file": "src/KyberWeave.Data/Docs/Mcp/GitCheckoutProbe.cs",
       "text": "ProcessStartInfo startInfo = new(\"git\")",
       "count": 1,
       "bound": "Builds only; nothing starts on this line. Started at CorpusProvenance.cs:133 with GitTimeout = 5 s."
     },
     {
-      "file": "src/KyberWeave.Mcp/CorpusProvenance.cs",
+      "file": "src/KyberWeave.Data/Docs/Mcp/GitCheckoutProbe.cs",
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);",
       "count": 1,
       "bound": "ProcessRunner.Run with GitTimeout = 5 s (CorpusProvenance.cs:31); the process tree is killed on expiry."

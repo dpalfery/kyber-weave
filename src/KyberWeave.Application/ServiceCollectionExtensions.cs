@@ -1,4 +1,7 @@
 using KyberWeave.Application.Hooks;
+using KyberWeave.Contracts.Docs;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Mcp;
 using KyberWeave.Application.RunStart;
 using KyberWeave.Core.Squad.Briefs;
 using KyberWeave.Contracts.Services;
@@ -28,6 +31,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IEditHookService, EditHookService>();
         services.TryAddSingleton<IRunStartRunnerFactory, RunStartRunnerFactory>();
         services.TryAddSingleton<ISquadBriefService, SquadBriefService>();
+        services.TryAddSingleton<ICorpusProvenance>(sp => new CorpusProvenanceService(sp.GetRequiredService<IGitCheckoutProbe>()));
         return services;
     }
 }

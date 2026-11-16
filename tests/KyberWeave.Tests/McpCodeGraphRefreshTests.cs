@@ -209,7 +209,7 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
 
-        DocsTools tools = new(
+        DocsTools tools = DocsToolsComposition.Create(
             host,
             null,
             new CodeGraphFreshness(Root, refreshEnabled: true, ProvisionSucceeds()));
@@ -363,7 +363,7 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
 
-        return new DocsTools(
+        return DocsToolsComposition.Create(
             host,
             null,
             new CodeGraphFreshness(root, refreshEnabled: true, ProvisionSucceeds()));

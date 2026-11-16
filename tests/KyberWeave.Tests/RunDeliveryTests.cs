@@ -826,9 +826,9 @@ public sealed class RunDeliveryTests : IDisposable
         Git(_work, "commit", "-q", "-m", "chore: config");
         ScriptedGh gh = new();
         DocsTools tools = DocsRootRegistry.CreateTools(_work, codeGraphRefreshEnabled: false,
-            new DocsRootRegistry(_work, path => DocsRootRegistry.CreateTools(path, codeGraphRefreshEnabled: false, registry: null)));
-        tools.DeliveryExecutor = gh;
-        tools.DeliveryHome = _home;
+            new DocsRootRegistry(_work, path => DocsRootRegistry.CreateTools(path, codeGraphRefreshEnabled: false, registry: null)),
+            deliveryExecutor: gh,
+            deliveryHome: _home);
 
         string response = tools.DeliverRun(_work, "Lists can be exported.");
 

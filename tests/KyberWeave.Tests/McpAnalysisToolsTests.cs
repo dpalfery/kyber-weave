@@ -269,7 +269,7 @@ public sealed class McpAnalysisToolsTests : IDisposable
             () => FakeCodeGraphResolver.WithSymbols(),
             () => new DocumentSet { Documents = [] },
             "docs");
-        return new DocsTools(host, reader);
+        return DocsToolsComposition.Create(host, reader);
     }
 
     private static DocumentationAnalysisResult Result(params AnalysisCandidate[] candidates) =>

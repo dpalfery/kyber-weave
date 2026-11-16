@@ -1,5 +1,6 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Data.Docs.Mcp;
 using KyberWeave.Data.Doctor;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Host;
@@ -33,6 +34,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IRunCheckout>(sp => new RunCheckoutGuard(sp.GetRequiredService<IWritableFileSystem>(), sp.GetRequiredService<IRunStateStore>()));
         services.TryAddSingleton<IHooksConfigSource>(sp => new YamlHooksConfigSource(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<ITestClassResolver>(sp => new ConventionTestClassResolver(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<IGitCheckoutProbe>(_ => new GitCheckoutProbe());
         return services;
     }
 }

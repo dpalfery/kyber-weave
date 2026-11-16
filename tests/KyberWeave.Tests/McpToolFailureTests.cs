@@ -136,7 +136,7 @@ public sealed class McpToolFailureTests : IDisposable
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
 
-        return new DocsTools(host, null, new CodeGraphFreshness(root, refreshEnabled: true));
+        return DocsToolsComposition.Create(host, null, new CodeGraphFreshness(root, refreshEnabled: true));
     }
 
     /// <summary>A CodeGraph port that reports no readable index, as a missing or unreadable database does.</summary>

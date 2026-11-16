@@ -1004,7 +1004,7 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
             () => new DocumentLoader(root, config.Ontology).Load(),
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
-        return new DocsTools(host);
+        return DocsToolsComposition.Create(host);
     }
 
     /// <summary>
@@ -1027,7 +1027,7 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
             () => new DocumentLoader(_corpus.Root, config.Ontology).Load(),
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
-        return (new DocsTools(host), host);
+        return (DocsToolsComposition.Create(host), host);
     }
 
     /// <summary>
