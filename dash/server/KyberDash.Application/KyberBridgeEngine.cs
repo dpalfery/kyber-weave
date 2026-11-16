@@ -377,14 +377,28 @@ public class KyberBridgeEngine
             }
             else
             {
-                chunks.Add(new
+                // One flat entry per captured part, the shape the part-filtered branch and the
+                // dashboard's content reader both use. A span that captured nothing contributes
+                // no entry, rather than a part-less wrapper the reader cannot render.
+                IEnumerable<(string Name, string Text, ContentPart? Source)> captured = record.Parts is not null
+                    ? record.Parts.Select(p => (p.Part, p.Text, (ContentPart?)p))
+                    : record.Content.Select(c => (c.Key, c.Value, (ContentPart?)null));
+                foreach ((string name, string text, ContentPart? source) in captured)
                 {
-                    spanId = record.SpanId,
-                    index,
-                    timestamp = record.Timestamp,
-                    content = record.Content,
-                    parts = record.Parts,
-                });
+                    Dictionary<string, object> entry = new(StringComparer.Ordinal)
+                    {
+                        ["spanId"] = record.SpanId,
+                        ["index"] = index,
+                        ["part"] = name,
+                        ["text"] = text,
+                    };
+                    if (source?.Tokens is long tokens) entry["tokens"] = tokens;
+                    if (source?.Server is string server) entry["server"] = server;
+                    if (source?.Order is int order) entry["order"] = order;
+                    if (source?.Resident is bool resident) entry["resident"] = resident;
+                    if (source?.Truncated is bool clipped) entry["truncated"] = clipped;
+                    chunks.Add(entry);
+                }
             }
 
             index++;
