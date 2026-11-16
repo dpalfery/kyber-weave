@@ -21,6 +21,9 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
 {
     private const string ChecksumAssetName = "SHA256SUMS.txt";
     private const int MaximumRedirects = 10;
+
+    /// <summary>The largest release asset one download buffers: the Squad bundle and its checksum list are far smaller.</summary>
+    internal const long DefaultMaximumAssetBytes = 512L * 1024 * 1024;
     private static readonly UTF8Encoding StrictUtf8 = new(
         encoderShouldEmitUTF8Identifier: false,
         throwOnInvalidBytes: true);
@@ -30,6 +33,7 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
     private readonly Uri _apiRoot;
     private readonly string? _token;
     private readonly Action? _onStagingCreated;
+    private readonly long _maximumAssetBytes = DefaultMaximumAssetBytes;
 
     // Derived from the root rather than passed separately: a caller can only reach the
     // relaxed transport by having already supplied a loopback API root, which
@@ -54,7 +58,8 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
         HttpMessageHandler handler,
         Uri apiRoot,
         Action? onStagingCreated = null,
-        Func<string, string?>? readEnvironment = null)
+        Func<string, string?>? readEnvironment = null,
+        long maximumAssetBytes = DefaultMaximumAssetBytes)
     {
         ArgumentNullException.ThrowIfNull(handler);
         ArgumentNullException.ThrowIfNull(apiRoot);
@@ -71,6 +76,7 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
         _httpClient = new HttpClient(_handler, disposeHandler: false);
         _apiRoot = apiRoot;
         _token = ReadToken(readEnvironment ?? Environment.GetEnvironmentVariable);
+        _maximumAssetBytes = maximumAssetBytes;
         _onStagingCreated = onStagingCreated;
         _allowLoopbackHttp = ReleaseOrigin.IsLoopbackAuthority(apiRoot);
     }
@@ -248,7 +254,40 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
     {
         ValidateTransport(uri, "GitHub release asset URI");
         using HttpResponseMessage response = await SendHttpsAsync(uri, cancellationToken).ConfigureAwait(false);
-        return await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+
+        // A declared length over the cap is refused before any byte is read; an undeclared or understated one is
+        // caught by the capped copy, so a hostile or broken host cannot make the CLI buffer an unbounded asset.
+        long? declared = response.Content.Headers.ContentLength;
+        if (declared > _maximumAssetBytes)
+        {
+            throw new InvalidDataException(
+                $"The release asset is {declared} bytes, over the {_maximumAssetBytes}-byte limit.");
+        }
+
+        Stream body = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        await using (body.ConfigureAwait(false))
+        {
+            return await ReadCappedAsync(body, _maximumAssetBytes, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Reads <paramref name="source"/> to its end, refusing more than <paramref name="maximumBytes"/>.</summary>
+    internal static async Task<byte[]> ReadCappedAsync(Stream source, long maximumBytes, CancellationToken cancellationToken)
+    {
+        using MemoryStream buffer = new();
+        byte[] chunk = new byte[81920];
+        int read;
+        while ((read = await source.ReadAsync(chunk, cancellationToken).ConfigureAwait(false)) > 0)
+        {
+            if (buffer.Length + read > maximumBytes)
+            {
+                throw new InvalidDataException($"The release asset is over the {maximumBytes}-byte limit.");
+            }
+
+            await buffer.WriteAsync(chunk.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+        }
+
+        return buffer.ToArray();
     }
 
     private async Task<HttpResponseMessage> SendHttpsAsync(
