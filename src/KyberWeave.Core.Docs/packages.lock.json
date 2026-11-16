@@ -25,6 +25,16 @@
         "resolved": "10.0.14",
         "contentHash": "QtpQzuSZVyTPCuHW058yCs9Nj0394uUkNyFHS813nOmK9UgUdBdaprJ5PPsBgsQIpxADTsTkbaMMonykem6qdw=="
       },
+      "kyberweave.application": {
+        "type": "Project",
+        "dependencies": {
+          "KyberWeave.Contracts": "[0.1.0, )",
+          "KyberWeave.Data": "[0.1.0, )",
+          "KyberWeave.Domain": "[0.1.0, )",
+          "KyberWeave.Kernel": "[0.1.0, )",
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "[10.0.14, )"
+        }
+      },
       "kyberweave.contracts": {
         "type": "Project",
         "dependencies": {

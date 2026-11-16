@@ -1,7 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Configuration;
-using KyberWeave.Core.Docs.Closeout;
 using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Docs.Delivery;
@@ -11,42 +10,6 @@ namespace KyberWeave.Core.Docs.Delivery;
 /// A null value leaves its section out. The renderer, not the caller, decides what an empty list means for the
 /// sections a reviewer must always see (Changes, Validation, Not verified, Documentation impact).
 /// </remarks>
-public sealed record PullRequestContent
-{
-    /// <summary>The problem and the outcome, in one to three sentences.</summary>
-    public required string Summary { get; init; }
-
-    /// <summary>The kind of change, in words: bug fix, feature, refactor and so on.</summary>
-    public string? Type { get; init; }
-
-    /// <summary>The issue or work item, or null when there is none.</summary>
-    public string? LinkedWork { get; init; }
-
-    /// <summary>What changed, one short line each; empty when nothing recorded it.</summary>
-    public IReadOnlyList<string> Changes { get; init; } = [];
-
-    /// <summary>The evidence, as short readable lines; empty when the run recorded none.</summary>
-    public IReadOnlyList<string> Validation { get; init; } = [];
-
-    /// <summary>Every check that did not run or could not be confirmed, with its reason.</summary>
-    public IReadOnlyList<string> NotVerified { get; init; } = [];
-
-    /// <summary>Decisions made without a person that rest on no authoritative source; empty leaves the section out.</summary>
-    public IReadOnlyList<string> Decisions { get; init; } = [];
-
-    /// <summary>Review findings still open; empty leaves the section out.</summary>
-    public IReadOnlyList<string> PendingReview { get; init; } = [];
-
-    /// <summary>The todos filed for work found outside the change's scope, one line each; empty leaves the section out.</summary>
-    public IReadOnlyList<string> FollowUps { get; init; } = [];
-
-    /// <summary>The documentation-impact outcome, or null when the run did not record one.</summary>
-    public string? DocumentationImpact { get; init; }
-
-    /// <summary>Anything else reviewers should know, or null.</summary>
-    public string? Notes { get; init; }
-}
-
 /// <summary>
 /// Lays a <see cref="PullRequestContent"/> out in the one pull request description format, the
 /// <c>create-pull-request</c> skill's <c>assets/pull-request-description.md</c>, embedded here so the skill and the
@@ -73,7 +36,7 @@ public static partial class PullRequestDescription
         ["pull_request_template.md", "docs/pull_request_template.md", ".github/pull_request_template.md"];
 
     /// <summary>Reads the host's default pull request template, matching the file name case-insensitively, or null when it has none or none can be read.</summary>
-    public static string? ReadHostTemplate(string repoRoot) => ReadHostTemplate(repoRoot, BoundedFile.ReadAllText).Text;
+    public static string? ReadHostTemplate(string repoRoot) => ReadHostTemplate(repoRoot, DeliveryFile.ReadAllText).Text;
 
     /// <summary>
     /// Reads the host's default pull request template through <paramref name="read"/>. A candidate that cannot be read is
