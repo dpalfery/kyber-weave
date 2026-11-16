@@ -627,4 +627,34 @@ public sealed class PlanFinalizeTests
         Assert.Contains("it is not there", Assert.Single(absent.Items).Message, StringComparison.Ordinal);
         Assert.Contains("not a valid task file", Assert.Single(corrupt.Items).Message, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void IsLinkAgreesWithTheFileInfoLinkTargetCheckForEveryKindOfPath()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Creating symbolic links needs a privilege on Windows.");
+
+        using DocFixture fixture = Repository();
+        string file = Path.Combine(fixture.Root, "file.txt");
+        string folder = Path.Combine(fixture.Root, "folder");
+        File.WriteAllText(file, "x");
+        Directory.CreateDirectory(folder);
+        string fileLink = Path.Combine(fixture.Root, "file-link");
+        string folderLink = Path.Combine(fixture.Root, "folder-link");
+        string danglingFileLink = Path.Combine(fixture.Root, "dangling-file-link");
+        string danglingFolderLink = Path.Combine(fixture.Root, "dangling-folder-link");
+        File.CreateSymbolicLink(fileLink, file);
+        Directory.CreateSymbolicLink(folderLink, folder);
+        File.CreateSymbolicLink(danglingFileLink, Path.Combine(fixture.Root, "nowhere.txt"));
+        Directory.CreateSymbolicLink(danglingFolderLink, Path.Combine(fixture.Root, "nowhere-folder"));
+        string[] paths = [file, folder, fileLink, folderLink, danglingFileLink, danglingFolderLink, Path.Combine(fixture.Root, "missing")];
+
+        foreach (string path in paths)
+        {
+            Assert.Equal(new FileInfo(path).LinkTarget is not null, PlanFinalize.IsLink(DocsPorts.Files, path));
+        }
+
+        Assert.True(PlanFinalize.IsLink(DocsPorts.Files, danglingFileLink));
+        Assert.True(PlanFinalize.IsLink(DocsPorts.Files, danglingFolderLink));
+        Assert.False(PlanFinalize.IsLink(DocsPorts.Files, Path.Combine(fixture.Root, "missing")));
+    }
 }
