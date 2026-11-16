@@ -2,6 +2,8 @@ using System.Reflection;
 
 using KyberWeave.Application;
 using KyberWeave.Contracts.Docs;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Docs.Delivery;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
@@ -111,12 +113,24 @@ builder.Services.AddSingleton<IDocsAnalysisReader>(new RepositoryDocsAnalysisRea
 // The refresh schedule is a process-wide decision, made once from this process's own argv. The
 // tools receive it by injection so a test that asks them directly gets the default cadence.
 builder.Services.AddSingleton<ICodeGraphFreshnessGate>(new CodeGraphFreshness(repoRoot, codeGraphRefreshEnabled));
+builder.Services.AddSingleton<IDocsHostConfiguration, HostConfiguration>();
 builder.Services.AddSingleton<IDocsGateRunner, DocsGateRunner>();
 builder.Services.AddSingleton<IDocsQueryService, DocsQueryService>();
 builder.Services.AddSingleton<IPlanLifecycleService>(services =>
-    new PlanLifecycleService(repoRoot, services.GetRequiredService<IDocsQueryService>()));
+    new PlanLifecycleService(
+        repoRoot,
+        services.GetRequiredService<IDocsQueryService>(),
+        services.GetRequiredService<IDocsHostConfiguration>(),
+        services.GetRequiredService<IPlanFinalizeService>(),
+        services.GetRequiredService<IPlanCloseoutService>(),
+        services.GetRequiredService<IRepositoryFileStore>(),
+        services.GetRequiredService<TimeProvider>()));
 builder.Services.AddSingleton<IRunDeliveryService>(services =>
-    new RunDeliveryService(repoRoot, services.GetRequiredService<IDocsQueryService>()));
+    new RunDeliveryService(
+        repoRoot,
+        services.GetRequiredService<IDocsQueryService>(),
+        services.GetRequiredService<IDocsHostConfiguration>(),
+        services.GetRequiredService<RunDeliveryPorts>()));
 
 // A tool call may name another worktree of this repository with projectPath. Those are served by
 // tools of their own, built on demand and kept in a small least-recently-used set.

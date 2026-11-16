@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Parsing;
@@ -8,25 +10,6 @@ using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Docs.Closeout;
-
-/// <summary>Who approved a plan for execution.</summary>
-public enum PlanApprovalMode
-{
-    /// <summary>The conductor accepted the recommendation under autonomy <c>autonomous</c>.</summary>
-    Autonomous,
-
-    /// <summary>The owner approved the plan at the approve-and-execute gate.</summary>
-    Supervised
-}
-
-/// <summary>What a plan finalize did.</summary>
-/// <param name="Report">The findings, and one Info line per step taken.</param>
-/// <param name="Finalized">True when this run moved the plan from Draft to Ready.</param>
-/// <param name="AlreadyReady">True when the plan was already Ready with a current task file, so nothing changed.</param>
-/// <param name="TaskFilePath">The task file beside the plan, repository-relative.</param>
-/// <param name="ReadyQueue">One line per task, from the task file, then the tasks that may start now; null when refused.</param>
-public sealed record PlanFinalizeOutcome(
-    DiagnosticReport Report, bool Finalized, bool AlreadyReady, string TaskFilePath, string? ReadyQueue = null);
 
 /// <summary>
 /// Does the mechanical half of finalizing an approved Draft plan: records the approval in its Decisions table, sets
@@ -70,8 +53,11 @@ public sealed partial class PlanFinalize
 
     private readonly string _repoRoot;
     private readonly KyberWeaveConfig _config;
-    private readonly Func<DocumentLoader> _loaderFactory;
+    private readonly Func<IDocumentSource> _loaderFactory;
     private readonly ActivePlanFiles _files;
+    private readonly IRepositoryFileStore _store;
+    private readonly IBoundedProcessExecutor _process;
+    private readonly IDocsSchemaGate _gate;
     private readonly IPlanTaskAgentPicker? _picker;
 
     /// <summary>
@@ -81,8 +67,8 @@ public sealed partial class PlanFinalize
     internal Action<string>? AfterActivePlanCheck { get; init; }
 
     /// <summary>Creates the finalize step over a repository, its effective configuration and the loader validation reads with.</summary>
-    public PlanFinalize(string repoRoot, KyberWeaveConfig config, Func<DocumentLoader> loaderFactory)
-        : this(repoRoot, config, loaderFactory, null)
+    public PlanFinalize(string repoRoot, KyberWeaveConfig config, Func<IDocumentSource> loaderFactory, IRepositoryFileStore files, IBoundedProcessExecutor process, IDocsSchemaGate gate)
+        : this(repoRoot, config, loaderFactory, files, process, gate, null)
     {
     }
 
@@ -91,15 +77,31 @@ public sealed partial class PlanFinalize
     /// <param name="config">The effective configuration.</param>
     /// <param name="loaderFactory">The loader validation reads with.</param>
     /// <param name="picker">The agent picker, or null when no decision model is configured.</param>
-    public PlanFinalize(string repoRoot, KyberWeaveConfig config, Func<DocumentLoader> loaderFactory, IPlanTaskAgentPicker? picker)
+    /// <param name="files">The file store the plan, its index and its task file are read and written through.</param>
+    /// <param name="process">Runs the git commands that stage and commit the plan.</param>
+    /// <param name="gate">The schema gate the finalized plan is validated with.</param>
+    public PlanFinalize(
+        string repoRoot,
+        KyberWeaveConfig config,
+        Func<IDocumentSource> loaderFactory,
+        IRepositoryFileStore files,
+        IBoundedProcessExecutor process,
+        IDocsSchemaGate gate,
+        IPlanTaskAgentPicker? picker)
     {
+        ArgumentNullException.ThrowIfNull(gate);
+        _gate = gate;
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(process);
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(loaderFactory);
         _repoRoot = Path.GetFullPath(repoRoot);
         _config = config;
         _loaderFactory = loaderFactory;
-        _files = new ActivePlanFiles(_repoRoot, config, LegacyPorts.Files, LegacyPorts.Process);
+        _store = files;
+        _process = process;
+        _files = new ActivePlanFiles(_repoRoot, config, files, process);
         _picker = picker;
     }
 
@@ -128,7 +130,7 @@ public sealed partial class PlanFinalize
         string? planRead;
         try
         {
-            planRead = PresentFile.ReadIfPresent(_files.Absolute(plan));
+            planRead = _store.ReadTextIfPresent(_files.Absolute(plan));
         }
         catch (Exception exception) when (FileFailure.Is(exception))
         {
@@ -159,7 +161,7 @@ public sealed partial class PlanFinalize
         string? indexText;
         try
         {
-            indexText = planIndex is null ? null : PresentFile.ReadIfPresent(_files.Absolute(planIndex));
+            indexText = planIndex is null ? null : _store.ReadTextIfPresent(_files.Absolute(planIndex));
         }
         catch (Exception exception) when (FileFailure.Is(exception))
         {
@@ -182,7 +184,7 @@ public sealed partial class PlanFinalize
         if (withApproval is null)
             return Refused();
 
-        PlanTaskFileGenerator generator = new(_repoRoot, _config, LegacyPorts.Files, LegacyPorts.Process, _picker);
+        PlanTaskFileGenerator generator = new(_repoRoot, _config, _store, _process, _picker);
         PlanTaskFileOutcome preview = generator.Run(plan, PlanTaskFileMode.Preview);
         if (preview.Report.HasErrors)
         {
@@ -207,7 +209,7 @@ public sealed partial class PlanFinalize
         {
             // One read answers both "is it there" and "what does it hold": null means absent at this read, and only then
             // may a restore delete it.
-            taskFileBefore = PresentFile.ReadIfPresent(_files.Absolute(taskFile));
+            taskFileBefore = _store.ReadTextIfPresent(_files.Absolute(taskFile));
         }
         catch (Exception exception) when (FileFailure.Is(exception))
         {
@@ -217,7 +219,7 @@ public sealed partial class PlanFinalize
             return Refused();
         }
 
-        foreach (string written in new[] { plan, planIndex }.OfType<string>().Where(file => IsLink(_files.Absolute(file))))
+        foreach (string written in new[] { plan, planIndex }.OfType<string>().Where(file => IsLink(_store, _files.Absolute(file))))
         {
             report.Add(new Diagnostic(PlanNeedsArchitect, Severity.Error,
                 $"'{written}' is a symbolic link, which this step does not write through. Nothing was changed.", plan, written, Hint: ArchitectHint));
@@ -226,9 +228,9 @@ public sealed partial class PlanFinalize
 
         try
         {
-            File.WriteAllText(_files.Absolute(plan), newPlan);
+            _store.WriteAllText(_files.Absolute(plan), newPlan);
             if (newIndex is not null)
-                File.WriteAllText(_files.Absolute(planIndex!), newIndex);
+                _store.WriteAllText(_files.Absolute(planIndex!), newIndex);
 
             PlanTaskFileOutcome written = generator.Run(plan, PlanTaskFileMode.Write);
             report.AddRange(written.Report.Items.Where(item => item.Severity == Severity.Error));
@@ -281,7 +283,7 @@ public sealed partial class PlanFinalize
 
     private PlanFinalizeOutcome AlreadyReady(string plan, DiagnosticReport report, string taskFile)
     {
-        PlanTaskFileOutcome check = new PlanTaskFileGenerator(_repoRoot, _config, LegacyPorts.Files, LegacyPorts.Process).Run(plan, PlanTaskFileMode.Check);
+        PlanTaskFileOutcome check = new PlanTaskFileGenerator(_repoRoot, _config, _store, _process).Run(plan, PlanTaskFileMode.Check);
         if (check.Report.HasErrors)
         {
             report.AddRange(check.Report.Items);
@@ -296,7 +298,7 @@ public sealed partial class PlanFinalize
         string? index = _files.PlanIndexPath();
         try
         {
-            if (index is not null && PresentFile.ReadIfPresent(_files.Absolute(index)) is not null)
+            if (index is not null && _store.ReadTextIfPresent(_files.Absolute(index)) is not null)
                 own.Add(index);
         }
         catch (Exception exception) when (FileFailure.Is(exception))
@@ -336,7 +338,7 @@ public sealed partial class PlanFinalize
         string problem = "it is not there";
         try
         {
-            if (PresentFile.ReadIfPresent(_files.Absolute(taskFile)) is { } text)
+            if (_store.ReadTextIfPresent(_files.Absolute(taskFile)) is { } text)
             {
                 queue = ReadyQueueOf(text);
                 problem = "it is not a valid task file";
@@ -542,7 +544,7 @@ public sealed partial class PlanFinalize
         if (planIndex is not null)
             own.Add(planIndex);
 
-        DiagnosticReport validated = DocsSchemaGate.Validate(_repoRoot, _config, _loaderFactory().Load(), _loaderFactory, mergeReady: false);
+        DiagnosticReport validated = _gate.Validate(_repoRoot, _config, _loaderFactory().Load(), _loaderFactory, mergeReady: false);
         return validated.Items.Where(item => item.Severity == Severity.Error
                                              && (own.Contains(item.FilePath?.Replace('\\', '/') ?? string.Empty)
                                                  || own.Contains(item.Subject.Replace('\\', '/'))));
@@ -556,15 +558,15 @@ public sealed partial class PlanFinalize
     internal List<string> Restore(string plan, string planText, string? planIndex, string? indexText, string taskFile, string? taskFileBefore)
     {
         List<string> notUndone = [];
-        if (!TryWrite(_files.Absolute(plan), planText))
+        if (!TryWrite(_store, _files.Absolute(plan), planText))
             notUndone.Add(plan);
-        if (planIndex is not null && indexText is not null && !TryWrite(_files.Absolute(planIndex), indexText))
+        if (planIndex is not null && indexText is not null && !TryWrite(_store, _files.Absolute(planIndex), indexText))
             notUndone.Add(planIndex);
         // Absent before the step means "this step created it", except a link: a dangling one also reads as absent, but it
         // is the owner's, this step never creates one, and deleting it would remove the link rather than a written file.
         bool taskFileRestored = taskFileBefore is not null
-            ? TryWrite(_files.Absolute(taskFile), taskFileBefore)
-            : IsLink(_files.Absolute(taskFile)) || DeleteIfPresent(_files.Absolute(taskFile));
+            ? TryWrite(_store, _files.Absolute(taskFile), taskFileBefore)
+            : IsLink(_store, _files.Absolute(taskFile)) || DeleteIfPresent(_store, _files.Absolute(taskFile));
         if (!taskFileRestored)
             notUndone.Add(taskFile);
         return notUndone;
@@ -597,11 +599,11 @@ public sealed partial class PlanFinalize
             Hint: string.Join(' ', advice)));
     }
 
-    internal static bool IsLink(string path)
+    internal static bool IsLink(IWritableFileSystem files, string path)
     {
         try
         {
-            return new FileInfo(path).LinkTarget is not null;
+            return files.GetLinkTarget(path) is not null;
         }
         catch (Exception exception) when (FileFailure.Is(exception))
         {
@@ -611,14 +613,14 @@ public sealed partial class PlanFinalize
 
     // A link is the owner's: writing through it would rewrite whatever it points at, so a restore treats it as one more
     // file it cannot undo, exactly as the generator refuses to write through one.
-    private static bool TryWrite(string path, string text)
+    private static bool TryWrite(IWritableFileSystem files, string path, string text)
     {
         try
         {
-            if (IsLink(path))
+            if (IsLink(files, path))
                 return false;
 
-            File.WriteAllText(path, text);
+            files.WriteAllText(path, text);
             return true;
         }
         catch (Exception exception) when (FileFailure.Is(exception))
@@ -633,11 +635,11 @@ public sealed partial class PlanFinalize
     /// runs while a refusal is being reported.
     /// </summary>
     /// <returns>True when the file is gone afterwards; false when it could not be deleted.</returns>
-    internal static bool DeleteIfPresent(string path)
+    internal static bool DeleteIfPresent(IWritableFileSystem files, string path)
     {
         try
         {
-            File.Delete(path);
+            files.DeleteFile(path);
             return true;
         }
         catch (DirectoryNotFoundException)

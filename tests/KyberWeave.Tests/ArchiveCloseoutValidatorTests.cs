@@ -182,7 +182,8 @@ public sealed class ArchiveCloseoutValidatorTests
         return new ArchiveCloseoutValidator(
             fixture.Root,
             config,
-            () => new DocumentLoader(fixture.Root, config.Ontology)).Validate(
+            () => new DocumentLoader(fixture.Root, config.Ontology),
+            DocsPorts.Files).Validate(
             new DocumentLoader(fixture.Root, config.Ontology).Load(), changes);
     }
 

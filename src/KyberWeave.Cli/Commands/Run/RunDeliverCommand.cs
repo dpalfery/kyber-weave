@@ -1,4 +1,5 @@
 using KyberWeave.Cli.Commands.Docs;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Delivery;
@@ -10,7 +11,7 @@ namespace KyberWeave.Cli.Commands.Run;
 /// Pushes a finished run's branch and creates or updates its draft pull request on GitHub, with the description
 /// assembled from what the run recorded. The same step the docs server's deliver tool runs (ADR 0081).
 /// </summary>
-public sealed class RunDeliverCommand : Command<RunDeliverSettings>
+public sealed class RunDeliverCommand(IRunDeliveryRunner delivery) : Command<RunDeliverSettings>
 {
     /// <summary>The command description shared by the real registration and the help tests.</summary>
     public const string Description =
@@ -28,8 +29,8 @@ public sealed class RunDeliverCommand : Command<RunDeliverSettings>
             return 1;
         }
 
-        DeliveryOutcome outcome = new RunDelivery(Path.GetFullPath(settings.Path), config.WithOntology(ontology))
-            .Run(new DeliveryRequest(settings.Summary ?? string.Empty, settings.Notes, settings.Title, !settings.NoDraft,
+        DeliveryOutcome outcome = delivery.Run(Path.GetFullPath(settings.Path), config.WithOntology(ontology),
+            new DeliveryRequest(settings.Summary ?? string.Empty, settings.Notes, settings.Title, !settings.NoDraft,
                 settings.DocumentationImpact, settings.Plan));
         report.AddRange(outcome.Report.Items);
         report.AddMetric("delivered", outcome.Delivered);

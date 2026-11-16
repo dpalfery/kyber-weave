@@ -15,7 +15,7 @@ namespace KyberWeave.Cli.Commands.Docs;
 /// Prints one task's packet for the worker that was dispatched for it, so a conductor passes a task id and nothing
 /// else, and a worker, which may not open a plan, still gets the whole brief.
 /// </summary>
-public sealed class DocsPacketCommand(IPlanTaskService tasks) : Command<DocsPacketSettings>
+public sealed class DocsPacketCommand(IPlanTaskService tasks, IPacketHostFacts hostFacts) : Command<DocsPacketSettings>
 {
     /// <summary>The plan could not be chosen: none is Ready or In progress, or several are.</summary>
     public const string PlanNotChosen = "KW-DOC-TASKS-CLI-002";
@@ -116,7 +116,7 @@ public sealed class DocsPacketCommand(IPlanTaskService tasks) : Command<DocsPack
         }
 
         List<string> notes = [];
-        Console.Out.WriteLine(PacketHostFacts.Render(root, config, agent, entry.Id, notes));
+        Console.Out.WriteLine(hostFacts.Render(root, config, agent, entry.Id, notes));
         foreach (string note in notes)
             Console.Error.WriteLine("docs packet: " + note);
         return 0;

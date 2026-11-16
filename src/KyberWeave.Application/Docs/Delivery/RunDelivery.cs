@@ -3,60 +3,18 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Closeout;
 using KyberWeave.Core.Processes;
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Review;
 using KyberWeave.Core.RunStart;
 using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Docs.Delivery;
-
-/// <summary>What the conductor asks the deliver step for.</summary>
-/// <param name="Summary">The problem and the outcome, in one to three plain sentences.</param>
-/// <param name="Notes">Extra notes for reviewers, or null.</param>
-/// <param name="Title">A title that replaces the composed one, or null.</param>
-/// <param name="Draft">Whether a new pull request is opened as a draft.</param>
-/// <param name="DocumentationImpact">The documentation-impact outcome as docs-dev returned it, or null.</param>
-/// <param name="PlanFile">The archived plan, when the branch archived more than one; null to find it.</param>
-public sealed record DeliveryRequest(
-    string Summary,
-    string? Notes = null,
-    string? Title = null,
-    bool Draft = true,
-    string? DocumentationImpact = null,
-    string? PlanFile = null);
-
-/// <summary>What a delivery did.</summary>
-/// <param name="Report">The findings, and one Info line per step taken.</param>
-/// <param name="Delivered">Whether the branch was pushed and its pull request created or updated.</param>
-/// <param name="Created">True when this call created the pull request, false when it updated an open one.</param>
-/// <param name="Link">The pull request's address.</param>
-/// <param name="Number">The pull request's number.</param>
-/// <param name="IsDraft">Whether the pull request is a draft, as read back.</param>
-/// <param name="Base">The branch it merges into.</param>
-/// <param name="Head">The run branch.</param>
-/// <param name="Checks">One line on the CI checks reported on it.</param>
-/// <param name="Title">The title sent.</param>
-/// <param name="Body">The description sent.</param>
-public sealed record DeliveryOutcome(
-    DiagnosticReport Report,
-    bool Delivered,
-    bool Created = false,
-    string? Link = null,
-    int? Number = null,
-    bool? IsDraft = null,
-    string? Base = null,
-    string? Head = null,
-    string? Checks = null,
-    string? Title = null,
-    string? Body = null)
-{
-    /// <summary>Whether the refusal is the provider one, which sends the conductor to the delivery agent instead.</summary>
-    public bool NeedsDeliveryAgent => Report.Items.Any(item => item.Code == RunDelivery.ProviderUnavailable);
-}
 
 /// <summary>
 /// Delivers a finished run: commits the archived plan move and the filed todos if still pending, pushes the run branch, and creates
@@ -83,7 +41,7 @@ public sealed partial class RunDelivery
     public const string PlanNotDeliverable = "KW-DELIVER-004";
 
     /// <summary>The provider is not GitHub, or its CLI is missing or not signed in: the delivery agent takes over.</summary>
-    public const string ProviderUnavailable = "KW-DELIVER-005";
+    public const string ProviderUnavailable = DeliveryOutcome.ProviderUnavailableCode;
 
     /// <summary>The push was refused.</summary>
     public const string PushFailed = "KW-DELIVER-006";
@@ -124,6 +82,10 @@ public sealed partial class RunDelivery
     private readonly IProcessExecutor _executor;
     private readonly string _homeDirectory;
     private readonly ActivePlanFiles _files;
+    private readonly IRepositoryFileStore _store;
+    private readonly IRunStateStore _runState;
+    private readonly IReviewCycleStore _cycles;
+    private readonly TimeProvider _time;
 
     /// <summary>
     /// Test seam, called with the absolute path of the archived plan once it is found and before it is read: the
@@ -139,15 +101,21 @@ public sealed partial class RunDelivery
     /// <param name="config">The repository's effective configuration.</param>
     /// <param name="executor">Runs git and gh; null for the bounded default.</param>
     /// <param name="homeDirectory">The operator's home, which holds the run records; null for the user profile.</param>
-    public RunDelivery(string repoRoot, KyberWeaveConfig config, IProcessExecutor? executor = null, string? homeDirectory = null)
+    /// <param name="ports">The ports the run records, review evidence and plan files are read through.</param>
+    public RunDelivery(string repoRoot, KyberWeaveConfig config, IProcessExecutor? executor, string? homeDirectory, RunDeliveryPorts ports)
     {
+        ArgumentNullException.ThrowIfNull(ports);
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
         _repoRoot = Path.GetFullPath(repoRoot);
         _config = config;
-        _executor = executor ?? new BoundedExecutor(TimeSpan.FromMinutes(3));
-        _homeDirectory = homeDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        _files = new ActivePlanFiles(_repoRoot, config, LegacyPorts.Files, LegacyPorts.Process);
+        _executor = executor ?? new BoundedExecutor(ports.Process, TimeSpan.FromMinutes(3));
+        _homeDirectory = homeDirectory ?? ports.Environment.HomeDirectory;
+        _store = ports.Files;
+        _runState = ports.RunState;
+        _cycles = ports.Cycles;
+        _time = ports.Time;
+        _files = new ActivePlanFiles(_repoRoot, config, ports.Files, ports.Process);
     }
 
     /// <summary>Delivers the run, or refuses and changes nothing.</summary>
@@ -177,7 +145,7 @@ public sealed partial class RunDelivery
                 "Deliver only a branch that kyber-weave run start created.");
         }
 
-        if (!RunBaseState.TryReadBaseRef(_homeDirectory, branch, out string? baseRef) || baseRef is null)
+        if (!_runState.TryReadBaseRef(_homeDirectory, branch, out string? baseRef) || baseRef is null)
         {
             return Refused(NotARunBranch, $"No run record names the base '{branch}' was started from. Nothing was changed.",
                 "Deliver only a branch kyber-weave run start created or resumed (--resume <branch>), which records its base.");
@@ -234,7 +202,7 @@ public sealed partial class RunDelivery
         string? planText = null;
         try
         {
-            planText = plan is null ? null : PresentFile.ReadIfPresent(_files.Absolute(plan));
+            planText = plan is null ? null : _store.ReadTextIfPresent(_files.Absolute(plan));
         }
         catch (Exception exception) when (FileFailure.Is(exception))
         {
@@ -259,7 +227,7 @@ public sealed partial class RunDelivery
         if (Gh("auth", "status", "--hostname", "github.com") is { ExitCode: not 0 } auth)
             return Refused(ProviderUnavailable, $"The GitHub CLI is not signed in to github.com: {FirstLine(auth.StandardError + auth.StandardOutput)}. Nothing was changed.", DeliveryAgentHint);
 
-        if (pendingPlanFiles.Count > 0 && !CommitPlanFiles([.. new[] { plansFolder, archiveFolder }.Where(folder => Directory.Exists(_files.Absolute(folder)))], plan, report))
+        if (pendingPlanFiles.Count > 0 && !CommitPlanFiles([.. new[] { plansFolder, archiveFolder }.Where(folder => _store.DirectoryExists(_files.Absolute(folder)))], plan, report))
             return new DeliveryOutcome(report, false);
         if (pendingTodoFiles.Count > 0 && !CommitTodoFiles(todoFolder, report))
             return new DeliveryOutcome(report, false);
@@ -268,7 +236,7 @@ public sealed partial class RunDelivery
         {
             FollowUps = FiledTodos(mergeBase, todoFolder, report)
         };
-        PullRequestDescription.HostTemplate hostTemplate = PullRequestDescription.ReadHostTemplate(_repoRoot, ReadTemplateFile ?? BoundedFile.ReadAllText);
+        PullRequestDescription.HostTemplate hostTemplate = PullRequestDescription.ReadHostTemplate(_repoRoot, ReadTemplateFile ?? _store.ReadAllTextBounded);
         foreach (string unreadable in hostTemplate.Unreadable)
         {
             report.Add(new Diagnostic(Step, Severity.Warning,
@@ -513,7 +481,7 @@ public sealed partial class RunDelivery
             .StandardOutput.Split('\0', StringSplitOptions.RemoveEmptyEntries)];
         added.AddRange(AddedInWorkingTree(porcelain));
 
-        List<string> active = [.. added.Where(path => IsPlanFile(path, plansFolder) && File.Exists(_files.Absolute(path))).Distinct(StringComparer.Ordinal)];
+        List<string> active = [.. added.Where(path => IsPlanFile(path, plansFolder) && _store.FileExists(_files.Absolute(path))).Distinct(StringComparer.Ordinal)];
         if (active.Count > 0)
         {
             report.Add(new Diagnostic(PlanNotDeliverable, Severity.Error,
@@ -522,7 +490,7 @@ public sealed partial class RunDelivery
             return false;
         }
 
-        List<string> archived = [.. added.Where(path => IsPlanFile(path, archiveFolder) && File.Exists(_files.Absolute(path))).Distinct(StringComparer.Ordinal)];
+        List<string> archived = [.. added.Where(path => IsPlanFile(path, archiveFolder) && _store.FileExists(_files.Absolute(path))).Distinct(StringComparer.Ordinal)];
         if (!string.IsNullOrWhiteSpace(named))
         {
             string wanted = Path.GetFileName(named.Trim().Replace('\\', '/'));
@@ -574,21 +542,21 @@ public sealed partial class RunDelivery
     private List<GateReport> TaskGateReports(string mergeBase, DiagnosticReport report)
     {
         string scratch = Path.Combine(_repoRoot, ScratchFolder);
-        if (!Directory.Exists(scratch))
+        if (!_store.DirectoryExists(scratch))
             return [];
 
         DateTimeOffset? started = RunStartedAt();
         List<GateReport> reports = [];
-        foreach (string folder in Directory.EnumerateDirectories(scratch))
+        foreach (string folder in _store.EnumerateDirectories(scratch))
         {
             string file = Path.Combine(folder, TaskGateFile);
-            if (!File.Exists(file) || Path.GetFileName(folder).EndsWith("-red", StringComparison.OrdinalIgnoreCase))
+            if (!_store.FileExists(file) || Path.GetFileName(folder).EndsWith("-red", StringComparison.OrdinalIgnoreCase))
                 continue;
             try
             {
-                GateReport gates = ReviewJson.ReadGates(BoundedFile.ReadAllText(file));
+                GateReport gates = ReviewJson.ReadGates(_store.ReadAllTextBounded(file));
                 bool thisRun = started is { } at
-                    ? File.GetLastWriteTimeUtc(file) >= at.UtcDateTime
+                    ? _store.GetLastWriteTimeUtc(file) >= at.UtcDateTime
                     : string.Equals(gates.Base, mergeBase, StringComparison.Ordinal);
                 if (thisRun)
                     reports.Add(gates);
@@ -609,7 +577,7 @@ public sealed partial class RunDelivery
         string branch = Git("symbolic-ref", "--quiet", "--short", "HEAD").StandardOutput.Trim();
         try
         {
-            using JsonDocument record = JsonDocument.Parse(BoundedFile.ReadAllText(RunBaseState.StatePath(_homeDirectory, branch)));
+            using JsonDocument record = JsonDocument.Parse(_store.ReadAllTextBounded(RunBaseStateFormat.StatePath(_homeDirectory, branch)));
             return record.RootElement.TryGetProperty("StartedAt", out JsonElement at) && at.ValueKind == JsonValueKind.String
                    && DateTimeOffset.TryParse(at.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTimeOffset value)
                 ? value
@@ -627,28 +595,28 @@ public sealed partial class RunDelivery
     private ReviewEvidence? Review(string branch, string mergeBase, DiagnosticReport report)
     {
         string scratch = Path.Combine(_repoRoot, ScratchFolder);
-        if (!Directory.Exists(scratch))
+        if (!_store.DirectoryExists(scratch))
             return null;
 
         string head = Git("rev-parse", "HEAD").StandardOutput.Trim();
         ReviewCycleIdentity current = new(branch, mergeBase, head);
         List<ReviewCycleRecord> belonging = [];
-        foreach (string folder in Directory.EnumerateDirectories(scratch))
+        foreach (string folder in _store.EnumerateDirectories(scratch))
         {
-            IReadOnlyList<ReviewCycleRecord> finished = ReviewCycles.ReadFinished(Path.Combine(folder, "review"));
-            belonging.AddRange(ReviewCycles.Belonging(finished, current,
+            IReadOnlyList<ReviewCycleRecord> finished = _cycles.ReadFinished(Path.Combine(folder, "review"));
+            belonging.AddRange(ReviewCyclePlanning.Belonging(finished, current,
                 commit => Git("merge-base", "--is-ancestor", commit, "HEAD").ExitCode == 0).Valid);
         }
 
         if (belonging.Count == 0)
             return null;
 
-        ReviewCycleRecord last = belonging.OrderBy(cycle => cycle.Number).ThenBy(cycle => File.GetLastWriteTimeUtc(cycle.FindingsPath)).Last();
+        ReviewCycleRecord last = belonging.OrderBy(cycle => cycle.Number).ThenBy(cycle => _store.GetLastWriteTimeUtc(cycle.FindingsPath)).Last();
         try
         {
-            FindingsReport findings = ReviewJson.ReadFindings(BoundedFile.ReadAllText(last.FindingsPath));
+            FindingsReport findings = ReviewJson.ReadFindings(_store.ReadAllTextBounded(last.FindingsPath));
             IReadOnlyList<GateResult> gates = last.Gates?.Gates ?? [];
-            ReviewOutcome outcome = VerdictEngine.Evaluate(findings.Findings, gates, _config.Review, DateOnly.FromDateTime(DateTime.UtcNow));
+            ReviewOutcome outcome = VerdictEngine.Evaluate(findings.Findings, gates, _config.Review, DateOnly.FromDateTime(_time.GetUtcNow().UtcDateTime));
             return new ReviewEvidence(last.Number, outcome, gates);
         }
         catch (Exception exception) when (IsEvidenceFailure(exception))
@@ -702,7 +670,7 @@ public sealed partial class RunDelivery
     {
         try
         {
-            return PresentFile.ReadIfPresent(_files.Absolute(path));
+            return _store.ReadTextIfPresent(_files.Absolute(path));
         }
         catch (Exception exception) when (FileFailure.Is(exception))
         {
@@ -837,10 +805,10 @@ public sealed partial class RunDelivery
     }
 
     /// <summary>The production executor: the repository's deadlock-safe runner, under one time limit per call.</summary>
-    private sealed class BoundedExecutor(TimeSpan timeout) : IProcessExecutor
+    private sealed class BoundedExecutor(IBoundedProcessExecutor process, TimeSpan timeout) : IProcessExecutor
     {
         public ProcessResult Run(ProcessStartInfo startInfo, string standardInput) =>
-            ProcessRunner.Run(startInfo, standardInput, timeout);
+            process.Run(startInfo, standardInput, timeout);
     }
 
     [GeneratedRegex(@"^[a-z]+(?:\([^()\s][^()]*\))?!?: \S", RegexOptions.CultureInvariant)]

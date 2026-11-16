@@ -7,6 +7,7 @@ using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
 using Xunit;
 
+using KyberWeave.Tests.Fakes;
 namespace KyberWeave.Tests;
 
 /// <summary>
@@ -513,7 +514,7 @@ public sealed class ManagedGlossaryTests
             """);
         DocsValidateSettings settings = new DocsValidateSettings { Path = repository.Root, Format = "json" };
 
-        int exitCode = ProcessConsoleCapture.Run(() => new DocsValidateCommand().Execute(null!, settings)).Result;
+        int exitCode = ProcessConsoleCapture.Run(() => DocsTestCommands.Validate().Execute(null!, settings)).Result;
 
         Assert.Equal(1, exitCode);
     }

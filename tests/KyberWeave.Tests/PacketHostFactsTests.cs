@@ -2,6 +2,7 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Validation;
 using Xunit;
 
+using KyberWeave.Tests.Fakes;
 namespace KyberWeave.Tests;
 
 /// <summary>
@@ -27,7 +28,7 @@ public sealed class PacketHostFactsTests : IDisposable
     [Fact]
     public void TheSectionCarriesTheTaskScratchpadAndTheConfiguredPlanningPaths()
     {
-        string facts = PacketHostFacts.Render(_root, Config(), "csharp-dev", "T4");
+        string facts = DocsTestCommands.HostFacts.Render(_root, Config(), "csharp-dev", "T4");
 
         Assert.StartsWith(PacketHostFacts.Heading, facts, StringComparison.Ordinal);
         Assert.Contains("`.agent_scratchpad/t4/`", facts, StringComparison.Ordinal);
@@ -37,7 +38,7 @@ public sealed class PacketHostFactsTests : IDisposable
     [Fact]
     public void TheSectionTellsTheWorkerToCommitItsTaskWithTheTaskIdAndNeverToPush()
     {
-        string facts = PacketHostFacts.Render(_root, Config(), "csharp-dev", "T4");
+        string facts = DocsTestCommands.HostFacts.Render(_root, Config(), "csharp-dev", "T4");
 
         Assert.Contains("-m \"Task: T4\"", facts, StringComparison.Ordinal);
         Assert.Contains("return the sha as COMMIT", facts, StringComparison.Ordinal);
@@ -56,8 +57,8 @@ public sealed class PacketHostFactsTests : IDisposable
                     run: [dotnet, build, "{changed}"]
             """);
 
-        string facts = PacketHostFacts.Render(_root, config, "csharp-dev", "T1");
-        string other = PacketHostFacts.Render(_root, config, "go-dev", "T1");
+        string facts = DocsTestCommands.HostFacts.Render(_root, config, "csharp-dev", "T1");
+        string other = DocsTestCommands.HostFacts.Render(_root, config, "go-dev", "T1");
 
         Assert.Contains("- `build`: `dotnet build {changed}`", facts, StringComparison.Ordinal);
         Assert.Contains("Task gates for go-dev: none declared", other, StringComparison.Ordinal);
@@ -66,7 +67,7 @@ public sealed class PacketHostFactsTests : IDisposable
     [Fact]
     public void WithNoAgentKnownTheSectionSaysHowToListTheWorkersOwnGates()
     {
-        string facts = PacketHostFacts.Render(_root, Config(), null, "T1");
+        string facts = DocsTestCommands.HostFacts.Render(_root, Config(), null, "T1");
 
         Assert.Contains("--agent <your agent name>", facts, StringComparison.Ordinal);
     }
@@ -76,7 +77,7 @@ public sealed class PacketHostFactsTests : IDisposable
     {
         Agents("# Repo\n\n## Non-negotiables\n\n- Never push to main.\n  Ask first.\n\n```bash\n# not a heading\n```\n\n- Keep ids.\n\n## Other\n\ntext\n");
 
-        string facts = PacketHostFacts.Render(_root, Config(), null, null);
+        string facts = DocsTestCommands.HostFacts.Render(_root, Config(), null, null);
 
         Assert.Contains("verbatim from AGENTS.md § Non-negotiables", facts, StringComparison.Ordinal);
         Assert.Contains("  Ask first.", facts, StringComparison.Ordinal);
@@ -87,7 +88,7 @@ public sealed class PacketHostFactsTests : IDisposable
     private string Render(out List<string> notes)
     {
         notes = [];
-        return PacketHostFacts.Render(_root, Config(), null, null, notes);
+        return DocsTestCommands.HostFacts.Render(_root, Config(), null, null, notes);
     }
 
     [Fact]

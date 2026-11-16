@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Review;
@@ -28,7 +30,8 @@ namespace KyberWeave.Core.Docs.Validation;
 /// reached through one pointer line to its index, never copied.
 /// </para>
 /// </remarks>
-public static partial class PacketHostFacts
+/// <param name="files">Reads the host's root <c>AGENTS.md</c> and checks the rules index.</param>
+public sealed partial class PacketHostFacts(IFileSystem files) : IPacketHostFacts
 {
     /// <summary>The heading the appended section starts with.</summary>
     public const string Heading = "## Host facts";
@@ -51,7 +54,7 @@ public static partial class PacketHostFacts
     /// <param name="taskId">The task id, for the scratchpad path.</param>
     /// <param name="diagnostics">Receives notes for the log, such as an empty rules section that was skipped; they are never part of the returned text.</param>
     /// <returns>The section, starting with <see cref="Heading" />.</returns>
-    public static string Render(string repoRoot, KyberWeaveConfig config, string? role, string? taskId, IList<string>? diagnostics = null)
+    public string Render(string repoRoot, KyberWeaveConfig config, string? role, string? taskId, IList<string>? diagnostics = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
@@ -95,13 +98,13 @@ public static partial class PacketHostFacts
             text.AppendLine(CultureInfo.InvariantCulture, $"  - `{gate.Id}`: `{string.Join(' ', gate.Run)}`");
     }
 
-    private static void AppendRules(StringBuilder text, string repoRoot, KyberWeaveConfig config, IList<string>? diagnostics)
+    private void AppendRules(StringBuilder text, string repoRoot, KyberWeaveConfig config, IList<string>? diagnostics)
     {
         string path = Path.Combine(repoRoot, "AGENTS.md");
         string markdown;
         try
         {
-            if (!File.Exists(path))
+            if (!files.FileExists(path))
             {
                 text.AppendLine();
                 text.AppendLine("Host rules: this repository has no root AGENTS.md.");
@@ -109,7 +112,7 @@ public static partial class PacketHostFacts
                 return;
             }
 
-            markdown = File.ReadAllText(path);
+            markdown = files.ReadAllText(path);
         }
         catch (Exception ex) when (FileFailure.Is(ex))
         {
@@ -167,11 +170,11 @@ public static partial class PacketHostFacts
         return bullets.Length > 0 && bullets.Length <= room ? bullets : null;
     }
 
-    private static void AppendRulesFolderPointer(StringBuilder text, string repoRoot, KyberWeaveConfig config)
+    private void AppendRulesFolderPointer(StringBuilder text, string repoRoot, KyberWeaveConfig config)
     {
         ConfigRegEntry? index = config.ConfigReg.Resolve(config.Ontology)
             .FirstOrDefault(entry => entry.Kind == ConfigRegEntryKind.Path && entry.Name == ConfigRegConfig.RulesIndexProperty);
-        if (index?.Path is not { Length: > 0 } relative || !File.Exists(Path.Combine(repoRoot, relative)))
+        if (index?.Path is not { Length: > 0 } relative || !files.FileExists(Path.Combine(repoRoot, relative)))
             return;
 
         text.AppendLine(CultureInfo.InvariantCulture, $"Rules folder: `{relative}` indexes this repository's per-topic rules. It is not copied here; open it when your task touches a topic it lists.");

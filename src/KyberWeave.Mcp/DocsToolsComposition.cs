@@ -1,5 +1,7 @@
 using KyberWeave.Application;
 using KyberWeave.Contracts.Docs;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Docs.Delivery;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
@@ -15,7 +17,7 @@ namespace KyberWeave.Mcp;
 internal static class DocsToolsComposition
 {
     private static readonly Lazy<IServiceProvider> DefaultServices = new(
-        () => new ServiceCollection().AddWeaveApplication().BuildServiceProvider());
+        () => new ServiceCollection().AddSingleton<IDocsHostConfiguration, HostConfiguration>().AddWeaveApplication().BuildServiceProvider());
 
     /// <summary>The tools over <paramref name="host"/>.</summary>
     /// <param name="host">The corpus the tools answer from.</param>
@@ -36,16 +38,27 @@ internal static class DocsToolsComposition
     {
         ArgumentNullException.ThrowIfNull(host);
         IServiceProvider provider = services ?? DefaultServices.Value;
+        IDocsHostConfiguration hostConfiguration = provider.GetService<IDocsHostConfiguration>() ?? new HostConfiguration();
         DocsQueryService query = new(
             host,
             analysisReader,
             freshness,
-            new DocsGateRunner(),
+            new DocsGateRunner(
+                hostConfiguration,
+                provider.GetRequiredService<IDocsSchemaGate>(),
+                provider.GetRequiredService<IDocumentSourceFactory>()),
             provider.GetRequiredService<ICorpusProvenance>());
         return new DocsTools(
             query,
-            new PlanLifecycleService(host.RepositoryRoot, query),
-            new RunDeliveryService(host.RepositoryRoot, query)
+            new PlanLifecycleService(
+                host.RepositoryRoot,
+                query,
+                hostConfiguration,
+                provider.GetRequiredService<IPlanFinalizeService>(),
+                provider.GetRequiredService<IPlanCloseoutService>(),
+                provider.GetRequiredService<IRepositoryFileStore>(),
+                provider.GetRequiredService<TimeProvider>()),
+            new RunDeliveryService(host.RepositoryRoot, query, hostConfiguration, provider.GetRequiredService<RunDeliveryPorts>())
             {
                 DeliveryExecutor = deliveryExecutor,
                 DeliveryHome = deliveryHome,

@@ -1,8 +1,8 @@
 using System.Globalization;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Closeout;
-using KyberWeave.Core.Docs.Parsing;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Docs;
@@ -11,7 +11,7 @@ namespace KyberWeave.Cli.Commands.Docs;
 /// Does the mechanical half of a plan closeout: checks the closeout evidence the archive gate wants, then archives
 /// the plan, removes its task file and updates the plan index and the archived plan inventory.
 /// </summary>
-public sealed class DocsCloseoutCommand : Command<DocsCloseoutSettings>
+public sealed class DocsCloseoutCommand(IPlanCloseoutService closeout) : Command<DocsCloseoutSettings>
 {
     /// <summary>The <c>--date</c> value is not a date.</summary>
     public const string InvalidDate = "KW-DOC-CLOSEOUT-005";
@@ -57,8 +57,7 @@ public sealed class DocsCloseoutCommand : Command<DocsCloseoutSettings>
         }
 
         PlanArguments.Announce(report, settings, relative);
-        PlanCloseoutOutcome outcome = new PlanCloseout(root, effective, () => new DocumentLoader(root, ontology))
-            .Run(relative, date, settings.Archive && !settings.DryRun);
+        PlanCloseoutOutcome outcome = closeout.Run(root, effective, relative, date, settings.Archive && !settings.DryRun);
         report.AddRange(outcome.Report.Items);
         report.AddMetric("archived", outcome.Archived);
 

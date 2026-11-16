@@ -1196,16 +1196,10 @@
       "bound": "Builds only; started through IBoundedProcessExecutor (KernelBoundedProcessExecutor) with GitTimeout = 60 s."
     },
     {
-      "file": "src/KyberWeave.Core.Docs/Delivery/RunDelivery.cs",
+      "file": "src/KyberWeave.Application/Docs/Delivery/RunDelivery.cs",
       "text": "ProcessStartInfo startInfo = new(program)",
       "count": 1,
-      "bound": "Builds only; started through the injected IProcessExecutor, whose production form is the BoundedExecutor below (3 min per call). program is git or gh only."
-    },
-    {
-      "file": "src/KyberWeave.Core.Docs/Delivery/RunDelivery.cs",
-      "text": "ProcessRunner.Run(startInfo, standardInput, timeout);",
-      "count": 1,
-      "bound": "BoundedExecutor: ProcessRunner.Run with a 3-minute timeout that kills the process tree on expiry. git (status, diff, merge-base, add, commit, push without force) and gh (pr list, create, edit, view; auth status) for the run branch only."
+      "bound": "Builds only; started through the injected IProcessExecutor, whose production form is the BoundedExecutor below, which runs through IBoundedProcessExecutor (3 min per call, process tree killed on expiry). program is git or gh only."
     },
     {
       "file": "tests/KyberWeave.Tests/RunDeliveryTests.cs",

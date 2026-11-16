@@ -1,9 +1,8 @@
 using System.Globalization;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Closeout;
-using KyberWeave.Core.Docs.Parsing;
-using KyberWeave.Core.Docs.Validation;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Docs;
@@ -12,7 +11,7 @@ namespace KyberWeave.Cli.Commands.Docs;
 /// Does the mechanical half of finalizing an approved Draft plan: records the approval, sets the plan and its index
 /// row to Ready and writes its task file. The same step the docs server's finalize tool runs.
 /// </summary>
-public sealed class DocsFinalizeCommand : Command<DocsFinalizeSettings>
+public sealed class DocsFinalizeCommand(IPlanFinalizeService finalize) : Command<DocsFinalizeSettings>
 {
     /// <summary>A <c>--date</c> or <c>--approval-mode</c> value is not usable.</summary>
     public const string InvalidOption = "KW-DOC-FINALIZE-007";
@@ -59,9 +58,7 @@ public sealed class DocsFinalizeCommand : Command<DocsFinalizeSettings>
         }
 
         PlanArguments.Announce(report, settings, relative);
-        using PlanTaskAgentPick? picker = PlanTaskAgentPick.ForConfig(effective);
-        PlanFinalizeOutcome outcome = new PlanFinalize(root, effective, () => new DocumentLoader(root, ontology), picker)
-            .Run(relative, mode, settings.Approval, date);
+        PlanFinalizeOutcome outcome = finalize.Run(root, effective, relative, mode, settings.Approval, date);
         report.AddRange(outcome.Report.Items);
         report.AddMetric("finalized", outcome.Finalized);
         report.AddMetric("task-file", outcome.TaskFilePath);

@@ -1,10 +1,14 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 
 namespace KyberWeave.Mcp;
 
-/// <summary>Loads the repository's host configuration for the tools that need it, reporting a failure as a finding.</summary>
-internal static class HostConfiguration
+/// <summary>
+/// Loads the repository's host configuration for the tools that need it, reporting a failure as a finding. It stays in
+/// the host while <see cref="KyberWeaveConfigLoader"/> lives in the legacy engine.
+/// </summary>
+internal sealed class HostConfiguration : IDocsHostConfiguration
 {
     /// <summary>
     /// Loads <c>kyber-weave.yml</c> for <paramref name="repositoryRoot"/>. A failure is added to <paramref name="report"/>
@@ -14,7 +18,7 @@ internal static class HostConfiguration
     /// <param name="report">The report the findings are added to.</param>
     /// <param name="config">The configuration, or the product defaults when loading failed.</param>
     /// <returns>True when the configuration loaded.</returns>
-    public static bool TryLoad(string repositoryRoot, DiagnosticReport report, out KyberWeaveConfig config)
+    public bool TryLoad(string repositoryRoot, DiagnosticReport report, out KyberWeaveConfig config)
     {
         KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(repositoryRoot, null);
         if (!result.Success)

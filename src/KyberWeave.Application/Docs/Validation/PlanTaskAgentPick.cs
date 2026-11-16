@@ -17,12 +17,6 @@ namespace KyberWeave.Core.Docs.Validation;
 /// </remarks>
 public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
 {
-    /// <summary>
-    /// Builds the picker for a repository's configuration, or null when no decision model is configured or its key is
-    /// missing. Settable so a test run never reaches a paid model unless a test installs one.
-    /// </summary>
-    public static Func<KyberWeaveConfig, PlanTaskAgentPick?> ForConfig { get; set; } = DefaultForConfig;
-
     /// <summary>The confidence a pick needs to be written to the task file.</summary>
     public const double ConfidenceFloor = 0.8;
 
@@ -48,15 +42,6 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
 
     /// <inheritdoc />
     public void Dispose() => (_provider as IDisposable)?.Dispose();
-
-    private static PlanTaskAgentPick? DefaultForConfig(KyberWeaveConfig config)
-    {
-        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        if (string.IsNullOrWhiteSpace(home))
-            return null;
-        IArbiterProvider? provider = ConfiguredProvider.TryCreate(config, home);
-        return provider is null ? null : new PlanTaskAgentPick(provider, ImplementationAgents());
-    }
 
     /// <summary>
     /// The agents a task may go to: every agent of the installed Squad whose capability profile takes implementation or

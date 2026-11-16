@@ -3,6 +3,7 @@ using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Diagnostics;
 using Xunit;
 
+using KyberWeave.Tests.Fakes;
 namespace KyberWeave.Tests;
 
 /// <summary>
@@ -52,7 +53,7 @@ public sealed class FindingLinesRenderingTests
         DocsCloseoutSettings settings = new() { Path = "no-such-plan", WorkingDirectory = Path.GetTempPath() };
 
         string output = ProcessConsoleCapture.Run(
-            () => new DocsCloseoutCommand().Execute(null!, settings, CancellationToken.None)).Output;
+            () => DocsTestCommands.Closeout().Execute(null!, settings, CancellationToken.None)).Output;
 
         string[] lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
         Assert.Contains(lines, line => line.StartsWith("ERROR KW-DOC-CLOSEOUT-001 ", StringComparison.Ordinal) && line.Contains("no-such-plan", StringComparison.Ordinal));
@@ -66,7 +67,7 @@ public sealed class FindingLinesRenderingTests
         DocsCloseoutSettings settings = new() { Path = "no-such-plan", Format = "table", WorkingDirectory = Path.GetTempPath() };
 
         string output = ProcessConsoleCapture.Run(
-            () => new DocsCloseoutCommand().Execute(null!, settings, CancellationToken.None)).Output;
+            () => DocsTestCommands.Closeout().Execute(null!, settings, CancellationToken.None)).Output;
 
         Assert.Contains("│", output, StringComparison.Ordinal);
     }

@@ -6,6 +6,7 @@ using KyberWeave.Core.Arbiter.Facts;
 using Xunit;
 using Xunit.Sdk;
 
+using KyberWeave.Tests.Fakes;
 namespace KyberWeave.Tests;
 
 /// <summary>
@@ -24,7 +25,7 @@ public sealed class ReviewGatesTaskModeTests : IDisposable
     {
         DocFixture fixture = PlanTaskFileProbe.Corpus();
         Directory.CreateDirectory(Path.Combine(fixture.Root, ".git"));
-        new DocsTasksCommand(DocsPorts.Tasks).Execute(
+        DocsTestCommands.Tasks().Execute(
             null!,
             new DocsTasksSettings { Path = Path.Combine(fixture.Root, PlanTaskFileProbe.PlanPath), Format = "json", Write = true },
             CancellationToken.None);
