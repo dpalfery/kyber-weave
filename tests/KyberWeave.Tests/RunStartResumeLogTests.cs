@@ -1,3 +1,4 @@
+using KyberWeave.Application.RunStart;
 using KyberWeave.Cli.Commands.Run;
 using KyberWeave.Core.RunStart;
 using Xunit;
@@ -28,7 +29,7 @@ public sealed class RunStartResumeLogTests
         ArgumentException failure = new("tip");
 
         Assert.Throws<ArgumentException>(() =>
-            RunStartCommand.TryReadResumeLog(
+            RunStartService.TryReadResumeLog(
                 () => throw failure,
                 "origin/claude/fix/tighten-the-gate",
                 out _,
@@ -43,7 +44,7 @@ public sealed class RunStartResumeLogTests
     public void ACancelledWaitWhileReadingTheResumeLogEscapes()
     {
         Assert.Throws<OperationCanceledException>(() =>
-            RunStartCommand.TryReadResumeLog(
+            RunStartService.TryReadResumeLog(
                 () => throw new OperationCanceledException(),
                 "origin/claude/fix/tighten-the-gate",
                 out _,
@@ -58,7 +59,7 @@ public sealed class RunStartResumeLogTests
     public void AMissingLogReaderWhileReadingTheResumeLogThrows()
     {
         Assert.Throws<ArgumentNullException>(() =>
-            RunStartCommand.TryReadResumeLog(
+            RunStartService.TryReadResumeLog(
                 null!,
                 "origin/claude/fix/tighten-the-gate",
                 out _,
@@ -72,7 +73,7 @@ public sealed class RunStartResumeLogTests
     [Fact]
     public void AGitLogExitFailureWhileReadingTheResumeLogWarnsAndContinues()
     {
-        RunStartCommand.TryReadResumeLog(
+        RunStartService.TryReadResumeLog(
             () => new GitOutcome(1, string.Empty, "fatal: bad revision"),
             "origin/claude/fix/tighten-the-gate",
             out IReadOnlyList<RunStartCompletedTask> completed,
@@ -92,7 +93,7 @@ public sealed class RunStartResumeLogTests
     [Fact]
     public void AGitLogProcessErrorWhileReadingTheResumeLogWarnsAndContinues()
     {
-        RunStartCommand.TryReadResumeLog(
+        RunStartService.TryReadResumeLog(
             () => throw new IOException("Permission denied"),
             "origin/claude/fix/tighten-the-gate",
             out IReadOnlyList<RunStartCompletedTask> completed,
@@ -109,7 +110,7 @@ public sealed class RunStartResumeLogTests
     [Fact]
     public void ASuccessfulResumeLogReadReportsNoWarning()
     {
-        RunStartCommand.TryReadResumeLog(
+        RunStartService.TryReadResumeLog(
             () => new GitOutcome(0, string.Empty, string.Empty),
             "origin/claude/fix/tighten-the-gate",
             out IReadOnlyList<RunStartCompletedTask> completed,

@@ -1,3 +1,4 @@
+using KyberWeave.Application.RunStart;
 using KyberWeave.Cli.Commands.Run;
 using KyberWeave.Core.RunStart;
 using Xunit;
@@ -21,7 +22,7 @@ public sealed class RunStartBaseRecordTests : IDisposable
     [Fact]
     public void ARecordedBaseReadsBack()
     {
-        Assert.True(RunStartCommand.RecordBase(RunBaseState.Store, _temp.Path, "claude/fix/tighten-the-gate", "origin/main"));
+        Assert.True(RunStartService.RecordBase(RunBaseState.Store, _temp.Path, "claude/fix/tighten-the-gate", "origin/main"));
         Assert.True(
             RunBaseState.TryReadBaseRef(_temp.Path, "claude/fix/tighten-the-gate", out string? baseRef));
         Assert.Equal("origin/main", baseRef);
@@ -34,6 +35,6 @@ public sealed class RunStartBaseRecordTests : IDisposable
     [Fact]
     public void ABlankHomeSkipsTheRecord()
     {
-        Assert.False(RunStartCommand.RecordBase(RunBaseState.Store, "  ", "claude/fix/tighten-the-gate", "origin/main"));
+        Assert.False(RunStartService.RecordBase(RunBaseState.Store, "  ", "claude/fix/tighten-the-gate", "origin/main"));
     }
 }
