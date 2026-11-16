@@ -18,7 +18,7 @@ decided-by:
   - adr/0079-the-reviewer-starts-its-own-seats-where-sub-agents-can-dispatch
 code-refs:
   - VerdictEngine
-  - GateRunner
+  - GateRunService
   - PathGlob
   - ReviewConfig
   - ReviewConfigLoader
@@ -166,11 +166,11 @@ is recorded like any other evidence, and it exits 0 whether or not it finds anyt
 | Technology checklists | 11 reference files, loaded as lens *modifiers*; each points at the host's `<technology>-coding-standard` and states no rule of its own | `products/kyber-squad/skills/code-review/references/` |
 | `dp-code-reviewer` | Skill — modes and the re-review loop | `products/kyber-squad/skills/dp-code-reviewer/SKILL.md` |
 | `security-review` | Skill — invoked by the security lens, not duplicated | `products/kyber-squad/skills/security-review/SKILL.md` |
-| `GateRunner` | Runs declared gates, normalizes results | `src/KyberWeave.Core/Review/GateRunner.cs` |
-| `DuplicateDetector` | Clusters symbols by normalized body, from the CodeGraph index | `src/KyberWeave.Core/Review/DuplicateDetector.cs` |
+| `GateRunService` | Runs declared gates, normalizes results | `src/KyberWeave.Application/Review/GateRunService.cs` |
+| `DuplicateDetector` | Clusters symbols by normalized body, from the CodeGraph index | `src/KyberWeave.Application/Review/DuplicateDetectionService.cs` |
 | `ICodeGraphSymbolEnumerator` | Optional CodeGraph port: every indexed symbol of one kind | `src/KyberWeave.Contracts/Repositories/ICodeGraphSymbolEnumerator.cs` |
 | `VerdictEngine` | The rules. Pure — no clock, no filesystem, no process | `src/KyberWeave.Domain/Review/VerdictEngine.cs` |
-| `PathGlob` | Matches changed paths against reserved patterns | `src/KyberWeave.Core/Review/PathGlob.cs` |
+| `PathGlob` | Matches changed paths against reserved patterns | `src/KyberWeave.Kernel/Text/PathGlob.cs` |
 | `ReviewConfig` | The `review:` host configuration | `src/KyberWeave.Domain/Configuration/ReviewConfig.cs` |
 
 ## Review guidance
@@ -231,7 +231,7 @@ section of `REVIEW.md`: a table of `Id`, `Finding class`, `Severity` (`critical`
 `nitpick`), `Applies to` (lens and technology names; empty for every seat) and `Why`. Precedence, as
 seats and the reviewer read it: host override, then the lens's shipped severity guidance, then the
 general definitions. An override changes the grade up or down. `SeverityOverrides`
-(`src/KyberWeave.Core/Review/SeverityOverrides.cs`) is the one reader; an absent file or section is
+(`src/KyberWeave.Domain/Review/SeverityOverrides.cs`) is the one reader; an absent file or section is
 no rows, and rows inside an HTML comment or a code fence are examples, not rows.
 
 - **Delivery.** `review seats` writes into each packet only that seat's rows: unscoped rows, rows

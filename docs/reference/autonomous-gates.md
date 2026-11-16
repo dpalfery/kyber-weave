@@ -134,7 +134,7 @@ this gate. Required CI decides readiness.
 
 | Gate id / trigger | Owning specialist | Autonomous behavior | Disposition | Notes / irreversible-action justification |
 |---|---|---|---|---|
-| `docs validate` (blocking gate, `KW-DOC-*`, `KW-CONFIG-REG-*`, `KW-DOC-LIFECYCLE-*`) | `docs-dev`, enforced by `GateRunner` | `hard-stop` — a failing blocking gate forces `REQUEST_CHANGES` per verdict rule 1; fix and re-gate | keep | Governance corpus must stay at zero findings. Removing it would let drift ship as truth. |
+| `docs validate` (blocking gate, `KW-DOC-*`, `KW-CONFIG-REG-*`, `KW-DOC-LIFECYCLE-*`) | `docs-dev`, enforced by `GateRunService` | `hard-stop` — a failing blocking gate forces `REQUEST_CHANGES` per verdict rule 1; fix and re-gate | keep | Governance corpus must stay at zero findings. Removing it would let drift ship as truth. |
 | `docs drift` (`KW-DOC-DRIFT-*`: `code-refs` and `api-endpoints` resolution against the code graph) | `docs-dev` | `hard-stop` on the same blocking-gate path | keep | Drift means the documentation claims coverage it no longer has. Keep; editing anything under `docs/` re-runs both checks in the same change. |
 
 ## 8. Verdict rules
