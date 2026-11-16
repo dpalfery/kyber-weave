@@ -9,6 +9,7 @@ using KyberWeave.Data.Doctor;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Host;
 using KyberWeave.Data.Review;
+using KyberWeave.Data.Skills;
 using KyberWeave.Data.RunStart;
 using KyberWeave.Data.Utilities;
 using KyberWeave.Data.Squad;
@@ -58,6 +59,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IGitChangeReader>(sp => new GitChangeReader(sp.GetRequiredService<IProgramRunner>()));
         services.TryAddSingleton<IReviewCycleStore>(_ => new FileReviewCycleStore());
         services.TryAddSingleton<ISeatFolder, FileSeatFolder>();
+        services.TryAddSingleton<ISkillArchiveWriter, ZipSkillArchiveWriter>();
         services.TryAddSingleton<INotSeatedStore>(_ => new FileNotSeatedStore());
         services.TryAddSingleton<IReviewEvidenceStore>(_ => new FileReviewEvidenceStore());
         services.TryAddSingleton<ISeverityOverrideSource>(_ => new FileSeverityOverrideSource());

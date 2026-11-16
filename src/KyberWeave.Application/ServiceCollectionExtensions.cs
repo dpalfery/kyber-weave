@@ -9,6 +9,8 @@ using KyberWeave.Application.Review;
 using KyberWeave.Application.RunStart;
 using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Application.Agents;
+using KyberWeave.Application.Skills;
 using KyberWeave.Application.Utilities;
 using KyberWeave.Application.Squad;
 using KyberWeave.Core.Squad.Briefs;
@@ -45,6 +47,8 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IRepositoryFileStore>(), sp.GetRequiredService<IBoundedProcessExecutor>()));
         services.TryAddSingleton<IStatusLineDeploymentService, StatusLineDeploymentService>();
         services.TryAddSingleton<IStatusLineHostService, StatusLineHostService>();
+        services.TryAddSingleton<ISkillGovernanceService, SkillGovernanceService>();
+        services.TryAddSingleton<IAgentGovernanceService, AgentGovernanceService>();
         services.TryAddSingleton<ICodeGraphProvisioner, CodeGraphIndexProvisioner>();
         services.TryAddSingleton<IWorktreeIndexGuard, WorktreeIndexEnsurer>();
         services.TryAddSingleton<McpServerLiveProbe>();

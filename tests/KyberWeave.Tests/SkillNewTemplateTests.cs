@@ -1,3 +1,4 @@
+using KyberWeave.Core.Skills.Authoring;
 using KyberWeave.Cli.Commands.Skills;
 using Xunit;
 
@@ -18,7 +19,7 @@ public sealed class SkillNewTemplateTests
     [InlineData("Checklist", "checklist so required validations are never skipped")]
     public void NamedTemplateIsSelected(string template, string expected)
     {
-        string body = NewCommand.Template(template, "order-refund", includeLicense: false, includeMetadata: false);
+        string body = SkillScaffold.Template(template, "order-refund", includeLicense: false, includeMetadata: false);
 
         Assert.Contains(expected, body, StringComparison.Ordinal);
     }
@@ -29,7 +30,7 @@ public sealed class SkillNewTemplateTests
     [InlineData("unknown")]
     public void UnknownTemplateFallsBackToBlank(string template)
     {
-        string body = NewCommand.Template(template, "order-refund", includeLicense: false, includeMetadata: false);
+        string body = SkillScaffold.Template(template, "order-refund", includeLicense: false, includeMetadata: false);
 
         Assert.Contains("Replace this with a specific, routable description.", body, StringComparison.Ordinal);
     }
