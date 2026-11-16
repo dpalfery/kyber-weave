@@ -25,8 +25,8 @@ keywords:
 **Autonomy:** autonomous
 
 Written 2026-11-16 against the draft [requirements](requirements.md) and [design](design.md). The
-owner approved writing this list. The specification is not yet marked approved and no machine task
-list has been generated from this file.
+owner approved both on 2026-11-16. This task list is still a draft awaiting the owner's review, and
+no machine task list has been generated from it.
 
 These tasks deliver five phases. Each phase is its own pull request and leaves the product working
 with today's agents as the default, so any phase can ship without the next.

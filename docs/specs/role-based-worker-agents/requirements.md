@@ -22,7 +22,9 @@ keywords:
 
 # Requirements Document
 
-**Phase status:** Draft
+**Phase status:** Approved
+
+Owner approved 2026-11-16 ('Yes, approve'), given directly in the authoring session.
 
 ## Introduction
 

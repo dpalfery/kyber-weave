@@ -20,7 +20,9 @@ keywords:
 
 # Role-based worker agents design
 
-**Phase status:** Draft
+**Phase status:** Approved
+
+Owner approved 2026-11-16 ('Yes, approve'), given directly in the authoring session.
 
 ## Overview
 
@@ -682,25 +684,25 @@ Estimates, for planning only.
 | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
 |---|---|---|---|---|
 | D1 | What replaces the technology agents? | Three developer agents by difficulty: `dev-easy`, `dev-medium`, `dev-hard`. | Server and client agents were mechanically identical once technology moved to the task; model strength is the one real difference. | user: explicit decision 2026-11-16 |
-| D2 | Who rates difficulty? | The architect; the decision model instead when the Arbiter runs with one. No gate checks the rating. | The decision model is asked when the task file is written, in the call that already picks the agent, so the rating is recorded once. | user: explicit decision 2026-11-16; timing is autonomous, pending owner approval |
+| D2 | Who rates difficulty? | The architect; the decision model instead when the Arbiter runs with one. No gate checks the rating. | The decision model is asked when the task file is written, in the call that already picks the agent, so the rating is recorded once. | user: explicit approval 2026-11-16 |
 | D3 | What happens when a task fails? | The next attempt goes one tier up; the three-dispatch limit stays. | The owner chose the existing one-step rule over a jump to `dev-hard` on the third try. | user: explicit decision 2026-11-16 |
 | D4 | Which agents are removed? | The ten technology agents, `sql-database-architect`, `test-dev`, `azure-reader`, `github-devops`. | `docs-dev` stays: it follows the documentation settings a host already customises. | user: explicit decision 2026-11-16 |
-| D5 | Are the old agents deleted at once? | No. They stay selectable for now; removal waits for the owner's decision after a comparison. | Keeps every earlier phase additive. | user: explicit decision 2026-11-16 |
+| D5 | Are the old agents deleted at once? | No. They stay selectable for now; removal waits for the owner's decision after a comparison. | Keeps every earlier phase additive. | user: explicit approval 2026-11-16 |
 | D6 | How is the model assigned? | By the agent: each agent names a model profile, as today. Nothing assigns a model at dispatch. The conductor has no profile. | Run-time assignment was drafted and removed by the owner. Choosing an agent works on all thirteen harnesses. | user: explicit decision 2026-11-16 |
-| D7 | Which model profiles change? | `dev-hard` is added, separate from the planning profiles. `orchestration` is removed. Nothing is renamed. | `dev-easy` uses `fast` and `dev-medium` uses `general`, so no preset breaks. | user: `dev-hard` separate and no conductor profile, 2026-11-16; reuse of `fast` and `general` is autonomous, pending owner approval |
+| D7 | Which model profiles change? | `dev-hard` is added, separate from the planning profiles. `orchestration` is removed. Nothing is renamed. | `dev-easy` uses `fast` and `dev-medium` uses `general`, so no preset breaks. | user: explicit approval 2026-11-16 |
 | D8 | What does a technology or role folder hold? | `<name>.standards.md`, `<name>.rules.md`, `<name>.skills.md`, `<name>.arbiter-rules.yml`. | `<name>.rules.md` and `<name>.skills.md` are the plan on pull request 625; that plan's `README.md` standard is renamed. | user: explicit decision 2026-11-16 |
 | D9 | What are the standard's headings? | Naming and layout; Coding standards; Testing; Commands; Security and data handling; Done checklist. | | user: explicit decision 2026-11-16 |
-| D10 | Where do the 36 Arbiter rules go? | Into `conductor`, `architect` and `reviewer` role folders, split by trigger. | The owner named conductor and architect. `reviewer` is added because 13 rules are review rules. | user: explicit decision 2026-11-16; `reviewer` folder is autonomous, pending owner approval |
+| D10 | Where do the 36 Arbiter rules go? | Into `conductor`, `architect` and `reviewer` role folders, split by trigger. | The owner named conductor and architect. `reviewer` is added because 13 rules are review rules. | user: explicit approval 2026-11-16 |
 | D11 | Is any Arbiter rule locked? | No. | The owner's view, and the code agrees: every rule can already be set to log only. | user: explicit decision 2026-11-16 |
 | D12 | How does the task prompt reach the worker? | A hook on the dispatch call replaces the conductor's one-line dispatch with the full prompt. Where a harness's hook cannot rewrite the dispatch, the prompt is written to a file the worker reads first. | Reverses decision D3 of the plan on pull request 625. The worker starts with everything, the conductor never reads or retypes about 12,000 tokens per task, and the worker cannot skip it. | user: explicit decision 2026-11-16 |
-| D13 | How are task gates keyed? | By the task's one technology, then its parent, with a fallback to the old agent-keyed entries. | No agent is named after a technology any more. No gate is added and no lists are merged. | autonomous: recommendation, pending owner approval |
-| D14 | Which file format? | YAML for every data file added or changed, the task file included, extension `.yml`. | The owner asked for one format and approved converting the task file. `.yml` matches every YAML file in the repository. | user: explicit decision 2026-11-16; extension is autonomous |
+| D13 | How are task gates keyed? | By the task's one technology, then its parent, with a fallback to the old agent-keyed entries. | No agent is named after a technology any more. No gate is added and no lists are merged. | user: explicit approval 2026-11-16 |
+| D14 | Which file format? | YAML for every data file added or changed, the task file included, extension `.yml`. | The owner asked for one format and approved converting the task file. `.yml` matches every YAML file in the repository. | user: explicit approval 2026-11-16 |
 | D15 | What replaces `azure-reader`? | `platform-researcher`, which loads the skills and rules of the technology its task names. | Needs a new capability profile that can run commands. | user: explicit decision 2026-11-16 |
 | D16 | Where does testing guidance live? | A Testing section in every standard; cross-technology rules in `shared-rules.md`. | `test-dev` and the `test` technology are removed. | user: explicit decision 2026-11-16 |
 | D17 | How many specifications? | One, in five phases. | The owner's direction. | user: explicit decision 2026-11-16 |
-| D18 | Does this need ADRs? | Yes: one for tiers, difficulty and the task prompt (amending ADR 0080 and ADR 0082), one for rules by folder, one for the task file format (amending ADR 0063). | Each is a contract hosts depend on. | autonomous: recommendation, pending owner approval |
+| D18 | Does this need ADRs? | Yes: one for tiers, difficulty and the task prompt (amending ADR 0080 and ADR 0082), one for rules by folder, one for the task file format (amending ADR 0063). | Each is a contract hosts depend on. | user: explicit approval 2026-11-16 |
 | D19 | What replaces `github-devops`? | A platform-neutral `devops` agent with a `devops` role folder and one platform folder each for GitHub, Azure DevOps, GitLab and Jira. | The agent names no platform; the task or the host configuration does. | user: explicit decision 2026-11-16 |
-| D20 | How large is the prompt budget? | 60,000 characters by default; a task must fit with nothing cut. | Sized from today's files at about 47,000 for the largest case, 57,000 with a parent. | autonomous: recommendation, pending owner approval |
+| D20 | How large is the prompt budget? | 60,000 characters by default; a task must fit with nothing cut. | Sized from today's files at about 47,000 for the largest case, 57,000 with a parent. | user: explicit approval 2026-11-16 |
 | D21 | How many technologies may a task name? | One. A template may name one parent it builds on; unrelated technologies are separate tasks. | Keeps the prompt inside the budget and gives a task one set of gates. | user: explicit decision 2026-11-16 |
 | D22 | How are the prompt's parts separated? | Named tags around each part; Markdown inside. | The one-format rule covers stored data files; the prompt is text for a model. | user: explicit decision 2026-11-16 |
 | D23 | Is there a test role folder? | No. | Testing lives in the shared rules and each standard's Testing section. | user: explicit decision 2026-11-16 |
