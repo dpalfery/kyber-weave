@@ -2,6 +2,7 @@ using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Arbiter.Sections;
+using KyberWeave.Data.Review;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -14,12 +15,12 @@ namespace KyberWeave.Tests.Arbiter;
 /// RED: <c>SectionSelector</c> and <c>SectionSelection</c> do not exist yet.
 /// </summary>
 /// <remarks>
-/// Names (GREEN must match): <c>new SectionSelector(IArbiterProvider provider)</c>;
+/// Names (GREEN must match): <c>new SectionSelector(IArbiterProvider provider, IBoundedFileReader files)</c>;
 /// <c>Task&lt;SectionSelection&gt; SelectAsync(string documentPath, string task, CancellationToken ct = default)</c>;
 /// <c>SectionSelection(IReadOnlyList&lt;DocumentSection&gt; Selected, bool FailedSafe)</c>. The answers are
 /// <c>relevant</c> and <c>not-relevant</c>; the floor is the rule's own 0.9.
 /// </remarks>
-public sealed class SectionSelectorTests : IDisposable
+public sealed class SectionSelectorTests
 {
     private const string Relevant = "relevant";
     private const string NotRelevant = "not-relevant";
@@ -32,17 +33,6 @@ public sealed class SectionSelectorTests : IDisposable
         ## Usage
         Run it.
         """;
-
-    private readonly string _root = Path.Combine(
-        Path.GetTempPath(), "kw-arbiter-sections-" + Guid.NewGuid().ToString("N"));
-
-    public void Dispose()
-    {
-        if (Directory.Exists(_root))
-        {
-            Directory.Delete(_root, recursive: true);
-        }
-    }
 
     /// <summary>
     /// Answers every trim question with one answer at one confidence. <paramref name="requestSent"/> <c>false</c> models
@@ -72,20 +62,12 @@ public sealed class SectionSelectorTests : IDisposable
         }
     }
 
-    private string WriteDocument()
-    {
-        Directory.CreateDirectory(_root);
-        string path = Path.Combine(_root, "guide.md");
-        File.WriteAllText(path, Markdown);
-        return path;
-    }
-
     /// <summary>When the provider marks every section not relevant, only the title section remains.</summary>
     [Fact]
     public async Task NotRelevantEverywhereKeepsOnlyTheTitleSection()
     {
-        SectionSelection selection = await new SectionSelector(new ScriptedSectionProvider(NotRelevant, 0.95))
-            .SelectAsync(WriteDocument(), "Change the install steps.");
+        SectionSelection selection = await SelectorFor(new ScriptedSectionProvider(NotRelevant, 0.95))
+            .SelectAsync(Markdown, "Change the install steps.");
 
         Assert.False(selection.FailedSafe);
         Assert.Equal(["guide"], selection.Selected.Select(section => section.Id));
@@ -95,8 +77,8 @@ public sealed class SectionSelectorTests : IDisposable
     [Fact]
     public async Task RelevantEverywhereKeepsEverySectionWithoutFailingSafe()
     {
-        SectionSelection selection = await new SectionSelector(new ScriptedSectionProvider(Relevant, 0.95))
-            .SelectAsync(WriteDocument(), "Change the install steps.");
+        SectionSelection selection = await SelectorFor(new ScriptedSectionProvider(Relevant, 0.95))
+            .SelectAsync(Markdown, "Change the install steps.");
 
         Assert.False(selection.FailedSafe);
         Assert.Equal(["guide", "guide/install", "guide/usage"], selection.Selected.Select(section => section.Id));
@@ -109,8 +91,8 @@ public sealed class SectionSelectorTests : IDisposable
     [Fact]
     public async Task AnAnswerBelowTheFloorFailsSafeToEverySection()
     {
-        SectionSelection selection = await new SectionSelector(new ScriptedSectionProvider(NotRelevant, 0.5))
-            .SelectAsync(WriteDocument(), "Change the install steps.");
+        SectionSelection selection = await SelectorFor(new ScriptedSectionProvider(NotRelevant, 0.5))
+            .SelectAsync(Markdown, "Change the install steps.");
 
         Assert.True(selection.FailedSafe);
         Assert.Equal(3, selection.Selected.Count);
@@ -120,9 +102,9 @@ public sealed class SectionSelectorTests : IDisposable
     [Fact]
     public async Task AProviderThatDidNotSendTheRequestFailsSafeToEverySection()
     {
-        SectionSelection selection = await new SectionSelector(
+        SectionSelection selection = await SelectorFor(
                 new ScriptedSectionProvider(NotRelevant, 0.95, requestSent: false))
-            .SelectAsync(WriteDocument(), "Change the install steps.");
+            .SelectAsync(Markdown, "Change the install steps.");
 
         Assert.True(selection.FailedSafe);
         Assert.Equal(3, selection.Selected.Count);
@@ -132,11 +114,13 @@ public sealed class SectionSelectorTests : IDisposable
     [Fact]
     public async Task AProviderFailureFailsSafeToEverySection()
     {
-        SectionSelection selection = await new SectionSelector(
+        SectionSelection selection = await SelectorFor(
                 new ScriptedSectionProvider(NotRelevant, 0.95, throws: true))
-            .SelectAsync(WriteDocument(), "Change the install steps.");
+            .SelectAsync(Markdown, "Change the install steps.");
 
         Assert.True(selection.FailedSafe);
         Assert.Equal(3, selection.Selected.Count);
     }
+
+    private static SectionSelector SelectorFor(IArbiterProvider provider) => new(provider);
 }

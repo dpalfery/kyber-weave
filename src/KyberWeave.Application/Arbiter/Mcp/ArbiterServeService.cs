@@ -30,7 +30,12 @@ namespace KyberWeave.Arbiter.Mcp;
 /// <c>serve</c> token; the classifier treats that token as project-wide, the same as any
 /// harness that does not fire per-agent hooks.
 /// </remarks>
-public sealed class ArbiterServeService(ArbiterServeContext context, IFileTextFacts files, ICommentTriageFactory triage, TimeProvider clock) : IArbiterServeService
+public sealed class ArbiterServeService(
+    ArbiterServeContext context,
+    IFileTextFacts files,
+    ICommentTriageFactory triage,
+    IArbiterSectionSelectionService sections,
+    TimeProvider clock) : IArbiterServeService
 {
     private const string Harness = "serve";
     private const string UnidentifiedCaller = "unidentified";
@@ -336,7 +341,7 @@ public sealed class ArbiterServeService(ArbiterServeContext context, IFileTextFa
         }
 
         SectionSelection selection = WithProvider(provider =>
-            new SectionSelector(provider).SelectAsync(full, task ?? string.Empty).GetAwaiter().GetResult());
+            sections.SelectAsync(full, task ?? string.Empty, provider).GetAwaiter().GetResult());
         IEnumerable<DocumentSection> shown = maxSections is int cap
             ? selection.Selected.Take(cap)
             : selection.Selected;
