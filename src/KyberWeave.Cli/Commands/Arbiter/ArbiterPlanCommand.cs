@@ -1,22 +1,15 @@
 using KyberWeave.Cli.Rendering;
-using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Diagnostics;
 using Spectre.Console;
 using Spectre.Console.Cli;
-using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Cli.Commands.Arbiter;
 
 /// <summary>Prints what the plan parser understood for a plan file.</summary>
-public sealed class ArbiterPlanCommand(IFileSystem files) : Command<ArbiterSettings>
+public sealed class ArbiterPlanCommand(IArbiterPlanService plans) : Command<ArbiterSettings>
 {
-    /// <summary>A plan with no Tasks section: downstream readiness answers <c>no-tasks</c>.</summary>
-    public const string NoTasks = "KW-ARB-PLAN-001";
-
-    /// <summary>The plan file is missing or unreadable.</summary>
-    public const string PlanNotReadable = "KW-ARB-PLAN-002";
-
     /// <summary>
     /// Parses the plan file named by the positional path and prints its tasks,
     /// files, dependencies, contract rows and out-of-scope paths, plus
@@ -38,114 +31,24 @@ public sealed class ArbiterPlanCommand(IFileSystem files) : Command<ArbiterSetti
             return 1;
         }
 
-        string resolved = Path.GetFullPath(relative, root);
-        if (!files.FileExists(resolved))
+        if (plans.TryRead(root, relative, settings.Path, report) is not { } read)
         {
-            report.Add(new Diagnostic(
-                PlanNotReadable,
-                Severity.Error,
-                $"Plan file '{settings.Path}' does not exist.",
-                settings.Path,
-                Hint: "Pass the plan file to print, for example 'arbiter plan docs/plans/plan.md'."));
             CommandHelpers.Finish(report, settings, "arbiter plan", "Task");
             return 1;
         }
-
-        string text;
-        try
-        {
-            text = files.ReadAllText(resolved);
-        }
-        catch (Exception exception) when (FileFailure.Is(exception))
-        {
-            report.Add(new Diagnostic(
-                PlanNotReadable,
-                Severity.Error,
-                $"Plan file '{resolved}' could not be read: {exception.Message}",
-                settings.Path));
-            CommandHelpers.Finish(report, settings, "arbiter plan", "Task");
-            return 1;
-        }
-
-        PlanDocument document = PlanDocumentParser.Parse(text);
-        report.AddRange(document.Diagnostics);
-
-        // Fail closed: a digest is withheld when the parser dropped content. KW-ARB-PARSE-001 (an unknown
-        // dependency token) is removed from the parse, so a digest over it would describe a plan that does
-        // not say what it says. KW-ARB-PARSE-002 (a task with no Files line) is a completeness finding: the
-        // task keeps its text, dependencies and contract, so its digest is offered. The findings are
-        // warnings, so HasErrors does not catch them; the code check does. An empty Tasks section has
-        // HasTasks but no task to digest.
-        bool droppedContent = document.Diagnostics.Any(finding => finding.Code == PlanDocumentParser.UnknownDependencyRule);
-        string? digest = !droppedContent && document.HasTasks && document.Tasks.Count > 0
-            ? PlanDocumentParser.ExecutionDigest(document)
-            : null;
 
         // Only json carries the metric. The table prints the digest on its own unfolded line, and a
         // metric row would print it again, truncated in a narrow cell.
-        if (digest is not null && settings.ParsedFormat == OutputFormat.Json)
+        if (read.Digest is { } digest && settings.ParsedFormat == OutputFormat.Json)
         {
             report.AddMetric("execution-digest", digest);
-        }
-
-        // Zero parsed tasks gets the finding whether or not a Tasks heading exists. Either way there is
-        // no execution, and the operator needs the finding to learn why no digest is printed.
-        if (document.Tasks.Count == 0)
-        {
-            report.Add(new Diagnostic(
-                NoTasks,
-                Severity.Warning,
-                document.HasTasks
-                    ? $"Plan '{resolved}' has a Tasks section, but no task in it parsed."
-                    : $"Plan '{resolved}' carries no Tasks section.",
-                settings.Path,
-                Hint: "Add T1, T2, ... headings under '## Tasks' (adding the section if missing), or a spec-grammar checklist; without one, readiness answers no-tasks."));
         }
 
         // The prose lines are for a person reading the table. Json, sarif and markdown must
         // carry only the rendered report, or a script reading stdout would parse a non-document.
         if (ReportRenderer.IsHuman(settings.ParsedFormat))
         {
-            CommandHelpers.WriteUnfolded(() => AnsiConsole.MarkupLine($"[bold]Plan:[/] {Markup.Escape(resolved)}"));
-            AnsiConsole.MarkupLine($"[grey]Status: {Markup.Escape(document.Status ?? "—")}; mode: {Markup.Escape(document.DevelopmentMode)}.[/]");
-
-            if (digest is { } printed)
-            {
-                // Written unfolded so a narrow console cannot wrap the 64 characters across lines.
-                CommandHelpers.WriteUnfolded(() => AnsiConsole.MarkupLine($"Execution digest: {Markup.Escape(printed)}"));
-            }
-
-            if (document.Tasks.Count > 0)
-            {
-                Table tasks = new Table().Border(TableBorder.Rounded).Expand();
-                tasks.AddColumn("Task");
-                tasks.AddColumn("Title");
-                tasks.AddColumn("Files");
-                tasks.AddColumn("Depends on");
-                foreach (PlanTask task in document.Tasks)
-                {
-                    tasks.AddRow(
-                        new Markup(Markup.Escape(task.Id)),
-                        new Markup(Markup.Escape(task.Title)),
-                        new Markup(Markup.Escape(task.Files.Count > 0 ? string.Join(", ", task.Files) : "—")),
-                        new Markup(Markup.Escape(task.DependsOn.Count > 0 ? string.Join(", ", task.DependsOn) : "—")));
-                }
-
-                AnsiConsole.Write(tasks);
-            }
-
-            if (document.ContractRows.Count > 0)
-            {
-                AnsiConsole.MarkupLine(
-                    $"[grey]{document.ContractRows.Count} contract row(s): " +
-                    $"{Markup.Escape(string.Join(", ", document.ContractRows.Select(row => row.TaskId)))}.[/]");
-            }
-
-            if (document.OutOfScope.Count > 0)
-            {
-                AnsiConsole.MarkupLine(
-                    $"[grey]Out of scope: {Markup.Escape(string.Join(", ", document.OutOfScope))}.[/]");
-            }
+            Print(read);
         }
 
         CommandHelpers.Finish(report, settings, "arbiter plan", "Task");
@@ -155,4 +58,49 @@ public sealed class ArbiterPlanCommand(IFileSystem files) : Command<ArbiterSetti
     /// <summary>Runs the command without cancellation; the entry point tests use.</summary>
     public int Execute(CommandContext context, ArbiterSettings settings) =>
         Execute(context, settings, CancellationToken.None);
+
+    private static void Print(ArbiterPlanRead read)
+    {
+        PlanDocument document = read.Document;
+        CommandHelpers.WriteUnfolded(() => AnsiConsole.MarkupLine($"[bold]Plan:[/] {Markup.Escape(read.ResolvedPath)}"));
+        AnsiConsole.MarkupLine($"[grey]Status: {Markup.Escape(document.Status ?? "—")}; mode: {Markup.Escape(document.DevelopmentMode)}.[/]");
+
+        if (read.Digest is { } printed)
+        {
+            // Written unfolded so a narrow console cannot wrap the 64 characters across lines.
+            CommandHelpers.WriteUnfolded(() => AnsiConsole.MarkupLine($"Execution digest: {Markup.Escape(printed)}"));
+        }
+
+        if (document.Tasks.Count > 0)
+        {
+            Table tasks = new Table().Border(TableBorder.Rounded).Expand();
+            tasks.AddColumn("Task");
+            tasks.AddColumn("Title");
+            tasks.AddColumn("Files");
+            tasks.AddColumn("Depends on");
+            foreach (PlanTask task in document.Tasks)
+            {
+                tasks.AddRow(
+                    new Markup(Markup.Escape(task.Id)),
+                    new Markup(Markup.Escape(task.Title)),
+                    new Markup(Markup.Escape(task.Files.Count > 0 ? string.Join(", ", task.Files) : "—")),
+                    new Markup(Markup.Escape(task.DependsOn.Count > 0 ? string.Join(", ", task.DependsOn) : "—")));
+            }
+
+            AnsiConsole.Write(tasks);
+        }
+
+        if (document.ContractRows.Count > 0)
+        {
+            AnsiConsole.MarkupLine(
+                $"[grey]{document.ContractRows.Count} contract row(s): " +
+                $"{Markup.Escape(string.Join(", ", document.ContractRows.Select(row => row.TaskId)))}.[/]");
+        }
+
+        if (document.OutOfScope.Count > 0)
+        {
+            AnsiConsole.MarkupLine(
+                $"[grey]Out of scope: {Markup.Escape(string.Join(", ", document.OutOfScope))}.[/]");
+        }
+    }
 }
