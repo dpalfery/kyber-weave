@@ -9,10 +9,10 @@ component: DocGraph
 decided-by: []
 supersedes: []
 code-refs:
-  - PostCheckoutHook
+  - PostCheckoutHookInstaller
   - PostCheckoutHookText
   - CodeGraphRestore
-  - WorktreeIndexGuard
+  - IWorktreeIndexGuard
   - CodeGraphProvisioner
   - RepositoryDoctor
 ---
@@ -31,7 +31,7 @@ It does not change the stop rule, the `doctor --ensure` steps, or any renderer's
 
 `.codegraph/` is not tracked by git, so a worktree made with a plain `git worktree add` starts with no
 CodeGraph index, and nothing fails. `kyber-weave run start` and `kyber-weave review gates` index the tree
-they use through `WorktreeIndexGuard`, so the trees they create or review are covered. A person, or an
+they use through `IWorktreeIndexGuard`, so the trees they create or review are covered. A person, or an
 agent in a session Kyber-Weave did not start, that runs `git worktree add` and then works in that tree
 directly is not covered. Its agent falls back to raw file reads, or is answered from another branch's index.
 
