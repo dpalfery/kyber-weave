@@ -182,7 +182,7 @@ public sealed class McpWiringReceiptTests : IDisposable
     public void ASecondWriteAfterUnwireLeavesOneRecordForTheFile()
     {
         Repair(VsCode);
-        McpWiringRepairer.Unwire(Repo, [VsCode]);
+        McpWiringTestServices.Wiring.Unwire(Repo, [VsCode]);
         Repair(VsCode);
 
         McpWiringReceipt receipt = McpWiringReceipt.Load(Repo);
@@ -209,7 +209,7 @@ public sealed class McpWiringReceiptTests : IDisposable
         Repair(VsCode);
         Assert.NotEqual(original, File.ReadAllBytes(Path.Combine(Repo, VsCodeConfigFile)));
 
-        McpWiringRepairReport report = McpWiringRepairer.Unwire(Repo, [VsCode]);
+        McpWiringRepairReport report = McpWiringTestServices.Wiring.Unwire(Repo, [VsCode]);
 
         McpWiringFileChange change = Assert.Single(report.Files);
         Assert.Equal(McpWiringChangeOutcome.Restored, change.Outcome);
@@ -228,7 +228,7 @@ public sealed class McpWiringReceiptTests : IDisposable
         Repair(VsCode);
         Assert.True(File.Exists(Path.Combine(Repo, VsCodeConfigFile)));
 
-        McpWiringRepairReport report = McpWiringRepairer.Unwire(Repo, [VsCode]);
+        McpWiringRepairReport report = McpWiringTestServices.Wiring.Unwire(Repo, [VsCode]);
 
         McpWiringFileChange change = Assert.Single(report.Files);
         Assert.Equal(McpWiringChangeOutcome.Deleted, change.Outcome);
@@ -251,7 +251,7 @@ public sealed class McpWiringReceiptTests : IDisposable
         File.AppendAllText(Path.Combine(Repo, ".mcp.json"), "\n// a teammate's edit\n");
         byte[] drifted = File.ReadAllBytes(Path.Combine(Repo, ".mcp.json"));
 
-        McpWiringRepairReport report = McpWiringRepairer.Unwire(Repo, ["claude-code"]);
+        McpWiringRepairReport report = McpWiringTestServices.Wiring.Unwire(Repo, ["claude-code"]);
 
         McpWiringFileChange change = Assert.Single(report.Files);
         Assert.Equal(McpWiringChangeOutcome.Refused, change.Outcome);
@@ -291,7 +291,7 @@ public sealed class McpWiringReceiptTests : IDisposable
         Assert.NotNull(afterTampering);
         Assert.Equal(tampered, Convert.FromBase64String(afterTampering.PreContent ?? string.Empty));
 
-        McpWiringRepairReport report = McpWiringRepairer.Unwire(Repo, [VsCode]);
+        McpWiringRepairReport report = McpWiringTestServices.Wiring.Unwire(Repo, [VsCode]);
 
         McpWiringFileChange change = Assert.Single(report.Files);
         Assert.Equal(McpWiringChangeOutcome.Refused, change.Outcome);
@@ -315,7 +315,7 @@ public sealed class McpWiringReceiptTests : IDisposable
         McpWiringFixture.WriteBytes(Repo, ".mcp.json", Encoding.UTF8.GetBytes("""{"mcpServers": {}}"""));
         byte[] before = File.ReadAllBytes(Path.Combine(Repo, ".mcp.json"));
 
-        McpWiringRepairReport report = McpWiringRepairer.Unwire(Repo, ["claude-code"]);
+        McpWiringRepairReport report = McpWiringTestServices.Wiring.Unwire(Repo, ["claude-code"]);
 
         McpWiringFileChange change = Assert.Single(report.Files);
         Assert.Equal(McpWiringChangeOutcome.Refused, change.Outcome);
@@ -332,7 +332,7 @@ public sealed class McpWiringReceiptTests : IDisposable
     [Fact]
     public void ADryRunWritesNoReceiptAndCreatesNoFile()
     {
-        McpWiringRepairer.Repair(
+        McpWiringTestServices.Wiring.Repair(
             Repo,
             McpWiringFixture.Declare(FirstPartyServer()),
             ResolverOver(Bin),
@@ -345,7 +345,7 @@ public sealed class McpWiringReceiptTests : IDisposable
     }
 
     private McpWiringRepairReport Repair(params string[] targets) =>
-        McpWiringRepairer.Repair(Repo, McpWiringFixture.Declare(FirstPartyServer()), ResolverOver(Bin), targets, dryRun: false);
+        McpWiringTestServices.Wiring.Repair(Repo, McpWiringFixture.Declare(FirstPartyServer()), ResolverOver(Bin), targets, dryRun: false);
 
     private LaunchCommandResolver ResolverOver(params string[] searchPaths) => new(searchPaths);
 

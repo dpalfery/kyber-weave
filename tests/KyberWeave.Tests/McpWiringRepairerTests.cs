@@ -346,7 +346,7 @@ public sealed class McpWiringRepairerTests : IDisposable
             }.ToJsonString());
         byte[] before = File.ReadAllBytes(Path.Combine(Repo, ".factory", "mcp.json"));
 
-        McpWiringRepairReport report = McpWiringRepairer.Repair(
+        McpWiringRepairReport report = McpWiringTestServices.Wiring.Repair(
             Repo,
             config,
             new LaunchCommandResolver(Repo, []),
@@ -648,7 +648,7 @@ public sealed class McpWiringRepairerTests : IDisposable
         McpConfig config = McpWiringFixture.Declare(FirstPartyServer());
         LaunchCommandResolver resolver = ResolverOver(Bin);
 
-        McpWiringRepairReport dryRun = McpWiringRepairer.Repair(
+        McpWiringRepairReport dryRun = McpWiringTestServices.Wiring.Repair(
             Repo,
             config,
             resolver,
@@ -661,7 +661,7 @@ public sealed class McpWiringRepairerTests : IDisposable
         Assert.False(File.Exists(Path.Combine(Repo, ".mcp.json")), "a dry run creates nothing");
         Assert.False(File.Exists(ReceiptPath), "a dry run writes no receipt");
 
-        McpWiringRepairReport real = McpWiringRepairer.Repair(
+        McpWiringRepairReport real = McpWiringTestServices.Wiring.Repair(
             Repo,
             config,
             resolver,
@@ -734,7 +734,7 @@ public sealed class McpWiringRepairerTests : IDisposable
         Assert.Equal(McpWiringChangeOutcome.Created, change.Outcome);
         Assert.True(File.Exists(Path.Combine(Repo, configFile)), $"{harness}: nothing was written");
 
-        McpWiringReport inspection = McpWiringInspector.Inspect(Repo, config, resolver);
+        McpWiringReport inspection = McpWiringTestServices.Wiring.Inspect(Repo, config, resolver);
 
         string[] found =
         [
@@ -807,7 +807,7 @@ public sealed class McpWiringRepairerTests : IDisposable
         JsonElement entry = servers.GetProperty(ServerName);
         Assert.Equal("${workspaceFolder}", entry.GetProperty("args")[1].GetString());
 
-        McpWiringReport inspection = McpWiringInspector.Inspect(Repo, config, resolver);
+        McpWiringReport inspection = McpWiringTestServices.Wiring.Inspect(Repo, config, resolver);
 
         string[] found =
         [
@@ -936,12 +936,12 @@ public sealed class McpWiringRepairerTests : IDisposable
 
         McpConfig config = McpWiringFixture.Declare(FirstPartyServer());
         LaunchCommandResolver resolver = ResolverOver(Bin);
-        McpWiringReport inspection = McpWiringInspector.Inspect(Repo, config, resolver);
+        McpWiringReport inspection = McpWiringTestServices.Wiring.Inspect(Repo, config, resolver);
 
         McpWiringFinding finding = Assert.Single(inspection.Findings, candidate => candidate.Harness == ClaudeCode);
         Assert.Equal(McpWiringKind.CommandDiffers, finding.Kind);
 
-        IReadOnlyList<McpWiringFix> offered = McpWiringFixes.Derive(inspection, Repo);
+        IReadOnlyList<McpWiringFix> offered = McpWiringTestServices.Wiring.Derive(inspection, Repo);
         Assert.True(
             offered.Count == 0,
             "the prompt was offered a write the repair refuses: "
@@ -1016,7 +1016,7 @@ public sealed class McpWiringRepairerTests : IDisposable
         McpWiringFixture.CreateSymlink(link, outside);
         byte[] written = File.ReadAllBytes(outside);
 
-        McpWiringFileChange change = Assert.Single(McpWiringRepairer.Unwire(Repo, [ClaudeCode]).Files);
+        McpWiringFileChange change = Assert.Single(McpWiringTestServices.Wiring.Unwire(Repo, [ClaudeCode]).Files);
 
         Assert.Equal(McpWiringChangeOutcome.Refused, change.Outcome);
         Assert.False(change.Written);
@@ -1029,7 +1029,7 @@ public sealed class McpWiringRepairerTests : IDisposable
         McpConfig config,
         LaunchCommandResolver resolver,
         params string[] targets) =>
-        McpWiringRepairer.Repair(Repo, config, resolver, targets, dryRun: false);
+        McpWiringTestServices.Wiring.Repair(Repo, config, resolver, targets, dryRun: false);
 
     private LaunchCommandResolver ResolverOver(params string[] searchPaths) => new(searchPaths);
 

@@ -476,7 +476,7 @@ public sealed class McpDocsGateToolsTests : IDisposable
             () => new DocumentLoader(root, config.Ontology).Load(),
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
-        return new DocsTools(host);
+        return DocsToolsComposition.Create(host);
     }
 
     private static string InvokeValidate(

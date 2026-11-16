@@ -1,32 +1,17 @@
 using System.ComponentModel;
-using System.Globalization;
-using System.Text;
-using KyberWeave.Cli.Commands.Squad.Infrastructure;
-using KyberWeave.Core.Configuration;
-using KyberWeave.Core.Diagnostics;
-using KyberWeave.Core.Docs.Delivery;
 using ModelContextProtocol.Server;
 
 namespace KyberWeave.Mcp;
 
 /// <summary>
 /// The deliver tool: push a finished run's branch and open or update its draft pull request, with the description
-/// assembled from what the run recorded (ADR 0081). A thin wrapper over <see cref="RunDelivery"/>, which
-/// <c>kyber-weave run deliver</c> also runs.
+/// assembled from what the run recorded (ADR 0081). An adapter over <see cref="KyberWeave.Contracts.Services.IRunDeliveryService"/>,
+/// which <c>kyber-weave run deliver</c> also runs through the same engine.
 /// </summary>
 public sealed partial class DocsTools
 {
     /// <summary>The deliver tool's published name.</summary>
     public const string DeliverToolName = "docs_push_run_branch_and_open_draft_pull_request";
-
-    private const string DeliverFallbackNext =
-        "next: dispatch github-devops with the create-pull-request skill to open the pull request. Nothing was pushed.";
-
-    /// <summary>Runs git and gh for the deliver tool; null for the bounded default. Tests set it so nothing leaves the machine.</summary>
-    internal IProcessExecutor? DeliveryExecutor { get; set; }
-
-    /// <summary>The home directory holding the run records; null for the user profile. Tests point it at a scratch folder.</summary>
-    internal string? DeliveryHome { get; set; }
 
     /// <summary>
     /// Delivers a finished run: commits the archived plan move and the filed todos if still pending, pushes the run branch (never
@@ -57,33 +42,9 @@ public sealed partial class DocsTools
         [Description("The archived plan's file name, only when the branch archived more than one. Optional.")] string? planFile = null)
     {
         if (string.IsNullOrWhiteSpace(projectPath))
-            return Provenance() + "\nresult: refused\nprojectPath is required: pass the absolute path of the run's worktree.";
-        if (Redirect(projectPath, tools => tools.DeliverHere(summary, notes, title, draft, documentationImpact, planFile)) is { } redirected)
+            return _query.Provenance() + "\nresult: refused\nprojectPath is required: pass the absolute path of the run's worktree.";
+        if (Redirect(projectPath, tools => tools._delivery.DeliverRun(summary, notes, title, draft, documentationImpact, planFile)) is { } redirected)
             return redirected;
-        return DeliverHere(summary, notes, title, draft, documentationImpact, planFile);
-    }
-
-    private string DeliverHere(string summary, string? notes, string? title, bool draft, string? documentationImpact, string? planFile)
-    {
-        string provenance = Provenance();
-        DiagnosticReport report = new();
-        if (!TryLoadHostConfiguration(report, out KyberWeaveConfig config))
-            return LifecycleResponse(provenance, "refused", report, null);
-
-        DeliveryOutcome outcome = new RunDelivery(_host.RepositoryRoot, config, DeliveryExecutor, DeliveryHome)
-            .Run(new DeliveryRequest(summary, notes, title, draft, documentationImpact, planFile));
-        report.AddRange(outcome.Report.Items);
-        if (!outcome.Delivered)
-            return LifecycleResponse(provenance, "refused", report, outcome.NeedsDeliveryAgent ? DeliverFallbackNext : null);
-
-        StringBuilder next = new();
-        next.AppendLine(CultureInfo.InvariantCulture, $"pull request: {outcome.Link}");
-        next.AppendLine(CultureInfo.InvariantCulture, $"number: {outcome.Number}");
-        next.AppendLine(CultureInfo.InvariantCulture, $"draft: {(outcome.IsDraft == true ? "yes" : "no")}");
-        next.AppendLine(CultureInfo.InvariantCulture, $"base: {outcome.Base}");
-        next.AppendLine(CultureInfo.InvariantCulture, $"head: {outcome.Head}");
-        next.AppendLine(CultureInfo.InvariantCulture, $"checks: {outcome.Checks}");
-        next.Append("next: report the pull request link and its checks. No re-check is needed: this was read back from GitHub.");
-        return LifecycleResponse(provenance, outcome.Created ? "created" : "updated", report, next.ToString());
+        return _delivery.DeliverRun(summary, notes, title, draft, documentationImpact, planFile);
     }
 }

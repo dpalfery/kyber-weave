@@ -1,11 +1,4 @@
 using System.ComponentModel;
-using System.Globalization;
-using System.Text;
-using KyberWeave.Core.Configuration;
-using KyberWeave.Core.Diagnostics;
-using KyberWeave.Core.Docs.Closeout;
-using KyberWeave.Core.Docs.Parsing;
-using KyberWeave.Core.Docs.Validation;
 using ModelContextProtocol.Server;
 
 namespace KyberWeave.Mcp;
@@ -13,7 +6,7 @@ namespace KyberWeave.Mcp;
 /// <summary>
 /// The two plan lifecycle tools: finalize an approved Draft plan, and archive a plan whose closeout evidence is
 /// complete. They are the docs server's only tools that change files, and each changes only a plan, its task file,
-/// the plan index and the archive (ADR 0078).
+/// the plan index and the archive (ADR 0078). Adapters over <see cref="KyberWeave.Contracts.Services.IPlanLifecycleService"/>.
 /// </summary>
 public sealed partial class DocsTools
 {
@@ -22,10 +15,6 @@ public sealed partial class DocsTools
 
     /// <summary>The archive tool's published name.</summary>
     public const string ArchiveToolName = "docs_archive_plan_after_closeout_is_complete";
-
-    private const string ArchiveRefusalNext =
-        "next: send these findings to docs-dev as one closeout dispatch (harvest and Closeout mapping). " +
-        "No other role fixes them, and no file is moved by hand. Call this tool again when docs-dev returns.";
 
     /// <summary>
     /// Finalizes an approved Draft plan: records the approval in its Decisions table, sets the plan and its index row
@@ -52,40 +41,11 @@ public sealed partial class DocsTools
         [Description("One line saying what approved it, such as 'AUTONOMOUS_APPROVAL: approve-and-execute' or the owner's answer.")] string approval)
     {
         if (string.IsNullOrWhiteSpace(projectPath))
-            return Provenance() + "\nresult: refused\nprojectPath is required: pass the absolute path of the run's worktree.";
-        if (Redirect(projectPath, tools => tools.FinalizeHere(planFile, approvalMode, approval)) is { } redirected)
+            return _query.Provenance() + "\nresult: refused\nprojectPath is required: pass the absolute path of the run's worktree.";
+        if (Redirect(projectPath, tools => tools._planLifecycle.FinalizePlan(planFile, approvalMode, approval)) is { } redirected)
             return redirected;
-        return FinalizeHere(planFile, approvalMode, approval);
+        return _planLifecycle.FinalizePlan(planFile, approvalMode, approval);
     }
-
-    private string FinalizeHere(string planFile, string approvalMode, string approval)
-    {
-        string provenance = Provenance();
-        DiagnosticReport report = new();
-        if (!TryResolveLifecyclePlan(planFile, report, out KyberWeaveConfig config, out string plan))
-            return LifecycleResponse(provenance, "refused", report, null);
-
-        if (!PlanFinalize.TryParseMode(approvalMode, out PlanApprovalMode mode))
-        {
-            return LifecycleResponse(provenance, "refused", report,
-                $"approvalMode '{approvalMode}' is not 'autonomous' or 'supervised'. Nothing was changed.");
-        }
-
-        // The decision model, when one is configured, picks each unassigned task's agent as the task file is written.
-        using PlanTaskAgentPick? picker = PlanTaskAgentPick.ForConfig(config);
-        PlanFinalizeOutcome outcome = new PlanFinalize(_host.RepositoryRoot, config, () => new DocumentLoader(_host.RepositoryRoot, config.Ontology), picker)
-            .Run(plan, mode, approval, DateOnly.FromDateTime(DateTime.UtcNow));
-        report.AddRange(outcome.Report.Items);
-        if (outcome.Finalized)
-            return LifecycleResponse(provenance, "finalized", report, ReadyNext(outcome));
-        if (outcome.AlreadyReady)
-            return LifecycleResponse(provenance, "already-ready", report, ReadyNext(outcome));
-        return LifecycleResponse(provenance, "refused", report, null);
-    }
-
-    private static string ReadyNext(PlanFinalizeOutcome outcome) =>
-        $"next: TASK_FILE: {outcome.TaskFilePath}\nready queue (dispatch each worker by task id, to the agent its line names when it names one; it fetches its own packet):\n" +
-        $"{outcome.ReadyQueue ?? "(unreadable: validate the task file)"}\ndispatch the first ready tasks now.";
 
     /// <summary>
     /// Archives a plan whose closeout evidence is complete, through the same step as
@@ -106,63 +66,9 @@ public sealed partial class DocsTools
         [Description("The plan file, as a path or its file name under the plans folder.")] string planFile)
     {
         if (string.IsNullOrWhiteSpace(projectPath))
-            return Provenance() + "\nresult: refused\nprojectPath is required: pass the absolute path of the run's worktree.";
-        if (Redirect(projectPath, tools => tools.ArchiveHere(planFile)) is { } redirected)
+            return _query.Provenance() + "\nresult: refused\nprojectPath is required: pass the absolute path of the run's worktree.";
+        if (Redirect(projectPath, tools => tools._planLifecycle.ArchivePlan(planFile)) is { } redirected)
             return redirected;
-        return ArchiveHere(planFile);
-    }
-
-    private string ArchiveHere(string planFile)
-    {
-        string provenance = Provenance();
-        DiagnosticReport report = new();
-        if (!TryResolveLifecyclePlan(planFile, report, out KyberWeaveConfig config, out string plan))
-            return LifecycleResponse(provenance, "refused", report, null);
-
-        PlanCloseoutOutcome outcome = new PlanCloseout(_host.RepositoryRoot, config, () => new DocumentLoader(_host.RepositoryRoot, config.Ontology))
-            .Run(plan, DateOnly.FromDateTime(DateTime.UtcNow), archive: true);
-        report.AddRange(outcome.Report.Items);
-        return outcome.Archived
-            ? LifecycleResponse(provenance, "archived", report,
-                "next: call docs_validate_governed_document_schema with mergeReady true and docs_detect_drift_between_documents_and_code, with the same projectPath.")
-            : LifecycleResponse(provenance, "refused", report, ArchiveRefusalNext);
-    }
-
-    private bool TryResolveLifecyclePlan(string planFile, DiagnosticReport report, out KyberWeaveConfig config, out string plan)
-    {
-        plan = string.Empty;
-        if (!TryLoadHostConfiguration(report, out config))
-            return false;
-
-        if (string.IsNullOrWhiteSpace(planFile))
-        {
-            report.Add(new Diagnostic(PlanFinalize.NotAnActivePlan, Severity.Error, "planFile is required.", "plan"));
-            return false;
-        }
-
-        PlanPathResolution resolution = new PlanPathResolver(_host.RepositoryRoot, config).Resolve(planFile, _host.RepositoryRoot);
-        if (!resolution.Found)
-        {
-            string message = resolution.Ambiguous
-                ? $"'{planFile}' matches several plans: {string.Join(", ", resolution.Candidates)}. Name one."
-                : $"'{planFile}' names no plan under {string.Join(", ", resolution.SearchedFolders)}.";
-            report.Add(new Diagnostic(PlanFinalize.NotAnActivePlan, Severity.Error, message, planFile));
-            return false;
-        }
-
-        plan = resolution.Path!;
-        return true;
-    }
-
-    private static string LifecycleResponse(string provenance, string result, DiagnosticReport report, string? next)
-    {
-        StringBuilder sb = new();
-        sb.AppendLine(provenance);
-        sb.AppendLine(CultureInfo.InvariantCulture, $"result: {result}");
-        foreach (Diagnostic item in report.Items.OrderByDescending(item => item.Severity))
-            sb.AppendLine(FormatGateFinding(item));
-        if (next is not null)
-            sb.AppendLine(next);
-        return sb.ToString().TrimEnd();
+        return _planLifecycle.ArchivePlan(planFile);
     }
 }

@@ -53,7 +53,7 @@ public sealed class RetrievalRegressionTests
         () =>
         {
             string? root = RepositoryRoot();
-            return root is null ? null : new DocsTools(CreateHost(root), new RepositoryDocsAnalysisReader(root));
+            return root is null ? null : DocsToolsComposition.Create(CreateHost(root), new RepositoryDocsAnalysisReader(root));
         });
 
     /// <summary>Question, expected document id, phrase from the answering section, confidence floor.</summary>

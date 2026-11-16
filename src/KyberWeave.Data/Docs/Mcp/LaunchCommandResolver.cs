@@ -28,7 +28,7 @@ namespace KyberWeave.Core.Docs.Mcp;
 /// resolved against.
 /// </para>
 /// </remarks>
-public sealed class LaunchCommandResolver
+public sealed class LaunchCommandResolver : KyberWeave.Contracts.Repositories.ILaunchCommandResolver
 {
     /// <summary>What Windows searches when a command names no extension.</summary>
     private const string DefaultPathExtensions = ".COM;.EXE;.BAT;.CMD";
@@ -213,4 +213,12 @@ public sealed class LaunchCommandResolver
     /// </summary>
     private static IEnumerable<string> SplitSearchPath(string? searchPath) =>
         searchPath is null ? [] : searchPath.Split(Path.PathSeparator);
+}
+
+/// <summary>Builds the launch-command resolver over this process's own <c>PATH</c>.</summary>
+public sealed class EnvironmentLaunchCommandResolverFactory : KyberWeave.Contracts.Repositories.ILaunchCommandResolverFactory
+{
+    /// <inheritdoc />
+    public KyberWeave.Contracts.Repositories.ILaunchCommandResolver FromEnvironment(string repositoryRoot) =>
+        LaunchCommandResolver.FromEnvironment(repositoryRoot);
 }

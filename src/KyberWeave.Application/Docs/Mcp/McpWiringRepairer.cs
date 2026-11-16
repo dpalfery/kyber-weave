@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Encodings.Web;
@@ -7,53 +8,6 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Docs.Mcp;
-
-/// <summary>What the repair did to one target file.</summary>
-public enum McpWiringChangeOutcome
-{
-    /// <summary>The file was absent and now holds the declared servers' entries.</summary>
-    Created,
-
-    /// <summary>Entries were inserted into a file that already existed.</summary>
-    Inserted,
-
-    /// <summary>Removal restored the file's pre-write bytes.</summary>
-    Restored,
-
-    /// <summary>Removal deleted a file the repair had created.</summary>
-    Deleted,
-
-    /// <summary>Nothing was written to the target, and <see cref="McpWiringFileChange.Code"/> says why.</summary>
-    Refused
-}
-
-/// <summary>What one target of a repair or a removal came to.</summary>
-/// <param name="Harness">The harness slug the change is about.</param>
-/// <param name="Path">
-/// The repository-relative file, or null when the harness has no file in the tree to write.
-/// </param>
-/// <param name="Outcome">What happened.</param>
-/// <param name="Servers">The server names the change concerns.</param>
-/// <param name="Code">The stable <c>KW-*</c> rule id, on a refusal.</param>
-/// <param name="Message">One sentence describing the change or the refusal.</param>
-/// <param name="Hint">The remedy, as the command or edit to make.</param>
-/// <param name="Written">Whether bytes reached the target. Always false in a dry run.</param>
-/// <param name="Snippet">For a harness the repair does not write: what to paste instead.</param>
-public sealed record McpWiringFileChange(
-    string Harness,
-    string? Path,
-    McpWiringChangeOutcome Outcome,
-    IReadOnlyList<string> Servers,
-    string? Code = null,
-    string? Message = null,
-    string? Hint = null,
-    bool Written = false,
-    string? Snippet = null);
-
-/// <summary>Every target's outcome, in the order the targets were requested.</summary>
-/// <param name="Files">One change per target.</param>
-/// <param name="DryRun">Whether the report describes a run that wrote nothing.</param>
-public sealed record McpWiringRepairReport(IReadOnlyList<McpWiringFileChange> Files, bool DryRun);
 
 /// <summary>
 /// Writes the declared MCP servers into the harnesses an operator names, and takes them out again.
@@ -84,8 +38,10 @@ public sealed record McpWiringRepairReport(IReadOnlyList<McpWiringFileChange> Fi
 /// installation itself is broken and names the install repair, not the harness configuration (6.3).
 /// </para>
 /// </remarks>
-public static class McpWiringRepairer
+public sealed class McpWiringRepairer(IMcpConfigFiles files)
 {
+    private readonly IMcpConfigFiles _files = files ?? throw new ArgumentNullException(nameof(files));
+
     /// <summary>The repair refused a target and wrote nothing to it.</summary>
     public const string RefusalCode = "KW-MCP-WIRE-005";
 
@@ -126,10 +82,10 @@ public static class McpWiringRepairer
     /// account of what it held.
     /// </para>
     /// </remarks>
-    public static McpWiringRepairReport Repair(
+    public McpWiringRepairReport Repair(
         string repositoryRoot,
         McpConfig config,
-        LaunchCommandResolver resolver,
+        ILaunchCommandResolver resolver,
         IReadOnlyList<string> targets,
         bool dryRun = false)
     {
@@ -169,7 +125,7 @@ public static class McpWiringRepairer
     /// asked for, so the write never landed and its record is dropped instead. There is no dry run
     /// here — the operation either restores bytes it can prove, or it does nothing.
     /// </remarks>
-    public static McpWiringRepairReport Unwire(string repositoryRoot, IReadOnlyList<string> targets)
+    public McpWiringRepairReport Unwire(string repositoryRoot, IReadOnlyList<string> targets)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
         ArgumentNullException.ThrowIfNull(targets);
@@ -192,7 +148,7 @@ public static class McpWiringRepairer
         return new McpWiringRepairReport(changes, DryRun: false);
     }
 
-    private static (McpWiringFileChange Change, bool Removed) UnwireTarget(
+    private (McpWiringFileChange Change, bool Removed) UnwireTarget(
         string root,
         List<McpWiringReceiptRecord> records,
         string harness)
@@ -242,7 +198,7 @@ public static class McpWiringRepairer
         // digest read, because it is the more specific fact: an operator whose file is a link needs
         // to hear that, not "there is no record" or "restore it from version control" — advice that
         // would have them editing the linked file by hand.
-        McpLinkProbe probe = McpConfigurationLink.Probe(root, fullPath);
+        McpLinkProbe probe = McpConfigurationLink.Probe(root, fullPath, _files.InspectLink);
 
         if (probe.Obstruction == McpLinkObstruction.Denied)
         {
@@ -291,7 +247,7 @@ public static class McpWiringRepairer
 
         try
         {
-            current = File.ReadAllBytes(fullPath);
+            current = _files.ReadAllBytes(fullPath);
         }
         catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
@@ -359,9 +315,9 @@ public static class McpWiringRepairer
         try
         {
             if (preWrite is null)
-                File.Delete(fullPath);
+                _files.DeleteFile(fullPath);
             else
-                AtomicFile.WriteAllBytes(fullPath, preWrite);
+                _files.WriteAllBytesAtomic(fullPath, preWrite);
         }
         catch (IOException exception)
         {
@@ -398,10 +354,10 @@ public static class McpWiringRepairer
     /// and writes neither the file nor its record (5.10). The journal is what says a write may happen
     /// at all: a write this tool cannot record is a write it cannot undo.
     /// </param>
-    private static McpWiringFileChange RepairTarget(
+    private McpWiringFileChange RepairTarget(
         string root,
         IReadOnlyList<RequiredMcpServer> declared,
-        LaunchCommandResolver resolver,
+        ILaunchCommandResolver resolver,
         string harness,
         ReceiptJournal? journal)
     {
@@ -443,7 +399,7 @@ public static class McpWiringRepairer
         // refusal comes before the read so that not one byte of the target is opened. The same
         // position answers the denial case, which is the other way this path can prove nothing about
         // the file it names.
-        McpLinkProbe probe = McpConfigurationLink.Probe(root, fullPath);
+        McpLinkProbe probe = McpConfigurationLink.Probe(root, fullPath, _files.InspectLink);
 
         if (probe.Obstruction == McpLinkObstruction.Denied)
         {
@@ -479,7 +435,7 @@ public static class McpWiringRepairer
 
         try
         {
-            original = File.ReadAllBytes(fullPath);
+            original = _files.ReadAllBytes(fullPath);
         }
         catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
@@ -637,7 +593,7 @@ public static class McpWiringRepairer
 
         try
         {
-            AtomicFile.WriteAllBytes(fullPath, planned);
+            _files.WriteAllBytesAtomic(fullPath, planned);
         }
         catch (IOException exception)
         {
@@ -1320,7 +1276,7 @@ public static class McpWiringRepairer
     private static IReadOnlyList<RequiredMcpServer> Declared(McpConfig config) =>
         [.. config.RequiredServers.Values.OrderBy(server => server.Name, StringComparer.Ordinal)];
 
-    private static bool Resolves(LaunchCommandResolver resolver, RequiredMcpServer server) =>
+    private static bool Resolves(ILaunchCommandResolver resolver, RequiredMcpServer server) =>
         server.Command.Count > 0 &&
         !string.IsNullOrWhiteSpace(server.Command[0]) &&
         resolver.Resolve(server.Command[0]) is not null;

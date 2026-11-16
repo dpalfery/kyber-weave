@@ -83,7 +83,7 @@ public sealed class McpDocsToolsRefreshOptInTests : IDisposable
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
 
-        return new DocsTools(host);
+        return DocsToolsComposition.Create(host);
     }
 
     /// <summary>A CodeGraph port that reports no readable index, as a runner without one does.</summary>

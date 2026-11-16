@@ -1,5 +1,8 @@
 using System.Reflection;
 
+using KyberWeave.Application;
+using KyberWeave.Contracts.Docs;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
@@ -94,7 +97,9 @@ if (!expectRootFromFlag && !string.IsNullOrWhiteSpace(expectRootEnvironment))
 
 OntologyConfig ontology = DocsRootRegistry.ResolveOntology(repoRoot);
 
-// Composition root: factories for DocumentIndexHost. Core never invents these collaborators.
+// Composition root. The shared layers register their own services first; every registration below this line
+// is a host decision made once from this process's own argv and root. Core never invents these collaborators.
+builder.Services.AddWeaveApplication();
 builder.Services.AddSingleton(new DocumentIndexHost(
     repoRoot,
     () => CodeGraphResolvers.ForRepository(repoRoot).Resolver,
@@ -105,11 +110,18 @@ builder.Services.AddSingleton<IDocsAnalysisReader>(new RepositoryDocsAnalysisRea
 
 // The refresh schedule is a process-wide decision, made once from this process's own argv. The
 // tools receive it by injection so a test that asks them directly gets the default cadence.
-builder.Services.AddSingleton(new CodeGraphFreshness(repoRoot, codeGraphRefreshEnabled));
+builder.Services.AddSingleton<ICodeGraphFreshnessGate>(new CodeGraphFreshness(repoRoot, codeGraphRefreshEnabled));
+builder.Services.AddSingleton<IDocsGateRunner, DocsGateRunner>();
+builder.Services.AddSingleton<IDocsQueryService, DocsQueryService>();
+builder.Services.AddSingleton<IPlanLifecycleService>(services =>
+    new PlanLifecycleService(repoRoot, services.GetRequiredService<IDocsQueryService>()));
+builder.Services.AddSingleton<IRunDeliveryService>(services =>
+    new RunDeliveryService(repoRoot, services.GetRequiredService<IDocsQueryService>()));
 
 // A tool call may name another worktree of this repository with projectPath. Those are served by
 // tools of their own, built on demand and kept in a small least-recently-used set.
-builder.Services.AddSingleton(DocsRootRegistry.ForRepository(repoRoot, codeGraphRefreshEnabled));
+builder.Services.AddSingleton(services =>
+    DocsRootRegistry.ForRepository(repoRoot, codeGraphRefreshEnabled, services));
 
 builder.Services
     .AddMcpServer(DocsServerInstructions.Configure)

@@ -1,24 +1,6 @@
-namespace KyberWeave.Core.Docs.Mcp;
+using KyberWeave.Contracts.Repositories;
 
-/// <summary>
-/// One harness file a wiring repair would write, and the servers it would put there.
-/// </summary>
-/// <param name="Harness">The harness slug, which is also the repair's target.</param>
-/// <param name="Path">The repository-relative configuration file the write would land in.</param>
-/// <param name="Servers">The server names the write would add, ordinal-sorted.</param>
-/// <param name="Create">
-/// Whether the file is absent today, so the repair would create it rather than insert into it.
-/// </param>
-/// <remarks>
-/// This is what an operator is shown before consenting to a write, so it names the file and the
-/// servers rather than the finding that prompted them: "cursor is missing a server" is a diagnosis,
-/// and "this would write .cursor/mcp.json adding kyber-weave" is what consent is given to.
-/// </remarks>
-public sealed record McpWiringFix(
-    string Harness,
-    string Path,
-    IReadOnlyList<string> Servers,
-    bool Create);
+namespace KyberWeave.Core.Docs.Mcp;
 
 /// <summary>
 /// Turns an inspection report into the writes a repair would perform, so a caller offering the
@@ -48,8 +30,11 @@ public sealed record McpWiringFix(
 /// file the check read and the repair will write.
 /// </para>
 /// </remarks>
-public static class McpWiringFixes
+public sealed class McpWiringFixes(IMcpConfigFiles files, McpServerRenamer renamer)
 {
+    private readonly IMcpConfigFiles _files = files ?? throw new ArgumentNullException(nameof(files));
+    private readonly McpServerRenamer _renamer = renamer ?? throw new ArgumentNullException(nameof(renamer));
+
     /// <summary>
     /// The writes that would close <paramref name="report"/>'s fixable gaps, in report order.
     /// </summary>
@@ -59,7 +44,7 @@ public static class McpWiringFixes
     /// file exists yet. Nothing is written.
     /// </param>
     /// <returns>One fix per harness with at least one fixable gap, or an empty list.</returns>
-    public static IReadOnlyList<McpWiringFix> Derive(McpWiringReport report, string repositoryRoot)
+    public IReadOnlyList<McpWiringFix> Derive(McpWiringReport report, string repositoryRoot)
     {
         ArgumentNullException.ThrowIfNull(report);
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
@@ -103,7 +88,7 @@ public static class McpWiringFixes
                 harness,
                 plans[harness].Path,
                 [.. plans[harness].Servers],
-                Create: !File.Exists(plans[harness].AbsolutePath)))
+                Create: !_files.FileExists(plans[harness].AbsolutePath)))
         ];
     }
 
@@ -114,11 +99,11 @@ public static class McpWiringFixes
     /// The scan is the migration's, so this list and <c>docs mcp-migrate</c> cannot disagree about
     /// which files hold a leftover: one proof table decides both.
     /// </remarks>
-    private static HashSet<string> Leftovers(string root)
+    private HashSet<string> Leftovers(string root)
     {
         HashSet<string> harnesses = new(StringComparer.Ordinal);
 
-        foreach (McpRenameChange change in McpServerRenamer.Scan(root))
+        foreach (McpRenameChange change in _renamer.Scan(root))
         {
             if (string.IsNullOrEmpty(change.OldKey) || change.Code == McpServerRenamer.LeftAloneCode)
                 continue;

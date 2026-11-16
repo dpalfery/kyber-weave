@@ -456,7 +456,7 @@ public sealed class ExploreAnswerTests : IDisposable
             "6-Docs/indexing/two-clocks.md",
             "The corpus is rebuilt when documentation changes, and the joins when the graph does.");
 
-        return new DocsTools(CreateHost(_fixture.Root), new RepositoryDocsAnalysisReader(_fixture.Root));
+        return DocsToolsComposition.Create(CreateHost(_fixture.Root), new RepositoryDocsAnalysisReader(_fixture.Root));
     }
 
     private void WriteUnrelatedDocument(string id, string title, string relativePath, string prose)
@@ -500,7 +500,7 @@ public sealed class ExploreAnswerTests : IDisposable
         }
 
         DocumentIndexHost host = CreateHost(_fixture.Root);
-        return (new DocsTools(host, new RepositoryDocsAnalysisReader(_fixture.Root)), host);
+        return (DocsToolsComposition.Create(host, new RepositoryDocsAnalysisReader(_fixture.Root)), host);
     }
 
     private void WriteDocument(

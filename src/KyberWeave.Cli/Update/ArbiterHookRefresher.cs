@@ -1,3 +1,4 @@
+using KyberWeave.Cli.Composition;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -471,7 +472,7 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
     {
         IReadOnlyList<McpRenameChange> leftovers =
         [
-            .. McpServerRenamer.Scan(root)
+            .. LegacyMcpWiring.Service.Scan(root, null)
                 .Where(change => string.Equals(change.Code, McpServerRenamer.RenameCode, StringComparison.Ordinal))
         ];
 

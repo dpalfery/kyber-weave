@@ -198,7 +198,7 @@ public sealed class McpDocsProvenanceTests : IDisposable
             $"gitdir: {Path.Combine(root, ".git-missing")}{Environment.NewLine}");
 
     private static DocsTools CreateTools(string root) =>
-        new(CreateHost(root), new RepositoryDocsAnalysisReader(root));
+        DocsToolsComposition.Create(CreateHost(root), new RepositoryDocsAnalysisReader(root));
 
     private static DocumentIndexHost CreateHost(string root)
     {

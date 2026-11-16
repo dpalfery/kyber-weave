@@ -3,6 +3,7 @@ using KyberWeave.Contracts.Services;
 using KyberWeave.Data.Docs.FileSystem;
 using KyberWeave.Data.CodeGraph;
 using KyberWeave.Data.Configuration;
+using KyberWeave.Data.Docs.Mcp;
 using KyberWeave.Data.Doctor;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Host;
@@ -45,6 +46,9 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IMcpStdioSessionFactory, StdioMcpSessionFactory>();
         services.TryAddSingleton<IStatusLineFiles, FileStatusLineFiles>();
         services.TryAddSingleton<IUserHostConfigStore, FileUserHostConfigStore>();
+        services.TryAddSingleton<IGitCheckoutProbe>(_ => new GitCheckoutProbe());
+        services.TryAddSingleton<IMcpConfigFiles>(_ => new PhysicalMcpConfigFiles());
+        services.TryAddSingleton<ILaunchCommandResolverFactory>(_ => new KyberWeave.Core.Docs.Mcp.EnvironmentLaunchCommandResolverFactory());
         return services;
     }
 }

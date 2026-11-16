@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Core.Configuration;
@@ -24,8 +25,10 @@ namespace KyberWeave.Core.Docs.Mcp;
 /// refuses, or an entry naming a binary that does not resolve, is a gap rather than a pass.
 /// </para>
 /// </remarks>
-public static class McpWiringInspector
+public sealed class McpWiringInspector(IMcpConfigFiles files)
 {
+    private readonly IMcpConfigFiles _files = files ?? throw new ArgumentNullException(nameof(files));
+
     /// <summary>A declared server is not wired for an in-play harness.</summary>
     public const string NotWiredCode = "KW-MCP-WIRE-001";
 
@@ -45,27 +48,14 @@ public static class McpWiringInspector
 
     private const string WireCommand = "kyber-weave docs mcp-wire --target";
 
-    /// <summary>Inspects a repository against this process's <c>PATH</c>.</summary>
-    /// <param name="repositoryRoot">The repository whose repository-scope files are read.</param>
-    /// <param name="config">The servers the repository declares.</param>
-    /// <remarks>
-    /// The root is passed to the resolver as well as to the tree walk, so a declared launch command
-    /// spelled as a relative path — <c>./bin/kyber-weave-mcp</c>, which is how a repository points at
-    /// the binary it builds — resolves against the repository being inspected. Resolving it against
-    /// the working directory instead made the answer depend on where the operator stood when they ran
-    /// the command: the same tree was wired from the repository root and unwired from anywhere else.
-    /// </remarks>
-    public static McpWiringReport Inspect(string repositoryRoot, McpConfig config) =>
-        Inspect(repositoryRoot, config, LaunchCommandResolver.FromEnvironment(repositoryRoot));
-
     /// <summary>Inspects a repository against an injected search path.</summary>
     /// <param name="repositoryRoot">The repository whose repository-scope files are read.</param>
     /// <param name="config">The servers the repository declares.</param>
     /// <param name="resolver">Resolves a launch command to a file, without launching it.</param>
-    public static McpWiringReport Inspect(
+    public McpWiringReport Inspect(
         string repositoryRoot,
         McpConfig config,
-        LaunchCommandResolver resolver)
+        ILaunchCommandResolver resolver)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
         ArgumentNullException.ThrowIfNull(config);
@@ -90,12 +80,12 @@ public static class McpWiringInspector
         return new McpWiringReport(findings);
     }
 
-    private static void AddHarnessFindings(
+    private void AddHarnessFindings(
         List<McpWiringFinding> findings,
         string root,
         HarnessMcpEntry entry,
         IReadOnlyList<RequiredMcpServer> declared,
-        LaunchCommandResolver resolver)
+        ILaunchCommandResolver resolver)
     {
         if (entry.Shape == McpConfigurationShape.RepositorySettings)
         {
@@ -105,7 +95,7 @@ public static class McpWiringInspector
 
         IReadOnlyList<ConfiguredFile> files = ConfiguredFiles(root, entry);
         bool markerPresent = entry.MarkerDirectories.Any(
-            marker => Directory.Exists(Path.Combine(root, marker)));
+            marker => _files.DirectoryExists(Path.Combine(root, marker)));
 
         if (files.Count == 0 && !markerPresent)
         {
@@ -123,12 +113,12 @@ public static class McpWiringInspector
         }
     }
 
-    private static McpWiringFinding? InspectServer(
+    private McpWiringFinding? InspectServer(
         HarnessMcpEntry entry,
         RequiredMcpServer server,
         IReadOnlyList<ConfiguredFile> files,
         string namedPath,
-        LaunchCommandResolver resolver)
+        ILaunchCommandResolver resolver)
     {
         Detection detection = Detect(entry, server, files);
 
@@ -294,7 +284,7 @@ public static class McpWiringInspector
     /// however many stand between the operator and a working configuration.
     /// </para>
     /// </remarks>
-    private static Detection Detect(
+    private Detection Detect(
         HarnessMcpEntry entry,
         RequiredMcpServer server,
         IReadOnlyList<ConfiguredFile> files)
@@ -849,7 +839,7 @@ public static class McpWiringInspector
     /// than writing there.
     /// </para>
     /// </remarks>
-    private static IReadOnlyList<ConfiguredFile> ConfiguredFiles(string root, HarnessMcpEntry entry)
+    private IReadOnlyList<ConfiguredFile> ConfiguredFiles(string root, HarnessMcpEntry entry)
     {
         List<ConfiguredFile> files = [];
 
@@ -863,8 +853,8 @@ public static class McpWiringInspector
                         continue;
 
                     string path = Path.Combine(directory, relativePath.Replace('/', Path.DirectorySeparatorChar));
-                    McpLinkProbe probe = McpConfigurationLink.Probe(root, path);
-                    if (probe.Obstruction != McpLinkObstruction.None || File.Exists(path))
+                    McpLinkProbe probe = McpConfigurationLink.Probe(root, path, _files.InspectLink);
+                    if (probe.Obstruction != McpLinkObstruction.None || _files.FileExists(path))
                         files.Add(new ConfiguredFile(path, RelativeTo(root, path), probe));
                 }
             }
@@ -881,8 +871,8 @@ public static class McpWiringInspector
             // states where File.Exists answers two: a link whose target is gone is still a link, and a
             // file this process may not reach still exists — File.Exists reports it as absent, and
             // "absent" is the answer that lets the repair create a file over one it never read.
-            McpLinkProbe probe = McpConfigurationLink.Probe(root, path);
-            if (probe.Obstruction != McpLinkObstruction.None || File.Exists(path))
+            McpLinkProbe probe = McpConfigurationLink.Probe(root, path, _files.InspectLink);
+            if (probe.Obstruction != McpLinkObstruction.None || _files.FileExists(path))
                 files.Add(new ConfiguredFile(path, relativePath, probe));
         }
 
@@ -894,7 +884,7 @@ public static class McpWiringInspector
     /// <c>ZCodeMcpConfiguration</c> semantics: with no worktree marker anywhere above, the walk
     /// contributes the starting directory alone rather than every ancestor.
     /// </summary>
-    private static IReadOnlyList<string> ZCodeProjectDirectories(string root)
+    private IReadOnlyList<string> ZCodeProjectDirectories(string root)
     {
         List<string> directories = [];
         string current = root;
@@ -904,7 +894,7 @@ public static class McpWiringInspector
             directories.Add(current);
 
             string marker = Path.Combine(current, WorktreeMarker);
-            if (Directory.Exists(marker) || File.Exists(marker))
+            if (_files.DirectoryExists(marker) || _files.FileExists(marker))
                 return directories;
 
             string? parent = Path.GetDirectoryName(current);
@@ -1167,11 +1157,11 @@ public static class McpWiringInspector
     /// exception here: the check reports a gap, and one permission error in a repository's tree
     /// must not abort a <c>docs init</c>.
     /// </summary>
-    private static string? ReadText(string path)
+    private string? ReadText(string path)
     {
         try
         {
-            return File.ReadAllText(path);
+            return _files.ReadAllText(path);
         }
         catch (IOException)
         {
@@ -1187,7 +1177,7 @@ public static class McpWiringInspector
     /// Parses a JSON configuration leniently — comments and trailing commas are what editors leave
     /// behind — and returns null when it cannot be read at all.
     /// </summary>
-    private static JsonDocument? ReadJson(string path)
+    private JsonDocument? ReadJson(string path)
     {
         string? text = ReadText(path);
         if (text is null)

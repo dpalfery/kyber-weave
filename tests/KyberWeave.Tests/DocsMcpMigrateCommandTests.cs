@@ -1094,7 +1094,7 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
             (OldKey, ShippedBinary, ["--repo-root", "."]),
             ("kyberdash", "npx", []));
 
-        IReadOnlyList<McpRenameChange> changes = McpServerRenamer.Migrate(Repo, [ClaudeCode]);
+        IReadOnlyList<McpRenameChange> changes = McpWiringTestServices.Wiring.Migrate(Repo, [ClaudeCode]);
 
         McpRenameChange renamed = Assert.Single(changes, change => change.OldKey == OldKey);
         Assert.Equal(McpRenameOutcome.Renamed, renamed.Outcome);
@@ -1276,19 +1276,19 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     /// fake home, for the cases about which tree the operator pointed the command at.
     /// </summary>
     private CapturedConsoleExecution<int> MigrateAt(string root, string targets, bool dryRun = false) =>
-        ProcessConsoleCapture.Run(() => new DocsMcpMigrateCommand(() => FakeHome).Execute(
+        ProcessConsoleCapture.Run(() => new DocsMcpMigrateCommand(McpWiringTestServices.Wiring, () => FakeHome).Execute(
             null!,
             new DocsMcpMigrateSettings { Path = root, Target = targets, DryRun = dryRun }));
 
     /// <summary>Runs the wire verb, to produce a receipt the migrate verb must rebase.</summary>
     private CapturedConsoleExecution<int> Wire(string targets) =>
-        ProcessConsoleCapture.Run(() => new DocsMcpWireCommand().Execute(
+        ProcessConsoleCapture.Run(() => new DocsMcpWireCommand(McpWiringTestServices.Wiring).Execute(
             null!,
             new DocsMcpWireSettings { Path = Repo, Target = targets }));
 
     /// <summary>Runs the removal verb against the receipt the wire and migrate verbs wrote.</summary>
     private CapturedConsoleExecution<int> Unwire(string targets) =>
-        ProcessConsoleCapture.Run(() => new DocsMcpUnwireCommand().Execute(
+        ProcessConsoleCapture.Run(() => new DocsMcpUnwireCommand(McpWiringTestServices.Wiring).Execute(
             null!,
             new DocsMcpUnwireSettings { Path = Repo, Target = targets }));
 

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
@@ -55,14 +56,27 @@ public sealed class DocsRootRegistry
     /// <summary>A registry whose other roots get the same composition the server root has.</summary>
     /// <param name="serverRoot">The root the server was started with.</param>
     /// <param name="codeGraphRefreshEnabled">False when the process runs with <c>--no-codegraph-refresh</c>.</param>
-    public static DocsRootRegistry ForRepository(string serverRoot, bool codeGraphRefreshEnabled) =>
-        new(serverRoot, root => CreateTools(root, codeGraphRefreshEnabled, null));
+    /// <param name="services">The container the other roots' services are resolved from, or null for the default one.</param>
+    public static DocsRootRegistry ForRepository(
+        string serverRoot,
+        bool codeGraphRefreshEnabled,
+        IServiceProvider? services = null) =>
+        new(serverRoot, root => CreateTools(root, codeGraphRefreshEnabled, null, services));
 
     /// <summary>The tools for one checkout: its own document host, analysis reader and refresh schedule.</summary>
     /// <param name="repoRoot">The checkout root.</param>
     /// <param name="codeGraphRefreshEnabled">False when the process runs with <c>--no-codegraph-refresh</c>.</param>
     /// <param name="registry">The registry the tools hand a per-call <c>projectPath</c> to, or null.</param>
-    public static DocsTools CreateTools(string repoRoot, bool codeGraphRefreshEnabled, DocsRootRegistry? registry)
+    /// <param name="services">The container the shared collaborators are resolved from, or null for the default one.</param>
+    /// <param name="deliveryExecutor">Runs git and gh for the deliver tool, or null for the bounded default.</param>
+    /// <param name="deliveryHome">The home directory holding the run records, or null for the user profile.</param>
+    public static DocsTools CreateTools(
+        string repoRoot,
+        bool codeGraphRefreshEnabled,
+        DocsRootRegistry? registry,
+        IServiceProvider? services = null,
+        IProcessExecutor? deliveryExecutor = null,
+        string? deliveryHome = null)
     {
         OntologyConfig ontology = ResolveOntology(repoRoot);
         DocumentIndexHost host = new(
@@ -71,11 +85,14 @@ public sealed class DocsRootRegistry
             () => new DocumentLoader(repoRoot, ontology).Load(),
             ontology.DocsRoots,
             ontology.ResolvedCatalogPath);
-        return new DocsTools(
+        return DocsToolsComposition.Create(
             host,
             new RepositoryDocsAnalysisReader(repoRoot),
             new CodeGraphFreshness(repoRoot, codeGraphRefreshEnabled),
-            registry);
+            registry,
+            services,
+            deliveryExecutor,
+            deliveryHome);
     }
 
     /// <summary>

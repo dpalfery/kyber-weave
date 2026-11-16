@@ -1,70 +1,11 @@
+using KyberWeave.Contracts.Repositories;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.FileSystem;
-using YamlDotNet.Core;
 
 namespace KyberWeave.Core.Docs.Mcp;
-
-/// <summary>What one target of a rename came to.</summary>
-public enum McpRenameOutcome
-{
-    /// <summary>The target holds no old key, so there is nothing to rename.</summary>
-    NothingToDo,
-
-    /// <summary>A proven old key was rewritten to its shipped name.</summary>
-    Renamed,
-
-    /// <summary>A proven old key was removed because the shipped name already held the same launch.</summary>
-    RemovedDuplicate,
-
-    /// <summary>An old key was reported and left alone, because it could not be proven ours.</summary>
-    Reported,
-
-    /// <summary>The target could not be migrated, and no byte of it was written.</summary>
-    Refused
-}
-
-/// <summary>What a rename found, did, or refused, in the words the operator reads.</summary>
-/// <param name="Harness">The target slug the change is about, or <c>declaration</c> for the host declaration.</param>
-/// <param name="Path">The repository-relative file, or null when the target has no file in the tree.</param>
-/// <param name="Outcome">What happened, or what would happen in a dry run.</param>
-/// <param name="OldKey">The retired key the change is about, when there is one.</param>
-/// <param name="NewKey">The shipped key the change is about, when there is one.</param>
-/// <param name="Code">The stable <c>KW-*</c> rule id the change carries.</param>
-/// <param name="Message">One sentence describing the change or the refusal.</param>
-/// <param name="Hint">The remedy, as the command or edit to make.</param>
-/// <param name="Snippet">For a harness this tool does not write: what to paste instead.</param>
-/// <param name="Written">Whether bytes reached the file. Always false in a dry run.</param>
-public sealed record McpRenameChange(
-    string Harness,
-    string? Path,
-    McpRenameOutcome Outcome,
-    string? OldKey = null,
-    string? NewKey = null,
-    string? Code = null,
-    string? Message = null,
-    string? Hint = null,
-    string? Snippet = null,
-    bool Written = false);
-
-/// <summary>
-/// One retired MCP server key, the key that replaced it, and the launch that proves an entry written
-/// under the old one is Kyber-Weave's.
-/// </summary>
-/// <param name="OldKey">The key existing installs were written under.</param>
-/// <param name="NewKey">The key this version writes.</param>
-/// <param name="Binary">The file name of the binary the old key's server launches.</param>
-/// <param name="NextArgument">
-/// The argument that must follow the binary for the launch to be this server's, or null when the
-/// binary alone identifies it.
-/// </param>
-public sealed record McpRenameRule(
-    string OldKey,
-    string NewKey,
-    string Binary,
-    string? NextArgument);
 
 /// <summary>
 /// Renames the retired MCP server keys in an existing install, in place, and never touches an entry
@@ -89,8 +30,11 @@ public sealed record McpRenameRule(
 /// paths it will not enter are named in the report so the operator can edit them by hand.
 /// </para>
 /// </remarks>
-public static class McpServerRenamer
+public sealed class McpServerRenamer(IMcpConfigFiles files, IMcpDeclarationReader declarations)
 {
+    private readonly IMcpConfigFiles _files = files ?? throw new ArgumentNullException(nameof(files));
+    private readonly IMcpDeclarationReader _declarations = declarations ?? throw new ArgumentNullException(nameof(declarations));
+
     /// <summary>A proven old key is present; the remedy is this command.</summary>
     public const string RenameCode = "KW-MCP-WIRE-007";
 
@@ -190,7 +134,7 @@ public static class McpServerRenamer
     /// "is the declared server wired", and returns nothing at all when nothing is declared, while a
     /// leftover key is worth reporting either way.
     /// </remarks>
-    public static IReadOnlyList<McpRenameChange> Scan(string repositoryRoot, string? harness = null)
+    public IReadOnlyList<McpRenameChange> Scan(string repositoryRoot, string? harness = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
 
@@ -218,7 +162,7 @@ public static class McpServerRenamer
     /// A target that refuses does not stop another: one unlucky file in a repository is no reason to
     /// leave the rest of the install under the retired names.
     /// </remarks>
-    public static IReadOnlyList<McpRenameChange> Migrate(
+    public IReadOnlyList<McpRenameChange> Migrate(
         string repositoryRoot,
         IReadOnlyList<string> targets,
         bool dryRun = false)
@@ -276,7 +220,7 @@ public static class McpServerRenamer
     }
 
     /// <summary>Reads one harness's repository-scope files and reports what they hold.</summary>
-    private static IReadOnlyList<McpRenameChange> ScanRow(string root, HarnessMcpEntry row)
+    private IReadOnlyList<McpRenameChange> ScanRow(string root, HarnessMcpEntry row)
     {
         if (row.Shape == McpConfigurationShape.RepositorySettings || row.Paths.Count == 0)
             return [];
@@ -289,7 +233,7 @@ public static class McpServerRenamer
         return changes;
     }
 
-    private static IReadOnlyList<McpRenameChange> ScanFile(HarnessMcpEntry row, ConfiguredFile file)
+    private IReadOnlyList<McpRenameChange> ScanFile(HarnessMcpEntry row, ConfiguredFile file)
     {
         if (file.Probe.Obstruction != McpLinkObstruction.None)
         {
@@ -335,13 +279,13 @@ public static class McpServerRenamer
     /// qualifier (<c>KW-MCP-WIRE-008</c>) for that reason: an unqualified rename would claim a proof
     /// this command never obtained and tell an operator to rename an entry nobody read.
     /// </remarks>
-    private static IReadOnlyList<McpRenameChange> ScanToml(HarnessMcpEntry row, ConfiguredFile file)
+    private IReadOnlyList<McpRenameChange> ScanToml(HarnessMcpEntry row, ConfiguredFile file)
     {
         string text;
 
         try
         {
-            text = File.ReadAllText(file.AbsolutePath);
+            text = _files.ReadAllText(file.AbsolutePath);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -374,13 +318,13 @@ public static class McpServerRenamer
     /// Reads one file's server table and answers, per retired key, whether the old key and the new one
     /// are there and what each launches.
     /// </summary>
-    private static FileAnalysis Analyze(HarnessMcpEntry row, string absolutePath, string relativePath)
+    private FileAnalysis Analyze(HarnessMcpEntry row, string absolutePath, string relativePath)
     {
         byte[] bytes;
 
         try
         {
-            bytes = File.ReadAllBytes(absolutePath);
+            bytes = _files.ReadAllBytes(absolutePath);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -390,7 +334,7 @@ public static class McpServerRenamer
         return Analyze(row, bytes, relativePath);
     }
 
-    private static FileAnalysis Analyze(HarnessMcpEntry row, byte[] document, string relativePath)
+    private FileAnalysis Analyze(HarnessMcpEntry row, byte[] document, string relativePath)
     {
         int bomLength = JsonServerSplice.ByteOrderMarkLength(document);
 
@@ -493,7 +437,7 @@ public static class McpServerRenamer
     }
 
     /// <summary>Migrates one writable harness's file, and its receipt, in place.</summary>
-    private static IReadOnlyList<McpRenameChange> MigrateRow(string root, HarnessMcpEntry row, bool dryRun)
+    private IReadOnlyList<McpRenameChange> MigrateRow(string root, HarnessMcpEntry row, bool dryRun)
     {
         string relativePath = row.Paths[0];
 
@@ -509,7 +453,7 @@ public static class McpServerRenamer
             ];
         }
 
-        McpLinkProbe probe = McpConfigurationLink.Probe(root, fullPath);
+        McpLinkProbe probe = McpConfigurationLink.Probe(root, fullPath, _files.InspectLink);
 
         if (probe.Obstruction != McpLinkObstruction.None)
         {
@@ -523,14 +467,14 @@ public static class McpServerRenamer
             ];
         }
 
-        if (!File.Exists(fullPath))
+        if (!_files.FileExists(fullPath))
             return [NothingToDo(row.Harness, relativePath)];
 
         byte[] original;
 
         try
         {
-            original = File.ReadAllBytes(fullPath);
+            original = _files.ReadAllBytes(fullPath);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -633,7 +577,7 @@ public static class McpServerRenamer
 
         try
         {
-            AtomicFile.WriteAllBytes(fullPath, planned);
+            _files.WriteAllBytesAtomic(fullPath, planned);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -671,7 +615,7 @@ public static class McpServerRenamer
     /// operator could learn the file needs fixing.
     /// </para>
     /// </remarks>
-    private static IReadOnlyList<McpRenameChange> ReportOnly(string root, HarnessMcpEntry row)
+    private IReadOnlyList<McpRenameChange> ReportOnly(string root, HarnessMcpEntry row)
     {
         List<McpRenameChange> changes = [];
         bool inspected = false;
@@ -725,7 +669,7 @@ public static class McpServerRenamer
     /// Edits the host declaration's server key on its own line, and reloads the edited text to prove
     /// the edit changed the name and nothing else.
     /// </summary>
-    private static IReadOnlyList<McpRenameChange> MigrateDeclaration(string root, bool dryRun, bool explicitTarget)
+    private IReadOnlyList<McpRenameChange> MigrateDeclaration(string root, bool dryRun, bool explicitTarget)
     {
         string? configPath = FindConfigPath(root);
         string relativePath = configPath is null
@@ -746,7 +690,7 @@ public static class McpServerRenamer
                 ];
             }
 
-            McpLinkProbe probe = McpConfigurationLink.Probe(root, guarded);
+            McpLinkProbe probe = McpConfigurationLink.Probe(root, guarded, _files.InspectLink);
 
             if (probe.Obstruction != McpLinkObstruction.None)
             {
@@ -761,9 +705,9 @@ public static class McpServerRenamer
             }
         }
 
-        KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(root);
+        McpDeclarationLoad loaded = _declarations.TryLoad(root);
 
-        if (!loaded.Success || loaded.Config is null)
+        if (!loaded.Success || loaded.Mcp is null)
         {
             return configPath is null
                 ? []
@@ -785,7 +729,7 @@ public static class McpServerRenamer
         {
             try
             {
-                text = File.ReadAllText(configPath);
+                text = _files.ReadAllText(configPath);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
@@ -802,7 +746,7 @@ public static class McpServerRenamer
 
         foreach (McpRenameRule rule in Rules)
         {
-            if (!loaded.Config.Mcp.RequiredServers.TryGetValue(rule.OldKey, out RequiredMcpServer? server))
+            if (!loaded.Mcp.RequiredServers.TryGetValue(rule.OldKey, out RequiredMcpServer? server))
                 continue;
 
             if (!IsProven(rule, server.Command))
@@ -822,7 +766,7 @@ public static class McpServerRenamer
 
             if (TryReplaceKeyLine(text, rule, out string edited, out string? refusal))
             {
-                if (!Verifies(edited, loaded.Config, rule))
+                if (!Verifies(edited, loaded.Mcp, rule))
                 {
                     changes.Add(new McpRenameChange(
                         DeclarationTarget,
@@ -967,28 +911,28 @@ public static class McpServerRenamer
     /// <summary>
     /// Whether an edited declaration reloads as the same declaration with one server key renamed.
     /// </summary>
-    private static bool Verifies(string edited, KyberWeaveConfig before, McpRenameRule rule)
+    private bool Verifies(string edited, McpConfig before, McpRenameRule rule)
     {
         try
         {
-            KyberWeaveConfig after = KyberWeaveConfigLoader.LoadFromYaml(edited);
+            McpConfig after = _declarations.Parse(edited);
 
-            if (after.Mcp.RequiredServers.ContainsKey(rule.OldKey) ||
-                !after.Mcp.RequiredServers.TryGetValue(rule.NewKey, out RequiredMcpServer? renamed))
+            if (after.RequiredServers.ContainsKey(rule.OldKey) ||
+                !after.RequiredServers.TryGetValue(rule.NewKey, out RequiredMcpServer? renamed))
             {
                 return false;
             }
 
-            if (before.Mcp.RequiredServers.Count != after.Mcp.RequiredServers.Count)
+            if (before.RequiredServers.Count != after.RequiredServers.Count)
                 return false;
 
-            foreach (KeyValuePair<string, RequiredMcpServer> pair in before.Mcp.RequiredServers)
+            foreach (KeyValuePair<string, RequiredMcpServer> pair in before.RequiredServers)
             {
                 string expected = string.Equals(pair.Key, rule.OldKey, StringComparison.Ordinal)
                     ? rule.NewKey
                     : pair.Key;
 
-                if (!after.Mcp.RequiredServers.TryGetValue(expected, out RequiredMcpServer? other) ||
+                if (!after.RequiredServers.TryGetValue(expected, out RequiredMcpServer? other) ||
                     !SameDeclaration(pair.Value, other))
                 {
                     return false;
@@ -997,7 +941,7 @@ public static class McpServerRenamer
 
             return renamed.Command.Count > 0;
         }
-        catch (Exception exception) when (exception is YamlException or InvalidOperationException or ArgumentException)
+        catch (Exception exception) when (exception is FormatException or InvalidOperationException or ArgumentException)
         {
             return false;
         }
@@ -1013,15 +957,15 @@ public static class McpServerRenamer
         left.Level == right.Level &&
         string.Equals(left.Install, right.Install, StringComparison.Ordinal);
 
-    private static string? WriteDeclaration(string configPath, string edited)
+    private string? WriteDeclaration(string configPath, string edited)
     {
         try
         {
-            byte[] original = File.ReadAllBytes(configPath);
+            byte[] original = _files.ReadAllBytes(configPath);
             bool bom = JsonServerSplice.ByteOrderMarkLength(original) > 0;
             byte[] content = Encoding.UTF8.GetBytes(edited);
 
-            AtomicFile.WriteAllBytes(configPath, bom ? [0xEF, 0xBB, 0xBF, .. content] : content);
+            _files.WriteAllBytesAtomic(configPath, bom ? [0xEF, 0xBB, 0xBF, .. content] : content);
             return null;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -1074,7 +1018,7 @@ public static class McpServerRenamer
         return McpWiringReceipt.Save(root, records);
     }
 
-    private static IReadOnlyList<ConfiguredFile> ConfiguredFiles(string root, HarnessMcpEntry row)
+    private IReadOnlyList<ConfiguredFile> ConfiguredFiles(string root, HarnessMcpEntry row)
     {
         List<ConfiguredFile> files = [];
 
@@ -1083,34 +1027,34 @@ public static class McpServerRenamer
             if (McpRepositoryPath.Contained(root, relativePath) is not { } path)
                 continue;
 
-            McpLinkProbe probe = McpConfigurationLink.Probe(root, path);
+            McpLinkProbe probe = McpConfigurationLink.Probe(root, path, _files.InspectLink);
 
-            if (probe.Obstruction != McpLinkObstruction.None || File.Exists(path))
+            if (probe.Obstruction != McpLinkObstruction.None || _files.FileExists(path))
                 files.Add(new ConfiguredFile(path, relativePath, probe));
         }
 
         return files;
     }
 
-    private static string? FindConfigPath(string root)
+    private string? FindConfigPath(string root)
     {
         string defaultPath = Path.Combine(
             root,
             KyberWeaveYamlParser.DefaultDirectoryName,
             KyberWeaveYamlParser.DefaultFileName);
 
-        if (File.Exists(defaultPath))
+        if (_files.FileExists(defaultPath))
             return defaultPath;
 
         string legacy = Path.Combine(root, KyberWeaveYamlParser.DefaultFileName);
-        return File.Exists(legacy) ? legacy : null;
+        return _files.FileExists(legacy) ? legacy : null;
     }
 
-    private static string? ReadText(string path)
+    private string? ReadText(string path)
     {
         try
         {
-            return File.ReadAllText(path);
+            return _files.ReadAllText(path);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {

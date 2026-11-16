@@ -1,6 +1,7 @@
 using System.Diagnostics;
 
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Contracts.Docs;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Doctor;
@@ -42,7 +43,7 @@ namespace KyberWeave.Mcp;
 /// is left answering from whatever is on disk, exactly as it did before this refresh existed.
 /// </para>
 /// </remarks>
-public sealed class CodeGraphFreshness
+public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
 {
     /// <summary>How long one refresh may take before it is stopped and reported as failed.</summary>
     private static readonly TimeSpan RefreshBound = TimeSpan.FromSeconds(30);
@@ -103,7 +104,7 @@ public sealed class CodeGraphFreshness
     /// CodeGraph failed in a way the caller has to be told about.
     /// </summary>
     /// <param name="resolverFactory">Builds the CodeGraph port the docs tools answer from.</param>
-    internal CodeGraphGate Evaluate(Func<ICodeGraphResolver> resolverFactory)
+    public CodeGraphGate Evaluate(Func<ICodeGraphResolver> resolverFactory)
     {
         ArgumentNullException.ThrowIfNull(resolverFactory);
 
@@ -228,19 +229,4 @@ public sealed class CodeGraphFreshness
         public ProcessResult Run(ProcessStartInfo startInfo, string standardInput) =>
             ProcessRunner.Run(startInfo, standardInput, timeout);
     }
-}
-
-/// <summary>What one CodeGraph check means for the tool call that asked for it.</summary>
-/// <param name="Failure">The block a tool returns instead of its own answer, or null.</param>
-/// <param name="Note">One line the answer carries above its body, or null.</param>
-internal sealed record CodeGraphGate(string? Failure, string? Note)
-{
-    /// <summary>CodeGraph is usable, and the call proceeds unchanged.</summary>
-    public static CodeGraphGate Clear { get; } = new(null, null);
-
-    /// <summary>The call must report the failure instead of answering.</summary>
-    public static CodeGraphGate Blocking(string failure) => new(failure, null);
-
-    /// <summary>The call answers, and says what happened in one line first.</summary>
-    public static CodeGraphGate Advisory(string note) => new(null, note);
 }

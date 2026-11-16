@@ -199,7 +199,7 @@ public sealed class CorpusProvenanceTests : IDisposable
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
 
-        string status = new DocsTools(host).DocsStatus();
+        string status = DocsToolsComposition.Create(host).DocsStatus();
         Assert.StartsWith("provenance:", status, StringComparison.Ordinal);
         return status;
     }
