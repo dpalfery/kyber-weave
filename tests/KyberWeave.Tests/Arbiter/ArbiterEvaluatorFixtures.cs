@@ -1,3 +1,5 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
@@ -109,6 +111,7 @@ internal static class ArbiterEvaluatorFixtures
             new DecisionLog(DirectoryFor(root)),
             new PassThroughGitFacts(),
             planReader ?? new PlanFacts(),
+            new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             new Clock(FixedNow),
             secondaryTriggers);
 

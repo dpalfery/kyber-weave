@@ -1,3 +1,5 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
@@ -126,6 +128,7 @@ public sealed class ArbiterSameFailureRuleTests : IDisposable
             new DecisionLog(arbiterDirectory),
             new PassThroughGitFacts(),
             new PassThroughPlanReader(),
+            new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             new FixedClock(Now),
             SecondaryTriggers.For);
 

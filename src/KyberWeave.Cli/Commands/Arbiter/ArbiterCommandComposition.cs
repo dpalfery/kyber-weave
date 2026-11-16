@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
@@ -635,10 +636,12 @@ public static class ArbiterCommandComposition
         KyberWeaveConfig config,
         string repositoryRoot,
         string? providerOverride,
-        DiagnosticReport report)
+        DiagnosticReport report,
+        IArbiterModelTargetsReader modelTargets)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(report);
+        ArgumentNullException.ThrowIfNull(modelTargets);
 
         IArbiterProvider? provider = CreateProvider(config, providerOverride, report, out Func<Uri, string?> keyResolver);
         if (provider is null)
@@ -652,6 +655,7 @@ public static class ArbiterCommandComposition
             new DecisionLog(arbiterDirectory),
             new ArbiterCliGitFacts(),
             new ArbiterCliPlanReader(repositoryRoot),
+            modelTargets,
             Clock());
         return new ArbiterEvaluatorSession(evaluator, provider as IDisposable);
     }

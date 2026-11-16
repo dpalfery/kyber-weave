@@ -1,3 +1,5 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
 using System.Text.Json;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
@@ -94,6 +96,7 @@ public sealed class ArbiterEvaluatorModelWriteFailureTests : IDisposable
         new DecisionLog(ArbiterDirectory),
         new NoGitFacts(),
         new PlanFacts(),
+        new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
         TimeProvider.System);
 
     private ArbiterEvent Dispatch() => new()

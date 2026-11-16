@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using KyberWeave.Cli;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Arbiter;
@@ -30,7 +31,7 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 /// post-dispatch advisory limitation as information (no diagnostic id: nothing is
 /// wrong, so there is nothing to suppress or baseline).
 /// </remarks>
-public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
+public sealed class ArbiterDoctorCommand(IArbiterModelTargetsReader modelTargets) : Command<ArbiterSettings>
 {
     /// <summary><c>artifacts/arbiter/</c> is not ignored by git.</summary>
     public const string LogNotIgnored = "KW-ARB-LOG-001";
@@ -78,7 +79,7 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
         return report.HasErrors ? 1 : 0;
     }
 
-    private static void Inspect(ArbiterSettings settings, DiagnosticReport report)
+    private void Inspect(ArbiterSettings settings, DiagnosticReport report)
     {
         _ = ArbiterCommandComposition.TryResolveConfig(settings, report, out KyberWeaveConfig config, out string? configPath);
         string home = ArbiterCommandComposition.HomeDirectory();
@@ -127,7 +128,7 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
         report.AddRange(RuleValidator.CheckProviderTimeout(config.Arbiter.Provider, effective));
     }
 
-    private static void CheckModelTargets(KyberWeaveConfig config, string home, IReadOnlyList<string> globalTargets, DiagnosticReport report)
+    private void CheckModelTargets(KyberWeaveConfig config, string home, IReadOnlyList<string> globalTargets, DiagnosticReport report)
     {
         if (string.Equals(config.Arbiter.ModelTargeting.Mode, ModelTargetingOff, StringComparison.Ordinal))
         {
@@ -145,7 +146,7 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
 
             string targetsPath = Path.Combine(arbiterDirectory, $"model-targets.{token}.json");
             DateTime targetsWritten = default;
-            bool readable = ArbiterModelTargets.TryRead(arbiterDirectory, token) is not null
+            bool readable = modelTargets.TryRead(arbiterDirectory, token) is not null
                 && TryGetWriteTimeUtc(targetsPath, out targetsWritten);
             bool stale = readable && TryGetWriteTimeUtc(lockPath, out DateTime lockWritten)
                 && targetsWritten < lockWritten;

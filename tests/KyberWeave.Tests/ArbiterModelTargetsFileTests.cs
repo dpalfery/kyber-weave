@@ -1,3 +1,5 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
 using KyberWeave.Core.Arbiter.ModelTargets;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -89,7 +91,7 @@ public sealed class ArbiterModelTargetsFileTests : IDisposable
             File.WriteAllBytes(path, file.Content.ToArray());
         }
 
-        return ArbiterModelTargets.TryRead(Path.Combine(ProjectRoot, "artifacts", "arbiter"), "claude");
+        return new FileArbiterModelTargetsReader(new PhysicalFileSystem()).TryRead(Path.Combine(ProjectRoot, "artifacts", "arbiter"), "claude");
     }
 
     [Fact]

@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Arbiter.Facts;
@@ -8,6 +9,7 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Deployment;
+using Microsoft.Extensions.DependencyInjection;
 using YamlDotNet.Core;
 using KyberWeave.Core.FileSystem;
 
@@ -49,6 +51,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     private readonly Func<ICredentialStore> _credentialStoreFactory;
     private readonly Func<string, string?> _environment;
     private readonly TimeProvider _clock;
+    private readonly Lazy<IServiceProvider> _services;
 
     /// <summary>
     /// Creates an engine. Every factory is injectable so tests run the real
@@ -62,8 +65,10 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         Func<string>? homeDirectory = null,
         TimeProvider? clock = null,
         Func<ICredentialStore>? credentialStoreFactory = null,
-        Func<string, string?>? environment = null)
+        Func<string, string?>? environment = null,
+        Func<IServiceProvider>? services = null)
     {
+        _services = new Lazy<IServiceProvider>(services ?? ArbiterServices.Create);
         _homeDirectory = homeDirectory ?? (() => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
         Func<string> home = _homeDirectory;
         _providerFactory = providerFactory ?? (config => CreateProvider(ApplyUserProvider(config, home)));
@@ -213,6 +218,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
                 new DecisionLog(arbiterDirectory),
                 gitFacts,
                 _planReaderFactory(evaluationRoot),
+                _services.Value.GetRequiredService<IArbiterModelTargetsReader>(),
                 _clock);
             ArbiterEvent ev = new()
             {

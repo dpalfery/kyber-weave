@@ -1,3 +1,5 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.ModelTargets;
@@ -135,6 +137,7 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
         new DecisionLog(ArbiterDirectory),
         new NoGitFacts(),
         new PlanFacts(),
+        new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
         TimeProvider.System,
         secondaryTriggers: (primary, ev) => string.Equals(primary, "delegate", StringComparison.Ordinal)
             ? [Trigger]
