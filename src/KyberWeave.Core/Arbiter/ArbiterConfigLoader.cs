@@ -143,7 +143,7 @@ public static class ArbiterConfigLoader
     {
         ArgumentNullException.ThrowIfNull(defaults);
         ArgumentException.ThrowIfNullOrWhiteSpace(yamlPath);
-        KyberWeaveYamlDocument document = KyberWeaveYamlParser.ParseFile(yamlPath);
+        KyberWeaveYamlDocument document = KyberWeaveYamlFile.ParseFile(yamlPath);
         return Merge(defaults, document.Arbiter);
     }
 

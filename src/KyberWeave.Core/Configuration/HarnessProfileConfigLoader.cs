@@ -9,7 +9,7 @@ public static class HarnessProfileConfigLoader
     public static HarnessProfileConfig Load(string yamlPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(yamlPath);
-        KyberWeaveYamlDocument document = KyberWeaveYamlParser.ParseFile(yamlPath);
+        KyberWeaveYamlDocument document = KyberWeaveYamlFile.ParseFile(yamlPath);
         return Merge(HarnessProfileConfig.ProductDefaults, document.Harness);
     }
 
