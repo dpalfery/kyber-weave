@@ -490,7 +490,7 @@ public sealed class DocSpecValidator
 
     private static void ValidateSectionFrontmatter(DocumentModel doc, DiagnosticReport report)
     {
-        string docId = DocumentLoader.ResolveDocId(doc.Frontmatter, doc.RelativePath);
+        string docId = DocumentMarkdown.ResolveDocId(doc.Frontmatter, doc.RelativePath);
         HashSet<string> slugs = CollectSectionSlugs(doc, docId);
 
         string? lead = doc.Frontmatter.Lead?.Trim();
@@ -605,7 +605,7 @@ public sealed class DocSpecValidator
 
     private static HashSet<string> CollectSectionSlugs(DocumentModel doc, string docId)
     {
-        HashSet<string> slugs = new(DocumentLoader.CollectHeadingFragmentSlugs(doc.Body, docId),
+        HashSet<string> slugs = new(DocumentMarkdown.CollectHeadingFragmentSlugs(doc.Body, docId),
             StringComparer.Ordinal);
         slugs.Add("#");
         return slugs;
@@ -759,9 +759,9 @@ public sealed class DocSpecValidator
             if (!doc.HasFrontmatter || doc.ParseError is not null)
                 continue;
 
-            string docId = DocumentLoader.ResolveDocId(doc.Frontmatter, doc.RelativePath);
+            string docId = DocumentMarkdown.ResolveDocId(doc.Frontmatter, doc.RelativePath);
             slugsByPath[doc.RelativePath] =
-                DocumentLoader.CollectHeadingFragmentSlugs(doc.Body, docId);
+                DocumentMarkdown.CollectHeadingFragmentSlugs(doc.Body, docId);
         }
 
         return slugsByPath;
