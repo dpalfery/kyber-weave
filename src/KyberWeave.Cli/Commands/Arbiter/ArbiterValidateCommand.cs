@@ -6,7 +6,7 @@ using Spectre.Console.Cli;
 namespace KyberWeave.Cli.Commands.Arbiter;
 
 /// <summary>Validates the <c>arbiter:</c> section, the user override and the shipped rules.</summary>
-public sealed class ArbiterValidateCommand : Command<ArbiterSettings>
+public sealed class ArbiterValidateCommand(IArbiterConfigResolver configs) : Command<ArbiterSettings>
 {
     /// <summary>
     /// Validates the effective Arbiter configuration. Exits 0 when no error
@@ -17,7 +17,7 @@ public sealed class ArbiterValidateCommand : Command<ArbiterSettings>
     public override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new();
-        if (!ArbiterCommandComposition.TryResolveConfig(settings, report, out KyberWeaveConfig config, out string? configPath))
+        if (!configs.TryResolve(settings.Path, settings.Config, report, out KyberWeaveConfig config, out string? configPath))
         {
             CommandHelpers.Finish(report, settings, "arbiter validate", "Rule");
             return 1;

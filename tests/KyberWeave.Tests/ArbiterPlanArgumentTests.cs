@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Arbiter;
 using KyberWeave.Cli.Commands.Arbiter;
 using Xunit;
 
@@ -39,7 +40,7 @@ public sealed class ArbiterPlanArgumentTests : IDisposable
         };
 
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(
-            () => new ArbiterPlanCommand().Execute(null!, settings));
+            () => ArbiterTestServices.Command<ArbiterPlanCommand>().Execute(null!, settings));
 
         Assert.DoesNotContain("KW-ARB-PLAN-002", run.Output, StringComparison.Ordinal);
         Assert.Contains(Plan, run.Output.Replace('\\', '/'), StringComparison.Ordinal);

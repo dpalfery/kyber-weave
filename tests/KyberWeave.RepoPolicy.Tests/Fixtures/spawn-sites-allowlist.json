@@ -974,24 +974,6 @@
       "bound": "ProcessRunner default timeout kills the child tree; the release scripts self-exit."
     },
     {
-      "file": "src/KyberWeave.Cli/Commands/Arbiter/ArbiterCommandComposition.cs",
-      "text": "(startInfo, standardInput) => ProcessRunner.Run(startInfo, standardInput);",
-      "count": 1,
-      "bound": "The injected runner delegate is always called through ProcessRunner.Run with the caller's timeout; the Arbiter command's process is bounded by that timeout."
-    },
-    {
-      "file": "src/KyberWeave.Cli/Commands/Arbiter/ArbiterCommandComposition.cs",
-      "text": "ProcessStartInfo startInfo = new(\"git\")",
-      "count": 1,
-      "bound": "Started by the ProcessRunner.Run delegate above with the caller's timeout; git argv only, self-exiting."
-    },
-    {
-      "file": "src/KyberWeave.Cli/Commands/Arbiter/ArbiterDoctorCommand.cs",
-      "text": "ProcessStartInfo startInfo = new(\"git\")",
-      "count": 1,
-      "bound": "Started by the ProcessRunner.Run in the doctor probe with its timeout; git argv only, self-exiting."
-    },
-    {
       "file": "src/KyberWeave.Data/Arbiter/Credentials/ProcessRunnerCredentialProcessRunner.cs",
       "text": "return ProcessRunner.Run(startInfo, standardInput);",
       "count": 1,

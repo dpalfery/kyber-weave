@@ -67,7 +67,7 @@ public sealed class ArbiterTriageCliCommandTests : IDisposable
     [Fact]
     public void Sections_PrintsEachSectionIdAndItsLineRange()
     {
-        ArbiterSectionsCommand command = new(ArbiterTestServices.Get<IFileTextFacts>());
+        ArbiterSectionsCommand command = ArbiterTestServices.Command<ArbiterSectionsCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterSectionsSettings { Path = WriteDocumentUnderRoot(), Task = "Change the install steps." }));
@@ -81,7 +81,7 @@ public sealed class ArbiterTriageCliCommandTests : IDisposable
     [Fact]
     public void Sections_PathOutsideTheRoot_ExitsNonZeroWithAMessageAndPrintsNoSections()
     {
-        ArbiterSectionsCommand command = new(ArbiterTestServices.Get<IFileTextFacts>());
+        ArbiterSectionsCommand command = ArbiterTestServices.Command<ArbiterSectionsCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterSectionsSettings { Path = WriteDocumentOutsideRoot(), Task = "Change the install steps." }));
@@ -94,7 +94,7 @@ public sealed class ArbiterTriageCliCommandTests : IDisposable
     [Fact]
     public void Sections_MissingDocument_ExitsOne()
     {
-        ArbiterSectionsCommand command = new(ArbiterTestServices.Get<IFileTextFacts>());
+        ArbiterSectionsCommand command = ArbiterTestServices.Command<ArbiterSectionsCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterSectionsSettings { Path = Path.Combine(_temp.Path, "absent.md"), Task = "Anything." }));
@@ -107,7 +107,7 @@ public sealed class ArbiterTriageCliCommandTests : IDisposable
     public void Comment_NoProvider_PrintsRealAndTheDecisionId()
     {
         WriteDocument();
-        ArbiterCommentCommand command = new(ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<ICommentTriageFactory>());
+        ArbiterCommentCommand command = ArbiterTestServices.Command<ArbiterCommentCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterCommentSettings
@@ -131,7 +131,7 @@ public sealed class ArbiterTriageCliCommandTests : IDisposable
     public void Comment_BodyWithMarkupCharacters_DoesNotThrow()
     {
         WriteDocument();
-        ArbiterCommentCommand command = new(ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<ICommentTriageFactory>());
+        ArbiterCommentCommand command = ArbiterTestServices.Command<ArbiterCommentCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterCommentSettings

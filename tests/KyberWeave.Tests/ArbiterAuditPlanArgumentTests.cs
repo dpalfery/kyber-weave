@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Arbiter;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using Xunit;
@@ -26,7 +27,7 @@ public sealed class ArbiterAuditPlanArgumentTests : IDisposable
     {
         string root = Host();
 
-        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() => new ArbiterAuditCommand().Execute(
+        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() => ArbiterTestServices.Command<ArbiterAuditCommand>().Execute(
             null!,
             new ArbiterSettings
             {

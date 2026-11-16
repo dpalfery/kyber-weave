@@ -1,29 +1,14 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
-using KyberWeave.Cli.Commands.Squad;
-using KyberWeave.Cli.Update;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
-using Spectre.Console;
 
 namespace KyberWeave.Cli.Commands.Arbiter;
-
-/// <summary>One installed harness and the state its dispatches are gated in for this project.</summary>
-/// <param name="Token">The harness token, as <c>--target</c> takes it.</param>
-/// <param name="State">The gating state, in words an operator can act on.</param>
-/// <param name="FixCommand">The command that gates it, or null when nothing needs fixing.</param>
-/// <param name="Ungated">True when no hook gates this harness's dispatches for the project.</param>
-internal sealed record HarnessGatingRow(string Token, string State, string? FixCommand, bool Ungated);
-
-/// <summary>The per-harness rows, and the harnesses whose global hook is missing from the global targets.</summary>
-/// <param name="Rows">One row per installed harness, in catalogue order.</param>
-/// <param name="UnlistedGlobalTokens">Harnesses the global Squad receipt holds an Arbiter hook for that <c>arbiter.global.targets</c> does not list.</param>
-internal sealed record HarnessGatingReport(
-    IReadOnlyList<HarnessGatingRow> Rows,
-    IReadOnlyList<string> UnlistedGlobalTokens);
 
 /// <summary>
 /// Works out how each installed harness is gated for one project, for <c>arbiter doctor</c> and
@@ -36,7 +21,7 @@ internal sealed record HarnessGatingReport(
 /// Arbiter, so it is gated only by a project deployment. Everything is read from the home the caller
 /// names; nothing is written.
 /// </remarks>
-internal static class ArbiterHarnessGating
+public sealed class ArbiterHarnessGating : IArbiterHarnessGating
 {
     private const string FallbackOnlyReason = "fallback-only";
     private const string FallbackOnlyState = "fallback-only: no hook; the Arbiter MCP server is its only gate";
@@ -59,12 +44,34 @@ internal static class ArbiterHarnessGating
 
     private static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(100);
 
-    /// <summary>Builds the rows for every harness installed for <paramref name="root"/>.</summary>
-    /// <param name="root">The project root whose project hooks and deployments are read.</param>
-    /// <param name="home">The home directory whose global targets, receipt and user hooks are read.</param>
-    /// <param name="config">The project configuration; an unset <c>arbiter.enabled</c> reads as not configured.</param>
-    /// <param name="globalTargets">The harnesses listed under <c>arbiter.global.targets</c>.</param>
-    internal static HarnessGatingReport Build(
+    private readonly ISquadStateStore _store;
+    private readonly ISquadGlobalRootResolver _roots;
+    private readonly IClaudeHookCoverage _claudeHooks;
+    private readonly IWritableFileSystem _files;
+    private readonly IArbiterUninstaller _uninstaller;
+
+    /// <summary>Creates the gating report over the registered Squad state, hook coverage and file system.</summary>
+    /// <param name="store">Reads the global and project receipts.</param>
+    /// <param name="roots">Resolves each harness's global root.</param>
+    /// <param name="claudeHooks">Lists the Claude hook sources a project declares.</param>
+    /// <param name="files">Reads the hook files.</param>
+    /// <param name="uninstaller">Says whether a project deployment is present.</param>
+    public ArbiterHarnessGating(
+        ISquadStateStore store,
+        ISquadGlobalRootResolver roots,
+        IClaudeHookCoverage claudeHooks,
+        IWritableFileSystem files,
+        IArbiterUninstaller uninstaller)
+    {
+        _store = store;
+        _roots = roots;
+        _claudeHooks = claudeHooks;
+        _files = files;
+        _uninstaller = uninstaller;
+    }
+
+    /// <inheritdoc />
+    public HarnessGatingReport Build(
         string root,
         string home,
         KyberWeaveConfig config,
@@ -75,8 +82,8 @@ internal static class ArbiterHarnessGating
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(globalTargets);
 
-        ISquadGlobalRootResolver roots = SquadHostDefaults.ResolveGlobalRoots(ArbiterCommandComposition.GetEnvironmentVariable);
-        SquadStateStore store = SquadHostDefaults.ResolveStateStore(new HomeUserPaths(home));
+        ISquadGlobalRootResolver roots = _roots;
+        ISquadStateStore store = _store;
         SquadReceipt? receipt = ReadGlobalReceipt(store, home);
 
         List<HarnessGatingRow> rows = [];
@@ -84,10 +91,10 @@ internal static class ArbiterHarnessGating
         foreach (SquadTarget target in SquadTargetCatalog.All)
         {
             string token = SquadTargetCatalog.GetToken(target);
-            string? hookPath = ArbiterHookRefresher.ResolveGlobalHookPath(target, home, roots);
+            string? hookPath = ArbiterGlobalHookPaths.Resolve(target, home, roots);
             bool listed = globalTargets.Contains(token, StringComparer.OrdinalIgnoreCase);
             bool owned = OwnsGlobalHook(receipt, target, token, hookPath, roots);
-            bool deployed = HasProjectDeployment(root, target, store, roots);
+            bool deployed = HasProjectDeployment(root, target);
             if (!listed && !owned && !deployed)
             {
                 continue;
@@ -105,29 +112,7 @@ internal static class ArbiterHarnessGating
         return new HarnessGatingReport(rows, unlisted);
     }
 
-    /// <summary>Prints one line per row, the label first and the fix command after it.</summary>
-    /// <param name="report">The rows to print.</param>
-    /// <param name="displayName">Turns a harness token into the name the operator knows it by.</param>
-    internal static void WriteRows(HarnessGatingReport report, Func<string, string> displayName)
-    {
-        ArgumentNullException.ThrowIfNull(report);
-        ArgumentNullException.ThrowIfNull(displayName);
-
-        if (report.Rows.Count == 0)
-        {
-            AnsiConsole.MarkupLine("  [grey]no harness installed for this project.[/]");
-            return;
-        }
-
-        foreach (HarnessGatingRow row in report.Rows)
-        {
-            string fix = row.FixCommand is null ? string.Empty : $"; run {row.FixCommand}";
-            AnsiConsole.MarkupLine(
-                $"  {Markup.Escape(displayName(row.Token))}: {Markup.Escape(row.State)}{Markup.Escape(fix)}");
-        }
-    }
-
-    private static HarnessGatingRow RowFor(Installed installed, string root, string home, KyberWeaveConfig config)
+    private HarnessGatingRow RowFor(Installed installed, string root, string home, KyberWeaveConfig config)
     {
         string token = installed.Token;
         if (IsFallbackOnly(installed.Target))
@@ -176,7 +161,7 @@ internal static class ArbiterHarnessGating
             Ungated: true);
     }
 
-    private static HarnessGatingRow ClaudeRow(Installed installed, string root, string home, bool live)
+    private HarnessGatingRow ClaudeRow(Installed installed, string root, string home, bool live)
     {
         string token = installed.Token;
         IReadOnlyList<string> sources = ClaudeProjectSources(root, home);
@@ -201,12 +186,12 @@ internal static class ArbiterHarnessGating
     /// file's own hooks for its agent type, and the effective skills. Both events are listed, since a
     /// hook on either one gates a dispatch.
     /// </summary>
-    private static IReadOnlyList<string> ClaudeProjectSources(string root, string home)
+    private IReadOnlyList<string> ClaudeProjectSources(string root, string home)
     {
         List<string> sources = [];
         foreach (string eventName in new[] { "PreToolUse", "PostToolUse" })
         {
-            sources.AddRange(ArbiterCommandComposition.ClaudeHooks.ProjectCandidateSources(root, home, eventName, AgentToolName));
+            sources.AddRange(_claudeHooks.ProjectCandidateSources(root, home, eventName, AgentToolName));
         }
 
         return sources.Distinct(StringComparer.Ordinal).ToList();
@@ -216,7 +201,7 @@ internal static class ArbiterHarnessGating
         ArbiterHookWiring.TargetDegradations([target], SquadDeploymentScope.Project)
             .Any(record => string.Equals(record.Details, FallbackOnlyReason, StringComparison.Ordinal));
 
-    private static bool IsLive(Installed installed)
+    private bool IsLive(Installed installed)
     {
         if (installed.HookPath is null)
         {
@@ -232,11 +217,11 @@ internal static class ArbiterHarnessGating
 
             if (ShimTargets.Contains(installed.Target))
             {
-                return File.Exists(installed.HookPath);
+                return _files.FileExists(installed.HookPath);
             }
 
-            return File.Exists(installed.HookPath)
-                && File.ReadAllText(installed.HookPath).Contains(
+            return _files.FileExists(installed.HookPath)
+                && _files.ReadAllText(installed.HookPath).Contains(
                     $"kyber-weave-arbiter hook --harness {installed.Token} --scope global",
                     StringComparison.Ordinal);
         }
@@ -251,16 +236,16 @@ internal static class ArbiterHarnessGating
     /// gate anything. Live means a <c>PreToolUse</c> entry whose matcher matches <c>Agent</c> runs the
     /// user-level hook.
     /// </summary>
-    private static bool IsClaudeUserHookLive(string settingsPath)
+    private bool IsClaudeUserHookLive(string settingsPath)
     {
-        if (!File.Exists(settingsPath))
+        if (!_files.FileExists(settingsPath))
         {
             return false;
         }
 
         try
         {
-            JsonNode? document = JsonNode.Parse(File.ReadAllText(settingsPath));
+            JsonNode? document = JsonNode.Parse(_files.ReadAllText(settingsPath));
             if (document is not JsonObject root
                 || root["hooks"] is not JsonObject hooks
                 || hooks["PreToolUse"] is not JsonArray groups)
@@ -362,7 +347,7 @@ internal static class ArbiterHarnessGating
         }
     }
 
-    private static SquadReceipt? ReadGlobalReceipt(SquadStateStore store, string home)
+    private SquadReceipt? ReadGlobalReceipt(ISquadStateStore store, string home)
     {
         try
         {
@@ -375,11 +360,11 @@ internal static class ArbiterHarnessGating
         }
     }
 
-    private static bool HasProjectDeployment(string root, SquadTarget target, SquadStateStore store, ISquadGlobalRootResolver roots)
+    private bool HasProjectDeployment(string root, SquadTarget target)
     {
         try
         {
-            return ArbiterUninstaller.HasDeployment(root, target, store, SquadDeploymentScope.Project, roots);
+            return _uninstaller.HasDeployment(root, target, SquadDeploymentScope.Project);
         }
         catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or JsonException or InvalidDataException or InvalidOperationException)
         {
@@ -399,15 +384,4 @@ internal static class ArbiterHarnessGating
         bool Owned,
         bool Deployed,
         string? HookPath);
-
-    /// <summary>
-    /// The home-anchored user paths the state store reads global state from. Global Squad state lives
-    /// under the home, so the store never reaches the process's own user profile.
-    /// </summary>
-    private sealed class HomeUserPaths(string home) : ISquadUserPaths
-    {
-        public string ApplicationDataDirectory => Path.Combine(home, ".kyber-weave");
-
-        public string HomeDirectory => home;
-    }
 }

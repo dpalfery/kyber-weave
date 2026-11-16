@@ -18,7 +18,7 @@ public sealed class ArbiterSectionsUsageCliTests
     [Fact]
     public void ASectionsRunWithoutAPathIsAUsageErrorNotAnException()
     {
-        ArbiterSectionsCommand command = new(ArbiterTestServices.Get<IFileTextFacts>());
+        ArbiterSectionsCommand command = ArbiterTestServices.Command<ArbiterSectionsCommand>();
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,

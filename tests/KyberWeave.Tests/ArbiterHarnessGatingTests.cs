@@ -1,5 +1,6 @@
-using KyberWeave.Data.Arbiter;
-using KyberWeave.Data.Hooks;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Tests.Arbiter;
+using Microsoft.Extensions.DependencyInjection;
 using System.Text.RegularExpressions;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Squad;
@@ -29,23 +30,19 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
     private readonly TempDirectory _home = new();
     private readonly TempDirectory _repo = new();
     private readonly TempDirectory _userPaths = new();
-    private readonly Func<string> _savedHome;
-    private readonly Func<string, string?> _savedEnvironment;
+    private readonly ArbiterTestHost _host;
 
     public ArbiterHarnessGatingTests()
     {
-        _savedHome = ArbiterCommandComposition.HomeDirectory;
-        _savedEnvironment = ArbiterCommandComposition.GetEnvironmentVariable;
-
-        ArbiterCommandComposition.HomeDirectory = () => _home.Path;
-        ArbiterCommandComposition.GetEnvironmentVariable = name =>
-            name is "HOME" or "USERPROFILE" ? _home.Path : null;
+        _host = ArbiterTestHost.Create(services =>
+            services.AddSingleton<IProcessEnvironment>(new FakeProcessEnvironment(
+                () => _home.Path,
+                name => name is "HOME" or "USERPROFILE" ? _home.Path : null)));
     }
 
     public void Dispose()
     {
-        ArbiterCommandComposition.HomeDirectory = _savedHome;
-        ArbiterCommandComposition.GetEnvironmentVariable = _savedEnvironment;
+        _host.Dispose();
         _home.Dispose();
         _repo.Dispose();
         _userPaths.Dispose();
@@ -256,7 +253,7 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
         SetUpLiveClaudeHook("PreToolUse");
         WriteProjectConfig(EnabledYaml);
 
-        CommandExecution execution = Capture(() => new ArbiterStatusCommand().Execute(
+        CommandExecution execution = Capture(() => _host.Command<ArbiterStatusCommand>().Execute(
             null!,
             new ArbiterSettings { Path = _repo.Path }));
 
@@ -356,7 +353,7 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
     }
 
     private CommandExecution RunDoctor() =>
-        Capture(() => new ArbiterDoctorCommand(new FileArbiterModelTargetsReader(new PhysicalFileSystem())).Execute(
+        Capture(() => _host.Command<ArbiterDoctorCommand>().Execute(
             null!,
             new ArbiterSettings { Path = _repo.Path }));
 

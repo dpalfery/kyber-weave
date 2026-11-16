@@ -1,4 +1,5 @@
 using KyberWeave.Cli.Rendering;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Diagnostics;
 using Spectre.Console;
@@ -8,7 +9,7 @@ using KyberWeave.Core.FileSystem;
 namespace KyberWeave.Cli.Commands.Arbiter;
 
 /// <summary>Prints what the plan parser understood for a plan file.</summary>
-public sealed class ArbiterPlanCommand : Command<ArbiterSettings>
+public sealed class ArbiterPlanCommand(IFileSystem files) : Command<ArbiterSettings>
 {
     /// <summary>A plan with no Tasks section: downstream readiness answers <c>no-tasks</c>.</summary>
     public const string NoTasks = "KW-ARB-PLAN-001";
@@ -38,7 +39,7 @@ public sealed class ArbiterPlanCommand : Command<ArbiterSettings>
         }
 
         string resolved = Path.GetFullPath(relative, root);
-        if (!File.Exists(resolved))
+        if (!files.FileExists(resolved))
         {
             report.Add(new Diagnostic(
                 PlanNotReadable,
@@ -53,7 +54,7 @@ public sealed class ArbiterPlanCommand : Command<ArbiterSettings>
         string text;
         try
         {
-            text = File.ReadAllText(resolved);
+            text = files.ReadAllText(resolved);
         }
         catch (Exception exception) when (FileFailure.Is(exception))
         {

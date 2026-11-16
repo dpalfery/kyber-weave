@@ -284,7 +284,7 @@ public sealed class PlanPathResolverTests : IDisposable
     private static IArbiterPlanReader Reader(string reader, string repositoryRoot) =>
         reader == "hook"
             ? new HookPlanReader(new KyberWeave.Core.Arbiter.Plans.PlanFacts(new PlanPathResolver()), repositoryRoot)
-            : new ArbiterCommandComposition.ArbiterCliPlanReader(ArbiterTestServices.Get<IPlanFacts>(), repositoryRoot);
+            : new ArbiterCliPlanReader(ArbiterTestServices.Get<IPlanFacts>(), repositoryRoot);
 
     [Theory]
     [MemberData(nameof(Readers))]

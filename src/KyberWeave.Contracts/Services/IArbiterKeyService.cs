@@ -1,0 +1,27 @@
+using KyberWeave.Core.Configuration;
+
+namespace KyberWeave.Contracts.Services;
+
+/// <summary>Resolves the Arbiter key for a provider endpoint from the credential store and the environment.</summary>
+public interface IArbiterKeyService
+{
+    /// <summary>
+    /// Resolves the key for <paramref name="endpoint"/>, binding the environment key to the TypeSafe origin or the user
+    /// override's endpoint. A loopback endpoint needs no key and returns null.
+    /// </summary>
+    /// <param name="config">The configuration whose provider the user override applies to.</param>
+    /// <param name="endpoint">The provider endpoint.</param>
+    /// <returns>The key, or null when none resolves.</returns>
+    string? ResolveKey(KyberWeaveConfig config, string endpoint);
+
+    /// <summary>Resolves the key, treating a credential store that cannot be read as an absent key.</summary>
+    /// <param name="config">The configuration whose provider the user override applies to.</param>
+    /// <param name="endpoint">The provider endpoint.</param>
+    /// <returns>The key, or null when none resolves or the store failed.</returns>
+    string? TryResolveKey(KyberWeaveConfig config, string endpoint);
+
+    /// <summary>Creates the resolver a provider asks for the key of the endpoint it calls.</summary>
+    /// <param name="config">The configuration whose provider the user override applies to.</param>
+    /// <returns>A resolver from endpoint to key.</returns>
+    Func<Uri, string?> CreateKeyResolver(KyberWeaveConfig config);
+}

@@ -232,7 +232,7 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
     {
         WriteCitedFile();
         WriteHostConfig("arbiter:\n  enabled: true\n  rules:\n    - id: " + CommentRule + "\n      enabled: false\n");
-        ArbiterCommentCommand disabledCommand = new(ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<ICommentTriageFactory>()) { ProviderFactory = (_, _) => new CountingProvider() };
+        ArbiterCommentCommand disabledCommand = ArbiterTestServices.CommentCommand((_, _) => new CountingProvider());
         CommandExecution disabled = Capture(() => disabledCommand.Execute(
             null!,
             new ArbiterCommentSettings { Root = Root, Path = CitedPath, Line = 12, Body = "Rename this." }));
@@ -242,7 +242,7 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
         Assert.Contains("status not-evaluated", disabled.Output, StringComparison.Ordinal);
 
         File.Delete(Path.Combine(Root, ".kyber-weave", "kyber-weave.yml"));
-        ArbiterCommentCommand answeredCommand = new(ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<ICommentTriageFactory>()) { ProviderFactory = (_, _) => new CountingProvider(Real, 0.95) };
+        ArbiterCommentCommand answeredCommand = ArbiterTestServices.CommentCommand((_, _) => new CountingProvider(Real, 0.95));
         CommandExecution answered = Capture(() => answeredCommand.Execute(
             null!,
             new ArbiterCommentSettings { Root = Root, Path = CitedPath, Line = 12, Body = "Rename this." }));

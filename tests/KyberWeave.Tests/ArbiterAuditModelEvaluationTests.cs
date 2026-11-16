@@ -1,3 +1,6 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Tests.Arbiter;
+using Microsoft.Extensions.DependencyInjection;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
@@ -16,14 +19,15 @@ public sealed class ArbiterAuditModelEvaluationTests : IDisposable
     private const string LedgerId = "0000000000000001-aaaaaaaa";
 
     private readonly TempDirectory _temp = new();
-    private readonly Func<string> _home = ArbiterCommandComposition.HomeDirectory;
+    private readonly ArbiterTestHost _host;
 
     public ArbiterAuditModelEvaluationTests() =>
-        ArbiterCommandComposition.HomeDirectory = () => Path.Combine(_temp.Path, "home");
+        _host = ArbiterTestHost.Create(services =>
+            services.AddSingleton<IProcessEnvironment>(new FakeProcessEnvironment(() => Path.Combine(_temp.Path, "home"))));
 
     public void Dispose()
     {
-        ArbiterCommandComposition.HomeDirectory = _home;
+        _host.Dispose();
         _temp.Dispose();
     }
 
@@ -68,7 +72,7 @@ public sealed class ArbiterAuditModelEvaluationTests : IDisposable
         DiagnosticReport report = new();
         int reported = 0;
 
-        bool configured = ArbiterAuditCommand.ModelConfigured(KyberWeaveConfig.ProductDefaults, report, ref reported);
+        bool configured = _host.Command<ArbiterAuditCommand>().ModelConfigured(KyberWeaveConfig.ProductDefaults, report, ref reported);
 
         Assert.False(configured);
         Assert.Equal(1, reported);
@@ -87,16 +91,16 @@ public sealed class ArbiterAuditModelEvaluationTests : IDisposable
         DiagnosticReport report = new();
         int reported = 0;
 
-        bool configured = ArbiterAuditCommand.ModelConfigured(KyberWeaveConfig.ProductDefaults, report, ref reported);
+        bool configured = _host.Command<ArbiterAuditCommand>().ModelConfigured(KyberWeaveConfig.ProductDefaults, report, ref reported);
 
         Assert.True(configured);
         Assert.Equal(0, reported);
         Assert.Empty(report.Items);
     }
 
-    private static void WriteUserSettings(string yaml)
+    private void WriteUserSettings(string yaml)
     {
-        string settingsPath = ArbiterUserSettings.GetPath(ArbiterCommandComposition.HomeDirectory());
+        string settingsPath = ArbiterUserSettings.GetPath(Path.Combine(_temp.Path, "home"));
         Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
         File.WriteAllText(settingsPath, yaml);
     }
@@ -124,7 +128,7 @@ public sealed class ArbiterAuditModelEvaluationTests : IDisposable
             "\",\"effect\":\"allow\",\"facts\":[]}],\"provider\":{\"kind\":\"systemone\",\"latency-ms\":1,\"status\":\"answered\"}," +
             "\"outcome\":\"allow\",\"repeat\":1,\"duration-ms\":1,\"schema\":\"kyber-arbiter.decision/v1\"}\n");
 
-        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() => new ArbiterAuditCommand().Execute(
+        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() => _host.Command<ArbiterAuditCommand>().Execute(
             null!, new ArbiterSettings { Path = root }));
         return run.Output;
     }

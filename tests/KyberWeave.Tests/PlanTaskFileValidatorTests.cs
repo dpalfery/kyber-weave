@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Arbiter;
 using System.Reflection;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Arbiter;
@@ -1393,7 +1394,7 @@ internal static class SpecTaskFileProbe
         ArgumentNullException.ThrowIfNull(fixture);
 
         string path = Path.Combine(fixture.Root, TasksPath.Replace('/', Path.DirectorySeparatorChar));
-        ArbiterPlanCommand command = new();
+        ArbiterPlanCommand command = ArbiterTestServices.Command<ArbiterPlanCommand>();
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
             () => command.Execute(null!, new ArbiterSettings { Path = path, Format = "json" }));
 

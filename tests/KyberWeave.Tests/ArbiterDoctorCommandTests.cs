@@ -1,3 +1,6 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Tests.Arbiter;
+using Microsoft.Extensions.DependencyInjection;
 using KyberWeave.Data.Arbiter;
 using KyberWeave.Data.Hooks;
 using System.Text.RegularExpressions;
@@ -15,17 +18,17 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
 {
     private readonly TempDirectory _home = new();
     private readonly TempDirectory _repo = new();
-    private readonly Func<string> _savedHome;
+    private readonly ArbiterTestHost _host;
 
     public ArbiterDoctorCommandTests()
     {
-        _savedHome = ArbiterCommandComposition.HomeDirectory;
-        ArbiterCommandComposition.HomeDirectory = () => _home.Path;
+        _host = ArbiterTestHost.Create(services =>
+            services.AddSingleton<IProcessEnvironment>(new FakeProcessEnvironment(() => _home.Path)));
     }
 
     public void Dispose()
     {
-        ArbiterCommandComposition.HomeDirectory = _savedHome;
+        _host.Dispose();
         _home.Dispose();
         _repo.Dispose();
     }
@@ -40,7 +43,7 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
               enabled: true
             """);
 
-        CommandExecution execution = Capture(() => new ArbiterDoctorCommand(new FileArbiterModelTargetsReader(new PhysicalFileSystem())).Execute(
+        CommandExecution execution = Capture(() => _host.Command<ArbiterDoctorCommand>().Execute(
             null!,
             new ArbiterSettings { Path = _repo.Path }));
 
@@ -189,7 +192,7 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
     }
 
     private CommandExecution RunDoctor() =>
-        Capture(() => new ArbiterDoctorCommand(new FileArbiterModelTargetsReader(new PhysicalFileSystem())).Execute(
+        Capture(() => _host.Command<ArbiterDoctorCommand>().Execute(
             null!,
             new ArbiterSettings { Path = _repo.Path }));
 
