@@ -221,6 +221,6 @@ public sealed partial class ReviewBlockWriter : IReviewGateCatalogue
         return text.EndsWith('\n') || text.EndsWith('\r');
     }
 
-    [GeneratedRegex(@"^review[ \t]*:", RegexOptions.Multiline)]
+    [GeneratedRegex(@"(?:\A\uFEFF?|[\r\n])review[ \t]*:")]
     private static partial Regex ReviewKey();
 }
