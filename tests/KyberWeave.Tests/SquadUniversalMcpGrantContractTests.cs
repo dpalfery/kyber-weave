@@ -918,7 +918,7 @@ public sealed class SquadUniversalMcpGrantContractTests
         SquadRenderResult result = await renderer.RenderAsync(new SquadRenderRequest(
             sourceDirectory,
             [target],
-            SquadDeploymentScope.Project));
+            SquadDeploymentScope.Project).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
         return result;
     }

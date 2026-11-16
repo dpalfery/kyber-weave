@@ -220,11 +220,11 @@ public sealed class PiRendererContractTests : IDisposable
 
     private static async Task<SquadRenderResult> RenderPiAsync(string sourceDirectory)
     {
-        SquadRendererRegistry registry = new([new PiRenderer()]);
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new PiRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
             SourceDirectory: sourceDirectory,
             Targets: [SquadTarget.Pi],
-            Scope: SquadDeploymentScope.Project);
+            Scope: SquadDeploymentScope.Project).Prepared();
         return await registry.RenderAsync(request);
     }
 
@@ -543,12 +543,12 @@ public sealed class PiRendererContractTests : IDisposable
             $"Fixture profile '{PiFileReadDeniedFixture.DeniedProfileName}' must deny "
             + "'filesystem.read', or this test cannot observe a non-entitled agent.");
 
-        SquadRendererRegistry registry = new([new PiRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new PiRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: fixture.ProductRoot,
             Targets: [SquadTarget.Pi],
             Scope: SquadDeploymentScope.Project,
-            PreloadedSource: source));
+            PreloadedSource: source).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         SquadDeploymentFile file = Assert.Single(

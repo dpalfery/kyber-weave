@@ -94,8 +94,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
     public async Task RenderAsync_Antigravity_RendersTheRealCanonicalCorpus()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRenderResult result = await new SquadRendererRegistry([new AntigravityRenderer()]).RenderAsync(
-            new SquadRenderRequest(ProductRoot, [SquadTarget.Antigravity], SquadDeploymentScope.Project));
+        SquadRenderResult result = await SquadTestRegistry.Create([new AntigravityRenderer()]).RenderAsync(
+            new SquadRenderRequest(ProductRoot, [SquadTarget.Antigravity], SquadDeploymentScope.Project).Prepared());
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         Assert.NotEmpty(DeriveCollisions(source));
@@ -144,12 +144,12 @@ public sealed class AntigravityRendererContractTests : IDisposable
         // for both agent and skill resources. This differs from other native renderers that
         // project resources under separate agents/ and skills/ directories.
         // Verify determinism by rendering twice and confirming identical file output.
-        SquadRendererRegistry registry = new([new AntigravityRenderer()]);
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new AntigravityRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Antigravity],
             SquadDeploymentScope.Project,
-            PreloadedSource: TestSquadCorpus.CanonicalSource);
+            PreloadedSource: TestSquadCorpus.CanonicalSource).Prepared();
 
         SquadRenderResult first = await registry.RenderAsync(request);
         SquadRenderResult second = await registry.RenderAsync(request);
@@ -871,16 +871,16 @@ public sealed class AntigravityRendererContractTests : IDisposable
     [Fact]
     public async Task SquadRendererRegistry_IncludesAntigravityInNativeTargetSet()
     {
-        SquadRendererRegistry registry = new([new AntigravityRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new AntigravityRenderer()]);
 
         Assert.Contains(SquadTarget.Antigravity, registry.SupportedTargets);
 
         // Native target validation applies to Antigravity: rendering must succeed without
         // triggering native validation errors (no role- prefixes, single projection per identity)
-        SquadRenderRequest request = new(
+        SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Antigravity],
-            SquadDeploymentScope.Project);
+            SquadDeploymentScope.Project).Prepared();
 
         SquadRenderResult result = await registry.RenderAsync(request);
         Assert.True(result.Success, string.Join("; ", result.Errors));
@@ -1026,7 +1026,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
         SquadRenderResult result = await new AntigravityRenderer().RenderAsync(new SquadRenderRequest(
             fixture.ProductRoot,
             [SquadTarget.Antigravity],
-            SquadDeploymentScope.Project));
+            SquadDeploymentScope.Project).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         YamlMappingNode withheldFrontmatter = ReadFrontmatter(Assert.Single(
@@ -1090,7 +1090,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             fixture.ProductRoot,
             [SquadTarget.Antigravity],
             SquadDeploymentScope.Project,
-            PreloadedSource: source));
+            PreloadedSource: source).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         foreach (SquadAgent agent in source.Agents)
@@ -1178,7 +1178,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             fixture.ProductRoot,
             [SquadTarget.Antigravity],
             SquadDeploymentScope.Project,
-            PreloadedSource: source));
+            PreloadedSource: source).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         // review-lens declares no delegates-to roster, so its record set must hold exactly one
@@ -1238,7 +1238,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             fixture.ProductRoot,
             [SquadTarget.Antigravity],
             SquadDeploymentScope.Project,
-            PreloadedSource: source));
+            PreloadedSource: source).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         // review-lens declares no delegates-to roster, so this agent's record set must hold exactly
@@ -1282,7 +1282,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             fixture.ProductRoot,
             [SquadTarget.Antigravity],
             SquadDeploymentScope.Project,
-            PreloadedSource: source));
+            PreloadedSource: source).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         // review-lens declares no delegates-to roster, so its record set must hold exactly one
@@ -1335,7 +1335,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             fixture.ProductRoot,
             [SquadTarget.Antigravity],
             SquadDeploymentScope.Project,
-            PreloadedSource: source));
+            PreloadedSource: source).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         // review-lens declares no delegates-to roster, so its record set must hold exactly one
@@ -1442,7 +1442,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             ProductRoot,
             [SquadTarget.Antigravity],
             SquadDeploymentScope.Project,
-            PreloadedSource: configured));
+            PreloadedSource: configured).Prepared());
         Assert.True(result.Success, $"[{caseName}] {string.Join("; ", result.Errors)}");
 
         foreach (string agentName in entitled)

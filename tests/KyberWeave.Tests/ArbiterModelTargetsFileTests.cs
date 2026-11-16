@@ -57,14 +57,14 @@ public sealed class ArbiterModelTargetsFileTests : IDisposable
         IReadOnlyDictionary<SquadTarget, SquadModelPreset>? presets = preset is null
             ? null
             : new Dictionary<SquadTarget, SquadModelPreset> { [SquadTarget.Claude] = preset };
-        SquadRenderRequest request = new(
+        SquadRenderRequest request = new SquadRenderRequest(
             SourceDirectory: CorpusRoot,
             Targets: [SquadTarget.Claude, SquadTarget.OpenCode],
             Scope: scope,
             UserScopeDirectory: userScopeDirectory,
             ModelPresets: presets,
             PreloadedSource: Canonical,
-            Arbiter: new SquadArbiterWiring(Enabled: arbiterEnabled, HookTimeoutSeconds: 45));
+            Arbiter: new SquadArbiterWiring(Enabled: arbiterEnabled, HookTimeoutSeconds: 45)).Prepared();
         return Registry().RenderAsync(request);
     }
 
@@ -171,7 +171,7 @@ public sealed class ArbiterModelTargetsFileTests : IDisposable
             SourceDirectory: CorpusRoot,
             Targets: [SquadTarget.Claude, SquadTarget.OpenCode],
             Scope: SquadDeploymentScope.Project,
-            PreloadedSource: Canonical));
+            PreloadedSource: Canonical).Prepared());
 
         Assert.True(disabled.Success, string.Join("; ", disabled.Errors));
         Assert.DoesNotContain(disabled.Files, file => file.RelativePath.Contains("model-targets", StringComparison.Ordinal));

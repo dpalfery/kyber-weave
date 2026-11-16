@@ -38,7 +38,7 @@ public sealed class SquadOwnedBlockLifecycleTests
     public async Task RegistryMergesBlocksAcrossTargets()
     {
         using SharedIdentitySquadFixture fixture = SharedIdentitySquadFixture.Create();
-        SquadRendererRegistry registry = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create(
         [
             new BlockStubRenderer(SquadTarget.Cursor, CursorBlock("cursor-one")),
             new BlockStubRenderer(SquadTarget.Codex, CodexBlock("codex-one")),
@@ -47,7 +47,7 @@ public sealed class SquadOwnedBlockLifecycleTests
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             fixture.Path,
             [SquadTarget.Cursor, SquadTarget.Codex],
-            SquadDeploymentScope.Project));
+            SquadDeploymentScope.Project).Prepared());
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         Assert.NotNull(result.Blocks);

@@ -240,7 +240,7 @@ public sealed class FactoryMcpConfigurationTests : IDisposable
     private SquadLifecycleService NewService(ISquadReleaseSource release, ISquadRenderer renderer) =>
         SquadHostDefaults.CreateLifecycleService(
             release,
-            new SquadRendererRegistry([renderer]),
+            SquadTestRegistry.Create([renderer]),
             new SquadStateStore(_paths),
             globalRoots: SquadOperatorChannelFixture.GlobalRoots(Path.Combine(_home, ".copilot"), _home));
 

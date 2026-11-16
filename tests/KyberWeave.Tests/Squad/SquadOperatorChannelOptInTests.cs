@@ -519,7 +519,7 @@ public sealed class SquadOperatorChannelOptInTests : IDisposable
                         [SquadTarget.Copilot],
                         SquadDeploymentScope.Global,
                         GlobalRoots: SquadOperatorChannelFixture.GlobalRoots(copilot, home),
-                        EnvironmentReader: SquadOperatorChannelFixture.CreateEnvironmentReader("true", copilot)));
+                        EnvironmentReader: SquadOperatorChannelFixture.CreateEnvironmentReader("true", copilot)).Prepared());
                 });
 
             Assert.Contains(overlay, failure.Message, StringComparison.Ordinal);
@@ -580,7 +580,7 @@ public sealed class SquadOperatorChannelOptInTests : IDisposable
             SquadDeploymentScope.Global,
             GlobalRoots: roots,
             PreloadedSource: TestSquadCorpus.CanonicalSource,
-            EnvironmentReader: SquadOperatorChannelFixture.CreateEnvironmentReader("true", copilot)));
+            EnvironmentReader: SquadOperatorChannelFixture.CreateEnvironmentReader("true", copilot)).Prepared());
 
         Assert.Contains(
             SquadOperatorChannelFixture.ToolEntry,
@@ -738,7 +738,7 @@ internal static class SquadOperatorChannelFixture
             scope,
             GlobalRoots: GlobalRoots(copilotHome, homeDirectory),
             PreloadedSource: preloadedSource ?? TestSquadCorpus.CanonicalSource,
-            EnvironmentReader: CreateEnvironmentReader(gateValue, copilotHome, serverName)));
+            EnvironmentReader: CreateEnvironmentReader(gateValue, copilotHome, serverName)).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
         return result;
     }

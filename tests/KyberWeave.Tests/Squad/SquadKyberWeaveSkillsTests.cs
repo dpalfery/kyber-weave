@@ -175,12 +175,12 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
 
         foreach (SquadTarget target in Enum.GetValues<SquadTarget>())
         {
-            SquadRenderRequest request = new(
+            SquadRenderRequest request = new SquadRenderRequest(
                 extracted,
                 [target],
                 SquadDeploymentScope.Global,
                 GlobalRoots: harness.GlobalRoots,
-                PreloadedSource: source);
+                PreloadedSource: source).Prepared();
             SquadRenderResult render = await renderer.RenderAsync(request);
             Assert.True(
                 render.Success && render.Errors.Count == 0,

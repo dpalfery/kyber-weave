@@ -59,7 +59,7 @@ internal static class SquadHostDefaults
     }
 
     /// <summary>Creates the registry over one instance of every shipped renderer.</summary>
-    public static ISquadRenderer ResolveRenderer() => new SquadRendererRegistry(CreateRenderers());
+    public static ISquadRenderer ResolveRenderer() => new SquadRendererRegistry(CreateRenderers(), new FileSquadRenderInputReader());
 
     /// <summary>Creates one instance of every shipped harness renderer.</summary>
     public static IReadOnlyList<ISquadRenderer> CreateRenderers() => SquadRendererSet.Create();

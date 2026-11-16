@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using KyberWeave.Tests.Fakes;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Arbiter;
@@ -144,7 +145,7 @@ public sealed class ArbiterFix1ContractTests : IDisposable
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Claude],
             Scope: SquadDeploymentScope.Project,
-            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)));
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)).Prepared());
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         SquadDeploymentFile file = Assert.Single(

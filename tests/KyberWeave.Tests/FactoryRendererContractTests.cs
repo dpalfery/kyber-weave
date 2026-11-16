@@ -117,11 +117,11 @@ public sealed class FactoryRendererContractTests : IDisposable
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
         IReadOnlyList<string> declaredMcpServers = DeclaredFactoryMcpServers(source);
-        SquadRendererRegistry registry = new([new FactoryRenderer()]);
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new FactoryRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Factory],
-            SquadDeploymentScope.Project);
+            SquadDeploymentScope.Project).Prepared();
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -333,7 +333,7 @@ public sealed class FactoryRendererContractTests : IDisposable
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Factory],
-            SquadDeploymentScope.Project));
+            SquadDeploymentScope.Project).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         foreach (SquadAgent agent in source.Agents)
@@ -395,7 +395,7 @@ public sealed class FactoryRendererContractTests : IDisposable
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Factory],
-            SquadDeploymentScope.Project));
+            SquadDeploymentScope.Project).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         foreach (SquadAgent agent in source.Agents)
@@ -489,7 +489,7 @@ public sealed class FactoryRendererContractTests : IDisposable
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Factory],
-            SquadDeploymentScope.Project));
+            SquadDeploymentScope.Project).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         List<string> whitelistedPrimaries = [];
@@ -538,7 +538,7 @@ public sealed class FactoryRendererContractTests : IDisposable
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
             fixture.ProductRoot,
             [SquadTarget.Factory],
-            SquadDeploymentScope.Project));
+            SquadDeploymentScope.Project).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         SquadAgent[] whitelistedPrimaries =
@@ -581,7 +581,7 @@ public sealed class FactoryRendererContractTests : IDisposable
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
             fixture.ProductRoot,
             [SquadTarget.Factory],
-            SquadDeploymentScope.Project));
+            SquadDeploymentScope.Project).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         foreach (SquadAgent agent in source.Agents)
@@ -635,7 +635,7 @@ public sealed class FactoryRendererContractTests : IDisposable
                 ProductRoot,
                 [SquadTarget.Factory],
                 SquadDeploymentScope.Project,
-                PreloadedSource: source)));
+                PreloadedSource: source).Prepared()));
         Assert.Contains(agentName, refused.Message, StringComparison.Ordinal);
         Assert.Contains("unresolved-profile", refused.Message, StringComparison.Ordinal);
     }
@@ -662,7 +662,7 @@ public sealed class FactoryRendererContractTests : IDisposable
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
             fixture.ProductRoot,
             [SquadTarget.Factory],
-            SquadDeploymentScope.Project));
+            SquadDeploymentScope.Project).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         SquadAgent entitled = Assert.Single(source.Agents, agent => agent.Name == "architect");
@@ -686,7 +686,7 @@ public sealed class FactoryRendererContractTests : IDisposable
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
             fixture.ProductRoot,
             [SquadTarget.Factory],
-            SquadDeploymentScope.Project));
+            SquadDeploymentScope.Project).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         int whitelistedDroids = 0;
@@ -745,7 +745,7 @@ public sealed class FactoryRendererContractTests : IDisposable
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
             fixture.ProductRoot,
             [SquadTarget.Factory],
-            SquadDeploymentScope.Project));
+            SquadDeploymentScope.Project).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         Assert.Empty(RenderedMcpServers(result, denied.Name));
@@ -781,11 +781,11 @@ public sealed class FactoryRendererContractTests : IDisposable
         SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(source.Agents,
             a => a.Name == "conductor");
-        SquadRendererRegistry registry = new([new FactoryRenderer()]);
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new FactoryRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Factory],
-            SquadDeploymentScope.Project);
+            SquadDeploymentScope.Project).Prepared();
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -902,11 +902,11 @@ public sealed class FactoryRendererContractTests : IDisposable
         SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(source.Agents,
             a => a.Name == "conductor");
-        SquadRendererRegistry registry = new([new FactoryRenderer()]);
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new FactoryRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Factory],
-            SquadDeploymentScope.Global);
+            SquadDeploymentScope.Global).Prepared();
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -958,21 +958,21 @@ public sealed class FactoryRendererContractTests : IDisposable
         SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(source.Agents,
             a => a.Name == "conductor");
-        SquadRendererRegistry registry = new([new FactoryRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new FactoryRenderer()]);
 
-        SquadRenderRequest skillRequest = new(
+        SquadRenderRequest skillRequest = new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Factory],
-            SquadDeploymentScope.Project);
+            SquadDeploymentScope.Project).Prepared();
         SquadRenderResult skillResult = await registry.RenderAsync(skillRequest);
         Assert.True(skillResult.Success);
 
         using (ClaudeNoPrimaryAgentFixture omitFixture = ClaudeNoPrimaryAgentFixture.Create("omit"))
         {
-            SquadRenderRequest omitRequest = new(
+            SquadRenderRequest omitRequest = new SquadRenderRequest(
                 omitFixture.ProductRoot,
                 [SquadTarget.Factory],
-                SquadDeploymentScope.Project);
+                SquadDeploymentScope.Project).Prepared();
             SquadRenderResult omitResult = await registry.RenderAsync(omitRequest);
             Assert.True(omitResult.Success, string.Join("; ", omitResult.Errors));
 
@@ -1036,10 +1036,10 @@ public sealed class FactoryRendererContractTests : IDisposable
                PiPrimaryIdentityCollisionFixture.Create(primaryAgent.Name))
         {
             FactoryRenderer renderer = new();
-            SquadRenderRequest request = new(
+            SquadRenderRequest request = new SquadRenderRequest(
                 collisionFixture.ProductRoot,
                 [SquadTarget.Factory],
-                SquadDeploymentScope.Project);
+                SquadDeploymentScope.Project).Prepared();
 
             SquadRenderValidationException ex =
                 await Assert.ThrowsAsync<SquadRenderValidationException>(() => renderer.RenderAsync(request));
@@ -1058,10 +1058,10 @@ public sealed class FactoryRendererContractTests : IDisposable
         using (ClaudeNoPrimaryAgentFixture renameFixture = ClaudeNoPrimaryAgentFixture.Create("rename"))
         {
             FactoryRenderer renderer = new();
-            SquadRenderRequest request = new(
+            SquadRenderRequest request = new SquadRenderRequest(
                 renameFixture.ProductRoot,
                 [SquadTarget.Factory],
-                SquadDeploymentScope.Project);
+                SquadDeploymentScope.Project).Prepared();
 
             SquadSourceValidationException ex =
                 await Assert.ThrowsAsync<SquadSourceValidationException>(() => renderer.RenderAsync(request));
@@ -1085,7 +1085,7 @@ public sealed class FactoryRendererContractTests : IDisposable
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Factory],
-            SquadDeploymentScope.Project));
+            SquadDeploymentScope.Project).Prepared());
 
         SquadDeploymentFile rendered = Assert.Single(
             result.Files,

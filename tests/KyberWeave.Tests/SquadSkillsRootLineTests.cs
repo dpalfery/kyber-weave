@@ -107,12 +107,12 @@ public sealed class SquadSkillsRootLineTests
         SquadDeploymentScope scope,
         ISquadGlobalRootResolver? roots)
     {
-        SquadRenderRequest request = new(
+        SquadRenderRequest request = new SquadRenderRequest(
             Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad"),
             [target],
             scope,
             GlobalRoots: roots,
-            PreloadedSource: TestSquadCorpus.CanonicalSource);
+            PreloadedSource: TestSquadCorpus.CanonicalSource).Prepared();
 
         return SquadHostDefaults.ResolveRenderer().RenderAsync(request);
     }

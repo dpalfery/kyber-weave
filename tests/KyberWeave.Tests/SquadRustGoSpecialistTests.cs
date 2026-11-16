@@ -145,7 +145,7 @@ public sealed class SquadRustGoSpecialistTests
 
     private static SquadRendererRegistry AllRenderers()
     {
-        return new SquadRendererRegistry(
+        return SquadTestRegistry.Create(
         [
             new CopilotRenderer(),
             new CursorRenderer(),

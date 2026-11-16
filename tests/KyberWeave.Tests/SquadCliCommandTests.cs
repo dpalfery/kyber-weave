@@ -1967,7 +1967,7 @@ public sealed class SquadCliCommandTests : IDisposable
             new SquadRenderRequest(
                 SourceDirectory: ".",
                 Targets: targets,
-                Scope: SquadDeploymentScope.Project)).GetAwaiter().GetResult();
+                Scope: SquadDeploymentScope.Project).Prepared()).GetAwaiter().GetResult();
         return result.Files.Count;
     }
 

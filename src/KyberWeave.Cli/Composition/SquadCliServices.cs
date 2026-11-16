@@ -24,7 +24,9 @@ internal static class SquadCliServices
             FindLocalProductSquadRoot(sp.GetRequiredService<ISquadFileAccess>()) is { } local
                 ? new LocalCheckoutSquadReleaseSource(local)
                 : sp.GetRequiredService<ISquadReleaseSource>()));
-        services.TryAddSingleton<ISquadRenderer>(_ => new SquadRendererRegistry(SquadRendererSet.Create()));
+        services.TryAddSingleton<ISquadRenderer>(sp => new SquadRendererRegistry(
+            SquadRendererSet.Create(),
+            sp.GetRequiredService<ISquadRenderInputReader>()));
         services.TryAddSingleton(new SquadConsoleOptions());
         services.TryAddSingleton(new SquadRunOptions());
         services.TryAddSingleton(new SquadDoctorOptions());

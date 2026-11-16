@@ -156,12 +156,12 @@ public static class TestSquadCorpus
             ? SquadHostDefaults.ResolveGlobalRoots()
             : null;
 
-        SquadRenderRequest request = new(
+        SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
             [target],
             scope,
             GlobalRoots: globalRoots,
-            PreloadedSource: CanonicalSource);
+            PreloadedSource: CanonicalSource).Prepared();
 
         ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
         SquadRenderResult result = await renderer.RenderAsync(request).ConfigureAwait(false);

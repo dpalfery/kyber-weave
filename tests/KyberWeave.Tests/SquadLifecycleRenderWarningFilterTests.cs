@@ -305,7 +305,7 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
             [SquadTarget.Copilot],
             SquadDeploymentScope.Global,
             GlobalRoots: SquadOperatorChannelFixture.GlobalRoots(h.CopilotHome, h.UserHome),
-            EnvironmentReader: SquadOperatorChannelFixture.CreateEnvironmentReader(gateValue, h.CopilotHome)));
+            EnvironmentReader: SquadOperatorChannelFixture.CreateEnvironmentReader(gateValue, h.CopilotHome)).Prepared());
         return SquadOperatorChannelFixture.ConductorText(result).Length;
     }
 
@@ -462,7 +462,7 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
             UserHome = userHome;
             Store = new SquadStateStore(new FakeSquadUserPaths(userHome));
             GlobalRoots = SquadOperatorChannelFixture.GlobalRoots(copilotHome, userHome);
-            Renderer = new RecordingRenderer(new SquadRendererRegistry([new CopilotRenderer()]));
+            Renderer = new RecordingRenderer(SquadTestRegistry.Create([new CopilotRenderer()]));
             Corpus = new SyntheticValidSquadReleaseSource();
             Oversized = new OversizedConductorReleaseSource();
         }

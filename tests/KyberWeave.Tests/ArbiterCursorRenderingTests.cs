@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fixtures;
@@ -157,12 +158,12 @@ public sealed class ArbiterCursorRenderingTests : IDisposable
 
     private async Task<SquadRenderResult> RenderAsync(SquadArbiterWiring? arbiter, SquadDeploymentScope scope)
     {
-        SquadRendererRegistry registry = new([new CursorRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new CursorRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Cursor],
             Scope: scope,
-            Arbiter: arbiter));
+            Arbiter: arbiter).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
         return result;
     }

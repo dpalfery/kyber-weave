@@ -94,7 +94,7 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
             install.UserPaths,
             KyberWeaveTestPaths.ToolRoot,
             install.GlobalRoots,
-            new SquadRendererRegistry([new CopilotRenderer()]));
+            SquadTestRegistry.Create([new CopilotRenderer()]));
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,

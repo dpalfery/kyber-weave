@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fixtures;
@@ -20,11 +21,11 @@ public sealed class ArbiterProjectShimByteIdentityTests : IDisposable
     [Fact]
     public async Task OpenCode_ProjectScopeShim_IsByteIdenticalToMain()
     {
-        SquadRenderResult result = await new SquadRendererRegistry([new OpenCodeRenderer()]).RenderAsync(new SquadRenderRequest(
+        SquadRenderResult result = await SquadTestRegistry.Create([new OpenCodeRenderer()]).RenderAsync(new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.OpenCode],
             Scope: SquadDeploymentScope.Project,
-            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)));
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)).Prepared());
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         SquadDeploymentFile shim = Assert.Single(result.Files, file => file.RelativePath == ".opencode/plugins/kyber-arbiter.ts");
@@ -34,11 +35,11 @@ public sealed class ArbiterProjectShimByteIdentityTests : IDisposable
     [Fact]
     public async Task Kilo_ProjectScopeShim_IsByteIdenticalToMain()
     {
-        SquadRenderResult result = await new SquadRendererRegistry([new KiloRenderer()]).RenderAsync(new SquadRenderRequest(
+        SquadRenderResult result = await SquadTestRegistry.Create([new KiloRenderer()]).RenderAsync(new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Kilo],
             Scope: SquadDeploymentScope.Project,
-            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)));
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)).Prepared());
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         SquadDeploymentFile shim = Assert.Single(result.Files, file => file.RelativePath == ".kilo/plugin/kyber-arbiter.ts");
@@ -48,11 +49,11 @@ public sealed class ArbiterProjectShimByteIdentityTests : IDisposable
     [Fact]
     public async Task Pi_ProjectScopeShim_IsByteIdenticalToMain()
     {
-        SquadRenderResult result = await new SquadRendererRegistry([new PiRenderer()]).RenderAsync(new SquadRenderRequest(
+        SquadRenderResult result = await SquadTestRegistry.Create([new PiRenderer()]).RenderAsync(new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Pi],
             Scope: SquadDeploymentScope.Project,
-            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)));
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)).Prepared());
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         SquadDeploymentFile shim = Assert.Single(result.Files, file => file.RelativePath == ".pi/extensions/kyber-arbiter.ts");

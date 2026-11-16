@@ -71,7 +71,7 @@ public sealed class SquadHarnessTokenRenderTests
                 ProductRoot,
                 [target],
                 SquadDeploymentScope.Project,
-                PreloadedSource: SourceWithProbe()));
+                PreloadedSource: SourceWithProbe()).Prepared());
         Assert.True(probe.Success, string.Join("; ", probe.Errors));
 
         string[] unresolved = probe.Files
@@ -96,7 +96,7 @@ public sealed class SquadHarnessTokenRenderTests
                 ProductRoot,
                 [target],
                 SquadDeploymentScope.Project,
-                PreloadedSource: TestSquadCorpus.CanonicalSource));
+                PreloadedSource: TestSquadCorpus.CanonicalSource).Prepared());
         Assert.True(corpus.Success, string.Join("; ", corpus.Errors));
 
         string[] corpusLeftovers = corpus.Files
@@ -127,7 +127,7 @@ public sealed class SquadHarnessTokenRenderTests
                 ProductRoot,
                 [target],
                 SquadDeploymentScope.Project,
-                PreloadedSource: SourceWithProbe(label + placeholder)));
+                PreloadedSource: SourceWithProbe(label + placeholder)).Prepared());
         Assert.True(probe.Success, string.Join("; ", probe.Errors));
 
         Assert.DoesNotContain(probe.Files, file => Text(file).Contains(placeholder, StringComparison.Ordinal));
@@ -152,7 +152,7 @@ public sealed class SquadHarnessTokenRenderTests
                 ProductRoot,
                 [target],
                 SquadDeploymentScope.Project,
-                PreloadedSource: SourceWithProbe(label + placeholder)));
+                PreloadedSource: SourceWithProbe(label + placeholder)).Prepared());
         Assert.True(probe.Success, string.Join("; ", probe.Errors));
 
         Assert.DoesNotContain(probe.Files, file => Text(file).Contains(placeholder, StringComparison.Ordinal));

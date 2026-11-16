@@ -405,19 +405,19 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Factory],
             Scope: SquadDeploymentScope.Project,
-            Arbiter: arbiter));
+            Arbiter: arbiter).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
         return result;
     }
 
     private async Task<SquadRenderResult> RenderAsync(SquadArbiterWiring? arbiter, SquadDeploymentScope scope)
     {
-        SquadRendererRegistry registry = new([new FactoryRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new FactoryRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Factory],
             Scope: scope,
-            Arbiter: arbiter));
+            Arbiter: arbiter).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
         return result;
     }

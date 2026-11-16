@@ -46,8 +46,8 @@ public sealed class CodexRendererContractTests : IDisposable
     public async Task RenderAsync_Codex_RendersTheRealCanonicalCorpus()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRenderResult result = await new SquadRendererRegistry([new CodexRenderer()]).RenderAsync(
-            new SquadRenderRequest(ProductRoot, [SquadTarget.Codex], SquadDeploymentScope.Project));
+        SquadRenderResult result = await SquadTestRegistry.Create([new CodexRenderer()]).RenderAsync(
+            new SquadRenderRequest(ProductRoot, [SquadTarget.Codex], SquadDeploymentScope.Project).Prepared());
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         foreach (SquadAgent agent in source.Agents)
@@ -98,10 +98,10 @@ public sealed class CodexRendererContractTests : IDisposable
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(source.Agents, agent => agent.Name == "conductor");
-        SquadRenderRequest request = new(
+        SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Codex],
-            SquadDeploymentScope.Global);
+            SquadDeploymentScope.Global).Prepared();
 
         SquadRenderResult result = await new CodexRenderer().RenderAsync(request);
 
@@ -162,7 +162,7 @@ public sealed class CodexRendererContractTests : IDisposable
         SquadRenderResult result = await new CodexRenderer().RenderAsync(new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Codex],
-            SquadDeploymentScope.Project));
+            SquadDeploymentScope.Project).Prepared());
 
         SquadDeploymentFile rendered = Assert.Single(
             result.Files,
@@ -197,7 +197,7 @@ public sealed class CodexRendererContractTests : IDisposable
         SquadRenderResult result = await new CodexRenderer().RenderAsync(new SquadRenderRequest(
             sourceRoot,
             [SquadTarget.Codex],
-            SquadDeploymentScope.Project));
+            SquadDeploymentScope.Project).Prepared());
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         SquadDeploymentFile agentFile = Assert.Single(

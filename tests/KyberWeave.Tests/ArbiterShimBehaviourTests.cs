@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using KyberWeave.Tests.Fakes;
 using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
@@ -333,12 +334,12 @@ public sealed class ArbiterShimBehaviourTests : IDisposable
 
     private async Task<string> RenderKiloShimAsync()
     {
-        SquadRendererRegistry registry = new([new KiloRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new KiloRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Kilo],
             Scope: SquadDeploymentScope.Project,
-            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)));
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
         SquadDeploymentFile shim = Assert.Single(
             result.Files, f => f.RelativePath == ".kilo/plugin/kyber-arbiter.ts");
@@ -347,12 +348,12 @@ public sealed class ArbiterShimBehaviourTests : IDisposable
 
     private async Task<string> RenderPiExtensionAsync(int timeoutSeconds)
     {
-        SquadRendererRegistry registry = new([new PiRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new PiRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Pi],
             Scope: SquadDeploymentScope.Project,
-            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: timeoutSeconds)));
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: timeoutSeconds)).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
         SquadDeploymentFile extension = Assert.Single(
             result.Files, f => f.RelativePath == ".pi/extensions/kyber-arbiter.ts");

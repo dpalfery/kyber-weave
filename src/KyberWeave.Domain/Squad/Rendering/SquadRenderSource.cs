@@ -1,11 +1,10 @@
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using KyberWeave.Core.Squad.Parsing;
 
 namespace KyberWeave.Core.Squad.Rendering;
 
 /// <summary>
-/// Loads canonical Squad source for a render execution, applying any target-scoped model preset overrides.
+/// Takes the canonical Squad source a render starts from, applying any target-scoped model preset overrides.
 /// </summary>
 /// <remarks>
 /// This seam isolates model preset application from the individual renderer implementations,
@@ -24,7 +23,7 @@ public static class SquadRenderSource
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        SquadSource source = request.PreloadedSource ?? SquadSourceLoader.Load(request.SourceDirectory);
+        SquadSource source = request.RequireSource();
         if (request.ModelPresets != null && request.ModelPresets.TryGetValue(target, out SquadModelPreset? preset) &&
             preset is not null)
         {

@@ -106,7 +106,7 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
             // path and a harness's own links and probes must read the same root.
             request = request.GlobalRoots is null
                 ? request
-                : request with { GlobalRoots = new MemoizedGlobalRoots(request.GlobalRoots) };
+                : request with { GlobalRoots = new MemoizedSquadGlobalRoots(request.GlobalRoots) };
 
             SquadSource renderSource = SquadWorkerBaselineInjector.Apply(
                 SubstituteHarnessToken(
@@ -115,7 +115,7 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
                     SubagentDispatchAnswer(Spec.Target),
                     SquadTargetCatalog.GetSubagentDispatchTool(Spec.Target)),
                 SquadWorkerBaselineInjector.BindSkillsRoot(
-                    SquadWorkerBaselineInjector.ReadBlock(request.SourceDirectory),
+                    request.RequireWorkerBaselineBlock(),
                     ResolveSkillsRoot(Spec, request)));
             return Task.FromResult(Render(new SquadHarnessRenderContext(Spec, request, renderSource)));
         }
@@ -126,25 +126,6 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
         catch (Exception exception)
         {
             return Task.FromException<SquadRenderResult>(exception);
-        }
-    }
-
-    /// <summary>Asks the wrapped resolver once per target, so every consumer in one render sees one answer.</summary>
-    private sealed class MemoizedGlobalRoots(ISquadGlobalRootResolver inner) : ISquadGlobalRootResolver
-    {
-        private readonly Dictionary<SquadTarget, string> _answers = [];
-
-        public string? HomeDirectory => inner.HomeDirectory;
-
-        public string ResolveGlobalRoot(SquadTarget target)
-        {
-            if (!_answers.TryGetValue(target, out string? root))
-            {
-                root = inner.ResolveGlobalRoot(target);
-                _answers[target] = root;
-            }
-
-            return root;
         }
     }
 

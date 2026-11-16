@@ -136,11 +136,11 @@ public sealed class SquadRendererSharedContractTests
     [MemberData(nameof(ShippedTargets))]
     public async Task EachRendererRefusesARequestForAnotherTarget(SquadTarget target)
     {
-        SquadRenderRequest request = new(
+        SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
             [AnotherTarget(target)],
             SquadDeploymentScope.Project,
-            PreloadedSource: TestSquadCorpus.CanonicalSource);
+            PreloadedSource: TestSquadCorpus.CanonicalSource).Prepared();
 
         await Assert.ThrowsAsync<ArgumentException>(() => RendererFor(target).RenderAsync(request));
     }
@@ -153,8 +153,8 @@ public sealed class SquadRendererSharedContractTests
     [MemberData(nameof(ShippedTargets))]
     public async Task EachRendererRendersTheCanonicalCorpusByteForByteTheSameTwice(SquadTarget target)
     {
-        SquadRendererRegistry registry = new([RendererFor(target)]);
-        SquadRenderRequest fromDisk = new(ProductRoot, [target], SquadDeploymentScope.Project);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([RendererFor(target)]);
+        SquadRenderRequest fromDisk = new SquadRenderRequest(ProductRoot, [target], SquadDeploymentScope.Project).Prepared();
 
         SquadRenderResult first = await registry.RenderAsync(
             fromDisk with { PreloadedSource = TestSquadCorpus.CanonicalSource });
@@ -384,7 +384,7 @@ public sealed class SquadRendererSharedContractTests
 
         SquadSourceValidationException refused = await Assert.ThrowsAsync<SquadSourceValidationException>(() =>
             RendererFor(target).RenderAsync(
-                new SquadRenderRequest(ProductRoot, [target], SquadDeploymentScope.Project, PreloadedSource: tampered)));
+                new SquadRenderRequest(ProductRoot, [target], SquadDeploymentScope.Project, PreloadedSource: tampered).Prepared()));
         Assert.Contains("undeclared", refused.Message, StringComparison.Ordinal);
     }
 
@@ -439,7 +439,7 @@ public sealed class SquadRendererSharedContractTests
         };
 
         await Assert.ThrowsAsync<SquadRenderValidationException>(() => RendererFor(target).RenderAsync(
-            new SquadRenderRequest(ProductRoot, [target], SquadDeploymentScope.Project, PreloadedSource: tampered)));
+            new SquadRenderRequest(ProductRoot, [target], SquadDeploymentScope.Project, PreloadedSource: tampered).Prepared()));
     }
 
     /// <summary>
@@ -495,13 +495,13 @@ public sealed class SquadRendererSharedContractTests
     public async Task TheRegistryRefusesTheWholeRequestBeforeAnyRendererRunsWhenATargetHasNoRenderer()
     {
         CountingRenderer claude = new(SquadTarget.Claude);
-        SquadRendererRegistry registry = new([claude]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([claude]);
 
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Copilot, SquadTarget.Claude],
             SquadDeploymentScope.Project,
-            PreloadedSource: TestSquadCorpus.CanonicalSource));
+            PreloadedSource: TestSquadCorpus.CanonicalSource).Prepared());
 
         Assert.False(result.Success);
         Assert.Empty(result.Files);

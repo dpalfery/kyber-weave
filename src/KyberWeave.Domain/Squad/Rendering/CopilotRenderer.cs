@@ -511,21 +511,23 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
             // declares the server it calls. Without the server the conductor must stay exactly as it is,
             // because a tool entry for a server Copilot cannot reach is a tool the agent cannot call.
             SquadOperatorChannelOverlay? operatorChannelOverlay = null;
-            if (copilotGlobalRoot is not null && SquadOperatorChannel.IsGateOn(request.EnvironmentReader))
+            if (copilotGlobalRoot is not null && SquadOperatorChannel.IsGateOn(request.RequireEnvironmentReader()))
             {
-                SquadOperatorChannelServerName server = SquadOperatorChannel.ResolveServerName(request.EnvironmentReader);
+                SquadOperatorChannelServerName server = SquadOperatorChannel.ResolveServerName(request.RequireEnvironmentReader());
                 if (server.Warning is { } nameWarning)
                 {
                     warnings.Add(nameWarning);
                 }
                 else if (server.Name is { } serverName)
                 {
-                    if (CopilotMcpServerProbe.HasServer(copilotGlobalRoot, serverName))
+                    SquadRenderDiskInputs inputs = request.RequireDiskInputs();
+                    if (inputs.CopilotMcpServerDeclared)
                     {
-                        string overlaySourceDirectory = Directory.Exists(request.SourceDirectory)
-                            ? request.SourceDirectory
-                            : request.PreloadedSource?.RootPath ?? request.SourceDirectory;
-                        operatorChannelOverlay = SquadOperatorChannelOverlayFile.LoadOverlay(overlaySourceDirectory, serverName);
+                        operatorChannelOverlay = inputs.OperatorChannelOverlayFailure is { } overlayFailure
+                            ? throw overlayFailure
+                            : SquadOperatorChannelOverlay.FromFileText(
+                                inputs.OperatorChannelOverlayText ?? string.Empty,
+                                serverName);
                         warnings.Add(SquadOperatorChannel.OverlayApplied());
                     }
                     else
@@ -533,7 +535,7 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
                         warnings.Add(new SquadRenderWarning(
                             SquadOperatorChannel.ServerAbsentCode,
                             $"The operator channel is enabled, but no '{serverName}' server is declared " +
-                            $"under mcpServers in {CopilotMcpServerProbe.McpConfigFileName} in '{copilotGlobalRoot}'. " +
+                            $"under mcpServers in {SquadOperatorChannel.CopilotMcpConfigFileName} in '{copilotGlobalRoot}'. " +
                             "The conductor was rendered without the operator channel.",
                             "copilot"));
                     }

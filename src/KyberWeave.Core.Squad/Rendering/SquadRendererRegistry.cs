@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -21,10 +22,15 @@ namespace KyberWeave.Core.Squad.Rendering;
 public sealed class SquadRendererRegistry : ISquadRenderer
 {
     private readonly IReadOnlyDictionary<SquadTarget, ISquadRenderer> _byTarget;
+    private readonly ISquadRenderInputReader? _inputs;
 
-    public SquadRendererRegistry(IEnumerable<ISquadRenderer> renderers)
+    /// <summary>Creates the registry over the shipped renderers.</summary>
+    /// <param name="renderers">The renderers, each claiming the targets it supports.</param>
+    /// <param name="inputs">Reads what a render needs from disk before the renderers run; null renders only prepared requests.</param>
+    public SquadRendererRegistry(IEnumerable<ISquadRenderer> renderers, ISquadRenderInputReader? inputs = null)
     {
         ArgumentNullException.ThrowIfNull(renderers);
+        _inputs = inputs;
 
         Dictionary<SquadTarget, ISquadRenderer> byTarget = new();
         foreach (ISquadRenderer renderer in renderers)
@@ -80,7 +86,8 @@ public sealed class SquadRendererRegistry : ISquadRenderer
         List<string> errors = [];
         List<SquadRenderedBlock> blocks = [];
 
-        SquadSource sharedSource = request.PreloadedSource ?? SquadSourceLoader.Load(request.SourceDirectory);
+        request = _inputs?.Prepare(request) ?? request;
+        SquadSource sharedSource = request.RequireSource();
 
         foreach (IGrouping<ISquadRenderer, SquadTarget> group in request.Targets.GroupBy(target => _byTarget[target]))
         {
@@ -107,7 +114,7 @@ public sealed class SquadRendererRegistry : ISquadRenderer
         // reads every target's merged profiles at once rather than one renderer's tree.
         files.AddRange(ArbiterModelTargetsFile.BuildFiles(request with { PreloadedSource = sharedSource }));
 
-        if (SquadOperatorChannel.IsGateOn(request.EnvironmentReader))
+        if (SquadOperatorChannel.IsGateOn(request.RequireEnvironmentReader()))
         {
             RecordOperatorChannelNotRendered(sharedSource, request, degradations);
         }

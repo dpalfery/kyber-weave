@@ -1,6 +1,7 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
+using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Core.FileSystem;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -28,6 +29,7 @@ public static class SquadServiceCollectionExtensions
         services.TryAddSingleton<ISquadModelPresetSelectionStore>(sp => new SquadModelPresetSelectionStore(sp.GetRequiredService<ISquadUserPaths>()));
         services.TryAddSingleton<ISquadCanonicalProfileStore>(sp => new SquadCanonicalProfileStore(sp.GetRequiredService<ISquadUserPaths>()));
         services.TryAddSingleton<ISquadSourceLoader, FileSquadSourceLoader>();
+        services.TryAddSingleton<ISquadRenderInputReader, FileSquadRenderInputReader>();
         services.TryAddSingleton<ISquadModelPresetValidator, FileSquadModelPresetValidator>();
         services.TryAddSingleton<ISquadDeploymentPlanner, FileSquadDeploymentPlanner>();
         services.TryAddSingleton<ISquadTransactionFactory>(sp => new SquadTransactionFactory(sp.GetRequiredService<SquadStateStore>()));

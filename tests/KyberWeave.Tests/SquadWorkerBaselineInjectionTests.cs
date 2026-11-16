@@ -139,10 +139,10 @@ public sealed class SquadWorkerBaselineInjectionTests
         Directory.CreateDirectory(emptyTemp);
         try
         {
-            string? block = SquadWorkerBaselineInjector.ReadBlock(emptyTemp);
+            string? block = SquadWorkerBaselineFile.ReadBlock(emptyTemp);
             Assert.Null(block);
 
-            string? cached = SquadWorkerBaselineInjector.ReadBlock(emptyTemp);
+            string? cached = SquadWorkerBaselineFile.ReadBlock(emptyTemp);
             Assert.Null(cached);
         }
         finally
@@ -164,7 +164,7 @@ public sealed class SquadWorkerBaselineInjectionTests
                 baselinePath,
                 "<worker-baseline>\n<worker-baseline>\ntext\n</worker-baseline>");
 
-            Assert.Throws<SquadRenderValidationException>(() => SquadWorkerBaselineInjector.ReadBlock(tempDir));
+            Assert.Throws<SquadRenderValidationException>(() => SquadWorkerBaselineFile.ReadBlock(tempDir));
         }
         finally
         {

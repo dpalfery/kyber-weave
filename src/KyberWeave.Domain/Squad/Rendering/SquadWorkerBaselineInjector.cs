@@ -1,9 +1,7 @@
-using System.Collections.Concurrent;
 using System.Text;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
-using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Squad.Deployment;
 
@@ -49,81 +47,15 @@ public static class SquadWorkerBaselineInjector
     private const string BlockOpen = "<" + TagName + ">";
     private const string BlockClose = "</" + TagName + ">";
 
-    private const int MaxCacheEntries = 64;
-
-    private sealed record CacheEntry(DateTime LastWriteTimeUtc, long FileLength, string? Block);
-
-    private static readonly ConcurrentDictionary<string, CacheEntry> CachedBlocks = new(
-        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
-
-    /// <summary>Empties the baseline block cache.</summary>
-    public static void ClearCache() => CachedBlocks.Clear();
-
     /// <summary>
-    /// Reads the injection block from <paramref name="sourceDirectory"/>, or returns null when the
-    /// tree carries no baseline file.
+    /// Takes the injection block out of the baseline file's text.
     /// </summary>
-    /// <remarks>
-    /// A test fixture renders from a minimal source tree and has no baseline; a shipped corpus does,
-    /// and the suite fails when a render carries no block rather than letting the render go quiet.
-    /// </remarks>
-    /// <param name="sourceDirectory">The Squad source root the render loaded from.</param>
-    /// <returns>The block, tags included, or null when the tree carries no baseline file.</returns>
-    public static string? ReadBlock(string sourceDirectory)
+    /// <param name="text">The baseline file's text.</param>
+    /// <param name="path">The file's path, named in the errors.</param>
+    /// <returns>The block, tags included.</returns>
+    /// <exception cref="SquadRenderValidationException">The file does not carry exactly one non-empty block.</exception>
+    public static string ExtractBlock(string text, string path)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(sourceDirectory);
-        string normalized = Path.TrimEndingDirectorySeparator(Path.GetFullPath(sourceDirectory));
-        string path = Path.Combine(normalized, RelativePath.Replace('/', Path.DirectorySeparatorChar));
-
-        try
-        {
-            FileInfo info = new(path);
-            if (!info.Exists)
-            {
-                if (CachedBlocks.TryGetValue(normalized, out CacheEntry? missing) && missing.LastWriteTimeUtc == DateTime.MinValue)
-                    return missing.Block;
-
-                if (CachedBlocks.Count >= MaxCacheEntries)
-                    CachedBlocks.Clear();
-
-                CachedBlocks[normalized] = new CacheEntry(DateTime.MinValue, 0, null);
-                return null;
-            }
-
-            DateTime lastWrite = info.LastWriteTimeUtc;
-            long length = info.Length;
-            if (CachedBlocks.TryGetValue(normalized, out CacheEntry? entry)
-                && entry.LastWriteTimeUtc == lastWrite
-                && entry.FileLength == length)
-            {
-                return entry.Block;
-            }
-
-            string? block = ReadBlockUncached(path);
-            if (CachedBlocks.Count >= MaxCacheEntries)
-                CachedBlocks.Clear();
-
-            CachedBlocks[normalized] = new CacheEntry(lastWrite, length, block);
-            return block;
-        }
-        catch (Exception ex) when (FileFailure.Is(ex))
-        {
-            return ReadBlockUncached(path);
-        }
-    }
-
-    private static string? ReadBlockUncached(string path)
-    {
-        string text;
-        try
-        {
-            text = File.ReadAllText(path, Encoding.UTF8);
-        }
-        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
-        {
-            return null;
-        }
-
         int openIndex = text.IndexOf(BlockOpen, StringComparison.Ordinal);
         int closeIndex = openIndex < 0
             ? -1
@@ -159,7 +91,7 @@ public static class SquadWorkerBaselineInjector
     /// render's skills install to. With no root, the paragraph that carries the placeholder is
     /// dropped, so a rendered body never ships an unanswered placeholder or a guessed path.
     /// </summary>
-    /// <param name="block">The block from <see cref="ReadBlock"/>; null or blank comes back as is.</param>
+    /// <param name="block">The block from the file reader; null or blank comes back as is.</param>
     /// <param name="skillsRoot">The install root, or null when this render cannot know it.</param>
     /// <returns>The block ready for <see cref="Apply"/>.</returns>
     public static string? BindSkillsRoot(string? block, string? skillsRoot)
@@ -186,7 +118,7 @@ public static class SquadWorkerBaselineInjector
     /// so the count holds however the source was edited.
     /// </summary>
     /// <param name="source">The source the pipeline is about to render.</param>
-    /// <param name="block">The block from <see cref="ReadBlock"/>; null or blank leaves the source untouched.</param>
+    /// <param name="block">The block from the file reader; null or blank leaves the source untouched.</param>
     /// <returns>
     /// The source to render. A blank block returns the same instance, so a tree without a baseline
     /// renders byte for byte as it did before.

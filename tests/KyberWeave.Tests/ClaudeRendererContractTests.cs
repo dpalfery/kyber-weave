@@ -107,11 +107,11 @@ public sealed class ClaudeRendererContractTests : IDisposable
     public async Task RenderAsync_Claude_RendersTheRealCanonicalCorpus()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRendererRegistry registry = new([new ClaudeRenderer()]);
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
             SourceDirectory: ProductRoot,
             Targets: [SquadTarget.Claude],
-            Scope: SquadDeploymentScope.Project);
+            Scope: SquadDeploymentScope.Project).Prepared();
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -340,11 +340,11 @@ public sealed class ClaudeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Claude_ConductorRunsOnSonnet()
     {
-        SquadRendererRegistry registry = new([new ClaudeRenderer()]);
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
             SourceDirectory: ProductRoot,
             Targets: [SquadTarget.Claude],
-            Scope: SquadDeploymentScope.Project);
+            Scope: SquadDeploymentScope.Project).Prepared();
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -367,11 +367,11 @@ public sealed class ClaudeRendererContractTests : IDisposable
     [InlineData("dal-dev")]
     public async Task RenderAsync_Claude_FastProfileWorkersRunOnHaiku55(string agent)
     {
-        SquadRendererRegistry registry = new([new ClaudeRenderer()]);
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
             SourceDirectory: ProductRoot,
             Targets: [SquadTarget.Claude],
-            Scope: SquadDeploymentScope.Project);
+            Scope: SquadDeploymentScope.Project).Prepared();
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -392,11 +392,11 @@ public sealed class ClaudeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Claude_ProductOwnerRunsOnArchitectModel()
     {
-        SquadRendererRegistry registry = new([new ClaudeRenderer()]);
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
             SourceDirectory: ProductRoot,
             Targets: [SquadTarget.Claude],
-            Scope: SquadDeploymentScope.Project);
+            Scope: SquadDeploymentScope.Project).Prepared();
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -419,11 +419,11 @@ public sealed class ClaudeRendererContractTests : IDisposable
     [InlineData("tauri-dev")]
     public async Task RenderAsync_Claude_GeneralProfileWorkersRunOnSonnet55(string agent)
     {
-        SquadRendererRegistry registry = new([new ClaudeRenderer()]);
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
             SourceDirectory: ProductRoot,
             Targets: [SquadTarget.Claude],
-            Scope: SquadDeploymentScope.Project);
+            Scope: SquadDeploymentScope.Project).Prepared();
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -443,11 +443,11 @@ public sealed class ClaudeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Claude_OnlyFastWorkersRunOnHaiku55()
     {
-        SquadRendererRegistry registry = new([new ClaudeRenderer()]);
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
             SourceDirectory: ProductRoot,
             Targets: [SquadTarget.Claude],
-            Scope: SquadDeploymentScope.Project);
+            Scope: SquadDeploymentScope.Project).Prepared();
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -501,11 +501,11 @@ public sealed class ClaudeRendererContractTests : IDisposable
         SquadAgent primaryAgent = Assert.Single(source.Agents,
             a => a.Name == "conductor");
 
-        SquadRendererRegistry registry = new([new ClaudeRenderer()]);
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
             SourceDirectory: ProductRoot,
             Targets: [SquadTarget.Claude],
-            Scope: SquadDeploymentScope.Project);
+            Scope: SquadDeploymentScope.Project).Prepared();
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -645,11 +645,11 @@ public sealed class ClaudeRendererContractTests : IDisposable
         SquadAgent primaryAgent = Assert.Single(source.Agents,
             a => a.Name == "conductor");
 
-        SquadRendererRegistry registry = new([new ClaudeRenderer()]);
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
             SourceDirectory: ProductRoot,
             Targets: [SquadTarget.Claude],
-            Scope: SquadDeploymentScope.Global);
+            Scope: SquadDeploymentScope.Global).Prepared();
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -689,23 +689,23 @@ public sealed class ClaudeRendererContractTests : IDisposable
         SquadAgent primaryAgent = Assert.Single(source.Agents,
             a => a.Name == "conductor");
 
-        SquadRendererRegistry registry = new([new ClaudeRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer()]);
 
         // Render with skill mode (default).
-        SquadRenderRequest skillRequest = new(
+        SquadRenderRequest skillRequest = new SquadRenderRequest(
             SourceDirectory: ProductRoot,
             Targets: [SquadTarget.Claude],
-            Scope: SquadDeploymentScope.Project);
+            Scope: SquadDeploymentScope.Project).Prepared();
         SquadRenderResult skillResult = await registry.RenderAsync(skillRequest);
         Assert.True(skillResult.Success);
 
         // Render with omit mode.
         using (var omitFixture = ClaudeNoPrimaryAgentFixture.Create("omit"))
         {
-            SquadRenderRequest omitRequest = new(
+            SquadRenderRequest omitRequest = new SquadRenderRequest(
                 SourceDirectory: omitFixture.ProductRoot,
                 Targets: [SquadTarget.Claude],
-                Scope: SquadDeploymentScope.Project);
+                Scope: SquadDeploymentScope.Project).Prepared();
             SquadRenderResult omitResult = await registry.RenderAsync(omitRequest);
             Assert.True(omitResult.Success);
 
@@ -777,10 +777,10 @@ public sealed class ClaudeRendererContractTests : IDisposable
         using (var collisionFixture = PiPrimaryIdentityCollisionFixture.Create(primaryAgent.Name))
         {
             ClaudeRenderer renderer = new();
-            SquadRenderRequest request = new(
+            SquadRenderRequest request = new SquadRenderRequest(
                 SourceDirectory: collisionFixture.ProductRoot,
                 Targets: [SquadTarget.Claude],
-                Scope: SquadDeploymentScope.Project);
+                Scope: SquadDeploymentScope.Project).Prepared();
 
             SquadRenderValidationException ex = await Assert.ThrowsAsync<SquadRenderValidationException>(
                 () => renderer.RenderAsync(request));
@@ -799,10 +799,10 @@ public sealed class ClaudeRendererContractTests : IDisposable
         using (var renameFixture = ClaudeNoPrimaryAgentFixture.Create("rename"))
         {
             ClaudeRenderer renderer = new();
-            SquadRenderRequest request = new(
+            SquadRenderRequest request = new SquadRenderRequest(
                 SourceDirectory: renameFixture.ProductRoot,
                 Targets: [SquadTarget.Claude],
-                Scope: SquadDeploymentScope.Project);
+                Scope: SquadDeploymentScope.Project).Prepared();
 
             SquadSourceValidationException ex = await Assert.ThrowsAsync<SquadSourceValidationException>(() => renderer.RenderAsync(request));
             Assert.Contains("no-primary-agent", ex.Message, StringComparison.Ordinal);
@@ -843,11 +843,11 @@ public sealed class ClaudeRendererContractTests : IDisposable
             "The fixture's orchestrator profile still allows filesystem.read, so the render reaches "
             + "the granting branch and the denial this test pins is never exercised.");
 
-        SquadRenderResult result = await new SquadRendererRegistry([new ClaudeRenderer()])
+        SquadRenderResult result = await SquadTestRegistry.Create([new ClaudeRenderer()])
             .RenderAsync(new SquadRenderRequest(
                 fixture.ProductRoot,
                 [SquadTarget.Claude],
-                SquadDeploymentScope.Project));
+                SquadDeploymentScope.Project).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         // The note states what the subagent file withholds, so the file has to withhold all three:
@@ -966,7 +966,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
             Targets: [SquadTarget.Claude],
             Scope: scope,
             GlobalRoots: new SquadGlobalRoots(_ => null, home.Path),
-            Arbiter: wiring));
+            Arbiter: wiring).Prepared());
     }
 
     private static YamlMappingNode ArchitectFrontmatter(SquadRenderResult result, string relativePath)

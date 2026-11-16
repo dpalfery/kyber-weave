@@ -1262,7 +1262,7 @@ public sealed class SquadGlobalRootTests : IDisposable
                     productRoot,
                     [target],
                     SquadDeploymentScope.Global,
-                    GlobalRoots: globalRoots));
+                    GlobalRoots: globalRoots).Prepared());
 
             if (legacyPrefixes.TryGetValue(target, out string? prefix))
                 foreach (SquadDeploymentFile file in result.Files)
