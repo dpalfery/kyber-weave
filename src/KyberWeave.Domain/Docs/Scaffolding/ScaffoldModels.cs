@@ -2,6 +2,37 @@ using KyberWeave.Core.Review.Catalogue;
 
 namespace KyberWeave.Core.Docs.Scaffolding;
 
+/// <summary>
+/// What <c>docs init</c> decided about the catalogue review gates: whether it wrote them,
+/// left a host-owned block alone, or stayed out entirely.
+/// </summary>
+/// <param name="OptedOut">True when the operator passed <c>--no-review-gates</c>.</param>
+/// <param name="AlreadyPresent">True when the host configuration already had a <c>review:</c> section.</param>
+/// <param name="Written">True when this run appended the rendered block.</param>
+/// <param name="WrittenGates">Each live gate written, as the technology it serves and its final id.</param>
+/// <param name="CommentedOutGates">Each gate written commented out, with the reason it is not live.</param>
+/// <param name="NoFamily">Declared technologies with no catalogue family, so no gates ship for them.</param>
+/// <param name="MissingFromExisting">
+/// Rendered gate ids absent from a host-owned <c>review:</c> section, reported as information only.
+/// </param>
+public sealed record ReviewGatesOutcome(
+    bool OptedOut,
+    bool AlreadyPresent,
+    bool Written,
+    IReadOnlyList<(string Technology, string GateId)> WrittenGates,
+    IReadOnlyList<(string GateId, string Reason)> CommentedOutGates,
+    IReadOnlyList<string> NoFamily,
+    IReadOnlyList<string> MissingFromExisting);
+
+/// <summary>
+/// The rendered block <c>docs init</c> may write, and whether it may write it at all.
+/// </summary>
+/// <param name="Rendered">The catalogue render for the declared technologies.</param>
+/// <param name="ShouldWrite">
+/// False when no declared technology has a catalogue entry; there is then no block to write.
+/// </param>
+public sealed record ReviewGatesPlan(RenderedReviewBlock Rendered, bool ShouldWrite);
+
 /// <summary>What the scaffolder did to one file.</summary>
 public enum ScaffoldOutcome
 {

@@ -47,7 +47,7 @@ public static class DocsScaffoldTemplates
 
     public static string Catalog(string owner, string today)
     {
-        RequireCatalogValue(owner, nameof(owner));
+        ScaffoldValues.RequireCatalogValue(owner, nameof(owner));
         string yamlOwner = HostConfigYaml.QuoteScalar(owner);
         return $"""
         ---
