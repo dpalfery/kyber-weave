@@ -42,7 +42,9 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IGitWorktreeIdentity>(_ => new GitWorktreeIdentity());
         services.TryAddSingleton<IDoctorFileSystem>(_ => new PhysicalDoctorFileSystem());
         services.TryAddSingleton<IProcessRunner>(_ => new KernelProcessRunner());
-        services.TryAddSingleton<IHooksConfigSource>(sp => new YamlHooksConfigSource(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<IHooksConfigSource>(sp => new YamlHooksConfigSource(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<ITestClassResolver>(sp => new ConventionTestClassResolver(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<ICodeGraphPortsFactory, CodeGraphPortsFactory>();
         services.TryAddSingleton<ICodeGraphIndexWorkspace, FileCodeGraphIndexWorkspace>();

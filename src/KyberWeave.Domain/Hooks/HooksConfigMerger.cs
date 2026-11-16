@@ -1,6 +1,16 @@
 namespace KyberWeave.Domain.Hooks;
 
-/// <summary>Merges a parsed repository config over the built-in defaults.</summary>
+/// <summary>Which file a hook configuration overlay came from.</summary>
+public enum HookConfigSource
+{
+    /// <summary>The repository's <c>.kyber-weave/hooks.yml</c>: it may tune the built-in rules only.</summary>
+    Repository,
+
+    /// <summary>The user's <c>~/.kyber-weave/hooks.yml</c>: it may tune the built-in rules and add its own.</summary>
+    User,
+}
+
+/// <summary>Merges parsed hook configuration over the built-in defaults.</summary>
 public static class HooksConfigMerger
 {
     private const int MinTimeBudgetSeconds = 1;
@@ -14,14 +24,16 @@ public static class HooksConfigMerger
 
     /// <summary>Applies <paramref name="overlay"/> to <paramref name="defaults"/>.</summary>
     /// <param name="defaults">The configuration to start from.</param>
-    /// <param name="overlay">The parsed repository file.</param>
+    /// <param name="overlay">The parsed file.</param>
+    /// <param name="source">Which file the overlay came from, which decides whether it may name a new command.</param>
     /// <returns>
-    /// The merged config. A rule whose id matches a default replaces only the fields it sets; any other rule is
-    /// appended and must set kind, include and run, or it is dropped with a warning. Numeric overlays outside their
-    /// allowed range (time budget 1 to 120 seconds, rule timeout 1 to 300 seconds, output 1 to 500 lines and 100 to
-    /// 100000 bytes) are clamped to the nearest limit with a warning.
+    /// The merged config. A rule whose id matches a default replaces only the fields it sets. A repository file may
+    /// tune the built-in rules but not add one: a new rule needs a command, and a command comes from the user's own
+    /// file. The user's file may add a rule, which must set kind, include and run, or it is dropped with a warning.
+    /// Numeric overlays outside their allowed range (time budget 1 to 120 seconds, rule timeout 1 to 300 seconds,
+    /// output 1 to 500 lines and 100 to 100000 bytes) are clamped to the nearest limit with a warning.
     /// </returns>
-    public static HooksConfig Merge(HooksConfig defaults, HooksConfigOverlay overlay)
+    public static HooksConfig Merge(HooksConfig defaults, HooksConfigOverlay overlay, HookConfigSource source)
     {
         ArgumentNullException.ThrowIfNull(defaults);
         ArgumentNullException.ThrowIfNull(overlay);
@@ -35,6 +47,14 @@ public static class HooksConfigMerger
             if (index >= 0)
             {
                 rules[index] = Apply(rules[index], change, warnings);
+                continue;
+            }
+
+            if (source != HookConfigSource.User)
+            {
+                warnings.Add(
+                    $"rule '{change.Id}' ignored: the repository file tunes the built-in rules but cannot add a " +
+                    "command; put a new rule in the user file, ~/.kyber-weave/hooks.yml.");
                 continue;
             }
 

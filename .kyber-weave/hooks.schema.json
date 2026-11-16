@@ -26,7 +26,7 @@
       "minimum": 1
     },
     "rules": {
-      "description": "Rule overrides and additions. A rule with a built-in id changes only the fields it sets; any other id adds a rule that needs kind, include and run.",
+      "description": "Rule overrides. A rule with a built-in id changes only the fields it sets. This repository file cannot add a rule that names a command: a new rule belongs in the user file, ~/.kyber-weave/hooks.yml.",
       "type": "array",
       "items": {
         "type": "object",
@@ -53,7 +53,7 @@
             "items": { "type": "string" }
           },
           "run": {
-            "description": "Command as an argument list, never a shell string. Tokens: {file}, {root}, {marker}, {project}, {target} (project, else marker), {testProject}, and a standalone {testClasses}.",
+            "description": "Command as an argument list, never a shell string. Refused for an id that is not built in, because a repository may not name a command. Tokens: {file}, {root}, {marker}, {project}, {target} (project, else marker), {testProject}, and a standalone {testClasses}.",
             "type": "array",
             "items": { "type": "string" },
             "minItems": 1
