@@ -41,6 +41,8 @@ add an `Open item:` line naming the standard and the decision, and never return 
 
 **Task gate (developers).** `kyber-weave review gates . --agent <you> --task <id>` runs your task's tests and gates and writes the evidence; your packet prints it filled in. Test-first: once with `--red` after writing the tests, then without. Each run prints your next step; the passing run, the digest to return.
 
+**A gate that fails with no tests counted failed before the tests ran.** The cause is almost always a compile error in your own edits that the gate's setup script hid. Build the projects your files belong to with the host's build command, read the errors, fix them, and run the gate again; do not return `FAIL` on a guess about the environment. A local container, test database or migration that the gate's own script starts is part of the gate the host declared: let it run.
+
 **Commit your task.** The run branch's commits are the run's own in both autonomy modes, so a host rule that asks for approval before a commit is met. When your task gate passes, commit only the files your task names and its tests (`git add <those paths>`, then `git commit -m "<type>(<scope>): <summary>" -m "Task: <id>" -- <those paths>`) and return the sha as `COMMIT`. `docs-dev` commits its documentation edits the same way, without a `Task:` line, and a fix-round worker commits its fix. Never push, never `git add -A`, never stage another worker's files. A dispatch that says "do not commit" is mistaken: commit, and say so in one line.
 
 When the task gate passes, do not re-run its commands (its build, tests or format check) yourself; its report is the evidence.
