@@ -66,7 +66,7 @@ marked as estimates.
 | A difficulty question already exists | `KW-ARB-DIFFICULTY-001` asks the decision model "easy, standard or hard?" with a 0.8 confidence floor and maps the answer through `model-targeting.difficulty-profiles`. |
 | A step-up rule already exists | `KW-ARB-LADDER-001` moves a failed attempt one profile up the ladder, from the ledger alone, with no model call. |
 | Both are off by default | `arbiter.model-targeting.mode` defaults to `shadow`: the choice is recorded and nothing is delivered. |
-| A model can be set on a dispatch on one harness only | `docs/kyber-arbiter/runbook.md`: the rework dispatch climbs one rung "only where the harness takes a per-dispatch model (Claude); elsewhere the conductor's prose carries the escalation". `architecture.md`: other harnesses record `unsupported-harness`. |
+| Kyber-Weave sets a model on a dispatch on one harness only | `docs/kyber-arbiter/runbook.md`: the rework dispatch climbs one rung "only where the harness takes a per-dispatch model (Claude); elsewhere the conductor's prose carries the escalation". `architecture.md`: other harnesses record `unsupported-harness`. |
 | Nothing rates difficulty with the Arbiter off | No plan or task-file field holds a difficulty. |
 | Rework is already capped | `delivery-execution` skill: at most three rework dispatches per failure cluster, then the architect mediates. |
 | The agent pick is made when the task file is written | ADR 0082: `PlanTaskAgentPick` asks the decision model once, keeps picks at 0.8 confidence or more, and records them in the task file. |
@@ -78,7 +78,10 @@ marked as estimates.
 | 36 Arbiter rules ship in one file | `src/KyberWeave.Domain/Arbiter/Rules/default-rules.yml`. Ids are permanent. |
 | None is technology-specific | Every trigger is a delegation, planner, review or shortcut event. No rule reads a technology. |
 | One rule names a worker | `KW-ARB-MODE-002` answers `not-required` when the target is `test-dev`. |
-| A host can already change a rule | `arbiter.rules` in the host configuration sets `shadow` and `effects` per rule id. Eight rules ship in shadow. |
+| A host can already change a rule | `arbiter.rules` in the host configuration sets `shadow` and `effects` per rule id. Seven rules ship in shadow and `KW-ARB-OWNER-002` ships disabled. The two model rules are switched together by `arbiter.model-targeting.mode`, not per rule. |
+| The owner rule does not bind current plans | `KW-ARB-OWNER-001` escalates only when a plan carries the older `Skills:` line; a plan that names capabilities answers `no-mapping`, which allows. |
+| Five agents list who they may dispatch | `delegates-to` in `conductor` and `bug-crusher` lists every technology agent; `conductor`, `architect` and `code-reviewer` list `azure-reader`. `KW-ARB-ROSTER-001` escalates a dispatch to an unlisted agent. |
+| Some dispatches have no task | `bug-crusher` hands a larger fix to a technology agent by name, and `azure-reader` is dispatched by planners and reviewers, both outside any task file. |
 | An answer the Arbiter cannot reach allows | [ADR 0072](../../adr/0072-the-arbiter-blocks-only-on-machine-facts-and-confident-model-answers.md): no clause matched, no provider, an error or a floor not met all allow and are logged. |
 | The Arbiter sees a sub-agent's own tool calls on two harnesses | Runbook: "Only Copilot CLI and Claude run the worker guard". |
 | Host task gates are keyed by agent name | `review.task-gates` in the host configuration; four call sites look a key up by agent: `ReviewGatesService`, `PacketHostFacts.AppendGates`, `PacketTestCommandRenderer` and `TriggerFactBuilder`. An unknown agent gets a warning, an empty report and exit code 0. |
@@ -100,8 +103,8 @@ marked as estimates.
 
 Stated so the owner can weigh them. The design follows the owner's direction in each case.
 
-1. **Run-time model assignment works on one harness of thirteen.** On the other twelve the model
-   must still be written into the rendered agent file. That is why three developer agents exist
+1. **Kyber-Weave assigns a model at run time on one harness of thirteen today.** On the other
+   twelve the model is still written into the rendered agent file. That is why three developer agents exist
    instead of one: choosing an agent works everywhere, choosing a model at dispatch does not.
 2. **No Arbiter rule is technology-specific today.** Every technology's `arbiter-rules.yml` starts
    empty. All 36 rules land in three role folders. The technology files earn their place only when
@@ -173,15 +176,27 @@ Under the tiered roster the pick of ADR 0082 chooses the kind of worker (develop
 tier = min(hard, rated difficulty + failed attempts at this task)
 ```
 
-The task prompt tool computes the tier from the task file and the attempt tally the conductor
-already keeps on the run's execution artifact, and returns the agent name. The conductor dispatches
-that agent. The same sentence is in the conductor's instructions, so a run with the Arbiter off
+The conductor passes the number of failed attempts at the task to the task prompt tool, which
+returns the agent name. The conductor dispatches that agent. The task file records the kind of
+worker and the difficulty, never a tier, so a step-up does not contradict it. The same sentence is in the conductor's instructions, so a run with the Arbiter off
 behaves the same. The limit of three rework dispatches per failure cluster is unchanged, and at the
 limit the architect mediates as today.
 
 `KW-ARB-LADDER-001` moves to the `conductor` role folder unchanged. Its ladder becomes `dev-easy`,
 `dev-medium`, `dev-hard`. When the conductor has already dispatched the next tier, the rule's
 target equals the rendered profile and it writes nothing.
+
+One rating is used per task. Under the tiered roster the model-targeting step takes the task
+file's difficulty as its answer and makes no second model call, so the agent and the model cannot
+disagree.
+
+`KW-ARB-OWNER-001` is unaffected: a current plan answers `no-mapping`. The `delegates-to` lists of
+`conductor` and `bug-crusher` gain the three developer agents, and those of `conductor`,
+`architect` and `code-reviewer` gain `cli-researcher`, so `KW-ARB-ROSTER-001` allows them. The old
+names leave those lists in phase 5.
+
+A dispatch with no task, such as a fix `bug-crusher` hands on, starts at `dev-medium` and moves to
+`dev-hard` on its second attempt, inside the two attempts that flow already allows.
 
 ### Models
 
@@ -242,9 +257,11 @@ Content moves:
 
 - Every technology rule in the eleven technology agents, `test-dev` and `azure-reader` goes to the
   matching template, tracked by the inventory of Requirement 6.5.
-- The `test` template's cross-technology rules go to `shared-rules.md`; the rest goes to each
-  technology's Testing section. The `test` technology and the `testing` skill are removed.
-- The `sql` template becomes `sql-server` and takes the rules `sql-database-architect` holds.
+- The `test` template's cross-technology rules are copied to `shared-rules.md`; the rest is copied
+  to each technology's Testing section. The `test` technology and the `testing` skill stay until
+  phase 5, so the old roster keeps working.
+- A `sql-server` template is added and takes the rules `sql-database-architect` holds. The `sql`
+  template stays until phase 5.
 - `azure` gains the skills and rules `azure-reader` holds. An `aws` template is added.
 
 Templates live in `products/kyber-squad/standards/<technology>/`. A contribution is a pull request
@@ -255,7 +272,9 @@ how a host folder differs from the current template and writes nothing.
 ### The task prompt tool
 
 A new tool on the docs server, `docs_build_task_prompt_for_agent_dispatch`, takes the project path
-and a task id (and optionally the plan and a prior-results file). It is built on the service behind
+and a task id (and optionally the plan, a prior-results file and the number of failed attempts).
+Given technologies instead of a task id, it returns parts 4 to 6 only, for a dispatch that has no
+task: a `cli-researcher` request or a fix `bug-crusher` hands on. It is built on the service behind
 `docs packet`, and that command prints the same text.
 
 Returned, in order:
@@ -313,11 +332,12 @@ names; then the host's `arbiter.rules` settings, which keep working as they do t
 fails to parse, or names a trigger or fact the Arbiter lacks, is an `arbiter validate` error and
 the shipped rules for that folder are used.
 
-**Is any rule critical?** No rule is locked. Every rule can be set to log only, eight already ship
-that way, and an answer the Arbiter cannot reach allows. Six rules decide from machine facts and
-guard the tree itself (`READY-001`, `DIFF-001`, `PLANNER-DIFF-001`, `READONLY-001`,
-`CHECKOUT-001`, `ROSTER-001`); the templates keep them enforced, and a host may still turn them
-down.
+**Is any rule critical?** No rule is locked. Each rule can be turned down to log only through the
+switch it has today (`arbiter.rules`, or `arbiter.model-targeting.mode` for the two model rules),
+seven already ship that way, and an answer the Arbiter cannot reach allows. Six rules guard the
+tree and the run order (`READY-001`, `DIFF-001`, `PLANNER-DIFF-001`, `READONLY-001`,
+`CHECKOUT-001`, `ROSTER-001`); the templates keep them as they ship today, and a host may still
+turn them down. Their bodies were not all read for this draft; the split task confirms each.
 
 `KW-ARB-MODE-002` loses its `test-dev` clause. It gains a clause on a new machine fact,
 `plan.task.files-all-tests`, which is true when every file of the task matches the test paths the
@@ -385,11 +405,11 @@ Each phase ships on its own and leaves a working product.
 
 | Phase | Delivers | Depends on |
 |---|---|---|
-| 1. Technology folders | Six-heading templates with four files each, the rule inventory, `shared-rules.md` testing rules, role folder templates, onboarding by chosen technology, `docs standards diff` | Pull request 625 |
+| 1. Technology folders | Six-heading templates with four files each, the rule inventory, `shared-rules.md` testing rules, role folder templates, onboarding by chosen technology, `docs standards diff`. Additive: nothing the old roster reads is deleted | Pull request 625 |
 | 2. Task fields and the prompt tool | `Difficulty:` and `Technologies:`, the task file change, `TaskGateResolver`, the task prompt tool | Phase 1 |
 | 3. Agents and models | The three developer agents, `cli-researcher`, the seven model profiles, run-time model on Claude, the roster switch, the step-up | Phase 2 |
 | 4. Arbiter rules from folders | The split of the 36 rules, folder loading, the `MODE-002` change, the command allow-list | Phases 1 and 3 |
-| 5. Comparison and removal | The comparison runbook and runs, the decision, removal and migration | Phases 1 to 4 |
+| 5. Comparison and removal | The comparison runbook and runs, the decision, removal of the thirteen agents, the `test` technology, the `testing` skill and the `sql` template, and migration | Phases 1 to 4 |
 
 ## Data models
 

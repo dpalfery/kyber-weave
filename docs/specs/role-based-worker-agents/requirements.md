@@ -107,6 +107,10 @@ Copilot tool list; they SHALL differ only in name, description and model profile
 1.8. THE thirteen harness renderers SHALL render the new agents with no renderer code that names an
 agent.
 
+1.9. EVERY agent that may dispatch a technology agent or `azure-reader` today SHALL list the
+developer agents or `cli-researcher` in its `delegates-to`, so no existing Arbiter rule refuses the
+dispatch.
+
 ### Requirement 2: Every task carries a difficulty
 
 **User Story:** As the owner, I want each task rated easy, medium or hard by judgement, so that the
@@ -139,6 +143,9 @@ correct.
 2.9. THE rating in use for a dispatch, and its source (`architect`, `decision-model` or `default`),
 SHALL be recorded where the run's other dispatch facts are recorded.
 
+2.10. A task SHALL have one rating in use at a time; no later step SHALL rate it again and choose a
+different model for the same attempt.
+
 ### Requirement 3: A failed task moves one tier up
 
 **User Story:** As the owner, I want a task that failed to be retried by the next stronger developer
@@ -158,6 +165,9 @@ existing limit of three rework dispatches per failure cluster SHALL apply unchan
 conductor's instructions SHALL state the same rule in prose for a run with the Arbiter off.
 
 3.5. A failed attempt SHALL never be retried on a lower tier.
+
+3.6. A developer-agent dispatch that belongs to no task SHALL start on `dev-medium` and SHALL follow
+the same step-up.
 
 ### Requirement 4: Models are assigned at run time
 
@@ -293,7 +303,8 @@ be applied after the folders are read.
 
 8.5. No Arbiter rule id SHALL be reused or renumbered.
 
-8.6. No rule SHALL be locked: a host SHALL be able to set any rule to log only.
+8.6. No rule SHALL be locked: a host SHALL be able to turn any rule down to log only, through the
+switch that rule has today.
 
 8.7. IF a machine rules file cannot be parsed, or names a trigger or fact the Arbiter does not have,
 THEN `kyber-weave arbiter validate` SHALL report an error naming the file and the rule, and the
@@ -366,6 +377,9 @@ and SHALL say which command repairs it.
 10.9. IF a named technology has no folder THEN the prompt SHALL say so in its own section and the
 tool SHALL still return the rest.
 
+10.10. WHEN the tool is given technologies and no task id THEN it SHALL return the shared rules and
+each technology's rules, skills and standard sections, for a dispatch that belongs to no task.
+
 ### Requirement 11: Task gates resolve by technology
 
 **User Story:** As a host repository owner, I want task gates declared per technology, so that they
@@ -426,7 +440,7 @@ defaulting to `technology` until the removal phase.
 the run's roster from the task file.
 
 13.3. WHEN the roster is `technology` THEN a run SHALL behave as it does today, apart from the task
-prompt of Requirement 10.
+prompt of Requirement 10, and no file that roster reads SHALL be removed before the removal phase.
 
 13.4. THE delivery SHALL define a comparison procedure: the same approved plan run once per roster
 from the same base commit on the same harness.
