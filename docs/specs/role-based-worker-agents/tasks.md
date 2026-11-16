@@ -515,7 +515,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Files:**
     - `src/KyberWeave.Domain/Arbiter/Rules/default-rules.yml`: split into three files
     - `src/KyberWeave.Domain/Arbiter/ArbiterConfigLoader.cs`, `src/KyberWeave.Domain/Areas/Arbiter.props`: load the three
-    - `products/kyber-squad/standards/conductor/**`, `products/kyber-squad/standards/architect/**`, `products/kyber-squad/standards/reviewer/**`: the role templates' rules files
+    - `products/kyber-squad/standards/conductor/conductor.arbiter-rules.yml`, `products/kyber-squad/standards/architect/architect.arbiter-rules.yml`, `products/kyber-squad/standards/reviewer/reviewer.arbiter-rules.yml` (new): the role templates' rules files
     - `tests/KyberWeave.Tests/ArbiterRuleFolderSplitTests.cs` (new): `KyberWeave.Tests.ArbiterRuleFolderSplitTests`
   - **Acceptance criteria:** The loaded rule set equals the set before the split, rule for rule: same ids, questions, answers, effects and shadow flags; each rule is in exactly one file; the counts are 21, 2 and 13.
   - **Capabilities:** C# work on rule loading in the Arbiter, YAML editing, and xUnit tests
@@ -552,7 +552,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Files:**
     - `src/KyberWeave.Domain/Arbiter/Hooks/WorkerGuardRules.cs`: raise a `worker.command` trigger
     - `src/KyberWeave.Domain/Arbiter/Rules/RuleValidator.cs`: the trigger and its facts
-    - `products/kyber-squad/standards/azure/**`, `products/kyber-squad/standards/aws/**`: allowed read forms
+    - `products/kyber-squad/standards/azure/azure.arbiter-rules.yml`, `products/kyber-squad/standards/aws/aws.arbiter-rules.yml`: allowed read forms
     - `tests/KyberWeave.Tests/ArbiterCommandAllowListTests.cs` (new): `KyberWeave.Tests.ArbiterCommandAllowListTests`
     - `docs/kyber-arbiter/architecture.md`: where it is enforced and where it is an instruction
   - **Acceptance criteria:** With Azure's list, `az vm list` is allowed and `az vm delete` is refused on Claude and Copilot CLI; a technology with no list refuses nothing; on a harness with no worker guard nothing is refused and the list appears in the prompt's rules part.
