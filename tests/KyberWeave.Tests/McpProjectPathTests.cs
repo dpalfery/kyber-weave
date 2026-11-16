@@ -4,6 +4,7 @@ using KyberWeave.Core.Processes;
 using KyberWeave.Mcp;
 using Xunit;
 
+using KyberWeave.Tests.Fakes;
 namespace KyberWeave.Tests;
 
 /// <summary>
@@ -107,7 +108,7 @@ public sealed class McpProjectPathTests : IDisposable
     }
 
     private static DocsRootRegistry Registry(string repo) =>
-        new(repo, root => DocsRootRegistry.CreateTools(root, codeGraphRefreshEnabled: false, registry: null));
+        DocsTestCommands.Registry(repo, root => DocsRootRegistry.CreateTools(root, codeGraphRefreshEnabled: false, registry: null));
 
     private static DocsTools ServerTools(string repo, DocsRootRegistry? registry = null) =>
         DocsRootRegistry.CreateTools(repo, codeGraphRefreshEnabled: false, registry ?? Registry(repo));

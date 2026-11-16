@@ -9,6 +9,7 @@ using KyberWeave.Core.Docs.Analysis.Model;
 using KyberWeave.Core.Docs.Analysis.Review;
 using Xunit;
 
+using KyberWeave.Tests.Fakes;
 namespace KyberWeave.Tests;
 
 /// <summary>
@@ -218,7 +219,7 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
             ImportResult = new ReviewImportResult(false, 0, diagnostics)
         };
 
-        CommandExecution execution = Capture(() => new DocsReviewImportCommand(service).Execute(
+        CommandExecution execution = Capture(() => DocsTestCommands.ReviewImport(service).Execute(
             null!,
             new DocsReviewImportSettings
             {

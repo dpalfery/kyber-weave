@@ -12,6 +12,7 @@ using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Domain.CodeGraph;
 using Xunit;
 
+using KyberWeave.Tests.Fakes;
 namespace KyberWeave.Tests;
 
 /// <summary>
@@ -204,7 +205,7 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
             persistence,
             new DisposableEmbeddingGenerator(),
             new AvailableResolver());
-        RepositoryDocsAnalysisCommandService service = new RepositoryDocsAnalysisCommandService(factories.Factories);
+        RepositoryDocsAnalysisCommandService service = DocsTestCommands.AnalysisService(factories.Factories);
         string output = Path.Combine(_temp.Path, "candidates.json");
         string input = Path.Combine(_temp.Path, "verdicts.json");
         File.WriteAllText(input, "{}");
@@ -214,7 +215,7 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
             "export" => new DocsReviewExportCommand(service).Execute(
                 null!,
                 new DocsReviewExportSettings { Path = _temp.Path, OutputPath = output, Format = "json" }),
-            "import" => new DocsReviewImportCommand(service).Execute(
+            "import" => DocsTestCommands.ReviewImport(service).Execute(
                 null!,
                 new DocsReviewImportSettings { Path = _temp.Path, InputPath = input, Format = "json" }),
             "glossary" => new DocsGlossaryCommand(service).Execute(
@@ -239,7 +240,7 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
             persistence,
             new DisposableEmbeddingGenerator(),
             new UnavailableResolver());
-        RepositoryDocsAnalysisCommandService service = new RepositoryDocsAnalysisCommandService(factories.Factories);
+        RepositoryDocsAnalysisCommandService service = DocsTestCommands.AnalysisService(factories.Factories);
 
         ReviewExportResult exported = service.ExportReview(new DocsReviewExportSettings { Path = _temp.Path });
         ReviewImportResult imported = service.ImportReview(new DocsReviewImportSettings { Path = _temp.Path }, "{}");

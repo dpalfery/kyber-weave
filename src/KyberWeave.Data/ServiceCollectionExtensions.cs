@@ -1,6 +1,8 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Data.Docs.FileSystem;
+using KyberWeave.Data.Docs.Closeout;
+using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Data.CodeGraph;
 using KyberWeave.Core.Doctor;
 using KyberWeave.Data.Configuration;
@@ -36,6 +38,9 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IProductRootLocator>(sp => new CheckoutProductRootLocator(sp.GetRequiredService<IWritableFileSystem>()));
         services.TryAddSingleton<IRepositoryFileStore>(_ => new PhysicalRepositoryFileStore());
         services.TryAddSingleton<IBoundedProcessExecutor>(_ => new KernelBoundedProcessExecutor());
+        services.TryAddSingleton<IExclusiveFileWriter>(_ => new ExclusiveFileWriter());
+        services.TryAddSingleton<IDocumentSourceFactory>(_ => new DocumentLoaderFactory());
+        services.TryAddSingleton<IGitWorktreeIdentity>(_ => new GitWorktreeIdentity());
         services.TryAddSingleton<IDoctorFileSystem>(_ => new PhysicalDoctorFileSystem());
         services.TryAddSingleton<IProcessRunner>(_ => new KernelProcessRunner());
         services.TryAddSingleton<IGitCommandRunner>(_ => new ProcessGitCommandRunner(ProcessGitCommandRunner.DefaultTimeout));

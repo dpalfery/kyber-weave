@@ -11,6 +11,7 @@ using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Processes;
 using Xunit;
 
+using KyberWeave.Tests.Fakes;
 namespace KyberWeave.Tests;
 
 /// <summary>
@@ -90,7 +91,7 @@ public sealed class DocsCloseoutCommandTests
         };
 
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(
-            () => new DocsCloseoutCommand().Execute(null!, settings, CancellationToken.None));
+            () => DocsTestCommands.Closeout().Execute(null!, settings, CancellationToken.None));
         return (run.Result, run.Output);
     }
 
@@ -106,7 +107,7 @@ public sealed class DocsCloseoutCommandTests
         };
 
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(
-            () => new DocsCloseoutCommand().Execute(null!, settings, CancellationToken.None));
+            () => DocsTestCommands.Closeout().Execute(null!, settings, CancellationToken.None));
         return (run.Result, run.Output);
     }
 
@@ -356,7 +357,7 @@ public sealed class DocsCloseoutCommandTests
         };
 
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(
-            () => new DocsCloseoutCommand().Execute(null!, settings, CancellationToken.None));
+            () => DocsTestCommands.Closeout().Execute(null!, settings, CancellationToken.None));
 
         Assert.True(run.Result == 0, run.Output);
         Assert.Contains("Would create", run.Output, StringComparison.Ordinal);
@@ -407,7 +408,8 @@ public sealed class DocsCloseoutCommandTests
 
     private static PlanCloseout Closer(DocFixture fixture, Action<string>? afterActivePlanCheck = null, Action<string>? beforeWriteTarget = null) =>
         new(fixture.Root, KyberWeaveConfig.ProductDefaults,
-            () => new DocumentLoader(fixture.Root, KyberWeaveConfig.ProductDefaults.Ontology))
+            () => new DocumentLoader(fixture.Root, KyberWeaveConfig.ProductDefaults.Ontology),
+            DocsPorts.Files, DocsPorts.Process, DocsPorts.Exclusive)
         {
             AfterActivePlanCheck = afterActivePlanCheck,
             BeforeWriteTarget = beforeWriteTarget
@@ -486,7 +488,7 @@ public sealed class DocsCloseoutCommandTests
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, EarlierArchive);
 
-        bool written = PlanCloseout.TryWriteNew(path, "replacement");
+        bool written = DocsPorts.Exclusive.TryWriteNew(path, "replacement");
 
         Assert.False(written);
         Assert.Equal(EarlierArchive, File.ReadAllText(path));
@@ -498,7 +500,7 @@ public sealed class DocsCloseoutCommandTests
         using DocFixture fixture = Repository();
         string path = Absolute(fixture, "6-Docs/archive/plans/new.md");
 
-        bool written = PlanCloseout.TryWriteNew(path, "# new\n");
+        bool written = DocsPorts.Exclusive.TryWriteNew(path, "# new\n");
 
         Assert.True(written);
         Assert.Equal(Encoding.UTF8.GetBytes("# new\n"), File.ReadAllBytes(path));
@@ -516,7 +518,7 @@ public sealed class DocsCloseoutCommandTests
         string path = Absolute(fixture, "6-Docs/archive/plans/partial.md");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
 
-        Assert.ThrowsAny<EncoderFallbackException>(() => PlanCloseout.TryWriteNew(path, "text then a lone surrogate \uD800 here"));
+        Assert.ThrowsAny<EncoderFallbackException>(() => DocsPorts.Exclusive.TryWriteNew(path, "text then a lone surrogate \uD800 here"));
 
         Assert.False(File.Exists(path));
     }
@@ -533,7 +535,7 @@ public sealed class DocsCloseoutCommandTests
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         List<string> deleteAttempts = [];
 
-        Assert.ThrowsAny<EncoderFallbackException>(() => PlanCloseout.TryWriteNew(
+        Assert.ThrowsAny<EncoderFallbackException>(() => DocsPorts.Exclusive.TryWriteNew(
             path,
             "text then a lone surrogate \uD800 here",
             attempted =>
@@ -558,7 +560,7 @@ public sealed class DocsCloseoutCommandTests
         Directory.CreateDirectory(path);
         File.WriteAllText(Path.Combine(path, "inside.txt"), "kept");
 
-        bool written = PlanCloseout.TryWriteNew(path, "text");
+        bool written = DocsPorts.Exclusive.TryWriteNew(path, "text");
 
         Assert.False(written);
         Assert.Equal("kept", File.ReadAllText(Path.Combine(path, "inside.txt")));
@@ -577,7 +579,7 @@ public sealed class DocsCloseoutCommandTests
         File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserExecute);
         try
         {
-            bool written = PlanCloseout.TryWriteNew(Path.Combine(directory, "new.md"), "text");
+            bool written = DocsPorts.Exclusive.TryWriteNew(Path.Combine(directory, "new.md"), "text");
 
             Assert.False(written);
             Assert.False(File.Exists(Path.Combine(directory, "new.md")));

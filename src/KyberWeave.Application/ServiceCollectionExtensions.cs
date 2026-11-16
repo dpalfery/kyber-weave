@@ -9,6 +9,9 @@ using KyberWeave.Application.Review;
 using KyberWeave.Application.RunStart;
 using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Core.Docs.Closeout;
+using KyberWeave.Core.Docs.Delivery;
 using KyberWeave.Application.Utilities;
 using KyberWeave.Application.Squad;
 using KyberWeave.Core.Squad.Briefs;
@@ -44,6 +47,35 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IRepositoryFileStore>(), sp.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton<IPlanTaskService>(sp => new PlanTaskService(
             sp.GetRequiredService<IRepositoryFileStore>(), sp.GetRequiredService<IBoundedProcessExecutor>()));
+        services.TryAddSingleton<IDocsSchemaGate>(sp => new DocsSchemaGate(
+            sp.GetRequiredService<IRepositoryFileStore>(),
+            sp.GetRequiredService<IBoundedProcessExecutor>(),
+            sp.GetRequiredService<IGitChangeReader>(),
+            sp.GetRequiredService<ISeverityOverrideSource>(),
+            sp.GetRequiredService<TimeProvider>()));
+        services.TryAddSingleton<IPacketHostFacts>(sp => new PacketHostFacts(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<IPlanCloseoutService>(sp => new PlanCloseoutService(
+            sp.GetRequiredService<IRepositoryFileStore>(),
+            sp.GetRequiredService<IBoundedProcessExecutor>(),
+            sp.GetRequiredService<IExclusiveFileWriter>(),
+            sp.GetRequiredService<IDocumentSourceFactory>()));
+        services.TryAddSingleton<IPlanFinalizeService>(sp => new PlanFinalizeService(
+            sp.GetRequiredService<IRepositoryFileStore>(),
+            sp.GetRequiredService<IBoundedProcessExecutor>(),
+            sp.GetRequiredService<IDocsSchemaGate>(),
+            sp.GetRequiredService<IDocumentSourceFactory>(),
+            sp.GetRequiredService<IPlanTaskAgentPickerFactory>()));
+        services.TryAddSingleton<IPlanTaskAgentPickerFactory>(sp => new ConfiguredPlanTaskAgentPickerFactory(
+            sp.GetRequiredService<ConfiguredArbiterProviderFactory>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
+        services.TryAddSingleton(sp => new RunDeliveryPorts(
+            sp.GetRequiredService<IRepositoryFileStore>(),
+            sp.GetRequiredService<IBoundedProcessExecutor>(),
+            sp.GetRequiredService<IRunStateStore>(),
+            sp.GetRequiredService<IReviewCycleStore>(),
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<TimeProvider>()));
+        services.TryAddSingleton<IRunDeliveryRunner, RunDeliveryRunner>();
         services.TryAddSingleton<IStatusLineDeploymentService, StatusLineDeploymentService>();
         services.TryAddSingleton<ICodeGraphProvisioner, CodeGraphIndexProvisioner>();
         services.TryAddSingleton<IWorktreeIndexGuard, WorktreeIndexEnsurer>();

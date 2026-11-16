@@ -15,7 +15,7 @@ namespace KyberWeave.Cli.Commands.Docs;
 /// Derives a plan's, or a specification's, task file from the plan and writes or checks it, so no one writes the
 /// machine format, or its execution digest, by hand.
 /// </summary>
-public sealed class DocsTasksCommand(IPlanTaskService tasks) : Command<DocsTasksSettings>
+public sealed class DocsTasksCommand(IPlanTaskService tasks, IPlanTaskAgentPickerFactory pickers) : Command<DocsTasksSettings>
 {
     /// <summary>Both <c>--write</c> and <c>--check</c> were given; they ask for opposite things.</summary>
     public const string ConflictingModes = "KW-DOC-TASKS-CLI-001";
@@ -87,7 +87,7 @@ public sealed class DocsTasksCommand(IPlanTaskService tasks) : Command<DocsTasks
             : PlanTaskFileMode.Preview;
 
         // Only a write may ask the decision model to pick each task's agent; check and preview keep the picks on disk.
-        using PlanTaskAgentPick? picker = mode == PlanTaskFileMode.Write ? PlanTaskAgentPick.ForConfig(effective) : null;
+        using IPlanTaskAgentPicker? picker = mode == PlanTaskFileMode.Write ? pickers.ForConfig(effective) : null;
         PlanTaskFileOutcome outcome = tasks.Run(root, effective, relative, mode, picker);
         report.AddRange(outcome.Report.Items);
 

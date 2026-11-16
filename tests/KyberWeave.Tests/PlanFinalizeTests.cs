@@ -8,6 +8,7 @@ using KyberWeave.Core.Docs.Closeout;
 using KyberWeave.Core.Docs.Parsing;
 using Xunit;
 
+using KyberWeave.Tests.Fakes;
 namespace KyberWeave.Tests;
 
 /// <summary>
@@ -63,7 +64,7 @@ public sealed class PlanFinalizeTests
         };
 
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(
-            () => new DocsFinalizeCommand().Execute(null!, settings, CancellationToken.None));
+            () => DocsTestCommands.Finalize().Execute(null!, settings, CancellationToken.None));
         return (run.Result, run.Output);
     }
 
@@ -300,7 +301,8 @@ public sealed class PlanFinalizeTests
 
     private static PlanFinalize Finalizer(DocFixture fixture, Action<string>? afterActivePlanCheck = null) =>
         new(fixture.Root, KyberWeaveConfig.ProductDefaults,
-            () => new DocumentLoader(fixture.Root, KyberWeaveConfig.ProductDefaults.Ontology))
+            () => new DocumentLoader(fixture.Root, KyberWeaveConfig.ProductDefaults.Ontology),
+            DocsPorts.Files, DocsPorts.Process, DocsTestCommands.SchemaGate)
         {
             AfterActivePlanCheck = afterActivePlanCheck
         };
@@ -392,7 +394,7 @@ public sealed class PlanFinalizeTests
         using DocFixture fixture = Repository();
         string gone = Absolute(fixture, "6-Docs/vanished/plan.tasks.json");
 
-        PlanFinalize.DeleteIfPresent(gone);
+        PlanFinalize.DeleteIfPresent(DocsPorts.Files, gone);
 
         Assert.False(File.Exists(gone));
         Assert.False(Directory.Exists(Path.GetDirectoryName(gone)));
@@ -406,7 +408,7 @@ public sealed class PlanFinalizeTests
         string folderWhereTheFileBelongs = Absolute(fixture, PlanTaskFileProbe.TaskFilePath);
         Directory.CreateDirectory(folderWhereTheFileBelongs);
 
-        bool gone = PlanFinalize.DeleteIfPresent(folderWhereTheFileBelongs);
+        bool gone = PlanFinalize.DeleteIfPresent(DocsPorts.Files, folderWhereTheFileBelongs);
 
         Assert.False(gone);
         Assert.True(Directory.Exists(folderWhereTheFileBelongs));
@@ -494,8 +496,8 @@ public sealed class PlanFinalizeTests
     {
         using DocFixture fixture = Repository();
 
-        Assert.True(PlanFinalize.DeleteIfPresent(Absolute(fixture, "6-Docs/vanished/plan.tasks.json")));
-        Assert.True(PlanFinalize.DeleteIfPresent(Absolute(fixture, "6-Docs/never-there.json")));
+        Assert.True(PlanFinalize.DeleteIfPresent(DocsPorts.Files, Absolute(fixture, "6-Docs/vanished/plan.tasks.json")));
+        Assert.True(PlanFinalize.DeleteIfPresent(DocsPorts.Files, Absolute(fixture, "6-Docs/never-there.json")));
     }
 
     [Fact]
@@ -505,7 +507,7 @@ public sealed class PlanFinalizeTests
         string file = Absolute(fixture, PlanTaskFileProbe.TaskFilePath);
         File.WriteAllText(file, "{}");
 
-        PlanFinalize.DeleteIfPresent(file);
+        PlanFinalize.DeleteIfPresent(DocsPorts.Files, file);
 
         Assert.False(File.Exists(file));
         Assert.True(Directory.Exists(Path.GetDirectoryName(file)));

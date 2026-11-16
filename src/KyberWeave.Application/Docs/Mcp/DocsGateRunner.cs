@@ -1,18 +1,23 @@
 using KyberWeave.Contracts.Docs;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Model;
-using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Validation;
 
 namespace KyberWeave.Mcp;
 
 /// <summary>
-/// Runs the schema and drift gates the docs tools report. It stays in the host while the host configuration
-/// (<see cref="KyberWeaveConfig"/>) and the schema gate (<see cref="DocsSchemaGate"/>) live in the legacy engine.
+/// Runs the schema and drift gates the docs tools report.
 /// </summary>
-internal sealed class DocsGateRunner : IDocsGateRunner
+/// <param name="hostConfiguration">Loads the repository's host configuration.</param>
+/// <param name="schemaGate">The schema-validation sequence the CLI shares.</param>
+/// <param name="documents">Opens the corpus again for the archive-closeout gate.</param>
+public sealed class DocsGateRunner(
+    IDocsHostConfiguration hostConfiguration,
+    IDocsSchemaGate schemaGate,
+    IDocumentSourceFactory documents) : IDocsGateRunner
 {
     /// <inheritdoc />
     public void ValidateSchema(
@@ -22,24 +27,24 @@ internal sealed class DocsGateRunner : IDocsGateRunner
         string? baseRef,
         DiagnosticReport report)
     {
-        if (!HostConfiguration.TryLoad(repositoryRoot, report, out KyberWeaveConfig config))
+        if (!hostConfiguration.TryLoad(repositoryRoot, report, out KyberWeaveConfig config))
             return;
 
         try
         {
             DocumentSet set = loadDocuments();
-            report.AddRange(DocsSchemaGate.Validate(
+            report.AddRange(schemaGate.Validate(
                 repositoryRoot,
                 config,
                 set,
-                () => new DocumentLoader(repositoryRoot, config.Ontology),
+                () => documents.Create(repositoryRoot, config.Ontology),
                 mergeReady,
                 baseRef).Items);
         }
         catch (Exception exception) when (DocsToolSupport.IsExpectedReadFailure(exception))
         {
             report.Add(new Diagnostic(
-                KyberWeaveConfigLoader.ConfigLoadErrorCode,
+                IDocsHostConfiguration.ConfigLoadErrorCode,
                 Severity.Error,
                 exception.Message,
                 "docs validate",
@@ -54,7 +59,7 @@ internal sealed class DocsGateRunner : IDocsGateRunner
         Func<ICodeGraphResolver> codeGraph,
         DiagnosticReport report)
     {
-        if (!HostConfiguration.TryLoad(repositoryRoot, report, out KyberWeaveConfig _))
+        if (!hostConfiguration.TryLoad(repositoryRoot, report, out KyberWeaveConfig _))
             return;
 
         try
@@ -66,7 +71,7 @@ internal sealed class DocsGateRunner : IDocsGateRunner
         catch (Exception exception) when (DocsToolSupport.IsExpectedReadFailure(exception))
         {
             report.Add(new Diagnostic(
-                KyberWeaveConfigLoader.ConfigLoadErrorCode,
+                IDocsHostConfiguration.ConfigLoadErrorCode,
                 Severity.Error,
                 exception.Message,
                 "docs drift",

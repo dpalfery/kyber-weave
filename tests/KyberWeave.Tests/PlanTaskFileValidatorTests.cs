@@ -13,6 +13,7 @@ using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Core.Processes;
 using Xunit;
 
+using KyberWeave.Tests.Fakes;
 namespace KyberWeave.Tests;
 
 /// <summary>
@@ -887,7 +888,7 @@ internal sealed class ReportedFindings
         };
 
         CapturedConsoleExecution<int> execution =
-            ProcessConsoleCapture.Run(() => new DocsValidateCommand().Execute(null!, settings));
+            ProcessConsoleCapture.Run(() => DocsTestCommands.Validate().Execute(null!, settings));
         Exit = execution.Result;
         Output = execution.Output;
     }

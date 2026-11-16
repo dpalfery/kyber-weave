@@ -1,3 +1,6 @@
+using KyberWeave.Contracts.Services;
+using KyberWeave.Tests.Fakes;
+using Microsoft.Extensions.DependencyInjection;
 using System.Diagnostics;
 using System.Reflection;
 using KyberWeave.Core.Docs.Validation;
@@ -18,9 +21,13 @@ public sealed class McpPlanLifecycleToolsTests
     private const string ClosedPlan = "6-Docs/plans/2026-10-20-widget.md";
     private const string ArchivedPlan = "6-Docs/archive/plans/2026-10-20-widget.md";
 
-    private static DocsTools Tools(string root) =>
-        DocsRootRegistry.CreateTools(root, codeGraphRefreshEnabled: false,
-            new DocsRootRegistry(root, path => DocsRootRegistry.CreateTools(path, codeGraphRefreshEnabled: false, registry: null)));
+    private static DocsTools Tools(string root, IServiceProvider? services = null)
+    {
+        IServiceProvider provider = services ?? DocsTestCommands.Services();
+        return DocsRootRegistry.CreateTools(root, codeGraphRefreshEnabled: false,
+            DocsTestCommands.Registry(root, path => DocsRootRegistry.CreateTools(path, codeGraphRefreshEnabled: false, registry: null, provider)),
+            provider);
+    }
 
     private static DocFixture GitRepository(DocFixture fixture)
     {
@@ -104,22 +111,15 @@ public sealed class McpPlanLifecycleToolsTests
         Git(fixture.Root, "config", "user.email", "t@example.com");
         Git(fixture.Root, "add", "-A");
         Git(fixture.Root, "commit", "-q", "-m", "init");
-        Func<KyberWeave.Core.Configuration.KyberWeaveConfig, PlanTaskAgentPick?> before = PlanTaskAgentPick.ForConfig;
-        PlanTaskAgentPick.ForConfig = _ => new PlanTaskAgentPick(new PickingProvider(), PlanTaskAgentPick.ImplementationAgents());
-        try
-        {
-            string response = Tools(fixture.Root).FinalizePlan(fixture.Root, PlanTaskFileProbe.PlanPath, "autonomous",
-                "AUTONOMOUS_APPROVAL: approve-and-execute");
+        IServiceProvider picking = DocsTestCommands.Services(services => services.AddSingleton<IPlanTaskAgentPickerFactory>(
+            new DocsTestCommands.FixedPickerFactory(() => new PlanTaskAgentPick(new PickingProvider(), PlanTaskAgentPick.ImplementationAgents()))));
+        string response = Tools(fixture.Root, picking).FinalizePlan(fixture.Root, PlanTaskFileProbe.PlanPath, "autonomous",
+            "AUTONOMOUS_APPROVAL: approve-and-execute");
 
-            Assert.Contains("result: finalized", response, StringComparison.Ordinal);
-            Assert.Contains("| agent=csharp-dev |", response, StringComparison.Ordinal);
-            Assert.Contains("\"agent\": \"csharp-dev\"",
-                File.ReadAllText(Path.Combine(fixture.Root, PlanTaskFileProbe.TaskFilePath)), StringComparison.Ordinal);
-        }
-        finally
-        {
-            PlanTaskAgentPick.ForConfig = before;
-        }
+        Assert.Contains("result: finalized", response, StringComparison.Ordinal);
+        Assert.Contains("| agent=csharp-dev |", response, StringComparison.Ordinal);
+        Assert.Contains("\"agent\": \"csharp-dev\"",
+            File.ReadAllText(Path.Combine(fixture.Root, PlanTaskFileProbe.TaskFilePath)), StringComparison.Ordinal);
     }
 
     private sealed class PickingProvider : KyberWeave.Core.Arbiter.Providers.IArbiterProvider

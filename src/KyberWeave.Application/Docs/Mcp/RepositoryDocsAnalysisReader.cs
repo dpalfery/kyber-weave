@@ -12,7 +12,6 @@ using KyberWeave.Core.Docs.Analysis.Persistence;
 using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Core.Docs.Graph;
 using KyberWeave.Core.Docs.Model;
-using KyberWeave.Core.Docs.Parsing;
 
 namespace KyberWeave.Mcp;
 
@@ -27,11 +26,30 @@ namespace KyberWeave.Mcp;
 public sealed class RepositoryDocsAnalysisReader : IDocsAnalysisReader
 {
     private readonly string _repositoryRoot;
+    private readonly IDocsHostConfiguration _hostConfiguration;
+    private readonly ICodeGraphPortsFactory _codeGraph;
+    private readonly IManagedGlossaryFactory _glossaries;
+    private readonly IDocumentSourceFactory _documents;
 
-    public RepositoryDocsAnalysisReader(string repositoryRoot)
+    /// <summary>A reader over <paramref name="repositoryRoot"/>.</summary>
+    /// <param name="repositoryRoot">The bound repository root.</param>
+    /// <param name="hostConfiguration">Loads the repository's configuration for each call.</param>
+    /// <param name="codeGraph">Opens the CodeGraph index of the repository.</param>
+    /// <param name="glossaries">Opens the managed glossary of the repository.</param>
+    /// <param name="documents">Opens the documentation corpus of the repository.</param>
+    public RepositoryDocsAnalysisReader(
+        string repositoryRoot,
+        IDocsHostConfiguration hostConfiguration,
+        ICodeGraphPortsFactory codeGraph,
+        IManagedGlossaryFactory glossaries,
+        IDocumentSourceFactory documents)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
         _repositoryRoot = Path.GetFullPath(repositoryRoot);
+        _hostConfiguration = hostConfiguration ?? throw new ArgumentNullException(nameof(hostConfiguration));
+        _codeGraph = codeGraph ?? throw new ArgumentNullException(nameof(codeGraph));
+        _glossaries = glossaries ?? throw new ArgumentNullException(nameof(glossaries));
+        _documents = documents ?? throw new ArgumentNullException(nameof(documents));
     }
 
     /// <inheritdoc />
@@ -39,9 +57,9 @@ public sealed class RepositoryDocsAnalysisReader : IDocsAnalysisReader
     {
         cancellationToken.ThrowIfCancellationRequested();
         KyberWeaveConfig config = LoadConfig();
-        DocumentSet documents = new DocumentLoader(_repositoryRoot, config.Ontology).Load();
+        DocumentSet documents = _documents.Create(_repositoryRoot, config.Ontology).Load();
         cancellationToken.ThrowIfCancellationRequested();
-        ICodeGraphResolver codeGraph = CodeGraphResolvers.ForRepository(_repositoryRoot).Resolver;
+        ICodeGraphResolver codeGraph = _codeGraph.ForRepository(_repositoryRoot).Resolver;
         DocGraphProjection graph = DocGraphProjectionBuilder.Build(
             documents,
             codeGraph,
@@ -59,10 +77,7 @@ public sealed class RepositoryDocsAnalysisReader : IDocsAnalysisReader
             [new GraphClaimCandidateSource(), new SparseLexicalCandidateSource()],
             embeddingResolver,
             persistence);
-        ManagedGlossaryLoadResult glossary = new ManagedGlossaryService(
-            _repositoryRoot,
-            config,
-            TimeProvider.System).Load();
+        ManagedGlossaryLoadResult glossary = _glossaries.Open(_repositoryRoot, config).Load();
 
         DocumentationAnalysisResult result = analyzer.Analyze(
             documents,
@@ -79,23 +94,21 @@ public sealed class RepositoryDocsAnalysisReader : IDocsAnalysisReader
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(term);
         KyberWeaveConfig config = LoadConfig();
-        return new ManagedGlossaryService(
-            _repositoryRoot,
-            config,
-            TimeProvider.System).Lookup(term);
+        return _glossaries.Open(_repositoryRoot, config).Lookup(term);
     }
 
     private KyberWeaveConfig LoadConfig()
     {
-        KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(_repositoryRoot);
-        if (loaded is { Success: true, Config: not null })
+        DiagnosticReport report = new();
+        if (_hostConfiguration.TryLoad(_repositoryRoot, report, out KyberWeaveConfig config))
         {
-            return loaded.Config;
+            return config;
         }
 
+        Diagnostic failure = report.Items[0];
         throw new InvalidDataException(
-            $"{KyberWeaveConfigLoader.ConfigLoadErrorCode}: Failed to load " +
-            $"'{loaded.ConfigPath ?? "kyber-weave.yml"}': {loaded.Error ?? "unknown error"}.");
+            $"{failure.Code}: Failed to load " +
+            $"'{failure.FilePath ?? "kyber-weave.yml"}': {failure.Message}.");
     }
 
     private static void AddCodeGraphUnavailable(

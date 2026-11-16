@@ -6,7 +6,7 @@ namespace KyberWeave.Core.Docs.Validation;
 public sealed record PlanTaskAgentChoice(string Agent, double Confidence);
 
 /// <summary>Chooses an agent for each task of a task file while the file is written.</summary>
-public interface IPlanTaskAgentPicker
+public interface IPlanTaskAgentPicker : IDisposable
 {
     /// <summary>
     /// The confident picks by task id. A task with no confident pick is left out, and a picker that cannot reach its

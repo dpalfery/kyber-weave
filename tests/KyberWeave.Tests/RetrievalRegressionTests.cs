@@ -9,6 +9,7 @@ using KyberWeave.Data.CodeGraph;
 using KyberWeave.Mcp;
 using Xunit;
 
+using KyberWeave.Tests.Fakes;
 namespace KyberWeave.Tests;
 
 /// <summary>
@@ -53,7 +54,7 @@ public sealed class RetrievalRegressionTests
         () =>
         {
             string? root = RepositoryRoot();
-            return root is null ? null : DocsToolsComposition.Create(CreateHost(root), new RepositoryDocsAnalysisReader(root));
+            return root is null ? null : DocsToolsComposition.Create(CreateHost(root), McpTestServices.AnalysisReader(root));
         });
 
     /// <summary>Question, expected document id, phrase from the answering section, confidence floor.</summary>

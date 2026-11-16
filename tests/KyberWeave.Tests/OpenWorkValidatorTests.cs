@@ -4,6 +4,7 @@ using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Validation;
 using Xunit;
 
+using KyberWeave.Tests.Fakes;
 namespace KyberWeave.Tests;
 
 /// <summary>
@@ -181,7 +182,7 @@ public sealed class OpenWorkValidatorTests
         };
 
         CapturedConsoleExecution<int> execution =
-            ProcessConsoleCapture.Run(() => new DocsValidateCommand().Execute(null!, settings));
+            ProcessConsoleCapture.Run(() => DocsTestCommands.Validate().Execute(null!, settings));
 
         Assert.Equal(expectedExit, execution.Result);
         Assert.Equal(mergeReady, execution.Output.Contains(OpenWorkValidator.OpenWork, StringComparison.Ordinal));
@@ -294,7 +295,7 @@ public sealed class OpenWorkValidatorTests
         };
 
         CapturedConsoleExecution<int> execution =
-            ProcessConsoleCapture.Run(() => new DocsValidateCommand().Execute(null!, settings));
+            ProcessConsoleCapture.Run(() => DocsTestCommands.Validate().Execute(null!, settings));
         return new MergedRun(execution.Result, execution.Output);
     }
 

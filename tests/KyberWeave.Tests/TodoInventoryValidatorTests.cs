@@ -6,6 +6,7 @@ using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Validation;
 using Xunit;
 
+using KyberWeave.Tests.Fakes;
 namespace KyberWeave.Tests;
 
 /// <summary>
@@ -195,7 +196,7 @@ public sealed class TodoInventoryValidatorTests
         DocsValidateSettings settings = new DocsValidateSettings { Path = fixture.Root, Format = "json" };
 
         CapturedConsoleExecution<int> execution =
-            ProcessConsoleCapture.Run(() => new DocsValidateCommand().Execute(null!, settings));
+            ProcessConsoleCapture.Run(() => DocsTestCommands.Validate().Execute(null!, settings));
 
         Assert.Contains(TodoInventoryValidator.UnlistedTodo, execution.Output, StringComparison.Ordinal);
         Assert.Equal(1, execution.Result);

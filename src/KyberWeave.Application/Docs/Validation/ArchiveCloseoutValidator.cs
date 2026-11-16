@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -53,7 +54,8 @@ public sealed partial class ArchiveCloseoutValidator
 
     private readonly string _repoRoot;
     private readonly KyberWeaveConfig _config;
-    private readonly Func<DocumentLoader> _loaderFactory;
+    private readonly Func<IDocumentSource> _loaderFactory;
+    private readonly IFileSystem _files;
 
     /// <summary>
     /// Creates the validator over the repository and configuration it will check. The
@@ -63,14 +65,17 @@ public sealed partial class ArchiveCloseoutValidator
     public ArchiveCloseoutValidator(
         string repoRoot,
         KyberWeaveConfig config,
-        Func<DocumentLoader> loaderFactory)
+        Func<IDocumentSource> loaderFactory,
+        IFileSystem files)
     {
+        ArgumentNullException.ThrowIfNull(files);
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(loaderFactory);
         _repoRoot = Path.GetFullPath(repoRoot);
         _config = config;
         _loaderFactory = loaderFactory;
+        _files = files;
     }
 
     /// <summary>
@@ -105,7 +110,7 @@ public sealed partial class ArchiveCloseoutValidator
             ? string.Empty
             : Path.GetDirectoryName(todoIndex)?.Replace('\\', '/') ?? string.Empty;
 
-        DocumentLoader archivedLoader = _loaderFactory();
+        IDocumentSource archivedLoader = _loaderFactory();
         foreach (string entry in SelectEntries(changes))
         {
             // The type is the classifier. A message match would miss a reword, and the
@@ -179,7 +184,7 @@ public sealed partial class ArchiveCloseoutValidator
                 continue;
 
             string absolute = Path.Combine(_repoRoot, relative.Replace('/', Path.DirectorySeparatorChar));
-            if (!File.Exists(absolute))
+            if (!_files.FileExists(absolute))
                 continue;
 
             bool newlyArchived = change.Kind is ChangeKind.Added or ChangeKind.Renamed
@@ -239,9 +244,9 @@ public sealed partial class ArchiveCloseoutValidator
             : root + "/" + OntologyConfig.ArchiveSegment + "/";
 
     /// <summary>Reads only the frontmatter impact key, to decide scope without parsing the body.</summary>
-    private static string? FrontmatterImpact(string absolutePath)
+    private string? FrontmatterImpact(string absolutePath)
     {
-        string raw = File.ReadAllText(absolutePath);
+        string raw = _files.ReadAllText(absolutePath);
         FrontmatterReadResult read = MarkdownFrontmatterReader.Read(raw);
         if (!read.HasFrontmatter)
             return null;

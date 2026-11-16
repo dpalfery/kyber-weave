@@ -1,20 +1,25 @@
 using System.Globalization;
 using System.Text;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Closeout;
-using KyberWeave.Core.Docs.Parsing;
-using KyberWeave.Core.Docs.Validation;
 
 namespace KyberWeave.Mcp;
 
 /// <summary>
-/// The plan lifecycle operations behind the finalize and archive tools, for one repository root. The service stays in
-/// the host while the plan engine (<see cref="PlanFinalize"/>, <see cref="PlanCloseout"/>, <see cref="PlanPathResolver"/>)
-/// and the host configuration live in the legacy engine.
+/// The plan lifecycle operations behind the finalize and archive tools, for one repository root: the response
+/// composition over <see cref="IPlanFinalizeService"/> and <see cref="IPlanCloseoutService"/>.
 /// </summary>
-internal sealed class PlanLifecycleService(string repositoryRoot, IDocsQueryService query) : IPlanLifecycleService
+public sealed class PlanLifecycleService(
+    string repositoryRoot,
+    IDocsQueryService query,
+    IDocsHostConfiguration hostConfiguration,
+    IPlanFinalizeService finalize,
+    IPlanCloseoutService closeout,
+    IRepositoryFileStore files,
+    TimeProvider timeProvider) : IPlanLifecycleService
 {
     private const string ArchiveRefusalNext =
         "next: send these findings to docs-dev as one closeout dispatch (harvest and Closeout mapping). " +
@@ -31,6 +36,8 @@ internal sealed class PlanLifecycleService(string repositoryRoot, IDocsQueryServ
     public string ArchivePlan(string planFile) => ArchiveHere(planFile);
 
 
+    private DateOnly Today() => DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
+
     private string FinalizeHere(string planFile, string approvalMode, string approval)
     {
         string provenance = _query.Provenance();
@@ -44,10 +51,7 @@ internal sealed class PlanLifecycleService(string repositoryRoot, IDocsQueryServ
                 $"approvalMode '{approvalMode}' is not 'autonomous' or 'supervised'. Nothing was changed.");
         }
 
-        // The decision model, when one is configured, picks each unassigned task's agent as the task file is written.
-        using PlanTaskAgentPick? picker = PlanTaskAgentPick.ForConfig(config);
-        PlanFinalizeOutcome outcome = new PlanFinalize(_repositoryRoot, config, () => new DocumentLoader(_repositoryRoot, config.Ontology), picker)
-            .Run(plan, mode, approval, DateOnly.FromDateTime(DateTime.UtcNow));
+        PlanFinalizeOutcome outcome = finalize.Run(_repositoryRoot, config, plan, mode, approval, Today());
         report.AddRange(outcome.Report.Items);
         if (outcome.Finalized)
             return LifecycleResponse(provenance, "finalized", report, ReadyNext(outcome));
@@ -68,8 +72,7 @@ internal sealed class PlanLifecycleService(string repositoryRoot, IDocsQueryServ
         if (!TryResolveLifecyclePlan(planFile, report, out KyberWeaveConfig config, out string plan))
             return LifecycleResponse(provenance, "refused", report, null);
 
-        PlanCloseoutOutcome outcome = new PlanCloseout(_repositoryRoot, config, () => new DocumentLoader(_repositoryRoot, config.Ontology))
-            .Run(plan, DateOnly.FromDateTime(DateTime.UtcNow), archive: true);
+        PlanCloseoutOutcome outcome = closeout.Run(_repositoryRoot, config, plan, Today(), archive: true);
         report.AddRange(outcome.Report.Items);
         return outcome.Archived
             ? LifecycleResponse(provenance, "archived", report,
@@ -80,7 +83,7 @@ internal sealed class PlanLifecycleService(string repositoryRoot, IDocsQueryServ
     private bool TryResolveLifecyclePlan(string planFile, DiagnosticReport report, out KyberWeaveConfig config, out string plan)
     {
         plan = string.Empty;
-        if (!HostConfiguration.TryLoad(_repositoryRoot, report, out config))
+        if (!hostConfiguration.TryLoad(_repositoryRoot, report, out config))
             return false;
 
         if (string.IsNullOrWhiteSpace(planFile))
@@ -89,7 +92,7 @@ internal sealed class PlanLifecycleService(string repositoryRoot, IDocsQueryServ
             return false;
         }
 
-        PlanPathResolution resolution = new PlanPathResolver(_repositoryRoot, config).Resolve(planFile, _repositoryRoot);
+        PlanPathResolution resolution = new PlanFileResolver(_repositoryRoot, config, files).Resolve(planFile, _repositoryRoot);
         if (!resolution.Found)
         {
             string message = resolution.Ambiguous
@@ -103,7 +106,7 @@ internal sealed class PlanLifecycleService(string repositoryRoot, IDocsQueryServ
         return true;
     }
 
-    internal static string LifecycleResponse(string provenance, string result, DiagnosticReport report, string? next)
+    public static string LifecycleResponse(string provenance, string result, DiagnosticReport report, string? next)
     {
         StringBuilder sb = new();
         sb.AppendLine(provenance);

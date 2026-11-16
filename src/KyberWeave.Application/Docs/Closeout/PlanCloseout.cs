@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Model;
@@ -9,11 +10,6 @@ using KyberWeave.Core.Review;
 using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Docs.Closeout;
-
-/// <summary>What a plan closeout did, or would do.</summary>
-/// <param name="Report">The findings, and one Info line per step taken or planned.</param>
-/// <param name="Archived">Whether the plan was moved to the archive. False for a preview and for a refusal.</param>
-public sealed record PlanCloseoutOutcome(DiagnosticReport Report, bool Archived);
 
 /// <summary>
 /// Does the mechanical half of closing out a finished plan: checks the closeout evidence the archive gate checks,
@@ -50,8 +46,10 @@ public sealed partial class PlanCloseout
 
     private readonly string _repoRoot;
     private readonly KyberWeaveConfig _config;
-    private readonly Func<DocumentLoader> _loaderFactory;
+    private readonly Func<IDocumentSource> _loaderFactory;
     private readonly ActivePlanFiles _files;
+    private readonly IRepositoryFileStore _store;
+    private readonly IExclusiveFileWriter _exclusive;
 
     /// <summary>
     /// Test seam, called with the plan's absolute path once the plan has passed the active-plan check and before it is
@@ -65,16 +63,27 @@ public sealed partial class PlanCloseout
     /// </summary>
     internal Action<string>? BeforeWriteTarget { get; init; }
 
-    /// <summary>Creates the closeout over a repository, its effective configuration and the loader the gate reads with.</summary>
-    public PlanCloseout(string repoRoot, KyberWeaveConfig config, Func<DocumentLoader> loaderFactory)
+    /// <summary>Creates the closeout over a repository, its effective configuration, the loader the gate reads with and the ports it writes through.</summary>
+    public PlanCloseout(
+        string repoRoot,
+        KyberWeaveConfig config,
+        Func<IDocumentSource> loaderFactory,
+        IRepositoryFileStore files,
+        IBoundedProcessExecutor process,
+        IExclusiveFileWriter exclusive)
     {
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(process);
+        ArgumentNullException.ThrowIfNull(exclusive);
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(loaderFactory);
         _repoRoot = Path.GetFullPath(repoRoot);
         _config = config;
         _loaderFactory = loaderFactory;
-        _files = new ActivePlanFiles(_repoRoot, config, LegacyPorts.Files, LegacyPorts.Process);
+        _store = files;
+        _exclusive = exclusive;
+        _files = new ActivePlanFiles(_repoRoot, config, files, process);
     }
 
     /// <summary>Checks the plan's closeout evidence and, with <paramref name="archive"/>, archives it.</summary>
@@ -102,7 +111,7 @@ public sealed partial class PlanCloseout
         string inventory = Join(archiveFolder, "README.md");
         string planIndex = _files.PlanIndexPath()!;
 
-        if (File.Exists(_files.Absolute(target)))
+        if (_store.FileExists(_files.Absolute(target)))
         {
             report.Add(new Diagnostic(ArchiveTargetExists, Severity.Error,
                 $"The archive already holds '{target}'.", plan, target,
@@ -118,7 +127,7 @@ public sealed partial class PlanCloseout
         string? planIndexText = null;
         try
         {
-            planIndexText = PresentFile.ReadIfPresent(_files.Absolute(planIndex));
+            planIndexText = _store.ReadTextIfPresent(_files.Absolute(planIndex));
             if (planIndexText is null)
             {
                 report.Add(new Diagnostic(IndexNotEditable, Severity.Error, $"'{planIndex}' does not exist.", plan, planIndex,
@@ -134,7 +143,7 @@ public sealed partial class PlanCloseout
         string? planText;
         try
         {
-            planText = PresentFile.ReadIfPresent(_files.Absolute(plan));
+            planText = _store.ReadTextIfPresent(_files.Absolute(plan));
         }
         catch (Exception exception) when (FileFailure.Is(exception))
         {
@@ -152,7 +161,7 @@ public sealed partial class PlanCloseout
 
         string archivedText = WithArchivedStatus(planText, date);
         string taskFile = PlanTaskFileGenerator.TaskFilePathOf(plan);
-        bool hasTaskFile = File.Exists(_files.Absolute(taskFile));
+        bool hasTaskFile = _store.FileExists(_files.Absolute(taskFile));
 
         // The archive gate reads the plan where it would be archived, so the copy goes there for the check and
         // is gone again before this method returns, whatever the outcome.
@@ -163,12 +172,12 @@ public sealed partial class PlanCloseout
         string row;
         string archiveDirectory = Path.GetDirectoryName(_files.Absolute(target))!;
         string? createdDirectory = FirstMissingDirectory(archiveDirectory);
-        Directory.CreateDirectory(archiveDirectory);
+        _store.CreateDirectory(archiveDirectory);
         bool wroteTarget = false;
         try
         {
             BeforeWriteTarget?.Invoke(_files.Absolute(target));
-            if (!TryWriteNew(_files.Absolute(target), archivedText))
+            if (!_exclusive.TryWriteNew(_files.Absolute(target), archivedText))
             {
                 report.Add(new Diagnostic(ArchiveTargetExists, Severity.Error,
                     $"The archive already holds '{target}'.", plan, target,
@@ -178,7 +187,7 @@ public sealed partial class PlanCloseout
 
             wroteTarget = true;
             DocumentSet live = _loaderFactory().Load();
-            report.AddRange(new ArchiveCloseoutValidator(_repoRoot, _config, _loaderFactory)
+            report.AddRange(new ArchiveCloseoutValidator(_repoRoot, _config, _loaderFactory, _store)
                 .Itemise(live, [new ChangedPath(target, ChangeKind.Added)]).Items);
             if (report.HasErrors)
             {
@@ -205,9 +214,9 @@ public sealed partial class PlanCloseout
         {
             // Only a file this run created is removed: one that appeared before the exclusive create is someone else's.
             if (wroteTarget)
-                File.Delete(_files.Absolute(target));
+                _store.DeleteFile(_files.Absolute(target));
             if (createdDirectory is not null)
-                Directory.Delete(createdDirectory, recursive: true);
+                _store.DeleteDirectory(createdDirectory, recursive: true);
         }
 
         List<string> touched = [plan, target, inventory, planIndex];
@@ -223,7 +232,7 @@ public sealed partial class PlanCloseout
             return new PlanCloseoutOutcome(report, false);
         }
 
-        foreach (string linked in new[] { planIndex, inventory }.Where(file => PlanFinalize.IsLink(_files.Absolute(file))))
+        foreach (string linked in new[] { planIndex, inventory }.Where(file => PlanFinalize.IsLink(_store, _files.Absolute(file))))
         {
             report.Add(new Diagnostic(IndexNotEditable, Severity.Error,
                 $"'{linked}' is a symbolic link, which this step does not write through. Nothing was moved.", plan, linked,
@@ -231,9 +240,9 @@ public sealed partial class PlanCloseout
             return new PlanCloseoutOutcome(report, false);
         }
 
-        Directory.CreateDirectory(archiveDirectory);
+        _store.CreateDirectory(archiveDirectory);
         BeforeWriteTarget?.Invoke(_files.Absolute(target));
-        if (!TryWriteNew(_files.Absolute(target), archivedText))
+        if (!_exclusive.TryWriteNew(_files.Absolute(target), archivedText))
         {
             report.Add(new Diagnostic(ArchiveTargetExists, Severity.Error,
                 $"The archive already holds '{target}'. Nothing was moved.", plan, target,
@@ -241,17 +250,17 @@ public sealed partial class PlanCloseout
             return new PlanCloseoutOutcome(report, false);
         }
 
-        File.Delete(_files.Absolute(plan));
+        _store.DeleteFile(_files.Absolute(plan));
         Say(report, plan, $"Moved {plan} to {target} with status archived.");
         if (hasTaskFile)
         {
-            File.Delete(_files.Absolute(taskFile));
+            _store.DeleteFile(_files.Absolute(taskFile));
             Say(report, plan, $"Removed {taskFile}.");
         }
 
-        File.WriteAllText(_files.Absolute(planIndex), newPlanIndex!);
+        _store.WriteAllText(_files.Absolute(planIndex), newPlanIndex!);
         Say(report, plan, planRowRemoved ? $"Took its row out of {planIndex}." : $"{planIndex} had no row for it.");
-        File.WriteAllText(_files.Absolute(inventory), newInventory);
+        _store.WriteAllText(_files.Absolute(inventory), newInventory);
         Say(report, plan, $"Done: {inventoryAction} {inventory} with its row.");
 
         _files.Stage(touched, report, plan, Step);
@@ -259,75 +268,11 @@ public sealed partial class PlanCloseout
         return new PlanCloseoutOutcome(report, true);
     }
 
-    /// <summary>
-    /// Writes <paramref name="text"/> to a file that must not exist yet, in one step, so a file that appeared since the
-    /// last look is never overwritten. False when the path is already taken (a file or a folder is there) or this
-    /// process may not create it; either way nothing is overwritten and the caller refuses. Which of those it was is
-    /// read from the failed create itself, never from a second look at the path, which could change in between. A
-    /// failure while writing (a full disk, an unencodable character) removes the partial file this call created, best
-    /// effort, and propagates, so it is never mistaken for "already there"; a partial file whose removal also fails is left on disk, and the write
-    /// error, not the removal error, is what propagates.
-    /// </summary>
-    internal static bool TryWriteNew(string path, string text) => TryWriteNew(path, text, File.Delete);
-
-    /// <summary><see cref="TryWriteNew(string, string)"/> with the removal of a partial file supplied, so a failing removal can be tested.</summary>
-    /// <param name="path">The file to create.</param>
-    /// <param name="text">What to write.</param>
-    /// <param name="deletePartial">Removes the file this call created when writing it failed.</param>
-    internal static bool TryWriteNew(string path, string text, Action<string> deletePartial)
-    {
-        ArgumentNullException.ThrowIfNull(deletePartial);
-        bool created = false;
-        try
-        {
-            using FileStream stream = new(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-            created = true;
-            using StreamWriter writer = new(stream, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true));
-            writer.Write(text);
-            return true;
-        }
-        catch (UnauthorizedAccessException) when (!created)
-        {
-            // A folder in the way, or no permission to create here: nothing was written.
-            return false;
-        }
-        catch (IOException exception) when (!created && IsPathTaken(exception))
-        {
-            return false;
-        }
-        catch when (created)
-        {
-            // Best effort: the write failure is the error to report, and a removal that fails too must not replace it.
-            // A partial file that cannot be removed stays on disk; the caller sees the write error, not a clean refusal.
-            try
-            {
-                deletePartial(path);
-            }
-            catch (Exception cleanup) when (FileFailure.Is(cleanup))
-            {
-                // The original exception is rethrown below.
-            }
-
-            throw;
-        }
-    }
-
-    /// <summary>Whether a failed exclusive create failed because the path already exists (EEXIST; ERROR_FILE_EXISTS or ERROR_ALREADY_EXISTS).</summary>
-    private static bool IsPathTaken(IOException exception)
-    {
-        const int Eexist = 17;
-        const int ErrorFileExists = 80;
-        const int ErrorAlreadyExists = 183;
-        return OperatingSystem.IsWindows()
-            ? (exception.HResult & 0xFFFF) is ErrorFileExists or ErrorAlreadyExists
-            : exception.HResult == Eexist;
-    }
-
     /// <summary>The outermost directory on the way to <paramref name="directory"/> that does not exist yet, or null.</summary>
-    private static string? FirstMissingDirectory(string directory)
+    private string? FirstMissingDirectory(string directory)
     {
         string? missing = null;
-        for (string? current = directory; current is not null && !Directory.Exists(current); current = Path.GetDirectoryName(current))
+        for (string? current = directory; current is not null && !_store.DirectoryExists(current); current = Path.GetDirectoryName(current))
             missing = current;
         return missing;
     }
@@ -380,7 +325,7 @@ public sealed partial class PlanCloseout
     private (string Text, string Action) WithInventoryRow(string inventory, string planIndexText, string row, DateOnly date)
     {
         string table = $"{InventoryColumns}\n|---|---|---|---|---|---|\n{row}\n";
-        if (PresentFile.ReadIfPresent(_files.Absolute(inventory)) is not { } text)
+        if (_store.ReadTextIfPresent(_files.Absolute(inventory)) is not { } text)
         {
             string owner = Owner().Match(planIndexText) is { Success: true } match
                 ? match.Groups[1].Value

@@ -30,6 +30,8 @@ internal static class CliApplication
         ServiceCollection services = [];
         configure?.Invoke(services);
         services.TryAddSingleton<IMcpDeclarationReader, McpDeclarationReader>();
+        services.TryAddSingleton<DocsAnalysisCompositionFactories>();
+        services.TryAddSingleton<IDocsAnalysisCommandService, RepositoryDocsAnalysisCommandService>();
         _ = services.AddSquadCliServices();
         _ = services.AddArbiterCliServices();
         _ = services.AddWeaveApplication();

@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis.Glossary;
@@ -13,46 +15,57 @@ namespace KyberWeave.Core.Docs.Validation;
 /// Shared schema-validation sequence for the CLI and the docs MCP server so the two
 /// surfaces cannot diverge on which validators run or in what order.
 /// </summary>
-public static class DocsSchemaGate
+/// <param name="files">Reads the registers and glossary the validators check.</param>
+/// <param name="process">Runs the git commands the task-file validator reads.</param>
+/// <param name="changes">Reads the files the working tree changed, for the archive-closeout gate.</param>
+/// <param name="severityOverrides">Validates the review guidance's severity overrides.</param>
+/// <param name="timeProvider">Dates new glossary rows.</param>
+public sealed class DocsSchemaGate(
+    IRepositoryFileStore files,
+    IBoundedProcessExecutor process,
+    IGitChangeReader changes,
+    ISeverityOverrideSource severityOverrides,
+    TimeProvider timeProvider) : IDocsSchemaGate
 {
     /// <summary>
     /// Runs every frontmatter and inventory validator, the review guidance's severity overrides, the managed glossary gate, and — only
     /// when <paramref name="mergeReady"/> is set — the open-work and archive-closeout gates.
     /// </summary>
-    public static DiagnosticReport Validate(
+    public DiagnosticReport Validate(
         string repoRoot,
         KyberWeaveConfig config,
-        DocumentSet set,
-        Func<DocumentLoader> closeoutLoaderFactory,
+        DocumentSet corpus,
+        Func<IDocumentSource> closeoutLoaderFactory,
         bool mergeReady,
         string? gitBase = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
-        ArgumentNullException.ThrowIfNull(set);
+        ArgumentNullException.ThrowIfNull(corpus);
         ArgumentNullException.ThrowIfNull(closeoutLoaderFactory);
 
         DiagnosticReport report = new();
         OntologyConfig ontology = config.Ontology;
 
-        report.AddRange(new DocSpecValidator(repoRoot, ontology).Validate(set).Items);
-        report.AddRange(new ConfigRegValidator(repoRoot, config, LegacyPorts.Files).Validate().Items);
-        report.AddRange(SeverityOverrideFiles.Validate(repoRoot, config).Items);
-        report.AddRange(new PlanInventoryValidator(config).Validate(set).Items);
-        report.AddRange(new TodoInventoryValidator(config).Validate(set).Items);
-        report.AddRange(new PlanTaskFileValidator(repoRoot, config, LegacyPorts.Files, LegacyPorts.Process).Validate(set).Items);
+        report.AddRange(new DocSpecValidator(repoRoot, ontology).Validate(corpus).Items);
+        report.AddRange(new ConfigRegValidator(repoRoot, config, files).Validate().Items);
+        report.AddRange(severityOverrides.Validate(repoRoot, config.ConfigReg).Items);
+        report.AddRange(new PlanInventoryValidator(config).Validate(corpus).Items);
+        report.AddRange(new TodoInventoryValidator(config).Validate(corpus).Items);
+        report.AddRange(new PlanTaskFileValidator(repoRoot, config, files, process).Validate(corpus).Items);
 
         try
         {
-            report.AddRange(new ManagedGlossaryService(
+            report.AddRange(new ManagedGlossary(
                 repoRoot,
                 config,
-                TimeProvider.System).Validate().Items);
+                timeProvider,
+                files).Validate().Items);
         }
         catch (Exception exception) when (IsOperationalGlossaryFailure(exception))
         {
             report.Add(new Diagnostic(
-                ManagedGlossaryService.ValidationRuleCode,
+                ManagedGlossary.ValidationRuleCode,
                 Severity.Error,
                 exception.Message,
                 "glossary",
@@ -61,8 +74,8 @@ public static class DocsSchemaGate
 
         if (mergeReady)
         {
-            report.AddRange(new OpenWorkValidator(config, LegacyPorts.Files, repoRoot).Validate(set).Items);
-            report.AddRange(ValidateCloseout(repoRoot, config, set, closeoutLoaderFactory, gitBase).Items);
+            report.AddRange(new OpenWorkValidator(config, files, repoRoot).Validate(corpus).Items);
+            report.AddRange(ValidateCloseout(repoRoot, config, corpus, closeoutLoaderFactory, gitBase).Items);
         }
 
         return report;
@@ -76,18 +89,18 @@ public static class DocsSchemaGate
     /// Runs the archive-closeout gate over the change the working tree carries. Scope that
     /// cannot resolve fails closed instead of reporting a clean run.
     /// </summary>
-    private static DiagnosticReport ValidateCloseout(
+    private DiagnosticReport ValidateCloseout(
         string repoRoot,
         KyberWeaveConfig config,
         DocumentSet set,
-        Func<DocumentLoader> closeoutLoaderFactory,
+        Func<IDocumentSource> closeoutLoaderFactory,
         string? gitBase)
     {
         DiagnosticReport report = new();
 
         if (!string.IsNullOrWhiteSpace(gitBase))
         {
-            string? refusal = ChangedFiles.ValidateBase(gitBase);
+            string? refusal = GitChangeParsing.ValidateBase(gitBase);
             if (refusal is not null)
             {
                 report.Add(new Diagnostic(
@@ -101,10 +114,10 @@ public static class DocsSchemaGate
         }
 
         string baseRef = string.IsNullOrWhiteSpace(gitBase) ? "origin/HEAD" : gitBase;
-        IReadOnlyList<ChangedPath> changes;
+        IReadOnlyList<ChangedPath> changed;
         try
         {
-            changes = ChangedFiles.ResolveSinceMergeBase(repoRoot, baseRef);
+            changed = changes.ResolveSinceMergeBase(repoRoot, baseRef);
         }
         catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or Win32Exception or TimeoutException)
         {
@@ -120,7 +133,8 @@ public static class DocsSchemaGate
         report.AddRange(new ArchiveCloseoutValidator(
             repoRoot,
             config,
-            closeoutLoaderFactory).Validate(set, changes).Items);
+            closeoutLoaderFactory,
+            files).Validate(set, changed).Items);
         return report;
     }
 }

@@ -1,5 +1,7 @@
 using KyberWeave.Application;
 using KyberWeave.Contracts.Docs;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Docs.Delivery;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
@@ -15,7 +17,25 @@ namespace KyberWeave.Mcp;
 internal static class DocsToolsComposition
 {
     private static readonly Lazy<IServiceProvider> DefaultServices = new(
-        () => new ServiceCollection().AddWeaveApplication().BuildServiceProvider());
+        () => new ServiceCollection().AddSingleton<IDocsHostConfiguration, HostConfiguration>().AddWeaveApplication().BuildServiceProvider());
+
+    /// <summary>The container the shared collaborators are resolved from: <paramref name="services"/>, or the default one.</summary>
+    /// <param name="services">The caller's container, or null.</param>
+    public static IServiceProvider ServicesOrDefault(IServiceProvider? services) => services ?? DefaultServices.Value;
+
+    /// <summary>The analysis reader over <paramref name="repositoryRoot"/>, built from the ports of <paramref name="provider"/>.</summary>
+    /// <param name="provider">The container the ports are resolved from.</param>
+    /// <param name="repositoryRoot">The bound repository root.</param>
+    public static RepositoryDocsAnalysisReader AnalysisReader(IServiceProvider provider, string repositoryRoot)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        return new RepositoryDocsAnalysisReader(
+            repositoryRoot,
+            provider.GetService<IDocsHostConfiguration>() ?? new HostConfiguration(),
+            provider.GetRequiredService<ICodeGraphPortsFactory>(),
+            provider.GetRequiredService<IManagedGlossaryFactory>(),
+            provider.GetRequiredService<IDocumentSourceFactory>());
+    }
 
     /// <summary>The tools over <paramref name="host"/>.</summary>
     /// <param name="host">The corpus the tools answer from.</param>
@@ -35,17 +55,28 @@ internal static class DocsToolsComposition
         string? deliveryHome = null)
     {
         ArgumentNullException.ThrowIfNull(host);
-        IServiceProvider provider = services ?? DefaultServices.Value;
+        IServiceProvider provider = ServicesOrDefault(services);
+        IDocsHostConfiguration hostConfiguration = provider.GetService<IDocsHostConfiguration>() ?? new HostConfiguration();
         DocsQueryService query = new(
             host,
             analysisReader,
             freshness,
-            new DocsGateRunner(),
+            new DocsGateRunner(
+                hostConfiguration,
+                provider.GetRequiredService<IDocsSchemaGate>(),
+                provider.GetRequiredService<IDocumentSourceFactory>()),
             provider.GetRequiredService<ICorpusProvenance>());
         return new DocsTools(
             query,
-            new PlanLifecycleService(host.RepositoryRoot, query),
-            new RunDeliveryService(host.RepositoryRoot, query)
+            new PlanLifecycleService(
+                host.RepositoryRoot,
+                query,
+                hostConfiguration,
+                provider.GetRequiredService<IPlanFinalizeService>(),
+                provider.GetRequiredService<IPlanCloseoutService>(),
+                provider.GetRequiredService<IRepositoryFileStore>(),
+                provider.GetRequiredService<TimeProvider>()),
+            new RunDeliveryService(host.RepositoryRoot, query, hostConfiguration, provider.GetRequiredService<RunDeliveryPorts>())
             {
                 DeliveryExecutor = deliveryExecutor,
                 DeliveryHome = deliveryHome,

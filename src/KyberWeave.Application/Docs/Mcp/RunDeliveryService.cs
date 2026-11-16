@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -10,10 +11,13 @@ namespace KyberWeave.Mcp;
 
 /// <summary>
 /// The run delivery behind the deliver tool, for one repository root: a thin wrapper over <see cref="RunDelivery"/>,
-/// which <c>kyber-weave run deliver</c> also runs. It stays in the host while the delivery engine and the host
-/// configuration live in the legacy engine.
+/// which <c>kyber-weave run deliver</c> also runs.
 /// </summary>
-internal sealed class RunDeliveryService(string repositoryRoot, IDocsQueryService query) : IRunDeliveryService
+public sealed class RunDeliveryService(
+    string repositoryRoot,
+    IDocsQueryService query,
+    IDocsHostConfiguration hostConfiguration,
+    RunDeliveryPorts ports) : IRunDeliveryService
 {
     private const string DeliverFallbackNext =
         "next: dispatch github-devops with the create-pull-request skill to open the pull request. Nothing was pushed.";
@@ -22,10 +26,10 @@ internal sealed class RunDeliveryService(string repositoryRoot, IDocsQueryServic
     private readonly IDocsQueryService _query = query ?? throw new ArgumentNullException(nameof(query));
 
     /// <summary>Runs git and gh for the deliver tool; null for the bounded default. Tests set it so nothing leaves the machine.</summary>
-    internal IProcessExecutor? DeliveryExecutor { get; set; }
+    public IProcessExecutor? DeliveryExecutor { get; set; }
 
     /// <summary>The home directory holding the run records; null for the user profile. Tests point it at a scratch folder.</summary>
-    internal string? DeliveryHome { get; set; }
+    public string? DeliveryHome { get; set; }
 
     /// <inheritdoc />
     public string DeliverRun(
@@ -41,10 +45,10 @@ internal sealed class RunDeliveryService(string repositoryRoot, IDocsQueryServic
     {
         string provenance = _query.Provenance();
         DiagnosticReport report = new();
-        if (!HostConfiguration.TryLoad(_repositoryRoot, report, out KyberWeaveConfig config))
+        if (!hostConfiguration.TryLoad(_repositoryRoot, report, out KyberWeaveConfig config))
             return PlanLifecycleService.LifecycleResponse(provenance, "refused", report, null);
 
-        DeliveryOutcome outcome = new RunDelivery(_repositoryRoot, config, DeliveryExecutor, DeliveryHome)
+        DeliveryOutcome outcome = new RunDelivery(_repositoryRoot, config, DeliveryExecutor, DeliveryHome, ports)
             .Run(new DeliveryRequest(summary, notes, title, draft, documentationImpact, planFile));
         report.AddRange(outcome.Report.Items);
         if (!outcome.Delivered)

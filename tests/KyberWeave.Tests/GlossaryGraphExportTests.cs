@@ -162,7 +162,7 @@ public sealed class GlossaryGraphExportTests
         Assert.DoesNotContain(contribution.Edges, edge => edge.To.Contains("mutated", StringComparison.Ordinal));
     }
 
-    private static ManagedGlossaryService GlossaryService(string repositoryRoot) =>
+    private static ManagedGlossary GlossaryService(string repositoryRoot) =>
         new(
             repositoryRoot,
             new KyberWeaveConfig
@@ -170,7 +170,8 @@ public sealed class GlossaryGraphExportTests
                 Ontology = OntologyConfig.ProductDefaults.WithDocsRoots(["docs"]),
                 DocsAnalysis = new DocsAnalysisConfig { GlossaryPath = "docs/glossary.md" }
             },
-            TimeProvider.System);
+            TimeProvider.System,
+            DocsPorts.Files);
 
     private static ManagedGlossaryLoadResult CreateLoad(params GlossaryLookupResult[] terms) =>
         new(new AnalysisGlossary([]), terms);

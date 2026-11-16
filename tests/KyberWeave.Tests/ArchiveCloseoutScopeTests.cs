@@ -8,6 +8,7 @@ using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review;
 using Xunit;
 
+using KyberWeave.Tests.Fakes;
 namespace KyberWeave.Tests;
 
 /// <summary>
@@ -133,7 +134,8 @@ public sealed class ArchiveCloseoutScopeTests
         return new ArchiveCloseoutValidator(
                 repo.Root,
                 KyberWeaveConfig.ProductDefaults,
-                () => new DocumentLoader(repo.Root, KyberWeaveConfig.ProductDefaults.Ontology))
+                () => new DocumentLoader(repo.Root, KyberWeaveConfig.ProductDefaults.Ontology),
+                DocsPorts.Files)
             .Validate(new DocumentLoader(repo.Root).Load(), changes);
     }
 
@@ -151,7 +153,7 @@ public sealed class ArchiveCloseoutScopeTests
             MergeReady = mergeReady,
             Base = gitBase
         };
-        return ProcessConsoleCapture.Run(() => new DocsValidateCommand().Execute(null!, settings));
+        return ProcessConsoleCapture.Run(() => DocsTestCommands.Validate().Execute(null!, settings));
     }
 
     /// <summary>
@@ -576,7 +578,8 @@ public sealed class ArchiveCloseoutScopeTests
         DiagnosticReport report = new ArchiveCloseoutValidator(
             fixture.Root,
             config,
-            () => new DocumentLoader(fixture.Root, handbook)).Validate(
+            () => new DocumentLoader(fixture.Root, handbook),
+            DocsPorts.Files).Validate(
             new DocumentLoader(fixture.Root, handbook).Load(),
             [new ChangedPath(HandbookPlan, ChangeKind.Added)]);
 
@@ -609,7 +612,8 @@ public sealed class ArchiveCloseoutScopeTests
         DiagnosticReport report = new ArchiveCloseoutValidator(
             fixture.Root,
             config,
-            () => new DocumentLoader(fixture.Root, both)).Validate(
+            () => new DocumentLoader(fixture.Root, both),
+            DocsPorts.Files).Validate(
             new DocumentLoader(fixture.Root, both).Load(),
             [
                 new ChangedPath(PrimaryPlan, ChangeKind.Added),
