@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
@@ -9,51 +10,16 @@ using YamlDotNet.Core;
 
 namespace KyberWeave.Cli.Commands.Arbiter;
 
-/// <summary>Loads the host configuration for an Arbiter command and applies the user override.</summary>
-public interface IArbiterConfigResolver
-{
-    /// <summary>
-    /// Loads the host configuration and applies the user override, reporting failures as diagnostics. A load that
-    /// already names a <c>KW-ARB-CONFIG-*</c> code keeps it; any other load failure surfaces as <c>KW-CONFIG-001</c>.
-    /// </summary>
-    /// <param name="path">The repository path.</param>
-    /// <param name="configFile">The <c>--config</c> path, or null.</param>
-    /// <param name="report">Receives the diagnostics.</param>
-    /// <param name="config">The effective configuration, or the product defaults on failure.</param>
-    /// <param name="configPath">The configuration file read, when one was.</param>
-    /// <returns>True when a configuration was produced.</returns>
-    bool TryResolve(string path, string? configFile, DiagnosticReport report, out KyberWeaveConfig config, out string? configPath);
-
-    /// <summary>Loads the repository's own configuration, with no user override and no diagnostics.</summary>
-    /// <param name="root">The repository root.</param>
-    /// <returns>The configuration, or null when none loads.</returns>
-    KyberWeaveConfig? TryLoadRepository(string root);
-
-    /// <summary>Loads the project configuration under a root, or the per-user host configuration for global scope.</summary>
-    /// <param name="root">The project root, or the home directory for global scope.</param>
-    /// <param name="configFile">The <c>--config</c> path, or null.</param>
-    /// <param name="projectScope">True for the project file, false for the per-user file.</param>
-    /// <returns>The load result, successful or not.</returns>
-    KyberWeaveConfigLoadResult Load(string root, string? configFile, bool projectScope);
-
-    /// <summary>Parses configuration text, with no repository on disk.</summary>
-    /// <param name="yaml">The configuration text.</param>
-    /// <returns>The configuration.</returns>
-    KyberWeaveConfig LoadFromYaml(string yaml);
-}
-
 /// <summary>Resolves the Arbiter configuration over the registered user settings, environment and file system.</summary>
-/// <remarks>
-/// The load itself still calls <see cref="KyberWeaveConfigLoader"/>, which lives in the legacy Core project until the
-/// configuration hub moves behind a repository port (BLOCKED-BY CR: KyberWeaveConfigLoader).
-/// </remarks>
 /// <param name="userSettings">Applies the user override to the repository provider.</param>
 /// <param name="environment">Supplies the home directory the override lives under.</param>
 /// <param name="files">Probes and reads the project config file.</param>
+/// <param name="repository">Reads the project and the per-user host configuration.</param>
 public sealed class ArbiterConfigResolver(
     IArbiterUserSettings userSettings,
     IProcessEnvironment environment,
-    IFileSystem files) : IArbiterConfigResolver
+    IFileSystem files,
+    IKyberWeaveConfigRepository repository) : IArbiterConfigResolver
 {
     /// <inheritdoc />
     public bool TryResolve(
@@ -73,7 +39,7 @@ public sealed class ArbiterConfigResolver(
             return false;
         }
 
-        KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(path, configFile);
+        KyberWeaveConfigLoadResult loaded = repository.TryLoad(path, configFile);
         if (!loaded.Success)
         {
             if (TryLoadProjectConfigWithoutGlobal(path, configFile, out config, out configPath))
@@ -129,18 +95,18 @@ public sealed class ArbiterConfigResolver(
     /// <inheritdoc />
     public KyberWeaveConfig? TryLoadRepository(string root)
     {
-        KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(root);
+        KyberWeaveConfigLoadResult loaded = repository.TryLoad(root);
         return loaded.Success ? loaded.Config : null;
     }
 
     /// <inheritdoc />
     public KyberWeaveConfigLoadResult Load(string root, string? configFile, bool projectScope) =>
         projectScope
-            ? KyberWeaveConfigLoader.TryLoad(root, configFile)
-            : KyberWeaveConfigLoader.TryLoadUserConfig(root, configFile);
+            ? repository.TryLoad(root, configFile)
+            : repository.TryLoadUserConfig(root, configFile);
 
     /// <inheritdoc />
-    public KyberWeaveConfig LoadFromYaml(string yaml) => KyberWeaveConfigLoader.LoadFromYaml(yaml);
+    public KyberWeaveConfig LoadFromYaml(string yaml) => KyberWeaveConfigAssembler.FromYaml(yaml);
 
     private bool TryLoadProjectConfigWithoutGlobal(
         string path,
@@ -167,7 +133,7 @@ public sealed class ArbiterConfigResolver(
                 return false;
             }
 
-            config = KyberWeaveConfigLoader.LoadFromYaml(sanitized);
+            config = KyberWeaveConfigAssembler.FromYaml(sanitized);
             configPath = repoConfigPath;
             return true;
         }
@@ -208,7 +174,7 @@ public sealed class ArbiterConfigResolver(
         Match match = Regex.Match(message, @"KW-ARB-CONFIG-\d{3}");
         string code = match.Success
             ? match.Value
-            : KyberWeaveConfigLoader.ConfigLoadErrorCode;
+            : IDocsHostConfiguration.ConfigLoadErrorCode;
         return new Diagnostic(
             code,
             Severity.Error,
