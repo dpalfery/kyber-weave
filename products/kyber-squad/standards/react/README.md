@@ -4,6 +4,7 @@ title: react coding standard
 doc-type: coding-standard
 status: draft
 technology: react
+builds-on: typescript
 owner: unassigned
 last-reviewed: 2026-08-16
 ---

@@ -85,6 +85,12 @@ scope's folder under `<docs-root>/standards/`. Pick the one scope the document c
 skill about a stack is scoped by technology, a skill about a role's procedure by role. A
 document that covers both is two documents.
 
+### `KW-DOC-SPEC-014` — invalid `builds-on`
+
+A standard's `builds-on` key must name one declared technology, must not name the
+standard's own technology, and that parent must not itself declare `builds-on`. One level,
+because the task prompt is sized for one parent. Only a `coding-standard` takes the key.
+
 ## Drift — `docs drift`
 
 Requires a CodeGraph index at `.codegraph/codegraph.db` and the `sqlite3` CLI.

@@ -128,6 +128,7 @@ public sealed class DocSpecValidator
         ValidateLinkFragments(byPath, headingSlugsByPath, report);
 
         ValidateStandardsFolders(byPath, report);
+        ValidateBuildsOn(set, report);
 
         return report;
     }
@@ -443,6 +444,16 @@ public sealed class DocSpecValidator
                 "Only a coding-standard, a rule or a skill is scoped by role.",
                 report);
         }
+
+        if (!string.IsNullOrWhiteSpace(doc.Frontmatter.BuildsOn)
+            && doc.DocType != DocType.CodingStandard)
+        {
+            report.Add(new Diagnostic(
+                InvalidBuildsOn, Severity.Error,
+                $"builds-on is declared on a '{doc.Frontmatter.DocType}' document.",
+                doc.Subject, doc.RelativePath,
+                "Only a coding-standard names the one technology it builds on."));
+        }
     }
 
     private void ValidateScopeKey(
@@ -566,6 +577,68 @@ public sealed class DocSpecValidator
         }
     }
 
+    /// <summary>
+    /// Checks each standard's <c>builds-on</c> key: the parent must be declared, must not be
+    /// the standard itself, and must not itself build on another technology. One level only,
+    /// because a chain would make the set of rules a task receives depend on how deep it
+    /// runs, and the budget is sized for one parent.
+    /// </summary>
+    private void ValidateBuildsOn(DocumentSet set, DiagnosticReport report)
+    {
+        Dictionary<string, string> declaredParents = new(StringComparer.Ordinal);
+        Dictionary<string, DocumentModel> owners = new(StringComparer.Ordinal);
+
+        foreach (DocumentModel doc in set.Documents)
+        {
+            if (doc.DocType != DocType.CodingStandard) continue;
+
+            string? parent = doc.Frontmatter.BuildsOn?.Trim();
+            string? technology = doc.Frontmatter.Technology?.Trim();
+            if (string.IsNullOrWhiteSpace(parent) || string.IsNullOrWhiteSpace(technology)) continue;
+
+            declaredParents[technology] = parent;
+            owners[technology] = doc;
+        }
+
+        foreach ((string technology, string parent) in declaredParents)
+        {
+            DocumentModel doc = owners[technology];
+
+            if (string.Equals(parent, technology, StringComparison.Ordinal))
+            {
+                report.Add(new Diagnostic(
+                    InvalidBuildsOn, Severity.Error,
+                    $"the '{technology}' standard builds on itself.",
+                    doc.Subject, doc.RelativePath,
+                    "Name a different declared technology, or drop builds-on."));
+                continue;
+            }
+
+            if (!_config.Technologies.Contains(parent, StringComparer.Ordinal))
+            {
+                report.Add(new Diagnostic(
+                    InvalidBuildsOn, Severity.Error,
+                    $"the '{technology}' standard builds on undeclared technology '{parent}'.",
+                    doc.Subject, doc.RelativePath,
+                    StringDistance.Nearest(parent, _config.Technologies) is { } near
+                        ? $"Closest declared technology: '{near}'."
+                        : "Add it to ontology.technologies, or name a declared technology."));
+                continue;
+            }
+
+            if (declaredParents.TryGetValue(parent, out string? grandParent))
+            {
+                report.Add(new Diagnostic(
+                    InvalidBuildsOn, Severity.Error,
+                    $"the '{technology}' standard builds on '{parent}', which itself builds on " +
+                    $"'{grandParent}'.",
+                    doc.Subject, doc.RelativePath,
+                    "A template names at most one parent, and that parent names none. Flatten " +
+                    "the rules the child needs into its own files."));
+            }
+        }
+    }
+
     private static void ValidateStandardHeadings(
         DocumentModel document,
         string scope,
@@ -609,7 +682,8 @@ public sealed class DocSpecValidator
         Path.Combine(_repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
 
     /// <summary>Name of the directory a repository-relative path sits in, or empty.</summary>
-    private static string ContainingFolder(string relativePath)    {
+    private static string ContainingFolder(string relativePath)
+    {
         int end = relativePath.LastIndexOf('/');
         if (end <= 0) return string.Empty;
 

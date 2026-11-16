@@ -4,6 +4,7 @@ title: "Data access layer coding standard"
 doc-type: coding-standard
 status: draft
 technology: data-access-layer
+builds-on: csharp
 owner: unassigned
 last-reviewed: 2026-08-16
 ---

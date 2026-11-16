@@ -4,6 +4,7 @@ title: "Tauri coding standard"
 doc-type: coding-standard
 status: draft
 technology: tauri
+builds-on: rust
 owner: unassigned
 last-reviewed: 2026-09-27
 ---

@@ -62,6 +62,7 @@ code-refs:
 | `source-root` | Repository-relative path to that component's source. Must exist on disk. |
 | `technology` | The stack a coding standard, rule or skill governs. Declared in configuration, and equal to the folder the document sits in. Rejected on any other doc-type. |
 | `role` | The role a standard, rule or skill governs (`conductor`, `architect`, `reviewer`, `devops`). Declared in `ontology.roles`, and equal to the folder the document sits in. Rejected on any other doc-type. |
+| `builds-on` | The one declared technology this standard builds on. A task in this technology also receives the parent's rules and skills. One level only. |
 | `owner` | Who answers for it. Must exist in [catalog.md](catalog.md). |
 | `last-reviewed` | ISO `yyyy-MM-dd`. Any other format is an error, not a warning. |
 | `keywords` | Domain synonyms, acronyms, or search aliases that route natural-language and specialized queries to this document. Optional. `aliases` is accepted as an internal synonym for the same list; retrieval reads the unified `Keywords` view. Empty items fail `KW-DOC-SPEC-002`. |
