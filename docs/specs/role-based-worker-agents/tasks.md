@@ -73,16 +73,16 @@ and a follow-up specification ([design, Retirement](design.md#retirement-not-app
   - _Requirements: 3.1, 3.2, 3.7_
 
 - [ ] 1.2 Validate a task's technologies
-  - **Objective:** Report an unknown technology as an error, and warn when a task's files imply a declared technology it does not name.
+  - **Objective:** Report an unknown technology as an error.
   - **Files:**
-    - `src/KyberWeave.Application/Docs/Validation/PlanTaskFileValidator.cs`: the two checks, with new `KW-DOC-TASKS-*` ids
+    - `src/KyberWeave.Application/Docs/Validation/PlanTaskFileValidator.cs`: the check, with a new `KW-DOC-TASKS-*` id
     - `tests/KyberWeave.Tests/PlanTaskFileValidatorTests.cs`: new cases
-    - `docs/docgraph/governance.md`: the new ids in the rule table
-  - **Acceptance criteria:** An undeclared technology is an error naming the task, the value and `ontology.technologies`; a `.cs` file in a task that names only `typescript` is a warning naming the file and `csharp`, using the host's own gate `include` globs; a task with no technologies under roster `technology` reports nothing.
+    - `docs/docgraph/governance.md`: the new id in the rule table
+  - **Acceptance criteria:** An undeclared technology is an error naming the task, the value and `ontology.technologies`; a task with no technologies reports nothing.
   - **Capabilities:** C# validation rules in the documentation engine, with xUnit tests, and one governed Markdown table edit
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~PlanTaskFileValidatorTests"`
   - **Depends on:** 1.1
-  - _Requirements: 3.3, 3.5, 3.6_
+  - _Requirements: 3.3, 3.5_
 
 - [ ] 1.3 List each technology's standards call in the packet
   - **Objective:** Make a printed packet name, for each of the task's technologies, the docs-tool call that returns its standards bundle.
@@ -139,22 +139,24 @@ and a follow-up specification ([design, Retirement](design.md#retirement-not-app
     - `src/KyberWeave.Domain/Review/TaskGateResolver.cs` (new)
     - `src/KyberWeave.Domain/Review/Catalogue/GateCatalogueRenderer.cs`: read the shared map instead of its private `AgentTechnology`
     - `tests/KyberWeave.Tests/TaskGateResolverTests.cs` (new): `KyberWeave.Tests.TaskGateResolverTests`
-  - **Acceptance criteria:** An agent with its own entry gets it unchanged; an agent without one gets the technology-keyed gates, else the mapped agent's; same id and command runs once; same id with different commands is refused naming both; nothing resolved with technologies named is an error with a new `KW-REVIEW-*` id; `GateCatalogueRenderTests` and `GateCatalogueToolchainTests` stay green.
+  - **Acceptance criteria:** An agent with its own entry gets it unchanged; an agent without one gets the technology-keyed gates, else the mapped agent's; same id, command and globs runs once; same id with a different command runs both, reported as `<technology>:<id>`; nothing resolved with technologies named is an error with a new `KW-REVIEW-*` id; `GateCatalogueRenderTests` and `GateCatalogueToolchainTests` stay green.
   - **Capabilities:** C# domain logic in the review engine, with xUnit tests
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~TaskGateResolverTests|FullyQualifiedName~GateCatalogueRenderTests|FullyQualifiedName~GateCatalogueToolchainTests"`
   - **Depends on:** 2.1
   - _Requirements: 6.1, 6.3, 6.4, 6.5, 6.6, 6.7_
 
 - [ ] 2.3 Use the resolver at every lookup
-  - **Objective:** Replace the four direct `TaskGates` lookups with the resolver, passing the task's technologies.
+  - **Objective:** Replace the four direct `TaskGates` lookups with the resolver, passing the task's technologies, and warn when a task's files belong to a declared technology it does not name.
   - **Files:**
     - `src/KyberWeave.Application/Review/ReviewGatesService.cs`, `src/KyberWeave.Application/Review/PacketTestCommandRenderer.cs`, `src/KyberWeave.Application/Docs/Validation/PacketHostFacts.cs`, `src/KyberWeave.Application/Arbiter/Facts/TriggerFactBuilder.cs`
+    - `src/KyberWeave.Application/Docs/Validation/PlanTaskFileValidator.cs`: the unnamed-technology warning, with a new `KW-DOC-TASKS-*` id
+    - `tests/KyberWeave.Tests/PlanTaskFileValidatorTests.cs`: new cases
     - `tests/KyberWeave.Tests/ReviewGatesTechnologyResolutionTests.cs` (new): `KyberWeave.Tests.ReviewGatesTechnologyResolutionTests`
-  - **Acceptance criteria:** A gate run for an agent with no entry and a task naming `csharp` runs the `csharp-dev` gates of an unedited host configuration; the packet lists the same gates; `config.task-gates-declared` is true for it; every existing case in `ReviewGatesAgentCommandTests`, `PacketHostFactsTests` and `PacketTestCommandTests` passes unchanged.
+  - **Acceptance criteria:** A gate run for an agent with no entry and a task naming `csharp` runs the `csharp-dev` gates of an unedited host configuration; the packet lists the same gates; `config.task-gates-declared` is true for it; a `.sh` file in a task that names only `csharp` is a warning naming the file and `github-actions`, while a `.cs` file in a task that names `csharp` reports nothing whatever other technologies select `.cs`; every existing case in `ReviewGatesAgentCommandTests`, `PacketHostFactsTests` and `PacketTestCommandTests` passes unchanged.
   - **Capabilities:** C# application services in the review engine and Arbiter facts, with xUnit tests
-  - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~ReviewGatesTechnologyResolutionTests|FullyQualifiedName~ReviewGatesAgentCommandTests|FullyQualifiedName~PacketHostFactsTests|FullyQualifiedName~PacketTestCommandTests"`
+  - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~ReviewGatesTechnologyResolutionTests|FullyQualifiedName~ReviewGatesAgentCommandTests|FullyQualifiedName~PacketHostFactsTests|FullyQualifiedName~PacketTestCommandTests|FullyQualifiedName~PlanTaskFileValidatorTests"`
   - **Depends on:** 2.2
-  - _Requirements: 6.1, 6.7, 6.8, 6.9_
+  - _Requirements: 3.6, 6.1, 6.7, 6.8, 6.9_
 
 - [ ] 2.4 Document phase 2
   - **Objective:** Describe technology-resolved task gates and the new configuration key.
@@ -180,26 +182,26 @@ and a follow-up specification ([design, Retirement](design.md#retirement-not-app
   - _Requirements: 2.4, 8.1_
 
 - [ ] 3.2 Choose the roster per host and per run
-  - **Objective:** Add the `worker-roster` host key, its Config Reg property and the `run start --worker-roster` override.
+  - **Objective:** Add the `worker-roster` host key, its Config Reg property and the roster option on the commands that write a task file.
   - **Files:**
     - `src/KyberWeave.Domain/Configuration/KyberWeaveConfig.cs`, `src/KyberWeave.Domain/Configuration/KyberWeaveYamlDocument.cs`, `src/KyberWeave.Domain/Configuration/ConfigRegConfig.cs`
-    - `src/KyberWeave.Cli/Commands/Run/RunStartSettings.cs`, `src/KyberWeave.Domain/RunStart/RunStartPlanner.cs`
+    - `src/KyberWeave.Cli/Commands/Docs/DocsFinalizeSettings.cs`, `src/KyberWeave.Cli/Commands/Docs/DocsTasksSettings.cs`, `src/KyberWeave.Mcp/DocsTools.PlanLifecycle.cs`: the roster option, passed to the task-file writer
     - `tests/KyberWeave.Tests/WorkerRosterConfigTests.cs` (new): `KyberWeave.Tests.WorkerRosterConfigTests`
-  - **Acceptance criteria:** No key means `technology`; an illegal value is a load error naming both legal values; the Config Reg block lists `<worker-roster>`; the override applies to one run and the start report prints the roster.
+  - **Acceptance criteria:** No key means `technology`; an illegal value is a load error naming both legal values; the Config Reg block lists `<worker-roster>`; the option overrides the host value for that task file only, and the command's report prints the roster.
   - **Capabilities:** C# configuration and CLI option handling, with xUnit tests
-  - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~WorkerRosterConfigTests|FullyQualifiedName~ConfigRegTests|FullyQualifiedName~RunStartCommandTests"`
+  - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~WorkerRosterConfigTests|FullyQualifiedName~ConfigRegTests|FullyQualifiedName~DocsTasksCommandTests|FullyQualifiedName~PlanFinalizeTests"`
   - **Depends on:** 2.4
   - _Requirements: 2.1, 2.2, 2.3_
 
 - [ ] 3.3 Add the three role agents
-  - **Objective:** Write `server-dev`, `client-dev` and `devops-dev`, mark the eleven technology agents with their roster, and add the role agents to the bundle and the conductor's roster.
+  - **Objective:** Write `server-dev`, `client-dev` and `devops-dev`, mark the ten technology agents other than `sql-database-architect` with their roster, and add the role agents to the bundle and the conductor's roster.
   - **Files:**
     - `products/kyber-squad/agents/server-dev.md`, `client-dev.md`, `devops-dev.md` (new)
-    - the eleven technology agent files: one added `worker-roster: technology` line each
+    - the ten technology agent files (`csharp-dev`, `dal-dev`, `go-dev`, `maui-dev`, `pulumi-dev`, `python-dev`, `react-dev`, `rust-dev`, `tauri-dev`, `typescript-dev`): one added `worker-roster: technology` line each; `sql-database-architect` gets none
     - `products/kyber-squad/bundles/full.yml`, `products/kyber-squad/agents/conductor.md` (`delegates-to`)
     - `tests/KyberWeave.Tests/SquadRoleAgentContentTests.cs` (new): `KyberWeave.Tests.SquadRoleAgentContentTests`
     - `tests/KyberWeave.Tests/SquadCanonicalContentTests.cs`, `SquadSourceTests.cs`, `SquadPackAndReleaseTests.cs`: roster counts and lists
-  - **Acceptance criteria:** Each role agent uses the `worker` profile, the `general` model profile and the technology agents' exact Copilot tool line; its body names no technology rule, command or library; its description says it is used only under roster `role`; its workflow fetches the bundle for every technology the packet lists before the first edit and holds the interim technology-to-skill table; every existing agent still loads with an unchanged name.
+  - **Acceptance criteria:** Each role agent uses the `worker` profile, the `general` model profile and the technology agents' exact Copilot tool line; its body names no technology rule, command or library, the interim technology-to-skill table being the one exception; its description says it is used only under roster `role`; its workflow fetches the bundle for every technology the packet lists before the first edit and holds the interim technology-to-skill table; every existing agent still loads with an unchanged name.
   - **Capabilities:** Agent instruction writing in Markdown and YAML frontmatter, with xUnit content tests
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~SquadRoleAgentContentTests|FullyQualifiedName~SquadCanonicalContentTests|FullyQualifiedName~SquadSourceTests|FullyQualifiedName~SquadPackAndReleaseTests"`
   - **Depends on:** 3.1
@@ -211,7 +213,7 @@ and a follow-up specification ([design, Retirement](design.md#retirement-not-app
     - `src/KyberWeave.Application/Docs/Validation/PlanTaskAgentPick.cs`, `PlanTaskFileGenerator.cs`, `PlanTaskFileValidator.cs`
     - `src/KyberWeave.Domain/Docs/Validation/PlanTaskFile.cs`, `PlanTaskPacket.cs` (the ready queue names the roster)
     - `tests/KyberWeave.Tests/PlanTaskAgentPickTests.cs`, `PlanTaskFileValidatorTests.cs`: new cases
-  - **Acceptance criteria:** Under `role`, candidates are the three role agents plus agents with no roster key; under `technology`, the role agents are absent; the task file records the roster; under `role`, a file-changing task with no technologies is an error; a `Role:` line naming the other roster is kept with a warning.
+  - **Acceptance criteria:** Under `role`, candidates are the three role agents plus agents with no roster key; under `technology`, the role agents are absent; the task file records the roster given by the option, else the host's; under `role`, a file-changing task with no technologies is an error; a `Role:` line naming the other roster is kept with a warning.
   - **Capabilities:** C# application logic in the documentation engine around the decision-model pick, with xUnit tests
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~PlanTaskAgentPickTests|FullyQualifiedName~PlanTaskFileValidatorTests"`
   - **Depends on:** 3.1, 3.2
@@ -233,7 +235,7 @@ and a follow-up specification ([design, Retirement](design.md#retirement-not-app
   - **Files:**
     - `src/KyberWeave.Application/Arbiter/Facts/TriggerFactBuilder.cs`, `src/KyberWeave.Domain/Arbiter/ArbiterTriggerCatalog.cs`, `src/KyberWeave.Domain/Arbiter/Rules/default-rules.yml`
     - `tests/KyberWeave.Tests/Arbiter/ArbiterWorkerRosterTests.cs` (new): `KyberWeave.Tests.Arbiter.ArbiterWorkerRosterTests`
-  - **Acceptance criteria:** The fact is true, false or absent as the design states; the rule has a new id, every answer allows, and the decision is logged; role agents are classified `implementation` with profile `worker`; no existing rule id or rule body changes.
+  - **Acceptance criteria:** The fact takes the roster from the `worker-roster` field of the run's `tasks.json` or `<plan>.tasks.json`, else from the host configuration; it is true when the dispatched agent belongs to that roster or declares none, false when it belongs to the other, and absent when the target is not a Squad agent; the rule has a new id, every answer allows, and the decision is logged; role agents are classified `implementation` with profile `worker`; no existing rule id or rule body changes.
   - **Capabilities:** C# Arbiter facts and YAML rule authoring, with xUnit tests
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~ArbiterWorkerRosterTests|FullyQualifiedName~ArbiterClassificationTests"`
   - **Depends on:** 3.1, 3.2
@@ -286,7 +288,7 @@ and a follow-up specification ([design, Retirement](design.md#retirement-not-app
 - [ ] 4.4 Run the comparison and record the decision
   - **Objective:** Run the six runs of the runbook, fill in the results, and write the decision record on retiring, keeping, or partly keeping the technology agents.
   - **Files:** `docs/kyber-squad/roster-comparison-runbook.md` (results), `docs/adr/` (new record), `docs/adr/README.md`
-  - **Acceptance criteria:** Six runs are recorded with every measurement or a stated reason one is missing; the record answers decisions D2 and D3 of the design from the results; the owner has approved the record.
+  - **Acceptance criteria:** Six runs are recorded with every measurement or a stated reason one is missing; the record answers, from the results, whether the server and client split is kept or replaced by one developer agent, and whether `sql-database-architect` folds into `server-dev`; the owner has approved the record.
   - **Capabilities:** Running end-to-end Squad delivery runs, reading run evidence, and writing an architecture decision record
   - **Command:** `dotnet run --project src/KyberWeave.Cli -- docs validate .`
   - **Depends on:** 4.2, 4.3
@@ -308,21 +310,21 @@ and a follow-up specification ([design, Retirement](design.md#retirement-not-app
 | Task | Test project or file | Runner | Observable behaviour | Failing run's expected reason | Passing acceptance |
 |---|---|---|---|---|---|
 | 1.1 | `tests/KyberWeave.Tests`: `PlanTaskTechnologiesTests`, `PlanTaskFileGeneratorReadTests` | task's Command | A `Technologies:` line reaches the task file as a list | The field and the parser branch do not exist | New class passes; the read tests stay green |
-| 1.2 | `tests/KyberWeave.Tests`: `PlanTaskFileValidatorTests` | task's Command | Unknown technology is an error; an unnamed implied technology is a warning | The checks do not exist, so no diagnostic is raised | New cases pass; existing cases unchanged |
+| 1.2 | `tests/KyberWeave.Tests`: `PlanTaskFileValidatorTests` | task's Command | Unknown technology is an error | The check does not exist, so no diagnostic is raised | New cases pass; existing cases unchanged |
 | 1.3 | `tests/KyberWeave.Tests`: `PacketHostFactsTests` | task's Command | One standards line per technology in the packet | `Render` has no technologies input | New cases pass; existing output unchanged |
 | 1.4 | `tests/KyberWeave.PromptContent.Tests`: `SquadStandardsToolContractTests` | task's Command | Planner instructions carry the two rules | The sentences are absent | New cases pass |
 | 1.5 | none: documentation | docs gates | Decision record and documents exist | not applicable | Zero findings |
 | 2.1 | `tests/KyberWeave.Tests`: `ReviewTechnologyGatesConfigTests`, `ReviewTaskGatesConfigTests` | task's Command | `review.technology-gates` parses and is validated | The key is unknown to the parser | New class passes; task-gate tests stay green |
 | 2.2 | `tests/KyberWeave.Tests`: `TaskGateResolverTests`, `GateCatalogueRenderTests`, `GateCatalogueToolchainTests` | task's Command | The five resolution outcomes of the design | `TaskGateResolver` does not exist | New class passes; catalogue tests stay green |
-| 2.3 | `tests/KyberWeave.Tests`: `ReviewGatesTechnologyResolutionTests`, `ReviewGatesAgentCommandTests`, `PacketHostFactsTests`, `PacketTestCommandTests` | task's Command | A role-style agent runs the mapped gates end to end | The gate run answers "no gates declared" | New class passes; the three existing classes unchanged |
+| 2.3 | `tests/KyberWeave.Tests`: `ReviewGatesTechnologyResolutionTests`, `ReviewGatesAgentCommandTests`, `PacketHostFactsTests`, `PacketTestCommandTests`, `PlanTaskFileValidatorTests` | task's Command | A role-style agent runs the mapped gates end to end; an unnamed technology is warned about | The gate run answers "no gates declared", and no warning is raised | New class passes; the three existing classes unchanged |
 | 2.4 | none: documentation | docs gates | Resolution documented | not applicable | Zero findings |
 | 3.1 | `tests/KyberWeave.Tests`: `SquadWorkerRosterTests`, `SquadSourceTests` | task's Command | The roster key loads and validates | The loader rejects or ignores the key | New class passes |
-| 3.2 | `tests/KyberWeave.Tests`: `WorkerRosterConfigTests`, `ConfigRegTests`, `RunStartCommandTests` | task's Command | Host key, registry property and run override | The key and option do not exist | New class passes; existing classes stay green |
+| 3.2 | `tests/KyberWeave.Tests`: `WorkerRosterConfigTests`, `ConfigRegTests`, `DocsTasksCommandTests`, `PlanFinalizeTests` | task's Command | Host key, registry property and the task-file roster option | The key and option do not exist | New class passes; existing classes stay green |
 | 3.3 | `tests/KyberWeave.Tests`: `SquadRoleAgentContentTests`, `SquadCanonicalContentTests`, `SquadSourceTests`, `SquadPackAndReleaseTests` | task's Command | Three role agents with the stated profile, tools and body rules | The agent files do not exist | All four classes pass |
 | 3.4 | `tests/KyberWeave.Tests`: `PlanTaskAgentPickTests`, `PlanTaskFileValidatorTests` | task's Command | Candidates follow the roster; the task file records it | Candidates are unfiltered | New cases pass |
 | 3.5 | `tests/KyberWeave.PromptContent.Tests`: `ArbiterConductorContractTests` | task's Command | Conductor instructions carry the roster rule | The sentence is absent | New cases pass |
 | 3.6 | `tests/KyberWeave.Tests`: `ArbiterWorkerRosterTests`, `ArbiterClassificationTests` | task's Command | The fact and its allow-and-log rule | The fact is unknown to the catalogue | New class passes; classification stays green |
-| 3.7 | `tests/KyberWeave.Tests`: `SquadRoleAgentRenderTests` | task's Command | Thirteen harnesses render three more agents, remove none | The expected outputs are not rendered until 3.3 lands; written against 3.3's agents, the class fails only if a renderer drops or alters them | Class passes on all thirteen |
+| 3.7 | `tests/KyberWeave.Tests`: `SquadRoleAgentRenderTests` | task's Command | Thirteen harnesses render three more agents, remove none | No failing run: a characterization test over the agents 3.3 added; it fails only if a renderer drops or alters one | Class passes on all thirteen |
 | 4.1, 4.3, 4.4 | none: documentation and measured runs | docs gates | Inventory, runbook, results, decision record | not applicable | Zero findings; owner approval of the record |
 | 4.2 | `tests/KyberWeave.Tests`: `SquadRoleAgentContentTests`, `SquadCanonicalContentTests` | task's Command | Baseline rules present once | The rules are not in the baseline | Classes pass |
 | 5.1 | none: closeout | docs gates with `--merge-ready` | Specification archived, harvest complete | not applicable | Zero findings |
@@ -341,7 +343,7 @@ and a follow-up specification ([design, Retirement](design.md#retirement-not-app
 |---|---|
 | 1 | 3.3, 5.1 |
 | 2 | 3.1, 3.2, 3.4, 3.5 |
-| 3 | 1.1, 1.2, 3.4 |
+| 3 | 1.1, 1.2, 2.3, 3.4 |
 | 4 | 1.3, 3.3, 4.2 |
 | 5 | 1.4, 1.5 |
 | 6 | 2.1, 2.2, 2.3, 2.4 |

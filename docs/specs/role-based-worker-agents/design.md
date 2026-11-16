@@ -46,7 +46,7 @@ marked as estimates.
 | The same twelve share one capability profile | All name `capability-profile: worker`. `docs-dev` is `documentation`; `github-devops` is `publishing-worker`, which adds network read and ask-to-publish. |
 | Model tiers differ by technology | `fast`: `csharp-dev`, `dal-dev`, `react-dev`, `python-dev`, `maui-dev`, `test-dev`, `docs-dev`. `general`: `typescript-dev`, `go-dev`, `rust-dev`, `tauri-dev`, `pulumi-dev`, `github-devops`. `deep-planning`: `sql-database-architect`. |
 | `fast` and `general` are different models on five harnesses | `products/kyber-squad/profiles/models.yml`: Claude, Codex, Copilot, Cursor and Devin name different models; Pi differs in thinking level only; Antigravity, Factory, Kilo, OpenCode and ZCode name the same model. |
-| Most bodies are pointers; three are not | Sizes run 67 to 82 lines for eight agents. `tauri-dev` is 207 lines and `sql-database-architect` is 182, each with security and platform rules in the body. `csharp-dev` carries a 13-line completion gate on build isolation and diagnostics. |
+| Most bodies are pointers; three are not | Nine agents run 67 to 82 lines. `tauri-dev` is 207 lines and `sql-database-architect` is 182, each with security and platform rules in the body. `csharp-dev`, one of the nine, carries a 13-line completion gate on build isolation and diagnostics. |
 | Four technologies have no skill | Skills exist for `csharp-dev`, `dal-dev`, `go-dev`, `maui-dev`, `python-dev`, `rust-dev`, `typescript-dev`, `github-devops` and `testing`. There is none for React, Tauri, Pulumi or SQL. |
 | Fourteen shipped standards exist | `products/kyber-squad/standards/`: azure, csharp, data-access-layer, github-actions, go, maui, pulumi, python, react, rust, sql, tauri, test, typescript. |
 
@@ -59,6 +59,7 @@ marked as estimates.
 | Council gates are not keyed by agent | `review.gates` entries are keyed by gate id and selected by `include` globs. The brief's statement that `review.gates` is agent-keyed does not match the code; only `review.task-gates` is. |
 | The shipped gate catalogue names agents | `GateCatalogueRenderer` holds `AgentOrder` and an `AgentTechnology` map (for example `dal-dev`, `maui-dev` and `pulumi-dev` all map to `csharp`); each family file lists `agents:` per gate, and `test-dev` receives a copy of format and lint gates. |
 | Some task gates have no `include` | The catalogue's `build` gate for C# has none, so it runs for every task of the agent it is listed under. |
+| Gates shared between agents are identical here | In this repository's configuration every gate id that two agents share (`react-dev` and `typescript-dev`, `rust-dev` and `tauri-dev`, `csharp-dev` and `dal-dev`) has the same command and globs. Other hosts may differ: the catalogue makes ids unique per agent, not across agents. |
 | `docs init` never rewrites a host's review block | Stated in the block's own header, written by `GateCatalogueRenderer.BuildYaml`. |
 | Routing already ignores technology names in plans | ADR 0080: a task carries a `Capabilities:` line in plain words. ADR 0082: the decision model picks the agent once, when the task file is written, from every embedded agent whose class is `implementation` (`PlanTaskAgentPick.ImplementationAgents`), keeping picks at 0.8 confidence or more. |
 | Arbiter rules key on profile, with three names | `default-rules.yml` reads `delegation.target-profile` and `delegation.target-class`. It names only `test-dev` (`KW-ARB-MODE-002`). `docs-dev` and `github-devops` are named in delivery and closeout messages (`RunDelivery`, `PlanLifecycleService`, `ArbiterRunStartRemedy`, `SecondaryTriggers`). No rule names a technology agent. |
@@ -93,9 +94,10 @@ These are stated so the owner can weigh them; the design still follows the owner
    lines of working habit. A single `dev` agent would behave the same to the machine. The split is
    kept because the owner asked for it and because it gives parallel work a readable boundary;
    the comparison should say whether it earns its place (decision D2).
-4. **The misrouting that prompted this was designed behaviour, not a roster fault.** `csharp-dev`'s
-   own "Data layer" section tells it to take repository, SQL and migration files when its task names
-   them. Role agents remove the question rather than fix an error.
+4. **The misrouting that prompted this may be designed behaviour.** `csharp-dev`'s own "Data
+   layer" section tells it to take repository, SQL and migration files when its task names them.
+   The run itself was not examined for this specification. Either way, role agents remove the
+   question instead of answering it.
 5. **Routing was rebuilt three days ago.** ADR 0080 (2026-11-13) and ADR 0082 (2026-11-14) moved
    routing to capabilities and a model pick, which measured 0.99 to 1.00 confidence on six tasks.
    Fewer, broader agents make that pick easier, but they also remove the description as a place to
@@ -117,26 +119,32 @@ These are stated so the owner can weigh them; the design still follows the owner
 | `docs-dev` | both | stays: sole holder of the `documentation` profile; closeout names it | `documentation` | `fast` |
 | `github-devops` | both | stays as the delivery agent: run start, push, pull request | `publishing-worker` | `general` |
 | `sql-database-architect` | both | stays for now: the only `deep-planning` worker (decision D3) | `worker` | `deep-planning` |
-| Eleven technology agents | technology | unchanged | unchanged | unchanged |
+| Ten technology agents (all but `sql-database-architect`) | technology | unchanged | unchanged | unchanged |
 
 `devops-dev` takes the `worker` profile, not `publishing-worker`. Folding Pulumi work into
 `github-devops` would give infrastructure code network read and ask-to-publish it does not have
 today. Publishing stays with `github-devops`.
 
 An agent declares its roster with a new optional frontmatter key, `worker-roster: technology | role`.
-An agent without the key serves both rosters. The eleven technology agents gain
-`worker-roster: technology`; that one line is the only edit made to them.
+An agent without the key serves both rosters. The ten technology agents other than
+`sql-database-architect` gain `worker-roster: technology`; that one line is the only edit made to
+them.
 
 ### Choosing the roster
 
 A new top-level host configuration key, `worker-roster`, takes `technology` (the default) or `role`.
 It is published in the Config Reg as `<worker-roster>`, the same way `<autonomy>` is.
-`kyber-weave run start --worker-roster <value>` overrides it for one run and prints the roster in
-the start report.
+
+The per-run override is given where the task file is written: `docs finalize`, the finalize tool
+and `docs tasks --write` accept a roster option. The task file's `worker-roster` field is then the
+single record of the run's roster. The ready queue, validation and the Arbiter fact read it from
+the task file; where no task file resolves they use the host configuration. The gate resolver does
+not need the roster: it keys on whether the agent has its own entry.
 
 - `PlanTaskAgentPick.ImplementationAgents` filters candidates to the active roster plus agents with
   no roster key.
-- The task file gains a top-level `worker-roster` field, written by `PlanTaskFileGenerator`.
+- The task file gains a top-level `worker-roster` field, written by `PlanTaskFileGenerator`. An
+  unchanged rewrite keeps the recorded roster unless the option is given again.
 - The conductor's `delegates-to` gains the three role agents. Its instructions say to dispatch only
   agents of the roster the ready queue names.
 - A `Role:` line naming an agent of the other roster is kept and reported as a warning, new id
@@ -161,9 +169,10 @@ Validation, in `PlanTaskFileValidator`:
 - unknown technology: error;
 - roster `role`, task with files and no technologies: error;
 - roster `technology`, no technologies: accepted;
-- a file in scope whose extension matches the `include` globs of a declared technology's gates that
-  the task does not name: warning. The globs are the ones the host already wrote; no second table of
-  extensions is kept.
+- a file in scope that no named technology's gate `include` globs select, but another declared
+  technology's do: warning. Technologies share extensions (`.cs`, `.ts`, `.rs`), so a file a named
+  technology already covers is never reported. The globs are the ones the host already wrote; no
+  second table of extensions is kept. This check uses the gate resolver, so it ships in phase 2.
 
 ### Packet delivery
 
@@ -200,8 +209,9 @@ the agent name and the task's technologies.
 2. Otherwise, for each technology of the task: take `review.technology-gates.<technology>` when the
    host declares it; else take the entry of the technology agent the shipped map names for that
    technology.
-3. Merge the lists in technology order. The same id with the same command runs once. The same id
-   with different commands is refused, naming both entries.
+3. Merge the lists in technology order. The same id with the same command and globs runs once. The
+   same id with a different command runs as well, and the report names each as
+   `<technology>:<id>`, so a clash between two technologies' gates never stops a run.
 4. Nothing resolved for a role agent whose task names technologies: an error with a new
    `KW-REVIEW-0NN` id and a non-zero exit, because a silent empty report is how gating would be lost.
 
@@ -233,8 +243,8 @@ dispatch to the inactive roster is logged, not blocked. That follows
 
 The thirteen renderers iterate the bundle's agents and need no agent-specific change. The work is
 content and tests: three agent files, three more rendered outputs per harness, the `full` bundle
-list, and the tests that pin the shipped roster. The Copilot renderer intersects each worker's tools
-with the selected agent's list, so the role agents copy the technology agents' tool line exactly.
+list, and the tests that pin the shipped roster. Copilot grants a worker exactly the tools its
+`copilot-tools` line lists, so the role agents copy the technology agents' line unchanged.
 The parser must accept the new frontmatter key and every renderer must leave it out of rendered
 frontmatter.
 
@@ -243,16 +253,16 @@ frontmatter.
 All three role agents name `general`. Against today, that raises the tier for C#, data-access,
 Python, React and MAUI work (now `fast`) on Claude, Codex, Copilot, Cursor and Devin, and changes
 nothing for TypeScript, Go, Rust, Tauri and Pulumi work. Schema design keeps `deep-planning` because
-`sql-database-architect` stays. User presets are keyed by profile, so they keep working. The
-Arbiter's existing difficulty retarget still moves a single dispatch between tiers.
+`sql-database-architect` stays. User presets are keyed by profile, so they keep working. Where a
+host has turned on the Arbiter's difficulty retarget, it keys on profile and is unaffected.
 
 ### Comparison
 
 A runbook defines the procedure of Requirement 10: three plans (server-only, client-only, mixed),
 each run once per roster from one base commit, on one harness, under a preset that maps `fast` and
-`general` to the same model. The measurements come from sources that exist today: the run's gate
-reports, the council's findings, the task file's picks and confidence, and KyberDash's token and
-time totals. The result is written as an ADR.
+`general` to the same model. The intended sources are the run's gate reports, the council's findings, the task file's picks and
+confidence, and KyberDash's session records for tokens, time and tool calls. The runbook task
+confirms each source and names any measurement that has none. The result is written as an ADR.
 
 ### Retirement (not approved here)
 
@@ -289,7 +299,7 @@ fixes only its shape, so nothing built now blocks it:
 | Unknown technology on a task | `docs validate` error naming the task, the value and the declared list. |
 | Role roster, file-changing task without technologies | `docs validate` error naming the task. |
 | Role agent, technologies named, no gate resolves | Gate run error, non-zero exit, hint naming `review.technology-gates`. |
-| Same gate id, different commands, across a task's technologies | Gate run refused, both entries named. |
+| Same gate id, different commands, across a task's technologies | Both run; each is reported as `<technology>:<id>`. |
 | `worker-roster` holds another value | Configuration load error listing the two legal values. |
 | `Role:` names an agent of the inactive roster | Kept; warning when the task file is written. |
 | Docs tool has no standard for a listed technology | Worker reports an open item; it does not improvise. |
@@ -301,7 +311,7 @@ Test-first, with targeted classes only; no task runs the full suite.
 
 - **New test classes** (about ten): roster key parsing and validation; picker candidate filtering;
   `Technologies:` parsing, task-file round trip and the four validation cases; packet host facts for
-  technologies; `TaskGateResolver` (own entry, technology key, legacy fallback, merge, conflict,
+  technologies; `TaskGateResolver` (own entry, technology key, legacy fallback, merge, same-id clash,
   nothing resolved); `review.technology-gates` parsing; the Arbiter fact and rule; role-agent content
   (no technology named in the body); rendered output for one harness per renderer family.
 - **Existing tests that change** (estimate: 12 to 18 files): the classes that pin the shipped
@@ -337,7 +347,7 @@ Estimates, for planning only.
 | D6 | Where does technology knowledge come from? | The stitched standards bundle of pull request 625, fetched through the docs tool. | One delivery route. The interim skill table exists only until that plan ships. | user: explicit decision 2026-11-16 |
 | D7 | How does a task declare technologies? | A `Technologies:` line checked against `ontology.technologies`. | A closed list the host already owns. It does not constrain `Capabilities:`, so ADR 0080's no-vocabulary rule for capabilities stands. Inferring from file extensions alone cannot tell React from Node TypeScript, or Tauri from plain Rust. | autonomous: recommendation, pending owner approval |
 | D8 | How are task gates keyed for role agents? | By the task's technologies, with fallback to the mapped technology agent's entry. | Server and client share languages, so a role key would run the wrong gates. The fallback means no host edit is needed to try the role roster. | autonomous: recommendation, pending owner approval |
-| D9 | How is the roster chosen? | Host key `worker-roster`, default `technology`, with a per-run override on `run start`. | Mirrors `autonomy`. One roster per run keeps the model pick unambiguous. | autonomous: low-confidence, no authoritative source; cheap to reverse |
+| D9 | How is the roster chosen? | Host key `worker-roster`, default `technology`, with a per-run override given when the task file is written and recorded in it. | Mirrors `autonomy`. One roster per run keeps the model pick unambiguous, and the task file is the one place every later reader already opens. | autonomous: low-confidence, no authoritative source; cheap to reverse |
 | D10 | How does an agent declare its roster? | Optional frontmatter key `worker-roster`; absent means both. | One line per agent, read by the embedded catalogue the picker already uses. A separate roster file was the alternative; it would put one fact in two places. | autonomous: low-confidence, no authoritative source; cheap to reverse |
 | D11 | Which model profile do role agents use? | `general` for all three. | Raises the tier for five technologies on five harnesses and lowers none. The comparison uses a same-model preset, so tier does not confound it. | autonomous: recommendation, pending owner approval |
 | D12 | How does the architect read standards? | Through the docs tool, per technology a task names, just in time. | Owner direction; matches ADR 0064 for workers. | user: explicit decision 2026-11-16 |

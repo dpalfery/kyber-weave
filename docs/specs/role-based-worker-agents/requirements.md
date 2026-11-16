@@ -47,7 +47,8 @@ Terms used below:
 - **Worker roster**: the set of worker agents a run may dispatch. `technology` is today's set;
   `role` is the new set.
 - **Role agent**: `server-dev`, `client-dev` or `devops-dev`.
-- **Technology agent**: one of the eleven per-technology workers named above.
+- **Technology agent**: one of the eleven per-technology workers named above. Ten of them belong to
+  the `technology` roster only; `sql-database-architect` serves both rosters.
 - **Shared worker**: `test-dev`, `docs-dev` and `github-devops`, which serve both rosters.
 - **Task gate**: a command a worker runs on its own change before it reports done, declared by the
   host repository under `review.task-gates`.
@@ -86,7 +87,8 @@ list the technology agents use.
 agents SHALL stay as they are and SHALL be dispatchable under both rosters.
 
 1.8. A role agent's body SHALL name no technology-specific rule, command, library or skill; it
-SHALL state only the role's scope, the workflow and the rules that hold for every technology.
+SHALL state only the role's scope, the workflow and the rules that hold for every technology. The
+interim table of criterion 4.5 is the one exception.
 
 ### Requirement 2: One roster is active per run
 
@@ -99,8 +101,9 @@ choose between a technology agent and a role agent for the same task.
 
 2.2. IF the host configuration declares no `worker-roster` THEN the system SHALL use `technology`.
 
-2.3. WHEN a run starts with an explicit roster option THEN that value SHALL override the host
-configuration for that run only, and the run's start report SHALL state the roster in use.
+2.3. WHEN a task file is written with an explicit roster option THEN that value SHALL override the
+host configuration for that plan or specification only, and the command's report SHALL state the
+roster in use.
 
 2.4. WHEN the task-file writer asks the decision model to pick an agent THEN the candidates SHALL be
 the active roster's workers plus the shared workers, and no agent of the other roster.
@@ -111,8 +114,8 @@ limit the choice to the active roster's workers plus the shared workers.
 2.6. IF a plan task names an agent of the inactive roster with an explicit `Role:` line THEN the
 system SHALL keep the owner's override and SHALL report it as a warning when the task file is written.
 
-2.7. THE task file SHALL record the roster it was written under, so a later reader can tell which
-roster a run used.
+2.7. THE task file SHALL record the roster it was written under, and every later reader (the ready
+queue, validation and the Arbiter) SHALL take the run's roster from the task file.
 
 ### Requirement 3: A task declares its technologies
 
@@ -135,9 +138,9 @@ technology names.
 3.5. IF the active roster is `technology` and a task has no `Technologies:` line THEN the system
 SHALL accept the task, so existing plans stay valid.
 
-3.6. WHEN a task's file scope contains a file whose extension belongs to a declared technology the
-task does not name THEN the task-file writer SHALL report a warning naming the file and the
-technology.
+3.6. WHEN a task names technologies and its file scope contains a file that no named technology's
+gates select but another declared technology's gates do THEN `docs validate` SHALL report a warning
+naming the file and that technology.
 
 3.7. THE `Capabilities:` line SHALL stay as it is: plain words, no fixed vocabulary.
 
@@ -202,7 +205,7 @@ gates declared under the technology agent that technology maps to, from one ship
 the system SHALL run that gate once.
 
 6.5. IF two technologies of one task resolve to gates with the same id and different commands THEN
-the system SHALL refuse the run and name both entries.
+the system SHALL run both and report each under its technology and id.
 
 6.6. IF a role agent's task names technologies and no gate resolves for any of them THEN the system
 SHALL report an error, not a warning, and SHALL exit non-zero.
