@@ -30,6 +30,12 @@ namespace KyberWeave.Mcp;
 /// disk is then at worst one refresh behind, not broken.
 /// </para>
 /// <para>
+/// CodeGraph keeps a lock of its own, which its server, its file watcher and any other sync take.
+/// A sync that finds it held is the same condition one layer down, so it gets the same answer: a
+/// few short retries (<see cref="HeldLockRetryPauses"/>), then a note, never a failure. Every other
+/// sync failure still fails the tool.
+/// </para>
+/// <para>
 /// The child's output is captured by <see cref="ProcessRunner"/> and is never read into a
 /// response or a stream of ours: stdout carries the JSON-RPC transport, and one line written
 /// there breaks the session.
@@ -67,6 +73,27 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
     private const string BusyNote =
         "note: codegraph refresh skipped — another process holds the index lock and is refreshing "
         + "it; this answer uses the index as it stands.";
+
+    /// <summary>
+    /// What a caller is told when every sync attempt found CodeGraph's own index lock held. It
+    /// opens like <see cref="BusyNote"/> so one rule reads both.
+    /// </summary>
+    private const string IndexLockHeldNote =
+        "note: codegraph refresh skipped — CodeGraph's own index lock is held by another process "
+        + "(its server, its file watcher, or another sync); this answer uses the index as it stands.";
+
+    /// <summary>
+    /// The pauses before the second and third sync when CodeGraph's own lock is held.
+    /// </summary>
+    /// <remarks>
+    /// Measured against CodeGraph 1.6.2: a sync that finds the lock held returns in about 0.15
+    /// seconds, and a sync with nothing to do holds the lock for about 0.3 seconds. Three attempts
+    /// one second apart in total outlast that and the short syncs a file watcher runs, and cost a
+    /// tool call at most about 1.5 seconds. A longer hold is an index rebuild, which no wait a tool
+    /// call can afford would outlast.
+    /// </remarks>
+    private static readonly TimeSpan[] HeldLockRetryPauses =
+        [TimeSpan.FromMilliseconds(300), TimeSpan.FromMilliseconds(700)];
 
     private readonly string _repositoryRoot;
     private readonly bool _refreshEnabled;
@@ -175,17 +202,15 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
         string lockDirectory = Path.GetTempPath();
 
         DoctorOptions options = new(RefreshBound, RefreshBound, CodeGraphExecutable, "kyber-weave-mcp");
-        DoctorCheck provisioned = _provisioner.Provision(
-            _repositoryRoot,
-            options,
-            _executor,
-            lockDirectory,
-            TimeSpan.Zero);
+        DoctorCheck provisioned = ProvisionPastAHeldIndexLock(options, lockDirectory);
 
         if (!provisioned.Passed)
         {
-            return CodeGraphIndexRules.IsBusy(provisioned)
-                ? CodeGraphGate.Advisory(BusyNote)
+            if (CodeGraphIndexRules.IsBusy(provisioned))
+                return CodeGraphGate.Advisory(BusyNote);
+
+            return CodeGraphIndexRules.IsIndexLockHeld(provisioned)
+                ? CodeGraphGate.Advisory(IndexLockHeldNote)
                 : Failure(stops, provisioned.Reason, provisioned.Fix);
         }
 
@@ -194,6 +219,28 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
             ? CodeGraphGate.Clear
             : Failure(stops, resolver.UnavailableReason, null);
     }
+
+    /// <summary>
+    /// Provisions once, and again after each of <see cref="HeldLockRetryPauses"/> while the only
+    /// thing wrong is that CodeGraph's own index lock is held. Any other result is returned at once.
+    /// </summary>
+    private DoctorCheck ProvisionPastAHeldIndexLock(DoctorOptions options, string lockDirectory)
+    {
+        DoctorCheck provisioned = Provision(options, lockDirectory);
+        foreach (TimeSpan pause in HeldLockRetryPauses)
+        {
+            if (!CodeGraphIndexRules.IsIndexLockHeld(provisioned))
+                break;
+
+            Thread.Sleep(pause);
+            provisioned = Provision(options, lockDirectory);
+        }
+
+        return provisioned;
+    }
+
+    private DoctorCheck Provision(DoctorOptions options, string lockDirectory) =>
+        _provisioner.Provision(_repositoryRoot, options, _executor, lockDirectory, TimeSpan.Zero);
 
     /// <summary>
     /// The failure a tool reports under <paramref name="stops"/>, and the warning it carries

@@ -52,10 +52,12 @@ whatever the server does has to remain honest about both.
 3. **A busy lock is a note, not a failure.** Another process holding the refresh lock means someone
    is already refreshing the index — a worker's `doctor --ensure`, the CodeGraph daemon — so the
    answer proceeds with one `note:` line above the body, saying the index is being updated and the
-   answer uses it as it stands. A refresh that fails while the lock is held is treated the same
-   way, because the lock is the one honest witness that the failure is contention and not
-   breakage. Contention must never be reported as a broken index, or the note becomes noise a
-   caller learns to ignore.
+   answer uses it as it stands. CodeGraph's own lock, `.codegraph/codegraph.lock`, is the same
+   condition one layer down: a `sync` that finds it held is retried twice within about a second,
+   and if it is still held the answer proceeds with a note of the same kind. Contention must never
+   be reported as a broken index, or a healthy index stops a run because two agents asked at once.
+   *Amended 2026-11-16:* a held CodeGraph lock used to be reported as a failed `sync`, which
+   stopped a worker although the index was usable.
 4. **A real failure fails the tools.** A missing binary or a failed `sync` returns
    `STATUS: TOOL_FAILURE` with `tool:`, `reason:` and `fix:` lines, and nothing else, under the
    default stop rule. The token is a whole line so a passing mention cannot satisfy an orchestrator

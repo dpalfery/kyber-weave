@@ -129,6 +129,10 @@ so a tool call never blocks on the provisioner's 600-second index timeout.
 - **A busy lock is a note, not a failure.** Another process refreshing means a worker's
   `doctor --ensure` or the CodeGraph daemon got there first: one `note:` line above the body, and
   the answer proceeds.
+- **CodeGraph's own lock held is busy too.** A `sync` that fails only because
+  `.codegraph/codegraph.lock` is held (`CodeGraphIndexRules.IsIndexLockHeld`) is retried twice,
+  0.3 and 0.7 seconds apart, then answered with a `note:` line. CodeGraph gives no exit code for
+  it, so the rule matches the message; re-check it when CodeGraph is upgraded.
 - **A real failure fails the tool.** `CodeGraphGate.Blocking` returns `STATUS: TOOL_FAILURE` with
   `tool:`, `reason:` and `fix:` lines, and nothing else, under the default stop rule; under
   `stop-on-tool-failure: false` the same detail arrives as the `warning:` advisory instead. The

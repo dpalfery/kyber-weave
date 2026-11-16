@@ -48,6 +48,25 @@ public static class CodeGraphIndexRules
         check.Reason?.StartsWith("codegraph.index busy", StringComparison.Ordinal) == true;
 
     /// <summary>
+    ///     Whether a failed check reports that <c>codegraph sync</c> found CodeGraph's own index lock held by another
+    ///     process: its server, its file watcher, or another sync. The index on disk is then usable, only busy.
+    /// </summary>
+    /// <remarks>
+    ///     CodeGraph 1.6.2 exits 1 for every sync failure and prints no code or marker for this one, so the only
+    ///     signal is its message. The phrase matched is the one its sync prints when it cannot take
+    ///     <c>.codegraph/codegraph.lock</c>, whichever process holds it. It sits at the start of the first error
+    ///     line, so the 160-character cut the check's reason is given cannot remove it. Its two "rebuild in
+    ///     progress" messages are deliberately not matched: the database file is being replaced then, so the index
+    ///     on disk cannot be answered from.
+    /// </remarks>
+    /// <param name="check">The <c>codegraph.index</c> check a provisioning run returned.</param>
+    public static bool IsIndexLockHeld(DoctorCheck check) =>
+        !check.Passed
+        && check.Reason is { } reason
+        && reason.StartsWith("codegraph sync exited ", StringComparison.Ordinal)
+        && reason.Contains("Sync could not acquire the file lock", StringComparison.Ordinal);
+
+    /// <summary>
     ///     Whether an <see cref="IOException"/> represents a sharing or locking violation caused by another process.
     /// </summary>
     /// <param name="ex">The exception.</param>

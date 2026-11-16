@@ -241,8 +241,14 @@ with no shell was the only index it would ever see. It now refreshes the index i
   a **zero wait**: a tool call cannot block for the 600-second index timeout.
 - **Contention is a note, not a failure.** A held lock means another process is refreshing the
   index — a worker's `doctor --ensure`, the CodeGraph daemon — so the answer proceeds with one
-  `note:` line above the body. A refresh that fails while the lock is held is treated the same
-  way, because the lock is the one honest witness that someone is already working on it.
+  `note:` line above the body.
+- **CodeGraph's own lock is contention too.** CodeGraph keeps a second lock,
+  `.codegraph/codegraph.lock`, which its server, its file watcher and every `sync` take. A
+  `sync` that finds it held is retried twice, after 0.3 and 0.7 seconds, which costs a tool
+  call about 1.5 seconds at most; if it is still held the answer proceeds with the same kind of
+  `note:` line. CodeGraph exits 1 for every `sync` failure, so the held lock is recognised by
+  the message its `sync` prints, "Sync could not acquire the file lock". Its "rebuild in
+  progress" messages stay failures, because the database file is being replaced.
 - **Failure is a token, not a sentence.** A missing binary or a failed `sync` returns
   `STATUS: TOOL_FAILURE` with `tool:`, `reason:` and `fix:` lines under the stop rule, or the
   same detail as a `warning:` line under `stop-on-tool-failure: false`. The token is a whole
