@@ -93,34 +93,6 @@ public sealed class ArbiterSquadCatalog
         };
     }
 
-    /// <summary>
-    /// Loads a catalog from directories on disk: top-level <c>*.md</c> agents and a
-    /// lenses directory, mirroring how the canonical source loader discovers them.
-    /// </summary>
-    public static ArbiterSquadCatalog LoadFromDirectories(string agentsDirectory, string lensesDirectory)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(agentsDirectory);
-        ArgumentException.ThrowIfNullOrWhiteSpace(lensesDirectory);
-        Dictionary<string, ArbiterSquadAgent> agents = new(StringComparer.Ordinal);
-        foreach (string path in Directory.EnumerateFiles(agentsDirectory, "*.md", SearchOption.TopDirectoryOnly)
-                     .Order(StringComparer.Ordinal))
-        {
-            ArbiterSquadAgent agent = ParseAgent(
-                Path.GetFileNameWithoutExtension(path), File.ReadAllText(path));
-            agents[agent.Name] = agent;
-        }
-
-        Dictionary<string, ArbiterSquadLens> lenses = new(StringComparer.Ordinal);
-        foreach (string path in Directory.EnumerateFiles(lensesDirectory, "*.md", SearchOption.TopDirectoryOnly)
-                     .Order(StringComparer.Ordinal))
-        {
-            string name = Path.GetFileNameWithoutExtension(path);
-            lenses[name] = new ArbiterSquadLens(name, ReadApplicabilitySection(File.ReadAllText(path)));
-        }
-
-        return new ArbiterSquadCatalog(agents, lenses);
-    }
-
     /// <summary>Extracts the <c>## Applicability</c> section body from lens markdown.</summary>
     internal static string ReadApplicabilitySection(string markdown)
     {
