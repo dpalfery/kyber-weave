@@ -1,6 +1,7 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Data.CodeGraph;
+using KyberWeave.Data.Configuration;
 using KyberWeave.Data.Doctor;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Host;
@@ -35,6 +36,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IHooksConfigSource>(sp => new YamlHooksConfigSource(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<ITestClassResolver>(sp => new ConventionTestClassResolver(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<ICodeGraphPortsFactory, CodeGraphPortsFactory>();
+        services.TryAddSingleton<IUserHostConfigStore, FileUserHostConfigStore>();
         return services;
     }
 }

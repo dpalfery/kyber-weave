@@ -1,110 +1,29 @@
-using KyberWeave.Core.Docs.Scaffolding;
-using KyberWeave.Core.FileSystem;
-using KyberWeave.Core.Parsing;
-using YamlDotNet.Core;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Data.Configuration;
 
 namespace KyberWeave.Core.Configuration;
 
 /// <summary>
 /// User-level host config path and global target ledger.
 /// </summary>
+/// <remarks>
+/// The path is <see cref="UserHostConfigPath"/> in the domain layer and the file access is
+/// <see cref="FileUserHostConfigStore"/> in the data layer, behind <see cref="IUserHostConfigStore"/>. This static entry
+/// point stays for the callers that have no container (the Arbiter hook host, and the CLI commands not yet moved onto
+/// it), and answers over the real file system.
+/// </remarks>
 public static class UserHostConfig
 {
-    public static string GetPath(string home)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(home);
-        return Path.Combine(home, ".kyber-weave", "kyber-weave.yml");
-    }
+    private static readonly IUserHostConfigStore Store = new FileUserHostConfigStore();
 
-    public static string EnsureUserConfig(string home)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(home);
+    public static string GetPath(string home) => UserHostConfigPath.Of(home);
 
-        string path = GetPath(home);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+    public static string EnsureUserConfig(string home) => Store.EnsureUserConfig(home);
 
-        string yaml = File.Exists(path)
-            ? File.ReadAllText(path)
-            : string.Empty;
+    public static void WriteGlobalTargets(string home, IReadOnlyList<string> targets) =>
+        Store.WriteGlobalTargets(home, targets);
 
-        string updated = HostConfigYaml.WithArbiterEnabled(yaml);
-        if (!File.Exists(path) || !string.Equals(yaml, updated, StringComparison.Ordinal))
-        {
-            AtomicFile.WriteAllText(path, updated);
-        }
+    public static void RemoveGlobalTarget(string home, string target) => Store.RemoveGlobalTarget(home, target);
 
-        return updated;
-    }
-
-    public static void WriteGlobalTargets(string home, IReadOnlyList<string> targets)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(home);
-        ArgumentNullException.ThrowIfNull(targets);
-
-        string path = GetPath(home);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-
-        string yaml = File.Exists(path)
-            ? File.ReadAllText(path)
-            : EnsureUserConfig(home);
-
-        string updated = HostConfigYaml.WithArbiterGlobalTargets(yaml, targets);
-        if (!string.Equals(yaml, updated, StringComparison.Ordinal))
-        {
-            AtomicFile.WriteAllText(path, updated);
-        }
-    }
-
-    public static void RemoveGlobalTarget(string home, string target)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(home);
-        ArgumentException.ThrowIfNullOrWhiteSpace(target);
-
-        string path = GetPath(home);
-        if (!File.Exists(path))
-        {
-            return;
-        }
-
-        string yaml = File.ReadAllText(path);
-        string updated = HostConfigYaml.WithoutArbiterGlobalTarget(yaml, target);
-        if (!string.Equals(yaml, updated, StringComparison.Ordinal))
-        {
-            AtomicFile.WriteAllText(path, updated);
-        }
-    }
-
-    public static IReadOnlyList<string> ReadGlobalTargets(string home)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(home);
-
-        string path = GetPath(home);
-        if (!File.Exists(path))
-        {
-            return [];
-        }
-
-        try
-        {
-            string yaml = File.ReadAllText(path);
-            if (string.IsNullOrWhiteSpace(yaml))
-            {
-                return [];
-            }
-
-            ArbiterYamlSection? section = KyberWeaveYamlParser.Parse(yaml).Arbiter;
-            if (section?.Global?.Targets is null)
-            {
-                return [];
-            }
-
-            return [.. section.Global.Targets
-                .Where(target => !string.IsNullOrWhiteSpace(target))
-                .Distinct(StringComparer.Ordinal)];
-        }
-        catch (Exception ex) when (ex is YamlException or IOException or UnauthorizedAccessException)
-        {
-            return [];
-        }
-    }
+    public static IReadOnlyList<string> ReadGlobalTargets(string home) => Store.ReadGlobalTargets(home);
 }
