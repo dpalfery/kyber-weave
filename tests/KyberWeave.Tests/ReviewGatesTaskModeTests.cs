@@ -21,7 +21,7 @@ public sealed class ReviewGatesTaskModeTests : IDisposable
     {
         DocFixture fixture = PlanTaskFileProbe.Corpus();
         Directory.CreateDirectory(Path.Combine(fixture.Root, ".git"));
-        new DocsTasksCommand().Execute(
+        new DocsTasksCommand(DocsPorts.Tasks).Execute(
             null!,
             new DocsTasksSettings { Path = Path.Combine(fixture.Root, PlanTaskFileProbe.PlanPath), Format = "json", Write = true },
             CancellationToken.None);

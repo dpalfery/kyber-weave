@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Processes;
@@ -8,7 +9,7 @@ namespace KyberWeave.Core.Docs.Closeout;
 
 /// <summary>
 /// The file rules the plan lifecycle commands share: which path is an active plan, where the plan index is, and how
-/// the files a command touched are staged. <see cref="PlanCloseout"/> and <see cref="PlanFinalize"/> both refuse any
+/// the files a command touched are staged. <c>PlanCloseout</c> and <c>PlanFinalize</c> both refuse any
 /// path that is not a plan file directly under the plans folder, so neither can be pointed at code or other documents.
 /// </summary>
 internal sealed class ActivePlanFiles
@@ -17,12 +18,16 @@ internal sealed class ActivePlanFiles
     private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(60);
 
     private readonly string _repoRoot;
-    private readonly KyberWeaveConfig _config;
+    private readonly IDocsEngineConfig _config;
+    private readonly IRepositoryFileStore _files;
+    private readonly IBoundedProcessExecutor _process;
 
-    internal ActivePlanFiles(string repoRoot, KyberWeaveConfig config)
+    internal ActivePlanFiles(string repoRoot, IDocsEngineConfig config, IRepositoryFileStore files, IBoundedProcessExecutor process)
     {
         _repoRoot = repoRoot;
         _config = config;
+        _files = files;
+        _process = process;
     }
 
     /// <summary>The plan index's repository-relative path, or null when the configuration registers none.</summary>
@@ -39,7 +44,7 @@ internal sealed class ActivePlanFiles
             return "The configuration registers no plan index, so no plan is active.";
 
         string folder = Path.GetDirectoryName(index)?.Replace('\\', '/') ?? string.Empty;
-        if (!File.Exists(Absolute(plan)))
+        if (!_files.FileExists(Absolute(plan)))
             return $"'{plan}' does not exist.";
 
         string name = Path.GetFileName(plan);
@@ -71,7 +76,7 @@ internal sealed class ActivePlanFiles
 
     /// <summary>Whether the root is a git checkout, so there is something to stage and commit.</summary>
     internal bool IsGitCheckout() =>
-        Directory.Exists(Path.Combine(_repoRoot, ".git")) || File.Exists(Path.Combine(_repoRoot, ".git"));
+        _files.DirectoryExists(Path.Combine(_repoRoot, ".git")) || _files.FileExists(Path.Combine(_repoRoot, ".git"));
 
     /// <summary>The staged paths that are not one of <paramref name="paths"/>; null when git could not say.</summary>
     internal IReadOnlyList<string>? StagedOutside(IEnumerable<string> paths)
@@ -137,7 +142,7 @@ internal sealed class ActivePlanFiles
 
         try
         {
-            return ProcessRunner.Run(startInfo, string.Empty, GitTimeout);
+            return _process.Run(startInfo, string.Empty, GitTimeout);
         }
         catch (Exception ex) when (ex is Win32Exception or TimeoutException or InvalidOperationException)
         {

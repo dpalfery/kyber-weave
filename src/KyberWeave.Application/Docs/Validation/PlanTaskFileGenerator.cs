@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -8,36 +9,6 @@ using KyberWeave.Core.Docs.Closeout;
 using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Docs.Validation;
-
-/// <summary>What <see cref="PlanTaskFileGenerator.Run"/> does with the file it derives.</summary>
-public enum PlanTaskFileMode
-{
-    /// <summary>Derive the file and report it; touch nothing.</summary>
-    Preview,
-
-    /// <summary>Derive the file and write it beside the plan, unless it is already exactly that.</summary>
-    Write,
-
-    /// <summary>Derive the file and report every way the one on disk differs; touch nothing.</summary>
-    Check
-}
-
-/// <summary>The result of one <see cref="PlanTaskFileGenerator.Run"/>.</summary>
-/// <param name="Report">The findings: gaps in the plan, differences found by a check, or problems writing.</param>
-/// <param name="TaskFilePath">The repository-relative path of the task file beside the plan.</param>
-/// <param name="Json">The derived file's text; null when the plan has a gap that stops it being derived.</param>
-/// <param name="ExecutionDigest">The digest recorded in the derived file; null when none was derived.</param>
-/// <param name="TaskCount">How many tasks the derived file carries.</param>
-/// <param name="Wrote">True when this run changed the file on disk.</param>
-/// <param name="File">The derived file; null when none was derived.</param>
-public sealed record PlanTaskFileOutcome(
-    DiagnosticReport Report,
-    string TaskFilePath,
-    string? Json,
-    string? ExecutionDigest,
-    int TaskCount,
-    bool Wrote,
-    PlanTaskFile? File = null);
 
 /// <summary>
 /// Derives a plan's, or a specification's, task file from the task list it sits beside, so nobody
@@ -74,28 +45,28 @@ public sealed partial class PlanTaskFileGenerator
     private const string PriorResultsSlot = "{prior_results}";
 
     private readonly string _repoRoot;
-    private readonly KyberWeaveConfig _config;
+    private readonly IDocsEngineConfig _config;
+    private readonly IRepositoryFileStore _files;
+    private readonly IBoundedProcessExecutor _process;
     private readonly IPlanTaskAgentPicker? _picker;
-
-    /// <summary>Creates the generator over a repository root and its effective configuration.</summary>
-    /// <param name="repoRoot">The absolute repository root the artifact path is relative to.</param>
-    /// <param name="config">The effective host configuration, with its ontology applied.</param>
-    public PlanTaskFileGenerator(string repoRoot, KyberWeaveConfig config)
-        : this(repoRoot, config, null)
-    {
-    }
 
     /// <summary>Creates the generator with a picker that chooses each unassigned task's agent when the file is written.</summary>
     /// <param name="repoRoot">The absolute repository root the artifact path is relative to.</param>
     /// <param name="config">The effective host configuration, with its ontology applied.</param>
+    /// <param name="files">Reads the plan and the task file and writes the task file.</param>
+    /// <param name="process">Runs git for the file-scope check.</param>
     /// <param name="picker">The agent picker, or null when no decision model is configured.</param>
-    public PlanTaskFileGenerator(string repoRoot, KyberWeaveConfig config, IPlanTaskAgentPicker? picker)
+    public PlanTaskFileGenerator(string repoRoot, IDocsEngineConfig config, IRepositoryFileStore files, IBoundedProcessExecutor process, IPlanTaskAgentPicker? picker = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(process);
 
         _repoRoot = repoRoot;
         _config = config;
+        _files = files;
+        _process = process;
         _picker = picker;
     }
 
@@ -105,7 +76,7 @@ public sealed partial class PlanTaskFileGenerator
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(artifactPath);
         string normalized = artifactPath.Replace('\\', '/');
-        return PlanTaskFileValidator.TaskFilePathFor(normalized, PlanTaskFileValidator.IsSpecTaskListPath(normalized));
+        return PlanTaskFileRules.TaskFilePathFor(normalized, PlanTaskFileRules.IsSpecTaskListPath(normalized));
     }
 
     /// <summary>Derives the task file for one plan or specification task list and writes, checks or previews it.</summary>
@@ -125,9 +96,9 @@ public sealed partial class PlanTaskFileGenerator
             return new PlanTaskFileOutcome(report, taskFile, null, null, 0, false);
         }
 
-        IReadOnlyList<string> planningDirectories = PlanTaskFileValidator.PlanningDirectories(
+        IReadOnlyList<string> planningDirectories = PlanTaskFileRules.PlanningDirectories(
             _config.ConfigReg.Resolve(_config.Ontology));
-        PlanTaskFile? file = Build(artifact, markdown, planningDirectories, report, _repoRoot);
+        PlanTaskFile? file = Build(artifact, markdown, planningDirectories, report, _repoRoot, _files, _process);
         if (file is null)
         {
             return new PlanTaskFileOutcome(report, taskFile, null, null, 0, false);
@@ -164,12 +135,16 @@ public sealed partial class PlanTaskFileGenerator
     /// <param name="planningDirectories">The folders holding plans, which no prompt may send a worker into.</param>
     /// <param name="report">Receives every gap found; all of them are reported in one run.</param>
     /// <param name="repoRoot">The repository root, to tell repository paths in a task's files from other text; null when unknown.</param>
+    /// <param name="files">Probes the repository's files; required when <paramref name="repoRoot"/> is given.</param>
+    /// <param name="process">Runs git for the file-scope check; required when <paramref name="repoRoot"/> is given.</param>
     public static PlanTaskFile? Build(
         string artifactPath,
         string markdown,
         IReadOnlyList<string> planningDirectories,
         DiagnosticReport report,
-        string? repoRoot = null)
+        string? repoRoot = null,
+        IRepositoryFileStore? files = null,
+        IBoundedProcessExecutor? process = null)
     {
         ArgumentNullException.ThrowIfNull(markdown);
         ArgumentNullException.ThrowIfNull(planningDirectories);
@@ -203,7 +178,7 @@ public sealed partial class PlanTaskFileGenerator
         }
 
         PlanPacketContext context = PlanPacketContext.Parse(markdown);
-        PlanFileScope fileScope = new(repoRoot);
+        PlanFileScope fileScope = new(repoRoot, files, process);
         List<PlanTaskFileEntry> entries = [];
         foreach (PlanTask task in parsed.Tasks)
         {
@@ -248,7 +223,7 @@ public sealed partial class PlanTaskFileGenerator
         if (role is null && capabilities is null)
         {
             report.Add(new Diagnostic(
-                PlanTaskFileValidator.IncompletePrompt,
+                PlanTaskFileRules.IncompletePrompt,
                 Severity.Error,
                 $"Task '{task.Id}' says nothing about the abilities its work needs, so the conductor cannot choose an agent for it.",
                 task.Id,
@@ -262,13 +237,13 @@ public sealed partial class PlanTaskFileGenerator
         string session = LabelValue(lines, "session", "session group") ?? task.Id;
 
         string? command = null;
-        if (!PlanTaskFileValidator.HasCommand(body))
+        if (!PlanTaskFileRules.HasCommand(body))
         {
             command = CommandFromContract(row);
             if (command is null)
             {
                 report.Add(new Diagnostic(
-                    PlanTaskFileValidator.IncompletePrompt,
+                    PlanTaskFileRules.IncompletePrompt,
                     Severity.Error,
                     $"Task '{task.Id}' gives no command to run: no backticked command with a program and an " +
                     "argument in its text, and none in the 'Runner filter' or 'Runner command' cell of its row in the test contract.",
@@ -282,13 +257,13 @@ public sealed partial class PlanTaskFileGenerator
         }
 
         string? acceptance = null;
-        if (!PlanTaskFileValidator.HasAcceptanceCriteria(body))
+        if (!PlanTaskFileRules.HasAcceptanceCriteria(body))
         {
             acceptance = AcceptanceFromTask(lines) ?? AcceptanceFromContract(row);
             if (acceptance is null)
             {
                 report.Add(new Diagnostic(
-                    PlanTaskFileValidator.IncompletePrompt,
+                    PlanTaskFileRules.IncompletePrompt,
                     Severity.Error,
                     $"Task '{task.Id}' states no acceptance criteria: no 'Acceptance criteria:' line (or " +
                     "'Acceptance:', 'Done when:', 'Definition of done:', 'Success criteria:') in its text, and " +
@@ -310,7 +285,7 @@ public sealed partial class PlanTaskFileGenerator
         if (instructions.Count > 0)
         {
             report.Add(new Diagnostic(
-                PlanTaskFileValidator.PromptsAPlanRead,
+                PlanTaskFileRules.PromptsAPlanRead,
                 Severity.Error,
                 $"Task '{task.Id}' tells the worker to open a plan: \"{instructions[0]}\".",
                 task.Id,
@@ -324,7 +299,7 @@ public sealed partial class PlanTaskFileGenerator
         if (droppedFiles.Count > 0)
         {
             report.Add(new Diagnostic(
-                PlanTaskFileValidator.NotARepositoryPath,
+                PlanTaskFileRules.NotARepositoryPath,
                 Severity.Info,
                 $"Task '{task.Id}': left out of its files because they are not repository paths: {string.Join(", ", droppedFiles)}.",
                 task.Id,
@@ -392,7 +367,7 @@ public sealed partial class PlanTaskFileGenerator
             foreach (Match span in BacktickSpanRegex().Matches(cell))
             {
                 string candidate = span.Groups["body"].Value.Trim();
-                if (PlanTaskFileValidator.HasCommand("`" + candidate + "`"))
+                if (PlanTaskFileRules.HasCommand("`" + candidate + "`"))
                 {
                     return candidate;
                 }
@@ -511,7 +486,7 @@ public sealed partial class PlanTaskFileGenerator
     private string? ReadArtifact(string artifact, DiagnosticReport report)
     {
         string full = Path.Combine(_repoRoot, artifact.Replace('/', Path.DirectorySeparatorChar));
-        if (!artifact.EndsWith(".md", StringComparison.OrdinalIgnoreCase) || !File.Exists(full))
+        if (!artifact.EndsWith(".md", StringComparison.OrdinalIgnoreCase) || !_files.FileExists(full))
         {
             report.Add(new Diagnostic(
                 PlanNotReadable,
@@ -526,7 +501,7 @@ public sealed partial class PlanTaskFileGenerator
 
         try
         {
-            if (new FileInfo(full).LinkTarget is not null)
+            if (_files.GetLinkTarget(full) is not null)
             {
                 report.Add(new Diagnostic(
                     PlanNotReadable,
@@ -538,7 +513,7 @@ public sealed partial class PlanTaskFileGenerator
                 return null;
             }
 
-            return BoundedFile.ReadAllText(full);
+            return _files.ReadAllTextBounded(full);
         }
         catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidDataException)
         {
@@ -606,7 +581,7 @@ public sealed partial class PlanTaskFileGenerator
         string full = Path.Combine(_repoRoot, taskFile.Replace('/', Path.DirectorySeparatorChar));
         try
         {
-            if (PresentFile.ReadIfPresent(full) is not { } text)
+            if (_files.ReadTextIfPresent(full) is not { } text)
                 return found;
             PlanTaskFile? existing = JsonSerializer.Deserialize<PlanTaskFile>(text, PlanTaskFileJson.ReadOptions);
             foreach (PlanTaskFileEntry? entry in existing?.Tasks ?? [])
@@ -628,11 +603,11 @@ public sealed partial class PlanTaskFileGenerator
         string full = Path.Combine(_repoRoot, taskFile.Replace('/', Path.DirectorySeparatorChar));
         try
         {
-            if (new FileInfo(full).LinkTarget is not null
-                || !DocsRootPath.IsContainedFile(_repoRoot, artifact, _config.Ontology.DocsRoots))
+            if (_files.GetLinkTarget(full) is not null
+                || !_files.IsContainedFile(_repoRoot, artifact, _config.Ontology.DocsRoots))
             {
                 report.Add(new Diagnostic(
-                    PlanTaskFileValidator.Malformed,
+                    PlanTaskFileRules.Malformed,
                     Severity.Error,
                     $"'{taskFile}' is a symbolic link, or its plan is outside the documentation roots, so it is not written.",
                     taskFile,
@@ -641,18 +616,18 @@ public sealed partial class PlanTaskFileGenerator
                 return false;
             }
 
-            if (string.Equals(PresentFile.ReadIfPresent(full), json, StringComparison.Ordinal))
+            if (string.Equals(_files.ReadTextIfPresent(full), json, StringComparison.Ordinal))
             {
                 return false;
             }
 
-            File.WriteAllText(full, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            _files.WriteAllText(full, json);
             return true;
         }
         catch (Exception exception) when (FileFailure.Is(exception))
         {
             report.Add(new Diagnostic(
-                PlanTaskFileValidator.Malformed,
+                PlanTaskFileRules.Malformed,
                 Severity.Error,
                 $"'{taskFile}' could not be written: {exception.Message}",
                 taskFile,
@@ -668,12 +643,12 @@ public sealed partial class PlanTaskFileGenerator
         string? diskText;
         try
         {
-            diskText = PresentFile.ReadIfPresent(full);
+            diskText = _files.ReadTextIfPresent(full);
         }
         catch (Exception exception) when (FileFailure.Is(exception))
         {
             report.Add(new Diagnostic(
-                PlanTaskFileValidator.Malformed,
+                PlanTaskFileRules.Malformed,
                 Severity.Error,
                 $"The task file '{taskFile}' cannot be read: {exception.Message}",
                 taskFile,
@@ -685,7 +660,7 @@ public sealed partial class PlanTaskFileGenerator
         if (diskText is null)
         {
             report.Add(new Diagnostic(
-                PlanTaskFileValidator.MissingTaskFile,
+                PlanTaskFileRules.MissingTaskFile,
                 Severity.Error,
                 $"There is no task file at '{taskFile}'.",
                 taskFile,
@@ -704,7 +679,7 @@ public sealed partial class PlanTaskFileGenerator
         catch (Exception exception) when (FileFailure.Is(exception) || exception is JsonException)
         {
             report.Add(new Diagnostic(
-                PlanTaskFileValidator.Malformed,
+                PlanTaskFileRules.Malformed,
                 Severity.Error,
                 $"The task file '{taskFile}' cannot be read: {exception.Message}",
                 taskFile,
@@ -716,7 +691,7 @@ public sealed partial class PlanTaskFileGenerator
         if (actual is null)
         {
             report.Add(new Diagnostic(
-                PlanTaskFileValidator.Malformed,
+                PlanTaskFileRules.Malformed,
                 Severity.Error,
                 $"The task file '{taskFile}' is empty.",
                 taskFile,
@@ -728,7 +703,7 @@ public sealed partial class PlanTaskFileGenerator
         int before = report.Items.Count;
         if (actual.SchemaVersion != expected.SchemaVersion)
         {
-            Differs(report, taskFile, $"schema-version is {actual.SchemaVersion}, the plan produces {expected.SchemaVersion}", fix, PlanTaskFileValidator.Malformed);
+            Differs(report, taskFile, $"schema-version is {actual.SchemaVersion}, the plan produces {expected.SchemaVersion}", fix, PlanTaskFileRules.Malformed);
         }
 
         if (!string.Equals(actual.Plan, expected.Plan, StringComparison.Ordinal))
@@ -738,7 +713,7 @@ public sealed partial class PlanTaskFileGenerator
 
         if (!string.Equals(actual.ExecutionDigest, expected.ExecutionDigest, StringComparison.OrdinalIgnoreCase))
         {
-            Differs(report, taskFile, "execution-digest is stale: the plan moved after the file was written", fix, PlanTaskFileValidator.StaleDigest);
+            Differs(report, taskFile, "execution-digest is stale: the plan moved after the file was written", fix, PlanTaskFileRules.StaleDigest);
         }
 
         CompareTasks(actual, expected, taskFile, fix, report);
@@ -792,7 +767,7 @@ public sealed partial class PlanTaskFileGenerator
         }
     }
 
-    private static void Differs(DiagnosticReport report, string taskFile, string what, string fix, string rule = PlanTaskFileValidator.DiffersFromPlan) =>
+    private static void Differs(DiagnosticReport report, string taskFile, string what, string fix, string rule = PlanTaskFileRules.DiffersFromPlan) =>
         report.Add(new Diagnostic(
             rule,
             Severity.Error,

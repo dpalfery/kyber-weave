@@ -147,7 +147,7 @@ public sealed partial class RunDelivery
         _config = config;
         _executor = executor ?? new BoundedExecutor(TimeSpan.FromMinutes(3));
         _homeDirectory = homeDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        _files = new ActivePlanFiles(_repoRoot, config);
+        _files = new ActivePlanFiles(_repoRoot, config, LegacyPorts.Files, LegacyPorts.Process);
     }
 
     /// <summary>Delivers the run, or refuses and changes nothing.</summary>

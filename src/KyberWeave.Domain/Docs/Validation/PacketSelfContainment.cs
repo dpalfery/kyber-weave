@@ -34,7 +34,7 @@ public static class PacketSelfContainment
 
     /// <summary>The question, as the provider is asked it.</summary>
     public static ArbiterRule Rule { get; } = new(
-        PlanTaskFileValidator.PacketNotSelfContained,
+        PlanTaskFileRules.PacketNotSelfContained,
         "docs.tasks",
         "Could a developer who can read only this packet, not the plan, do the task: are the files, the expected behaviour, the tests to write or pass, and the exact command all stated here?",
         [SelfContained, "missing-files", "missing-behaviour", "missing-tests", "missing-command"],
@@ -102,7 +102,7 @@ public static class PacketSelfContainment
             if (MissingElement.TryGetValue(answer, out string? missing))
             {
                 findings.Add(new Diagnostic(
-                    PlanTaskFileValidator.PacketNotSelfContained,
+                    PlanTaskFileRules.PacketNotSelfContained,
                     Severity.Warning,
                     $"Task '{entry.Id}': a developer who reads only this packet could not do the task; it does not state {missing}.",
                     entry.Id ?? "?",

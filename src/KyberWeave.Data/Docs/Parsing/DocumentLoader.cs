@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using System.Text;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Configuration;
@@ -15,7 +16,7 @@ namespace KyberWeave.Core.Docs.Parsing;
 ///     Discovers and parses the in-scope documentation corpus, and reads the catalog
 ///     vocabularies that frontmatter values are validated against.
 /// </summary>
-public sealed partial class DocumentLoader
+public sealed partial class DocumentLoader : IDocumentSource
 {
     private readonly string _catalogPath;
     private readonly OntologyConfig _config;

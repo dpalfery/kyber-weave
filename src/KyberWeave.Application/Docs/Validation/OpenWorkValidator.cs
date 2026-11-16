@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Model;
@@ -52,20 +53,24 @@ public sealed class OpenWorkValidator
         (ConfigRegConfig.SpecificationIndexProperty, "Specification", "specs", [DocType.Spec, DocType.Requirements])
     ];
 
-    private readonly KyberWeaveConfig _config;
+    private readonly IDocsEngineConfig _config;
+    private readonly IRepositoryFileStore _files;
     private readonly string? _repoRoot;
 
     /// <summary>Creates the validator over the registry and ontology in <paramref name="config"/>.</summary>
     /// <param name="config">The effective host configuration, with its ontology applied.</param>
+    /// <param name="files">Lists the task files under each documentation root.</param>
     /// <param name="repoRoot">
     /// The absolute repository root, needed to find a task file left behind: those are not
     /// Markdown and so are not loaded as documents. Null skips that rule, which is what a caller
     /// checking a document set alone asks for.
     /// </param>
-    public OpenWorkValidator(KyberWeaveConfig config, string? repoRoot = null)
+    public OpenWorkValidator(IDocsEngineConfig config, IRepositoryFileStore files, string? repoRoot = null)
     {
         ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(files);
         _config = config;
+        _files = files;
         _repoRoot = repoRoot;
     }
 
@@ -134,10 +139,10 @@ public sealed class OpenWorkValidator
         foreach (string root in _config.Ontology.DocsRoots)
         {
             string docsRoot = Path.Combine(_repoRoot, root.Replace('/', Path.DirectorySeparatorChar));
-            if (!Directory.Exists(docsRoot))
+            if (!_files.DirectoryExists(docsRoot))
                 continue;
 
-            foreach (string file in DocsRootPath.EnumerateContainedFiles(docsRoot, JsonSearchPattern))
+            foreach (string file in _files.EnumerateContainedFiles(docsRoot, JsonSearchPattern))
             {
                 string name = Path.GetFileName(file);
                 if (!name.Equals(FolderTaskFileName, StringComparison.OrdinalIgnoreCase)

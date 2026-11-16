@@ -78,7 +78,7 @@ public sealed class PlanTaskCapabilitiesTests
         (PlanTaskFileEntry? entry, DiagnosticReport report) = Build(string.Empty);
 
         Assert.Null(entry);
-        Diagnostic gap = Assert.Single(report.Items, item => item.Code == PlanTaskFileValidator.IncompletePrompt);
+        Diagnostic gap = Assert.Single(report.Items, item => item.Code == PlanTaskFileRules.IncompletePrompt);
         Assert.Contains("Capabilities:", gap.Hint, StringComparison.Ordinal);
     }
 

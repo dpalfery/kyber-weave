@@ -22,45 +22,6 @@ public static partial class PlanTaskPacket
 
     private const string WorktreeSlot = "{worktree}";
     private const string PriorResultsSlot = "{prior_results}";
-    private const string TaskList = "tasks.md";
-
-    /// <summary>
-    /// The plans and specifications that are Ready or In progress, repository-relative and sorted: files directly in a
-    /// planning folder, and each specification folder's <c>tasks.md</c>.
-    /// </summary>
-    /// <param name="repoRoot">The repository root.</param>
-    /// <param name="config">The effective configuration, which says where plans live.</param>
-    public static IReadOnlyList<string> ActivePlans(string repoRoot, KyberWeaveConfig config)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
-        ArgumentNullException.ThrowIfNull(config);
-
-        string root = Path.GetFullPath(repoRoot);
-        List<string> found = [];
-        foreach (string folder in new PlanPathResolver(root, config).PlanningFolders())
-        {
-            string directory = Path.Combine(root, folder.Replace('/', Path.DirectorySeparatorChar));
-            if (!Directory.Exists(directory))
-            {
-                continue;
-            }
-
-            IEnumerable<string> candidates = Directory.EnumerateFiles(directory, "*.md", SearchOption.TopDirectoryOnly)
-                .Where(file => !string.Equals(Path.GetFileName(file), "README.md", StringComparison.OrdinalIgnoreCase))
-                .Concat(Directory.EnumerateDirectories(directory)
-                    .Select(sub => Path.Combine(sub, TaskList))
-                    .Where(File.Exists));
-            foreach (string file in candidates)
-            {
-                if (IsActive(file))
-                {
-                    found.Add(Path.GetRelativePath(root, file).Replace('\\', '/'));
-                }
-            }
-        }
-
-        return [.. found.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
-    }
 
     /// <summary>
     /// The task a worker named, accepting the spellings an agent types: <c>T1</c>, <c>t1</c>, <c>task 1</c>,
@@ -172,18 +133,6 @@ public static partial class PlanTaskPacket
         return first.StartsWith(prefix, StringComparison.Ordinal) ? first[prefix.Length..].TrimStart(':', ' ') : first;
     }
 
-    private static bool IsActive(string file)
-    {
-        try
-        {
-            return ActiveStatusRegex().IsMatch(BoundedFile.ReadAllText(file));
-        }
-        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidDataException)
-        {
-            return false;
-        }
-    }
-
     private static string Key(string value)
     {
         string key = NonAlphanumericRegex().Replace(value, string.Empty).ToUpperInvariant();
@@ -195,9 +144,6 @@ public static partial class PlanTaskPacket
         Match match = TrailingNumberRegex().Match(Key(id ?? string.Empty));
         return match.Success ? match.Groups["n"].Value.TrimStart('0') : string.Empty;
     }
-
-    [GeneratedRegex(@"\*\*Status:(?:\*\*)?\s*(?:Ready|In[ -]progress)(?![\w-])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex ActiveStatusRegex();
 
     [GeneratedRegex(@"[^A-Za-z0-9]", RegexOptions.CultureInvariant)]
     private static partial Regex NonAlphanumericRegex();

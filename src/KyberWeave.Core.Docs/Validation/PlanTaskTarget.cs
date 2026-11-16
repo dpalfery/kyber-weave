@@ -19,6 +19,8 @@ public sealed record PlanTaskTargetMatch(string Plan, PlanTaskFileEntry Entry, P
 /// </summary>
 public static partial class PlanTaskTarget
 {
+    private static readonly PlanTaskService Tasks = new(LegacyPorts.Files, LegacyPorts.Process);
+
     /// <summary>The task in the one Ready or In progress plan, or null with the reason when there is not exactly one match.</summary>
     /// <param name="root">The repository root.</param>
     /// <param name="config">The effective configuration.</param>
@@ -30,7 +32,7 @@ public static partial class PlanTaskTarget
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(typedTask);
 
-        IReadOnlyList<string> active = PlanTaskPacket.ActivePlans(root, config);
+        IReadOnlyList<string> active = Tasks.ActivePlans(root, config);
         if (active.Count != 1)
         {
             reason = active.Count == 0
@@ -39,7 +41,7 @@ public static partial class PlanTaskTarget
             return null;
         }
 
-        PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(root, config).Run(active[0], PlanTaskFileMode.Check);
+        PlanTaskFileOutcome outcome = Tasks.Run(root, config, active[0], PlanTaskFileMode.Check);
         if (outcome.File is null || outcome.Report.HasErrors)
         {
             reason = $"the task file for {active[0]} is missing or does not match the plan";

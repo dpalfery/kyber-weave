@@ -1,3 +1,4 @@
+using KyberWeave.Domain.FileSystem;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Model;
@@ -31,9 +32,9 @@ public sealed class TodoInventoryValidator
     /// <summary>A todo document in the active todo folder that the todo index does not reach.</summary>
     public const string UnlistedTodo = "KW-DOC-LIFECYCLE-002";
 
-    private readonly KyberWeaveConfig _config;
+    private readonly IDocsEngineConfig _config;
 
-    public TodoInventoryValidator(KyberWeaveConfig config)
+    public TodoInventoryValidator(IDocsEngineConfig config)
     {
         ArgumentNullException.ThrowIfNull(config);
         _config = config;

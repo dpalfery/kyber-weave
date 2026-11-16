@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Scaffolding;
@@ -27,12 +28,15 @@ public sealed class ConfigRegValidator
     private const string Subject = "config-reg";
 
     private readonly string _repoRoot;
-    private readonly KyberWeaveConfig _config;
+    private readonly IDocsEngineConfig _config;
+    private readonly IRepositoryFileStore _files;
 
-    public ConfigRegValidator(string repoRoot, KyberWeaveConfig config)
+    public ConfigRegValidator(string repoRoot, IDocsEngineConfig config, IRepositoryFileStore files)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(files);
+        _files = files;
         _repoRoot = Path.GetFullPath(repoRoot);
         _config = config;
     }
@@ -59,7 +63,7 @@ public sealed class ConfigRegValidator
                        || _config.ConfigReg.StopOnToolFailure is not null
                        || _config.ConfigReg.RunBaseBranch is not null
                        || _config.Ontology.Intake
-                       || (File.Exists(agentsFile) && ConfigRegMarkdown.ContainsBlock(File.ReadAllText(agentsFile)));
+                       || (_files.FileExists(agentsFile) && ConfigRegMarkdown.ContainsBlock(_files.ReadAllText(agentsFile)));
 
         if (!adopted)
             return report;
@@ -76,7 +80,7 @@ public sealed class ConfigRegValidator
                 continue;
 
             string absolute = Path.Combine(_repoRoot, entry.Path.Replace('/', Path.DirectorySeparatorChar));
-            if (Directory.Exists(absolute) || File.Exists(absolute))
+            if (_files.DirectoryExists(absolute) || _files.FileExists(absolute))
                 continue;
 
             report.Add(new Diagnostic(
@@ -99,7 +103,7 @@ public sealed class ConfigRegValidator
     private void ValidateRendering(IReadOnlyList<ConfigRegEntry> entries, DiagnosticReport report)
     {
         string absolute = Path.Combine(_repoRoot, AgentsFilePath);
-        if (!File.Exists(absolute))
+        if (!_files.FileExists(absolute))
         {
             report.Add(new Diagnostic(
                 StaleRendering, Severity.Error,
@@ -109,7 +113,7 @@ public sealed class ConfigRegValidator
             return;
         }
 
-        string existing = File.ReadAllText(absolute);
+        string existing = _files.ReadAllText(absolute);
         string expected;
         try
         {

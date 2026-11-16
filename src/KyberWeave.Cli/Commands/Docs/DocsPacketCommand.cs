@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Services;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Arbiter.Facts;
@@ -14,7 +15,7 @@ namespace KyberWeave.Cli.Commands.Docs;
 /// Prints one task's packet for the worker that was dispatched for it, so a conductor passes a task id and nothing
 /// else, and a worker, which may not open a plan, still gets the whole brief.
 /// </summary>
-public sealed class DocsPacketCommand : Command<DocsPacketSettings>
+public sealed class DocsPacketCommand(IPlanTaskService tasks) : Command<DocsPacketSettings>
 {
     /// <summary>The plan could not be chosen: none is Ready or In progress, or several are.</summary>
     public const string PlanNotChosen = "KW-DOC-TASKS-CLI-002";
@@ -47,7 +48,7 @@ public sealed class DocsPacketCommand : Command<DocsPacketSettings>
         }
 
         string? plan = ChoosePlan(root, config, settings, current, report);
-        if (plan is null && settings.Plan is null && PlanTaskPacket.ActivePlans(root, config).Count == 0)
+        if (plan is null && settings.Plan is null && tasks.ActivePlans(root, config).Count == 0)
         {
             plan = FindInOtherWorktrees(ref root, config, settings, current, report);
         }
@@ -57,7 +58,7 @@ public sealed class DocsPacketCommand : Command<DocsPacketSettings>
             return Fail(report);
         }
 
-        PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(root, config).Run(plan, PlanTaskFileMode.Check);
+        PlanTaskFileOutcome outcome = tasks.Run(root, config, plan, PlanTaskFileMode.Check);
         if (outcome.File is null || outcome.Report.HasErrors)
         {
             report.AddRange(outcome.Report.Items);
@@ -121,7 +122,7 @@ public sealed class DocsPacketCommand : Command<DocsPacketSettings>
         return 0;
     }
 
-    private static string? ChoosePlan(string root, KyberWeaveConfig config, DocsPacketSettings settings, string current, DiagnosticReport report)
+    private string? ChoosePlan(string root, KyberWeaveConfig config, DocsPacketSettings settings, string current, DiagnosticReport report)
     {
         if (settings.Plan is not null)
         {
@@ -130,7 +131,7 @@ public sealed class DocsPacketCommand : Command<DocsPacketSettings>
                 : null;
         }
 
-        IReadOnlyList<string> active = PlanTaskPacket.ActivePlans(root, config);
+        IReadOnlyList<string> active = tasks.ActivePlans(root, config);
         if (active.Count == 1)
         {
             return active[0];
@@ -151,7 +152,7 @@ public sealed class DocsPacketCommand : Command<DocsPacketSettings>
         return null;
     }
 
-    private static string? FindInOtherWorktrees(ref string root, KyberWeaveConfig config, DocsPacketSettings settings, string current, DiagnosticReport report)
+    private string? FindInOtherWorktrees(ref string root, KyberWeaveConfig config, DocsPacketSettings settings, string current, DiagnosticReport report)
     {
         string here = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
         List<(string Worktree, string Plan)> matches = [];
@@ -163,9 +164,9 @@ public sealed class DocsPacketCommand : Command<DocsPacketSettings>
                 continue;
             }
 
-            foreach (string candidate in PlanTaskPacket.ActivePlans(other, config))
+            foreach (string candidate in tasks.ActivePlans(other, config))
             {
-                PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(other, config).Run(candidate, PlanTaskFileMode.Check);
+                PlanTaskFileOutcome outcome = tasks.Run(other, config, candidate, PlanTaskFileMode.Check);
                 if (outcome.File is not null && PlanTaskPacket.FindTask(outcome.File, settings.Task) is not null)
                 {
                     matches.Add((other, candidate));

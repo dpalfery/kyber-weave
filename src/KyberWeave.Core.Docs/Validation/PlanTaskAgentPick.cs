@@ -5,22 +5,6 @@ using KyberWeave.Core.Configuration;
 
 namespace KyberWeave.Core.Docs.Validation;
 
-/// <summary>One task's agent pick: the agent the model chose and how sure it was.</summary>
-/// <param name="Agent">The chosen agent's name.</param>
-/// <param name="Confidence">The model's confidence, at or above <see cref="PlanTaskAgentPick.ConfidenceFloor"/>.</param>
-public sealed record PlanTaskAgentChoice(string Agent, double Confidence);
-
-/// <summary>Chooses an agent for each task of a task file while the file is written.</summary>
-public interface IPlanTaskAgentPicker
-{
-    /// <summary>
-    /// The confident picks by task id. A task with no confident pick is left out, and a picker that cannot reach its
-    /// model returns no picks at all rather than failing.
-    /// </summary>
-    /// <param name="tasks">The tasks that need an agent: the plan assigned them no role.</param>
-    IReadOnlyDictionary<string, PlanTaskAgentChoice> Pick(IReadOnlyList<PlanTaskFileEntry> tasks);
-}
-
 /// <summary>
 /// Asks the decision model, once per task file, which agent should do each task: the task's title, capabilities and
 /// files against the name and description of every agent that takes implementation or documentation work (ADR 0082).
