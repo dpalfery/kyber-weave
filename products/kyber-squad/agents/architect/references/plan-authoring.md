@@ -115,6 +115,10 @@ Before writing a task, fetch the standard for every technology its files fall un
 
 When existing code contradicts a documented rule or standard (where a kind of file goes, a layering or naming rule), new work follows the documented rule, not the surrounding code: never copy the divergent pattern forward, and name the documented location in the task. Existing code that carries a comment marking it as a deliberate exception is respected. Record each other divergence you find, with the rule and the existing offending paths, in the investigation findings, then decide by the size of the debt: when fixing it is small and touches the same files, add it to a task in this plan; otherwise write a todo under the directory named by **<todo-index>**, add it to that index's inventory, and link it from the plan's out-of-scope boundaries (and from a `RESIDUAL` row of the Closeout mapping when closeout leaves it open). The deliver tool commits the todo with the run.
 
+## The request's explicit instructions
+
+A value, class name, layout, endpoint shape or check the request states outright is a requirement, not a suggestion. Plan it as written. Where you think it is wrong, keep it and add a risk row saying why; do not replace it with the option you prefer. Before `PLAN_READY`, walk the request line by line: each instruction is met by a task's acceptance, or sits in the out-of-scope boundaries with the reason. A request that asks for proof (for example that values reach the screen from the database) gets a task or verification step that is actually executed, with its command and evidence, not a mocked stand-in. A plan the conductor has to send back for a missed instruction costs a planning round.
+
 ## Facts that depend on a version, and existing tests
 
 A decision that says a library class, token or API yields a specific value (a colour, a default, a signature) is checked against the version the repository installs: read the package manifest or lock file once and state the version in the decision row. A value true in another major version is a wrong decision that the worker cannot see and a later task has to find.
