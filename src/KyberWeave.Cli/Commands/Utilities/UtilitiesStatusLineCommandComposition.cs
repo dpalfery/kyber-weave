@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Utilities.StatusLine;
@@ -11,6 +12,9 @@ namespace KyberWeave.Cli.Commands.Utilities;
 /// </summary>
 internal static class UtilitiesStatusLineCommandComposition
 {
+    /// <summary>Where the status-line artifact tree sits in the checkout.</summary>
+    internal const string ProductRelativePath = "products/kyber-utilities/statusline";
+
     /// <summary>How long a harness version probe may run before doctor gives up on it.</summary>
     private static readonly TimeSpan VersionProbeTimeout = TimeSpan.FromSeconds(5);
 
@@ -23,17 +27,21 @@ internal static class UtilitiesStatusLineCommandComposition
     /// <summary>
     ///     Resolves the per-user roots from the process environment and the operator's home directory.
     /// </summary>
-    public static StatusLineTargetRoots ResolveRoots()
+    /// <param name="environment">The process state the roots are read from.</param>
+    public static StatusLineTargetRoots ResolveRoots(IProcessEnvironment environment)
     {
-        return new StatusLineTargetRoots(
-            Environment.GetEnvironmentVariable,
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        ArgumentNullException.ThrowIfNull(environment);
+
+        return new StatusLineTargetRoots(environment.GetVariable, environment.HomeDirectory);
     }
 
     /// <summary>Resolves the tool-presence probe over the process environment.</summary>
-    public static UtilitiesStatusLineToolProbe ResolveToolProbe()
+    /// <param name="environment">The process state <c>PATH</c> is read from.</param>
+    public static UtilitiesStatusLineToolProbe ResolveToolProbe(IProcessEnvironment environment)
     {
-        return new UtilitiesStatusLineToolProbe(Environment.GetEnvironmentVariable);
+        ArgumentNullException.ThrowIfNull(environment);
+
+        return new UtilitiesStatusLineToolProbe(environment.GetVariable);
     }
 
     /// <summary>The production process runner, with the harness version probe's bounded wait.</summary>
@@ -46,9 +54,16 @@ internal static class UtilitiesStatusLineCommandComposition
     ///     Resolves the artifact source from the current repository checkout.
     /// </summary>
     /// <exception cref="DirectoryNotFoundException">The checkout does not hold the artifact tree.</exception>
-    public static IUtilitiesStatusLineArtifactSource ResolveArtifactSource()
+    /// <param name="environment">The process state the checkout is read from.</param>
+    /// <param name="productRoots">Finds the artifact tree in that checkout.</param>
+    public static IUtilitiesStatusLineArtifactSource ResolveArtifactSource(
+        IProcessEnvironment environment,
+        IProductRootLocator productRoots)
     {
-        string? productRoot = UtilitiesStatusLineProductLocator.Resolve(Directory.GetCurrentDirectory());
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(productRoots);
+
+        string? productRoot = productRoots.Locate(environment.CurrentDirectory, ProductRelativePath);
         if (productRoot is null)
             throw new DirectoryNotFoundException(
                 "The Kyber Utilities status-line artifacts were not found. Run this command from the " +

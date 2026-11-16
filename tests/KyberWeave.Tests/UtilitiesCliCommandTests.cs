@@ -1,6 +1,10 @@
 using System.Diagnostics;
 using System.Text;
+using KyberWeave.Cli;
+using KyberWeave.Cli.Commands.Utilities;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -132,6 +136,19 @@ public sealed class UtilitiesCliCommandTests : IDisposable
         AssertExitCode(0, run);
         foreach (string verb in Verbs)
             Assert.Contains(verb, run.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The one case that starts the real host process: the container, the type registrar and the production
+    /// adapters stage the artifacts exactly as the in-process cases that fake the environment do.
+    /// </summary>
+    [Fact]
+    public void TheRealHostDeploysTheArtifactsFromTheCheckout()
+    {
+        CliResult run = RunInChildProcess(_checkout, _stubBin, "utilities", "statusline", "deploy", "--target", "claude");
+
+        AssertExitCode(0, run);
+        AssertFileBytes(DeployedPath("claude"), ArtifactContent("claude"));
     }
 
     // -----------------------------------------------------------------------------------------
@@ -562,10 +579,44 @@ public sealed class UtilitiesCliCommandTests : IDisposable
     }
 
     /// <summary>
-    /// Runs the CLI as a child process in the isolated home, with the given working directory and
+    /// Runs the CLI in this process over the isolated home, with the given working directory and
     /// <c>PATH</c>, and captures its exit code and both output streams.
     /// </summary>
     private CliResult RunIn(string workingDirectory, string pathVariable, params string[] args)
+    {
+        Dictionary<string, string> variables = new(StringComparer.Ordinal)
+        {
+            ["HOME"] = _home,
+            ["USERPROFILE"] = _home,
+            [ClaudeConfigDirectoryVariable] = Path.Combine(_home, ".claude"),
+            [AgyConfigDirectoryVariable] = Path.Combine(_home, ".gemini", "antigravity-cli"),
+            [PiCodingAgentDirectoryVariable] = Path.Combine(_home, ".pi", "agent"),
+            ["PATH"] = pathVariable
+        };
+        IsolatedEnvironment environment = new(workingDirectory, _home, variables);
+        UtilitiesStatusLineProcessRunner versionProbe = (startInfo, _) =>
+        {
+            // A child resolves its program against this process's PATH, so the stub on the case's PATH is named in full.
+            startInfo.FileName = ResolveOnPath(startInfo.FileName, pathVariable) ?? startInfo.FileName;
+            startInfo.Environment["PATH"] = pathVariable;
+            return Execute(startInfo);
+        };
+
+        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() =>
+            CliApplication.Create(services =>
+            {
+                _ = services.AddSingleton<IProcessEnvironment>(environment);
+                _ = services.AddSingleton(versionProbe);
+            }).Run(args));
+
+        return new CliResult(run.Result, run.Output + "\n" + run.ErrorOutput);
+    }
+
+    /// <summary>
+    /// Runs the CLI as the real host process, for the one case that proves the composition root wires the
+    /// branch end to end.
+    /// </summary>
+    private CliResult RunInChildProcess(string workingDirectory, string pathVariable, params string[] args)
     {
         ProcessStartInfo startInfo = new(CliHostPath())
         {
@@ -586,8 +637,25 @@ public sealed class UtilitiesCliCommandTests : IDisposable
         startInfo.Environment[PiCodingAgentDirectoryVariable] = Path.Combine(_home, ".pi", "agent");
         startInfo.Environment["PATH"] = pathVariable;
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, CliTimeout);
+        ProcessResult result = Execute(startInfo);
         return new CliResult(result.ExitCode, result.StandardOutput + "\n" + result.StandardError);
+    }
+
+    /// <summary>The one place this suite starts a process: bounded by <see cref="CliTimeout"/>, which kills the tree.</summary>
+    private static ProcessResult Execute(ProcessStartInfo startInfo)
+    {
+        return ProcessRunner.Run(startInfo, string.Empty, CliTimeout);
+    }
+
+    private static string? ResolveOnPath(string name, string path)
+    {
+        foreach (string directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            string candidate = Path.Combine(directory, name);
+            if (File.Exists(candidate)) return candidate;
+        }
+
+        return null;
     }
 
     private string HarnessRoot(string token)
@@ -916,4 +984,17 @@ public sealed class UtilitiesCliCommandTests : IDisposable
 
     /// <summary>One CLI invocation: its exit code, and stdout and stderr as one rendered transcript.</summary>
     private readonly record struct CliResult(int ExitCode, string Output);
+}
+
+/// <summary>Gives the commands the case's working directory, home and variables instead of this test host's.</summary>
+internal sealed class IsolatedEnvironment(string current, string home, Dictionary<string, string> variables) : IProcessEnvironment
+{
+    public string CurrentDirectory => current;
+
+    public string HomeDirectory => home;
+
+    public string TempDirectory => Path.GetTempPath();
+
+    public string? GetVariable(string name) =>
+        variables.TryGetValue(name, out string? value) ? value : Environment.GetEnvironmentVariable(name);
 }

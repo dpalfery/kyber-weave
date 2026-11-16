@@ -617,13 +617,13 @@
       "file": "tests/KyberWeave.Tests/UtilitiesCliCommandTests.cs",
       "text": "ProcessStartInfo startInfo = new(CliHostPath())",
       "count": 1,
-      "bound": "Started by the Run at line 589: CliTimeout (60 s) kills the tree; the built CLI host with an isolated HOME."
+      "bound": "Started by Execute through the single ProcessRunner.Run site: CliTimeout (60 s) kills the tree; the built CLI host with an isolated HOME, used by the one real-host smoke case."
     },
     {
       "file": "tests/KyberWeave.Tests/UtilitiesCliCommandTests.cs",
-      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, CliTimeout);",
+      "text": "return ProcessRunner.Run(startInfo, string.Empty, CliTimeout);",
       "count": 1,
-      "bound": "CliTimeout (60 s) kills the tree; the built CLI host with an isolated HOME."
+      "bound": "CliTimeout (60 s) kills the tree. The single start site of the suite: the one real-host smoke case (isolated HOME) and the harness version probe doctor runs against the case's stub PATH go through it."
     },
     {
       "file": "tests/KyberWeave.Tests/UtilitiesStatusLineArtifactTests.cs",

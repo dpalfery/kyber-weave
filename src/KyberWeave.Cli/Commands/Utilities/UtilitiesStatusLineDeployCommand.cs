@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Utilities.StatusLine;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -16,21 +17,19 @@ namespace KyberWeave.Cli.Commands.Utilities;
 /// </remarks>
 public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLineDeploySettings>
 {
-    private readonly IUtilitiesStatusLineArtifactSource? _artifacts;
-    private readonly StatusLineTargetRoots? _roots;
+    private readonly IProcessEnvironment _environment;
+    private readonly IProductRootLocator _productRoots;
 
-    /// <summary>Creates a deploy command using the default per-user roots and product artifact tree.</summary>
-    public UtilitiesStatusLineDeployCommand()
+    /// <summary>Creates a deploy command over the process environment and the product-tree locator.</summary>
+    /// <param name="environment">The process state the per-user roots and the checkout are read from.</param>
+    /// <param name="productRoots">Finds the artifact tree in the checkout.</param>
+    public UtilitiesStatusLineDeployCommand(IProcessEnvironment environment, IProductRootLocator productRoots)
     {
-    }
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(productRoots);
 
-    /// <summary>Creates a deploy command using injectable dependencies.</summary>
-    internal UtilitiesStatusLineDeployCommand(
-        StatusLineTargetRoots? roots = null,
-        IUtilitiesStatusLineArtifactSource? artifacts = null)
-    {
-        _roots = roots;
-        _artifacts = artifacts;
+        _environment = environment;
+        _productRoots = productRoots;
     }
 
     /// <inheritdoc />
@@ -55,7 +54,7 @@ public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLi
         StatusLineTargetRoots roots;
         try
         {
-            roots = _roots ?? UtilitiesStatusLineCommandComposition.ResolveRoots();
+            roots = UtilitiesStatusLineCommandComposition.ResolveRoots(_environment);
             foreach (StatusLineTarget target in targets)
             {
                 _ = roots.ResolveStagingRoot(target);
@@ -70,7 +69,7 @@ public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLi
         IUtilitiesStatusLineArtifactSource artifacts;
         try
         {
-            artifacts = _artifacts ?? UtilitiesStatusLineCommandComposition.ResolveArtifactSource();
+            artifacts = UtilitiesStatusLineCommandComposition.ResolveArtifactSource(_environment, _productRoots);
         }
         catch (DirectoryNotFoundException ex)
         {

@@ -37,6 +37,23 @@ public sealed class RunStartCommandTests : IDisposable
     }
 
     /// <summary>
+    ///     The one case that starts the real host process: the composition root wires <c>run start</c> end to
+    ///     end, so the container, the type registrar and the production git adapter agree with the in-process
+    ///     cases that fake them.
+    /// </summary>
+    [Fact]
+    public void TheRealHostStartsARunAndReportsItsBranch()
+    {
+        ProbeResult result = _probe.RunStartInChildProcess(
+            "--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate", "--json");
+
+        Assert.True(result.ExitCode == 0, $"The real host must start the run. {result.Output}");
+        using JsonDocument document = ParseJson(result.StandardOutput);
+        Assert.Equal("claude/fix/tighten-the-gate", document.RootElement.GetProperty("branch").GetString());
+        Assert.True(_probe.BranchExists("claude/fix/tighten-the-gate"));
+    }
+
+    /// <summary>
     ///     A folder left at the name an earlier run would have used does not stop a new run: the worktree
     ///     folder carries a timestamp, while the branch keeps the shape the pull request naming check needs.
     /// </summary>
