@@ -1630,11 +1630,19 @@ with no shell is not served a stale index. The rules ([ADR 0061](../adr/0062-the
   worker's `doctor --ensure`, the CodeGraph daemon — the response carries one note line above
   its body saying the index is being refreshed by another process, and it answers from the
   index as it stands. Contention is never reported as a failure.
-- **CodeGraph's own lock held means a short retry, then the same note.** CodeGraph's server,
-  its file watcher and any other `sync` hold `.codegraph/codegraph.lock` while they write. A
-  refresh whose `sync` finds it held tries twice more, 0.3 and then 0.7 seconds later, and if
-  it is still held answers from the index as it stands with one note line. No
-  `STATUS: TOOL_FAILURE` and no `warning:` line under either stop rule.
+- **CodeGraph's lock file is looked for before every sync.** CodeGraph's server, its file
+  watcher and any other `sync` create `.codegraph/codegraph.lock` while they write. If the file
+  exists the refresh waits 1 second and looks again, then 5 seconds, then 30, and syncs as soon
+  as a look finds no file. A file still there at the fourth look, 36 seconds in, fails the tool
+  without a sync: `STATUS: TOOL_FAILURE` (or the `warning:` line) whose reason names the file,
+  its PID and whether that process is running. The fix line is `codegraph unlock <root>` when
+  the process is not running, and otherwise says to wait for the process or stop it. The next
+  call looks again; this failure is not held for 60 seconds. A tool call can therefore take up
+  to 36 seconds longer, plus the 30-second sync bound.
+- **A sync that loses the race gets a short retry, then a note.** When the look found no file
+  but the `sync` itself reports the lock held, the refresh tries twice more, 0.3 and then 0.7
+  seconds later, and if it is still held answers from the index as it stands with one note
+  line. No `STATUS: TOOL_FAILURE` and no `warning:` line under either stop rule.
 - **A missing binary or a failed `sync` fails the tools.** Under the default stop rule the
   response is `STATUS: TOOL_FAILURE`, then `tool:`, `reason:` and `fix:` lines, and nothing
   else — a caller reading a degraded answer cannot tell it from a complete one. With
@@ -1992,7 +2000,7 @@ index of the root it is bound to, and nothing else.
 | Client reports a protocol error | Something wrote to stdout; check that you launched `kyber-weave-mcp`, not `kyber-weave` |
 | Answers look right but named files do not exist, or the document count is wrong | A same-named server is bound to a different checkout — compare the `provenance: repo=` line to `git rev-parse --git-common-dir`, call `docs_get_source_repository_and_revision`, and pin the server with `--expect-root`. A matching `repo=` with a different `root=` is another worktree of your own repository, not a foreign one |
 | A tool answers `STATUS: TOOL_FAILURE`, or carries a `warning: codegraph is unavailable` line | The repository declares `codegraph` under `mcp.required-servers` and the server could not read the index: the `fix:` line names the repair, usually `kyber-weave doctor --ensure .`. Under the default stop rule the tool refuses to answer with joins missing; `stop-on-tool-failure: false` turns the same detail into the warning. See [the refresh rules](#the-server-refreshes-codegraph-and-its-tools-fail-when-it-cannot) |
-| A tool carries `note: codegraph refresh skipped` | Another process holds the index lock and is refreshing it — a worker's `doctor --ensure`, or the CodeGraph daemon — or holds CodeGraph's own lock (`.codegraph/codegraph.lock`) through three `sync` attempts. Not a failure: the answer comes from the index as it stands, and the next call after the 60-second interval refreshes it |
+| A tool carries `note: codegraph refresh skipped` | Another process holds the index lock and is refreshing it — a worker's `doctor --ensure`, or the CodeGraph daemon — or took CodeGraph's own lock (`.codegraph/codegraph.lock`) just after the refresh looked for it, through three `sync` attempts. Not a failure: the answer comes from the index as it stands, and the next call after the 60-second interval refreshes it |
 | Piped requests exit 0 with nothing on stdout | A release up to `v0.1.7-rc.13` dropped replies once stdin closed — upgrade, or keep stdin open until the replies arrive. See [Closing stdin](#closing-stdin) |
 
 ## Related

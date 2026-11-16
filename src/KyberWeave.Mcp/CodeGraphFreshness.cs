@@ -1,4 +1,6 @@
+using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Docs;
@@ -30,10 +32,17 @@ namespace KyberWeave.Mcp;
 /// disk is then at worst one refresh behind, not broken.
 /// </para>
 /// <para>
-/// CodeGraph keeps a lock of its own, which its server, its file watcher and any other sync take.
-/// A sync that finds it held is the same condition one layer down, so it gets the same answer: a
-/// few short retries (<see cref="CodeGraphIndexRules.HeldLockRetryPauses"/>), then a note, never a failure. Every other
-/// sync failure still fails the tool.
+/// CodeGraph keeps a lock of its own, a file its server, its file watcher and any other sync
+/// create while they write. The refresh never starts a sync without first looking for that file.
+/// While it exists the refresh waits and looks again, on the owner's schedule
+/// (<see cref="CodeGraphIndexRules.LockFileWaits"/>), and after the last look it fails the tool
+/// without syncing. That verdict is not kept for the refresh interval: the next call looks again.
+/// </para>
+/// <para>
+/// A sync can still lose the race and find the lock taken after the look. That is contention on a
+/// healthy index, so it gets a few short retries
+/// (<see cref="CodeGraphIndexRules.HeldLockRetryPauses"/>), each after its own look, then a note,
+/// never a failure. Every other sync failure still fails the tool.
 /// </para>
 /// <para>
 /// The child's output is captured by <see cref="ProcessRunner"/> and is never read into a
@@ -159,8 +168,10 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
 
             try
             {
-                _last = Refresh(resolverFactory);
-                _lastAttempt = now;
+                _last = Refresh(resolverFactory, out bool lockFileRemained);
+
+                // A lock file that outlasted the waits is not a verdict to keep: the next call looks again.
+                _lastAttempt = lockFileRemained ? null : now;
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -178,8 +189,9 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
         }
     }
 
-    private CodeGraphGate Refresh(Func<ICodeGraphResolver> resolverFactory)
+    private CodeGraphGate Refresh(Func<ICodeGraphResolver> resolverFactory, out bool lockFileRemained)
     {
+        lockFileRemained = false;
         KyberWeaveConfigLoadResult loaded = _config.TryLoad(_repositoryRoot);
         if (loaded is not { Success: true, Config: not null })
             return CodeGraphGate.Clear;
@@ -194,6 +206,12 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
 
         bool stops = loaded.Config.StopsOnToolFailure;
         string lockDirectory = Path.GetTempPath();
+
+        if (!WaitForNoIndexLockFile())
+        {
+            lockFileRemained = true;
+            return IndexLockFileRemained(stops);
+        }
 
         DoctorOptions options = new(RefreshBound, RefreshBound, CodeGraphExecutable, "kyber-weave-mcp");
         DoctorCheck provisioned = ProvisionPastAHeldIndexLock(options, lockDirectory);
@@ -215,11 +233,86 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
     }
 
     /// <summary>
+    /// Looks for CodeGraph's lock file, and while it exists waits and looks again after each of
+    /// <see cref="CodeGraphIndexRules.LockFileWaits"/>. The file's existence is the test, not
+    /// whether the process it names is running.
+    /// </summary>
+    /// <returns>True as soon as a look finds no lock file; false when the last look still finds it.</returns>
+    private bool WaitForNoIndexLockFile()
+    {
+        string lockFile = CodeGraphIndexRules.IndexLockPathFor(_repositoryRoot);
+        foreach (TimeSpan wait in CodeGraphIndexRules.LockFileWaits)
+        {
+            if (!File.Exists(lockFile))
+                return true;
+
+            _pause(wait);
+        }
+
+        return !File.Exists(lockFile);
+    }
+
+    /// <summary>
+    /// The failure for a lock file that outlasted every wait: how long was waited, the file, the
+    /// process it names and whether that process is running, and the repair that follows from it.
+    /// </summary>
+    private CodeGraphGate IndexLockFileRemained(bool stops)
+    {
+        string lockFile = CodeGraphIndexRules.IndexLockPathFor(_repositoryRoot);
+        double waited = CodeGraphIndexRules.LockFileWaits.Sum(wait => wait.TotalSeconds);
+        int? holder = ReadLockHolder(lockFile);
+        bool running = holder is { } processId && IsRunning(processId);
+
+        string owner = holder is { } id
+            ? $"it records PID {id.ToString(CultureInfo.InvariantCulture)}, which is {(running ? "running" : "not running")}"
+            : "it records no PID";
+        string fix = running
+            ? $"wait for process {holder!.Value.ToString(CultureInfo.InvariantCulture)} to finish its index work, or stop it"
+            : $"codegraph unlock {CodeGraphIndexRules.QuoteShellPath(_repositoryRoot, OperatingSystem.IsWindows())}";
+
+        return Failure(
+            stops,
+            $"the CodeGraph index lock was still held after {waited.ToString("0", CultureInfo.InvariantCulture)} seconds: "
+            + $"{lockFile} exists and {owner}.",
+            fix);
+    }
+
+    /// <summary>The process id the lock file records, or null when the file is gone, unreadable, or holds no number.</summary>
+    private static int? ReadLockHolder(string lockFile)
+    {
+        try
+        {
+            return int.TryParse(File.ReadAllText(lockFile).Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out int processId)
+                ? processId
+                : null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static bool IsRunning(int processId)
+    {
+        try
+        {
+            using Process process = Process.GetProcessById(processId);
+            return !process.HasExited;
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or Win32Exception)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Provisions once, and again after each of <see cref="DoctorOptions.HeldLockRetryPauses"/> while the only
     /// thing wrong is that CodeGraph's own index lock is held. Any other result is returned at once.
+    /// A retry looks for the lock file first, like every sync, and does not sync while it exists.
     /// </summary>
     private DoctorCheck ProvisionPastAHeldIndexLock(DoctorOptions options, string lockDirectory)
     {
+        string lockFile = CodeGraphIndexRules.IndexLockPathFor(_repositoryRoot);
         DoctorCheck provisioned = Provision(options, lockDirectory);
         foreach (TimeSpan pause in options.HeldLockRetryPauses)
         {
@@ -227,7 +320,8 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
                 break;
 
             _pause(pause);
-            provisioned = Provision(options, lockDirectory);
+            if (!File.Exists(lockFile))
+                provisioned = Provision(options, lockDirectory);
         }
 
         return provisioned;

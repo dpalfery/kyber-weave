@@ -51,6 +51,18 @@ public static class CodeGraphIndexRules
     public const string IndexLockFileName = "codegraph.lock";
 
     /// <summary>
+    ///     How long the docs server waits before each further look at CodeGraph's lock file, when a refresh finds
+    ///     the file present. The owner set the schedule: 1, 5, then 30 seconds, and a failure after the last look.
+    /// </summary>
+    public static IReadOnlyList<TimeSpan> LockFileWaits { get; } =
+        [TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30)];
+
+    /// <summary>Returns CodeGraph's own lock file for a repository root: <c>.codegraph/codegraph.lock</c>.</summary>
+    /// <param name="root">The repository root.</param>
+    public static string IndexLockPathFor(string root) =>
+        Path.Combine(root, IndexDirectoryName, IndexLockFileName);
+
+    /// <summary>
     ///     The pauses before the second and third <c>codegraph sync</c> when the first finds CodeGraph's own index
     ///     lock held.
     /// </summary>

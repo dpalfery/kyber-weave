@@ -249,13 +249,21 @@ with no shell was the only index it would ever see. It now refreshes the index i
 - **Contention is a note, not a failure.** A held lock means another process is refreshing the
   index — a worker's `doctor --ensure`, the CodeGraph daemon — so the answer proceeds with one
   `note:` line above the body.
-- **CodeGraph's own lock is contention too.** CodeGraph keeps a second lock,
-  `.codegraph/codegraph.lock`, which its server, its file watcher and every `sync` take. A
-  `sync` that finds it held is retried twice, after 0.3 and 0.7 seconds, which costs a tool
-  call about 1.5 seconds at most; if it is still held the answer proceeds with the same kind of
-  `note:` line. CodeGraph exits 1 for every `sync` failure, so the held lock is recognised by
-  the message its `sync` prints, "Sync could not acquire the file lock". Its "rebuild in
-  progress" messages stay failures, because the database file is being replaced.
+- **No sync before a look for CodeGraph's lock file.** CodeGraph keeps a second lock, the file
+  `.codegraph/codegraph.lock`, which its server, its file watcher and every `sync` create while
+  they write. The refresh looks for that file before it starts a `sync`. If the file exists it
+  waits 1 second and looks again, then 5 seconds, then 30. As soon as a look finds no file the
+  `sync` runs. If the fourth look still finds it, after 36 seconds, no `sync` runs and the
+  tools fail as below: the reason names the file, the PID it records and whether that process
+  is running, and the fix is `codegraph unlock <root>` for a process that is not running and
+  "wait for it or stop it" otherwise. Existence is the test, not the PID. This failure is not
+  kept for the 60-second interval, so the next call looks again.
+- **Losing the race after the look is contention.** A `sync` can still find the lock taken
+  after the look found no file. It is retried twice, after 0.3 and 0.7 seconds, each after its
+  own look; if it is still held the answer proceeds with the same kind of `note:` line.
+  CodeGraph exits 1 for every `sync` failure, so this case is recognised by the message its
+  `sync` prints, "Sync could not acquire the file lock". Its "rebuild in progress" messages
+  stay failures, because the database file is being replaced.
 - **Failure is a token, not a sentence.** A missing binary or a failed `sync` returns
   `STATUS: TOOL_FAILURE` with `tool:`, `reason:` and `fix:` lines under the stop rule, or the
   same detail as a `warning:` line under `stop-on-tool-failure: false`. The token is a whole
