@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Domain/Squad
 owner: dpalfery
-last-reviewed: 2026-11-12
+last-reviewed: 2026-11-16
 status: current
 decided-by:
   - adr/0076-test-first-is-one-worker-per-task
@@ -1818,6 +1818,24 @@ flowchart TD
     Worker --> Resume
     Worker --> Archive
 ```
+
+#### Prompt delivery by harness
+
+The dispatch no longer carries the prompt text; the machine inserts it. Which path a harness uses
+is the Arbiter's
+[dispatch delivery path](../kyber-arbiter/architecture.md#dispatch-delivery-path) table, restated
+here for the Squad's own readers:
+
+| Harness | Delivery path |
+|---|---|
+| Claude, Copilot in VS Code, Copilot CLI, OpenCode, Pi, Codex, Cursor, Kilo, Factory, Devin | rewrite: the dispatch hook replaces the task-id line with the full prompt |
+| Antigravity | file until its live check passes: the dispatch names `.agent_scratchpad/<task>/prompt.md`, which the worker reads first |
+| Warp, ZCode | file: no dispatch hook exists, so the dispatch names the prompt file |
+
+On every path the conductor dispatches with the task id and the failed-attempt count, never with
+the prompt text. A worker that starts with only the header lines, because a hook was absent or
+untrusted, runs `kyber-weave docs packet <task id>` itself or stops; it never works from the task
+id alone.
 
 The file has a shelf life of exactly one plan. `docs-dev` removes it with `git rm` in the same commit
 that archives the plan, so it never reaches `main` — this repository squash merges, and nothing

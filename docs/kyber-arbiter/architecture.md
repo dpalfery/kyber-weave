@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberArbiter
 source-root: src/KyberWeave.Domain/Arbiter
 owner: dpalfery
-last-reviewed: 2026-11-12
+last-reviewed: 2026-11-16
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
@@ -853,6 +853,41 @@ On the Copilot CLI target post-dispatch outcomes are advisory only: `Deny`,
 `PostBlock` and `PostAnnotation` all render as `additionalContext`, so a post-dispatch
 finding is surfaced as context rather than enforced. Pre-dispatch denies still block.
 
+### Dispatch delivery path
+
+A worker learns its task from its dispatch. The task prompt reaches it one of two ways, chosen by
+the harness:
+
+- **rewrite**: the dispatch hook replaces the task-id line with the full prompt inside the
+  dispatch call, before the worker starts. The worker reads no file, and the dispatching agent
+  never holds the prompt text.
+- **file**: the hook cannot rewrite the dispatch, so the prompt is written to
+  `.agent_scratchpad/<task>/prompt.md` (untracked) and the dispatch names that file. The worker's
+  first step is to read it.
+
+A row reads `rewrite` only where a live dispatch has shown both halves: the worker received the
+replaced text, and the dispatching agent's transcript kept the text it sent. The shipped
+header-strip rewrite is that evidence wherever it runs today: the hook returns the dispatch input
+with the routing headers removed, the worker starts from the returned input, and the dispatcher's
+transcript keeps what it sent. Where no such check has run, the row reads `file`, because a worker
+that reads a file is never worse than one that starts with only a task id. Antigravity is the one
+harness in that state, and its row records the shape the check will use.
+
+| Harness | Path | Rewrite field and shape | Live check: worker got the replaced text, dispatcher transcript did not | When the hook is not trusted or not enabled | Source, read 2026-11-16 |
+|---|---|---|---|---|---|
+| Claude | rewrite | `hookSpecificOutput.updatedInput` replaces the whole tool input; only `prompt` changes | Shipped header strip | An untrusted workspace leaves the worker with the header lines; it runs `docs packet` for its task id | [CC-HOOK] |
+| Copilot in VS Code | rewrite | `hookSpecificOutput.updatedInput.prompt` (Preview) | Shipped header strip | Without `chat.useHooks` or a trusted workspace the hook does not run; the worker runs `docs packet` | [GH-HOOK] |
+| Copilot CLI | rewrite | `modifiedArgs.prompt` beside `permissionDecision: allow` | Shipped header strip | A missing hook file leaves the worker with the header lines; it runs `docs packet` | [GH-HOOK] |
+| OpenCode | rewrite | `args`, the complete arguments object, which the shim assigns over the call | Shipped header strip | The plugin shim absent leaves the worker with the header lines; it runs `docs packet` | [OC-AGENT] |
+| Pi | rewrite | `args` in the plugin envelope | Shipped header strip | The extension absent leaves the worker with the header lines; it runs `docs packet` | [PI-EXT] |
+| Codex | rewrite | `hookSpecificOutput.updatedInput.message`, valid only with `allow` | Shipped header strip | A hook the user has not trusted is skipped; the worker runs `docs packet` | [CX-HOOK] |
+| Cursor | rewrite | `updated_input.prompt`, riding on `allow` only | Shipped header strip; `updated_input` on `Task` is documented only loosely, so a field the harness drops falls back to the file | A `failClosed` hook that does not run leaves the worker with the header lines; it runs `docs packet` | [CU-HOOK] |
+| Kilo | rewrite | `args` in the plugin envelope | Shipped header strip | The plugin shim absent leaves the worker with the header lines; it runs `docs packet` | [KI-SUB] |
+| Antigravity | file until the check passes | `overwrite` replaces `toolCall.args` by a **shallow top-level merge**, so the rewrite must resend the whole `Subagents` array, one element per dispatch. `decision` is required; the hook returns `decision: "ask"` so the user's approval prompt still applies, and never `auto_approve` | Not yet: the harness is not installed in this worktree. The check must show the worker received the replaced `Prompt` and the dispatcher's transcript did not; until then this row stays `file` | A project or global `hooks.json` that is absent or disabled means no hook; the worker runs `docs packet` | [AG-HOOK] |
+| Factory | rewrite | `hookSpecificOutput.updatedInput.prompt`, with every `tool_input` field copied | Shipped header strip | A missing or disabled hook file leaves the worker with the header lines; it runs `docs packet` | [FA-HOOK] |
+| Devin | rewrite | `hookSpecificOutput.updatedInput.prompt`, merged into the tool call | Shipped header strip | A missing hook file leaves the worker with the header lines; it runs `docs packet` | [DV-HOOK] |
+| Warp, ZCode | file | No hook and no rewrite field | Not applicable | Always the file path; the MCP fallback carries the dispatch | — |
+
 ### The user-level Claude hook
 
 The user-level hook (`--scope global`) and a project hook can both receive one Claude dispatch. For a
@@ -925,6 +960,8 @@ one. Rendering it there is an exception to the rule that user-scope agents carry
 The verdicts in the "Per-dispatch model" column cite these vendor pages. They were read on
 2026-11-10 and carried into this guide from the savings design's research. They were not
 re-read live for this revision, so a changed vendor page is a defect to record, not a silent edit.
+The [dispatch delivery path](#dispatch-delivery-path) rows cite the same pages, re-read on
+2026-11-16; [AG-HOOK] is where Antigravity documents the `overwrite` field.
 
 - [CC-SUB] Claude Code subagents: https://code.claude.com/docs/en/sub-agents
 - [CC-HOOK] Claude Code hooks: https://code.claude.com/docs/en/hooks
