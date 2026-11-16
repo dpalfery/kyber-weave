@@ -39,7 +39,7 @@ public sealed class SquadInstanceCliTests : IDisposable
             RepositoryRoot(),
             "src",
             "KyberWeave.Cli",
-            "Program.cs"));
+            "CliApplication.cs"));
 
         Assert.Contains("AddBranch(\"instance\"", program, StringComparison.Ordinal);
         Assert.Contains("AddCommand<SquadInstanceRemoveCommand>(\"remove\")", program, StringComparison.Ordinal);

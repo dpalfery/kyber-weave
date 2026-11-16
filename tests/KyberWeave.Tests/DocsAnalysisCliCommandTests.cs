@@ -28,7 +28,7 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
             RepositoryRoot(),
             "src",
             "KyberWeave.Cli",
-            "Program.cs"));
+            "CliApplication.cs"));
 
         Assert.Contains("AddCommand<DocsIntegrityCheckCommand>(\"integrity-check\")", program, StringComparison.Ordinal);
         Assert.Contains("AddCommand<DocsExportGraphCommand>(\"export-graph\")", program, StringComparison.Ordinal);
