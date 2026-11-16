@@ -10,11 +10,8 @@
       The standards templates KyberStandardsTemplates reads. A reader resolves its resources
       through typeof(Anchor).Assembly, so the templates travel with the type that reads them.
 
-      These are copies of the files Core.Docs already embeds, and the logical names are the
-      ones KyberStandardsTemplates asks for. Core.Docs still embeds them for the code that has
-      not moved yet; a later commit drops that duplicate once nothing there reads it. The
-      build fails rather than shipping two different texts, for the same reason the pull
-      request description template does.
+      The logical names are the ones KyberStandardsTemplates asks for. Core.Docs no longer
+      embeds them: the readers that needed them moved here.
     -->
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\azure\README.md" LogicalName="Standards.azure.md" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\csharp\README.md" LogicalName="Standards.csharp.md" />
