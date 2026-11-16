@@ -1,6 +1,6 @@
 using KyberWeave.Core.Arbiter.Facts;
 
-namespace KyberWeave.Cli.Commands.Arbiter;
+namespace KyberWeave.Application.Arbiter;
 
 /// <summary>
 /// What <c>arbiter audit</c> and <c>arbiter tune</c> say about a log read that did not show the whole log. The hook

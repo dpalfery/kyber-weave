@@ -1,15 +1,11 @@
-using KyberWeave.Contracts.Repositories;
-using KyberWeave.Contracts.Services;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using KyberWeave.Core.Arbiter;
-using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Diagnostics;
 using Spectre.Console;
 using Spectre.Console.Cli;
-using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Cli.Commands.Arbiter;
 
@@ -17,25 +13,20 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 /// Scores the step-1 answers in the decision log so a threshold can be chosen from evidence.
 /// </summary>
 /// <remarks>
-/// Read-only: it opens <c>decisions.jsonl</c> and <c>ledger.jsonl</c> under <c>artifacts/arbiter/</c>
-/// and writes nothing, not even the directory. For each step-1 rule it counts the scored answers,
-/// splits them into shadow and enforced, histograms their confidence in tenths, and counts how many
-/// answers would change side at each candidate threshold. A flip is measured against the threshold
-/// recorded on each decision, because that is the threshold the answer was actually judged by.
-/// A decision whose ledger event carries a return shows that return's <c>RESULT</c> beside its score.
+/// Read-only: the scoring service reads <c>decisions.jsonl</c> and <c>ledger.jsonl</c> under
+/// <c>artifacts/arbiter/</c> and writes nothing, not even the directory. For each step-1 rule this prints the count of
+/// scored answers split into shadow and enforced, their confidence histogram in tenths, and how many answers would
+/// change side at each candidate threshold. A decision whose ledger event carries a return shows that return's
+/// <c>RESULT</c> beside its score.
 /// </remarks>
-public sealed class ArbiterTuneCommand(IArbiterRepositoryLocator locator, IArbiterStateFactory state) : Command<ArbiterSettings>
+public sealed class ArbiterTuneCommand(IArbiterTuneService tune) : Command<ArbiterSettings>
 {
-    /// <summary>The number of confidence bins: one per tenth of the unit interval.</summary>
-    public const int HistogramBins = 10;
-
     /// <summary>The candidate thresholds when <c>--thresholds</c> is not given.</summary>
     public static readonly double[] DefaultThresholds = [0.5, 0.6, 0.7, 0.8, 0.9];
 
     private const string NoScoredAnswers = "no scored answers.";
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
-    private const string DelegateModelTrigger = "delegate.model";
     private const string CommandName = "arbiter tune";
 
     /// <summary>Reports the scored answers per rule. Exits 1 only when the logs cannot be read whole.</summary>
@@ -55,70 +46,26 @@ public sealed class ArbiterTuneCommand(IArbiterRepositoryLocator locator, IArbit
             return 1;
         }
 
-        string arbiterDirectory = locator.ResolveArbiterDirectory(settings.Path);
-        IReadOnlyList<ArbiterDecisionRecord> records;
-        IReadOnlyList<ArbiterLedgerEvent> events;
-        string? truncationNote;
-        try
+        if (tune.Score(settings.Path, thresholds, settings.Rule, report) is not { } scored)
         {
-            ArbiterLogRead<ArbiterDecisionRecord> decisionRead = state.OpenDecisionLog(arbiterDirectory).ReadAllWithDiagnostics();
-            ArbiterLogRead<ArbiterLedgerEvent> ledgerRead = state.OpenLedger(arbiterDirectory).ReadAllWithDiagnostics();
-            records = decisionRead.Records;
-            events = ledgerRead.Records;
-            if (ArbiterLogProblems.Unreadable(ledgerRead, decisionRead) is { } unreadable)
-            {
-                report.Add(new Diagnostic(
-                    ArbiterEvaluator.HookErrorCode,
-                    Severity.Error,
-                    $"The arbiter log under '{arbiterDirectory}' exists but could not be read: {unreadable}",
-                    arbiterDirectory,
-                    "tune reads nothing partial; an unreadable log is not an empty one."));
-                CommandHelpers.Finish(report, settings, CommandName, "Event");
-                return 1;
-            }
-
-            if (decisionRead.MalformedLines + ledgerRead.MalformedLines > 0)
-            {
-                report.Add(new Diagnostic(
-                    ArbiterEvaluator.HookErrorCode,
-                    Severity.Error,
-                    $"The arbiter log under '{arbiterDirectory}' holds {decisionRead.MalformedLines + ledgerRead.MalformedLines} line(s) that are not a complete record.",
-                    arbiterDirectory,
-                    "tune reads nothing partial; repair or remove the malformed line, then re-run."));
-                CommandHelpers.Finish(report, settings, CommandName, "Event");
-                return 1;
-            }
-
-            truncationNote = ArbiterLogProblems.TruncationNote(ledgerRead, decisionRead);
-        }
-        catch (Exception exception) when (FileFailure.Is(exception) || exception is System.Text.Json.JsonException or InvalidDataException)
-        {
-            report.Add(new Diagnostic(
-                ArbiterEvaluator.HookErrorCode,
-                Severity.Error,
-                $"The arbiter log under '{arbiterDirectory}' could not be read: {exception.Message}",
-                arbiterDirectory));
             CommandHelpers.Finish(report, settings, CommandName, "Event");
             return 1;
         }
-
-        Dictionary<string, RuleTally> tallies = Tally(records, settings.Rule);
-        Dictionary<string, string> results = PairedResults(events);
 
         CommandHelpers.WriteUnfolded(() =>
         {
             if (settings.Json)
             {
-                WriteJson(tallies, thresholds, results, truncationNote);
+                WriteJson(scored);
             }
             else
             {
-                if (truncationNote is not null)
+                if (scored.TruncationNote is not null)
                 {
-                    AnsiConsole.WriteLine($"warning {ArbiterAuditCommand.LogWindowTruncated}: {truncationNote} The tallies below cover only the newest records.");
+                    AnsiConsole.WriteLine($"warning {ArbiterAuditCommand.LogWindowTruncated}: {scored.TruncationNote} The tallies below cover only the newest records.");
                 }
 
-                WriteText(tallies, thresholds, results);
+                WriteText(scored);
             }
         });
         return 0;
@@ -166,96 +113,28 @@ public sealed class ArbiterTuneCommand(IArbiterRepositoryLocator locator, IArbit
         return true;
     }
 
-    private static Dictionary<string, RuleTally> Tally(IReadOnlyList<ArbiterDecisionRecord> records, string? onlyRule)
+    private static void WriteText(ArbiterTuneReport report)
     {
-        Dictionary<string, RuleTally> tallies = new(StringComparer.Ordinal);
-        foreach (ArbiterDecisionRecord record in records)
-        {
-            foreach (ArbiterDecisionRule rule in record.Rules)
-            {
-                if (rule.Step != 1 || rule.Confidence is not double confidence)
-                {
-                    continue;
-                }
-
-                if (onlyRule is not null && !string.Equals(rule.Id, onlyRule, StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                if (!tallies.TryGetValue(rule.Id, out RuleTally? tally))
-                {
-                    tally = new RuleTally(rule.Id);
-                    tallies[rule.Id] = tally;
-                }
-
-                if (!IsReadableConfidence(confidence))
-                {
-                    tally.CountUnreadable();
-                    continue;
-                }
-
-                ArbiterModelBlock? model = string.Equals(record.Trigger, DelegateModelTrigger, StringComparison.Ordinal)
-                    ? record.Model
-                    : null;
-                tally.Add(record.Id, record.LedgerId, confidence, rule.Threshold, rule.Shadow == true, model);
-            }
-        }
-
-        return tallies;
-    }
-
-    /// <summary>
-    /// A confidence the tally can place: a finite number between 0 and 1. NaN and out-of-range values are
-    /// skipped and counted as unreadable, because clamping them would put them in a bin they never earned.
-    /// </summary>
-    private static bool IsReadableConfidence(double confidence) =>
-        double.IsFinite(confidence) && confidence is >= 0 and <= 1;
-
-    /// <summary>The return's <c>RESULT</c> keyed by the decision's ledger id, from the post event that names the pre.</summary>
-    private static Dictionary<string, string> PairedResults(IReadOnlyList<ArbiterLedgerEvent> events)
-    {
-        Dictionary<string, string> results = new(StringComparer.Ordinal);
-        foreach (ArbiterLedgerEvent ev in events)
-        {
-            if (!string.Equals(ev.Phase, ArbiterLedgerPhases.Post, StringComparison.Ordinal)
-                || ev.PreId is null
-                || ev.Returns?.TaskReview is not string result)
-            {
-                continue;
-            }
-
-            results[ev.PreId] = result;
-        }
-
-        return results;
-    }
-
-    private static void WriteText(
-        IReadOnlyDictionary<string, RuleTally> tallies,
-        double[] thresholds,
-        IReadOnlyDictionary<string, string> results)
-    {
-        if (tallies.Count == 0)
+        if (report.Rules.Count == 0)
         {
             AnsiConsole.WriteLine(NoScoredAnswers);
             return;
         }
 
-        foreach (RuleTally tally in tallies.Values.OrderBy(t => t.Id, StringComparer.Ordinal))
+        foreach (ArbiterTuneRule rule in report.Rules)
         {
             AnsiConsole.MarkupLine(
-                $"[bold]{Markup.Escape(tally.Id)}[/]  scored {tally.Scored}  shadow {tally.Shadow}  enforced {tally.Enforced}{UnreadableSuffix(tally)}");
-            AnsiConsole.MarkupLine($"  confidence (tenths): {string.Join(' ', tally.Histogram)}");
-            foreach (ThresholdFlips flips in tally.FlipsAt(thresholds))
+                $"[bold]{Markup.Escape(rule.Id)}[/]  scored {rule.Scored}  shadow {rule.Shadow}  enforced {rule.Enforced}{UnreadableSuffix(rule)}");
+            AnsiConsole.MarkupLine($"  confidence (tenths): {string.Join(' ', rule.Histogram)}");
+            foreach (ArbiterTuneThreshold flips in rule.Thresholds)
             {
                 AnsiConsole.MarkupLine(
                     $"  threshold {flips.Threshold.ToString("0.00", CultureInfo.InvariantCulture)}: {flips.Changed} flip(s)");
             }
 
-            foreach (RuleSample sample in tally.Samples)
+            foreach (ArbiterTuneSample sample in rule.Samples)
             {
-                if (!results.TryGetValue(sample.LedgerId, out string? result))
+                if (sample.Result is not { } result)
                 {
                     continue;
                 }
@@ -269,20 +148,16 @@ public sealed class ArbiterTuneCommand(IArbiterRepositoryLocator locator, IArbit
         }
     }
 
-    private static string UnreadableSuffix(RuleTally tally) =>
-        tally.Unreadable == 0 ? string.Empty : $"  unreadable {tally.Unreadable}";
+    private static string UnreadableSuffix(ArbiterTuneRule rule) =>
+        rule.Unreadable == 0 ? string.Empty : $"  unreadable {rule.Unreadable}";
 
-    private static void WriteJson(
-        IReadOnlyDictionary<string, RuleTally> tallies,
-        double[] thresholds,
-        IReadOnlyDictionary<string, string> results,
-        string? truncationNote)
+    private static void WriteJson(ArbiterTuneReport report)
     {
         List<JsonRuleReport> rules = [];
-        foreach (RuleTally tally in tallies.Values.OrderBy(t => t.Id, StringComparer.Ordinal))
+        foreach (ArbiterTuneRule rule in report.Rules)
         {
             List<JsonModelRow> model = [];
-            foreach (RuleSample sample in tally.Samples)
+            foreach (ArbiterTuneSample sample in rule.Samples)
             {
                 if (sample.Model is null)
                 {
@@ -295,85 +170,23 @@ public sealed class ArbiterTuneCommand(IArbiterRepositoryLocator locator, IArbit
                     sample.Model.Profile,
                     sample.Model.Token,
                     sample.Model.Delivered,
-                    results.TryGetValue(sample.LedgerId, out string? result) ? result : null));
+                    sample.Result));
             }
 
             rules.Add(new JsonRuleReport(
-                tally.Id,
-                tally.Scored,
-                tally.Shadow,
-                tally.Enforced,
-                tally.Unreadable,
-                tally.Histogram,
-                [.. tally.FlipsAt(thresholds).Select(f => new JsonThresholdReport(f.Threshold, f.Changed))],
+                rule.Id,
+                rule.Scored,
+                rule.Shadow,
+                rule.Enforced,
+                rule.Unreadable,
+                rule.Histogram,
+                [.. rule.Thresholds.Select(flips => new JsonThresholdReport(flips.Threshold, flips.Changed))],
                 model));
         }
 
-        string json = JsonSerializer.Serialize(new JsonTuneReport(rules, truncationNote), JsonOptions);
+        string json = JsonSerializer.Serialize(new JsonTuneReport(rules, report.TruncationNote), JsonOptions);
         AnsiConsole.WriteLine(json);
     }
-
-    /// <summary>One rule's scored answers, the samples behind them, and the histogram of their confidence.</summary>
-    private sealed class RuleTally(string id)
-    {
-        private readonly List<RuleSample> _samples = [];
-
-        public string Id { get; } = id;
-
-        public int Scored => _samples.Count;
-
-        public int Shadow { get; private set; }
-
-        public int Enforced => Scored - Shadow;
-
-        /// <summary>Step-1 answers whose confidence was not a finite number between 0 and 1, so were not tallied.</summary>
-        public int Unreadable { get; private set; }
-
-        public int[] Histogram { get; } = new int[HistogramBins];
-
-        public IReadOnlyList<RuleSample> Samples => _samples;
-
-        public void CountUnreadable() => Unreadable++;
-
-        public void Add(
-            string decisionId,
-            string ledgerId,
-            double confidence,
-            double? threshold,
-            bool shadow,
-            ArbiterModelBlock? model)
-        {
-            int bin = Math.Clamp((int)Math.Floor(confidence * HistogramBins), 0, HistogramBins - 1);
-            Histogram[bin]++;
-            if (shadow)
-            {
-                Shadow++;
-            }
-
-            _samples.Add(new RuleSample(decisionId, ledgerId, confidence, threshold, shadow, model));
-        }
-
-        /// <summary>
-        /// Counts the answers that would change side at each candidate. An answer flips when its
-        /// confidence is at or above the candidate on one side and below it on the other, measured
-        /// against the threshold recorded on that decision. Decisions with no recorded threshold
-        /// cannot be measured, so they never count as a flip.
-        /// </summary>
-        public IEnumerable<ThresholdFlips> FlipsAt(IEnumerable<double> candidates) =>
-            candidates.Select(candidate => new ThresholdFlips(
-                candidate,
-                _samples.Count(s => s.Threshold is double recorded
-                    && (s.Confidence >= candidate) != (s.Confidence >= recorded))));
-    }
-
-    /// <summary>One scored answer, kept with the threshold it was judged by and the ledger event it pairs with.</summary>
-    private sealed record RuleSample(
-        string DecisionId,
-        string LedgerId,
-        double Confidence,
-        double? Threshold,
-        bool Shadow,
-        ArbiterModelBlock? Model);
 
     /// <summary>One <c>delegate.model</c> answer's model row in the JSON report: what it targeted and whether it was delivered.</summary>
     private sealed record JsonModelRow(
@@ -383,8 +196,6 @@ public sealed class ArbiterTuneCommand(IArbiterRepositoryLocator locator, IArbit
         [property: JsonPropertyName("token")] string? Token,
         [property: JsonPropertyName("delivered")] bool Delivered,
         [property: JsonPropertyName("result")] string? Result);
-
-    private sealed record ThresholdFlips(double Threshold, int Changed);
 
     private sealed record JsonTuneReport(
         [property: JsonPropertyName("rules")] IReadOnlyList<JsonRuleReport> Rules,
