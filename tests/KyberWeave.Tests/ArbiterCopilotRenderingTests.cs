@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Tests.Fakes;
 using System.Text.Json;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
@@ -193,13 +194,13 @@ public sealed class ArbiterCopilotRenderingTests : IDisposable
         using ArbiterSquadFixture hostileFixture = ArbiterSquadFixture.Create();
         hostileFixture.WriteAgent(hostile, "worker", "worker", "[]");
 
-        SquadRendererRegistry registry = new([new CopilotRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new CopilotRenderer()]);
         ArgumentException error = await Assert.ThrowsAsync<ArgumentException>(() =>
             registry.RenderAsync(new SquadRenderRequest(
                 SourceDirectory: hostileFixture.Path,
                 Targets: [SquadTarget.Copilot],
                 Scope: SquadDeploymentScope.Project,
-                Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: HookTimeoutSeconds))));
+                Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: HookTimeoutSeconds)).Prepared()));
 
         Assert.Contains(hostile, error.Message, StringComparison.Ordinal);
     }
@@ -265,13 +266,13 @@ public sealed class ArbiterCopilotRenderingTests : IDisposable
 
     private async Task<SquadRenderResult> RenderAsync(SquadArbiterWiring? arbiter, SquadDeploymentScope scope)
     {
-        SquadRendererRegistry registry = new([new CopilotRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new CopilotRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Copilot],
             Scope: scope,
             GlobalRoots: new FixedGlobalRoots(_fixture.Path),
-            Arbiter: arbiter));
+            Arbiter: arbiter).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
         return result;
     }

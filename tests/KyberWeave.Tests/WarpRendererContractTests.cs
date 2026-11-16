@@ -90,8 +90,8 @@ public sealed class WarpRendererContractTests : IDisposable
         HashSet<string> collisions = DeriveCollisions(source);
         Assert.NotEmpty(collisions);
 
-        SquadRenderResult result = await new SquadRendererRegistry([new WarpRenderer()]).RenderAsync(
-            new SquadRenderRequest(ProductRoot, [SquadTarget.Warp], SquadDeploymentScope.Project));
+        SquadRenderResult result = await SquadTestRegistry.Create([new WarpRenderer()]).RenderAsync(
+            new SquadRenderRequest(ProductRoot, [SquadTarget.Warp], SquadDeploymentScope.Project).Prepared());
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         Assert.DoesNotContain(result.Files, f => f.RelativePath.Contains("/agents/", StringComparison.OrdinalIgnoreCase));

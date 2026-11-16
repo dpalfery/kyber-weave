@@ -1,3 +1,5 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Arbiter;
@@ -466,7 +468,7 @@ public sealed class ArbiterCliCommandTests : IDisposable
             IsDispatch = true,
         }));
 
-        ArbiterEvalCommand command = new();
+        ArbiterEvalCommand command = new(new FileArbiterModelTargetsReader(new PhysicalFileSystem()));
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterSettings

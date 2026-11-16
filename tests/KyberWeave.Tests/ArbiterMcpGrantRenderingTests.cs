@@ -1,4 +1,5 @@
 using System.IO;
+using KyberWeave.Tests.Fakes;
 using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
@@ -84,11 +85,11 @@ public sealed class ArbiterMcpGrantRenderingTests : IDisposable
         SquadDeploymentScope scope = wiringKind == 2
             ? SquadDeploymentScope.Global
             : SquadDeploymentScope.Project;
-        SquadRendererRegistry registry = new([new ZCodeRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new ZCodeRenderer()]);
         SquadRenderResult baseline = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: bare.Path,
             Targets: [SquadTarget.ZCode],
-            Scope: scope));
+            Scope: scope).Prepared());
         Assert.True(baseline.Success, string.Join("; ", baseline.Errors));
 
         SquadRenderResult gated = await RenderAsync(new ZCodeRenderer(), SquadTarget.ZCode, wiring, scope);
@@ -243,12 +244,12 @@ public sealed class ArbiterMcpGrantRenderingTests : IDisposable
         SquadArbiterWiring? arbiter = null,
         SquadDeploymentScope scope = SquadDeploymentScope.Project)
     {
-        SquadRendererRegistry registry = new([renderer]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([renderer]);
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [target],
             Scope: scope,
-            Arbiter: arbiter));
+            Arbiter: arbiter).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
         return result;
     }

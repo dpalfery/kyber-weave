@@ -1,0 +1,23 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Arbiter.Credentials;
+using KyberWeave.Data.Arbiter.Credentials;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+
+namespace KyberWeave.Data.Arbiter;
+
+/// <summary>Registers the Arbiter's adapters.</summary>
+internal static class ArbiterDataServiceCollectionExtensions
+{
+    /// <summary>Registers the Arbiter adapters with <c>TryAdd</c>, so a host or test that registered its own first keeps it.</summary>
+    /// <param name="services">The collection to populate.</param>
+    /// <returns>The same collection, for chaining.</returns>
+    internal static IServiceCollection AddWeaveArbiterData(this IServiceCollection services)
+    {
+        services.TryAddSingleton<IArbiterModelTargetsReader>(sp => new FileArbiterModelTargetsReader(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<IArbiterUserSettings>(sp => new FileArbiterUserSettings(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<ICredentialStore>(_ => OperatingSystemCredentialStore.Create());
+        services.TryAddSingleton(sp => new ConfiguredArbiterProviderFactory(sp.GetRequiredService<IArbiterUserSettings>()));
+        return services;
+    }
+}

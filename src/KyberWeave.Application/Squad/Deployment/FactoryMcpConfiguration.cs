@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using System.Text.Json;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
@@ -28,12 +29,14 @@ public static class FactoryMcpConfiguration
     /// Returns one warning naming the granted servers Factory has no definition for, or nothing
     /// when Factory is not a target, every server is defined, or the scope has no known config path.
     /// </summary>
+    /// <param name="files">The file probes the config files are read through.</param>
     /// <param name="targets">The harnesses this deployment renders.</param>
     /// <param name="scope">The deployment scope; a harness instance's config location is not known.</param>
     /// <param name="source">The squad source whose <c>mcp.json</c> names the granted servers.</param>
     /// <param name="targetRoot">The project root for a project deployment.</param>
     /// <param name="homeDirectory">The user's home directory.</param>
     public static IReadOnlyList<string> Warnings(
+        ISquadFileAccess files,
         IReadOnlyCollection<SquadTarget> targets,
         SquadDeploymentScope scope,
         SquadSource? source,
@@ -53,7 +56,7 @@ public static class FactoryMcpConfiguration
         HashSet<string> configured = new(
             ConfigPaths(scope, targetRoot, homeDirectory)
                 .Distinct(StringComparer.Ordinal)
-                .SelectMany(path => ReadServerNames(path, unreadable))
+                .SelectMany(path => ReadServerNames(files, path, unreadable))
                 .ToList(),
             StringComparer.Ordinal);
         string[] missing =
@@ -100,17 +103,17 @@ public static class FactoryMcpConfiguration
         }
     }
 
-    private static IReadOnlyList<string> ReadServerNames(string path, List<string> unreadable)
+    private static IReadOnlyList<string> ReadServerNames(ISquadFileAccess files, string path, List<string> unreadable)
     {
         try
         {
-            if (!File.Exists(path))
+            if (!files.FileExists(path))
             {
                 return [];
             }
 
             using JsonDocument document = JsonDocument.Parse(
-                File.ReadAllText(path),
+                files.ReadAllText(path),
                 new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip });
 
             if (document.RootElement.ValueKind != JsonValueKind.Object)

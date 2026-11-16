@@ -67,8 +67,8 @@ public sealed class CursorRendererContractTests
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
         HashSet<string> sharedIdentities = SharedIdentities(source);
-        SquadRenderResult result = await new SquadRendererRegistry([new CursorRenderer()]).RenderAsync(
-            new SquadRenderRequest(ProductRoot, [SquadTarget.Cursor], SquadDeploymentScope.Project));
+        SquadRenderResult result = await SquadTestRegistry.Create([new CursorRenderer()]).RenderAsync(
+            new SquadRenderRequest(ProductRoot, [SquadTarget.Cursor], SquadDeploymentScope.Project).Prepared());
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         foreach (SquadAgent agent in source.Agents.Where(a => a.Invocation == SquadInvocation.Subagent))
@@ -131,11 +131,11 @@ public sealed class CursorRendererContractTests
     public async Task RenderAsync_Cursor_LowersThePrimaryAgentToASkillOnly()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRendererRegistry registry = new([new CursorRenderer()]);
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new CursorRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
             SourceDirectory: ProductRoot,
             Targets: [SquadTarget.Cursor],
-            Scope: SquadDeploymentScope.Project);
+            Scope: SquadDeploymentScope.Project).Prepared();
 
         SquadRenderResult result = await registry.RenderAsync(request);
         Assert.True(result.Success, string.Join("; ", result.Errors));
@@ -224,11 +224,11 @@ public sealed class CursorRendererContractTests
         SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(source.Agents, agent => agent.Name == "conductor");
 
-        SquadRendererRegistry registry = new([new CursorRenderer()]);
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new CursorRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
             SourceDirectory: ProductRoot,
             Targets: [SquadTarget.Cursor],
-            Scope: SquadDeploymentScope.Global);
+            Scope: SquadDeploymentScope.Global).Prepared();
 
         SquadRenderResult result = await registry.RenderAsync(request);
         Assert.True(result.Success, string.Join("; ", result.Errors));
@@ -264,19 +264,19 @@ public sealed class CursorRendererContractTests
         SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(source.Agents, agent => agent.Name == "conductor");
 
-        SquadRendererRegistry registry = new([new CursorRenderer()]);
-        SquadRenderRequest skillRequest = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new CursorRenderer()]);
+        SquadRenderRequest skillRequest = new SquadRenderRequest(
             SourceDirectory: ProductRoot,
             Targets: [SquadTarget.Cursor],
-            Scope: SquadDeploymentScope.Project);
+            Scope: SquadDeploymentScope.Project).Prepared();
         SquadRenderResult skillResult = await registry.RenderAsync(skillRequest);
         Assert.True(skillResult.Success, string.Join("; ", skillResult.Errors));
 
         using ClaudeNoPrimaryAgentFixture omitFixture = ClaudeNoPrimaryAgentFixture.Create("omit");
-        SquadRenderRequest omitRequest = new(
+        SquadRenderRequest omitRequest = new SquadRenderRequest(
             SourceDirectory: omitFixture.ProductRoot,
             Targets: [SquadTarget.Cursor],
-            Scope: SquadDeploymentScope.Project);
+            Scope: SquadDeploymentScope.Project).Prepared();
         SquadRenderResult omitResult = await registry.RenderAsync(omitRequest);
         Assert.True(omitResult.Success, string.Join("; ", omitResult.Errors));
 
@@ -326,10 +326,10 @@ public sealed class CursorRendererContractTests
         using PiPrimaryIdentityCollisionFixture fixture = PiPrimaryIdentityCollisionFixture.Create(primaryAgent.Name);
 
         CursorRenderer renderer = new();
-        SquadRenderRequest request = new(
+        SquadRenderRequest request = new SquadRenderRequest(
             SourceDirectory: fixture.ProductRoot,
             Targets: [SquadTarget.Cursor],
-            Scope: SquadDeploymentScope.Project);
+            Scope: SquadDeploymentScope.Project).Prepared();
 
         SquadRenderValidationException exception = await Assert.ThrowsAsync<SquadRenderValidationException>(
             () => renderer.RenderAsync(request));

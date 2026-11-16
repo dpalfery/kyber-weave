@@ -1,4 +1,6 @@
 using KyberWeave.Cli.Commands.Arbiter;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Squad.Briefs;
@@ -15,7 +17,7 @@ namespace KyberWeave.Cli.Commands.Squad.Brief;
 /// Read-only. Exit codes: <c>0</c> the brief was printed (an unmapped heading is included, never an
 /// error), <c>2</c> refused input or reference files that cannot be found or read.
 /// </remarks>
-public sealed class SquadBriefCommand : Command<SquadBriefSettings>
+public sealed class SquadBriefCommand(ISquadBriefService briefs, IFileSystem files) : Command<SquadBriefSettings>
 {
     private const int Printed = 0;
     private const int Refused = 2;
@@ -48,7 +50,7 @@ public sealed class SquadBriefCommand : Command<SquadBriefSettings>
             [root],
             config);
 
-        if (!SquadBriefBuilder.TryBuild(request, out BriefResult? result, out string error))
+        if (!SquadBriefBuilder.TryBuild(request, briefs, files, out BriefResult? result, out string error))
         {
             return Refuse(error);
         }

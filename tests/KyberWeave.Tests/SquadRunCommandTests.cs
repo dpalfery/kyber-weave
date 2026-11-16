@@ -363,7 +363,7 @@ public sealed class SquadRunCommandTests : IDisposable
         Func<string, string?>? getEnv = null,
         Func<SquadTarget, string, Task<SquadInstanceEnsureResult>>? ensureOverride = null)
     {
-        return new SquadRunCommand(
+        return SquadTestCommands.Run(
             _userPaths,
             _selectionStore,
             runner ?? (_ => 0),

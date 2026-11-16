@@ -299,13 +299,13 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
 
     private static async Task<int> ConductorLengthAsync(Harness h, string? gateValue)
     {
-        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
+        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
         SquadRenderResult result = await renderer.RenderAsync(new SquadRenderRequest(
             SyntheticValidSquadReleaseSource.SyntheticCorpusRoot,
             [SquadTarget.Copilot],
             SquadDeploymentScope.Global,
             GlobalRoots: SquadOperatorChannelFixture.GlobalRoots(h.CopilotHome, h.UserHome),
-            EnvironmentReader: SquadOperatorChannelFixture.CreateEnvironmentReader(gateValue, h.CopilotHome)));
+            EnvironmentReader: SquadOperatorChannelFixture.CreateEnvironmentReader(gateValue, h.CopilotHome)).Prepared());
         return SquadOperatorChannelFixture.ConductorText(result).Length;
     }
 
@@ -350,7 +350,7 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
         ISquadReleaseSource releaseSource,
         Func<string, string?>? environmentReader = null)
     {
-        return new SquadLifecycleService(
+        return SquadHostDefaults.CreateLifecycleService(
             releaseSource,
             h.Renderer,
             h.Store,
@@ -462,7 +462,7 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
             UserHome = userHome;
             Store = new SquadStateStore(new FakeSquadUserPaths(userHome));
             GlobalRoots = SquadOperatorChannelFixture.GlobalRoots(copilotHome, userHome);
-            Renderer = new RecordingRenderer(new SquadRendererRegistry([new CopilotRenderer()]));
+            Renderer = new RecordingRenderer(SquadTestRegistry.Create([new CopilotRenderer()]));
             Corpus = new SyntheticValidSquadReleaseSource();
             Oversized = new OversizedConductorReleaseSource();
         }

@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fixtures;
@@ -16,11 +17,11 @@ public sealed class SquadSharedIdentityProjectionTests
     public async Task AntigravitySuppressesRedundantSharedIdentitySkillProjection()
     {
         using SharedIdentitySquadFixture fixture = SharedIdentitySquadFixture.Create();
-        SquadRendererRegistry registry = new([new AntigravityRenderer()]);
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new AntigravityRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
             fixture.Path,
             [SquadTarget.Antigravity],
-            SquadDeploymentScope.Project);
+            SquadDeploymentScope.Project).Prepared();
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -46,11 +47,11 @@ public sealed class SquadSharedIdentityProjectionTests
     public async Task NativeRendererEmitsAgentAndSuppressesSharedCanonicalSkill()
     {
         using SharedIdentitySquadFixture fixture = SharedIdentitySquadFixture.Create();
-        SquadRendererRegistry registry = new([new CopilotRenderer()]);
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new CopilotRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
             fixture.Path,
             [SquadTarget.Copilot],
-            SquadDeploymentScope.Project);
+            SquadDeploymentScope.Project).Prepared();
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -67,11 +68,11 @@ public sealed class SquadSharedIdentityProjectionTests
     public async Task RegistryAcceptsExactlyOneSharedIdentityProjection()
     {
         using SharedIdentitySquadFixture fixture = SharedIdentitySquadFixture.Create();
-        SquadRendererRegistry registry = new([new SingleProjectionRenderer()]);
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new SingleProjectionRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
             fixture.Path,
             [SquadTarget.Copilot],
-            SquadDeploymentScope.Project);
+            SquadDeploymentScope.Project).Prepared();
 
         SquadRenderResult result = await registry.RenderAsync(request);
 

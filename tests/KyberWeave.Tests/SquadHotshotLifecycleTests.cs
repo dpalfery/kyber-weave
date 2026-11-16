@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
@@ -38,7 +39,7 @@ public sealed class SquadHotshotLifecycleTests : IDisposable
         SquadStateStore stateStore = new(new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-data")));
         using FakeSquadReleaseSource releaseSource = new();
         RosterShrinkingRenderer renderer = new(rosterPaths);
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
 
         SquadLifecycleResult install = await service.InstallAsync(new SquadInstallRequest(
             TargetRoot: targetRoot,

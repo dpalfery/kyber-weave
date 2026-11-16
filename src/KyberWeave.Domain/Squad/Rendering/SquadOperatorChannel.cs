@@ -31,6 +31,9 @@ public static class SquadOperatorChannel
     /// <summary>The review council's root agent, the second Arbiter fallback caller.</summary>
     public const string CodeReviewerAgentName = "code-reviewer";
 
+    /// <summary>The file in the Copilot root that declares the user's MCP servers.</summary>
+    public const string CopilotMcpConfigFileName = "mcp-config.json";
+
     /// <summary>The overlay file, relative to the canonical Squad source root.</summary>
     public const string OverlayRelativePath = "agents/conductor/overlays/operator-channel.md";
 
@@ -56,10 +59,10 @@ public static class SquadOperatorChannel
     }
 
     /// <summary>True only when the gate variable is exactly <c>true</c>, compared ordinally.</summary>
-    public static bool IsGateOn(Func<string, string?>? getEnvironmentVariable = null)
+    public static bool IsGateOn(Func<string, string?> getEnvironmentVariable)
     {
-        Func<string, string?> reader = getEnvironmentVariable ?? Environment.GetEnvironmentVariable;
-        return string.Equals(reader(GateVariable), "true", StringComparison.Ordinal);
+        ArgumentNullException.ThrowIfNull(getEnvironmentVariable);
+        return string.Equals(getEnvironmentVariable(GateVariable), "true", StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -67,10 +70,10 @@ public static class SquadOperatorChannel
     /// turns the overlay off. The warning never carries the raw value, because a value that failed
     /// validation must not reach any output.
     /// </summary>
-    public static SquadOperatorChannelServerName ResolveServerName(Func<string, string?>? getEnvironmentVariable = null)
+    public static SquadOperatorChannelServerName ResolveServerName(Func<string, string?> getEnvironmentVariable)
     {
-        Func<string, string?> reader = getEnvironmentVariable ?? Environment.GetEnvironmentVariable;
-        string? raw = reader(ServerVariable);
+        ArgumentNullException.ThrowIfNull(getEnvironmentVariable);
+        string? raw = getEnvironmentVariable(ServerVariable);
         if (string.IsNullOrEmpty(raw))
         {
             return new SquadOperatorChannelServerName(

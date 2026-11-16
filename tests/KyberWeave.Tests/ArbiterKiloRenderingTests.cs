@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fixtures;
@@ -191,12 +192,12 @@ public sealed class ArbiterKiloRenderingTests : IDisposable
         };
         SquadDeploymentScope scope = SquadDeploymentScope.Project;
 
-        SquadRendererRegistry registry = new([new KiloRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new KiloRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Kilo],
             Scope: scope,
-            Arbiter: wiring));
+            Arbiter: wiring).Prepared());
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         Assert.DoesNotContain(result.Files, f => f.RelativePath == ShimFilePath);
@@ -229,12 +230,12 @@ public sealed class ArbiterKiloRenderingTests : IDisposable
 
     private async Task<SquadRenderResult> RenderAsync(SquadArbiterWiring? arbiter, SquadDeploymentScope scope)
     {
-        SquadRendererRegistry registry = new([new KiloRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new KiloRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Kilo],
             Scope: scope,
-            Arbiter: arbiter));
+            Arbiter: arbiter).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
         return result;
     }

@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Tests.Fakes;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Agents.Model;
 using KyberWeave.Core.Skills.Model;
@@ -484,11 +485,11 @@ public sealed class SquadDocsHarvestContractTests
 
     private static async Task<string> RenderFrontmatterAsync(string agentName)
     {
-        SquadRendererRegistry registry = new([new CopilotRenderer()]);
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new CopilotRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Copilot],
-            SquadDeploymentScope.Project);
+            SquadDeploymentScope.Project).Prepared();
 
         SquadRenderResult result = await registry.RenderAsync(request);
         Assert.True(result.Success, string.Join("; ", result.Errors));

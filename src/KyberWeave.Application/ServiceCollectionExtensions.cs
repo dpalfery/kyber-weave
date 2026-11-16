@@ -5,10 +5,10 @@ using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Docs.Mcp;
 using KyberWeave.Mcp;
 using KyberWeave.Application.RunStart;
-using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Application.Utilities;
+using KyberWeave.Application.Squad;
 using KyberWeave.Core.Squad.Briefs;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Data;
@@ -58,6 +58,8 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<McpWiringFixes>(),
             sp.GetRequiredService<ILaunchCommandResolverFactory>()));
         services.TryAddSingleton<ICorpusProvenance>(sp => new CorpusProvenanceService(sp.GetRequiredService<IGitCheckoutProbe>()));
+        services.TryAddSingleton<ISquadBriefService>(sp => new SquadBriefService(sp.GetRequiredService<IFileSystem>()));
+        _ = services.AddWeaveSquadApplication();
         return services;
     }
 }

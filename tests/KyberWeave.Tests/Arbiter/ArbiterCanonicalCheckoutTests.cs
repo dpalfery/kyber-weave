@@ -1,3 +1,5 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
 using System.Diagnostics;
 using System.Text.Json;
 using KyberWeave.Arbiter.Hooks;
@@ -254,6 +256,7 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
             new DecisionLog(arbiterDirectory),
             new HookGitFacts(_repo, _home.Path, arbiterDirectory),
             new ArbiterEvaluatorFixtures.PlanFacts(),
+            new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             TimeProvider.System);
         KyberWeaveConfig config = ArbiterEvaluatorFixtures.ConfigWith(ArbiterConfig.ProductDefaults.Rules);
 

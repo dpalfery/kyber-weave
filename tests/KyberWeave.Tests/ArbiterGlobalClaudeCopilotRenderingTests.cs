@@ -1,4 +1,5 @@
 using System.Text.Json;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fixtures;
@@ -34,7 +35,7 @@ public sealed class ArbiterGlobalClaudeCopilotRenderingTests : IDisposable
             Targets: [SquadTarget.Claude],
             Scope: SquadDeploymentScope.Global,
             GlobalRoots: globalRoots,
-            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: HookTimeoutSeconds)));
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: HookTimeoutSeconds)).Prepared());
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         Assert.NotNull(result.Blocks);
@@ -60,7 +61,7 @@ public sealed class ArbiterGlobalClaudeCopilotRenderingTests : IDisposable
             Targets: [SquadTarget.Copilot],
             Scope: SquadDeploymentScope.Global,
             GlobalRoots: globalRoots,
-            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: HookTimeoutSeconds)));
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: HookTimeoutSeconds)).Prepared());
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 

@@ -44,7 +44,7 @@ public sealed class SquadOwnedBlockStatusTests
             blocks: [CursorBlock("cursor-one")]);
         new SquadTransaction(store).Execute(plan);
 
-        SquadStatusCommand command = new(stateStore: store);
+        SquadStatusCommand command = SquadTestCommands.Status(stateStore: store);
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
             new SquadStatusSettings
@@ -85,7 +85,7 @@ public sealed class SquadOwnedBlockStatusTests
 
         try
         {
-            SquadStatusCommand command = new(stateStore: store);
+            SquadStatusCommand command = SquadTestCommands.Status(stateStore: store);
             CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
                 null!,
                 new SquadStatusSettings
@@ -121,7 +121,7 @@ public sealed class SquadOwnedBlockStatusTests
 
         DriftOwnedEntry(fixture.Path, ".cursor/hooks.json", "cursor-one", "cursor-one drifted by hand");
 
-        SquadStatusCommand command = new(stateStore: store);
+        SquadStatusCommand command = SquadTestCommands.Status(stateStore: store);
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
             new SquadStatusSettings
@@ -154,7 +154,7 @@ public sealed class SquadOwnedBlockStatusTests
 
         File.Delete(Path.Combine(fixture.Path, ".cursor", "hooks.json"));
 
-        SquadStatusCommand command = new(stateStore: store);
+        SquadStatusCommand command = SquadTestCommands.Status(stateStore: store);
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
             new SquadStatusSettings
@@ -190,7 +190,7 @@ public sealed class SquadOwnedBlockStatusTests
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-        SquadDoctorCommand command = new(executor, userPaths, workingDirectory: fixture.Path);
+        SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: fixture.Path);
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
@@ -234,7 +234,7 @@ public sealed class SquadOwnedBlockStatusTests
         {
             FakeProcessExecutor executor = new FakeProcessExecutor()
                 .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-            SquadDoctorCommand command = new(executor, userPaths, workingDirectory: fixture.Path);
+            SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: fixture.Path);
 
             CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
                 null!,
@@ -274,7 +274,7 @@ public sealed class SquadOwnedBlockStatusTests
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-        SquadDoctorCommand command = new(executor, userPaths, workingDirectory: fixture.Path);
+        SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: fixture.Path);
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
@@ -306,7 +306,7 @@ public sealed class SquadOwnedBlockStatusTests
         using TempDirectory fixture = new TempDirectory();
         GlobalBlockDeployment installed = InstallGlobalBlocks(fixture);
 
-        SquadStatusCommand command = new(stateStore: installed.Store, globalRoots: installed.GlobalRoots);
+        SquadStatusCommand command = SquadTestCommands.Status(stateStore: installed.Store, globalRoots: installed.GlobalRoots);
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
             new SquadStatusSettings
@@ -340,7 +340,7 @@ public sealed class SquadOwnedBlockStatusTests
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-        SquadDoctorCommand command = new(
+        SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
             installed.Store.UserPaths,
             installed.Home,

@@ -22,7 +22,7 @@ public sealed class ArbiterSectionAndCommentRuleTests
     private const string CommentRule = "KW-ARB-COMMENT-001";
 
     private static readonly string ShippedRulesPath =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Core", "Arbiter", "Rules", "default-rules.yml");
+        Path.Combine(KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Domain", "Arbiter", "Rules", "default-rules.yml");
 
     private static ArbiterRule Shipped(string id) =>
         Assert.Single(ArbiterConfig.ProductDefaults.Rules, rule => string.Equals(rule.Id, id, StringComparison.Ordinal));

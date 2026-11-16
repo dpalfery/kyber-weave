@@ -4,11 +4,13 @@ using KyberWeave.Data.Docs.FileSystem;
 using KyberWeave.Data.CodeGraph;
 using KyberWeave.Data.Configuration;
 using KyberWeave.Data.Docs.Mcp;
+using KyberWeave.Data.Arbiter;
 using KyberWeave.Data.Doctor;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Host;
 using KyberWeave.Data.RunStart;
 using KyberWeave.Data.Utilities;
+using KyberWeave.Data.Squad;
 using KyberWeave.Kernel.FileSystem;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -49,6 +51,8 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IGitCheckoutProbe>(_ => new GitCheckoutProbe());
         services.TryAddSingleton<IMcpConfigFiles>(_ => new PhysicalMcpConfigFiles());
         services.TryAddSingleton<ILaunchCommandResolverFactory>(_ => new KyberWeave.Core.Docs.Mcp.EnvironmentLaunchCommandResolverFactory());
+        _ = services.AddWeaveSquadData();
+        _ = services.AddWeaveArbiterData();
         return services;
     }
 }

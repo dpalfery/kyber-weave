@@ -72,8 +72,8 @@ public sealed class CommandCodeRendererContractTests
     ];
 
     private static Task<SquadRenderResult> RenderAsync(SquadDeploymentScope scope) =>
-        new SquadRendererRegistry([new CommandCodeRenderer()]).RenderAsync(
-            new SquadRenderRequest(ProductRoot, [SquadTarget.CommandCode], scope));
+        SquadTestRegistry.Create([new CommandCodeRenderer()]).RenderAsync(
+            new SquadRenderRequest(ProductRoot, [SquadTarget.CommandCode], scope).Prepared());
 
     /// <summary>
     /// The <c>tools</c> value an agent must render: the allow-only built-in lowering followed by
@@ -272,11 +272,11 @@ public sealed class CommandCodeRendererContractTests
         IReadOnlyList<string> kyberWeaveTools = SquadMcpGrantProjection.KyberWeaveToolNames(source);
         Assert.NotEmpty(kyberWeaveTools);
 
-        SquadRenderResult result = await new SquadRendererRegistry([new CommandCodeRenderer()])
+        SquadRenderResult result = await SquadTestRegistry.Create([new CommandCodeRenderer()])
             .RenderAsync(new SquadRenderRequest(
                 fixture.ProductRoot,
                 [SquadTarget.CommandCode],
-                SquadDeploymentScope.Project));
+                SquadDeploymentScope.Project).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         // The empty grant is the MCP tail, not the whole list: the agent keeps the built-in tools

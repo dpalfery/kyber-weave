@@ -1,4 +1,5 @@
 using System.Text.Json;
+using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Release;
@@ -99,7 +100,7 @@ public sealed class FactoryMcpConfigurationTests : IDisposable
     [Fact]
     public void InstanceDeployment_NoConfigAnywhere_DoesNotWarn()
     {
-        Assert.Empty(FactoryMcpConfiguration.Warnings(
+        Assert.Empty(FactoryMcpConfiguration.Warnings(new PhysicalSquadFileAccess(),
             [SquadTarget.Factory],
             SquadDeploymentScope.Instance,
             TestSquadCorpus.CanonicalSource,
@@ -164,7 +165,7 @@ public sealed class FactoryMcpConfigurationTests : IDisposable
         string project = Path.Combine(_home, "repo");
         Directory.CreateDirectory(project);
 
-        string warning = Assert.Single(FactoryMcpConfiguration.Warnings(
+        string warning = Assert.Single(FactoryMcpConfiguration.Warnings(new PhysicalSquadFileAccess(),
             [SquadTarget.Factory],
             SquadDeploymentScope.Project,
             TestSquadCorpus.CanonicalSource,
@@ -181,7 +182,7 @@ public sealed class FactoryMcpConfigurationTests : IDisposable
             """{ "mcpServers": { "bad\nname": { "command": "run\rit", "args": ["a\tb"] } } }""");
         SquadSource source = TestSquadCorpus.CanonicalSource with { McpConfiguration = servers.RootElement };
 
-        string warning = Assert.Single(FactoryMcpConfiguration.Warnings(
+        string warning = Assert.Single(FactoryMcpConfiguration.Warnings(new PhysicalSquadFileAccess(),
             [SquadTarget.Factory],
             SquadDeploymentScope.Project,
             source,
@@ -237,9 +238,9 @@ public sealed class FactoryMcpConfigurationTests : IDisposable
     }
 
     private SquadLifecycleService NewService(ISquadReleaseSource release, ISquadRenderer renderer) =>
-        new(
+        SquadHostDefaults.CreateLifecycleService(
             release,
-            new SquadRendererRegistry([renderer]),
+            SquadTestRegistry.Create([renderer]),
             new SquadStateStore(_paths),
             globalRoots: SquadOperatorChannelFixture.GlobalRoots(Path.Combine(_home, ".copilot"), _home));
 

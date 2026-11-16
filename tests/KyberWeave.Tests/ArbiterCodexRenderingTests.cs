@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fixtures;
@@ -78,12 +79,12 @@ public sealed class ArbiterCodexRenderingTests : IDisposable
         };
         SquadDeploymentScope scope = SquadDeploymentScope.Project;
 
-        SquadRendererRegistry registry = new([new CodexRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new CodexRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Codex],
             Scope: scope,
-            Arbiter: wiring));
+            Arbiter: wiring).Prepared());
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         Assert.True(result.Blocks is null || result.Blocks.Count == 0, "Expected no owned blocks when the Arbiter block is not rendered.");
@@ -118,12 +119,12 @@ public sealed class ArbiterCodexRenderingTests : IDisposable
 
     private async Task<SquadRenderResult> RenderAsync(SquadArbiterWiring? arbiter, SquadDeploymentScope scope)
     {
-        SquadRendererRegistry registry = new([new CodexRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new CodexRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Codex],
             Scope: scope,
-            Arbiter: arbiter));
+            Arbiter: arbiter).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
         return result;
     }

@@ -89,12 +89,12 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n")
             .WithMatchingArbiterProbe();
-        SquadDoctorCommand command = new(
+        SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
             install.UserPaths,
             KyberWeaveTestPaths.ToolRoot,
             install.GlobalRoots,
-            new SquadRendererRegistry([new CopilotRenderer()]));
+            SquadTestRegistry.Create([new CopilotRenderer()]));
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
@@ -122,9 +122,9 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
         SquadGlobalRoots globalRoots = new(_ => null, home);
         SquadStateStore stateStore = new(userPaths);
         using CorpusSquadReleaseSource releaseSource = new();
-        SquadLifecycleService service = new(
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
             releaseSource,
-            SquadCommandComposition.ResolveRenderer(),
+            SquadHostDefaults.ResolveRenderer(),
             stateStore,
             globalRoots: globalRoots);
 

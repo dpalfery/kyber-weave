@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using KyberWeave.Tests.Fakes;
 using System.Text;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Deployment;
@@ -193,12 +194,12 @@ public sealed class PullRequestSkillConsolidationTests
         SquadDeploymentScope scope)
     {
         using TempDirectory userScope = new();
-        SquadRendererRegistry registry = new(AllRenderers());
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create(AllRenderers());
+        SquadRenderRequest request = new SquadRenderRequest(
             SourceDirectory: ProductRoot,
             Targets: [target],
             Scope: scope,
-            UserScopeDirectory: scope == SquadDeploymentScope.Global ? userScope.Path : null);
+            UserScopeDirectory: scope == SquadDeploymentScope.Global ? userScope.Path : null).Prepared();
 
         SquadRenderResult result = await registry.RenderAsync(request);
 

@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fixtures;
@@ -187,11 +188,11 @@ public sealed class ArbiterClaudeRenderingTests : IDisposable
         SquadArbiterWiring? arbiter)
     {
         ClaudeRenderer renderer = new();
-        SquadRenderRequest request = new(
+        SquadRenderRequest request = new SquadRenderRequest(
             SourceDirectory: sourceDirectory,
             Targets: [SquadTarget.Claude],
             Scope: scope,
-            Arbiter: arbiter);
+            Arbiter: arbiter).Prepared();
 
         return await renderer.RenderAsync(request);
     }

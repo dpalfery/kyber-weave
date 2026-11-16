@@ -1,4 +1,5 @@
 using KyberWeave.Arbiter;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Arbiter.Mcp;
 using KyberWeave.Core.Arbiter;
@@ -106,7 +107,7 @@ static async Task<int> ServeAsync(string[] args)
 // Presence only: the key is read from the store or the environment and discarded here.
 // Status reports the answer, never the value.
 static ArbiterProviderConfig ServeEffectiveProvider(KyberWeaveConfig config) =>
-    ArbiterUserSettings.ApplyTo(
+    ArbiterServices.Shared.GetRequiredService<IArbiterUserSettings>().ApplyTo(
         config.Arbiter.Provider,
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
 
@@ -119,17 +120,10 @@ static bool ServeKeyResolved(KyberWeaveConfig config)
         string? userOverride = string.Equals(effective.Endpoint, repository.Endpoint, StringComparison.Ordinal)
             ? null
             : effective.Endpoint;
-        return ArbiterKeyResolver.Resolve(effective.Endpoint, CreateCredentialStore(), userOverride) is not null;
+        return ArbiterKeyResolver.Resolve(effective.Endpoint, ArbiterServices.Shared.GetRequiredService<ICredentialStore>(), Environment.GetEnvironmentVariable, userOverride) is not null;
     }
     catch (Exception)
     {
         return false;
     }
 }
-
-static ICredentialStore CreateCredentialStore() =>
-    OperatingSystem.IsWindows()
-        ? new WindowsCredentialStore()
-        : OperatingSystem.IsMacOS()
-            ? new MacKeychainCredentialStore(new ProcessRunnerCredentialProcessRunner())
-            : new SecretServiceCredentialStore(new ProcessRunnerCredentialProcessRunner());

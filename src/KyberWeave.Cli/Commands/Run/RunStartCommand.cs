@@ -63,6 +63,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
 
     private readonly IRunStartRunnerFactory _runners;
     private readonly IWorktreeIndexGuard _worktreeIndex;
+    private readonly ISquadBriefService _briefs;
     private readonly IRunStateStore _state;
     private readonly IWritableFileSystem _files;
     private readonly IProcessEnvironment _environment;
@@ -80,6 +81,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
     public RunStartCommand(
         IRunStartRunnerFactory runners,
         IWorktreeIndexGuard worktreeIndex,
+        ISquadBriefService briefs,
         IRunStateStore state,
         IWritableFileSystem files,
         IProcessEnvironment environment,
@@ -88,6 +90,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
     {
         ArgumentNullException.ThrowIfNull(runners);
         ArgumentNullException.ThrowIfNull(worktreeIndex);
+        ArgumentNullException.ThrowIfNull(briefs);
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(environment);
@@ -95,6 +98,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
 
         _runners = runners;
         _worktreeIndex = worktreeIndex;
+        _briefs = briefs;
         _state = state;
         _files = files;
         _environment = environment;
@@ -502,7 +506,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
             roots,
             config);
 
-        if (SquadBriefBuilder.TryBuild(request, out BriefResult? result, out string error))
+        if (SquadBriefBuilder.TryBuild(request, _briefs, _files, out BriefResult? result, out string error))
         {
             return result;
         }

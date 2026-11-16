@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
@@ -404,19 +405,19 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Factory],
             Scope: SquadDeploymentScope.Project,
-            Arbiter: arbiter));
+            Arbiter: arbiter).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
         return result;
     }
 
     private async Task<SquadRenderResult> RenderAsync(SquadArbiterWiring? arbiter, SquadDeploymentScope scope)
     {
-        SquadRendererRegistry registry = new([new FactoryRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new FactoryRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Factory],
             Scope: scope,
-            Arbiter: arbiter));
+            Arbiter: arbiter).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
         return result;
     }
@@ -680,7 +681,7 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
     {
         using FakeSquadReleaseSource releases = new();
         SquadStateStore store = new(new FakeSquadUserPaths(applicationData));
-        SquadLifecycleService service = new(
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
             releases,
             new FactoryBlockStubRenderer(),
             store,
@@ -693,7 +694,7 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
     {
         using FakeSquadReleaseSource releases = new();
         SquadStateStore store = new(new FakeSquadUserPaths(applicationData));
-        SquadLifecycleService service = new(
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
             releases,
             new FactoryBlockStubRenderer(subagentStop),
             store,
@@ -711,7 +712,7 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
     {
         using FakeSquadReleaseSource releases = new();
         SquadStateStore store = new(new FakeSquadUserPaths(applicationData));
-        SquadLifecycleService service = new(
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
             releases,
             new FactoryBlockStubRenderer(subagentStop),
             store,

@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using System.Text;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Deployment;
@@ -7,15 +8,6 @@ using YamlDotNet.RepresentationModel;
 namespace KyberWeave.Core.Squad.Model;
 
 /// <summary>
-///     Recorded model preset selection for a specific project root.
-/// </summary>
-/// <param name="Root">The canonical physical root path of the project.</param>
-/// <param name="ModelPresets">The mapping of deployment targets to preset names.</param>
-public sealed record SquadModelPresetSelection(
-    string Root,
-    IReadOnlyDictionary<SquadTarget, string> ModelPresets);
-
-/// <summary>
 ///     File-system store for project-level model preset selections, keyed by physical canonical root.
 /// </summary>
 /// <remarks>
@@ -23,7 +15,7 @@ public sealed record SquadModelPresetSelection(
 ///     (<c>~/.kyber-weave/squad/selections/</c>) rather than inside the project tree. This preserves
 ///     strict project isolation and prevents uncommitted artifacts from appearing in working copies.
 /// </remarks>
-public sealed partial class SquadModelPresetSelectionStore
+public sealed partial class SquadModelPresetSelectionStore : ISquadModelPresetSelectionStore
 {
     /// <summary>
     ///     The YAML schema version identifier for project model preset selections.
@@ -131,6 +123,10 @@ public sealed partial class SquadModelPresetSelectionStore
         presets[target] = presetName;
         WriteSelection(identity, presets);
     }
+
+    /// <inheritdoc />
+    void ISquadModelPresetSelectionStore.Record(string projectRoot, SquadTarget target, string presetName) =>
+        Set(projectRoot, target, presetName);
 
     /// <summary>
     ///     Clears the model preset selection for a specific target in the given project root.

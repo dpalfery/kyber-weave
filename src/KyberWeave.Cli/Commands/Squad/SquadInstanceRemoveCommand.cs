@@ -1,5 +1,7 @@
 using System.Text.RegularExpressions;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Deployment;
 using Spectre.Console.Cli;
 
@@ -8,31 +10,34 @@ namespace KyberWeave.Cli.Commands.Squad;
 /// <summary>
 ///     Removes a harness instance deployment and its recorded state without modifying main harness files.
 /// </summary>
-public sealed partial class SquadInstanceRemoveCommand : Command<SquadInstanceRemoveSettings>
+internal sealed partial class SquadInstanceRemoveCommand : Command<SquadInstanceRemoveSettings>
 {
     [GeneratedRegex("^[a-z0-9][a-z0-9-]{0,63}$")]
     private static partial Regex PresetNameRegex();
-    private readonly SquadInstanceService? _instanceService;
-    private readonly bool? _isInteractive;
-    private readonly Func<string, bool>? _readAnswer;
-    private readonly ISquadUserPaths? _userPaths;
+    private readonly ISquadInstanceService _instances;
+    private readonly ISquadUserPaths _userPaths;
+    private readonly ISquadFileAccess _files;
+    private readonly SquadConsoleOptions _console;
 
-    /// <summary>Creates a new squad instance remove command with default dependencies.</summary>
-    public SquadInstanceRemoveCommand()
-    {
-    }
-
-    /// <summary>Creates a new squad instance remove command with injectable dependencies.</summary>
+    /// <summary>Creates the instance remove command over the Squad services the host registers.</summary>
+    /// <param name="instances">Removes the instance.</param>
+    /// <param name="userPaths">Names the home the instances live under.</param>
+    /// <param name="files">Probes the instance directories.</param>
+    /// <param name="console">How the command prompts; the defaults read the console.</param>
     public SquadInstanceRemoveCommand(
-        ISquadUserPaths? userPaths = null,
-        SquadInstanceService? instanceService = null,
-        bool? isInteractive = null,
-        Func<string, bool>? readAnswer = null)
+        ISquadInstanceService instances,
+        ISquadUserPaths userPaths,
+        ISquadFileAccess files,
+        SquadConsoleOptions console)
     {
+        ArgumentNullException.ThrowIfNull(instances);
+        ArgumentNullException.ThrowIfNull(userPaths);
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(console);
+        _instances = instances;
         _userPaths = userPaths;
-        _instanceService = instanceService;
-        _isInteractive = isInteractive;
-        _readAnswer = readAnswer;
+        _files = files;
+        _console = console;
     }
 
     /// <inheritdoc />
@@ -74,7 +79,7 @@ public sealed partial class SquadInstanceRemoveCommand : Command<SquadInstanceRe
             return 2;
         }
 
-        ISquadUserPaths userPaths = _userPaths ?? SquadCommandComposition.ResolveUserPaths();
+        ISquadUserPaths userPaths = _userPaths;
         string targetToken = SquadTargetCatalog.GetToken(target);
         string instanceRoot = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "instances", targetToken,
             settings.Preset);
@@ -92,16 +97,16 @@ public sealed partial class SquadInstanceRemoveCommand : Command<SquadInstanceRe
             return 2;
         }
 
-        if (!Directory.Exists(instanceRoot) && !Directory.Exists(instanceStateDir))
+        if (!_files.DirectoryExists(instanceRoot) && !_files.DirectoryExists(instanceStateDir))
         {
             SquadCommandComposition.WriteClientInputError($"Instance '{targetToken}/{settings.Preset}' not found.");
             return 2;
         }
 
-        bool isInteractive = _isInteractive ?? SquadCommandComposition.IsInteractiveConsole();
+        bool isInteractive = _console.IsInteractive ?? SquadCommandComposition.IsInteractiveConsole();
         if (isInteractive && !settings.Yes)
         {
-            Func<string, bool> read = _readAnswer ?? SquadTargetRootConfirmation.ReadConsoleAnswer;
+            Func<string, bool> read = _console.ReadAnswer ?? SquadTargetRootConfirmation.ReadConsoleAnswer;
             if (!read($"Remove instance '{targetToken}/{settings.Preset}'?"))
             {
                 SquadCommandComposition.WriteLine("[yellow]Declined by user.[/]");
@@ -109,8 +114,7 @@ public sealed partial class SquadInstanceRemoveCommand : Command<SquadInstanceRe
             }
         }
 
-        SquadInstanceService service = _instanceService ?? SquadCommandComposition.CreateInstanceService(userPaths);
-        service.RemoveAsync(target, settings.Preset, cancellationToken).GetAwaiter().GetResult();
+        _instances.RemoveAsync(target, settings.Preset, cancellationToken).GetAwaiter().GetResult();
 
         SquadCommandComposition.WriteLine($"[green]Removed instance '{targetToken}/{settings.Preset}'.[/]");
         return 0;

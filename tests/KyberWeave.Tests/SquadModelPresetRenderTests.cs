@@ -49,7 +49,7 @@ public sealed class SquadModelPresetRenderTests
     /// </summary>
     private static SquadRendererRegistry CreateRegistry()
     {
-        return new SquadRendererRegistry(
+        return SquadTestRegistry.Create(
         [
             new AntigravityRenderer(),
             new ClaudeRenderer(),
@@ -72,12 +72,12 @@ public sealed class SquadModelPresetRenderTests
         return UnpresetRenders.GetOrAdd(target, static t =>
         {
             SquadRendererRegistry registry = CreateRegistry();
-            SquadRenderRequest request = new(
+            SquadRenderRequest request = new SquadRenderRequest(
                 ProductRoot,
                 [t],
                 SquadDeploymentScope.Project,
                 ModelPresets: null,
-                PreloadedSource: TestSquadCorpus.CanonicalSource);
+                PreloadedSource: TestSquadCorpus.CanonicalSource).Prepared();
             return registry.RenderAsync(request);
         });
     }
@@ -88,12 +88,12 @@ public sealed class SquadModelPresetRenderTests
         {
             SquadModelPreset probePreset = CreateUniversalProbePreset(TestSquadCorpus.CanonicalSource);
             SquadRendererRegistry registry = CreateRegistry();
-            SquadRenderRequest request = new(
+            SquadRenderRequest request = new SquadRenderRequest(
                 ProductRoot,
                 [t],
                 SquadDeploymentScope.Project,
                 ModelPresets: new Dictionary<SquadTarget, SquadModelPreset> { [t] = probePreset },
-                PreloadedSource: TestSquadCorpus.CanonicalSource);
+                PreloadedSource: TestSquadCorpus.CanonicalSource).Prepared();
             return registry.RenderAsync(request);
         });
     }
@@ -303,12 +303,12 @@ public sealed class SquadModelPresetRenderTests
         };
         SquadModelPreset selectivePreset = new("selective", "selective.yml", "digest", selectiveProfiles);
 
-        SquadRenderRequest request = new(
+        SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Copilot],
             SquadDeploymentScope.Project,
             ModelPresets: new Dictionary<SquadTarget, SquadModelPreset> { [SquadTarget.Copilot] = selectivePreset },
-            PreloadedSource: TestSquadCorpus.CanonicalSource);
+            PreloadedSource: TestSquadCorpus.CanonicalSource).Prepared();
 
         SquadRenderResult result = await registry.RenderAsync(request);
         Assert.True(result.Success, string.Join("; ", result.Errors));
@@ -343,12 +343,12 @@ public sealed class SquadModelPresetRenderTests
         string modelsPath = Path.Combine(ProductRoot, "profiles", "models.yml");
         byte[] beforeBytes = await File.ReadAllBytesAsync(modelsPath);
 
-        SquadRenderRequest request = new(
+        SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Copilot],
             SquadDeploymentScope.Project,
             ModelPresets: new Dictionary<SquadTarget, SquadModelPreset> { [SquadTarget.Copilot] = probePreset },
-            PreloadedSource: TestSquadCorpus.CanonicalSource);
+            PreloadedSource: TestSquadCorpus.CanonicalSource).Prepared();
 
         SquadRenderResult result = await registry.RenderAsync(request);
         Assert.True(result.Success, string.Join("; ", result.Errors));
@@ -360,12 +360,12 @@ public sealed class SquadModelPresetRenderTests
     [Fact]
     public void LoadWithPresentButNullPresetInDictionaryDoesNotThrowAndReturnsUnmodifiedSource()
     {
-        SquadRenderRequest request = new(
+        SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Claude],
             SquadDeploymentScope.Project,
             ModelPresets: new Dictionary<SquadTarget, SquadModelPreset> { [SquadTarget.Claude] = null! },
-            PreloadedSource: TestSquadCorpus.CanonicalSource);
+            PreloadedSource: TestSquadCorpus.CanonicalSource).Prepared();
 
         SquadSource source = SquadRenderSource.Load(request, SquadTarget.Claude);
         Assert.NotNull(source);

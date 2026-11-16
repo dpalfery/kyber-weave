@@ -914,11 +914,11 @@ public sealed class SquadUniversalMcpGrantContractTests
 
     private static async Task<SquadRenderResult> RenderAsync(string sourceDirectory, SquadTarget target)
     {
-        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
+        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
         SquadRenderResult result = await renderer.RenderAsync(new SquadRenderRequest(
             sourceDirectory,
             [target],
-            SquadDeploymentScope.Project));
+            SquadDeploymentScope.Project).Prepared());
         Assert.True(result.Success, string.Join("; ", result.Errors));
         return result;
     }

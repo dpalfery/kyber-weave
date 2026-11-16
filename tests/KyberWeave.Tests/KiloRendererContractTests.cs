@@ -45,8 +45,8 @@ public sealed class KiloRendererContractTests : IDisposable
     public async Task RenderAsync_Kilo_RendersTheRealCanonicalCorpus()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRenderResult result = await new SquadRendererRegistry([new KiloRenderer()]).RenderAsync(
-            new SquadRenderRequest(ProductRoot, [SquadTarget.Kilo], SquadDeploymentScope.Project));
+        SquadRenderResult result = await SquadTestRegistry.Create([new KiloRenderer()]).RenderAsync(
+            new SquadRenderRequest(ProductRoot, [SquadTarget.Kilo], SquadDeploymentScope.Project).Prepared());
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         foreach (SquadAgent agent in source.Agents)
@@ -101,13 +101,13 @@ public sealed class KiloRendererContractTests : IDisposable
         fixture.WriteAgentResource("references/x.markdown", "X markdown alias.\n");
         fixture.AppendAgentLink("[X md](bug-crusher-investigator/references/x.md)");
         fixture.AppendAgentLink("[X markdown](bug-crusher-investigator/references/x.markdown)");
-        SquadRendererRegistry registry = new([new KiloRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new KiloRenderer()]);
 
         SquadRenderValidationException exception = await Assert.ThrowsAsync<SquadRenderValidationException>(() =>
             registry.RenderAsync(new SquadRenderRequest(
                 fixture.ProductRoot,
                 [SquadTarget.Kilo],
-                SquadDeploymentScope.Project)));
+                SquadDeploymentScope.Project).Prepared()));
 
         Assert.Contains(ResourceBearingSquadFixture.AgentName, exception.Message, StringComparison.Ordinal);
         Assert.Contains("references/x.md", exception.Message, StringComparison.Ordinal);
@@ -122,11 +122,11 @@ public sealed class KiloRendererContractTests : IDisposable
     public async Task RenderAsync_Kilo_TextOnlyAgentResourcesProjectVerbatim()
     {
         using ResourceBearingSquadFixture fixture = ResourceBearingSquadFixture.CreateWithTextOnlyAgentResources();
-        SquadRendererRegistry registry = new([new KiloRenderer()]);
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new KiloRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
             fixture.ProductRoot,
             [SquadTarget.Kilo],
-            SquadDeploymentScope.Project);
+            SquadDeploymentScope.Project).Prepared();
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -178,10 +178,10 @@ public sealed class KiloRendererContractTests : IDisposable
     {
         using ResourceBearingSquadFixture fixture = ResourceBearingSquadFixture.CreateWithUnlinkedMarkdownResource();
         KiloRenderer renderer = new();
-        SquadRenderRequest request = new(
+        SquadRenderRequest request = new SquadRenderRequest(
             fixture.ProductRoot,
             [SquadTarget.Kilo],
-            SquadDeploymentScope.Project);
+            SquadDeploymentScope.Project).Prepared();
 
         SquadRenderResult result = await renderer.RenderAsync(request);
 
@@ -207,10 +207,10 @@ public sealed class KiloRendererContractTests : IDisposable
     {
         using KiloModelResolutionSquadFixture fixture = KiloModelResolutionSquadFixture.Create();
         KiloRenderer renderer = new();
-        SquadRenderRequest request = new(
+        SquadRenderRequest request = new SquadRenderRequest(
             fixture.Path,
             [SquadTarget.Kilo],
-            SquadDeploymentScope.Project);
+            SquadDeploymentScope.Project).Prepared();
 
         SquadRenderResult result = await renderer.RenderAsync(request);
 
@@ -357,10 +357,10 @@ public sealed class KiloRendererContractTests : IDisposable
     public async Task RenderAsync_ConcurrentRenders_ProduceConsistentOutputWithoutLocking()
     {
         KiloRenderer renderer = new();
-        SquadRenderRequest request = new(
+        SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Kilo],
-            SquadDeploymentScope.Project);
+            SquadDeploymentScope.Project).Prepared();
 
         Task<SquadRenderResult>[] tasks = Enumerable.Range(0, 10)
             .Select(_ => Task.Run(() => renderer.RenderAsync(request)))

@@ -68,7 +68,7 @@ public sealed class SquadDeveloperAgentShellContractTests
     };
 
     public static TheoryData<SquadTarget> ShippedTargets() =>
-        new(SquadCommandComposition.CreateRenderers().SelectMany(renderer => renderer.SupportedTargets));
+        new(SquadHostDefaults.CreateRenderers().SelectMany(renderer => renderer.SupportedTargets));
 
     [Fact]
     public void TheDeveloperRosterIsExactlyTheAgentsInADeveloperProfile()

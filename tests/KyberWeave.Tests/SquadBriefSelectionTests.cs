@@ -1,3 +1,4 @@
+using KyberWeave.Data.Hooks;
 using KyberWeave.Core.Squad.Briefs;
 using Xunit;
 
@@ -67,7 +68,7 @@ public sealed class SquadBriefSelectionTests : IDisposable
     private BriefResult Assemble(BriefFacts facts, string? text = null)
     {
         string directory = Install("plan-path.md", text ?? Reference);
-        return BriefAssembler.Assemble(BriefMap.Parse(MapYaml), "conductor", facts, directory);
+        return new SquadBriefService(new PhysicalFileSystem()).Assemble(BriefMap.Parse(MapYaml), "conductor", facts, directory);
     }
 
     [Fact]
@@ -139,7 +140,7 @@ public sealed class SquadBriefSelectionTests : IDisposable
         Install("test-first-contract.md", "# Test-First Contract\n\nRED first.\n");
         Install("standard-verification.md", "# Standard Verification Contract\n\nVerify.\n");
 
-        BriefResult standard = BriefAssembler.Assemble(map, "architect", new BriefFacts("plan", "supervised", "standard"), _temp.Path);
+        BriefResult standard = new SquadBriefService(new PhysicalFileSystem()).Assemble(map, "architect", new BriefFacts("plan", "supervised", "standard"), _temp.Path);
 
         Assert.Equal("mode=test-first", standard.Parts[0].WholeFileLeftOut);
         Assert.Null(standard.Parts[1].WholeFileLeftOut);
@@ -207,7 +208,7 @@ public sealed class SquadBriefSelectionTests : IDisposable
         Directory.CreateDirectory(directory);
 
         BriefMapException error = Assert.Throws<BriefMapException>(
-            () => BriefAssembler.Assemble(BriefMap.Parse(MapYaml), "conductor", new BriefFacts("plan", null, null), directory));
+            () => new SquadBriefService(new PhysicalFileSystem()).Assemble(BriefMap.Parse(MapYaml), "conductor", new BriefFacts("plan", null, null), directory));
 
         Assert.Contains(Path.Combine(directory, "plan-path.md"), error.Message, StringComparison.Ordinal);
         Assert.Contains("plan-path.markdown", error.Message, StringComparison.Ordinal);
@@ -218,7 +219,7 @@ public sealed class SquadBriefSelectionTests : IDisposable
     {
         Install("plan-path.markdown", Reference);
 
-        BriefResult result = BriefAssembler.Assemble(BriefMap.Parse(MapYaml), "conductor", new BriefFacts("plan", "autonomous", null), _temp.Path);
+        BriefResult result = new SquadBriefService(new PhysicalFileSystem()).Assemble(BriefMap.Parse(MapYaml), "conductor", new BriefFacts("plan", "autonomous", null), _temp.Path);
 
         Assert.EndsWith("plan-path.markdown", result.Parts[0].ReadFrom, StringComparison.Ordinal);
     }
@@ -229,7 +230,7 @@ public sealed class SquadBriefSelectionTests : IDisposable
         Install("plan-path.md", Reference);
         Install("brand-new-reference.md", "# New\n");
 
-        BriefResult result = BriefAssembler.Assemble(BriefMap.Parse(MapYaml), "conductor", new BriefFacts("plan", null, null), _temp.Path);
+        BriefResult result = new SquadBriefService(new PhysicalFileSystem()).Assemble(BriefMap.Parse(MapYaml), "conductor", new BriefFacts("plan", null, null), _temp.Path);
 
         Assert.Equal(["brand-new-reference.md"], result.UnlistedFiles);
         Assert.Contains("read whole: brand-new-reference.md", BriefFormatter.ToText(result), StringComparison.Ordinal);

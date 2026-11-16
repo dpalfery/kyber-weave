@@ -49,6 +49,10 @@ public interface ISquadRenderer
 /// <param name="Arbiter">
 /// Optional Arbiter enforcement settings; hooks render only when enabled and project-scoped.
 /// </param>
+/// <param name="DiskInputs">
+/// What a render reads from the Squad source tree and the user's Copilot config, read before the render by the host
+/// so a renderer stays a pure function of its request. A request with no preloaded source and no inputs cannot render.
+/// </param>
 /// <remarks>
 /// <see cref="UserScopeDirectory"/> is the Kyber-Weave app-data directory, so it cannot tell
 /// a renderer where a harness actually reads its global agents from (for Copilot that is
@@ -70,8 +74,38 @@ public sealed record SquadRenderRequest(
     IReadOnlyDictionary<SquadTarget, SquadModelPreset>? ModelPresets = null,
     SquadSource? PreloadedSource = null,
     Func<string, string?>? EnvironmentReader = null,
-    SquadArbiterWiring? Arbiter = null)
+    SquadArbiterWiring? Arbiter = null,
+    SquadRenderDiskInputs? DiskInputs = null)
 {
+    /// <summary>Gets the canonical source this render starts from, or throws why it is not available.</summary>
+    /// <returns>The preloaded source.</returns>
+    /// <exception cref="SquadRenderValidationException">The request was never prepared with the source.</exception>
+    public SquadSource RequireSource() =>
+        PreloadedSource ?? throw (DiskInputs?.SourceFailure ?? Unprepared("the canonical source"));
+
+    /// <summary>Gets the worker baseline block, or throws why it could not be read.</summary>
+    /// <returns>The block, or null when the tree carries no baseline.</returns>
+    /// <exception cref="SquadRenderValidationException">The request was never prepared, or the baseline is malformed.</exception>
+    public string? RequireWorkerBaselineBlock()
+    {
+        SquadRenderDiskInputs inputs = RequireDiskInputs();
+        return inputs.WorkerBaselineFailure is { } failure ? throw failure : inputs.WorkerBaselineBlock;
+    }
+
+    /// <summary>Gets the reader of environment variables this render consults, or throws that the request was never prepared.</summary>
+    /// <returns>The reader.</returns>
+    /// <exception cref="SquadRenderValidationException">The request carries no reader.</exception>
+    public Func<string, string?> RequireEnvironmentReader() =>
+        EnvironmentReader ?? throw Unprepared("an environment reader");
+
+    /// <summary>Gets what the host read from disk ahead of the render, or throws that the request was never prepared.</summary>
+    /// <returns>The disk inputs.</returns>
+    /// <exception cref="SquadRenderValidationException">The request was never prepared.</exception>
+    public SquadRenderDiskInputs RequireDiskInputs() => DiskInputs ?? throw Unprepared("what the render reads from disk");
+
+    private static SquadRenderValidationException Unprepared(string what) =>
+        new($"The render request does not carry {what}: prepare it with the render input reader before rendering.");
+
     /// <summary>
     /// Convenience constructor applying a single <see cref="SquadModelPreset"/> across all requested targets.
     /// </summary>
@@ -90,10 +124,26 @@ public sealed record SquadRenderRequest(
             ModelPresets is null ? null : Targets.ToDictionary(static target => target, _ => ModelPresets),
             null,
             null,
+            null,
             null)
     {
     }
 }
+
+/// <summary>What a render reads from disk, read ahead of the render and carried on the request.</summary>
+/// <param name="SourceFailure">Why the canonical source could not be loaded, rethrown when a render needs the source.</param>
+/// <param name="WorkerBaselineBlock">The worker baseline block, or null when the tree carries none.</param>
+/// <param name="WorkerBaselineFailure">Why the worker baseline could not be read, rethrown when a render needs it.</param>
+/// <param name="OperatorChannelOverlayText">The operator channel overlay file's text, or null when it could not be read.</param>
+/// <param name="OperatorChannelOverlayFailure">Why the overlay could not be read, rethrown when a render needs it.</param>
+/// <param name="CopilotMcpServerDeclared">Whether the user's Copilot MCP config declares the operator channel's server.</param>
+public sealed record SquadRenderDiskInputs(
+    Exception? SourceFailure = null,
+    string? WorkerBaselineBlock = null,
+    Exception? WorkerBaselineFailure = null,
+    string? OperatorChannelOverlayText = null,
+    Exception? OperatorChannelOverlayFailure = null,
+    bool CopilotMcpServerDeclared = false);
 
 /// <summary>The host's Arbiter enforcement settings carried into a render.</summary>
 /// <remarks>

@@ -141,7 +141,7 @@ public sealed class SquadTaskGateHintTests : IDisposable
         SeedDeployment(targetDir, stateStore);
         IReadOnlyDictionary<string, byte[]?> before = SnapshotConfigurationFiles(targetDir);
 
-        CommandExecution execution = Capture(() => new SquadUpdateCommand(
+        CommandExecution execution = Capture(() => SquadTestCommands.Update(
             userPaths: userPaths,
             stateStore: stateStore,
             releaseSource: releaseSource,
@@ -183,7 +183,7 @@ public sealed class SquadTaskGateHintTests : IDisposable
         SeedDeployment(targetDir, stateStore);
         IReadOnlyDictionary<string, byte[]?> before = SnapshotConfigurationFiles(targetDir);
 
-        CommandExecution execution = Capture(() => new SquadUpdateCommand(
+        CommandExecution execution = Capture(() => SquadTestCommands.Update(
             userPaths: userPaths,
             stateStore: stateStore,
             releaseSource: releaseSource,
@@ -216,7 +216,7 @@ public sealed class SquadTaskGateHintTests : IDisposable
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "install-home"));
         SquadStateStore stateStore = new(userPaths);
 
-        return Capture(() => new SquadInstallCommand(
+        return Capture(() => SquadTestCommands.Install(
             userPaths: userPaths,
             stateStore: stateStore,
             releaseSource: releaseSource,
@@ -238,7 +238,7 @@ public sealed class SquadTaskGateHintTests : IDisposable
         FakeSquadUserPaths userPaths = new(homeDir);
         SquadStateStore stateStore = new(userPaths);
 
-        return Capture(() => new SquadInstallCommand(
+        return Capture(() => SquadTestCommands.Install(
             userPaths: userPaths,
             stateStore: stateStore,
             releaseSource: releaseSource,

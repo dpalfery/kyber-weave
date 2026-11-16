@@ -76,7 +76,7 @@ public sealed class SquadDoctorShadowedSkillTests : IDisposable
     {
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-        SquadDoctorCommand command = new(
+        SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
             new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home")),
             workingDirectory: workingDir);

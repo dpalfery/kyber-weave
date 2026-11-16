@@ -235,17 +235,17 @@ public sealed class SquadLegacySingleRootCliTests : IDisposable
         }
 
         public SquadStatusCommand Status() =>
-            new(userPaths: UserPaths, stateStore: Store, globalRoots: GlobalRoots);
+            SquadTestCommands.Status(userPaths: UserPaths, stateStore: Store, globalRoots: GlobalRoots);
 
-        public SquadUninstallCommand Uninstall() => new(
+        public SquadUninstallCommand Uninstall() => SquadTestCommands.Uninstall(
             userPaths: UserPaths,
             stateStore: Store,
-            lifecycleService: new SquadLifecycleService(ReleaseSource, new EmptyRenderer(), Store, globalRoots: GlobalRoots),
+            lifecycleService: SquadHostDefaults.CreateLifecycleService(ReleaseSource, new EmptyRenderer(), Store, globalRoots: GlobalRoots),
             isInteractive: false,
             readAnswer: null,
             globalRoots: GlobalRoots);
 
-        public SquadUpdateCommand Update() => new(
+        public SquadUpdateCommand Update() => SquadTestCommands.Update(
             userPaths: UserPaths,
             stateStore: Store,
             releaseSource: ReleaseSource,

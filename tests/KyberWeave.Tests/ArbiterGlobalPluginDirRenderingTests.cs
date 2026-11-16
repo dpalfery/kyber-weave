@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fixtures;
@@ -79,12 +80,12 @@ public sealed class ArbiterGlobalPluginDirRenderingTests : IDisposable
         string home = Path.Combine(_temp.Path, "home");
         Directory.CreateDirectory(home);
 
-        SquadRenderResult result = await new SquadRendererRegistry([renderer]).RenderAsync(new SquadRenderRequest(
+        SquadRenderResult result = await SquadTestRegistry.Create([renderer]).RenderAsync(new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [target],
             Scope: SquadDeploymentScope.Global,
             GlobalRoots: new FixedGlobalRoots(home, globalRootFactory),
-            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 10)));
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 10)).Prepared());
 
         Assert.True(result.Success, string.Join(';', result.Errors));
 

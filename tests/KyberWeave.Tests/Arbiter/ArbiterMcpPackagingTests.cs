@@ -1,3 +1,5 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
 using System.ComponentModel;
 using System.Reflection;
 using System.Xml.Linq;
@@ -488,7 +490,7 @@ public sealed class ArbiterMcpPackagingTests
             TextWriter.Null,
             _ => RemoteConfig(),
             _ => true,
-            config => ArbiterUserSettings.ApplyTo(config.Arbiter.Provider, home.Path)));
+            config => new FileArbiterUserSettings(new PhysicalFileSystem()).ApplyTo(config.Arbiter.Provider, home.Path)));
 
         string status = tools.Status();
 

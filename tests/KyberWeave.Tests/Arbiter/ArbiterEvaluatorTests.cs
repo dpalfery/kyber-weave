@@ -1,3 +1,5 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
@@ -177,6 +179,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
             new DecisionLog(ArbiterDirectory),
             gitFacts ?? new PassThroughGitFacts(),
             planReader ?? new PassThroughPlanReader(),
+            new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             new FixedClock(fixedNow));
     }
 
@@ -299,6 +302,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
             new DecisionLog(ArbiterDirectory),
             new PassThroughGitFacts(),
             new PassThroughPlanReader(),
+            new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)));
         KyberWeaveConfig config = ConfigWith([
             AskRule("KW-ARB-ASK-001", "delegate", "within-task", RuleEffects.Allow),

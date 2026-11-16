@@ -36,7 +36,7 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
     private readonly ISquadGlobalRootResolver _globalRoots;
 
     internal ArbiterUninstaller(string root)
-        : this(root, SquadDeploymentScope.Project, SquadCommandComposition.ResolveStateStore(null, ArbiterCommandComposition.GetEnvironmentVariable))
+        : this(root, SquadDeploymentScope.Project, SquadHostDefaults.ResolveStateStore(null, ArbiterCommandComposition.GetEnvironmentVariable))
     {
     }
 
@@ -56,7 +56,7 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
         _root = Path.GetFullPath(root);
         _scope = scope;
         _stateStore = stateStore;
-        _globalRoots = globalRoots ?? SquadCommandComposition.ResolveGlobalRoots(ArbiterCommandComposition.GetEnvironmentVariable);
+        _globalRoots = globalRoots ?? SquadHostDefaults.ResolveGlobalRoots(ArbiterCommandComposition.GetEnvironmentVariable);
     }
 
     /// <inheritdoc />
@@ -286,7 +286,7 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
         ArgumentNullException.ThrowIfNull(stateStore);
         string full = Path.GetFullPath(root);
         string token = SquadTargetCatalog.GetToken(target);
-        globalRoots ??= SquadCommandComposition.ResolveGlobalRoots(ArbiterCommandComposition.GetEnvironmentVariable);
+        globalRoots ??= SquadHostDefaults.ResolveGlobalRoots(ArbiterCommandComposition.GetEnvironmentVariable);
 
         if (scope == SquadDeploymentScope.Global)
         {

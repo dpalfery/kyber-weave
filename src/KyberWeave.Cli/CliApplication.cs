@@ -14,11 +14,9 @@ using KyberWeave.Cli.Commands.Squad.Brief;
 using KyberWeave.Cli.Commands.Update;
 using KyberWeave.Cli.Commands.Utilities;
 using KyberWeave.Application;
-using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Doctor;
 using KyberWeave.Cli.Composition;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli;
@@ -34,6 +32,7 @@ internal static class CliApplication
         configure?.Invoke(services);
         services.TryAddSingleton<IRepositoryToolSettings, ConfigFileToolSettings>();
         services.TryAddSingleton<IMcpDeclarationReader, McpDeclarationReader>();
+        _ = services.AddSquadCliServices();
         _ = services.AddWeaveApplication();
         CommandApp app = new(new ServiceCollectionTypeRegistrar(services));
         app.Configure(config =>

@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fixtures;
@@ -21,11 +22,11 @@ public sealed class ArbiterGlobalWiringTests : IDisposable
     [Fact]
     public void EnabledArbiter_GlobalScope_WithEnabledRequest_IsNotNull()
     {
-        SquadRenderRequest request = new(
+        SquadRenderRequest request = new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Claude],
             Scope: SquadDeploymentScope.Global,
-            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 30));
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 30)).Prepared();
 
         SquadHarnessRenderContext context = new(
             new SquadHarnessSpec(
@@ -44,19 +45,19 @@ public sealed class ArbiterGlobalWiringTests : IDisposable
     [Fact]
     public async Task RenderAsync_EnabledArbiterUnderGlobalScope_RendersGlobalScopeFlagInHookCommandLines()
     {
-        SquadRendererRegistry registry = new([new CopilotRenderer()]);
-        SquadRenderRequest projectRequest = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new CopilotRenderer()]);
+        SquadRenderRequest projectRequest = new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Copilot],
             Scope: SquadDeploymentScope.Project,
             GlobalRoots: new FixedGlobalRoots(_fixture.Path),
-            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5));
-        SquadRenderRequest globalRequest = new(
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)).Prepared();
+        SquadRenderRequest globalRequest = new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Copilot],
             Scope: SquadDeploymentScope.Global,
             GlobalRoots: new FixedGlobalRoots(_fixture.Path),
-            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5));
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)).Prepared();
 
         SquadRenderResult project = await registry.RenderAsync(projectRequest);
         SquadRenderResult global = await registry.RenderAsync(globalRequest);
@@ -87,21 +88,21 @@ public sealed class ArbiterGlobalWiringTests : IDisposable
     [Fact]
     public async Task RenderAsync_DisabledArbiterUnderGlobalScope_RendersByteForByteAsOmittingTheWiring()
     {
-        SquadRendererRegistry registry = new([new CopilotRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new CopilotRenderer()]);
 
         SquadRenderResult omitted = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Copilot],
             Scope: SquadDeploymentScope.Global,
             GlobalRoots: new FixedGlobalRoots(_fixture.Path),
-            Arbiter: null));
+            Arbiter: null).Prepared());
 
         SquadRenderResult disabled = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Copilot],
             Scope: SquadDeploymentScope.Global,
             GlobalRoots: new FixedGlobalRoots(_fixture.Path),
-            Arbiter: new SquadArbiterWiring(Enabled: false, HookTimeoutSeconds: 5)));
+            Arbiter: new SquadArbiterWiring(Enabled: false, HookTimeoutSeconds: 5)).Prepared());
 
         Assert.Equal(
             omitted.Files.Select(file => (file.Target, file.RelativePath)).OrderBy(pair => pair.Target, StringComparer.Ordinal)

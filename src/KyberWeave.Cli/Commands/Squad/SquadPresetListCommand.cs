@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using Spectre.Console.Cli;
@@ -7,23 +8,32 @@ namespace KyberWeave.Cli.Commands.Squad;
 /// <summary>
 /// Lists available model preset profiles and their active usages.
 /// </summary>
-public sealed class SquadPresetListCommand : Command<SquadPresetListSettings>
+internal sealed class SquadPresetListCommand : Command<SquadPresetListSettings>
 {
-    private readonly ISquadUserPaths? _userPaths;
-    private readonly SquadStateStore? _stateStore;
+    private readonly ISquadUserPaths _userPaths;
+    private readonly ISquadStateStore _stateStore;
+    private readonly ISquadModelPresetStore _presetStore;
+    private readonly ISquadModelPresetSelectionStore _selectionStore;
 
-    /// <summary>Creates a new preset list command using default dependencies.</summary>
-    public SquadPresetListCommand()
+    /// <summary>Creates the command over the Squad services the host registers.</summary>
+    /// <param name="userPaths">Names the home the presets and selections live under.</param>
+    /// <param name="stateStore">Reads the deployment state the selections apply to.</param>
+    /// <param name="presetStore">Lists the presets.</param>
+    /// <param name="selectionStore">Reads the project's selection.</param>
+    public SquadPresetListCommand(
+        ISquadUserPaths userPaths,
+        ISquadStateStore stateStore,
+        ISquadModelPresetStore presetStore,
+        ISquadModelPresetSelectionStore selectionStore)
     {
-    }
-
-    /// <summary>Creates a new preset list command using injectable dependencies.</summary>
-    internal SquadPresetListCommand(
-        ISquadUserPaths? userPaths = null,
-        SquadStateStore? stateStore = null)
-    {
+        ArgumentNullException.ThrowIfNull(userPaths);
+        ArgumentNullException.ThrowIfNull(stateStore);
+        ArgumentNullException.ThrowIfNull(presetStore);
+        ArgumentNullException.ThrowIfNull(selectionStore);
         _userPaths = userPaths;
         _stateStore = stateStore;
+        _presetStore = presetStore;
+        _selectionStore = selectionStore;
     }
 
     /// <inheritdoc />
@@ -31,10 +41,10 @@ public sealed class SquadPresetListCommand : Command<SquadPresetListSettings>
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        SquadStateStore stateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths);
-        ISquadUserPaths userPaths = _userPaths ?? stateStore.UserPaths;
-        SquadModelPresetStore presetStore = new(userPaths);
-        IReadOnlyList<SquadModelPresetSelectionStore> selectionStores = SquadCommandComposition.ResolveSelectionStores(userPaths);
+        ISquadStateStore stateStore = _stateStore;
+        ISquadUserPaths userPaths = _userPaths;
+        ISquadModelPresetStore presetStore = _presetStore;
+        IReadOnlyList<ISquadModelPresetSelectionStore> selectionStores = [_selectionStore];
 
         string? effectivePath = SquadCommandComposition.CoalesceTargetPath(settings.Path, settings.PathOption);
         string projectRoot = SquadCommandComposition.ResolveTargetRoot(effectivePath);
@@ -64,7 +74,7 @@ public sealed class SquadPresetListCommand : Command<SquadPresetListSettings>
             }
         }
 
-        foreach (SquadModelPresetSelectionStore store in selectionStores)
+        foreach (ISquadModelPresetSelectionStore store in selectionStores)
         {
             SquadModelPresetSelection? currentSelection = store.Read(projectRoot);
             if (currentSelection?.ModelPresets is not null)
@@ -96,7 +106,7 @@ public sealed class SquadPresetListCommand : Command<SquadPresetListSettings>
                 }
             }
 
-            foreach (SquadModelPresetSelectionStore store in selectionStores)
+            foreach (ISquadModelPresetSelectionStore store in selectionStores)
             {
                 SquadModelPresetSelection? regSel = store.Read(project.Path);
                 if (regSel?.ModelPresets is not null)
@@ -130,7 +140,7 @@ public sealed class SquadPresetListCommand : Command<SquadPresetListSettings>
 
                     if (!string.IsNullOrWhiteSpace(root))
                     {
-                        foreach (SquadModelPresetSelectionStore store in selectionStores)
+                        foreach (ISquadModelPresetSelectionStore store in selectionStores)
                         {
                             SquadModelPresetSelection? sel = store.Read(root);
                             if (sel?.ModelPresets is not null)

@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -18,42 +19,94 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
 {
     private readonly ISquadGlobalRootResolver? _globalRoots;
     private readonly ISquadTransactionObserver? _observer;
-    private readonly SquadModelPresetStore _presetStore;
+    private readonly ISquadModelPresetStore _presetStore;
 
     private readonly ISquadReleaseSource _releaseSource;
     private readonly ISquadRenderer _renderer;
-    private readonly SquadModelPresetSelectionStore _selectionStore;
-    private readonly SquadStateStore _stateStore;
+    private readonly ISquadModelPresetSelectionStore _selectionStore;
+    private readonly ISquadStateStore _stateStore;
     private readonly TimeProvider _timeProvider;
     private readonly Func<string, string?>? _environmentReader;
+    private readonly ISquadSourceLoader _sourceLoader;
+    private readonly ISquadModelPresetValidator _presetValidator;
+    private readonly ISquadDeploymentPlanner _planner;
+    private readonly ISquadTransactionFactory _transactions;
+    private readonly ISquadResponseGuidanceStore _guidance;
+    private readonly ISquadFactoryHooksShadowing _shadowing;
+    private readonly ISquadCanonicalProfileStore _canonicalProfiles;
+    private readonly ISquadFileAccess _files;
 
     /// <summary>
     ///     Gets the state store associated with this lifecycle service.
     /// </summary>
-    public SquadStateStore StateStore => _stateStore;
+    public ISquadStateStore StateStore => _stateStore;
 
+    /// <summary>Creates the lifecycle service over its ports.</summary>
+    /// <param name="releaseSource">Downloads and extracts the Squad release.</param>
+    /// <param name="renderer">Renders canonical source into harness files.</param>
+    /// <param name="stateStore">Reads and writes the deployment state.</param>
+    /// <param name="presetStore">Loads the user's model presets.</param>
+    /// <param name="selectionStore">Reads the project's recorded preset selection.</param>
+    /// <param name="sourceLoader">Loads canonical Squad source from a directory.</param>
+    /// <param name="presetValidator">Checks presets against the source's model profiles.</param>
+    /// <param name="planner">Preflights deployments against the tree on disk.</param>
+    /// <param name="transactions">Creates the transactions that apply a plan.</param>
+    /// <param name="guidance">Reads and deploys the response guidance.</param>
+    /// <param name="shadowing">Decides whether Factory settings hooks shadow Squad's block.</param>
+    /// <param name="canonicalProfiles">Keeps the canonical profile snapshot of each version.</param>
+    /// <param name="files">Probes the release's extraction tree.</param>
+    /// <param name="timeProvider">The clock deployments are stamped with.</param>
+    /// <param name="observer">Told of each transaction step, or null.</param>
+    /// <param name="globalRoots">Resolves each target's global root, or null.</param>
+    /// <param name="environmentReader">Reads environment variables for the render, or null for none.</param>
     public SquadLifecycleService(
         ISquadReleaseSource releaseSource,
         ISquadRenderer renderer,
-        SquadStateStore stateStore,
+        ISquadStateStore stateStore,
+        ISquadModelPresetStore presetStore,
+        ISquadModelPresetSelectionStore selectionStore,
+        ISquadSourceLoader sourceLoader,
+        ISquadModelPresetValidator presetValidator,
+        ISquadDeploymentPlanner planner,
+        ISquadTransactionFactory transactions,
+        ISquadResponseGuidanceStore guidance,
+        ISquadFactoryHooksShadowing shadowing,
+        ISquadCanonicalProfileStore canonicalProfiles,
+        ISquadFileAccess files,
         TimeProvider? timeProvider = null,
         ISquadTransactionObserver? observer = null,
         ISquadGlobalRootResolver? globalRoots = null,
-        SquadModelPresetStore? presetStore = null,
-        SquadModelPresetSelectionStore? selectionStore = null,
         Func<string, string?>? environmentReader = null)
     {
         ArgumentNullException.ThrowIfNull(releaseSource);
         ArgumentNullException.ThrowIfNull(renderer);
         ArgumentNullException.ThrowIfNull(stateStore);
+        ArgumentNullException.ThrowIfNull(presetStore);
+        ArgumentNullException.ThrowIfNull(selectionStore);
+        ArgumentNullException.ThrowIfNull(sourceLoader);
+        ArgumentNullException.ThrowIfNull(presetValidator);
+        ArgumentNullException.ThrowIfNull(planner);
+        ArgumentNullException.ThrowIfNull(transactions);
+        ArgumentNullException.ThrowIfNull(guidance);
+        ArgumentNullException.ThrowIfNull(shadowing);
+        ArgumentNullException.ThrowIfNull(canonicalProfiles);
+        ArgumentNullException.ThrowIfNull(files);
         _releaseSource = releaseSource;
         _renderer = renderer;
         _stateStore = stateStore;
+        _presetStore = presetStore;
+        _selectionStore = selectionStore;
+        _sourceLoader = sourceLoader;
+        _presetValidator = presetValidator;
+        _planner = planner;
+        _transactions = transactions;
+        _guidance = guidance;
+        _shadowing = shadowing;
+        _canonicalProfiles = canonicalProfiles;
+        _files = files;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _observer = observer;
         _globalRoots = globalRoots;
-        _presetStore = presetStore ?? new SquadModelPresetStore(stateStore.UserPaths);
-        _selectionStore = selectionStore ?? new SquadModelPresetSelectionStore(stateStore.UserPaths);
         _environmentReader = environmentReader;
     }
 
@@ -124,9 +177,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             LoadAndVerifyPresets(targetPresetNames, request.Targets);
 
         string version = request.Version ?? ResolveDefaultVersion();
-        string tempExtractDir = Path.Combine(
-            Path.GetTempPath(),
-            "kyber-squad-extract-" + Guid.NewGuid().ToString("N"));
+        string tempExtractDir = _files.NewScratchDirectoryPath("kyber-squad-extract-");
 
         try
         {
@@ -139,7 +190,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             if (source is not null)
             {
                 foreach (KeyValuePair<SquadTarget, SquadModelPreset> kvp in loadedPresets)
-                    SquadModelPresetValidator.Validate(kvp.Value, source.ModelProfiles);
+                    _presetValidator.Validate(kvp.Value, source.ModelProfiles);
 
                 if (request.DryRun) modelChanges = ComputeModelChanges(source, request.Targets, loadedPresets);
             }
@@ -184,7 +235,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             }
 
             List<string> warnings = [.. RenderWarningMessages(renderResult.Warnings)];
-            string effectiveGuidance = SquadResponseGuidanceReader.ReadEffective(
+            string effectiveGuidance = _guidance.ReadEffective(
                 _stateStore.ResolveHomeOwnedFilesRoot(),
                 warnings);
             if (!SquadResponsePreferencesInjector.HasAnyBlock(renderResult))
@@ -204,7 +255,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             // Factory's block is dropped here rather than at render time when splicing it
             // would shadow the user's settings hooks (§10.8, R18): shadowing is a property
             // of the target's current files, not of the render request.
-            FactoryHooksShadowingOutcome shadowing = FactoryHooksShadowing.Resolve(
+            FactoryHooksShadowingOutcome shadowing = _shadowing.Resolve(
                 targetRoot,
                 request.Targets,
                 request.Arbiter,
@@ -227,7 +278,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             SquadDeploymentPlan plan;
             if (existingReceipt is null)
             {
-                plan = SquadDeploymentPlanner.CreateInstall(
+                plan = _planner.CreateInstall(
                     targetRoot: targetRoot,
                     scope: request.Scope,
                     squadLock: squadLock,
@@ -241,7 +292,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             }
             else
             {
-                plan = SquadDeploymentPlanner.CreateUpdate(
+                plan = _planner.CreateUpdate(
                     targetRoot: targetRoot,
                     scope: request.Scope,
                     squadLock: squadLock,
@@ -256,7 +307,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             }
 
             warnings.AddRange(DegradedFileWarnings(plan));
-            warnings.AddRange(FactoryMcpConfiguration.Warnings(
+            warnings.AddRange(FactoryMcpConfiguration.Warnings(_files,
                 request.Targets,
                 request.Scope,
                 source,
@@ -274,12 +325,12 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
                     ModelChanges: modelChanges,
                     Warnings: warnings);
 
-            SquadResponseGuidanceDeployer? guidanceDeployer =
+            ISquadResponseGuidanceDeployer? guidanceDeployer =
                 request is { Scope: SquadDeploymentScope.Global, DryRun: false }
-                    ? new SquadResponseGuidanceDeployer(_stateStore.ResolveHomeOwnedFilesRoot())
+                    ? _guidance.CreateDeployer(_stateStore.ResolveHomeOwnedFilesRoot())
                     : null;
 
-            SquadTransaction transaction = new(_stateStore, _observer);
+            ISquadTransaction transaction = _transactions.Create(_observer);
             transaction.Execute(
                 plan,
                 guidanceDeployer is null
@@ -403,9 +454,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             LoadAndVerifyPresets(targetPresetNames, targets);
 
         string version = request.Version ?? ResolveDefaultVersion();
-        string tempExtractDir = Path.Combine(
-            Path.GetTempPath(),
-            "kyber-squad-extract-" + Guid.NewGuid().ToString("N"));
+        string tempExtractDir = _files.NewScratchDirectoryPath("kyber-squad-extract-");
 
         try
         {
@@ -418,7 +467,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             if (source is not null)
             {
                 foreach (KeyValuePair<SquadTarget, SquadModelPreset> kvp in loadedPresets)
-                    SquadModelPresetValidator.Validate(kvp.Value, source.ModelProfiles);
+                    _presetValidator.Validate(kvp.Value, source.ModelProfiles);
 
                 if (request.DryRun) modelChanges = ComputeModelChanges(source, targets, loadedPresets);
             }
@@ -463,7 +512,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             }
 
             List<string> warnings = [.. RenderWarningMessages(renderResult.Warnings)];
-            string effectiveGuidance = SquadResponseGuidanceReader.ReadEffective(
+            string effectiveGuidance = _guidance.ReadEffective(
                 _stateStore.ResolveHomeOwnedFilesRoot(),
                 warnings);
             if (!SquadResponsePreferencesInjector.HasAnyBlock(renderResult))
@@ -482,7 +531,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
 
             // Same drop as install: a user who adds a settings hooks key after installing
             // must not have their next update create the shadowing file (§10.8, R18).
-            FactoryHooksShadowingOutcome shadowing = FactoryHooksShadowing.Resolve(
+            FactoryHooksShadowingOutcome shadowing = _shadowing.Resolve(
                 targetRoot,
                 targets,
                 request.Arbiter,
@@ -503,7 +552,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             // decides whether this run may write at all before anything outside the transaction is
             // touched. The home guidance is written after that decision and before the commit, so the
             // receipt carries only a digest read back from the deployed path.
-            SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
+            SquadDeploymentPlan plan = _planner.CreateUpdate(
                 targetRoot: targetRoot,
                 scope: request.Scope,
                 squadLock: squadLock,
@@ -519,7 +568,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             ReportPreservedEdits(plan, previousReceipt, request.ReplaceManaged, warnings);
 
             warnings.AddRange(DegradedFileWarnings(plan));
-            warnings.AddRange(FactoryMcpConfiguration.Warnings(
+            warnings.AddRange(FactoryMcpConfiguration.Warnings(_files,
                 targets,
                 request.Scope,
                 source,
@@ -544,12 +593,12 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             // failure inside the commit leaves the new default on disk under the old receipt. A retry of
             // the same release adopts those bytes; a later release that ships different wording reads them
             // as an operator edit, keeps them, and warns how to take its default.
-            SquadResponseGuidanceDeployer? guidanceDeployer =
+            ISquadResponseGuidanceDeployer? guidanceDeployer =
                 request is { Scope: SquadDeploymentScope.Global, DryRun: false }
-                    ? new SquadResponseGuidanceDeployer(_stateStore.ResolveHomeOwnedFilesRoot())
+                    ? _guidance.CreateDeployer(_stateStore.ResolveHomeOwnedFilesRoot())
                     : null;
 
-            SquadTransaction transaction = new(_stateStore, _observer);
+            ISquadTransaction transaction = _transactions.Create(_observer);
             transaction.Execute(
                 plan,
                 guidanceDeployer is null
@@ -630,7 +679,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             if (parsedTargets.Count == 1) planGlobalRoots = new SquadInstanceRootResolver(targetRoot, parsedTargets[0]);
         }
 
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUninstall(
+        SquadDeploymentPlan plan = _planner.CreateUninstall(
             targetRoot,
             request.Scope,
             receipt,
@@ -647,7 +696,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
                 plan.Receipt.Degradations,
                 DryRun: true));
 
-        SquadTransaction transaction = new(_stateStore, _observer);
+        ISquadTransaction transaction = _transactions.Create(_observer);
         transaction.Execute(plan);
 
         return Task.FromResult(new SquadLifecycleResult(
@@ -765,25 +814,19 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
     ///     Resolves canonical Squad source for preset validation and model diffing, falling back
     ///     to local checkout canonical source when the extraction directory is minimal (such as in tests).
     /// </summary>
-    private static SquadSource? TryResolveSquadSource(string extractionRoot)
+    private SquadSource? TryResolveSquadSource(string extractionRoot)
     {
         string squadPath = Path.Combine(extractionRoot, "squad.yml");
-        if (File.Exists(squadPath))
+        if (_files.FileExists(squadPath))
         {
-            string text = File.ReadAllText(squadPath);
-            if (text.Contains("name:", StringComparison.Ordinal)) return SquadSourceLoader.Load(extractionRoot);
+            string text = _files.ReadAllText(squadPath);
+            if (text.Contains("name:", StringComparison.Ordinal)) return _sourceLoader.Load(extractionRoot);
         }
 
         try
         {
-            DirectoryInfo? dir = new(AppContext.BaseDirectory);
-            while (dir is not null)
-            {
-                string candidate = Path.Combine(dir.FullName, "products", "kyber-squad");
-                if (File.Exists(Path.Combine(candidate, "squad.yml"))) return SquadSourceLoader.Load(candidate);
-
-                dir = dir.Parent;
-            }
+            string? checkoutRoot = _files.FindCheckoutSquadSourceRoot();
+            if (checkoutRoot is not null) return _sourceLoader.Load(checkoutRoot);
         }
         catch (Exception ex) when (FileFailure.Is(ex))
         {
@@ -797,7 +840,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
     ///     Warns once per receipt-owned deployed file that the update kept because its bytes were edited
     ///     locally. The plan has already decided to keep them; this only reports that decision.
     /// </summary>
-    private static void ReportPreservedEdits(
+    private void ReportPreservedEdits(
         SquadDeploymentPlan plan,
         SquadReceipt previousReceipt,
         bool replaceManaged,
@@ -812,15 +855,15 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
                 continue;
 
             string fullPath = plan.ResolvePhysicalPath(previous);
-            if (!File.Exists(fullPath))
+            if (!_files.FileExists(fullPath))
                 continue;
 
             string currentDigest;
             try
             {
-                currentDigest = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(fullPath)));
+                currentDigest = Convert.ToHexStringLower(SHA256.HashData(_files.ReadAllBytes(fullPath)));
             }
-            catch (Exception exception) when (SquadResponseGuidanceDeployer.IsDegradableFailure(exception))
+            catch (Exception exception) when (_guidance.IsDegradableFailure(exception))
             {
                 // The file is left as it is; naming it here keeps an unreadable deployed entry visible.
                 warnings.Add(
@@ -843,7 +886,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
     ///     not be deployed attaches nothing, so the receipt keeps the records it already has.
     /// </summary>
     private static void DeployGuidance(
-        SquadResponseGuidanceDeployer deployer,
+        ISquadResponseGuidanceDeployer deployer,
         SquadDeploymentPlan plan,
         IReadOnlyList<SquadHomeFile> previous,
         ICollection<string> warnings)
@@ -901,7 +944,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             foreach (SquadAgent agent in source.Agents)
                 agentProfiles[agent.Name] = agent.ModelProfile;
 
-            new SquadCanonicalProfileStore(_stateStore.UserPaths).Write(
+            _canonicalProfiles.Write(
                 new SquadCanonicalProfiles(version, source.ModelProfiles, agentProfiles));
         }
         catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidDataException)
@@ -958,7 +1001,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             $"Targets available today: {supported}.");
     }
 
-    private static SquadLock BuildLock(
+    private SquadLock BuildLock(
         string version,
         string bundle,
         IReadOnlyList<SquadTarget> targets,
@@ -1017,10 +1060,10 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
         return GetAssemblyVersion();
     }
 
-    private static string ComputeBundleDigest(string extractionRoot, string bundle)
+    private string ComputeBundleDigest(string extractionRoot, string bundle)
     {
         string bundlePath = Path.Combine(extractionRoot, "bundles", $"{bundle}.yml");
-        if (File.Exists(bundlePath)) return Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(bundlePath)));
+        if (_files.FileExists(bundlePath)) return Convert.ToHexStringLower(SHA256.HashData(_files.ReadAllBytes(bundlePath)));
 
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(bundle)));
     }
@@ -1037,14 +1080,14 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
     ///     <c>SquadDeploymentStateTests</c> that implies) for a field that was already
     ///     optional and whose absence this code already handled correctly.
     /// </remarks>
-    private static SquadApmIdentity ReadApmIdentity(string extractionRoot)
+    private SquadApmIdentity ReadApmIdentity(string extractionRoot)
     {
         string toolchainPath = Path.Combine(extractionRoot, "toolchain.yml");
-        if (!File.Exists(toolchainPath)) return SquadApmIdentity.None;
+        if (!_files.FileExists(toolchainPath)) return SquadApmIdentity.None;
 
         try
         {
-            string yamlText = File.ReadAllText(toolchainPath);
+            string yamlText = _files.ReadAllText(toolchainPath);
             YamlStream yaml = new();
             yaml.Load(new StringReader(yamlText));
             if (yaml.Documents.Count > 0 && yaml.Documents[0].RootNode is YamlMappingNode root)
@@ -1101,11 +1144,11 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
         return SquadApmIdentity.None;
     }
 
-    private static void CleanupTempDirectory(string path)
+    private void CleanupTempDirectory(string path)
     {
         try
         {
-            if (Directory.Exists(path)) Directory.Delete(path, true);
+            if (_files.DirectoryExists(path)) _files.DeleteDirectory(path);
         }
         catch
         {

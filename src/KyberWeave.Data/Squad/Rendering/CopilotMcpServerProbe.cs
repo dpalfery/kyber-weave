@@ -19,7 +19,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// </remarks>
 public static class CopilotMcpServerProbe
 {
-    public const string McpConfigFileName = "mcp-config.json";
+    public const string McpConfigFileName = SquadOperatorChannel.CopilotMcpConfigFileName;
 
     /// <summary>Upper bound on the config size the probe will read. Real MCP configs are a few kilobytes.</summary>
     public const long MaxConfigBytes = 1024 * 1024;

@@ -549,7 +549,7 @@ public sealed class DevinRendererContractTests : IDisposable
             new DevinRenderer().RenderAsync(new SquadRenderRequest(
                 fixture.ProductRoot,
                 [SquadTarget.Devin],
-                SquadDeploymentScope.Project)));
+                SquadDeploymentScope.Project).Prepared()));
         Assert.Contains(primary.Name, exception.Message, StringComparison.Ordinal);
     }
 
@@ -560,11 +560,11 @@ public sealed class DevinRendererContractTests : IDisposable
             return await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Devin);
         }
 
-        SquadRendererRegistry registry = new([new DevinRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new DevinRenderer()]);
         return await registry.RenderAsync(new SquadRenderRequest(
             sourceDirectory,
             [SquadTarget.Devin],
-            SquadDeploymentScope.Project));
+            SquadDeploymentScope.Project).Prepared());
     }
 
     private static IReadOnlyList<string> ComputeExpectedBuiltInTools(SquadCapabilityProfile profile)

@@ -1,4 +1,5 @@
 using System.Reflection;
+using KyberWeave.Tests.Fakes;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Arbiter.Mcp;
@@ -110,7 +111,7 @@ public sealed class ArbiterCanonicalSquadTests
         string[] qualifiedTools = DeclaredArbiterToolNames()
             .Select(tool => $"mcp__{ArbiterServer}__{tool}")
             .ToArray();
-        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
+        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
 
         foreach (SquadTarget target in Enum.GetValues<SquadTarget>())
         {
@@ -122,7 +123,7 @@ public sealed class ArbiterCanonicalSquadTests
             SquadRenderResult result = await renderer.RenderAsync(new SquadRenderRequest(
                 SourceDirectory: ProductRoot,
                 Targets: [target],
-                Scope: SquadDeploymentScope.Project));
+                Scope: SquadDeploymentScope.Project).Prepared());
             Assert.True(result.Success, string.Join("; ", result.Errors));
 
             foreach (SquadDeploymentFile file in result.Files)

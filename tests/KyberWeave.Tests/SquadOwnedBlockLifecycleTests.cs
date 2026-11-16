@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using KyberWeave.Cli.Commands.Squad;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -37,7 +38,7 @@ public sealed class SquadOwnedBlockLifecycleTests
     public async Task RegistryMergesBlocksAcrossTargets()
     {
         using SharedIdentitySquadFixture fixture = SharedIdentitySquadFixture.Create();
-        SquadRendererRegistry registry = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create(
         [
             new BlockStubRenderer(SquadTarget.Cursor, CursorBlock("cursor-one")),
             new BlockStubRenderer(SquadTarget.Codex, CodexBlock("codex-one")),
@@ -46,7 +47,7 @@ public sealed class SquadOwnedBlockLifecycleTests
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             fixture.Path,
             [SquadTarget.Cursor, SquadTarget.Codex],
-            SquadDeploymentScope.Project));
+            SquadDeploymentScope.Project).Prepared());
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         Assert.NotNull(result.Blocks);
@@ -782,7 +783,7 @@ public sealed class SquadOwnedBlockLifecycleTests
         Directory.CreateDirectory(targetRoot);
         using FakeSquadReleaseSource releases = new();
         SquadStateStore store = Store(fixture.Path);
-        SquadLifecycleService service = new(
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
             releases,
             new BlockStubRenderer(SquadTarget.Cursor, CursorBlock("cursor-one")),
             store,

@@ -170,17 +170,17 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         string extracted = ExtractApmArchive();
         SquadSource source = SquadSourceLoader.Load(extracted);
         using SquadHomeHarness harness = new(Path.Combine(_temp.Path, "home"));
-        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
+        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
         string[] kyberWeaveSkills = AllKyberWeaveSkillNames();
 
         foreach (SquadTarget target in Enum.GetValues<SquadTarget>())
         {
-            SquadRenderRequest request = new(
+            SquadRenderRequest request = new SquadRenderRequest(
                 extracted,
                 [target],
                 SquadDeploymentScope.Global,
                 GlobalRoots: harness.GlobalRoots,
-                PreloadedSource: source);
+                PreloadedSource: source).Prepared();
             SquadRenderResult render = await renderer.RenderAsync(request);
             Assert.True(
                 render.Success && render.Errors.Count == 0,
@@ -218,7 +218,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         AssertExit(_pack.ApmPack.ExitCode, _pack.ApmPack.Output, 0);
         string archive = ArchivePath(_pack.ApmPack, $"kyber-squad-{PackedVersion}.zip");
         using SquadHomeHarness harness = new(Path.Combine(_temp.Path, "home"));
-        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
+        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
         using ISquadReleaseSource releaseSource = new ArchiveSquadReleaseSource(archive);
         string anchor = harness.MakeDirectory("anchor");
         string claudeRoot = harness.GlobalRoot(SquadTarget.Claude);
@@ -226,7 +226,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         string claudeToken = SquadTargetCatalog.GetToken(SquadTarget.Claude);
         string[] kyberWeaveSkills = AllKyberWeaveSkillNames();
 
-        CapturedConsoleExecution<int> install = ProcessConsoleCapture.Run(() => new SquadInstallCommand(
+        CapturedConsoleExecution<int> install = ProcessConsoleCapture.Run(() => SquadTestCommands.Install(
                 harness.UserPaths,
                 harness.Store,
                 releaseSource,
@@ -265,7 +265,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         }
 
         string[] beforeUpdate = OwnedFingerprint(installed);
-        CapturedConsoleExecution<int> update = ProcessConsoleCapture.Run(() => new SquadUpdateCommand(
+        CapturedConsoleExecution<int> update = ProcessConsoleCapture.Run(() => SquadTestCommands.Update(
                 harness.UserPaths,
                 harness.Store,
                 releaseSource,
@@ -285,7 +285,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         SquadReceipt updated = harness.Store.DeserializeReceipt(File.ReadAllText(receiptPath, Encoding.UTF8));
         Assert.Equal(beforeUpdate, OwnedFingerprint(updated));
 
-        CapturedConsoleExecution<int> uninstall = ProcessConsoleCapture.Run(() => new SquadUninstallCommand(
+        CapturedConsoleExecution<int> uninstall = ProcessConsoleCapture.Run(() => SquadTestCommands.Uninstall(
                 harness.UserPaths,
                 harness.Store,
                 harness.Lifecycle(renderer),

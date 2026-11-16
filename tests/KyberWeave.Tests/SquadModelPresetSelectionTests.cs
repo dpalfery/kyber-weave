@@ -1,4 +1,5 @@
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Tests.Fakes;
 using Xunit;
@@ -270,7 +271,7 @@ public sealed class SquadModelPresetSelectionTests : IDisposable
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore, selectionStore: selectionStore);
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore, selectionStore: selectionStore);
 
         SquadInstallRequest request = new(
             projectRoot,
@@ -306,7 +307,7 @@ public sealed class SquadModelPresetSelectionTests : IDisposable
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore, selectionStore: selectionStore);
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore, selectionStore: selectionStore);
 
         SquadInstallRequest request = new(
             projectRoot,

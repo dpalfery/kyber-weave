@@ -1,3 +1,5 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
 using System.Text.RegularExpressions;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Squad;
@@ -324,7 +326,7 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
     /// </summary>
     private void WriteGlobalReceipt(IReadOnlyList<SquadOwnedFile> files, IReadOnlyList<SquadOwnedBlock> blocks)
     {
-        SquadStateStore store = SquadCommandComposition.ResolveStateStore(
+        SquadStateStore store = SquadHostDefaults.ResolveStateStore(
             new TempHomeUserPaths(_home.Path, _userPaths.Path));
         string path = store.ResolveReceiptPath(_home.Path, SquadDeploymentScope.Global);
         string schema = blocks.Count > 0 ? "kyber-squad.receipt/v3" : "kyber-squad.receipt/v1";
@@ -354,7 +356,7 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
     }
 
     private CommandExecution RunDoctor() =>
-        Capture(() => new ArbiterDoctorCommand().Execute(
+        Capture(() => new ArbiterDoctorCommand(new FileArbiterModelTargetsReader(new PhysicalFileSystem())).Execute(
             null!,
             new ArbiterSettings { Path = _repo.Path }));
 

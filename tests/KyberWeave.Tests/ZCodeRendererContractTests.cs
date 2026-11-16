@@ -317,12 +317,12 @@ public sealed class ZCodeRendererContractTests : IDisposable
             return await TestSquadCorpus.GetDefaultRenderAsync(SquadTarget.ZCode, scope);
         }
 
-        SquadRendererRegistry registry = new([new ZCodeRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new ZCodeRenderer()]);
         return await registry.RenderAsync(new SquadRenderRequest(
             sourceDirectory,
             [SquadTarget.ZCode],
             scope,
-            Arbiter: arbiter));
+            Arbiter: arbiter).Prepared());
     }
 
     public void Dispose()

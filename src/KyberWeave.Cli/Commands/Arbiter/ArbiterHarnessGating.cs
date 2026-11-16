@@ -75,8 +75,8 @@ internal static class ArbiterHarnessGating
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(globalTargets);
 
-        ISquadGlobalRootResolver roots = SquadCommandComposition.ResolveGlobalRoots(ArbiterCommandComposition.GetEnvironmentVariable);
-        SquadStateStore store = SquadCommandComposition.ResolveStateStore(new HomeUserPaths(home));
+        ISquadGlobalRootResolver roots = SquadHostDefaults.ResolveGlobalRoots(ArbiterCommandComposition.GetEnvironmentVariable);
+        SquadStateStore store = SquadHostDefaults.ResolveStateStore(new HomeUserPaths(home));
         SquadReceipt? receipt = ReadGlobalReceipt(store, home);
 
         List<HarnessGatingRow> rows = [];

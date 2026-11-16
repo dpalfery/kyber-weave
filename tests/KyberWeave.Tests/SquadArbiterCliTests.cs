@@ -30,7 +30,7 @@ public sealed class SquadArbiterCliTests : IDisposable
         FakeSquadRenderer renderer = new();
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
         SquadStateStore stateStore = new(userPaths);
-        SquadInstallCommand command = new(
+        SquadInstallCommand command = SquadTestCommands.Install(
             userPaths: userPaths,
             stateStore: stateStore,
             releaseSource: releaseSource,
@@ -69,7 +69,7 @@ public sealed class SquadArbiterCliTests : IDisposable
         SquadStateStore stateStore = new(userPaths);
         SeedDeployment(targetDir, stateStore, (".codex/agents/architect.toml", "name = \"architect\"\n"));
 
-        SquadUpdateCommand command = new(
+        SquadUpdateCommand command = SquadTestCommands.Update(
             userPaths: userPaths,
             stateStore: stateStore,
             releaseSource: releaseSource,
@@ -108,7 +108,7 @@ public sealed class SquadArbiterCliTests : IDisposable
         FakeSquadRenderer renderer = new();
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
         SquadStateStore stateStore = new(userPaths);
-        SquadInstallCommand command = new(
+        SquadInstallCommand command = SquadTestCommands.Install(
             userPaths: userPaths,
             stateStore: stateStore,
             releaseSource: releaseSource,
@@ -144,7 +144,7 @@ public sealed class SquadArbiterCliTests : IDisposable
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
 
         SquadLifecycleResult result = await service.InstallAsync(new SquadInstallRequest(
             TargetRoot: targetRoot,
@@ -202,7 +202,7 @@ public sealed class SquadArbiterCliTests : IDisposable
         FakeSquadRenderer renderer = new();
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
         SquadStateStore stateStore = new(userPaths);
-        SquadInstallCommand command = new(
+        SquadInstallCommand command = SquadTestCommands.Install(
             userPaths: userPaths,
             stateStore: stateStore,
             releaseSource: releaseSource,
@@ -238,7 +238,7 @@ public sealed class SquadArbiterCliTests : IDisposable
         SquadStateStore stateStore = new(userPaths);
         SeedDeployment(targetDir, stateStore, (".codex/agents/architect.toml", "name = \"architect\"\n"));
 
-        SquadUpdateCommand command = new(
+        SquadUpdateCommand command = SquadTestCommands.Update(
             userPaths: userPaths,
             stateStore: stateStore,
             releaseSource: releaseSource,
@@ -271,7 +271,7 @@ public sealed class SquadArbiterCliTests : IDisposable
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n")
             .WithFailure("kyber-weave-arbiter", "The 'kyber-weave-arbiter' executable is not available on PATH.");
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadDoctorCommand command = new(executor, userPaths, workingDirectory: workingDir);
+        SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: workingDir);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -291,7 +291,7 @@ public sealed class SquadArbiterCliTests : IDisposable
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n")
             .WithProbeOutput("kyber-weave-arbiter", "kyber-weave-arbiter 0.0.0\n");
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadDoctorCommand command = new(executor, userPaths, workingDirectory: workingDir);
+        SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: workingDir);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -312,7 +312,7 @@ public sealed class SquadArbiterCliTests : IDisposable
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n")
             .WithProbeOutput("kyber-weave-arbiter", $"kyber-weave-arbiter {cliVersion}\n");
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadDoctorCommand command = new(executor, userPaths, workingDirectory: workingDir);
+        SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: workingDir);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -336,7 +336,7 @@ public sealed class SquadArbiterCliTests : IDisposable
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n")
             .WithMatchingArbiterProbe();
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadDoctorCommand command = new(executor, userPaths, workingDirectory: workingDir);
+        SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: workingDir);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -361,7 +361,7 @@ public sealed class SquadArbiterCliTests : IDisposable
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadDoctorCommand command = new(
+        SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
             userPaths,
             workingDirectory: workingDir,
@@ -389,7 +389,7 @@ public sealed class SquadArbiterCliTests : IDisposable
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n")
             .WithProbeOutput("kyber-weave-arbiter", $"kyber-weave-arbiter {cliVersion}\n");
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadDoctorCommand command = new(
+        SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
             userPaths,
             workingDirectory: workingDir,
@@ -422,7 +422,7 @@ public sealed class SquadArbiterCliTests : IDisposable
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n")
             .WithProbeOutput("kyber-weave-arbiter", $"kyber-weave-arbiter {CliVersion()}\n");
-        SquadDoctorCommand command = new(
+        SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
             userPaths,
             workingDirectory: workingDir,
@@ -453,7 +453,7 @@ public sealed class SquadArbiterCliTests : IDisposable
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n")
             .WithProbeOutput("kyber-weave-arbiter", $"kyber-weave-arbiter {CliVersion()}\n");
-        SquadDoctorCommand command = new(
+        SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
             userPaths,
             workingDirectory: workingDir,

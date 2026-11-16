@@ -68,7 +68,7 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
             return 2;
         }
 
-        SquadStateStore stateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(
+        SquadStateStore stateStore = _stateStore ?? SquadHostDefaults.ResolveStateStore(
             null,
             ArbiterCommandComposition.GetEnvironmentVariable);
 
@@ -136,7 +136,7 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
             }
         }
 
-        ISquadGlobalRootResolver globalRoots = SquadCommandComposition.ResolveGlobalRoots(ArbiterCommandComposition.GetEnvironmentVariable);
+        ISquadGlobalRootResolver globalRoots = SquadHostDefaults.ResolveGlobalRoots(ArbiterCommandComposition.GetEnvironmentVariable);
 
         bool deployed;
         try

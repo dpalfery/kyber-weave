@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
@@ -7,47 +8,6 @@ using System.Text.Json.Serialization;
 using System.Threading;
 
 namespace KyberWeave.Core.Squad.Deployment;
-
-/// <summary>A durable point in the ordered Squad deployment transaction.</summary>
-public enum SquadTransactionStepKind
-{
-    IntentWritten,
-    FileStaged,
-    FileBackedUp,
-    FileApplied,
-    LockApplied,
-    ReceiptApplied
-}
-
-/// <summary>An observable transaction step, numbered from one in filesystem order.</summary>
-public sealed record SquadTransactionStep(
-    int Sequence,
-    SquadTransactionStepKind Kind,
-    string? RelativePath = null);
-
-/// <summary>Receives transaction checkpoints after their corresponding filesystem mutation.</summary>
-public interface ISquadTransactionObserver
-{
-    void AfterStep(SquadTransactionStep transactionStep);
-}
-
-public enum SquadTransactionCheckpointKind
-{
-    Prepared,
-    ActiveTransitionWritten,
-    OriginalClaimed,
-    AfterImagePublished
-}
-
-public sealed record SquadTransactionCheckpoint(
-    int Sequence,
-    SquadTransactionCheckpointKind Kind,
-    string? RelativePath = null);
-
-public interface ISquadTransactionCheckpointObserver : ISquadTransactionObserver
-{
-    void AfterCheckpoint(SquadTransactionCheckpoint checkpoint);
-}
 
 /// <summary>
 ///     Applies a preflighted Squad plan through a recoverable intent, staging, and backup protocol.
@@ -64,7 +24,7 @@ public interface ISquadTransactionCheckpointObserver : ISquadTransactionObserver
 ///     <see cref="ISquadGlobalRootResolver" /> or a possibly-changed environment. Directory cleanup
 ///     during restore operations must stop at each file's own resolved root and never walk above it.
 /// </remarks>
-public sealed class SquadTransaction
+public sealed class SquadTransaction : ISquadTransaction
 {
     private const string IntentFileName = "intent.json";
     private const string IntentSchema = "kyber-squad.transaction/v1";

@@ -1,4 +1,6 @@
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Deployment;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -8,44 +10,37 @@ namespace KyberWeave.Cli.Commands.Squad;
 /// <summary>
 /// Uninstalls Kyber-Squad from a project or global deployment directory using its ownership receipt.
 /// </summary>
-public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
+internal sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
 {
-    private readonly ISquadUserPaths? _userPaths;
-    private readonly SquadStateStore? _stateStore;
-    private readonly SquadLifecycleService? _lifecycleService;
-    private readonly bool? _isInteractive;
-    private readonly Func<string, bool>? _readAnswer;
-    private readonly ISquadGlobalRootResolver? _globalRoots;
-    private readonly Func<string, string?>? _environmentReader;
+    private readonly ISquadLifecycleService _lifecycle;
+    private readonly ISquadStateStore _stateStore;
+    private readonly ISquadStateMigration _migration;
+    private readonly ISquadGlobalRootResolver _globalRoots;
+    private readonly SquadConsoleOptions _console;
 
-    /// <summary>Creates a new uninstall command using default user paths.</summary>
-    public SquadUninstallCommand()
+    /// <summary>Creates the uninstall command over the Squad services the host registers.</summary>
+    /// <param name="lifecycle">Removes the deployment.</param>
+    /// <param name="stateStore">Reads the deployment state.</param>
+    /// <param name="migration">Moves legacy state into the home layout before the uninstall reads it.</param>
+    /// <param name="globalRoots">Names the roots a global uninstall writes beneath.</param>
+    /// <param name="console">How the command prompts; the defaults read the console.</param>
+    public SquadUninstallCommand(
+        ISquadLifecycleService lifecycle,
+        ISquadStateStore stateStore,
+        ISquadStateMigration migration,
+        ISquadGlobalRootResolver globalRoots,
+        SquadConsoleOptions console)
     {
-    }
-
-    /// <summary>Creates a new uninstall command using injectable dependencies.</summary>
-    /// <remarks>
-    /// <paramref name="isInteractive"/> and <paramref name="readAnswer"/> default to null
-    /// because optional parameter values must be compile-time constants; Execute resolves
-    /// them to <see cref="SquadCommandComposition.IsInteractiveConsole"/> and real console
-    /// input, so an unparameterized run behaves exactly like the default collaborators.
-    /// </remarks>
-    internal SquadUninstallCommand(
-        ISquadUserPaths? userPaths = null,
-        SquadStateStore? stateStore = null,
-        SquadLifecycleService? lifecycleService = null,
-        bool? isInteractive = null,
-        Func<string, bool>? readAnswer = null,
-        ISquadGlobalRootResolver? globalRoots = null,
-        Func<string, string?>? environmentReader = null)
-    {
-        _userPaths = userPaths;
+        ArgumentNullException.ThrowIfNull(lifecycle);
+        ArgumentNullException.ThrowIfNull(stateStore);
+        ArgumentNullException.ThrowIfNull(migration);
+        ArgumentNullException.ThrowIfNull(globalRoots);
+        ArgumentNullException.ThrowIfNull(console);
+        _lifecycle = lifecycle;
         _stateStore = stateStore;
-        _lifecycleService = lifecycleService;
-        _isInteractive = isInteractive;
-        _readAnswer = readAnswer;
+        _migration = migration;
         _globalRoots = globalRoots;
-        _environmentReader = environmentReader;
+        _console = console;
     }
 
     /// <inheritdoc />
@@ -54,8 +49,7 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        SquadStateStore stateStore =
-            _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths, _environmentReader);
+        ISquadStateStore stateStore = _stateStore;
 
         // Invalid client input returns exit code 2 before any resolution or work.
         if (settings.Project && settings.Global)
@@ -114,7 +108,7 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
 
         // Legacy state is migrated before the uninstall reads the receipt it removes.
         SquadMigrationReport migration = SquadCommandComposition.EnsureStateMigrated(
-            stateStore,
+            _migration,
             Environment.CurrentDirectory,
             scope == SquadDeploymentScope.Project ? projectRoot : null,
             settings.DryRun);
@@ -131,11 +125,7 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
             ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, settings.DryRun)
             : projectRoot;
 
-        SquadLifecycleService lifecycleService = _lifecycleService ?? SquadCommandComposition.CreateLifecycleService(
-            _userPaths,
-            stateStore,
-            globalRoots: _globalRoots,
-            environmentReader: _environmentReader);
+        ISquadLifecycleService lifecycleService = _lifecycle;
 
         if (target is { } chosen
             && !SquadCommandComposition.ReceiptHasTarget(stateStore, targetRoot, scope, chosen))
@@ -168,9 +158,9 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
                 targetRoot,
                 scope,
                 "uninstall",
-                _isInteractive ?? SquadCommandComposition.IsInteractiveConsole(),
+                _console.IsInteractive ?? SquadCommandComposition.IsInteractiveConsole(),
                 settings.Yes,
-                _readAnswer ?? SquadTargetRootConfirmation.ReadConsoleAnswer,
+                _console.ReadAnswer ?? SquadTargetRootConfirmation.ReadConsoleAnswer,
                 globalTargetRoots))
         {
             AnsiConsole.MarkupLine("[yellow]Declined. No changes were made.[/]");

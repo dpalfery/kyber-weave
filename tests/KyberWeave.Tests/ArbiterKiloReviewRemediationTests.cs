@@ -28,12 +28,12 @@ public sealed class ArbiterKiloReviewRemediationTests
     public async Task Item1_CursorRenderer_GlobalScope_EmitsHooksJsonDirectlyUnderGlobalRoot()
     {
         using ArbiterSquadFixture fixture = ArbiterSquadFixture.Create();
-        SquadRendererRegistry registry = new([new CursorRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new CursorRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: fixture.Path,
             Targets: [SquadTarget.Cursor],
             Scope: SquadDeploymentScope.Global,
-            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)));
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)).Prepared());
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         SquadRenderedBlock block = Assert.Single(result.Blocks ?? []);
@@ -80,12 +80,12 @@ public sealed class ArbiterKiloReviewRemediationTests
             skills: []
             """);
 
-        SquadRendererRegistry registry = new([new CopilotRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new CopilotRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: fixture.Path,
             Targets: [SquadTarget.Copilot],
             Scope: SquadDeploymentScope.Project,
-            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)));
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)).Prepared());
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         Assert.DoesNotContain(result.Files, f => f.RelativePath == ".github/hooks/kyber-arbiter.json");
@@ -95,12 +95,12 @@ public sealed class ArbiterKiloReviewRemediationTests
     public async Task Item4_ClaudeRenderer_GlobalScope_OmitsFrontmatterHooksOnAgents()
     {
         using ArbiterSquadFixture fixture = ArbiterSquadFixture.Create();
-        SquadRendererRegistry registry = new([new ClaudeRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: fixture.Path,
             Targets: [SquadTarget.Claude],
             Scope: SquadDeploymentScope.Global,
-            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)));
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)).Prepared());
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         foreach (SquadDeploymentFile file in result.Files.Where(f => f.RelativePath.EndsWith(".md", StringComparison.Ordinal)))

@@ -37,11 +37,11 @@ public sealed class SquadRenderingContractTests
         // the identical body). A primary shared identity is the thin wrapper whose canonical
         // skill IS the entry point, so it is emitted.
         HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
-        SquadRendererRegistry registry = new([new CopilotRenderer()]);
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new CopilotRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
             SourceDirectory: ProductRoot,
             Targets: [SquadTarget.Copilot],
-            Scope: SquadDeploymentScope.Project);
+            Scope: SquadDeploymentScope.Project).Prepared();
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -180,13 +180,13 @@ public sealed class SquadRenderingContractTests
     {
         using ResourceBearingSquadFixture fixture = ResourceBearingSquadFixture.Create();
         fixture.AppendAgentLink("[Collision](architect.md)");
-        SquadRendererRegistry registry = new([new CopilotRenderer()]);
+        SquadRendererRegistry registry = SquadTestRegistry.Create([new CopilotRenderer()]);
 
         SquadRenderValidationException exception = await Assert.ThrowsAsync<SquadRenderValidationException>(() =>
             registry.RenderAsync(new SquadRenderRequest(
                 fixture.ProductRoot,
                 [SquadTarget.Copilot],
-                SquadDeploymentScope.Project)));
+                SquadDeploymentScope.Project).Prepared()));
 
         Assert.Contains("collision", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(".github/agents/architect.agent.md", exception.Message, StringComparison.Ordinal);
@@ -371,11 +371,11 @@ internal static class SquadResourceRenderingContract
         string skillsDirectory)
     {
         using ResourceBearingSquadFixture fixture = ResourceBearingSquadFixture.Create();
-        SquadRendererRegistry registry = new([renderer]);
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([renderer]);
+        SquadRenderRequest request = new SquadRenderRequest(
             fixture.ProductRoot,
             [target],
-            SquadDeploymentScope.Project);
+            SquadDeploymentScope.Project).Prepared();
 
         SquadRenderResult first = await registry.RenderAsync(request);
         SquadRenderResult second = await registry.RenderAsync(request);
@@ -417,11 +417,11 @@ internal static class SquadResourceRenderingContract
         SquadAgent agent = Assert.Single(
             source.Agents,
             a => string.Equals(a.Name, ResourceBearingSquadFixture.AgentName, StringComparison.Ordinal));
-        SquadRendererRegistry registry = new([renderer]);
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([renderer]);
+        SquadRenderRequest request = new SquadRenderRequest(
             fixture.ProductRoot,
             [target],
-            SquadDeploymentScope.Project);
+            SquadDeploymentScope.Project).Prepared();
 
         SquadRenderResult first = await registry.RenderAsync(request);
         SquadRenderResult second = await registry.RenderAsync(request);
@@ -578,11 +578,11 @@ internal static class SquadResourceRenderingContract
         string skillsDirectory = ".agents/skills")
     {
         using ResourceBearingSquadFixture fixture = ResourceBearingSquadFixture.Create();
-        SquadRendererRegistry registry = new([renderer]);
-        SquadRenderRequest request = new(
+        SquadRendererRegistry registry = SquadTestRegistry.Create([renderer]);
+        SquadRenderRequest request = new SquadRenderRequest(
             fixture.ProductRoot,
             [target],
-            SquadDeploymentScope.Project);
+            SquadDeploymentScope.Project).Prepared();
 
         SquadRenderResult first = await registry.RenderAsync(request);
         SquadRenderResult second = await registry.RenderAsync(request);
