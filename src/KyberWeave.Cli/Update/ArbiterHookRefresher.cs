@@ -35,7 +35,7 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
         ArgumentNullException.ThrowIfNull(projectRoots);
 
         SquadLifecycleService lifecycle =
-            SquadCommandComposition.CreateLifecycleService(environmentReader: _environmentReader);
+            SquadHostDefaults.CreateLifecycleService(environmentReader: _environmentReader);
         int refreshed = 0;
         int failed = 0;
         foreach (string root in projectRoots)
@@ -95,8 +95,8 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
         if (!string.IsNullOrWhiteSpace(home))
         {
             int globalTimeout = ResolveGlobalTimeout(home);
-            SquadStateStore stateStore = SquadCommandComposition.ResolveStateStore(
-                new SquadCommandComposition.CliSquadUserPaths(home, Path.Combine(home, ".config")),
+            SquadStateStore stateStore = SquadHostDefaults.ResolveStateStore(
+                new SquadHostDefaults.CliSquadUserPaths(home, Path.Combine(home, ".config")),
                 _environmentReader);
             SquadReceipt? receipt = null;
             try

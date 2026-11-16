@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.Json;
@@ -17,7 +18,7 @@ namespace KyberWeave.Core.Squad.Deployment;
 /// Each successful copy or import is also recorded in the migration ledger beside the home registry, so the
 /// migration is one-shot per source: an uninstall of migrated state is not undone by the legacy copy that is kept.
 /// </remarks>
-public sealed class SquadStateMigration
+public sealed class SquadStateMigration : ISquadStateMigration
 {
     private const string ReceiptFileName = "squad.receipt.json";
     private const string LockFileName = "squad.lock.yml";

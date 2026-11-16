@@ -19,7 +19,7 @@ namespace KyberWeave.Tests.Squad;
 /// under <c>mcpServers</c> in <c>$COPILOT_HOME/mcp-config.json</c>.
 /// </summary>
 /// <remarks>
-/// Facts are black-box through <see cref="SquadCommandComposition.ResolveRenderer"/> and
+/// Facts are black-box through <see cref="SquadHostDefaults.ResolveRenderer"/> and
 /// <see cref="SquadRenderRequest"/>. The default-off parity facts guard against regressions: with the gate
 /// unset or set to any value other than the exact string <c>true</c>, every output must match a render with
 /// the gate unset, and no <c>operator-channel</c> text may appear anywhere. Environment variables are read
@@ -513,7 +513,7 @@ public sealed class SquadOperatorChannelOptInTests : IDisposable
             SquadRenderValidationException failure =
                 await Assert.ThrowsAsync<SquadRenderValidationException>(async () =>
                 {
-                    ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
+                    ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
                     await renderer.RenderAsync(new SquadRenderRequest(
                         sourceCopy,
                         [SquadTarget.Copilot],
@@ -573,7 +573,7 @@ public sealed class SquadOperatorChannelOptInTests : IDisposable
             laterRoot,
             SquadOperatorChannelFixture.GlobalRoots(copilot, home));
 
-        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
+        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
         SquadRenderResult on = await renderer.RenderAsync(new SquadRenderRequest(
             SquadOperatorChannelFixture.ProductRoot,
             [SquadTarget.Copilot],
@@ -731,7 +731,7 @@ internal static class SquadOperatorChannelFixture
         string? serverName = DefaultServerName,
         SquadSource? preloadedSource = null)
     {
-        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
+        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
         SquadRenderResult result = await renderer.RenderAsync(new SquadRenderRequest(
             ProductRoot,
             targets,

@@ -795,7 +795,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             plan.Receipt with { Schema = SquadStateStore.ReceiptSchemaV2 },
             Assert.IsType<SquadReceipt>(store.ReadReceipt(fixture.Path, SquadDeploymentScope.Global)));
 
-        SquadStatusCommand command = new(stateStore: store, globalRoots: globalRoots);
+        SquadStatusCommand command = SquadTestCommands.Status(stateStore: store, globalRoots: globalRoots);
         CapturedConsoleExecution<int> clean = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
             new SquadStatusSettings
@@ -838,9 +838,9 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         Write(fixture.Path, relativePath, "installed body");
         WriteState(fixture.Path, Lock(), receipt);
         SquadStateStore store = Store(fixture.Path);
-        SquadUninstallCommand command = new(
+        SquadUninstallCommand command = SquadTestCommands.Uninstall(
             stateStore: store,
-            lifecycleService: SquadCommandComposition.CreateLifecycleService(stateStore: store));
+            lifecycleService: SquadHostDefaults.CreateLifecycleService(stateStore: store));
 
         CapturedConsoleExecution<int> dryRun = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
@@ -1244,7 +1244,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             receipt.Files.Select(file => file.Sha256));
         Assert.All(receipt.Files, file => Assert.Equal("codex", file.Target));
 
-        SquadStatusCommand command = new(stateStore: store);
+        SquadStatusCommand command = SquadTestCommands.Status(stateStore: store);
         CapturedConsoleExecution<int> clean = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
             new SquadStatusSettings
@@ -4870,7 +4870,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         {
             [SquadTarget.Codex] = Path.Combine(fixture.Path, "fake-codex")
         });
-        SquadLifecycleService service = new(releaseSource, SquadCommandComposition.ResolveRenderer(), stateStore,
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, SquadHostDefaults.ResolveRenderer(), stateStore,
             globalRoots: globalRoots);
 
         SquadDeploymentConflictException exception = await Assert.ThrowsAsync<SquadDeploymentConflictException>(() =>
@@ -4931,7 +4931,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         {
             [SquadTarget.Codex] = Path.Combine(fixture.Path, "fake-codex")
         });
-        SquadLifecycleService service = new(releaseSource, SquadCommandComposition.ResolveRenderer(), stateStore,
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, SquadHostDefaults.ResolveRenderer(), stateStore,
             globalRoots: globalRoots);
 
         SquadDeploymentConflictException exception = await Assert.ThrowsAsync<SquadDeploymentConflictException>(() =>

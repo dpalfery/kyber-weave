@@ -773,7 +773,7 @@ public sealed class SquadCapturePluginStepTests : IDisposable
             Func<string, bool>? readAnswer = null,
             Func<string?>? locateKyberDash = null)
         {
-            return new SquadInstallCommand(
+            return SquadTestCommands.Install(
                 _userPaths,
                 _store,
                 _releaseSource,
@@ -786,7 +786,7 @@ public sealed class SquadCapturePluginStepTests : IDisposable
 
         public SquadUpdateCommand UpdateCommand(IProcessExecutor executor)
         {
-            return new SquadUpdateCommand(
+            return SquadTestCommands.Update(
                 _userPaths,
                 _store,
                 _releaseSource,

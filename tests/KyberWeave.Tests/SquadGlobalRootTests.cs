@@ -668,8 +668,8 @@ public sealed class SquadGlobalRootTests : IDisposable
         FakeSquadUserPaths userPaths = new(userData);
         SquadStateStore stateStore = new(userPaths);
         using CorpusSquadReleaseSource releaseSource = new();
-        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore, globalRoots: globalRoots);
+        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore, globalRoots: globalRoots);
 
         SquadInstallRequest request = new(
             projectRoot,
@@ -809,9 +809,9 @@ public sealed class SquadGlobalRootTests : IDisposable
         FakeSquadUserPaths userPaths = new(userData);
         SquadStateStore stateStore = new(userPaths);
         using SyntheticValidSquadReleaseSource releaseSource = new();
-        SquadLifecycleService service = new(
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
             releaseSource,
-            SquadCommandComposition.ResolveRenderer(),
+            SquadHostDefaults.ResolveRenderer(),
             stateStore,
             globalRoots: globalRoots);
 
@@ -851,7 +851,7 @@ public sealed class SquadGlobalRootTests : IDisposable
         SquadGlobalRoots roots = new(_ => null, home);
         SquadStateStore store = new(new FakeSquadUserPaths(Path.Combine(_temp.Path, name + "-user-data")));
         SyntheticValidSquadReleaseSource source = new();
-        return (new SquadLifecycleService(source, SquadCommandComposition.ResolveRenderer(), store, globalRoots: roots), store, project, roots, source);
+        return (SquadHostDefaults.CreateLifecycleService(source, SquadHostDefaults.ResolveRenderer(), store, globalRoots: roots), store, project, roots, source);
     }
 
     [Fact]
@@ -997,8 +997,8 @@ public sealed class SquadGlobalRootTests : IDisposable
         FakeSquadUserPaths userPaths = new(userData);
         SquadStateStore stateStore = new(userPaths);
         using CorpusSquadReleaseSource releaseSource = new();
-        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore, globalRoots: globalRoots);
+        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore, globalRoots: globalRoots);
 
         SquadLifecycleResult result = await service.InstallAsync(new SquadInstallRequest(
             projectRoot,
@@ -1059,8 +1059,8 @@ public sealed class SquadGlobalRootTests : IDisposable
         FakeSquadUserPaths userPaths = new(userData);
         SquadStateStore stateStore = new(userPaths);
         using SyntheticValidSquadReleaseSource releaseSource = new();
-        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
 
         SquadLifecycleResult result = await service.InstallAsync(new SquadInstallRequest(
             projectRoot,
@@ -1105,8 +1105,8 @@ public sealed class SquadGlobalRootTests : IDisposable
         FakeSquadUserPaths userPaths = new(userData);
         SquadStateStore stateStore = new(userPaths);
         using SyntheticValidSquadReleaseSource releaseSource = new();
-        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
 
         SquadInstallRequest request = new(
             projectRoot,
@@ -1159,8 +1159,8 @@ public sealed class SquadGlobalRootTests : IDisposable
         FakeSquadUserPaths userPaths = new(userData);
         SquadStateStore stateStore = new(userPaths);
         using CorpusSquadReleaseSource releaseSource = new();
-        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore, globalRoots: globalRoots);
+        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore, globalRoots: globalRoots);
 
         SquadInstallRequest request = new(
             projectRoot,
@@ -1253,7 +1253,7 @@ public sealed class SquadGlobalRootTests : IDisposable
         Directory.CreateDirectory(tempHome);
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
 
-        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
+        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
 
         foreach (SquadTarget target in SquadTargetCatalog.All)
         {

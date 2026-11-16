@@ -60,7 +60,7 @@ public sealed class SquadResponseFormatRetirementTests : IDisposable
         using SeededPriorReleaseSource prior = new(root);
         using SyntheticValidSquadReleaseSource synthetic = new();
         SquadLifecycleService priorLifecycle =
-            new(prior, SquadCommandComposition.ResolveRenderer(), store, globalRoots: roots);
+            SquadHostDefaults.CreateLifecycleService(prior, SquadHostDefaults.ResolveRenderer(), store, globalRoots: roots);
         SquadLifecycleResult install = await priorLifecycle.InstallAsync(new SquadInstallRequest(
             anchor,
             SquadDeploymentScope.Global,
@@ -92,9 +92,9 @@ public sealed class SquadResponseFormatRetirementTests : IDisposable
         string editedTarget = Path.GetRelativePath(globalRoots, edited).Split(Path.DirectorySeparatorChar)[0];
         await File.WriteAllTextAsync(edited, EditedSkillBody, Encoding.UTF8);
 
-        SquadLifecycleService updateLifecycle = new(
+        SquadLifecycleService updateLifecycle = SquadHostDefaults.CreateLifecycleService(
             synthetic,
-            SquadCommandComposition.ResolveRenderer(),
+            SquadHostDefaults.ResolveRenderer(),
             store,
             globalRoots: roots);
         SquadLifecycleResult update = await updateLifecycle.UpdateAsync(new SquadUpdateRequest(

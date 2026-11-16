@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 
@@ -6,6 +7,9 @@ namespace KyberWeave.Contracts.Services;
 /// <summary>Installs, updates and removes the Kyber-Squad deployment in a target root.</summary>
 public interface ISquadLifecycleService
 {
+    /// <summary>Gets the state store the service reads and writes.</summary>
+    ISquadStateStore StateStore { get; }
+
     /// <summary>Gets the targets an install of <paramref name="request"/> would render for.</summary>
     /// <param name="request">The install request.</param>
     /// <returns>The effective targets, including any the existing global receipt already holds.</returns>

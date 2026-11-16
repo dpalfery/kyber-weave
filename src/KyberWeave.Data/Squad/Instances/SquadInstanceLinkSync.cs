@@ -5,18 +5,6 @@ using System.Text.Json.Serialization;
 namespace KyberWeave.Core.Squad.Deployment;
 
 /// <summary>
-///     Result of synchronizing harness instance links with the main harness home directory.
-/// </summary>
-/// <param name="Links">The active symbolic and junction links currently established for this instance.</param>
-/// <param name="Warnings">
-///     Warnings generated during link synchronization (e.g. preserved split files or kept unmanaged
-///     files).
-/// </param>
-public sealed record SquadInstanceLinkSyncResult(
-    IReadOnlyList<SquadLinkRecord> Links,
-    IReadOnlyList<string> Warnings);
-
-/// <summary>
 ///     Synchronizes directory and file links from a main harness home directory into an instance root directory,
 ///     preventing drift, preserving unmanaged files, and detecting broken or split links.
 /// </summary>

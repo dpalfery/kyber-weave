@@ -28,7 +28,7 @@ public sealed class SquadSkillsRootLineTests
     public static TheoryData<SquadTarget, SquadDeploymentScope> TargetsAndScopes()
     {
         TheoryData<SquadTarget, SquadDeploymentScope> data = [];
-        foreach (SquadTarget target in SquadCommandComposition.CreateRenderers().SelectMany(renderer => renderer.SupportedTargets))
+        foreach (SquadTarget target in SquadHostDefaults.CreateRenderers().SelectMany(renderer => renderer.SupportedTargets))
         {
             data.Add(target, SquadDeploymentScope.Project);
             data.Add(target, SquadDeploymentScope.Global);
@@ -114,7 +114,7 @@ public sealed class SquadSkillsRootLineTests
             GlobalRoots: roots,
             PreloadedSource: TestSquadCorpus.CanonicalSource);
 
-        return SquadCommandComposition.ResolveRenderer().RenderAsync(request);
+        return SquadHostDefaults.ResolveRenderer().RenderAsync(request);
     }
 
     /// <summary>

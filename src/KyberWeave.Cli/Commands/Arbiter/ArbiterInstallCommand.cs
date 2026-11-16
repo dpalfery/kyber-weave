@@ -280,12 +280,12 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
             configChanged = !string.Equals(desiredText, existingText, StringComparison.Ordinal);
         }
 
-        ISquadUserPaths resolvedUserPaths = _userPaths ?? new SquadCommandComposition.CliSquadUserPaths(
+        ISquadUserPaths resolvedUserPaths = _userPaths ?? new SquadHostDefaults.CliSquadUserPaths(
             ArbiterCommandComposition.HomeDirectory(),
             string.IsNullOrWhiteSpace(ArbiterCommandComposition.GetEnvironmentVariable("APPDATA"))
                 ? Path.Combine(ArbiterCommandComposition.HomeDirectory(), ".config")
                 : ArbiterCommandComposition.GetEnvironmentVariable("APPDATA")!);
-        SquadStateStore stateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(resolvedUserPaths, _environmentReader);
+        SquadStateStore stateStore = _stateStore ?? SquadHostDefaults.ResolveStateStore(resolvedUserPaths, _environmentReader);
 
         SquadReceipt? existingReceipt;
         try
@@ -807,11 +807,11 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
     private SquadLifecycleService CreateLifecycleService(SquadStateStore stateStore)
     {
         ISquadReleaseSource releaseSource = _releaseSource ?? ResolveReleaseSource();
-        ISquadRenderer renderer = _renderer ?? SquadCommandComposition.ResolveRenderer();
+        ISquadRenderer renderer = _renderer ?? SquadHostDefaults.ResolveRenderer();
         ISquadGlobalRootResolver globalRoots = new SquadGlobalRoots(
             _environmentReader ?? ArbiterCommandComposition.GetEnvironmentVariable,
             ArbiterCommandComposition.HomeDirectory());
-        return new SquadLifecycleService(
+        return SquadHostDefaults.CreateLifecycleService(
             releaseSource,
             renderer,
             stateStore,

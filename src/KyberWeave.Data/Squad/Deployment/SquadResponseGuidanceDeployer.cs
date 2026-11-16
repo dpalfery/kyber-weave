@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using System.Security.Cryptography;
 
 namespace KyberWeave.Core.Squad.Deployment;
@@ -47,7 +48,7 @@ namespace KyberWeave.Core.Squad.Deployment;
 ///         defaults.
 ///     </para>
 /// </remarks>
-public sealed class SquadResponseGuidanceDeployer
+public sealed class SquadResponseGuidanceDeployer : ISquadResponseGuidanceDeployer
 {
     /// <summary>The file name Squad owns beneath the home state root.</summary>
     public const string FileName = "response-guidance.md";

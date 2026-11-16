@@ -1,4 +1,5 @@
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Rendering;
 using System.Runtime.Versioning;
 using Xunit;
@@ -64,7 +65,7 @@ internal sealed class SquadHomeHarness : IDisposable
 
     public SquadLifecycleService Lifecycle(ISquadRenderer renderer)
     {
-        return new SquadLifecycleService(ReleaseSource, renderer, Store, globalRoots: GlobalRoots);
+        return SquadHostDefaults.CreateLifecycleService(ReleaseSource, renderer, Store, globalRoots: GlobalRoots);
     }
 
     /// <summary>

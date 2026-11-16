@@ -153,7 +153,7 @@ public sealed class SquadPathSafetyTests : IDisposable
         Directory.CreateDirectory(targetDir);
 
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "conflict-user"));
-        SquadInstallCommand command = new(userPaths);
+        SquadInstallCommand command = SquadTestCommands.Install(userPaths);
 
         (int ExitCode, string Output) execution = Capture(() => command.Execute(
             null!,
@@ -296,7 +296,7 @@ public sealed class SquadPathSafetyTests : IDisposable
 
         (int ExitCode, string Output) execution = Capture(() => verb switch
         {
-            "install" => new SquadInstallCommand(
+            "install" => SquadTestCommands.Install(
                 userPaths: userPaths,
                 stateStore: stateStore,
                 releaseSource: releaseSource,
@@ -312,7 +312,7 @@ public sealed class SquadPathSafetyTests : IDisposable
                     DryRun = false,
                     Adopt = false
                 }),
-            "update" => new SquadUpdateCommand(
+            "update" => SquadTestCommands.Update(
                 userPaths: userPaths,
                 stateStore: stateStore,
                 releaseSource: releaseSource,
@@ -327,10 +327,10 @@ public sealed class SquadPathSafetyTests : IDisposable
                     Global = false,
                     DryRun = false
                 }),
-            _ => new SquadUninstallCommand(
+            _ => SquadTestCommands.Uninstall(
                 userPaths: userPaths,
                 stateStore: stateStore,
-                lifecycleService: new SquadLifecycleService(releaseSource, renderer, stateStore),
+                lifecycleService: SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore),
                 isInteractive: true,
                 readAnswer: _ => false).Execute(
                 null!,
@@ -390,7 +390,7 @@ public sealed class SquadPathSafetyTests : IDisposable
 
         (int ExitCode, string Output) execution = Capture(() => verb switch
         {
-            "install" => new SquadInstallCommand(
+            "install" => SquadTestCommands.Install(
                 userPaths: userPaths,
                 stateStore: stateStore,
                 releaseSource: releaseSource,
@@ -410,7 +410,7 @@ public sealed class SquadPathSafetyTests : IDisposable
                     DryRun = false,
                     Adopt = false
                 }),
-            "update" => new SquadUpdateCommand(
+            "update" => SquadTestCommands.Update(
                 userPaths: userPaths,
                 stateStore: stateStore,
                 releaseSource: releaseSource,
@@ -430,10 +430,10 @@ public sealed class SquadPathSafetyTests : IDisposable
                     DryRun = false,
                     ReplaceManaged = true
                 }),
-            _ => new SquadUninstallCommand(
+            _ => SquadTestCommands.Uninstall(
                 userPaths: userPaths,
                 stateStore: stateStore,
-                lifecycleService: new SquadLifecycleService(releaseSource, renderer, stateStore),
+                lifecycleService: SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore),
                 isInteractive: false,
                 readAnswer: _ =>
                 {
@@ -530,7 +530,7 @@ public sealed class SquadPathSafetyTests : IDisposable
 
         (int ExitCode, string Output) execution = RunWithEnvironment(globalRootOverrides, () => Capture(() => verb switch
         {
-            "install" => new SquadInstallCommand(
+            "install" => SquadTestCommands.Install(
                 userPaths: userPaths,
                 stateStore: stateStore,
                 releaseSource: releaseSource,
@@ -550,7 +550,7 @@ public sealed class SquadPathSafetyTests : IDisposable
                     DryRun = false,
                     Adopt = false
                 }),
-            "update" => new SquadUpdateCommand(
+            "update" => SquadTestCommands.Update(
                 userPaths: userPaths,
                 stateStore: stateStore,
                 releaseSource: releaseSource,
@@ -570,10 +570,10 @@ public sealed class SquadPathSafetyTests : IDisposable
                     DryRun = false,
                     ReplaceManaged = true
                 }),
-            _ => new SquadUninstallCommand(
+            _ => SquadTestCommands.Uninstall(
                 userPaths: userPaths,
                 stateStore: stateStore,
-                lifecycleService: new SquadLifecycleService(
+                lifecycleService: SquadHostDefaults.CreateLifecycleService(
                     releaseSource,
                     renderer,
                     stateStore,
@@ -623,7 +623,7 @@ public sealed class SquadPathSafetyTests : IDisposable
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "doctor-option-user"));
-        SquadDoctorCommand command = new(executor, userPaths, workingDirectory: defaultRoot);
+        SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: defaultRoot);
 
         (int ExitCode, string Output) execution = Capture(() => command.Execute(
             null!,
@@ -654,7 +654,7 @@ public sealed class SquadPathSafetyTests : IDisposable
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "doctor-positional-user"));
-        SquadDoctorCommand command = new(executor, userPaths, workingDirectory: defaultRoot);
+        SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: defaultRoot);
 
         (int ExitCode, string Output) execution = Capture(() => command.Execute(
             null!,
@@ -687,7 +687,7 @@ public sealed class SquadPathSafetyTests : IDisposable
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "doctor-inverse-user"));
-        SquadDoctorCommand command = new(executor, userPaths, workingDirectory: defaultRoot);
+        SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: defaultRoot);
 
         (int ExitCode, string Output) execution = Capture(() => command.Execute(
             null!,
@@ -716,7 +716,7 @@ public sealed class SquadPathSafetyTests : IDisposable
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "doctor-conflict-user"));
-        SquadDoctorCommand command = new(executor, userPaths, workingDirectory: defaultRoot);
+        SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: defaultRoot);
 
         (int ExitCode, string Output) execution = Capture(() => command.Execute(
             null!,

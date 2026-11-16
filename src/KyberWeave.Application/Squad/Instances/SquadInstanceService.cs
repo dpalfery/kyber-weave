@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Model;
 
@@ -21,10 +22,12 @@ public sealed partial class SquadInstanceService : ISquadInstanceService
     private static partial Regex PresetNameRegex();
 
     private readonly ISquadGlobalRootResolver _globalRootResolver;
-    private readonly SquadLifecycleService _lifecycleService;
+    private readonly ISquadLifecycleService _lifecycleService;
     private readonly ISquadLinkFileSystem _linkFileSystem;
-    private readonly SquadModelPresetStore _presetStore;
-    private readonly SquadStateStore _stateStore;
+    private readonly ISquadModelPresetStore _presetStore;
+    private readonly ISquadStateStore _stateStore;
+    private readonly ISquadInstanceLinkSync _linkSync;
+    private readonly ISquadFileAccess _files;
 
     /// <summary>
     ///     Initializes a new instance of the <see cref="SquadInstanceService" /> class.
@@ -33,23 +36,31 @@ public sealed partial class SquadInstanceService : ISquadInstanceService
     /// <param name="presetStore">Store for resolving model presets and their digests.</param>
     /// <param name="linkFileSystem">Filesystem abstraction for symbolic link operations.</param>
     /// <param name="globalRootResolver">Resolver for canonical harness global homes.</param>
+    /// <param name="linkSync">Synchronizes the instance links with the canonical home.</param>
+    /// <param name="files">File probes for the instance directories.</param>
     /// <param name="stateStore">Optional state store for reading receipts and recording instance metadata.</param>
     public SquadInstanceService(
-        SquadLifecycleService lifecycleService,
-        SquadModelPresetStore presetStore,
+        ISquadLifecycleService lifecycleService,
+        ISquadModelPresetStore presetStore,
         ISquadLinkFileSystem linkFileSystem,
         ISquadGlobalRootResolver globalRootResolver,
-        SquadStateStore? stateStore = null)
+        ISquadInstanceLinkSync linkSync,
+        ISquadFileAccess files,
+        ISquadStateStore? stateStore = null)
     {
         ArgumentNullException.ThrowIfNull(lifecycleService);
         ArgumentNullException.ThrowIfNull(presetStore);
         ArgumentNullException.ThrowIfNull(linkFileSystem);
         ArgumentNullException.ThrowIfNull(globalRootResolver);
+        ArgumentNullException.ThrowIfNull(linkSync);
+        ArgumentNullException.ThrowIfNull(files);
 
         _lifecycleService = lifecycleService;
         _presetStore = presetStore;
         _linkFileSystem = linkFileSystem;
         _globalRootResolver = globalRootResolver;
+        _linkSync = linkSync;
+        _files = files;
         _stateStore = stateStore ?? lifecycleService.StateStore;
     }
 
@@ -70,7 +81,7 @@ public sealed partial class SquadInstanceService : ISquadInstanceService
         if (!PresetNameRegex().IsMatch(presetName))
             throw new ArgumentException($"Invalid preset name '{presetName}'. Preset names must match '^[a-z0-9][a-z0-9-]{{0,63}}$'.", nameof(presetName));
 
-        SquadStateStore stateStore = _stateStore;
+        ISquadStateStore stateStore = _stateStore;
         string targetToken = SquadTargetCatalog.GetToken(target);
         string home = stateStore.UserPaths.HomeDirectory;
 
@@ -83,10 +94,10 @@ public sealed partial class SquadInstanceService : ISquadInstanceService
 
         IReadOnlyList<string>? lifecycleWarnings = null;
 
-        if (!File.Exists(receiptPath))
+        if (!_files.FileExists(receiptPath))
         {
-            Directory.CreateDirectory(instanceRoot);
-            Directory.CreateDirectory(instanceStateDir);
+            _files.CreateDirectory(instanceRoot);
+            _files.CreateDirectory(instanceStateDir);
 
             SquadInstallRequest installRequest = new(
                 instanceRoot,
@@ -168,7 +179,7 @@ public sealed partial class SquadInstanceService : ISquadInstanceService
                 ? receipt.Files.Select(file => file.RelativePath).ToHashSet(StringComparer.Ordinal)
                 : new HashSet<string>(StringComparer.Ordinal);
 
-            SquadInstanceLinkSyncResult syncResult = SquadInstanceLinkSync.Sync(
+            SquadInstanceLinkSyncResult syncResult = _linkSync.Sync(
                 instanceRoot,
                 mainHome,
                 row,
@@ -203,7 +214,7 @@ public sealed partial class SquadInstanceService : ISquadInstanceService
         if (!PresetNameRegex().IsMatch(presetName))
             throw new ArgumentException($"Invalid preset name '{presetName}'. Preset names must match '^[a-z0-9][a-z0-9-]{{0,63}}$'.", nameof(presetName));
 
-        SquadStateStore stateStore = _stateStore;
+        ISquadStateStore stateStore = _stateStore;
         string targetToken = SquadTargetCatalog.GetToken(target);
         string home = stateStore.UserPaths.HomeDirectory;
 
@@ -213,10 +224,10 @@ public sealed partial class SquadInstanceService : ISquadInstanceService
 
         VerifyPathContainment(home, targetToken, instanceRoot);
 
-        if (Directory.Exists(instanceRoot) || _linkFileSystem.IsLink(instanceRoot))
+        if (_files.DirectoryExists(instanceRoot) || _linkFileSystem.IsLink(instanceRoot))
             _linkFileSystem.DeleteTreeNoFollow(instanceRoot);
 
-        if (Directory.Exists(instanceStateDir)) _linkFileSystem.DeleteTreeNoFollow(instanceStateDir);
+        if (_files.DirectoryExists(instanceStateDir)) _linkFileSystem.DeleteTreeNoFollow(instanceStateDir);
 
         return Task.CompletedTask;
     }
@@ -228,24 +239,15 @@ public sealed partial class SquadInstanceService : ISquadInstanceService
     /// <param name="cancellationToken">Cancellation token.</param>
     public async Task RefreshAllAsync(CancellationToken cancellationToken = default)
     {
-        SquadStateStore stateStore = _stateStore;
+        ISquadStateStore stateStore = _stateStore;
         string home = stateStore.UserPaths.HomeDirectory;
         string instanceStateBase = Path.Combine(home, ".kyber-weave", "squad", "instance-state");
 
-        if (!Directory.Exists(instanceStateBase)) return;
+        if (!_files.DirectoryExists(instanceStateBase)) return;
 
-        DirectoryInfo baseDir = new(instanceStateBase);
-        EnumerationOptions options = new()
-        {
-            RecurseSubdirectories = false,
-            AttributesToSkip = 0
-        };
-
-        foreach (FileSystemInfo targetEntry in baseDir.EnumerateFileSystemInfos("*", options))
+        foreach (SquadDirectoryEntry targetDir in _files.EnumerateRealDirectories(instanceStateBase))
         {
             cancellationToken.ThrowIfCancellationRequested();
-
-            if (targetEntry is not DirectoryInfo targetDir || targetEntry.LinkTarget is not null) continue;
 
             SquadTarget? matchedTarget = null;
             foreach (SquadTarget candidate in SquadTargetCatalog.All)
@@ -258,14 +260,12 @@ public sealed partial class SquadInstanceService : ISquadInstanceService
 
             if (matchedTarget is null) continue;
 
-            foreach (FileSystemInfo presetEntry in targetDir.EnumerateFileSystemInfos("*", options))
+            foreach (SquadDirectoryEntry presetDir in _files.EnumerateRealDirectories(targetDir.FullPath))
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                if (presetEntry is not DirectoryInfo presetDir || presetEntry.LinkTarget is not null) continue;
-
-                string receiptFile = Path.Combine(presetDir.FullName, ReceiptFileName);
-                if (File.Exists(receiptFile))
+                string receiptFile = Path.Combine(presetDir.FullPath, ReceiptFileName);
+                if (_files.FileExists(receiptFile))
                     await EnsureAsync(matchedTarget.Value, presetDir.Name, cancellationToken).ConfigureAwait(false);
             }
         }

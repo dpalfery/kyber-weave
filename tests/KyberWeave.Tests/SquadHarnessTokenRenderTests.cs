@@ -21,7 +21,7 @@ namespace KyberWeave.Tests;
 ///     </para>
 ///     <para>
 ///         The token an assertion expects is <see cref="SquadTargetCatalog.GetToken" />, and the rows come
-///         from <see cref="SquadCommandComposition.CreateRenderers" />, so a renderer added later is held to
+///         from <see cref="SquadHostDefaults.CreateRenderers" />, so a renderer added later is held to
 ///         this contract the day it ships and no list of thirteen names lives in this file.
 ///     </para>
 /// </remarks>
@@ -46,7 +46,7 @@ public sealed class SquadHarnessTokenRenderTests
     public static TheoryData<SquadTarget> ShippedTargets()
     {
         TheoryData<SquadTarget> rows = [];
-        foreach (SquadTarget target in SquadCommandComposition.CreateRenderers()
+        foreach (SquadTarget target in SquadHostDefaults.CreateRenderers()
                      .SelectMany(renderer => renderer.SupportedTargets))
             rows.Add(target);
 
@@ -188,7 +188,7 @@ public sealed class SquadHarnessTokenRenderTests
 
     private static ISquadRenderer RendererFor(SquadTarget target)
     {
-        return SquadCommandComposition.CreateRenderers().Single(renderer => renderer.SupportedTargets.Contains(target));
+        return SquadHostDefaults.CreateRenderers().Single(renderer => renderer.SupportedTargets.Contains(target));
     }
 
     private static string Text(SquadDeploymentFile file)

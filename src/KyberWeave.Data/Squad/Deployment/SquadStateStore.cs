@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -9,7 +10,7 @@ using YamlDotNet.RepresentationModel;
 namespace KyberWeave.Core.Squad.Deployment;
 
 /// <summary>Reads and writes the portable lock and ownership receipt for Squad deployments.</summary>
-public sealed class SquadStateStore
+public sealed class SquadStateStore : ISquadStateStore
 {
     private const string LockFileName = "squad.lock.yml";
     private const string ReceiptFileName = "squad.receipt.json";

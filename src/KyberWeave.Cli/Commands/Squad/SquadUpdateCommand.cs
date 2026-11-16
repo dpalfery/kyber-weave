@@ -1,5 +1,7 @@
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Update;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Release;
@@ -20,57 +22,60 @@ namespace KyberWeave.Cli.Commands.Squad;
 ///     and <c>--replace-managed</c> never apply to a project. Selection is the operator's consent, so a selected
 ///     project is not confirmed a second time.
 /// </remarks>
-public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
+internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
 {
-    private readonly ISquadGlobalRootResolver? _globalRoots;
-    private readonly SquadInstanceService? _instanceService;
-    private readonly bool? _isInteractive;
+    private readonly ISquadLifecycleService _lifecycle;
+    private readonly ISquadInstanceService _instances;
+    private readonly ISquadStateStore _stateStore;
+    private readonly ISquadStateMigration _migration;
+    private readonly ISquadTargetResolver _targets;
+    private readonly ISquadGlobalRootResolver _globalRoots;
+    private readonly ISquadFileAccess _files;
     private readonly ISquadProjectPicker? _picker;
-    private readonly Func<string, bool>? _readAnswer;
-    private readonly ISquadReleaseSource? _releaseSource;
-    private readonly ISquadRenderer? _renderer;
-    private readonly SquadStateStore? _stateStore;
-    private readonly ISquadUserPaths? _userPaths;
+    private readonly SquadConsoleOptions _console;
     private readonly KyberDashCapturePluginStep? _capturePluginStep;
-    private readonly Func<string, string?>? _environmentReader;
 
-    /// <summary>Creates a new update command using default dependencies.</summary>
-    public SquadUpdateCommand()
-    {
-        _capturePluginStep = KyberDashCapturePluginStep.CreateDefault();
-    }
-
-    /// <summary>Creates a new update command using injectable dependencies.</summary>
-    /// <remarks>
-    ///     <paramref name="isInteractive" /> and <paramref name="readAnswer" /> default to null
-    ///     because optional parameter values must be compile-time constants; Execute resolves
-    ///     them to <see cref="SquadCommandComposition.IsInteractiveConsole" /> and real console
-    ///     input, so an unparameterized run behaves exactly like the default collaborators.
-    /// </remarks>
-    internal SquadUpdateCommand(
-        ISquadUserPaths? userPaths = null,
-        SquadStateStore? stateStore = null,
-        ISquadReleaseSource? releaseSource = null,
-        ISquadRenderer? renderer = null,
-        bool? isInteractive = null,
-        Func<string, bool>? readAnswer = null,
-        ISquadGlobalRootResolver? globalRoots = null,
+    /// <summary>Creates the update command over the Squad services the host registers.</summary>
+    /// <param name="lifecycle">Updates the deployment.</param>
+    /// <param name="instances">Refreshes the harness instances after a global update.</param>
+    /// <param name="stateStore">Reads the deployment state.</param>
+    /// <param name="migration">Moves legacy state into the home layout before the update reads it.</param>
+    /// <param name="targets">Chooses the harness targets.</param>
+    /// <param name="globalRoots">Names the roots a global update writes beneath.</param>
+    /// <param name="files">Lists the installed instances.</param>
+    /// <param name="console">How the command prompts; the defaults read the console.</param>
+    /// <param name="picker">Offers the registered projects to choose from, or null for the terminal picker.</param>
+    /// <param name="capturePluginStep">Installs the capture plugin after a global deployment, or null for none.</param>
+    public SquadUpdateCommand(
+        ISquadLifecycleService lifecycle,
+        ISquadInstanceService instances,
+        ISquadStateStore stateStore,
+        ISquadStateMigration migration,
+        ISquadTargetResolver targets,
+        ISquadGlobalRootResolver globalRoots,
+        ISquadFileAccess files,
+        SquadConsoleOptions console,
         ISquadProjectPicker? picker = null,
-        SquadInstanceService? instanceService = null,
-        KyberDashCapturePluginStep? capturePluginStep = null,
-        Func<string, string?>? environmentReader = null)
+        KyberDashCapturePluginStep? capturePluginStep = null)
     {
-        _userPaths = userPaths;
+        ArgumentNullException.ThrowIfNull(lifecycle);
+        ArgumentNullException.ThrowIfNull(instances);
+        ArgumentNullException.ThrowIfNull(stateStore);
+        ArgumentNullException.ThrowIfNull(migration);
+        ArgumentNullException.ThrowIfNull(targets);
+        ArgumentNullException.ThrowIfNull(globalRoots);
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(console);
+        _lifecycle = lifecycle;
+        _instances = instances;
         _stateStore = stateStore;
-        _releaseSource = releaseSource;
-        _renderer = renderer;
-        _isInteractive = isInteractive;
-        _readAnswer = readAnswer;
+        _migration = migration;
+        _targets = targets;
         _globalRoots = globalRoots;
+        _files = files;
+        _console = console;
         _picker = picker;
-        _instanceService = instanceService;
         _capturePluginStep = capturePluginStep;
-        _environmentReader = environmentReader;
     }
 
     /// <summary>
@@ -78,25 +83,16 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
     /// </summary>
     /// <param name="userPaths">The user paths provider.</param>
     /// <returns><c>true</c> if all deployed instance presets exist; otherwise, <c>false</c>.</returns>
-    private static bool ValidateInstancePresets(ISquadUserPaths userPaths)
+    private bool ValidateInstancePresets(ISquadUserPaths userPaths)
     {
         string home = userPaths.HomeDirectory;
         string instanceStateBase = Path.Combine(home, ".kyber-weave", "squad", "instance-state");
-        if (!Directory.Exists(instanceStateBase)) return true;
+        if (!_files.DirectoryExists(instanceStateBase)) return true;
 
         string presetsDir = Path.Combine(home, ".kyber-weave", "squad", "presets");
 
-        DirectoryInfo baseDir = new(instanceStateBase);
-        EnumerationOptions options = new()
+        foreach (SquadDirectoryEntry targetDir in _files.EnumerateRealDirectories(instanceStateBase))
         {
-            RecurseSubdirectories = false,
-            AttributesToSkip = 0
-        };
-
-        foreach (FileSystemInfo targetEntry in baseDir.EnumerateFileSystemInfos("*", options))
-        {
-            if (targetEntry is not DirectoryInfo targetDir || targetEntry.LinkTarget is not null) continue;
-
             SquadTarget? matchedTarget = null;
             foreach (SquadTarget candidate in SquadTargetCatalog.All)
             {
@@ -110,16 +106,14 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
 
             if (matchedTarget is null) continue;
 
-            foreach (FileSystemInfo presetEntry in targetDir.EnumerateFileSystemInfos("*", options))
+            foreach (SquadDirectoryEntry presetDir in _files.EnumerateRealDirectories(targetDir.FullPath))
             {
-                if (presetEntry is not DirectoryInfo presetDir || presetEntry.LinkTarget is not null) continue;
-
-                string receiptFile = Path.Combine(presetDir.FullName, "squad.receipt.json");
-                if (!File.Exists(receiptFile)) continue;
+                string receiptFile = Path.Combine(presetDir.FullPath, "squad.receipt.json");
+                if (!_files.FileExists(receiptFile)) continue;
 
                 string presetName = presetDir.Name;
                 string presetFile = Path.Combine(presetsDir, $"{presetName}.yml");
-                if (!File.Exists(presetFile))
+                if (!_files.FileExists(presetFile))
                 {
                     SquadCommandComposition.WriteLine(
                         $"[red]error:[/] Missing preset file '{Markup.Escape(presetFile)}' for instance '{Markup.Escape(targetDir.Name)}/{Markup.Escape(presetName)}'.");
@@ -136,8 +130,7 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        SquadStateStore stateStore =
-            _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths, _environmentReader);
+        ISquadStateStore stateStore = _stateStore;
         SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(settings.Global);
 
         // Coalesce the positional path with --path and validate explicit targets,
@@ -194,7 +187,7 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         // State is migrated before anything reads it. A dry run that finds legacy state reports it and
         // stops without reading a deployment the migration has not yet moved.
         SquadMigrationReport migration = SquadCommandComposition.EnsureStateMigrated(
-            stateStore,
+            _migration,
             Environment.CurrentDirectory,
             scope == SquadDeploymentScope.Project ? projectRoot : null,
             settings.DryRun);
@@ -206,15 +199,9 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
             ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, settings.DryRun)
             : projectRoot;
 
-        SquadLifecycleService lifecycleService = SquadCommandComposition.CreateLifecycleService(
-            _userPaths,
-            stateStore,
-            _releaseSource,
-            _renderer,
-            globalRoots: _globalRoots,
-            environmentReader: _environmentReader);
+        ISquadLifecycleService lifecycleService = _lifecycle;
 
-        bool interactive = _isInteractive ?? SquadCommandComposition.IsInteractiveConsole();
+        bool interactive = _console.IsInteractive ?? SquadCommandComposition.IsInteractiveConsole();
 
         UpdateRun run = new(
             targetRoot,
@@ -243,7 +230,7 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
                     _globalRoots);
             }
 
-            ISquadUserPaths paths = _userPaths ?? stateStore.UserPaths;
+            ISquadUserPaths paths = stateStore.UserPaths;
             if (!ValidateInstancePresets(paths))
             {
                 return 1;
@@ -251,9 +238,7 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
 
             try
             {
-                SquadInstanceService instanceService = _instanceService ??
-                                                       SquadCommandComposition.CreateInstanceService(paths);
-                instanceService.RefreshAllAsync(cancellationToken).GetAwaiter().GetResult();
+                _instances.RefreshAllAsync(cancellationToken).GetAwaiter().GetResult();
             }
             catch (SquadDeploymentConflictException ex)
             {
@@ -290,8 +275,8 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         string? pinnedVersion,
         SquadProjectSelection selection,
         IReadOnlyList<string> namedProjects,
-        SquadStateStore stateStore,
-        SquadLifecycleService lifecycleService,
+        ISquadStateStore stateStore,
+        ISquadLifecycleService lifecycleService,
         bool interactive,
         CancellationToken cancellationToken)
     {
@@ -323,7 +308,7 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
             }
 
             SquadMigrationReport import =
-                SquadCommandComposition.ImportProjectIfHomeStateAbsent(stateStore, path, settings.DryRun);
+                SquadCommandComposition.ImportProjectIfHomeStateAbsent(stateStore, _migration, path, settings.DryRun);
             SquadCommandComposition.WriteMigrationNotes(import);
             if (settings.DryRun && import.ImportedProjects.Count > 0)
             {
@@ -380,8 +365,8 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
     /// <returns>0 on success, 2 when the operator declined or the resolution refused, and 1 on failure.</returns>
     private int RunUpdate(
         UpdateRun run,
-        SquadStateStore stateStore,
-        SquadLifecycleService lifecycleService,
+        ISquadStateStore stateStore,
+        ISquadLifecycleService lifecycleService,
         bool interactive,
         CancellationToken cancellationToken,
         List<SquadTarget>? deployed = null)
@@ -431,7 +416,7 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
             IsInteractive = SquadCommandComposition.IsInteractiveConsole()
         };
 
-        SquadTargetResolutionDecision decision = SquadTargetResolver.Resolve(request);
+        SquadTargetResolutionDecision decision = _targets.Resolve(request);
         if (decision.Kind == SquadTargetResolutionKind.Failure)
         {
             AnsiConsole.MarkupLine("[red]No deployment targets specified or detected.[/]");
@@ -461,7 +446,7 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         // lifecycle plans with, so the confirmation names the real destinations.
         IReadOnlyList<(SquadTarget Target, string GlobalRoot)>? globalTargetRoots =
             run.Scope == SquadDeploymentScope.Global
-                ? SquadCommandComposition.ResolveGlobalTargetRoots(decision.Targets, _globalRoots, _environmentReader)
+                ? SquadCommandComposition.ResolveGlobalTargetRoots(decision.Targets, _globalRoots)
                 : null;
 
         // The confirmation is the last gate before the lifecycle call — the only
@@ -473,7 +458,7 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
                 "update",
                 interactive,
                 run.Yes,
-                _readAnswer ?? SquadTargetRootConfirmation.ReadConsoleAnswer,
+                _console.ReadAnswer ?? SquadTargetRootConfirmation.ReadConsoleAnswer,
                 globalTargetRoots))
         {
             AnsiConsole.MarkupLine("[yellow]Declined. No changes were made.[/]");

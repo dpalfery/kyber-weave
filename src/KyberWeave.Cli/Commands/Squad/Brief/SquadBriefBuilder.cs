@@ -229,7 +229,7 @@ internal static class SquadBriefBuilder
     {
         try
         {
-            return [.. SquadReferenceLocator.Candidates(request.Agent, target, request.ProjectRoots, SquadCommandComposition.ResolveGlobalRoots())];
+            return [.. SquadReferenceLocator.Candidates(request.Agent, target, request.ProjectRoots, SquadHostDefaults.ResolveGlobalRoots())];
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
         {

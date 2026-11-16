@@ -189,7 +189,7 @@ internal sealed class KyberDashCapturePluginStep
             }
 
             IReadOnlyList<(SquadTarget Target, string GlobalRoot)> roots =
-                SquadCommandComposition.ResolveGlobalTargetRoots([harness], globalRoots);
+                SquadCommandComposition.ResolveGlobalTargetRoots([harness], globalRoots ?? SquadHostDefaults.ResolveGlobalRoots());
             if (roots.Count == 0)
             {
                 AnsiConsole.MarkupLine(

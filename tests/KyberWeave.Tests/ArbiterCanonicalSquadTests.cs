@@ -110,7 +110,7 @@ public sealed class ArbiterCanonicalSquadTests
         string[] qualifiedTools = DeclaredArbiterToolNames()
             .Select(tool => $"mcp__{ArbiterServer}__{tool}")
             .ToArray();
-        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
+        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
 
         foreach (SquadTarget target in Enum.GetValues<SquadTarget>())
         {

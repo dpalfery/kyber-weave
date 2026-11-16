@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
@@ -680,7 +681,7 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
     {
         using FakeSquadReleaseSource releases = new();
         SquadStateStore store = new(new FakeSquadUserPaths(applicationData));
-        SquadLifecycleService service = new(
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
             releases,
             new FactoryBlockStubRenderer(),
             store,
@@ -693,7 +694,7 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
     {
         using FakeSquadReleaseSource releases = new();
         SquadStateStore store = new(new FakeSquadUserPaths(applicationData));
-        SquadLifecycleService service = new(
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
             releases,
             new FactoryBlockStubRenderer(subagentStop),
             store,
@@ -711,7 +712,7 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
     {
         using FakeSquadReleaseSource releases = new();
         SquadStateStore store = new(new FakeSquadUserPaths(applicationData));
-        SquadLifecycleService service = new(
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
             releases,
             new FactoryBlockStubRenderer(subagentStop),
             store,

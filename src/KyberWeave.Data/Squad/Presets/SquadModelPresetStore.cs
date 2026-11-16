@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Parsing;
@@ -7,7 +8,7 @@ namespace KyberWeave.Core.Squad.Model;
 /// <summary>
 /// File-system store for user-configured Squad model presets.
 /// </summary>
-public sealed partial class SquadModelPresetStore
+public sealed partial class SquadModelPresetStore : ISquadModelPresetStore
 {
     private readonly string _presetsDirectory;
 

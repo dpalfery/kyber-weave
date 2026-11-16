@@ -6,11 +6,13 @@ namespace KyberWeave.Core.Squad.Rendering;
 public static class SquadOperatorChannelOverlayFile
 {
     /// <summary>
-    /// Reads the overlay, substitutes the validated server name for its placeholder, and returns the tool entry
-    /// and the body text. A missing overlay is a source defect, so it fails the render rather than shipping a
+    /// Reads the overlay file's text. A missing overlay is a source defect, so it fails the render rather than shipping a
     /// conductor that promises a channel it does not describe.
     /// </summary>
-    public static SquadOperatorChannelOverlay LoadOverlay(string sourceDirectory, string serverName)
+    /// <param name="sourceDirectory">The Squad source root.</param>
+    /// <returns>The file's text.</returns>
+    /// <exception cref="SquadRenderValidationException">The overlay is missing or cannot be read.</exception>
+    public static string ReadText(string sourceDirectory)
     {
         string path = Path.Combine(
             sourceDirectory,
@@ -18,10 +20,9 @@ public static class SquadOperatorChannelOverlayFile
 
         // The read itself is the check. An exists-then-read pair would race the file system, so the failure
         // is taken from the read and translated into a render error that names the path and the cause.
-        string raw;
         try
         {
-            raw = File.ReadAllText(path, Encoding.UTF8);
+            return File.ReadAllText(path, Encoding.UTF8);
         }
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
         {
@@ -33,11 +34,15 @@ public static class SquadOperatorChannelOverlayFile
             throw new SquadRenderValidationException(
                 $"The operator channel overlay at '{path}' could not be read: {ex.Message}", ex);
         }
-
-        string text = raw
-            .Replace("\r\n", "\n", StringComparison.Ordinal)
-            .Replace(SquadOperatorChannel.ServerPlaceholder, serverName, StringComparison.Ordinal)
-            .TrimEnd();
-        return new SquadOperatorChannelOverlay($"{serverName}/*", text);
     }
+
+    /// <summary>
+    /// Reads the overlay, substitutes the validated server name for its placeholder, and returns the tool entry
+    /// and the body text.
+    /// </summary>
+    /// <param name="sourceDirectory">The Squad source root.</param>
+    /// <param name="serverName">The validated server name.</param>
+    /// <returns>The overlay, ready to render.</returns>
+    public static SquadOperatorChannelOverlay LoadOverlay(string sourceDirectory, string serverName) =>
+        SquadOperatorChannelOverlay.FromFileText(ReadText(sourceDirectory), serverName);
 }

@@ -11,7 +11,7 @@ namespace KyberWeave.Tests;
 /// <summary>
 /// Pins Pi through the real Kyber-Squad lifecycle composition:
 /// <see cref="SquadLifecycleService.InstallAsync"/> driven by
-/// <see cref="SquadCommandComposition.ResolveRenderer"/> against the real
+/// <see cref="SquadHostDefaults.ResolveRenderer"/> against the real
 /// <c>products/kyber-squad</c> corpus (via <see cref="CorpusSquadReleaseSource"/>), rather than
 /// the isolated <c>PiRendererContractTests</c> render path.
 /// </summary>
@@ -114,8 +114,8 @@ public sealed class PiSquadLifecycleTests : IDisposable
         FakeSquadUserPaths userPaths = new(userData);
         SquadStateStore stateStore = new(userPaths);
         using CorpusSquadReleaseSource releaseSource = new();
-        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
 
         SquadInstallRequest request = new(
             TargetRoot: targetRoot,
@@ -146,8 +146,8 @@ public sealed class PiSquadLifecycleTests : IDisposable
         FakeSquadUserPaths userPaths = new(userData);
         SquadStateStore stateStore = new(userPaths);
         using CorpusSquadReleaseSource releaseSource = new();
-        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
-        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
 
         SquadInstallRequest request = new(
             TargetRoot: targetRoot,

@@ -1,4 +1,6 @@
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Cli.Update;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
@@ -12,51 +14,46 @@ namespace KyberWeave.Cli.Commands.Squad;
 /// <summary>
 /// Deploys canonical agents and skills to coding harness directories.
 /// </summary>
-public sealed class SquadInstallCommand : Command<SquadInstallSettings>
+internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
 {
-    private readonly ISquadUserPaths? _userPaths;
-    private readonly SquadStateStore? _stateStore;
-    private readonly ISquadReleaseSource? _releaseSource;
-    private readonly ISquadRenderer? _renderer;
-    private readonly bool? _isInteractive;
-    private readonly Func<string, bool>? _readAnswer;
-    private readonly ISquadGlobalRootResolver? _globalRoots;
+    private readonly ISquadLifecycleService _lifecycle;
+    private readonly ISquadStateStore _stateStore;
+    private readonly ISquadStateMigration _migration;
+    private readonly ISquadTargetResolver _targets;
+    private readonly ISquadGlobalRootResolver _globalRoots;
+    private readonly SquadConsoleOptions _console;
     private readonly KyberDashCapturePluginStep? _capturePluginStep;
-    private readonly Func<string, string?>? _environmentReader;
 
-    /// <summary>Creates a new install command using default dependencies.</summary>
-    public SquadInstallCommand()
+    /// <summary>Creates the install command over the Squad services the host registers.</summary>
+    /// <param name="lifecycle">Installs the deployment.</param>
+    /// <param name="stateStore">Reads the deployment state.</param>
+    /// <param name="migration">Moves legacy state into the home layout before the install reads it.</param>
+    /// <param name="targets">Chooses the harness targets.</param>
+    /// <param name="globalRoots">Names the roots a global install writes beneath.</param>
+    /// <param name="console">How the command prompts; the defaults read the console.</param>
+    /// <param name="capturePluginStep">Installs the capture plugin after a global deployment, or null for none.</param>
+    public SquadInstallCommand(
+        ISquadLifecycleService lifecycle,
+        ISquadStateStore stateStore,
+        ISquadStateMigration migration,
+        ISquadTargetResolver targets,
+        ISquadGlobalRootResolver globalRoots,
+        SquadConsoleOptions console,
+        KyberDashCapturePluginStep? capturePluginStep = null)
     {
-        _capturePluginStep = KyberDashCapturePluginStep.CreateDefault();
-    }
-
-    /// <summary>Creates a new install command using injectable dependencies.</summary>
-    /// <remarks>
-    /// <paramref name="isInteractive"/> and <paramref name="readAnswer"/> default to null
-    /// because optional parameter values must be compile-time constants; Execute resolves
-    /// them to <see cref="SquadCommandComposition.IsInteractiveConsole"/> and real console
-    /// input, so an unparameterized run behaves exactly like the default collaborators.
-    /// </remarks>
-    internal SquadInstallCommand(
-        ISquadUserPaths? userPaths = null,
-        SquadStateStore? stateStore = null,
-        ISquadReleaseSource? releaseSource = null,
-        ISquadRenderer? renderer = null,
-        bool? isInteractive = null,
-        Func<string, bool>? readAnswer = null,
-        ISquadGlobalRootResolver? globalRoots = null,
-        KyberDashCapturePluginStep? capturePluginStep = null,
-        Func<string, string?>? environmentReader = null)
-    {
-        _userPaths = userPaths;
+        ArgumentNullException.ThrowIfNull(lifecycle);
+        ArgumentNullException.ThrowIfNull(stateStore);
+        ArgumentNullException.ThrowIfNull(migration);
+        ArgumentNullException.ThrowIfNull(targets);
+        ArgumentNullException.ThrowIfNull(globalRoots);
+        ArgumentNullException.ThrowIfNull(console);
+        _lifecycle = lifecycle;
         _stateStore = stateStore;
-        _releaseSource = releaseSource;
-        _renderer = renderer;
-        _isInteractive = isInteractive;
-        _readAnswer = readAnswer;
+        _migration = migration;
+        _targets = targets;
         _globalRoots = globalRoots;
+        _console = console;
         _capturePluginStep = capturePluginStep;
-        _environmentReader = environmentReader;
     }
 
     /// <inheritdoc />
@@ -65,8 +62,7 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        SquadStateStore stateStore =
-            _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths, _environmentReader);
+        ISquadStateStore stateStore = _stateStore;
         SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(settings.Global);
 
         // Coalesce the positional path with --path and validate explicit targets,
@@ -97,7 +93,7 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
         // Legacy state is migrated before the install reads any of it. A dry run reports what the next
         // real run would move, and stops without reading a deployment it has not yet moved.
         SquadMigrationReport migration = SquadCommandComposition.EnsureStateMigrated(
-            stateStore,
+            _migration,
             Environment.CurrentDirectory,
             scope == SquadDeploymentScope.Project ? projectRoot : null,
             settings.DryRun);
@@ -142,7 +138,7 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
             IsInteractive = SquadCommandComposition.IsInteractiveConsole()
         };
 
-        SquadTargetResolutionDecision decision = SquadTargetResolver.Resolve(request);
+        SquadTargetResolutionDecision decision = _targets.Resolve(request);
         if (decision.Kind == SquadTargetResolutionKind.Failure)
         {
             AnsiConsole.MarkupLine("[red]No deployment targets specified or detected.[/]");
@@ -161,13 +157,7 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
         // A --global run writes beneath each selected target's own physical global root,
         // not beneath the home anchor. The same injected resolver the lifecycle plans with
         // names the roots, so the confirmation shows the real destinations.
-        SquadLifecycleService lifecycleService = SquadCommandComposition.CreateLifecycleService(
-            _userPaths,
-            stateStore,
-            _releaseSource,
-            _renderer,
-            globalRoots: _globalRoots,
-            environmentReader: _environmentReader);
+        ISquadLifecycleService lifecycleService = _lifecycle;
 
         SquadInstallRequest installRequest = new(
             targetRoot,
@@ -184,7 +174,7 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
         IReadOnlyList<SquadTarget> deployedTargets = lifecycleService.EffectiveInstallTargets(installRequest);
         IReadOnlyList<(SquadTarget Target, string GlobalRoot)>? globalTargetRoots =
             scope == SquadDeploymentScope.Global
-                ? SquadCommandComposition.ResolveGlobalTargetRoots(deployedTargets, _globalRoots, _environmentReader)
+                ? SquadCommandComposition.ResolveGlobalTargetRoots(deployedTargets, _globalRoots)
                 : null;
 
         // The confirmation is the last gate before the lifecycle call — the only
@@ -194,9 +184,9 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
                 targetRoot,
                 scope,
                 "install",
-                _isInteractive ?? SquadCommandComposition.IsInteractiveConsole(),
+                _console.IsInteractive ?? SquadCommandComposition.IsInteractiveConsole(),
                 settings.Yes,
-                _readAnswer ?? SquadTargetRootConfirmation.ReadConsoleAnswer,
+                _console.ReadAnswer ?? SquadTargetRootConfirmation.ReadConsoleAnswer,
                 globalTargetRoots))
         {
             AnsiConsole.MarkupLine("[yellow]Declined. No changes were made.[/]");

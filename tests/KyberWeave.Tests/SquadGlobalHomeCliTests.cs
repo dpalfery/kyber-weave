@@ -113,7 +113,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
                 targets: [codex]
             """);
 
-        CommandExecution install = Capture(() => new SquadInstallCommand(
+        CommandExecution install = Capture(() => SquadTestCommands.Install(
                 h.UserPaths,
                 h.Store,
                 h.ReleaseSource,
@@ -520,7 +520,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     public void StatusGlobalListsRegisteredProjectsWithStaleFlags()
     {
         using Fleet fleet = ArrangeFleet("status-global");
-        SquadStatusCommand status = new(fleet.Harness.UserPaths, fleet.Harness.Store, fleet.Harness.GlobalRoots);
+        SquadStatusCommand status = SquadTestCommands.Status(fleet.Harness.UserPaths, fleet.Harness.Store, fleet.Harness.GlobalRoots);
 
         CommandExecution execution = Capture(() =>
             status.Execute(null!, new SquadStatusSettings { Path = fleet.Anchor, Global = true }));
@@ -569,7 +569,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         ScriptedAgentRenderer renderer = fleet.Renderer;
 
         CommandExecution execution = Capture(() =>
-            new SquadDoctorCommand(
+            SquadTestCommands.Doctor(
                     new FakeProcessExecutor(),
                     fleet.Harness.UserPaths,
                     fleet.Anchor,
@@ -601,7 +601,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         byte[]? alphaLockBefore = Snapshot(fleet.Alpha.LockPath);
         byte[]? alphaReceiptBefore = Snapshot(fleet.Alpha.ReceiptPath);
         RecordingProjectPicker picker = new(AllNonStale);
-        SquadUninstallCommand command = new(
+        SquadUninstallCommand command = SquadTestCommands.Uninstall(
             fleet.Harness.UserPaths,
             fleet.Harness.Store,
             fleet.Harness.Lifecycle(fleet.Renderer),
@@ -695,7 +695,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         MoveGlobalStateToLegacyRoot(h, anchor);
         AssertExit(Uninstall(h, renderer, anchor, true), 0);
 
-        CommandExecution install = Capture(() => new SquadInstallCommand(
+        CommandExecution install = Capture(() => SquadTestCommands.Install(
                 h.UserPaths,
                 h.Store,
                 h.ReleaseSource,
@@ -1167,7 +1167,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         using (SquadHomeHarness.DenyReadOrSkip(path))
         {
             execution = Capture(() =>
-                new SquadDoctorCommand(
+                SquadTestCommands.Doctor(
                         new FakeProcessExecutor(),
                         h.UserPaths,
                         anchor,
@@ -1195,12 +1195,12 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         WriteCanonicalSourceWithoutResponseBlocks(anchor);
 
         CommandExecution execution = Capture(() =>
-            new SquadDoctorCommand(
+            SquadTestCommands.Doctor(
                     new FakeProcessExecutor(),
                     h.UserPaths,
                     anchor,
                     h.GlobalRoots,
-                    SquadCommandComposition.ResolveRenderer(),
+                    SquadHostDefaults.ResolveRenderer(),
                     h.Store)
                 .Execute(null!, new SquadDoctorSettings { Path = anchor, Global = true }));
 
@@ -1221,7 +1221,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         WriteCanonicalSourceWithoutResponseBlocks(anchor);
 
         CommandExecution execution = Capture(() =>
-            new SquadDoctorCommand(
+            SquadTestCommands.Doctor(
                     new FakeProcessExecutor(),
                     h.UserPaths,
                     anchor,
@@ -1678,7 +1678,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         Func<string, bool>? readAnswer = null,
         ISquadReleaseSource? releaseSource = null)
     {
-        return new SquadUpdateCommand(
+        return SquadTestCommands.Update(
             h.UserPaths,
             h.Store,
             releaseSource ?? h.ReleaseSource,
@@ -1793,7 +1793,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
 
     private static CommandExecution Uninstall(Harness h, ISquadRenderer renderer, string path, bool global)
     {
-        return Capture(() => new SquadUninstallCommand(
+        return Capture(() => SquadTestCommands.Uninstall(
                 h.UserPaths,
                 h.Store,
                 h.Lifecycle(renderer),
@@ -1805,7 +1805,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
 
     private static CommandExecution Status(Harness h, string path, bool global)
     {
-        return Capture(() => new SquadStatusCommand(
+        return Capture(() => SquadTestCommands.Status(
                 h.UserPaths,
                 h.Store,
                 h.GlobalRoots)

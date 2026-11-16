@@ -26,6 +26,7 @@ internal static class CliApplication
     {
         ServiceCollection services = [];
         configure?.Invoke(services);
+        _ = services.AddSquadCliServices();
         _ = services.AddWeaveApplication();
         CommandApp app = new(new ServiceCollectionTypeRegistrar(services));
         app.Configure(config =>

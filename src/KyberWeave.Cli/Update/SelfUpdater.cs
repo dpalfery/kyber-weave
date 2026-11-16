@@ -733,7 +733,7 @@ internal sealed class SelfUpdater : IDisposable
     /// </summary>
     private IReadOnlyList<string> CollectArbiterEnabledProjectRoots()
     {
-        ISquadUserPaths userPaths = SquadCommandComposition.ResolveUserPaths(null, _readEnvironment);
+        ISquadUserPaths userPaths = SquadHostDefaults.ResolveUserPaths(null, _readEnvironment);
         SquadStateStore stateStore = new(userPaths);
         List<string> roots = [];
         foreach (SquadProjectRegistryEntry entry in stateStore.ListProjects())

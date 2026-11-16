@@ -530,7 +530,7 @@ public sealed class SquadPresetCliTests : IDisposable
         SeedCanonicalDeployment("bundled-arch-claude", "bundled-general-claude");
         string receiptBefore = ReadReceiptText();
         string lockBefore = ReadLockText();
-        SquadPresetUseCommand command = new(_userPaths, _stateStore, null, (_, _) => null);
+        SquadPresetUseCommand command = SquadTestCommands.PresetUse(_userPaths, _stateStore, null, (_, _) => null);
 
         SquadPresetUseSettings settings = new()
         {
@@ -562,7 +562,7 @@ public sealed class SquadPresetCliTests : IDisposable
         SeedCanonicalDeployment("bundled-arch-claude", "bundled-general-claude");
         string receiptBefore = ReadReceiptText();
         string lockBefore = ReadLockText();
-        SquadPresetUseCommand command = new(_userPaths, _stateStore, null, (_, _) => null);
+        SquadPresetUseCommand command = SquadTestCommands.PresetUse(_userPaths, _stateStore, null, (_, _) => null);
 
         SquadPresetUseSettings settings = new()
         {
@@ -650,7 +650,7 @@ public sealed class SquadPresetCliTests : IDisposable
         _selectionStore.Set(_projectDir, SquadTarget.Claude, "percat");
         string receiptBefore = ReadReceiptText();
         string lockBefore = ReadLockText();
-        SquadPresetClearCommand command = new(_userPaths, _stateStore, null, (_, _) => null);
+        SquadPresetClearCommand command = SquadTestCommands.PresetClear(_userPaths, _stateStore, null, (_, _) => null);
 
         SquadPresetClearSettings settings = new()
         {
@@ -681,7 +681,7 @@ public sealed class SquadPresetCliTests : IDisposable
         _selectionStore.Set(_projectDir, SquadTarget.Claude, "percat");
         string receiptBefore = ReadReceiptText();
         string lockBefore = ReadLockText();
-        SquadPresetClearCommand command = new(_userPaths, _stateStore, null, (_, _) => null);
+        SquadPresetClearCommand command = SquadTestCommands.PresetClear(_userPaths, _stateStore, null, (_, _) => null);
 
         SquadPresetClearSettings settings = new()
         {
@@ -769,7 +769,7 @@ public sealed class SquadPresetCliTests : IDisposable
         SquadCanonicalProfileStore snapshotStore = new(_userPaths);
         snapshotStore.Write(CreateCanonicalSnapshot("1.2.3"));
         string? seenVersion = "unset";
-        SquadPresetShowCommand command = new(
+        SquadPresetShowCommand command = SquadTestCommands.PresetShow(
             _userPaths,
             (preferredVersion, _) =>
             {
@@ -798,7 +798,7 @@ public sealed class SquadPresetCliTests : IDisposable
         WritePreset("percat", PerCategoryPresetYaml);
         SquadCanonicalProfileStore snapshotStore = new(_userPaths);
         snapshotStore.Write(CreateCanonicalSnapshot("1.2.3"));
-        SquadPresetShowCommand command = new(
+        SquadPresetShowCommand command = SquadTestCommands.PresetShow(
             _userPaths,
             (_, _) => snapshotStore.TryReadLatest());
 
@@ -824,7 +824,7 @@ public sealed class SquadPresetCliTests : IDisposable
         {
             SquadVersion = string.Empty
         };
-        SquadPresetShowCommand command = new(
+        SquadPresetShowCommand command = SquadTestCommands.PresetShow(
             _userPaths,
             (_, _) => checkoutProfiles);
 
@@ -844,7 +844,7 @@ public sealed class SquadPresetCliTests : IDisposable
     public void ShowWithNoCanonicalSourceExits1WithRemedy()
     {
         WritePreset("percat", PerCategoryPresetYaml);
-        SquadPresetShowCommand command = new(_userPaths, (_, _) => null);
+        SquadPresetShowCommand command = SquadTestCommands.PresetShow(_userPaths, (_, _) => null);
 
         SquadPresetShowSettings settings = new()
         {
@@ -868,7 +868,7 @@ public sealed class SquadPresetCliTests : IDisposable
         WritePreset("bad", BadPresetYaml);
         SquadCanonicalProfileStore snapshotStore = new(_userPaths);
         snapshotStore.Write(CreateCanonicalSnapshot("1.2.3"));
-        SquadPresetShowCommand command = new(_userPaths, (_, _) => snapshotStore.TryReadLatest());
+        SquadPresetShowCommand command = SquadTestCommands.PresetShow(_userPaths, (_, _) => snapshotStore.TryReadLatest());
 
         SquadPresetShowSettings settings = new()
         {
@@ -933,13 +933,13 @@ public sealed class SquadPresetCliTests : IDisposable
     private SquadPresetUseCommand CreateUseCommand(
         Func<string?, ISquadUserPaths, SquadCanonicalProfiles?> resolver)
     {
-        return new SquadPresetUseCommand(_userPaths, _stateStore, null, resolver);
+        return SquadTestCommands.PresetUse(_userPaths, _stateStore, null, resolver);
     }
 
     private SquadPresetClearCommand CreateClearCommand(
         Func<string?, ISquadUserPaths, SquadCanonicalProfiles?> resolver)
     {
-        return new SquadPresetClearCommand(_userPaths, _stateStore, null, resolver);
+        return SquadTestCommands.PresetClear(_userPaths, _stateStore, null, resolver);
     }
 
     private static CommandContext CreateCommandContext()

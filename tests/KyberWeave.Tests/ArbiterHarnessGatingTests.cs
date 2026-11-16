@@ -324,7 +324,7 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
     /// </summary>
     private void WriteGlobalReceipt(IReadOnlyList<SquadOwnedFile> files, IReadOnlyList<SquadOwnedBlock> blocks)
     {
-        SquadStateStore store = SquadCommandComposition.ResolveStateStore(
+        SquadStateStore store = SquadHostDefaults.ResolveStateStore(
             new TempHomeUserPaths(_home.Path, _userPaths.Path));
         string path = store.ResolveReceiptPath(_home.Path, SquadDeploymentScope.Global);
         string schema = blocks.Count > 0 ? "kyber-squad.receipt/v3" : "kyber-squad.receipt/v1";

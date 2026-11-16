@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using KyberWeave.Cli.Commands.Squad;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -782,7 +783,7 @@ public sealed class SquadOwnedBlockLifecycleTests
         Directory.CreateDirectory(targetRoot);
         using FakeSquadReleaseSource releases = new();
         SquadStateStore store = Store(fixture.Path);
-        SquadLifecycleService service = new(
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
             releases,
             new BlockStubRenderer(SquadTarget.Cursor, CursorBlock("cursor-one")),
             store,

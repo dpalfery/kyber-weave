@@ -290,7 +290,7 @@ public sealed class SquadInstanceScopeTests : IDisposable
             "default");
         Directory.CreateDirectory(instanceRoot);
 
-        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
+        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
         SquadInstanceRootResolver resolver = new(instanceRoot, SquadTarget.Claude);
 
         SquadRenderRequest request = new(
@@ -327,7 +327,7 @@ public sealed class SquadInstanceScopeTests : IDisposable
             "default");
         Directory.CreateDirectory(instanceRoot);
 
-        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
+        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
         SquadInstanceRootResolver resolver = new(instanceRoot, SquadTarget.Copilot);
 
         SquadRenderRequest request = new(
