@@ -20,7 +20,7 @@ keywords:
 
 **Phase status:** Approved
 
-Owner approved 2026-11-16 ('Approve tasks'), given directly in the authoring session.
+Owner approved 2026-11-16 ('Approve tasks'), given directly in the authoring session. Amended 2026-11-16 per owner direction ('fold 625 into phase 1 and close 625'): tasks 1.11 to 1.14 carry the standards plan first drafted on pull request 625.
 
 **Development mode:** test-first
 
@@ -35,16 +35,16 @@ with today's agents as the default, so any phase can ship without the next.
 
 | Phase | Delivers | Tasks | Shippable because |
 |---|---|---|---|
-| 1. Technology folders | Four prefixed files per folder, six headings, templates, role and platform folders, onboarding by choice, migration of existing folders | 1.1 to 1.10 | Additive: nothing today's agents read is removed |
+| 1. Technology folders | Four prefixed files per folder, six headings, templates, role and platform folders, onboarding by choice, migration of existing folders, the skill document type, the stitched standards bundle | 1.1 to 1.14 | Additive: nothing today's agents read is removed |
 | 2. Task fields and the task prompt | Difficulty and technology on tasks, the YAML task list file, gates by technology, the prompt service, hook insertion with the file fallback | 2.1 to 2.12 | Optional fields; today's agents receive the richer prompt |
 | 3. Agents | Three developer agents, `platform-researcher`, `devops`, the `dev-hard` profile, the roster switch, the step-up | 3.1 to 3.9 | The default roster stays `technology` |
 | 4. Arbiter rules from folders | The 36 rules split into role folders, folder loading, the command allow-list | 4.1 to 4.6 | Rule ids and effects are unchanged |
 | 5. Comparison and removal | The comparison, the owner's decision, migration, removal of the old agents | 5.1 to 5.6 | Removal starts only after the owner's recorded decision |
 | Closeout | Harvest and archive | 6.1 | After 5.6 |
 
-Phase 1 cannot start until the plan on
-[pull request 625](https://github.com/dpalfery/kyber-weave/pull/625) has landed with the changes the
-[design](design.md#open-questions) names.
+Phase 1 has no outside dependency. The standards plan first drafted on
+[pull request 625](https://github.com/dpalfery/kyber-weave/pull/625) is absorbed as tasks 1.11 to
+1.14, and that pull request is closed.
 
 ## How these tasks are dispatched
 
@@ -74,7 +74,7 @@ Phase 1 cannot start until the plan on
   - **Acceptance criteria:** A folder that still holds its standard as `README.md` is read and raises a warning that names the migrate command, not an error; otherwise a folder missing one of the four files is an error naming the folder and the file; a standard missing one of the six headings, or holding them out of order, is an error naming the heading; an Arbiter rules file that declares no rule is valid; a role declared in `ontology.roles` is checked the same way.
   - **Capabilities:** C# validation rules and configuration parsing in the documentation engine, with xUnit tests
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~StandardsFolderShapeTests"`
-  - **Depends on:** none
+  - **Depends on:** 1.11
   - _Requirements: 5.1, 5.2, 5.8, 5.9, 5.11_
 
 - [ ] 1.2 Reshape the shipped templates
@@ -143,11 +143,11 @@ Phase 1 cannot start until the plan on
     - `src/KyberWeave.Cli/Commands/Docs/DocsInitCommand.cs`, `src/KyberWeave.Cli/Commands/Docs/DocsInitSettings.cs`: the choice
     - `src/KyberWeave.Application/Docs/Scaffolding/DocsScaffolder.cs`: install by name, skip existing files and report them
     - `tests/KyberWeave.Tests/DocsInitTemplateChoiceTests.cs` (new): `KyberWeave.Tests.DocsInitTemplateChoiceTests`
-  - **Acceptance criteria:** Naming two technologies installs exactly those two folders plus the shared rules file; a file that exists is left byte-for-byte unchanged and listed in the report; `--kyber-standards` still installs every template.
+  - **Acceptance criteria:** Naming two technologies installs exactly those two folders plus the shared rules file; a file that exists is left byte-for-byte unchanged and listed in the report; a declared technology with no template gets the four files as stubs, and the shared rules file is written once; `--kyber-standards` still installs every template.
   - **Capabilities:** C# command-line and file scaffolding work, with xUnit tests
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~DocsInitTemplateChoiceTests|FullyQualifiedName~DocsScaffolderTests"`
   - **Depends on:** 1.2, 1.5
-  - _Requirements: 6.2, 6.3_
+  - _Requirements: 5.17, 6.2, 6.3_
 
 - [ ] 1.8 Show how a host folder differs from its template
   - **Objective:** Add `kyber-weave docs standards diff [name]`, which prints the difference between a host folder and the current template and writes nothing.
@@ -171,7 +171,7 @@ Phase 1 cannot start until the plan on
   - **Acceptance criteria:** The guide states the four files, the six headings and the one check that decides completeness; the onboarding guide and the configuration guide agree on how many templates ship; `docs validate .` and `docs drift .` report zero findings.
   - **Capabilities:** Documentation: onboarding and contribution guides in governed Markdown
   - **Command:** `dotnet run --project src/KyberWeave.Cli -- docs validate .`
-  - **Depends on:** 1.4, 1.5, 1.6, 1.7, 1.8, 1.10
+  - **Depends on:** 1.4, 1.5, 1.6, 1.7, 1.8, 1.10, 1.13, 1.14
   - _Requirements: 6.5_
 
 - [ ] 1.10 Migrate existing standards folders
@@ -188,6 +188,55 @@ Phase 1 cannot start until the plan on
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~DocsStandardsMigrateCommandTests"`
   - **Depends on:** 1.1
   - _Requirements: 5.12_
+
+- [ ] 1.11 Add the skill document type and folder scoping
+  - **Objective:** Add a `skill` document type, and let a rules or skills document name a technology or a role only when it sits in that technology's or role's folder.
+  - **Files:**
+    - `src/KyberWeave.Domain/Docs/Model/DocType.cs`, `src/KyberWeave.Data/Docs/Parsing/DocumentLoader.cs`, `src/KyberWeave.Domain/Configuration/OntologyConfig.cs`: the type and its required key
+    - `src/KyberWeave.Domain/Docs/Validation/DocSpecValidator.cs`: the scoping rule
+    - `docs/documentation-ontology.md`, `.apm/skills/kyber-docs-authoring/references/rules.md`, `.apm/skills/kyber-docs-authoring/references/retrofit.md`
+    - `tests/KyberWeave.Tests/OntologyConfigTests.cs`, `tests/KyberWeave.Tests/DocGovernanceTests.cs`, `tests/KyberWeave.RepoPolicy.Tests/KyberWeaveDocsSkillVocabularyTests.cs`: new cases
+  - **Acceptance criteria:** A skills document parses, requires a technology or role, and must sit in the matching folder; a rules document that names a technology passes only inside that technology's folder and stays `KW-DOC-SPEC-007` anywhere else; a rule under `docs/rules/` with no technology is unchanged; the authoring skill's references describe the new scope.
+  - **Capabilities:** C# work on the documentation type system and validation, with xUnit tests, and governed Markdown reference edits
+  - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~OntologyConfigTests|FullyQualifiedName~DocGovernanceTests"`
+  - **Depends on:** none
+  - _Requirements: 5.13_
+
+- [ ] 1.12 Look up the bundle and set its search weight
+  - **Objective:** Add one index lookup that returns a technology's shared rules, parent rules and skills, rules, skills and standard, and rank standards, skills and technology rules below other current documents.
+  - **Files:**
+    - `src/KyberWeave.Application/Docs/Search/DocumentIndex.cs`: the bundle lookup and the `Authority` rows
+    - `docs/docgraph/retrieval.md`: the weight table and its reason
+    - `tests/KyberWeave.Tests/DocumentIndexTests.cs`, `tests/KyberWeave.Tests/RetrievalRegressionTests.cs`: new and changed cases
+  - **Acceptance criteria:** The lookup returns every part for a technology, and the parent's rules and skills when the standard names a parent; a standard, a skills document and a rules document that names a technology score 0.55; the shared rules file and a rule with no technology score 1.0; an exact-id match still wins.
+  - **Capabilities:** C# work on documentation search and ranking, with xUnit tests, and one governed Markdown reference edit
+  - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~CodingStandardsLookupTests|FullyQualifiedName~DocumentAuthorityTests|FullyQualifiedName~RetrievalRegressionTests"`
+  - **Depends on:** 1.11, 1.6
+  - _Requirements: 5.15, 5.16_
+
+- [ ] 1.13 Return the stitched bundle from the standards tool
+  - **Objective:** Make `docs_get_coding_standard_for_technology` return one bundle in named parts: rule ids, shared rules, parent rules and skills, technology rules, skills, then the standard's sections.
+  - **Files:**
+    - `src/KyberWeave.Application/Docs/Mcp/DocsQueryService.cs`, `src/KyberWeave.Mcp/DocsTools.cs`, `src/KyberWeave.Mcp/DocsServerInstructions.cs`
+    - `docs/docgraph/mcp-runbook.md`, `products/kyber-squad/standards/README.md`
+    - `tests/KyberWeave.Tests/McpAgentCodingStandardsTests.cs`: expectations rewritten to the bundle
+  - **Acceptance criteria:** The reply is the unchanged provenance line followed by one bundle with the parts in the stated order; a topic selects standard sections as today and rules and skills render whole; anything cut by the budget is named in a note; an unknown technology and an empty request reply as they do today; no agent body changes.
+  - **Capabilities:** C# work on an MCP documentation tool and its text rendering, with xUnit tests, and one governed Markdown runbook edit
+  - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~McpAgentCodingStandardsTests|FullyQualifiedName~McpDocsProvenanceTests|FullyQualifiedName~SquadCanonicalContentTests"`
+  - **Depends on:** 1.1, 1.12
+  - _Requirements: 5.14, 5.15_
+
+- [ ] 1.14 Seed this repository's rules and skills files
+  - **Objective:** Fill the rules and skills files of this repository's own standards folders and its shared rules file, moving each statement from where it lives today.
+  - **Files:**
+    - `docs/standards/shared-rules.md`
+    - `docs/standards/`: the rules and skills files of the seven technology folders
+    - `docs/standards/README.md`, `docs/rules/README.md`
+  - **Acceptance criteria:** Each statement is moved, not copied, so it has one home; the standards tool returns the new files in its bundle for each of the seven technologies; `docs validate .` and `docs drift .` report zero findings.
+  - **Capabilities:** Documentation: moving rules and procedures between governed Markdown files without duplicating them
+  - **Command:** `dotnet run --project src/KyberWeave.Cli -- docs validate .`
+  - **Depends on:** 1.10, 1.13
+  - _Requirements: 5.4, 5.14_
 
 ### Phase 2: Task fields and the task prompt
 
@@ -278,8 +327,8 @@ Phase 1 cannot start until the plan on
   - **Acceptance criteria:** The parts appear in the stated order, each in its tag; over the budget, rules are whole, skills are cut before standard sections, and every cut is listed in the last part; a technology with no folder says so in its part and the rest is built; a technology with no task id yields the parts from the shared rules on; for every shipped template with its parent, nothing is cut at the default budget; nothing is written to a tracked file.
   - **Capabilities:** C# text assembly and budgeting in the documentation engine, with xUnit tests
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~TaskPromptServiceTests|FullyQualifiedName~TaskPromptBudgetTests"`
-  - **Depends on:** 2.2, 2.6, 1.2
-  - _Requirements: 9.1, 9.2, 9.10, 9.11, 9.12, 9.13, 9.16, 9.17_
+  - **Depends on:** 2.2, 2.6, 1.2, 1.13
+  - _Requirements: 5.15, 9.1, 9.2, 9.10, 9.11, 9.12, 9.13, 9.16, 9.17_
 
 - [ ] 2.8 Use the service from the packet command and a docs tool
   - **Objective:** Make `docs packet` print the service's prompt, and add a docs tool that tells the conductor which agent to dispatch without returning the prompt text.
@@ -628,6 +677,10 @@ Phase 1 cannot start until the plan on
 | 1.8 | `tests/KyberWeave.Tests`: `DocsStandardsDiffCommandTests` | task's Command | Differences are printed, nothing is written | The command does not exist | New class passes |
 | 1.9 | none: documentation | docs gates | Guides exist | not applicable | Zero findings |
 | 1.10 | `tests/KyberWeave.Tests`: `DocsStandardsMigrateCommandTests` | task's Command | Files are renamed and added, content unchanged | The command does not exist | New class passes |
+| 1.11 | `tests/KyberWeave.Tests`: `OntologyConfigTests`, `DocGovernanceTests`; `tests/KyberWeave.RepoPolicy.Tests`: `KyberWeaveDocsSkillVocabularyTests` | task's Command, and the same filter on the policy project | The skill type and the folder scoping | The type is unknown and the key is rejected with `KW-DOC-SPEC-007` | New cases pass; existing cases unchanged |
+| 1.12 | `tests/KyberWeave.Tests`: `CodingStandardsLookupTests`, `DocumentAuthorityTests`, `RetrievalRegressionTests` | task's Command | The bundle lookup and the 0.55 weight | The lookup returns the standard only and scores it 1.0 | All three classes pass |
+| 1.13 | `tests/KyberWeave.Tests`: `McpAgentCodingStandardsTests`, `McpDocsProvenanceTests`, `SquadCanonicalContentTests` | task's Command | The tool returns the bundle in named parts | The tool returns the standard as plain text | All three classes pass; no agent body changed |
+| 1.14 | none: documentation | docs gates | Rules and skills files are filled | not applicable | Zero findings |
 | 2.1 | none: research and documentation | docs gates | Per-harness delivery path recorded | not applicable | Zero findings |
 | 2.2 | `tests/KyberWeave.Tests`: `PlanTaskDifficultyAndTechnologyTests` | task's Command | Both lines reach the entry | The fields do not exist | New class passes |
 | 2.3 | `tests/KyberWeave.Tests`: `PlanTaskFileYamlTests`, `PlanTaskFileGeneratorReadTests` | task's Command | YAML is written, JSON is read with a warning | Only JSON is written | New class passes; read tests stay green |
@@ -663,7 +716,7 @@ Phase 1 cannot start until the plan on
 
 ## Dependency graph
 
-- Phase 1: 1.1 first; 1.2, 1.6 and 1.10 after it; 1.3, 1.5 and 1.8 after 1.2; 1.4 after 1.3; 1.7 after 1.2 and 1.5; 1.9 last.
+- Phase 1: 1.11 first; 1.1 after it; 1.2, 1.6 and 1.10 after 1.1; 1.12 after 1.11 and 1.6; 1.13 after 1.1 and 1.12; 1.14 after 1.10 and 1.13; 1.3, 1.5 and 1.8 after 1.2; 1.4 after 1.3; 1.7 after 1.2 and 1.5; 1.9 last.
 - Phase 2: 2.1 and 2.2 in parallel; 2.3, 2.4 and 2.5 after 2.2; 2.6 after 2.2; 2.7 after 2.6; 2.8 after 2.7; 2.9 after 2.1 and 2.7; 2.10 after 2.8 and 2.9; 2.11 after 2.4; 2.12 last.
 - Phase 3: 3.1, 3.2 and 3.3 in parallel; 3.4 after 3.1 and 3.2; 3.5 after 3.1 and 3.3; 3.6 after 3.4 and 3.5; 3.7 after 3.6; 3.8 after 3.4 and 3.5; 3.9 last.
 - Phase 4: 4.1 first; 4.2, 4.3 and 4.5 after it; 4.4 after 4.2; 4.6 last.
@@ -678,7 +731,7 @@ Phase 1 cannot start until the plan on
 | 2 | 2.2, 2.4, 2.5, 2.11, 4.5 |
 | 3 | 3.6, 3.7, 4.5 |
 | 4 | 1.6, 2.2, 2.4, 2.11, 3.1 |
-| 5 | 1.1, 1.2, 1.3, 1.4, 1.5, 1.10 |
+| 5 | 1.1, 1.2, 1.3, 1.4, 1.5, 1.7, 1.10, 1.11, 1.12, 1.13, 1.14 |
 | 6 | 1.2, 1.5, 1.7, 1.8, 1.9 |
 | 7 | 4.1, 4.2, 4.3, 4.6 |
 | 8 | 1.4, 3.3, 3.5, 4.4 |

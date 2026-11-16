@@ -22,11 +22,11 @@ a task. The Arbiter reads its rules from role and technology folders. A read-onl
 `github-devops`, with a folder per platform (GitHub, Azure DevOps, GitLab, Jira). The old agents
 stay selectable for now.
 
-It depends on the technology folder layout planned on
-[pull request 625](https://github.com/dpalfery/kyber-weave/pull/625).
+It absorbs the standards plan first drafted on
+[pull request 625](https://github.com/dpalfery/kyber-weave/pull/625), which is closed.
 
 | Document | Covers |
 |---|---|
 | [Requirements](requirements.md) | 13 requirements in EARS form. Approved. |
-| [Design](design.md) | Evidence from the code, where the evidence is against the idea, the roster, the developer agent's instructions, difficulty and the step-up, technology, role and platform folders, the task prompt tool and its budget, one technology per task, technology-resolved task gates, Arbiter rules by folder, five phases, 23 decisions and 1 open question. Approved. |
-| [Tasks](tasks.md) | 44 tasks in five shippable phases plus closeout, test-first. Approved; no machine task list generated. |
+| [Design](design.md) | Evidence from the code, where the evidence is against the idea, the roster, the developer agent's instructions, difficulty and the step-up, technology, role and platform folders, the task prompt tool and its budget, one technology per task, technology-resolved task gates, Arbiter rules by folder, five phases, 27 decisions and no open question. Approved. |
+| [Tasks](tasks.md) | 48 tasks in five shippable phases plus closeout, test-first. Approved; no machine task list generated. |

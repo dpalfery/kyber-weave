@@ -22,7 +22,7 @@ keywords:
 
 **Phase status:** Approved
 
-Owner approved 2026-11-16 ('Yes, approve'), given directly in the authoring session.
+Owner approved 2026-11-16 ('Yes, approve'), given directly in the authoring session. Amended 2026-11-16 per owner direction ('fold 625 into phase 1 and close 625'): the standards plan first drafted on pull request 625 is absorbed here and that pull request is closed.
 
 ## Overview
 
@@ -37,9 +37,9 @@ replace the last two.
 The Squad goes from 24 agents to 15. The old agents stay selectable for now; the owner decides
 later when they are removed, with a migration path.
 
-This design covers the [requirements](requirements.md). It depends on the technology folder layout
-planned on [pull request 625](https://github.com/dpalfery/kyber-weave/pull/625), reverses one
-decision of that plan (who fetches the standards), and amends
+This design covers the [requirements](requirements.md). It absorbs the standards plan first
+drafted on [pull request 625](https://github.com/dpalfery/kyber-weave/pull/625), which is closed,
+changes one decision of that plan (who fetches the standards), and amends
 [ADR 0063](../../adr/0063-the-task-file-is-tracked-and-the-plan-stays-authoritative.md),
 [ADR 0080](../../adr/0080-plan-tasks-name-capabilities-and-the-conductor-chooses-the-agent.md) and
 [ADR 0082](../../adr/0082-the-decision-model-picks-task-agents-and-headerless-dispatches-are-delegations.md).
@@ -199,7 +199,7 @@ it loads no skill by name, and it has a stated stopping rule that feeds the step
 | Host task gates are keyed by agent name | `review.task-gates` in the host configuration; four call sites look a key up by agent: `ReviewGatesService`, `PacketHostFacts.AppendGates`, `PacketTestCommandRenderer` and `TriggerFactBuilder`. An unknown agent gets a warning, an empty report and exit code 0. |
 | Council gates are keyed by gate id | `review.gates`: this repository declares 44, of which 24 are three skill checks repeated for eight skills. They do not name agents. |
 | A task packet command exists | `kyber-weave docs packet <task>` prints the task file's prompt plus a host facts section built by `PacketHostFacts` at print time, capped at 6,000 characters of host rules, never written into the task file. |
-| Workers fetch standards themselves | [ADR 0064](../../adr/0064-project-knowledge-lives-in-gates-and-standards-reached-through-tools.md) and decision D3 of the plan on pull request 625: the worker calls `docs_get_coding_standard_for_technology` in its first step. |
+| Workers fetch standards themselves | [ADR 0064](../../adr/0064-project-knowledge-lives-in-gates-and-standards-reached-through-tools.md) and the plan first drafted on pull request 625: the worker calls `docs_get_coding_standard_for_technology` in its first step. |
 | Standards and skills are small | Shipped standards run 4,153 to 10,215 characters (C# is the largest); the nine skills run 997 to 7,487; the four largest agent bodies run 10,352 to 12,858. Host rules in a packet are capped at 6,000 characters. |
 | The task file is JSON | `<plan>.tasks.json` and a specification's `tasks.json` (ADR 0063). Host configuration, Arbiter rules, model and capability profiles are YAML. |
 
@@ -357,9 +357,43 @@ docs/standards/
 `csharp.skills.md` and `csharp.arbiter-rules.yml`. Every file says what it is and whose it is when
 opened on its own.
 
-The rules file, the skills file and `shared-rules.md` are the plan on pull request 625, which names
-them `rules.md`, `skills.md` and `README.md`. This design renames all three with the folder prefix,
-and adds the Arbiter rules file, the six headings, the role folders and the platform folders.
+### Document types, scoping and the standards bundle
+
+This part was first planned on pull request 625 and is carried here with three changes: the files
+take the folder prefix, a parent's rules are included, and the worker receives the result in its
+prompt instead of fetching it.
+
+| Fact today | Evidence |
+|---|---|
+| A technology folder holds one governed file | `DocsLayout.TechnologyStandard` is `standards/<tech>/README.md`; `DocsScaffolder.Scaffold` writes one standard per declared technology. |
+| There is no skill document type | `DocType` has no such member; `DocumentLoader.ParseDocType` maps thirteen spellings; `OntologyConfig` requires `technology` only of `coding-standard`. |
+| Only a standard may name a technology | `DocSpecValidator.ValidateTechnology` reports `KW-DOC-SPEC-007` for any other type. |
+| The standards tool returns the standard only, as text | `DocumentIndex.CodingStandards` and `DocsQueryService.AgentCodingStandards`; `McpAgentCodingStandardsTests` pins the text shape. |
+| Standards rank at full weight in search | `DocumentIndex.Authority`: plans and specifications 0.55, decision records 0.9, everything else 1.0. |
+
+**Types and scoping.** A `skill` document type is added, scoped by technology or role. A rules or
+skills document may name a technology only when it sits in `standards/<technology>/`, and a role
+only when it sits in `standards/<role>/`; anywhere else it stays an error. `docs/rules/` keeps the
+rules that apply to every task, with no technology and full search weight. The Arbiter rules file
+is YAML, not a governed document: the folder check and `arbiter validate` cover it.
+
+**The bundle.** One lookup in `DocumentIndex` returns, for a technology: the shared rules, the
+parent's rules and skills when the template names a parent, the technology's rules, its skills and
+its standard. `docs_get_coding_standard_for_technology` renders that as named parts in that order,
+rule ids first, the provenance line unchanged as the first line. A topic selects standard sections
+as today; rules and skills render whole. The task prompt service uses the same lookup, so the tool
+and the prompt can never disagree. The stitch happens when asked, not when indexing, so it is
+always current and needs no second stored copy.
+
+**Search weight.** A standard, a skills document and a rules document that names a technology rank
+at 0.55, because a worker already holds them in its prompt. The shared rules file keeps 1.0: it is
+the small file that always fits, so it is what remains when a budget cut drops a section.
+
+**Scaffolding.** For a declared technology with no shipped template, `docs init` writes the four
+files as stubs, and the shared rules file once.
+
+**Precedence.** Technology rules beat parent rules, parent rules beat shared rules, and rules beat
+skills. The shared rules file states this once.
 
 The standard's headings, in order:
 
@@ -607,7 +641,7 @@ Each phase ships on its own and leaves a working product.
 
 | Phase | Delivers | Depends on |
 |---|---|---|
-| 1. Technology folders | Six-heading templates with four files each, the rule inventory, `shared-rules.md` testing rules, role folder templates, onboarding by chosen technology, `docs standards diff`. Additive: nothing the old roster reads is deleted | Pull request 625 |
+| 1. Technology folders | The skill document type and scoping, the stitched standards bundle and its search weight, six-heading templates with four files each, the rule inventory, `shared-rules.md` testing rules, role and platform folder templates, onboarding by chosen technology, `docs standards diff`, migration of existing folders. Additive: nothing the old roster reads is deleted | none |
 | 2. Task fields and the task prompt | `Difficulty:` and `Technology:`, the task file change, `TaskGateResolver`, the prompt service, the dispatch hook's prompt insertion with the file fallback, the docs tool | Phase 1 |
 | 3. Agents | The three developer agents, `platform-researcher`, `devops`, the `dev-hard` profile, the conductor without a profile, the roster switch, the step-up | Phase 2 |
 | 4. Arbiter rules from folders | The split of the 36 rules, folder loading, the `MODE-002` change, the command allow-list | Phases 1 and 3 |
@@ -673,7 +707,7 @@ Estimates, for planning only.
 
 | Phase | Source | Tests | Docs and prompts |
 |---|---|---|---|
-| 1. Technology folders | 6 to 9 files | 4 new classes, 4 to 6 changed | 15 template folders reshaped, 4 role folders, 4 platform folders, 1 inventory, 4 docs |
+| 1. Technology folders | 12 to 16 files | 6 new classes, 10 to 14 changed | 15 template folders reshaped, 4 role folders, 4 platform folders, 1 inventory, 6 docs |
 | 2. Task fields and the task prompt | 18 to 24 files | 8 new classes, 14 to 20 changed | 4 prompt files, 4 docs; the JSON task list name appears in 7 source, 10 test, 8 product and 9 live doc files |
 | 3. Agents | 6 to 9 files | 3 new classes, 8 to 12 changed | 5 new agents, 13 rendered sets, 4 docs |
 | 4. Arbiter rules from folders | 8 to 12 files | 4 new classes, 6 to 10 changed | 3 rule files, 3 docs |
@@ -690,11 +724,11 @@ Estimates, for planning only.
 | D5 | Are the old agents deleted at once? | No. They stay selectable for now; removal waits for the owner's decision after a comparison. | Keeps every earlier phase additive. | user: explicit approval 2026-11-16 |
 | D6 | How is the model assigned? | By the agent: each agent names a model profile, as today. Nothing assigns a model at dispatch. The conductor has no profile. | Run-time assignment was drafted and removed by the owner. Choosing an agent works on all thirteen harnesses. | user: explicit decision 2026-11-16 |
 | D7 | Which model profiles change? | `dev-hard` is added, separate from the planning profiles. `orchestration` is removed. Nothing is renamed. | `dev-easy` uses `fast` and `dev-medium` uses `general`, so no preset breaks. | user: explicit approval 2026-11-16 |
-| D8 | What does a technology or role folder hold? | `<name>.standards.md`, `<name>.rules.md`, `<name>.skills.md`, `<name>.arbiter-rules.yml`. | `<name>.rules.md` and `<name>.skills.md` are the plan on pull request 625; that plan's `README.md` standard is renamed. | user: explicit decision 2026-11-16 |
+| D8 | What does a technology or role folder hold? | `<name>.standards.md`, `<name>.rules.md`, `<name>.skills.md`, `<name>.arbiter-rules.yml`. | The plan on pull request 625 named the first three `README.md`, `rules.md` and `skills.md`; the owner renamed them with the folder prefix. | user: explicit decision 2026-11-16 |
 | D9 | What are the standard's headings? | Naming and layout; Coding standards; Testing; Commands; Security and data handling; Done checklist. | | user: explicit decision 2026-11-16 |
 | D10 | Where do the 36 Arbiter rules go? | Into `conductor`, `architect` and `reviewer` role folders, split by trigger. | The owner named conductor and architect. `reviewer` is added because 13 rules are review rules. | user: explicit approval 2026-11-16 |
 | D11 | Is any Arbiter rule locked? | No. | The owner's view, and the code agrees: every rule can already be set to log only. | user: explicit decision 2026-11-16 |
-| D12 | How does the task prompt reach the worker? | A hook on the dispatch call replaces the conductor's one-line dispatch with the full prompt. Where a harness's hook cannot rewrite the dispatch, the prompt is written to a file the worker reads first. | Reverses decision D3 of the plan on pull request 625. The worker starts with everything, the conductor never reads or retypes about 12,000 tokens per task, and the worker cannot skip it. | user: explicit decision 2026-11-16 |
+| D12 | How does the task prompt reach the worker? | A hook on the dispatch call replaces the conductor's one-line dispatch with the full prompt. Where a harness's hook cannot rewrite the dispatch, the prompt is written to a file the worker reads first. | Replaces the worker's own fetch that the plan on pull request 625 kept. The worker starts with everything, the conductor never reads or retypes about 12,000 tokens per task, and the worker cannot skip it. | user: explicit decision 2026-11-16 |
 | D13 | How are task gates keyed? | By the task's one technology, then its parent, with a fallback to the old agent-keyed entries. | No agent is named after a technology any more. No gate is added and no lists are merged. | user: explicit approval 2026-11-16 |
 | D14 | Which file format? | YAML for every data file added or changed, the task file included, extension `.yml`. | The owner asked for one format and approved converting the task file. `.yml` matches every YAML file in the repository. | user: explicit approval 2026-11-16 |
 | D15 | What replaces `azure-reader`? | `platform-researcher`, which loads the skills and rules of the technology its task names. | Needs a new capability profile that can run commands. | user: explicit decision 2026-11-16 |
@@ -706,12 +740,14 @@ Estimates, for planning only.
 | D21 | How many technologies may a task name? | One. A template may name one parent it builds on; unrelated technologies are separate tasks. | Keeps the prompt inside the budget and gives a task one set of gates. | user: explicit decision 2026-11-16 |
 | D22 | How are the prompt's parts separated? | Named tags around each part; Markdown inside. | The one-format rule covers stored data files; the prompt is text for a model. | user: explicit decision 2026-11-16 |
 | D23 | Is there a test role folder? | No. | Testing lives in the shared rules and each standard's Testing section. | user: explicit decision 2026-11-16 |
+| D24 | Is the plan on pull request 625 a separate piece of work? | No. It is absorbed into phase 1 and the pull request is closed. | Building it apart would ship file names and a fetch step this design replaces. | user: explicit decision 2026-11-16 |
+| D25 | How is a skills file typed and scoped? | A new `skill` document type; rules and skills may name a technology or role only inside that folder. | Carried from the plan on pull request 625, where it was a recommendation. Reusing an existing type would blur rules and procedures. | carried from pull request 625; owner directed the fold 2026-11-16 |
+| D26 | When is the bundle stitched? | When asked, from one index lookup shared by the standards tool and the task prompt. | Carried from the plan on pull request 625. Always current; no second stored copy. | carried from pull request 625; owner directed the fold 2026-11-16 |
+| D27 | How do standards rank in search? | Standards, skills and technology rules at 0.55; the shared rules file at 1.0. | Carried from the plan on pull request 625. Matches the weight plans and specifications already have. | carried from pull request 625; owner directed the fold 2026-11-16 |
 
 ## Open questions
 
-1. **Order against pull request 625.** Phase 1 cannot start before that plan lands, with three
-   changes: its decision D3 (the worker fetches), its file names, and the tool's output going to a
-   file. Recommendation: change that plan first, then land it.
+None. The one earlier question, the order against pull request 625, is settled by decision D24.
 
 ## Scale
 
@@ -733,3 +769,5 @@ Estimates, for planning only.
 | H10 | The roster switch and the comparison procedure (Roster switch and comparison) | KyberSquad | runbook |
 | H11 | Migration from agent-keyed gates and removed agent names (Removal) | ReviewCouncil | runbook |
 | H12 | Tiers and the task prompt; rules by folder; the task file format (Decisions D1, D10, D12, D14, D18) | KyberSquad | adr |
+| H13 | The skill document type and where rules and skills may name a technology or role (Document types, scoping and the standards bundle) | DocGraph | reference |
+| H14 | The standards bundle's parts, order and search weight (Document types, scoping and the standards bundle) | DocGraph | runbook |

@@ -24,7 +24,7 @@ keywords:
 
 **Phase status:** Approved
 
-Owner approved 2026-11-16 ('Yes, approve'), given directly in the authoring session.
+Owner approved 2026-11-16 ('Yes, approve'), given directly in the authoring session. Amended 2026-11-16 per owner direction ('fold 625 into phase 1 and close 625'): the standards plan first drafted on pull request 625 is absorbed here and that pull request is closed.
 
 ## Introduction
 
@@ -54,10 +54,10 @@ Owner decisions made on 2026-11-16 that shape these requirements:
 6. **The model comes from the agent.** Each agent names a model profile, as today, and choosing the
    agent chooses the model. Nothing assigns a model at dispatch. The conductor has no model
    profile: it runs on the model the user or the headless caller starts it with.
-7. **Technology folders** follow the plan on
-   [pull request 625](https://github.com/dpalfery/kyber-weave/pull/625), with the standard named
-   `<name>.standards.md` beside `<name>.rules.md` and `<name>.skills.md`. This specification adds a machine
-   rules file for the Arbiter beside them. Role folders have the same four files.
+7. **Technology folders** hold a standard named `<name>.standards.md` beside `<name>.rules.md` and
+   `<name>.skills.md`, plus a machine rules file for the Arbiter. Role folders have the same four
+   files. The plumbing for this was first planned on pull request 625; that plan is absorbed into
+   this specification and the pull request is closed.
 11. **The old agents stay for now.** They remain selectable until the owner decides to remove them.
 8. **Standards are templates.** Kyber-Weave ships one template folder per technology, the community
    can submit more, and onboarding installs the ones the user picks.
@@ -277,6 +277,24 @@ migration command instead of an error.
 5.12. THE system SHALL provide a command that renames a host's existing standards files to the
 prefixed names and adds any of the four files that is missing, prints the change before writing,
 and changes no file content.
+
+5.13. THE documentation types SHALL include a skill type for `<name>.skills.md`, and a rules or
+skills document SHALL be allowed to name a technology or a role only when it sits in that
+technology's or role's folder.
+
+5.14. WHEN `docs_get_coding_standard_for_technology` is asked for a technology THEN it SHALL return
+one bundle in named parts, in this order: the rule ids, the shared rules, the parent's rules and
+skills when the template names a parent, the technology's rules, its skills, then its standard's
+sections, with a note for anything left out.
+
+5.15. THE task prompt of Requirement 9 and the bundle of criterion 5.14 SHALL be built from the same
+lookup, so both give the same rules, skills and standard for a technology.
+
+5.16. IN documentation search, a standard, a skills document and a rules document that names a
+technology SHALL rank below other current documents; the shared rules file SHALL keep full rank.
+
+5.17. WHEN `docs init` runs for a declared technology that has no template THEN it SHALL write the
+four files as stubs, and the shared rules file once.
 
 ### Requirement 6: Standards ship as templates
 
