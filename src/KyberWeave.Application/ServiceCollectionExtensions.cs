@@ -125,6 +125,57 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IDuplicateDetectionService, DuplicateDetectionService>();
         services.TryAddSingleton<IReviewDecisionSteps, ReviewDecisionSteps>();
         services.TryAddSingleton<ITaskGateSelectionService, TaskGateSelectionService>();
+        services.TryAddSingleton<IConfigLoadService, ConfigLoadService>();
+        services.TryAddSingleton<IReviewCycleSelector, ReviewCycleSelector>();
+        services.TryAddSingleton<IReviewCatalogueService>(sp => new ReviewCatalogueService(
+            sp.GetRequiredService<IConfigLoadService>(),
+            sp.GetRequiredService<IRepositoryFileLister>(),
+            sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<IReviewDuplicatesService>(sp => new ReviewDuplicatesService(
+            sp.GetRequiredService<IDuplicateDetectionService>(),
+            sp.GetRequiredService<ICodeGraphPortsFactory>(),
+            sp.GetRequiredService<IConfigLoadService>(),
+            sp.GetRequiredService<IWritableFileSystem>()));
+        services.TryAddSingleton<IReviewSuppressionsService>(sp => new ReviewSuppressionsService(
+            sp.GetRequiredService<ISuppressionScanService>(),
+            sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<IReviewCycleService>(sp => new ReviewCycleService(
+            sp.GetRequiredService<IReviewWorkTreeService>(),
+            sp.GetRequiredService<IReviewCycleStore>(),
+            sp.GetRequiredService<IReviewCycleSelector>(),
+            sp.GetRequiredService<IConfigLoadService>()));
+        services.TryAddSingleton<IReviewSeatsService>(sp => new ReviewSeatsService(
+            sp.GetRequiredService<IReviewWorkTreeService>(),
+            sp.GetRequiredService<IReviewCycleStore>(),
+            sp.GetRequiredService<IGitChangeReader>(),
+            sp.GetRequiredService<IReviewEvidenceService>(),
+            sp.GetRequiredService<INotSeatedStore>(),
+            sp.GetRequiredService<ISeverityOverrideSource>(),
+            sp.GetRequiredService<IWorktreeIndexGuard>(),
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IReviewCycleSelector>(),
+            sp.GetRequiredService<IConfigLoadService>(),
+            sp.GetRequiredService<IReviewDecisionSteps>()));
+        services.TryAddSingleton<IReviewGatesService>(sp => new ReviewGatesService(
+            sp.GetRequiredService<IReviewWorkTreeService>(),
+            sp.GetRequiredService<IReviewCycleStore>(),
+            sp.GetRequiredService<IGitChangeReader>(),
+            sp.GetRequiredService<IReviewEvidenceService>(),
+            sp.GetRequiredService<INotSeatedStore>(),
+            sp.GetRequiredService<IProjectFileLocator>(),
+            sp.GetRequiredService<IGateRunService>(),
+            sp.GetRequiredService<IDuplicateDetectionService>(),
+            sp.GetRequiredService<ICodeGraphPortsFactory>(),
+            sp.GetRequiredService<IWorktreeIndexGuard>(),
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IReviewCycleSelector>(),
+            sp.GetRequiredService<IConfigLoadService>(),
+            sp.GetRequiredService<ITaskGateSelectionService>(),
+            sp.GetRequiredService<IPlanTaskTargetService>()));
+        services.TryAddSingleton<IPlanTaskTargetService>(sp => new PlanTaskTargetService(
+            sp.GetRequiredService<IPlanTaskService>(), sp.GetRequiredService<ITaskGateSelectionService>()));
         services.TryAddSingleton<IReviewDecisionModelFactory, ReviewDecisionModelFactory>();
         services.TryAddSingleton<IReviewVerdictService, ReviewVerdictService>();
         _ = services.AddWeaveArbiterApplication();

@@ -1,6 +1,4 @@
-using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
-using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Review;
 using Spectre.Console.Cli;
 
@@ -19,22 +17,16 @@ namespace KyberWeave.Cli.Commands.Review;
 /// <para>
 ///     Exit codes follow the review branch: <c>0</c> when every added suppression states a reason or the change
 ///     adds none, <c>1</c> when at least one does not or the change could not be read, and <c>2</c> for an option
-///     value that is refused before anything runs. An unreadable change is a failure rather than a pass, because a
-///     gate that cannot see the change has no evidence either way.
+///     value that is refused before anything runs.
 /// </para>
 /// </remarks>
-public sealed class ReviewSuppressionsCommand(ISuppressionScanService scanner, IFileSystem files) : Command<ReviewSuppressionsSettings>
+public sealed class ReviewSuppressionsCommand(IReviewSuppressionsService service) : Command<ReviewSuppressionsSettings>
 {
     /// <summary>A suppression the change added without stating a reason.</summary>
-    public const string UnreasonedSuppression = "KW-REVIEW-036";
+    public const string UnreasonedSuppression = ReviewSuppressionOutcome.NoReason;
 
     /// <summary>The change could not be read, so no line was scanned.</summary>
-    public const string ChangeUnreadable = "KW-REVIEW-037";
-
-    /// <summary>An option value the command refuses before it reads anything.</summary>
-    private const string InvalidInput = "KW-REVIEW-028";
-
-    private const int ClientInputExitCode = 2;
+    public const string ChangeUnreadable = ReviewSuppressionOutcome.ChangeUnreadable;
 
     /// <inheritdoc />
     public override int Execute(
@@ -42,63 +34,20 @@ public sealed class ReviewSuppressionsCommand(ISuppressionScanService scanner, I
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        DiagnosticReport report = new();
-        string root;
-        try
+        ReviewCommandResult result = service.Run(
+            new ReviewSuppressionsRequest(settings.Path, settings.BaseRef),
+            cancellationToken);
+
+        if (result.ClientError is not null)
         {
-            root = Path.GetFullPath(settings.Path);
-        }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException
-                                       or System.Security.SecurityException)
-        {
-            WriteClientInputError($"{InvalidInput}: Cannot resolve path '{settings.Path}': {ex.Message}");
-            return ClientInputExitCode;
+            WriteClientInputError(result.ClientError);
+            return result.ExitCode;
         }
 
-        if (!files.DirectoryExists(root))
-        {
-            WriteClientInputError($"{InvalidInput}: '{root}' is not a directory");
-            return ClientInputExitCode;
-        }
+        if (result.Report is not null)
+            CommandHelpers.Finish(result.Report, settings, "review suppressions", "Suppression");
 
-        string baseRef = settings.BaseRef ?? SuppressionScan.DefaultBase;
-        if (GitChangeParsing.ValidateBase(baseRef) is { } baseProblem)
-        {
-            WriteClientInputError($"{InvalidInput}: {baseProblem}");
-            return ClientInputExitCode;
-        }
-
-        SuppressionScanResult result = scanner.Scan(root, baseRef);
-
-        if (result.Failure is { } failure)
-        {
-            report.Add(new Diagnostic(
-                ChangeUnreadable,
-                Severity.Error,
-                $"Nothing was scanned: the change against '{baseRef}' could not be read ({failure}).",
-                "review suppressions",
-                Hint: "Run this inside a git repository that already has a commit, or name the ref to compare " +
-                      "with using --base."));
-            CommandHelpers.Finish(report, settings, "review suppressions", "Suppression");
-            return 1;
-        }
-
-        foreach (SuppressionFinding finding in result.Findings)
-        {
-            report.Add(new Diagnostic(
-                UnreasonedSuppression,
-                Severity.Error,
-                $"{finding.Path}:{finding.Line}: the added {finding.Form} states no reason.",
-                finding.Path,
-                finding.Path,
-                Hint: $"Say why the suppression is needed: put '{SuppressionScan.ReasonToken} <why>' on the same " +
-                      $"line or the line above. The line reads: {finding.Excerpt}",
-                StartLine: finding.Line,
-                EndLine: finding.Line));
-        }
-
-        CommandHelpers.Finish(report, settings, "review suppressions", "Suppression");
-        return report.HasErrors ? 1 : 0;
+        return result.ExitCode;
     }
 
     /// <summary>

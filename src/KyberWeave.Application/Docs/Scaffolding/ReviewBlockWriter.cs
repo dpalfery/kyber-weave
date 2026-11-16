@@ -1,5 +1,6 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Application.Review;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review.Catalogue;
 using System.Text.RegularExpressions;
@@ -65,43 +66,13 @@ public sealed partial class ReviewBlockWriter : IReviewGateCatalogue
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(declaredTechnologies);
 
-        IReadOnlyList<GateCatalogueFamily> families = GateCatalogueRenderer.LoadEmbedded();
-
-        // No declared technology maps to a family: there is nothing to detect and nothing to
-        // write, so the repository is never even walked. The render would be an empty block;
-        // the plan carries the no-family list instead.
-        HashSet<string> familyTechnologies = new(StringComparer.Ordinal);
-        foreach (GateCatalogueFamily family in families)
-        {
-            foreach (string technology in family.Technologies)
-            {
-                familyTechnologies.Add(technology);
-            }
-        }
-
-        if (!declaredTechnologies.Any(familyTechnologies.Contains))
-        {
-            RenderedReviewBlock empty = new(
-                string.Empty, [], [], [.. declaredTechnologies.Distinct(StringComparer.Ordinal)]);
-            return new ReviewGatesPlan(empty, false);
-        }
-
-        IReadOnlyList<string> repositoryFiles = _lister.List(repoRoot);
-        Dictionary<string, ProjectRootSet> rootsByFamily = new(StringComparer.Ordinal);
-        foreach (GateCatalogueFamily family in families)
-        {
-            rootsByFamily[family.Family] = ProjectRootDetection.Detect(
-                repositoryFiles,
-                [.. family.Markers],
-                family.Nesting,
-                family.Pair,
-                family.Fallback?.ToArray());
-        }
-
-        GateCatalogueFacts facts = new(_files.FileExists, _files.ReadAllText);
-        RenderedReviewBlock rendered = GateCatalogueRenderer.Render(
-            declaredTechnologies, rootsByFamily, repoRoot, facts);
-        return new ReviewGatesPlan(rendered, true);
+        // One planner, shared with the commands that have a container: this answers over the ports the
+        // host injected rather than walking the disk itself.
+        return ReviewCataloguePlanner.Plan(
+            repoRoot,
+            declaredTechnologies,
+            _lister.List(repoRoot),
+            new GateCatalogueFacts(_files.FileExists, _files.ReadAllText));
     }
 
     /// <summary>
