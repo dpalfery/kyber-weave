@@ -19,7 +19,7 @@ namespace KyberWeave.Cli.Commands.Review;
 ///     cycle folder, writes the diff and the change half of the evidence, writes every packet and prints each seat's
 ///     dispatch block, the lenses a catalogue file pattern rules out, and the gate command to run alongside.
 /// </summary>
-public sealed class ReviewSeatsCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, IReviewEvidenceService evidenceWriter, INotSeatedStore notSeatedStore, ISeverityOverrideSource severityOverrides) : Command<ReviewSeatsSettings>
+public sealed class ReviewSeatsCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, IReviewEvidenceService evidenceWriter, INotSeatedStore notSeatedStore, ISeverityOverrideSource severityOverrides, IWorktreeIndexGuard worktreeIndex, IWritableFileSystem files, IProcessEnvironment environment, IProcessExecutor? indexExecutor = null) : Command<ReviewSeatsSettings>
 {
     /// <summary>The command description shared by the real registration and the help tests.</summary>
     public const string Description =
@@ -31,11 +31,7 @@ public sealed class ReviewSeatsCommand(IReviewWorkTreeService trees, IReviewCycl
     private const string DefaultBase = "origin/HEAD";
     private const int ClientInputExitCode = 2;
 
-    private static readonly TimeSpan IndexTimeout = TimeSpan.FromSeconds(DoctorSettings.DefaultIndexTimeoutSeconds);
-    private static readonly TimeSpan McpTimeout = TimeSpan.FromSeconds(DoctorSettings.DefaultMcpTimeoutSeconds);
-
-    /// <summary>The process seam for the CodeGraph child that prepares the index; tests pass a scripted one.</summary>
-    internal IProcessExecutor? Executor { get; init; }
+    private static readonly TimeSpan IndexTimeout = DoctorOptions.Defaults.IndexTimeout;
 
     /// <inheritdoc />
     public override int Execute(CommandContext context, ReviewSeatsSettings settings, CancellationToken cancellationToken)
@@ -73,18 +69,18 @@ public sealed class ReviewSeatsCommand(IReviewWorkTreeService trees, IReviewCycl
             commit => ReviewCycleView.TryChangedSince(git, tree, commit));
         List<ReviewFinding> recheck = [];
         if (plan.Prior is { } priorCycle
-            && !ReviewCycleView.TryReadRecheck(priorCycle, config.Review.Policy, report, recheck, UnreadableInput, Severity.Error, "review seats"))
+            && !ReviewCycleView.TryReadRecheck(files, priorCycle, config.Review.Policy, report, recheck, UnreadableInput, Severity.Error, "review seats"))
         {
             CommandHelpers.Finish(report, settings, "review seats", "Review");
             return 1;
         }
 
         // The index is synced before any seat starts, so no seat reads an index older than the diff.
-        WorktreeIndexOutcome index = WorktreeIndexGuard.Ensure(
+        WorktreeIndexOutcome index = worktreeIndex.Ensure(
             tree,
-            new DoctorOptions(IndexTimeout, McpTimeout, DoctorCommand.CodeGraphExecutable, DoctorCommand.DefaultMcpExecutable),
-            Executor ?? ProcessExecutor.WithTimeout(IndexTimeout),
-            Path.GetTempPath());
+            DoctorOptions.Defaults,
+            indexExecutor ?? ProcessExecutor.WithTimeout(IndexTimeout),
+            environment.TempDirectory);
         bool indexReady = index.Status is WorktreeIndexStatus.Ready or WorktreeIndexStatus.NotGoverned;
 
         string folder = Path.Combine(reviewFolder, $"cycle-{plan.Number}");
@@ -255,13 +251,13 @@ public sealed class ReviewSeatsCommand(IReviewWorkTreeService trees, IReviewCycl
             Path.Combine(folder, "packets", lens + ".md"),
             handBack ? Path.Combine(folder, "seats", lens + ".md") : null);
 
-    private static void WritePackets(string folder, CouncilSeatPlan seats, CouncilSeatContext context)
+    private void WritePackets(string folder, CouncilSeatPlan seats, CouncilSeatContext context)
     {
         string packets = Path.Combine(folder, "packets");
-        Directory.CreateDirectory(packets);
-        Directory.CreateDirectory(Path.Combine(folder, "seats"));
+        files.CreateDirectory(packets);
+        files.CreateDirectory(Path.Combine(folder, "seats"));
         foreach (string lens in seats.Now.Concat(seats.AfterGates))
-            File.WriteAllText(Path.Combine(packets, lens + ".md"), CouncilSeating.Packet(context, lens));
+            files.WriteAllText(Path.Combine(packets, lens + ".md"), CouncilSeating.Packet(context, lens));
     }
 
     private IReadOnlyList<string>? ChangedPaths(string root, string baseRef)

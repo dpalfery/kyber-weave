@@ -57,6 +57,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IProgramRunner>(_ => new ProcessProgramRunner());
         services.TryAddSingleton<IGitChangeReader>(sp => new GitChangeReader(sp.GetRequiredService<IProgramRunner>()));
         services.TryAddSingleton<IReviewCycleStore>(_ => new FileReviewCycleStore());
+        services.TryAddSingleton<ISeatFolder, FileSeatFolder>();
         services.TryAddSingleton<INotSeatedStore>(_ => new FileNotSeatedStore());
         services.TryAddSingleton<IReviewEvidenceStore>(_ => new FileReviewEvidenceStore());
         services.TryAddSingleton<ISeverityOverrideSource>(_ => new FileSeverityOverrideSource());

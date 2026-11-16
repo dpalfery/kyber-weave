@@ -35,8 +35,41 @@ namespace KyberWeave.Application.Review;
 /// mode this gate must not have.
 /// </para>
 /// </remarks>
-public sealed class DuplicateDetectionService(IContainedFileReader files) : IDuplicateDetectionService
+public sealed class DuplicateDetectionService(IContainedFileReader files, IRepositoryFileStore store) : IDuplicateDetectionService
 {
+    /// <inheritdoc />
+    /// <remarks>
+    /// Takes the two CodeGraph ports separately rather than the concrete adapter, so the symbol enumerator is consumed
+    /// as a port and a fake can stand in for it.
+    /// </remarks>
+    public DuplicateReport Analyze(
+        string repoRoot,
+        ICodeGraphResolver graph,
+        ICodeGraphSymbolEnumerator symbols,
+        ReviewDuplicates options)
+    {
+        ArgumentNullException.ThrowIfNull(graph);
+        ArgumentNullException.ThrowIfNull(symbols);
+
+        if (!graph.IsAvailable)
+        {
+            return DuplicateDetector.Unavailable(
+                graph.DatabasePath,
+                graph.UnavailableReason ?? "The CodeGraph index could not be read.",
+                options);
+        }
+
+        List<CodeGraphNode> comparable = DuplicateDetector.ComparableKinds
+            .SelectMany(symbols.NodesOfKind)
+            .ToList();
+
+        DateTime? modified = store.FileExists(graph.DatabasePath)
+            ? store.GetLastWriteTimeUtc(graph.DatabasePath)
+            : null;
+
+        return Detect(repoRoot, comparable, options, graph.DatabasePath, modified);
+    }
+
     /// <summary>
     /// Clusters the given symbols by normalized body. <paramref name="repoRoot"/> is the tree
     /// the index's relative paths resolve against.

@@ -26,10 +26,10 @@ public sealed class DoctorCommand(IRepositoryDoctor doctor) : Command<DoctorSett
     internal const string NonInteractiveHint = "provisioning skipped: non-interactive; rerun with --provision";
 
     /// <summary>The executable name, resolved through PATH. Tests replace it so they never spawn the real server.</summary>
-    internal const string DefaultMcpExecutable = "kyber-weave-mcp";
+    internal const string DefaultMcpExecutable = DoctorOptions.DefaultMcpExecutableName;
 
     /// <summary>The CodeGraph executable name, resolved through PATH.</summary>
-    internal const string CodeGraphExecutable = "codegraph";
+    internal const string CodeGraphExecutable = DoctorOptions.DefaultCodeGraphExecutable;
 
     /// <summary>Runs the CodeGraph child. Null uses a process executor bounded by the index timeout.</summary>
     internal IProcessExecutor? Executor { get; init; }

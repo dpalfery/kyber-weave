@@ -12,4 +12,24 @@ public sealed record DoctorOptions(
     TimeSpan IndexTimeout,
     TimeSpan McpTimeout,
     string CodeGraphExecutable,
-    string McpExecutable);
+    string McpExecutable)
+{
+    /// <summary>The default bound on one CodeGraph index run, in seconds. Run-start and review commands reuse it.</summary>
+    public const int DefaultIndexTimeoutSeconds = 600;
+
+    /// <summary>The default total budget of the live MCP session, in seconds.</summary>
+    public const int DefaultMcpTimeoutSeconds = 20;
+
+    /// <summary>The CodeGraph executable name, resolved through PATH.</summary>
+    public const string DefaultCodeGraphExecutable = "codegraph";
+
+    /// <summary>The docs MCP executable name, resolved through PATH. Tests replace it so they never spawn the real server.</summary>
+    public const string DefaultMcpExecutableName = "kyber-weave-mcp";
+
+    /// <summary>The budgets and executables <c>doctor --ensure</c> uses, for callers that prepare the index without a doctor run.</summary>
+    public static DoctorOptions Defaults { get; } = new(
+        TimeSpan.FromSeconds(DefaultIndexTimeoutSeconds),
+        TimeSpan.FromSeconds(DefaultMcpTimeoutSeconds),
+        DefaultCodeGraphExecutable,
+        DefaultMcpExecutableName);
+}

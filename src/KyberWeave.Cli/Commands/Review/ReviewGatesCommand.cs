@@ -23,7 +23,7 @@ namespace KyberWeave.Cli.Commands.Review;
 ///     Runs the deterministic gates the host declares under <c>review.gates</c>, or, with <c>--agent</c>,
 ///     one developer agent's gates under <c>review.task-gates</c> against the change that agent made.
 /// </summary>
-public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, IReviewEvidenceService evidenceWriter, INotSeatedStore notSeatedStore, IProjectFileLocator projectFiles, IGateRunService gateRunner, IDuplicateDetectionService duplicateDetection) : Command<ReviewGatesSettings>
+public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, IReviewEvidenceService evidenceWriter, INotSeatedStore notSeatedStore, IProjectFileLocator projectFiles, IGateRunService gateRunner, IDuplicateDetectionService duplicateDetection, ICodeGraphPortsFactory graphs, IWorktreeIndexGuard worktreeIndex, IWritableFileSystem files, IProcessEnvironment environment, IProcessExecutor? indexExecutor = null) : Command<ReviewGatesSettings>
 {
     private const string NoGatesDeclared = "KW-REVIEW-020";
     private const string IndexState = "KW-REVIEW-038";
@@ -44,15 +44,7 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
     private const int ClientInputExitCode = 2;
 
     /// <summary>The bound on the CodeGraph index run, the same default <c>doctor --ensure</c> uses.</summary>
-    private static readonly TimeSpan IndexTimeout = TimeSpan.FromSeconds(DoctorSettings.DefaultIndexTimeoutSeconds);
-
-    private static readonly TimeSpan McpTimeout = TimeSpan.FromSeconds(DoctorSettings.DefaultMcpTimeoutSeconds);
-
-    /// <summary>
-    ///     The process seam for the CodeGraph child that prepares the index. Null uses a process executor bounded by
-    ///     the index timeout; tests pass a scripted one.
-    /// </summary>
-    internal IProcessExecutor? Executor { get; init; }
+    private static readonly TimeSpan IndexTimeout = DoctorOptions.Defaults.IndexTimeout;
 
     /// <inheritdoc />
     public override int Execute(CommandContext context, ReviewGatesSettings settings,
@@ -206,15 +198,11 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
         // none. A repository without governed docs has no index to keep and is not checked.
         // The index belongs to the tree, so a run pointed at a subdirectory still checks the tree's root.
         string indexRoot = EnclosingRepositoryRoot(root);
-        WorktreeIndexOutcome index = WorktreeIndexGuard.Ensure(
+        WorktreeIndexOutcome index = worktreeIndex.Ensure(
             indexRoot,
-            new DoctorOptions(
-                IndexTimeout,
-                McpTimeout,
-                DoctorCommand.CodeGraphExecutable,
-                DoctorCommand.DefaultMcpExecutable),
-            Executor ?? ProcessExecutor.WithTimeout(IndexTimeout),
-            Path.GetTempPath());
+            DoctorOptions.Defaults,
+            indexExecutor ?? ProcessExecutor.WithTimeout(IndexTimeout),
+            environment.TempDirectory);
         if (index.Status is not WorktreeIndexStatus.NotGoverned)
             AddIndexDiagnostic(report, indexRoot, index);
 
@@ -340,7 +328,7 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
                 // Only lenses review seats wrote a packet for: a verifier cycle seats fewer, and none is widened here.
                 string packets = Path.Combine(cycle.Folder!, "packets");
                 string[] send = [.. CouncilSeating.AfterGates.Where(lens => !gateProven.ContainsKey(lens)
-                    && (!Directory.Exists(packets) || File.Exists(Path.Combine(packets, lens + ".md"))))];
+                    && (!files.DirectoryExists(packets) || files.FileExists(Path.Combine(packets, lens + ".md"))))];
                 Console.WriteLine($"after-gates: send {(send.Length == 0 ? "none" : string.Join(", ", send))}");
                 Console.WriteLine($"next: {ReviewSeatsCommand.VerdictCommand(null)}");
             }
@@ -429,7 +417,7 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
         folder ??= Path.Combine(reviewFolder, $"cycle-{plan.Number}");
         List<ReviewFinding> recheck = [];
         if (plan.Prior is { } priorCycle)
-            ReviewCycleView.TryReadRecheck(priorCycle, config.Review.Policy, report, recheck, PriorFindingsUnreadable, Severity.Warning, "review gates");
+            ReviewCycleView.TryReadRecheck(files, priorCycle, config.Review.Policy, report, recheck, PriorFindingsUnreadable, Severity.Warning, "review gates");
 
         return new CouncilCycle(
             plan,
@@ -495,8 +483,8 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
         GateReport written,
         DiagnosticReport report)
     {
-        CodeGraphPorts graph = CodeGraphResolvers.ForRepository(root);
-        DuplicateReport duplicates = ReviewDuplicatesCommand.Analyze(duplicateDetection, root, graph.Resolver, graph.Enumerator, config.Review.Duplicates);
+        CodeGraphPorts graph = graphs.ForRepository(root);
+        DuplicateReport duplicates = duplicateDetection.Analyze(root, graph.Resolver, graph.Enumerator, config.Review.Duplicates);
         CommandHelpers.TryWriteReport(
             Path.Combine(cycle.Folder!, "duplicates.json"), ReviewJson.Write(duplicates), ReportWriteFailed, report);
         (IReadOnlyList<string>? changed, _) = ResolveCouncilChangedSet(root, settings);
@@ -600,15 +588,15 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
     ///     result for the same gate and the rest kept, in declaration order. An unreadable or missing report is nothing
     ///     to keep.
     /// </summary>
-    private static GateReport MergedWithExisting(IReadOnlyList<ReviewGate> declared, GateReport ran, string path)
+    private GateReport MergedWithExisting(IReadOnlyList<ReviewGate> declared, GateReport ran, string path)
     {
         GateReport existing;
         try
         {
-            if (!File.Exists(path))
+            if (!files.FileExists(path))
                 return ran;
 
-            existing = ReviewJson.ReadGates(File.ReadAllText(path));
+            existing = ReviewJson.ReadGates(files.ReadAllText(path));
         }
         catch (Exception ex) when (FileFailure.Is(ex) || ex is System.Text.Json.JsonException or InvalidOperationException)
         {
@@ -821,7 +809,7 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
     ///     The short form of each test gate and each failed gate (<see cref="TaskTestDigest" />), after writing every
     ///     gate's full output to a log beside the report, so a worker reads a few lines instead of the raw output.
     /// </summary>
-    private static List<string> TestDigest(
+    private List<string> TestDigest(
         string root, ReviewGatesSettings settings, IReadOnlyList<PlannedTaskGate> planned, GateReport report, Dictionary<string, string> outputs)
     {
         List<string> lines = [];
@@ -838,8 +826,8 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
                 try
                 {
                     string full = Path.Combine(root, log);
-                    Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-                    File.WriteAllText(full, output);
+                    files.CreateDirectory(Path.GetDirectoryName(full)!);
+                    files.WriteAllText(full, output);
                 }
                 catch (Exception ex) when (FileFailure.Is(ex))
                 {
@@ -1135,12 +1123,12 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
     internal static bool NeedsChangedSet(IReadOnlyList<ReviewGate> gates) =>
         gates.Any(gate => gate.Include.Count > 0 || gate.AppliesWhen is not null);
 
-    private static string EnclosingRepositoryRoot(string path)
+    private string EnclosingRepositoryRoot(string path)
     {
         for (DirectoryInfo? dir = new(path); dir is not null; dir = dir.Parent)
         {
             string gitPath = Path.Combine(dir.FullName, ".git");
-            if (Directory.Exists(gitPath) || File.Exists(gitPath) || Directory.Exists(Path.Combine(dir.FullName, ".kyber-weave")))
+            if (files.DirectoryExists(gitPath) || files.FileExists(gitPath) || files.DirectoryExists(Path.Combine(dir.FullName, ".kyber-weave")))
                 return dir.FullName;
         }
         return path;

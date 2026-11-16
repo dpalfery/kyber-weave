@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Review;
@@ -22,7 +23,7 @@ namespace KyberWeave.Cli.Commands.Review;
 ///     gate that cannot see the change has no evidence either way.
 /// </para>
 /// </remarks>
-public sealed class ReviewSuppressionsCommand(ISuppressionScanService scanner) : Command<ReviewSuppressionsSettings>
+public sealed class ReviewSuppressionsCommand(ISuppressionScanService scanner, IFileSystem files) : Command<ReviewSuppressionsSettings>
 {
     /// <summary>A suppression the change added without stating a reason.</summary>
     public const string UnreasonedSuppression = "KW-REVIEW-036";
@@ -54,7 +55,7 @@ public sealed class ReviewSuppressionsCommand(ISuppressionScanService scanner) :
             return ClientInputExitCode;
         }
 
-        if (!Directory.Exists(root))
+        if (!files.DirectoryExists(root))
         {
             WriteClientInputError($"{InvalidInput}: '{root}' is not a directory");
             return ClientInputExitCode;
