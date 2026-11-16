@@ -83,14 +83,22 @@ public static class VsCodeUserSettingsPaths
     /// <param name="homeDirectory">The user's home directory.</param>
     /// <param name="appDataDirectory">The roaming application-data directory on Windows; may be null elsewhere.</param>
     /// <param name="platform">The operating system whose layout applies.</param>
+    /// <param name="directoryExists">Probes whether a candidate directory exists, as the caller observed on disk.</param>
     /// <param name="xdgConfigHome">The <c>XDG_CONFIG_HOME</c> value on Linux; ignored unless absolute, and ignored on other platforms.</param>
     /// <returns>The detected builds, in a stable order. Empty when neither build is installed.</returns>
-    public static IReadOnlyList<VsCodeFlavour> Detect(string homeDirectory, string? appDataDirectory, OSPlatform platform, string? xdgConfigHome = null)
+    public static IReadOnlyList<VsCodeFlavour> Detect(
+        string homeDirectory,
+        string? appDataDirectory,
+        OSPlatform platform,
+        Func<string, bool> directoryExists,
+        string? xdgConfigHome = null)
     {
+        ArgumentNullException.ThrowIfNull(directoryExists);
+
         List<VsCodeFlavour> detected = [];
         foreach (VsCodeFlavour flavour in Enum.GetValues<VsCodeFlavour>())
         {
-            if (Directory.Exists(UserDataDirectory(flavour, homeDirectory, appDataDirectory, platform, xdgConfigHome)))
+            if (directoryExists(UserDataDirectory(flavour, homeDirectory, appDataDirectory, platform, xdgConfigHome)))
                 detected.Add(flavour);
         }
 
