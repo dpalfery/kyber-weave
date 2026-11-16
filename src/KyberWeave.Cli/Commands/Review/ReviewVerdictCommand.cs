@@ -28,7 +28,7 @@ namespace KyberWeave.Cli.Commands.Review;
 /// <see cref="VerdictEngine"/>, which stays the only judge.
 /// </para>
 /// </remarks>
-public sealed partial class ReviewVerdictCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, INotSeatedStore notSeatedStore) : Command<ReviewVerdictSettings>
+public sealed partial class ReviewVerdictCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, INotSeatedStore notSeatedStore, ISeverityOverrideSource severityOverrides) : Command<ReviewVerdictSettings>
 {
     /// <summary>The command description shared by the real registration and the help tests.</summary>
     public const string Description = "Compute approve / request-changes from findings and gates.";
@@ -107,7 +107,7 @@ public sealed partial class ReviewVerdictCommand(IReviewWorkTreeService trees, I
 
         // A host severity override sets the severity everything after this reads: the nitpick drop, the verdict rules,
         // the fix-level routing and the fix counts the loop compares.
-        SeverityOverrides overrides = SeverityOverrides.Load(root, config);
+        SeverityOverrides overrides = severityOverrides.Load(root, config.ConfigReg);
         List<Diagnostic> overrideNotes = [];
         findings = [.. overrides.ApplyCited(findings, overrideNotes)];
         report.AddRange(overrideNotes);

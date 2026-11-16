@@ -247,7 +247,7 @@ public sealed class ReviewGatesRedModeTests : IDisposable
         RedOutcome outcome = RedClassifier.Evaluate(
             [new RedGateObservation("tests", "dotnet test --filter FullyQualifiedName~JobTests", 8, GateSummary("t1-task-gate.json", "tests"))],
             [file],
-            root);
+            projectOf => ReviewTestServices.ProjectFiles.NearestProjectFile(root, projectOf));
 
         Assert.False(outcome.Passed);
         Assert.Contains("zero tests", outcome.Reason, StringComparison.Ordinal);

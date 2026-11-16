@@ -23,7 +23,7 @@ namespace KyberWeave.Cli.Commands.Review;
 ///     Runs the deterministic gates the host declares under <c>review.gates</c>, or, with <c>--agent</c>,
 ///     one developer agent's gates under <c>review.task-gates</c> against the change that agent made.
 /// </summary>
-public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, IReviewEvidenceService evidenceWriter, INotSeatedStore notSeatedStore) : Command<ReviewGatesSettings>
+public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, IReviewEvidenceService evidenceWriter, INotSeatedStore notSeatedStore, IProjectFileLocator projectFiles) : Command<ReviewGatesSettings>
 {
     private const string NoGatesDeclared = "KW-REVIEW-020";
     private const string IndexState = "KW-REVIEW-038";
@@ -881,7 +881,7 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
     ///     Judges a RED task's gate runs. A failed gate the classifier accepts is reported as passed with the reason, one
     ///     it rejects keeps its failure, and the verdict is one diagnostic carrying the classifier's summary or the next step.
     /// </summary>
-    private static (GateReport Report, RedOutcome Outcome) ApplyRed(
+    private (GateReport Report, RedOutcome Outcome) ApplyRed(
         GateReport ran,
         IReadOnlyList<PlannedTaskGate> planned,
         Dictionary<string, string> outputs,
@@ -897,7 +897,7 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
                 observations.Add(new RedGateObservation(gate.Id, string.Join(' ', plannedGate.Run), gate.ExitCode, output));
         }
 
-        RedOutcome outcome = RedClassifier.Evaluate(observations, changed, repositoryRoot);
+        RedOutcome outcome = RedClassifier.Evaluate(observations, changed, file => projectFiles.NearestProjectFile(repositoryRoot, file));
         List<GateResult> results = [];
         foreach (GateResult gate in ran.Gates)
         {

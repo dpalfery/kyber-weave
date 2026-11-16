@@ -30,6 +30,9 @@ internal static class ReviewTestServices
     /// <summary>A type registrar over the application's registered services, so commands that take services are built as they are on the command line.</summary>
     public static ITypeRegistrar Registrar() => new ServiceCollectionTypeRegistrar(new ServiceCollection().AddWeaveApplication());
 
+    /// <summary>Finds the project file a source file belongs to.</summary>
+    public static IProjectFileLocator ProjectFiles { get; } = Provider.GetRequiredService<IProjectFileLocator>();
+
     /// <summary>Builds a command the way the command line does, from the registered services.</summary>
     public static T Create<T>()
         where T : class => ActivatorUtilities.CreateInstance<T>(Provider);

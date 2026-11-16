@@ -501,8 +501,8 @@ public static partial class RedClassifier
     /// <summary>Judges the runs of one RED task's gates.</summary>
     /// <param name="gates">Every gate that ran, in order.</param>
     /// <param name="ownFiles">The files the task changed; missing-symbol errors must be in these.</param>
-    /// <param name="repositoryRoot">The repository root, used to name the project a changed file belongs to; null names none.</param>
-    public static RedOutcome Evaluate(IReadOnlyList<RedGateObservation> gates, IReadOnlyList<string> ownFiles, string? repositoryRoot = null)
+    /// <param name="projectOf">Names the repository-relative project file a changed file belongs to, or null for none; when the delegate itself is null no project is named.</param>
+    public static RedOutcome Evaluate(IReadOnlyList<RedGateObservation> gates, IReadOnlyList<string> ownFiles, Func<string, string?>? projectOf = null)
     {
         ArgumentNullException.ThrowIfNull(gates);
         ArgumentNullException.ThrowIfNull(ownFiles);
@@ -527,7 +527,7 @@ public static partial class RedClassifier
                 }
                 else if (ZeroTests(gate))
                 {
-                    rejected[gate.Id] = ZeroTestsReason(gate, ownFiles, repositoryRoot);
+                    rejected[gate.Id] = ZeroTestsReason(gate, ownFiles, projectOf);
                 }
 
                 continue;
@@ -569,7 +569,7 @@ public static partial class RedClassifier
 
             if (ZeroTests(gate) || run is { Total: 0 })
             {
-                rejected[gate.Id] = ZeroTestsReason(gate, ownFiles, repositoryRoot);
+                rejected[gate.Id] = ZeroTestsReason(gate, ownFiles, projectOf);
                 continue;
             }
 
@@ -603,13 +603,13 @@ public static partial class RedClassifier
     private static bool ZeroTests(RedGateObservation gate) =>
         RedLanguages.All.Any(language => language.ZeroTests(gate.ExitCode, gate.Output));
 
-    private static string ZeroTestsReason(RedGateObservation gate, IReadOnlyList<string> ownFiles, string? repositoryRoot)
+    private static string ZeroTestsReason(RedGateObservation gate, IReadOnlyList<string> ownFiles, Func<string, string?>? projectOf)
     {
         string filter = FilterOf(gate.Command);
         string text = $"'{gate.Command}' ran zero tests: nothing matched the filter or project it uses ('{filter}'), so no test failed and there is no RED";
         foreach (string file in ownFiles)
         {
-            if (ProjectOf(file, repositoryRoot) is { } project)
+            if (projectOf?.Invoke(file) is { } project)
             {
                 return text + $". The host's review.task-gates for this agent does not cover {project}, which holds {file}: "
                        + "declare a task gate for that project under review.task-gates (or point this gate's filter at it), then run again";
@@ -617,35 +617,6 @@ public static partial class RedClassifier
         }
 
         return text + ". Check that the gate's project and filter select the tests this task wrote, or declare a task gate for the project that holds them under review.task-gates";
-    }
-
-    /// <summary>The nearest project file above <paramref name="file"/> (a .csproj, package.json, pyproject.toml, Cargo.toml or go.mod), repository-relative, or null.</summary>
-    public static string? ProjectOf(string file, string? repositoryRoot)
-    {
-        if (string.IsNullOrWhiteSpace(repositoryRoot))
-        {
-            return null;
-        }
-
-        string root = Path.GetFullPath(repositoryRoot);
-        string? directory = Path.GetDirectoryName(Path.GetFullPath(Path.Combine(root, file)));
-        while (directory is not null && directory.StartsWith(root, StringComparison.Ordinal))
-        {
-            if (Directory.Exists(directory))
-            {
-                string? found = Directory.EnumerateFiles(directory)
-                    .FirstOrDefault(path => Path.GetExtension(path) is ".csproj" or ".fsproj" or ".vbproj"
-                                            || Path.GetFileName(path) is "package.json" or "pyproject.toml" or "Cargo.toml" or "go.mod");
-                if (found is not null)
-                {
-                    return Path.GetRelativePath(root, found).Replace('\\', '/');
-                }
-            }
-
-            directory = Path.GetDirectoryName(directory);
-        }
-
-        return null;
     }
 
     private static RedOutcome Fail(string reason, Dictionary<string, string> accepted, Dictionary<string, string> rejected) =>

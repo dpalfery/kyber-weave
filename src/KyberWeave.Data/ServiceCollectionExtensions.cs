@@ -40,6 +40,8 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IReviewCycleStore>(_ => new FileReviewCycleStore());
         services.TryAddSingleton<INotSeatedStore>(_ => new FileNotSeatedStore());
         services.TryAddSingleton<IReviewEvidenceStore>(_ => new FileReviewEvidenceStore());
+        services.TryAddSingleton<ISeverityOverrideSource>(_ => new FileSeverityOverrideSource());
+        services.TryAddSingleton<IProjectFileLocator>(_ => new FileProjectFileLocator());
         services.TryAddSingleton<IBoundedFileReader>(_ => new FileBoundedFileReader());
         _ = services.AddWeaveArbiterData();
         return services;

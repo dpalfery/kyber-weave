@@ -19,7 +19,7 @@ namespace KyberWeave.Cli.Commands.Review;
 ///     cycle folder, writes the diff and the change half of the evidence, writes every packet and prints each seat's
 ///     dispatch block, the lenses a catalogue file pattern rules out, and the gate command to run alongside.
 /// </summary>
-public sealed class ReviewSeatsCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, IReviewEvidenceService evidenceWriter, INotSeatedStore notSeatedStore) : Command<ReviewSeatsSettings>
+public sealed class ReviewSeatsCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, IReviewEvidenceService evidenceWriter, INotSeatedStore notSeatedStore, ISeverityOverrideSource severityOverrides) : Command<ReviewSeatsSettings>
 {
     /// <summary>The command description shared by the real registration and the help tests.</summary>
     public const string Description =
@@ -108,9 +108,9 @@ public sealed class ReviewSeatsCommand(IReviewWorkTreeService trees, IReviewCycl
                 StrictnessName(config.Review.Policy.Strictness),
                 config.Review.Policy.MinConfidence,
                 config.Review.Policy.FixLevelName,
-                SeverityOverrides.GuidancePath(root, config),
+                severityOverrides.GuidancePath(root, config.ConfigReg),
                 Path.Combine(folder, "duplicates.json"),
-                SeverityOverrides.Load(root, config),
+                severityOverrides.Load(root, config.ConfigReg),
                 changed));
             notSeatedStore.Replace(folder, ReviewLensCatalogue.Names, seats.NotSeated);
         }
