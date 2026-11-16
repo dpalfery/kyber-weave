@@ -854,9 +854,15 @@ public sealed class AnalysisPersistenceTests
             UseShellExecute = false
         };
         using Process process = Process.Start(startInfo)!;
-        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(5));
-        _ = await process.StandardOutput.ReadToEndAsync(timeout.Token);
-        await process.WaitForExitAsync(timeout.Token);
+        Task<string> readOutputTask = process.StandardOutput.ReadToEndAsync();
+        Task completedRead = await Task.WhenAny(readOutputTask, Task.Delay(TimeSpan.FromSeconds(5)));
+        Assert.True(completedRead == readOutputTask, "Reading process standard output did not complete in time.");
+        _ = await readOutputTask;
+
+        Task exitTask = process.WaitForExitAsync();
+        Task completedExit = await Task.WhenAny(exitTask, Task.Delay(TimeSpan.FromSeconds(5)));
+        Assert.True(completedExit == exitTask, "Process did not exit in time.");
+        await exitTask;
 
         // Turn off AutoFlush so the write buffers, making Flush() write across the broken pipe and throw IOException.
         process.StandardInput.AutoFlush = false;
