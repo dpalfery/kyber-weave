@@ -18,15 +18,17 @@ keywords:
 
 # Implementation Tasks
 
-**Phase status:** Draft
+**Phase status:** Approved
+
+Owner approved 2026-11-16 ('Approve tasks'), given directly in the authoring session.
 
 **Development mode:** test-first
 
 **Autonomy:** autonomous
 
 Written 2026-11-16 against the draft [requirements](requirements.md) and [design](design.md). The
-owner approved both on 2026-11-16. This task list is still a draft awaiting the owner's review, and
-no machine task list has been generated from it.
+owner approved all three on 2026-11-16. The specification awaits the final approve-and-execute
+decision; until then it is not Ready and no machine task list has been generated from this file.
 
 These tasks deliver five phases. Each phase is its own pull request and leaves the product working
 with today's agents as the default, so any phase can ship without the next.
