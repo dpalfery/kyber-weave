@@ -106,7 +106,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
 - [ ] 1.4 Move the missing rules into the templates
   - **Objective:** Add every rule the inventory marks missing to its technology's template, add a SQL Server template and an AWS template, and put the cross-technology testing rules in the shared rules file.
   - **Files:**
-    - `products/kyber-squad/standards/`: the affected technology folders, new `sql-server/` and `aws/`, and `azure/`
+    - `products/kyber-squad/standards/`: the affected technology folders, the new sql-server and aws folders, and azure
     - `products/kyber-squad/standards/shared-rules.md`
     - `docs/kyber-squad/agent-rule-inventory.md`: every row resolved
     - `tests/KyberWeave.Tests/KyberStandardsTemplateShapeTests.cs`: the two new templates
@@ -119,7 +119,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
 - [ ] 1.5 Add the role and platform folder templates
   - **Objective:** Ship template folders for the `conductor`, `architect`, `reviewer` and `devops` roles and for the GitHub, Azure DevOps, GitLab and Jira platforms.
   - **Files:**
-    - `products/kyber-squad/standards/`: `conductor/`, `architect/`, `reviewer/`, `devops/`, `github/`, `azure-devops/`, `gitlab/`, `jira/`
+    - `products/kyber-squad/standards/`: the conductor, architect, reviewer, devops, github, azure-devops, gitlab and jira folders
     - `src/KyberWeave.Domain/Docs/Scaffolding/KyberStandardsTemplates.cs`: register them
     - `tests/KyberWeave.Tests/KyberStandardsTemplateShapeTests.cs`: role and platform cases
   - **Acceptance criteria:** Each of the eight folders passes the checks of task 1.1; the GitHub template states what the `github-actions` standard and the `github-devops` skill state today; no folder for a testing role exists.
