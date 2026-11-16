@@ -29,7 +29,6 @@ public sealed class ReviewSeatsCommand(IReviewSeatsService service, IProcessExec
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        string root = Path.GetFullPath(settings.Path);
         if (settings.BaseRef is not null && GitChangeParsing.ValidateBase(settings.BaseRef) is { } baseProblem)
         {
             Say($"kyber-weave review seats: error: {baseProblem}");
