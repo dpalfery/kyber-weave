@@ -18,7 +18,7 @@ straight into a harness's shell bypasses both. The strongest closure is a shell 
 that runs the full-run classifier before every shell command and refuses a `full` result.
 
 **Work.** Add a pre-tool-use style hook for each harness the Squad target catalogue lists
-(`src/KyberWeave.Core/Squad/Deployment/SquadTarget.cs`), which includes Claude Code, Copilot CLI,
+(`src/KyberWeave.Domain/Squad/Deployment/SquadTarget.cs`), which includes Claude Code, Copilot CLI,
 Factory, Pi, OpenCode and Antigravity. The hook replaces the soft caller test (the terminal check)
 with the classifier's answer. Each harness has its own hook format, so the shape of each hook is a
 per-harness decision and is not assumed here.
