@@ -1,7 +1,7 @@
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 
-namespace KyberWeave.Cli.Commands.Arbiter;
+namespace KyberWeave.Contracts.Services;
 
 /// <summary>Loads the host configuration for an Arbiter command and applies the user override.</summary>
 public interface IArbiterConfigResolver
