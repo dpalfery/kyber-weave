@@ -5,10 +5,10 @@ namespace KyberWeave.Cli.Commands.Utilities;
 /// <summary>One runtime prerequisite a status-line variant declares, and how to remedy its absence.</summary>
 /// <param name="Executable">The executable name doctor looks for on <c>PATH</c>.</param>
 /// <param name="Hint">An actionable remediation, printed only when the executable is missing.</param>
-internal sealed record UtilitiesStatusLinePrerequisite(string Executable, string Hint);
+public sealed record UtilitiesStatusLinePrerequisite(string Executable, string Hint);
 
 /// <summary>The prerequisites and harness binary each status-line variant declares (T0 inventory).</summary>
-internal static class UtilitiesStatusLinePrerequisites
+public static class UtilitiesStatusLinePrerequisites
 {
     /// <summary>The optional KyberDash recorder the <c>agy</c> variant hands its payload to (C8, D10).</summary>
     public const string KyberDashExecutable = "kyberdash";

@@ -44,6 +44,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IPlanTaskService>(sp => new PlanTaskService(
             sp.GetRequiredService<IRepositoryFileStore>(), sp.GetRequiredService<IBoundedProcessExecutor>()));
         services.TryAddSingleton<IStatusLineDeploymentService, StatusLineDeploymentService>();
+        services.TryAddSingleton<IStatusLineHostService, StatusLineHostService>();
         services.TryAddSingleton<ICodeGraphProvisioner, CodeGraphIndexProvisioner>();
         services.TryAddSingleton<IWorktreeIndexGuard, WorktreeIndexEnsurer>();
         services.TryAddSingleton<McpServerLiveProbe>();

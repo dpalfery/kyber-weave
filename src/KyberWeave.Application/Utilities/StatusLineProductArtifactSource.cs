@@ -1,6 +1,8 @@
+using KyberWeave.Cli.Commands.Utilities;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Domain.StatusLine;
 
-namespace KyberWeave.Cli.Commands.Utilities;
+namespace KyberWeave.Application.Utilities;
 
 /// <summary>Reads the status-line artifacts from the canonical product tree.</summary>
 /// <remarks>
@@ -11,17 +13,21 @@ namespace KyberWeave.Cli.Commands.Utilities;
 ///     that records each file's origin and licence is not deployed, because it describes the artifacts
 ///     rather than being one.
 /// </remarks>
-internal sealed class UtilitiesStatusLineProductArtifactSource : IUtilitiesStatusLineArtifactSource
+internal sealed class StatusLineProductArtifactSource : IUtilitiesStatusLineArtifactSource
 {
     private const string ManifestJsonFileName = "manifest.json";
     private const string ManifestYamlFileName = "manifest.yml";
 
+    private readonly IStatusLineFiles _files;
     private readonly string _productRoot;
 
+    /// <param name="files">Reads the artifact tree.</param>
     /// <param name="productRoot">The absolute path of <c>products/kyber-utilities/statusline</c>.</param>
-    public UtilitiesStatusLineProductArtifactSource(string productRoot)
+    public StatusLineProductArtifactSource(IStatusLineFiles files, string productRoot)
     {
+        ArgumentNullException.ThrowIfNull(files);
         ArgumentException.ThrowIfNullOrWhiteSpace(productRoot);
+        _files = files;
         _productRoot = Path.GetFullPath(productRoot);
     }
 
@@ -30,13 +36,13 @@ internal sealed class UtilitiesStatusLineProductArtifactSource : IUtilitiesStatu
     {
         string token = UtilitiesStatusLineTargetCatalog.GetToken(target);
         string directory = Path.Combine(_productRoot, DirectoryName(target));
-        if (!Directory.Exists(directory))
+        if (!_files.DirectoryExists(directory))
             throw new DirectoryNotFoundException(
                 $"The {token} status-line artifacts are missing from '{directory}'. Run this command " +
                 "from the repository checkout that holds 'products/kyber-utilities/statusline'.");
 
         List<StatusLineDeploymentFile> files = [];
-        foreach (string physicalPath in EnumerateFiles(directory))
+        foreach (string physicalPath in _files.EnumerateRegularFiles(directory))
         {
             string fileName = Path.GetFileName(physicalPath);
             if (string.Equals(fileName, ManifestJsonFileName, StringComparison.OrdinalIgnoreCase) ||
@@ -46,7 +52,7 @@ internal sealed class UtilitiesStatusLineProductArtifactSource : IUtilitiesStatu
             string relativePath = Path
                 .GetRelativePath(directory, physicalPath)
                 .Replace(Path.DirectorySeparatorChar, '/');
-            files.Add(new StatusLineDeploymentFile(relativePath, File.ReadAllBytes(physicalPath)));
+            files.Add(new StatusLineDeploymentFile(relativePath, _files.ReadAllBytes(physicalPath)));
         }
 
         if (files.Count == 0)
@@ -70,41 +76,5 @@ internal sealed class UtilitiesStatusLineProductArtifactSource : IUtilitiesStatu
                 target,
                 "No status-line artifact directory exists for this target.")
         };
-    }
-
-    /// <summary>
-    ///     Walks the artifact directory one level at a time, skipping symlinks.
-    /// </summary>
-    /// <remarks>
-    ///     <see cref="SearchOption.AllDirectories" /> follows directory symbolic links, so a link inside
-    ///     the artifact tree could make the walk read files outside it (C# coding standard, "Safe
-    ///     filesystem enumeration"). The product tree is repository-controlled, but the walk holds to
-    ///     the same rule as every other walk over a directory this repository did not create at run
-    ///     time.
-    /// </remarks>
-    private static IEnumerable<string> EnumerateFiles(string root)
-    {
-        Stack<string> pending = new();
-        pending.Push(root);
-        while (pending.Count > 0)
-        {
-            string directory = pending.Pop();
-            foreach (FileSystemInfo entry in new DirectoryInfo(directory).EnumerateFileSystemInfos(
-                         "*",
-                         new EnumerationOptions { RecurseSubdirectories = false, AttributesToSkip = 0 }))
-            {
-                if (entry.LinkTarget is not null) continue;
-
-                switch (entry)
-                {
-                    case DirectoryInfo child:
-                        pending.Push(child.FullName);
-                        break;
-                    case FileInfo file:
-                        yield return file.FullName;
-                        break;
-                }
-            }
-        }
     }
 }

@@ -54,4 +54,16 @@ public interface IStatusLineFiles
     /// <param name="path">The file or directory.</param>
     /// <returns>True for a link; false for anything else, a path that does not exist included.</returns>
     bool IsLinkOrReparsePoint(string path);
+
+    /// <summary>Whether the file carries the user-execute bit. Always true on a platform that has no such bit.</summary>
+    /// <param name="path">The file to inspect.</param>
+    bool HasUserExecuteBit(string path);
+
+    /// <summary>Sets the user, group and other execute bits on an existing file. A no-op on a platform that has no such bit.</summary>
+    /// <param name="path">The file to mark.</param>
+    void MarkExecutable(string path);
+
+    /// <summary>Every regular file beneath <paramref name="directory"/>, walked one level at a time and skipping symbolic links.</summary>
+    /// <param name="directory">The directory to walk.</param>
+    IEnumerable<string> EnumerateRegularFiles(string directory);
 }

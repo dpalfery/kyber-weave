@@ -18,17 +18,24 @@ public sealed class UtilitiesStatusLineStatusCommand : Command<UtilitiesStatusLi
 {
     private readonly IProcessEnvironment _environment;
     private readonly IStatusLineDeploymentService _plans;
+    private readonly IStatusLineHostService _host;
 
     /// <summary>Creates the command over the process environment its per-user roots are read from.</summary>
     /// <param name="environment">The process state the roots are read from.</param>
     /// <param name="plans">Reads the receipts.</param>
-    public UtilitiesStatusLineStatusCommand(IProcessEnvironment environment, IStatusLineDeploymentService plans)
+    /// <param name="host">Compares each owned file with its recorded digest.</param>
+    public UtilitiesStatusLineStatusCommand(
+        IProcessEnvironment environment,
+        IStatusLineDeploymentService plans,
+        IStatusLineHostService host)
     {
         ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(plans);
+        ArgumentNullException.ThrowIfNull(host);
 
         _environment = environment;
         _plans = plans;
+        _host = host;
     }
 
     /// <inheritdoc />
@@ -96,7 +103,7 @@ public sealed class UtilitiesStatusLineStatusCommand : Command<UtilitiesStatusLi
     }
 
     /// <summary>Reports one owned file. Returns <see langword="false" /> when it is missing or drifted.</summary>
-    private static bool ReportOwnedFile(string stagingRoot, StatusLineOwnedFile file)
+    private bool ReportOwnedFile(string stagingRoot, StatusLineOwnedFile file)
     {
         string physicalPath;
         try
@@ -114,7 +121,7 @@ public sealed class UtilitiesStatusLineStatusCommand : Command<UtilitiesStatusLi
         }
 
         UtilitiesStatusLineFileState state =
-            UtilitiesStatusLineFileCheck.Evaluate(physicalPath, file.Sha256);
+            _host.EvaluateOwnedFile(physicalPath, file.Sha256);
         switch (state)
         {
             case UtilitiesStatusLineFileState.Ok:

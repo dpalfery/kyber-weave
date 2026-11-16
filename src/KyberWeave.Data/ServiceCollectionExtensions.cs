@@ -48,6 +48,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IGitHookFiles, FileGitHookFiles>();
         services.TryAddSingleton<IMcpStdioSessionFactory, StdioMcpSessionFactory>();
         services.TryAddSingleton<IStatusLineFiles, FileStatusLineFiles>();
+        services.TryAddSingleton(_ => StatusLineVersionProbeRunner.Create());
         services.TryAddSingleton<IUserHostConfigStore, FileUserHostConfigStore>();
         services.TryAddSingleton<IGitCheckoutProbe>(_ => new GitCheckoutProbe());
         services.TryAddSingleton<IMcpConfigFiles>(_ => new PhysicalMcpConfigFiles());
