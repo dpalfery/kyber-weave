@@ -36,6 +36,8 @@ public static class SquadServiceCollectionExtensions
                 ? new LocalCheckoutSquadReleaseSource(local)
                 : sp.GetRequiredService<ISquadReleaseSource>()));
         services.TryAddSingleton<ISquadPackService, SquadPackService>();
+        services.TryAddSingleton<IArbiterRefreshTargets, CliArbiterRefreshTargets>();
+        services.TryAddSingleton<IArbiterHookRefresherFactory, ArbiterHookRefresherFactory>();
         services.TryAddSingleton<ISelfUpdateService>(sp => new SelfUpdateService(
             sp.GetRequiredService<Func<SelfUpdateHost>>(),
             sp.GetRequiredService<IProcessEnvironment>(),
