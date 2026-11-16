@@ -6,6 +6,7 @@ using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Docs.Validation;
 using Xunit;
+using KyberWeave.Tests.Fakes;
 
 namespace KyberWeave.Tests;
 
@@ -392,7 +393,7 @@ public class MultipleDocsRootTests : IDisposable
             """);
         string before = File.ReadAllText(configPath);
 
-        ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path);
+        ScaffoldResult result = DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
 
         Assert.Equal("docs", result.DocsRoot);
         Assert.Equal(before.TrimEnd('\r', '\n') + McpWiringFixture.AppendedDeclaration(), File.ReadAllText(configPath));
@@ -404,7 +405,7 @@ public class MultipleDocsRootTests : IDisposable
         string configPath = WriteHostConfig("ontology:\n  docs-root: [docs, automation]\n");
         string before = File.ReadAllText(configPath);
 
-        DocsScaffolder.Scaffold(_temp.Path, "automation");
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "automation");
 
         Assert.Equal(before.TrimEnd('\r', '\n') + McpWiringFixture.AppendedDeclaration(), File.ReadAllText(configPath));
     }
@@ -424,7 +425,7 @@ public class MultipleDocsRootTests : IDisposable
         string before = File.ReadAllText(configPath);
 
         InvalidDataException ex = Assert.Throws<InvalidDataException>(
-            () => DocsScaffolder.Scaffold(_temp.Path, "handbook"));
+            () => DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "handbook"));
 
         Assert.Contains("handbook", ex.Message, StringComparison.Ordinal);
         Assert.Contains("docs, automation", ex.Message, StringComparison.Ordinal);
@@ -437,7 +438,7 @@ public class MultipleDocsRootTests : IDisposable
     {
         string configPath = WriteHostConfig("ontology:\n  docs-root:\n  excluded-files: []\n");
 
-        DocsScaffolder.Scaffold(_temp.Path, "handbook");
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "handbook");
 
         Assert.Equal("handbook", KyberWeaveConfigLoader.Load(_temp.Path).Ontology.DocsRoot);
         Assert.Contains("excluded-files: []", File.ReadAllText(configPath), StringComparison.Ordinal);
@@ -460,7 +461,7 @@ public class MultipleDocsRootTests : IDisposable
             """);
         string before = File.ReadAllText(configPath);
 
-        DocsScaffolder.Scaffold(_temp.Path, "docs");
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "docs");
 
         Assert.Equal(before.TrimEnd('\r', '\n') + McpWiringFixture.AppendedDeclaration(), File.ReadAllText(configPath));
     }
@@ -478,7 +479,7 @@ public class MultipleDocsRootTests : IDisposable
         string before = File.ReadAllText(configPath);
 
         InvalidDataException ex = Assert.Throws<InvalidDataException>(
-            () => DocsScaffolder.Scaffold(_temp.Path, "handbook"));
+            () => DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "handbook"));
 
         Assert.Contains("handbook", ex.Message, StringComparison.Ordinal);
         Assert.Equal(before, File.ReadAllText(configPath));

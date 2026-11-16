@@ -9,6 +9,7 @@ using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Docs.Validation;
 using Xunit;
+using KyberWeave.Tests.Fakes;
 
 namespace KyberWeave.Tests;
 
@@ -63,7 +64,7 @@ public sealed class DocsScaffolderTests : IDisposable
     {
         Directory.CreateDirectory(Path.Combine(_temp.Path, existing));
 
-        ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path);
+        ScaffoldResult result = DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
 
         Assert.Equal(existing, result.DocsRoot);
         Assert.Equal(DocsRootSource.Convention, result.DocsRootSource);
@@ -75,7 +76,7 @@ public sealed class DocsScaffolderTests : IDisposable
         Directory.CreateDirectory(Path.Combine(_temp.Path, "6-Docs"));
         Directory.CreateDirectory(Path.Combine(_temp.Path, "docs"));
 
-        Assert.Equal("docs", DocsScaffolder.Scaffold(_temp.Path).DocsRoot);
+        Assert.Equal("docs", DocsTestCommands.Scaffolding.Scaffold(_temp.Path).DocsRoot);
     }
 
     /// <summary>
@@ -99,7 +100,7 @@ public sealed class DocsScaffolderTests : IDisposable
         Directory.CreateDirectory(Path.Combine(_temp.Path, "docs"));
         Directory.CreateDirectory(Path.Combine(_temp.Path, "6-Docs"));
 
-        ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path);
+        ScaffoldResult result = DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
 
         Assert.Equal("6-Docs", result.DocsRoot);
         Assert.Equal(DocsRootSource.Configuration, result.DocsRootSource);
@@ -127,7 +128,7 @@ public sealed class DocsScaffolderTests : IDisposable
         // A docs/ directory would be detected by convention, but validate ignores it.
         Directory.CreateDirectory(Path.Combine(_temp.Path, "docs"));
 
-        ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path);
+        ScaffoldResult result = DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
         string validateRoot = KyberWeaveConfigLoader.Load(_temp.Path).Ontology.DocsRoot;
 
         Assert.Equal(validateRoot, result.DocsRoot);
@@ -148,7 +149,7 @@ public sealed class DocsScaffolderTests : IDisposable
         WriteHostConfig(yaml);
 
         InvalidDataException exception = Assert.Throws<InvalidDataException>(
-            () => DocsScaffolder.Scaffold(_temp.Path, docsRoot));
+            () => DocsTestCommands.Scaffolding.Scaffold(_temp.Path, docsRoot));
 
         Assert.Contains(KyberWeaveConfigLoader.ConfigLoadErrorCode, exception.Message, StringComparison.Ordinal);
         Assert.Contains("kyber-weave.yml", exception.Message, StringComparison.Ordinal);
@@ -168,7 +169,7 @@ public sealed class DocsScaffolderTests : IDisposable
         const string yaml = "ontology: [unclosed";
         WriteHostConfig(yaml);
 
-        (int ExitCode, ScaffoldResult? Result, string? Error) attempt = DocsInitCommand.TryScaffold(new DocsInitSettings
+        (int ExitCode, ScaffoldResult? Result, string? Error) attempt = DocsInitCommand.TryScaffold(DocsTestCommands.Scaffolding, new DocsInitSettings
         {
             Path = _temp.Path,
             DocsRoot = docsRoot,
@@ -186,7 +187,7 @@ public sealed class DocsScaffolderTests : IDisposable
     [Fact]
     public void FallsBackToDocsWhenNoConventionalRootExists()
     {
-        ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path);
+        ScaffoldResult result = DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
 
         Assert.Equal("docs", result.DocsRoot);
         Assert.Equal(DocsRootSource.Convention, result.DocsRootSource);
@@ -198,7 +199,7 @@ public sealed class DocsScaffolderTests : IDisposable
     {
         Directory.CreateDirectory(Path.Combine(_temp.Path, "docs"));
 
-        ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path, docsRoot: "handbook");
+        ScaffoldResult result = DocsTestCommands.Scaffolding.Scaffold(_temp.Path, docsRoot: "handbook");
 
         Assert.Equal("handbook", result.DocsRoot);
         Assert.Equal(DocsRootSource.Explicit, result.DocsRootSource);
@@ -208,7 +209,7 @@ public sealed class DocsScaffolderTests : IDisposable
     [Fact]
     public void TheEmittedConfigPointsAtTheResolvedDocsRoot()
     {
-        DocsScaffolder.Scaffold(_temp.Path, docsRoot: "handbook");
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, docsRoot: "handbook");
 
         KyberWeaveConfig config = KyberWeaveConfigLoader.Load(_temp.Path);
 
@@ -222,7 +223,7 @@ public sealed class DocsScaffolderTests : IDisposable
     [Fact]
     public void TheEmittedConfigClearsInheritedFileExclusions()
     {
-        DocsScaffolder.Scaffold(_temp.Path);
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
 
         KyberWeaveConfig config = KyberWeaveConfigLoader.Load(_temp.Path);
 
@@ -235,7 +236,7 @@ public sealed class DocsScaffolderTests : IDisposable
         Directory.CreateDirectory(Path.Combine(_temp.Path, "docs"));
         File.WriteAllText(Path.Combine(_temp.Path, "docs", "catalog.md"), "hand written");
 
-        ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path);
+        ScaffoldResult result = DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
 
         Assert.Equal("hand written", Read("docs/catalog.md"));
         ScaffoldedFile catalog = result.Files.Single(f => f.RelativePath == "docs/catalog.md");
@@ -251,7 +252,7 @@ public sealed class DocsScaffolderTests : IDisposable
         Directory.CreateDirectory(Path.Combine(_temp.Path, "docs"));
         File.WriteAllText(Path.Combine(_temp.Path, "docs", "catalog.md"), "hand written");
 
-        ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path, force: true);
+        ScaffoldResult result = DocsTestCommands.Scaffolding.Scaffold(_temp.Path, force: true);
 
         Assert.NotEqual("hand written", Read("docs/catalog.md"));
         Assert.True(result.Files.Single(f => f.RelativePath == "docs/catalog.md").Written);
@@ -266,7 +267,7 @@ public sealed class DocsScaffolderTests : IDisposable
     [Fact]
     public void FreshInitCreatesOnlyTheNarrowLocalStateIgnoresAndNoEmptyGlossary()
     {
-        ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path);
+        ScaffoldResult result = DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
 
         Assert.Equal("cache/\nreceipts/\n", Read(".kyber-weave/.gitignore"));
         Assert.True(AnalysisCacheSafety.IsSafe(_temp.Path));
@@ -287,7 +288,7 @@ public sealed class DocsScaffolderTests : IDisposable
         const string existing = "# operator entry\nlocal-notes/";
         File.WriteAllText(Path.Combine(_temp.Path, ".kyber-weave", ".gitignore"), existing);
 
-        ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path, force: true);
+        ScaffoldResult result = DocsTestCommands.Scaffolding.Scaffold(_temp.Path, force: true);
 
         // The operator's bytes are an exact prefix; the boundary newline and the two narrow
         // entries are the only thing appended.
@@ -310,7 +311,7 @@ public sealed class DocsScaffolderTests : IDisposable
         File.WriteAllText(Path.Combine(_temp.Path, ".kyber-weave", ".gitignore"), existing);
         Assert.False(AnalysisCacheSafety.IsSafe(_temp.Path));
 
-        DocsScaffolder.Scaffold(_temp.Path);
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
 
         Assert.Equal(existing + "cache/\nreceipts/\n", Read(".kyber-weave/.gitignore"));
         Assert.True(AnalysisCacheSafety.IsSafe(_temp.Path));
@@ -328,8 +329,8 @@ public sealed class DocsScaffolderTests : IDisposable
         const string existing = "# local state\ncache/\nlocal-notes/\n";
         File.WriteAllText(Path.Combine(_temp.Path, ".kyber-weave", ".gitignore"), existing);
 
-        ScaffoldResult first = DocsScaffolder.Scaffold(_temp.Path);
-        ScaffoldResult second = DocsScaffolder.Scaffold(_temp.Path, force: true);
+        ScaffoldResult first = DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
+        ScaffoldResult second = DocsTestCommands.Scaffolding.Scaffold(_temp.Path, force: true);
 
         // The operator's bytes are an exact prefix and the receipts entry joins the cache
         // entry without the cache line being regenerated or repeated.
@@ -364,7 +365,7 @@ public sealed class DocsScaffolderTests : IDisposable
         File.WriteAllText(path, existing, Encoding.Unicode);
         byte[] originalBytes = File.ReadAllBytes(path);
 
-        DocsScaffolder.Scaffold(_temp.Path);
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
 
         byte[] appendedBytes = Encoding.Unicode.GetBytes("\r\ncache/\r\nreceipts/\r\n");
         Assert.Equal(originalBytes.Concat(appendedBytes), File.ReadAllBytes(path));
@@ -382,7 +383,7 @@ public sealed class DocsScaffolderTests : IDisposable
     {
         WriteHostConfig(HandMaintainedConfig);
 
-        ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path, force: true);
+        ScaffoldResult result = DocsTestCommands.Scaffolding.Scaffold(_temp.Path, force: true);
 
         // The operator's file is an exact prefix of what was written; the declaration is the
         // only thing appended after it.
@@ -405,7 +406,7 @@ public sealed class DocsScaffolderTests : IDisposable
     {
         WriteHostConfig(HandMaintainedConfig);
 
-        ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path, docsRoot: "handbook", force: true);
+        ScaffoldResult result = DocsTestCommands.Scaffolding.Scaffold(_temp.Path, docsRoot: "handbook", force: true);
 
         KyberWeaveConfig config = KyberWeaveConfigLoader.Load(_temp.Path);
         Assert.Equal("handbook", config.Ontology.DocsRoot);
@@ -439,13 +440,13 @@ public sealed class DocsScaffolderTests : IDisposable
     {
         WriteHostConfig(HandMaintainedConfig);
 
-        ScaffoldResult first = DocsScaffolder.Scaffold(_temp.Path);
+        ScaffoldResult first = DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
 
         string afterFirst = HandMaintainedConfig + McpWiringFixture.AppendedDeclaration();
         Assert.Equal(afterFirst, Read(ConfigPath));
         Assert.Equal(ScaffoldOutcome.Updated, first.Files.Single(f => f.RelativePath == ConfigPath).Outcome);
 
-        ScaffoldResult second = DocsScaffolder.Scaffold(_temp.Path);
+        ScaffoldResult second = DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
 
         Assert.Equal(afterFirst, Read(ConfigPath));
         Assert.Equal(ScaffoldOutcome.Preserved, second.Files.Single(f => f.RelativePath == ConfigPath).Outcome);
@@ -465,7 +466,7 @@ public sealed class DocsScaffolderTests : IDisposable
                 - archive
             """);
 
-        DocsScaffolder.Scaffold(_temp.Path, docsRoot: "handbook");
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, docsRoot: "handbook");
 
         KyberWeaveConfig config = KyberWeaveConfigLoader.Load(_temp.Path);
         Assert.Equal("handbook", config.Ontology.DocsRoot);
@@ -486,7 +487,7 @@ public sealed class DocsScaffolderTests : IDisposable
                 docs-root: extension-docs
             """);
 
-        DocsScaffolder.Scaffold(_temp.Path, docsRoot: "handbook");
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, docsRoot: "handbook");
 
         string text = Read(ConfigPath);
         Assert.Contains("\n  docs-root: 'handbook'\n", text, StringComparison.Ordinal);
@@ -507,7 +508,7 @@ public sealed class DocsScaffolderTests : IDisposable
               excluded-files: []
             """);
 
-        DocsScaffolder.Scaffold(_temp.Path, docsRoot: "handbook");
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, docsRoot: "handbook");
 
         string text = Read(ConfigPath);
         Assert.Contains("\n  docs-root: 'handbook'\n", text, StringComparison.Ordinal);
@@ -529,7 +530,7 @@ public sealed class DocsScaffolderTests : IDisposable
                   directory-name: .agents/agents
             """);
 
-        DocsScaffolder.Scaffold(_temp.Path, docsRoot: "handbook");
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, docsRoot: "handbook");
 
         KyberWeaveConfig config = KyberWeaveConfigLoader.Load(_temp.Path);
         Assert.Equal("handbook", config.Ontology.DocsRoot);
@@ -546,7 +547,7 @@ public sealed class DocsScaffolderTests : IDisposable
     {
         File.WriteAllText(Path.Combine(_temp.Path, "kyber-weave.yml"), HandMaintainedConfig);
 
-        ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path, docsRoot: "handbook", force: true);
+        ScaffoldResult result = DocsTestCommands.Scaffolding.Scaffold(_temp.Path, docsRoot: "handbook", force: true);
 
         Assert.False(File.Exists(Path.Combine(_temp.Path, ".kyber-weave", "kyber-weave.yml")));
         Assert.Equal("cache/\nreceipts/\n", Read(".kyber-weave/.gitignore"));
@@ -565,7 +566,7 @@ public sealed class DocsScaffolderTests : IDisposable
     [Fact]
     public void TheOntologyReferenceTheDiagnosticHintNamesIsEmitted()
     {
-        ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path);
+        ScaffoldResult result = DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
 
         Assert.True(File.Exists(
             Path.Combine(_temp.Path, result.DocsRoot, "documentation-ontology.md")));
@@ -574,7 +575,7 @@ public sealed class DocsScaffolderTests : IDisposable
     [Fact]
     public void TheSeededCatalogSuppliesTheOwnerTheScaffoldedDocumentsClaim()
     {
-        DocsScaffolder.Scaffold(_temp.Path, owner: "platform-team");
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, owner: "platform-team");
 
         DocumentSet set = new DocumentLoader(_temp.Path, "docs").Load();
 
@@ -594,7 +595,7 @@ public sealed class DocsScaffolderTests : IDisposable
     public void RefusesADocsRootThatEscapesTheRepositoryRoot(string escaping)
     {
         ArgumentException error = Assert.Throws<ArgumentException>(
-            () => DocsScaffolder.Scaffold(_temp.Path, escaping));
+            () => DocsTestCommands.Scaffolding.Scaffold(_temp.Path, escaping));
 
         Assert.Contains("outside the repository root", error.Message, StringComparison.Ordinal);
 
@@ -610,7 +611,7 @@ public sealed class DocsScaffolderTests : IDisposable
         using TempDirectory elsewhere = new TempDirectory();
 
         Assert.Throws<ArgumentException>(
-            () => DocsScaffolder.Scaffold(_temp.Path, Path.Combine(elsewhere.Path, "pwned")));
+            () => DocsTestCommands.Scaffolding.Scaffold(_temp.Path, Path.Combine(elsewhere.Path, "pwned")));
 
         Assert.Empty(Directory.GetFiles(elsewhere.Path, "*", SearchOption.AllDirectories));
     }
@@ -643,7 +644,7 @@ public sealed class DocsScaffolderTests : IDisposable
     public void RefusesAnOwnerThatWouldInjectStructure(string owner)
     {
         Assert.Throws<ArgumentException>(
-            () => DocsScaffolder.Scaffold(_temp.Path, owner: owner));
+            () => DocsTestCommands.Scaffolding.Scaffold(_temp.Path, owner: owner));
 
         Assert.Empty(Directory.GetFiles(_temp.Path, "*", SearchOption.AllDirectories));
     }
@@ -651,7 +652,7 @@ public sealed class DocsScaffolderTests : IDisposable
     [Fact]
     public void AcceptsOrdinaryOwnerAndDocsRootValues()
     {
-        ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path, "team-docs", "platform-team");
+        ScaffoldResult result = DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "team-docs", "platform-team");
 
         Assert.Equal("team-docs", result.DocsRoot);
         Assert.All(result.Files, f => Assert.True(f.Written));
@@ -667,7 +668,7 @@ public sealed class DocsScaffolderTests : IDisposable
         const string docsRoot = "docs'root#manual";
         const string owner = "platform's: \"core\" #1";
 
-        DocsScaffolder.Scaffold(_temp.Path, docsRoot, owner);
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, docsRoot, owner);
 
         OntologyConfig ontology = KyberWeaveConfigLoader.Load(_temp.Path).Ontology;
         DocumentSet set = new DocumentLoader(_temp.Path, ontology).Load();
@@ -685,7 +686,7 @@ public sealed class DocsScaffolderTests : IDisposable
     {
         const string owner = "platform's: \"core\" #1";
 
-        DocsScaffolder.Scaffold(_temp.Path, owner: owner, kyberStandards: true);
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, owner: owner, kyberStandards: true);
 
         OntologyConfig ontology = KyberWeaveConfigLoader.Load(_temp.Path).Ontology;
         DocumentSet set = new DocumentLoader(_temp.Path, ontology).Load();
@@ -699,7 +700,7 @@ public sealed class DocsScaffolderTests : IDisposable
     [Fact]
     public void TrimsOwnerBeforeWritingFrontmatterAndCatalog()
     {
-        DocsScaffolder.Scaffold(_temp.Path, owner: " platform ");
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, owner: " platform ");
 
         OntologyConfig ontology = KyberWeaveConfigLoader.Load(_temp.Path).Ontology;
         DocumentSet set = new DocumentLoader(_temp.Path, ontology).Load();
@@ -716,7 +717,7 @@ public sealed class DocsScaffolderTests : IDisposable
         const string yaml = "ontology:\n  docs-root: \"docs\\nstatus\"\n";
         WriteHostConfig(yaml);
 
-        Assert.Throws<ArgumentException>(() => DocsScaffolder.Scaffold(_temp.Path));
+        Assert.Throws<ArgumentException>(() => DocsTestCommands.Scaffolding.Scaffold(_temp.Path));
 
         Assert.Equal(yaml, Read(ConfigPath));
         Assert.Single(Directory.GetFiles(_temp.Path, "*", SearchOption.AllDirectories));
@@ -779,7 +780,7 @@ public sealed class DocsScaffolderTests : IDisposable
             "  technologies:\r" +
             "    - go\r");
 
-        DocsScaffolder.Scaffold(_temp.Path, "docs", reviewGates: false);
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "docs", reviewGates: false);
 
         // The load is the assertion that matters: it is what raised a duplicate-key error before
         // the writer read the file under its own line endings.
@@ -802,7 +803,7 @@ public sealed class DocsScaffolderTests : IDisposable
     [InlineData("handbook")]
     public void AFreshlyScaffoldedCorpusPassesDocsValidate(string? docsRoot)
     {
-        ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path, docsRoot);
+        ScaffoldResult result = DocsTestCommands.Scaffolding.Scaffold(_temp.Path, docsRoot);
 
         OntologyConfig ontology = KyberWeaveConfigLoader.Load(_temp.Path).Ontology;
         DocumentSet set = new DocumentLoader(_temp.Path, ontology).Load();
@@ -822,7 +823,7 @@ public sealed class DocsScaffolderTests : IDisposable
     [Fact]
     public void CreatesEveryCanonicalFolderWithItsOwnIndex()
     {
-        DocsScaffolder.Scaffold(_temp.Path, "docs");
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "docs");
 
         foreach (string folder in DocsLayout.Folders)
         {
@@ -834,7 +835,7 @@ public sealed class DocsScaffolderTests : IDisposable
     [Fact]
     public void PublishesTheRegistryInANewAgentsFileWhenTheRepositoryHasNone()
     {
-        ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path, "docs");
+        ScaffoldResult result = DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "docs");
 
         string agents = Read("AGENTS.md");
         Assert.Contains(ConfigRegMarkdown.StartMarker, agents, StringComparison.Ordinal);
@@ -866,7 +867,7 @@ public sealed class DocsScaffolderTests : IDisposable
             Also hand-authored.
             """);
 
-        DocsScaffolder.Scaffold(_temp.Path, "docs", force: false);
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "docs", force: false);
 
         string agents = Read("AGENTS.md");
         Assert.Contains("Hand-authored guidance that must survive.", agents, StringComparison.Ordinal);
@@ -878,11 +879,11 @@ public sealed class DocsScaffolderTests : IDisposable
     [Fact]
     public void RendersAutonomyAsAPropertyLineOnlyWhenTheKeyIsSet()
     {
-        DocsScaffolder.Scaffold(_temp.Path, "docs");
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "docs");
         Assert.DoesNotContain("<autonomy>", Read("AGENTS.md"), StringComparison.Ordinal);
 
         WriteHostConfig("ontology:\n  docs-root: docs\nautonomy: autonomous\n");
-        DocsScaffolder.Scaffold(_temp.Path);
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
 
         Assert.Contains("- **<autonomy>**: `autonomous`\n", Read("AGENTS.md"), StringComparison.Ordinal);
     }
@@ -891,32 +892,32 @@ public sealed class DocsScaffolderTests : IDisposable
     public void AutonomyRenderingIsIdempotentAndFollowsTheSetting()
     {
         WriteHostConfig("ontology:\n  docs-root: docs\nautonomy: supervised\n");
-        DocsScaffolder.Scaffold(_temp.Path);
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
         string first = Read("AGENTS.md");
 
-        ScaffoldResult second = DocsScaffolder.Scaffold(_temp.Path);
+        ScaffoldResult second = DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
 
         Assert.Equal(first, Read("AGENTS.md"));
         Assert.Contains(second.Files, f => f is { RelativePath: "AGENTS.md", Outcome: ScaffoldOutcome.Preserved });
 
         WriteHostConfig("ontology:\n  docs-root: docs\nautonomy: autonomous\n");
-        DocsScaffolder.Scaffold(_temp.Path);
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
         string agents = Read("AGENTS.md");
         Assert.Contains("`autonomous`", agents, StringComparison.Ordinal);
         Assert.DoesNotContain("`supervised`", agents, StringComparison.Ordinal);
 
         WriteHostConfig("ontology:\n  docs-root: docs\n");
-        DocsScaffolder.Scaffold(_temp.Path);
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
         Assert.DoesNotContain("<autonomy>", Read("AGENTS.md"), StringComparison.Ordinal);
     }
 
     [Fact]
     public void RerunningLeavesAnAlreadyCurrentRegistryAlone()
     {
-        DocsScaffolder.Scaffold(_temp.Path, "docs");
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "docs");
         string first = Read("AGENTS.md");
 
-        ScaffoldResult second = DocsScaffolder.Scaffold(_temp.Path, "docs");
+        ScaffoldResult second = DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "docs");
 
         Assert.Equal(first, Read("AGENTS.md"));
         Assert.Contains(second.Files, f => f is { RelativePath: "AGENTS.md", Outcome: ScaffoldOutcome.Preserved });
@@ -931,7 +932,7 @@ public sealed class DocsScaffolderTests : IDisposable
     {
         WriteHostConfig("ontology:\n  docs-root: docs\n  technologies:\n    - github-actions\n");
 
-        DocsScaffolder.Scaffold(_temp.Path);
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
 
         string standard = Read("docs/standards/github-actions/README.md");
         Assert.Contains("doc-type: coding-standard", standard, StringComparison.Ordinal);
@@ -957,7 +958,7 @@ public sealed class DocsScaffolderTests : IDisposable
         File.WriteAllText(Path.Combine(_temp.Path, "AGENTS.md"),
             $"# Working here\n\n{ConfigRegMarkdown.StartMarker}\n\n## Mine\n\nKeep me.\n");
 
-        Assert.Throws<InvalidDataException>(() => DocsScaffolder.Scaffold(_temp.Path, "docs"));
+        Assert.Throws<InvalidDataException>(() => DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "docs"));
         Assert.Contains("Keep me.", Read("AGENTS.md"), StringComparison.Ordinal);
     }
 
@@ -971,7 +972,7 @@ public sealed class DocsScaffolderTests : IDisposable
     {
         string today = DateTime.UtcNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
 
-        ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path, kyberStandards: true);
+        ScaffoldResult result = DocsTestCommands.Scaffolding.Scaffold(_temp.Path, kyberStandards: true);
 
         // All 11 standards under <docs-root>/standards/<tech>/README.md are created
         Assert.Equal(KyberStandardsTemplates.All.Count, KyberStandardsTemplates.All.Count(tech =>
@@ -1044,14 +1045,14 @@ public sealed class DocsScaffolderTests : IDisposable
         File.WriteAllText(Path.Combine(_temp.Path, "docs", "standards", "csharp", "README.md"), customText);
 
         // Run without force -> Skipped, file untouched
-        ScaffoldResult result1 = DocsScaffolder.Scaffold(_temp.Path, kyberStandards: true, force: false);
+        ScaffoldResult result1 = DocsTestCommands.Scaffolding.Scaffold(_temp.Path, kyberStandards: true, force: false);
         ScaffoldedFile csharpFile1 = result1.Files.Single(f => f.RelativePath == "docs/standards/csharp/README.md");
         Assert.Equal(ScaffoldOutcome.Skipped, csharpFile1.Outcome);
         Assert.False(csharpFile1.Written);
         Assert.Equal(customText, Read("docs/standards/csharp/README.md"));
 
         // Run with force -> Updated, file overwritten with rich template
-        ScaffoldResult result2 = DocsScaffolder.Scaffold(_temp.Path, kyberStandards: true, force: true);
+        ScaffoldResult result2 = DocsTestCommands.Scaffolding.Scaffold(_temp.Path, kyberStandards: true, force: true);
         ScaffoldedFile csharpFile2 = result2.Files.Single(f => f.RelativePath == "docs/standards/csharp/README.md");
         Assert.Equal(ScaffoldOutcome.Updated, csharpFile2.Outcome);
         Assert.True(csharpFile2.Written);

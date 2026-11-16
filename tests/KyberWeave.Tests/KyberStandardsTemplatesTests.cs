@@ -3,6 +3,7 @@ using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Parsing;
 using Xunit;
+using KyberWeave.Tests.Fakes;
 
 namespace KyberWeave.Tests;
 

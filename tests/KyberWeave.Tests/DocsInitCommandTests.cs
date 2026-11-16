@@ -3,6 +3,7 @@ using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Docs.Scaffolding;
 using Spectre.Console.Cli;
 using Xunit;
+using KyberWeave.Tests.Fakes;
 
 namespace KyberWeave.Tests;
 
@@ -69,7 +70,7 @@ public sealed class DocsInitCommandTests : IDisposable
             NoSkill = true
         };
 
-        (int tryExitCode, ScaffoldResult? result, string? error) = DocsInitCommand.TryScaffold(initSettings);
+        (int tryExitCode, ScaffoldResult? result, string? error) = DocsInitCommand.TryScaffold(DocsTestCommands.Scaffolding, initSettings);
         Assert.Equal(0, tryExitCode);
         Assert.Null(error);
         Assert.NotNull(result);

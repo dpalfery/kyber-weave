@@ -118,7 +118,7 @@ public sealed class McpProjectPathTests : IDisposable
         string repo = Path.Combine(_temp.Path, "repo");
         Directory.CreateDirectory(repo);
         Git(repo, "init", "-q", "-b", "main");
-        DocsScaffolder.Scaffold(repo);
+        DocsTestCommands.Scaffolding.Scaffold(repo);
         Git(repo, "add", "-A");
         Git(repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "init");
         return repo;

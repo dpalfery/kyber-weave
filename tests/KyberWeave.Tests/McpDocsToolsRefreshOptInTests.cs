@@ -6,6 +6,7 @@ using KyberWeave.Core.Docs.Search;
 using KyberWeave.Domain.CodeGraph;
 using KyberWeave.Mcp;
 using Xunit;
+using KyberWeave.Tests.Fakes;
 
 namespace KyberWeave.Tests;
 
@@ -56,7 +57,7 @@ public sealed class McpDocsToolsRefreshOptInTests : IDisposable
     [Fact]
     public void DocsToolsBuiltWithoutARefreshScheduleAnswerFromTheDocumentsOnDisk()
     {
-        DocsScaffolder.Scaffold(_root.Path);
+        DocsTestCommands.Scaffolding.Scaffold(_root.Path);
         McpDeclarationFixture.RequireCodeGraph(_root.Path);
 
         string response = ToolsWithoutARefreshSchedule(_root.Path).Explore(ScaffoldedDocumentId);

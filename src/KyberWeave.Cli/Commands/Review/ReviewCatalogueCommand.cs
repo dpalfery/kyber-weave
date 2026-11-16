@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Scaffolding;
@@ -11,13 +12,20 @@ namespace KyberWeave.Cli.Commands.Review;
 /// </summary>
 /// <remarks>
 /// The block is the same one <c>docs init</c> would write: it is rendered by
-/// <see cref="ReviewBlockWriter.Plan"/> for the declared technologies (or <c>--technology</c>),
+/// <see cref="IReviewGateCatalogue.Plan"/> for the declared technologies (or <c>--technology</c>),
 /// which detects each family's project roots the same way. The plan only reads, so the run
 /// leaves every file under the path untouched.
 /// </remarks>
 public sealed class ReviewCatalogueCommand : Command<ReviewCatalogueSettings>
 {
     private const int ClientInputExitCode = 2;
+
+    private readonly IReviewGateCatalogue _catalogue;
+
+    /// <summary>Creates the command over the catalogue service the container resolves.</summary>
+    /// <param name="catalogue">Renders the block for the declared technologies.</param>
+    public ReviewCatalogueCommand(IReviewGateCatalogue catalogue) =>
+        _catalogue = catalogue ?? throw new ArgumentNullException(nameof(catalogue));
 
     /// <inheritdoc />
     public override int Execute(
@@ -64,7 +72,7 @@ public sealed class ReviewCatalogueCommand : Command<ReviewCatalogueSettings>
             }
         }
 
-        ReviewGatesPlan plan = ReviewBlockWriter.Plan(root, technologies);
+        ReviewGatesPlan plan = _catalogue.Plan(root, technologies);
 
         if (!plan.ShouldWrite)
         {

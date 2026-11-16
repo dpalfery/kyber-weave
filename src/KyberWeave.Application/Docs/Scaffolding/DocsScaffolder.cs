@@ -1,5 +1,7 @@
 using System.IO.Enumeration;
 using System.Text;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review.Catalogue;
 
@@ -23,8 +25,13 @@ namespace KyberWeave.Core.Docs.Scaffolding;
 /// reach it and only its docs root is ever rewritten.
 /// </para>
 /// </remarks>
-public static class DocsScaffolder
+public sealed class DocsScaffolder : IDocsScaffoldingService
 {
+    private readonly IRepositoryFileStore _files;
+    private readonly IKyberWeaveConfigRepository _config;
+    private readonly TimeProvider _time;
+    private readonly ReviewBlockWriter _reviewBlock;
+
     private const string AnalysisCacheIgnorePath = ".kyber-weave/.gitignore";
     private const string AnalysisCacheIgnoreEntry = "cache/";
 
@@ -39,9 +46,29 @@ public static class DocsScaffolder
     private const string AgentsFilePath = "AGENTS.md";
 
     /// <summary>Roots checked, in order, when no docs root is supplied.</summary>
-    private static readonly string[] ConventionalRoots = ["docs", "6-Docs", "doc", "documentation"];
+    private readonly string[] ConventionalRoots = ["docs", "6-Docs", "doc", "documentation"];
 
-    public static ScaffoldResult Scaffold(
+    /// <summary>Creates the scaffolder over the ports it reads and writes through.</summary>
+    /// <param name="files">Reads and writes the repository's files.</param>
+    /// <param name="config">Loads and locates the host configuration.</param>
+    /// <param name="lister">Lists the repository's files, for project-root detection.</param>
+    /// <param name="tree">Answers the path questions the review configuration parser asks.</param>
+    /// <param name="time">Supplies the date every generated document carries.</param>
+    public DocsScaffolder(
+        IRepositoryFileStore files,
+        IKyberWeaveConfigRepository config,
+        IRepositoryFileLister lister,
+        IRepositoryTreeProbe tree,
+        TimeProvider time)
+    {
+        _files = files ?? throw new ArgumentNullException(nameof(files));
+        _config = config ?? throw new ArgumentNullException(nameof(config));
+        _time = time ?? throw new ArgumentNullException(nameof(time));
+        _reviewBlock = new ReviewBlockWriter(files, lister, tree);
+    }
+
+    /// <inheritdoc />
+    public ScaffoldResult Scaffold(
         string repoRoot,
         string? docsRoot = null,
         string owner = "unassigned",
@@ -54,14 +81,14 @@ public static class DocsScaffolder
 
         ArgumentException.ThrowIfNullOrWhiteSpace(owner);
         string resolvedOwner = owner.Trim();
-        RequireCatalogValue(resolvedOwner, nameof(owner));
+        ScaffoldValues.RequireCatalogValue(resolvedOwner, nameof(owner));
 
         KyberWeaveConfigLoadResult loadedConfig = RequireLoadableHostConfig(root);
         (string DocsRoot, DocsRootSource Source) resolution = string.IsNullOrWhiteSpace(docsRoot)
             ? ResolveDocsRoot(root, loadedConfig)
             : (docsRoot.Trim().Replace('\\', '/').TrimEnd('/'), DocsRootSource.Explicit);
         string resolvedDocsRoot = resolution.DocsRoot;
-        resolvedDocsRoot = RequireEmittableValue(resolvedDocsRoot, nameof(docsRoot));
+        resolvedDocsRoot = ScaffoldValues.RequireEmittableValue(resolvedDocsRoot, nameof(docsRoot));
 
         // Checked before the first write, not only inside Write. The host config resolves
         // inside the root and would otherwise be created successfully and left behind,
@@ -86,34 +113,34 @@ public static class DocsScaffolder
         // block at creation, and so the declared technologies are the merged ones when
         // --kyber-standards is passed. Whether the file already had a review section is read
         // up front too: the section is host-owned from then on and never rewritten.
-        ReviewGatesPlan? reviewPlan = reviewGates ? ReviewBlockWriter.Plan(root, ontology.Technologies) : null;
-        string? preexistingConfigPath = KyberWeaveConfigLoader.FindConfigPath(root);
+        ReviewGatesPlan? reviewPlan = reviewGates ? _reviewBlock.Plan(root, ontology.Technologies) : null;
+        string? preexistingConfigPath = _config.FindConfigPath(root);
         bool hadReviewSection = preexistingConfigPath is not null
-            && ReviewBlockWriter.HasReviewSection(File.ReadAllText(preexistingConfigPath));
+            && ReviewBlockWriter.HasReviewSection(_files.ReadAllText(preexistingConfigPath));
 
         List<ScaffoldedFile> files =
         [
             WriteHostConfig(root, resolvedDocsRoot, kyberStandards, ReviewBlockFor(reviewPlan)),
             WriteLocalStateIgnore(root),
             Write(root, DocsLayout.Ontology(resolvedDocsRoot),
-                OntologyReference(resolvedDocsRoot, resolvedOwner), force),
+                DocsScaffoldTemplates.OntologyReference(resolvedDocsRoot, resolvedOwner, Today), force),
             Write(root, $"{resolvedDocsRoot}/catalog.md",
-                Catalog(resolvedOwner), force),
+                DocsScaffoldTemplates.Catalog(resolvedOwner, Today), force),
             Write(root, DocsLayout.Index(resolvedDocsRoot),
-                DocumentationIndex(resolvedDocsRoot, resolvedOwner), force)
+                DocsScaffoldTemplates.DocumentationIndex(resolvedDocsRoot, resolvedOwner, Today), force)
         ];
 
         foreach (string folder in DocsLayout.Folders)
         {
             files.Add(Write(root, DocsLayout.FolderIndex(resolvedDocsRoot, folder),
-                FolderIndex(folder, resolvedOwner), force));
+                DocsScaffoldTemplates.FolderIndex(folder, resolvedOwner, Today), force));
         }
 
         foreach (string technology in ontology.Technologies)
         {
             string standardContent = kyberStandards && KyberStandardsTemplates.TryRender(technology, resolvedOwner, Today, out string? rendered)
                 ? rendered
-                : TechnologyStandard(technology, resolvedOwner);
+                : DocsScaffoldTemplates.TechnologyStandard(technology, resolvedOwner, Today);
 
             files.Add(Write(root, DocsLayout.TechnologyStandard(resolvedDocsRoot, technology),
                 standardContent, force));
@@ -129,14 +156,14 @@ public static class DocsScaffolder
     }
 
     /// <summary>The rendered block to write, or null when there is nothing to write.</summary>
-    private static RenderedReviewBlock? ReviewBlockFor(ReviewGatesPlan? reviewPlan) =>
+    private RenderedReviewBlock? ReviewBlockFor(ReviewGatesPlan? reviewPlan) =>
         reviewPlan is { ShouldWrite: true } ? reviewPlan.Rendered : null;
 
     /// <summary>
     /// Accounts for the review section after the host config was written: what was appended,
     /// what was already host-owned, or that nothing was declared to write.
     /// </summary>
-    private static ReviewGatesOutcome BuildReviewOutcome(
+    private ReviewGatesOutcome BuildReviewOutcome(
         string repoRoot,
         ReviewGatesPlan? reviewPlan,
         bool hadReviewSection,
@@ -156,10 +183,10 @@ public static class DocsScaffolder
 
         // WriteHostConfig always ensures a host config, so this resolves; the guard names the
         // invariant rather than letting a null flow into the file read below.
-        string configPath = KyberWeaveConfigLoader.FindConfigPath(repoRoot)
+        string configPath = _config.FindConfigPath(repoRoot)
             ?? throw new InvalidOperationException(
                 $"The scaffolded host configuration for '{repoRoot}' could not be found.");
-        bool hasReviewSection = ReviewBlockWriter.HasReviewSection(File.ReadAllText(configPath));
+        bool hasReviewSection = ReviewBlockWriter.HasReviewSection(_files.ReadAllText(configPath));
 
         if (hasReviewSection && !hadReviewSection)
         {
@@ -199,11 +226,11 @@ public static class DocsScaffolder
     /// The first conventional documentation directory that already exists, else "docs".
     /// Adopting an existing tree is the common case; creating one is not.
     /// </summary>
-    private static string DetectDocsRoot(string repoRoot)
+    private string DetectDocsRoot(string repoRoot)
     {
         foreach (string candidate in ConventionalRoots)
         {
-            if (Directory.Exists(Path.Combine(repoRoot, candidate)))
+            if (_files.DirectoryExists(Path.Combine(repoRoot, candidate)))
                 return candidate;
         }
 
@@ -219,7 +246,7 @@ public static class DocsScaffolder
     /// <c>docs validate</c> then reads. Only a missing config falls back to
     /// <see cref="DetectDocsRoot"/>; an invalid or unreadable one must stop scaffolding.
     /// </summary>
-    private static (string DocsRoot, DocsRootSource Source) ResolveDocsRoot(
+    private (string DocsRoot, DocsRootSource Source) ResolveDocsRoot(
         string repoRoot,
         KyberWeaveConfigLoadResult loaded)
     {
@@ -234,49 +261,16 @@ public static class DocsScaffolder
     /// cannot be read is operator state requiring repair, not permission to infer a
     /// different root and write a second corpus.
     /// </summary>
-    private static KyberWeaveConfigLoadResult RequireLoadableHostConfig(string repoRoot)
+    private KyberWeaveConfigLoadResult RequireLoadableHostConfig(string repoRoot)
     {
-        KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(repoRoot);
+        KyberWeaveConfigLoadResult loaded = _config.TryLoad(repoRoot);
         if (loaded.Success)
             return loaded;
 
         string path = loaded.ConfigPath ?? KyberWeaveYamlParser.DefaultFileName;
         throw new InvalidDataException(
-            $"{KyberWeaveConfigLoader.ConfigLoadErrorCode}: Failed to load '{path}': " +
+            $"{IDocsHostConfiguration.ConfigLoadErrorCode}: Failed to load '{path}': " +
             (loaded.Error ?? "The configuration could not be read."));
-    }
-
-    /// <summary>
-    /// Rejects values that cannot remain on one generated line.
-    /// </summary>
-    /// <remarks>
-    /// YAML punctuation is quoted at the emission site. Control characters still change
-    /// the generated document's line structure and are therefore rejected before any write.
-    /// </remarks>
-    private static string RequireEmittableValue(string value, string parameterName)
-    {
-        if (value.Any(char.IsControl))
-        {
-            throw new ArgumentException(
-                $"'{parameterName}' may not contain control characters. " +
-                "Generated values must remain on one line.",
-                parameterName);
-        }
-
-        return value;
-    }
-
-    /// <summary>Rejects values that would add a column to the pipe-delimited catalog row.</summary>
-    private static void RequireCatalogValue(string value, string parameterName)
-    {
-        RequireEmittableValue(value, parameterName);
-        if (value.Contains('|', StringComparison.Ordinal))
-        {
-            throw new ArgumentException(
-                $"'{parameterName}' may not contain '|'. " +
-                "The value is written into a pipe-delimited catalog row.",
-                parameterName);
-        }
     }
 
     /// <summary>
@@ -288,7 +282,7 @@ public static class DocsScaffolder
     /// that argument is rooted, and <c>..</c> segments walk upward, so an unchecked
     /// operator-supplied docs root places files anywhere the process can reach.
     /// </remarks>
-    private static string RequireContained(string repoRoot, string relativePath, string parameterName)
+    private string RequireContained(string repoRoot, string relativePath, string parameterName)
     {
         string absolute = Path.GetFullPath(
             Path.Combine(repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
@@ -341,20 +335,20 @@ public static class DocsScaffolder
     /// claims with the tool's guess, showing up in review as changes nobody made.
     /// </para>
     /// </remarks>
-    private static ScaffoldedFile WriteHostConfig(
+    private ScaffoldedFile WriteHostConfig(
         string repoRoot,
         string docsRoot,
         bool kyberStandards,
         RenderedReviewBlock? reviewBlock)
     {
-        string? existingPath = KyberWeaveConfigLoader.FindConfigPath(repoRoot);
+        string? existingPath = _config.FindConfigPath(repoRoot);
         if (existingPath is null)
         {
-            string created = HostConfig(docsRoot, kyberStandards);
+            string created = DocsScaffoldTemplates.HostConfig(docsRoot, kyberStandards);
             if (reviewBlock is not null)
             {
                 string finalText = created.TrimEnd('\r', '\n') + "\n\n" + ReviewBlockWriter.KeyFirstYaml(reviewBlock);
-                ReviewBlockWriter.ValidateFinalText(finalText, repoRoot, reviewBlock);
+                _reviewBlock.ValidateFinalText(finalText, repoRoot, reviewBlock);
                 created = finalText;
             }
 
@@ -366,7 +360,7 @@ public static class DocsScaffolder
         }
 
         string relativePath = Path.GetRelativePath(repoRoot, existingPath).Replace('\\', '/');
-        string existing = File.ReadAllText(existingPath);
+        string existing = _files.ReadAllText(existingPath);
         string updated = HostConfigYaml.WithDocsRoot(existing, docsRoot);
         if (kyberStandards)
         {
@@ -389,7 +383,7 @@ public static class DocsScaffolder
         bool reviewAppended = false;
         if (reviewBlock is not null && !ReviewBlockWriter.HasReviewSection(updated))
         {
-            updated = ReviewBlockWriter.AppendBlock(updated, reviewBlock, repoRoot);
+            updated = _reviewBlock.AppendBlock(updated, reviewBlock, repoRoot);
             reviewAppended = true;
         }
 
@@ -421,7 +415,7 @@ public static class DocsScaffolder
 
         string note = $"{string.Join(", ", changes)}; the rest of the file is untouched";
 
-        File.WriteAllText(existingPath, updated);
+        _files.WriteAllText(existingPath, updated);
         return new ScaffoldedFile(
             relativePath,
             ScaffoldOutcome.Updated,
@@ -438,7 +432,7 @@ public static class DocsScaffolder
     /// rewritten whether or not <c>force</c> was passed — <c>force</c> governs hand-authored
     /// content, and this block is neither hand-authored nor safe to leave stale.
     /// </remarks>
-    private static ScaffoldedFile WriteConfigReg(
+    private ScaffoldedFile WriteConfigReg(
         string repoRoot,
         string docsRoot,
         IReadOnlyList<ConfigRegEntry> entries,
@@ -447,14 +441,14 @@ public static class DocsScaffolder
         string absolute = RequireContained(repoRoot, AgentsFilePath, nameof(repoRoot));
         string block = ConfigRegMarkdown.Render(entries, autonomy);
 
-        if (!File.Exists(absolute))
+        if (!_files.FileExists(absolute))
         {
-            File.WriteAllText(absolute, ConfigRegMarkdown.NewAgentsFile(block, docsRoot));
+            _files.WriteAllText(absolute, ConfigRegMarkdown.NewAgentsFile(block, docsRoot));
             return new ScaffoldedFile(
                 AgentsFilePath, ScaffoldOutcome.Created, "Config Reg, and a file to hold it");
         }
 
-        string existing = File.ReadAllText(absolute);
+        string existing = _files.ReadAllText(absolute);
         string updated = ConfigRegMarkdown.Splice(existing, block);
         if (string.Equals(existing, updated, StringComparison.Ordinal))
         {
@@ -462,7 +456,7 @@ public static class DocsScaffolder
                 AgentsFilePath, ScaffoldOutcome.Preserved, "Config Reg already current");
         }
 
-        File.WriteAllText(absolute, updated);
+        _files.WriteAllText(absolute, updated);
         return new ScaffoldedFile(
             AgentsFilePath,
             ScaffoldOutcome.Updated,
@@ -481,19 +475,19 @@ public static class DocsScaffolder
     /// The two entries are decided independently: a host that already ignores the cache still
     /// needs the receipts directory, which an older scaffold never wrote.
     /// </remarks>
-    private static ScaffoldedFile WriteLocalStateIgnore(string repoRoot)
+    private ScaffoldedFile WriteLocalStateIgnore(string repoRoot)
     {
         string absolute = RequireContained(repoRoot, AnalysisCacheIgnorePath, nameof(repoRoot));
-        if (!File.Exists(absolute))
+        if (!_files.FileExists(absolute))
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(absolute)!);
-            File.WriteAllText(
+            _files.CreateDirectory(Path.GetDirectoryName(absolute)!);
+            _files.WriteAllText(
                 absolute,
                 AnalysisCacheIgnoreEntry + "\n" + McpReceiptsIgnoreEntry + "\n");
             return new ScaffoldedFile(AnalysisCacheIgnorePath, ScaffoldOutcome.Created);
         }
 
-        byte[] existingBytes = File.ReadAllBytes(absolute);
+        byte[] existingBytes = _files.ReadAllBytes(absolute);
         (Encoding? encoding, int preambleLength) = DetectEncoding(existingBytes);
         string existing = encoding.GetString(
             existingBytes,
@@ -522,7 +516,7 @@ public static class DocsScaffolder
         string newline = ExistingNewline(existing);
         string boundary = existing.Length == 0 || EndsWithNewline(existing) ? string.Empty : newline;
         byte[] appendedBytes = encoding.GetBytes(boundary + string.Join(newline, missing) + newline);
-        using (FileStream stream = File.Open(absolute, FileMode.Append, FileAccess.Write, FileShare.None))
+        using (Stream stream = _files.OpenAppend(absolute))
         {
             stream.Write(appendedBytes);
         }
@@ -539,7 +533,7 @@ public static class DocsScaffolder
     /// rule with no negation semantics of its own, and a line that merely starts with the entry
     /// (<c>receipts/archive/</c>) does not ignore the directory the wiring writes into.
     /// </remarks>
-    private static bool HasIgnoreEntry(string content, string entry)
+    private bool HasIgnoreEntry(string content, string entry)
     {
         using StringReader reader = new StringReader(content);
         while (reader.ReadLine() is { } line)
@@ -551,7 +545,7 @@ public static class DocsScaffolder
         return false;
     }
 
-    private static (Encoding Encoding, int PreambleLength) DetectEncoding(byte[] content) =>
+    private (Encoding Encoding, int PreambleLength) DetectEncoding(byte[] content) =>
         content switch
         {
             [0x00, 0x00, 0xFE, 0xFF, ..] =>
@@ -563,7 +557,7 @@ public static class DocsScaffolder
             _ => (new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), 0)
         };
 
-    private static bool HasEffectiveAnalysisCacheIgnore(string content)
+    private bool HasEffectiveAnalysisCacheIgnore(string content)
     {
         bool protectedByExactEntry = false;
         using StringReader reader = new StringReader(content);
@@ -586,7 +580,7 @@ public static class DocsScaffolder
         return protectedByExactEntry;
     }
 
-    private static bool NegatesAnalysisCacheProtection(string pattern)
+    private bool NegatesAnalysisCacheProtection(string pattern)
     {
         if (pattern.StartsWith('/')) pattern = pattern[1..];
         if (pattern.Length == 0 || pattern.StartsWith('#')) return false;
@@ -615,7 +609,7 @@ public static class DocsScaffolder
 #pragma warning restore CA1847
     }
 
-    private static string ExistingNewline(string content)
+    private string ExistingNewline(string content)
     {
         int lineFeed = content.IndexOf('\n', StringComparison.Ordinal);
         if (lineFeed >= 0)
@@ -624,419 +618,26 @@ public static class DocsScaffolder
         return content.Contains('\r', StringComparison.Ordinal) ? "\r" : "\n";
     }
 
-    private static bool EndsWithNewline(string content) =>
+    private bool EndsWithNewline(string content) =>
         content.EndsWith('\n') || content.EndsWith('\r');
 
-    private static ScaffoldedFile Write(string repoRoot, string relativePath, string content, bool force)
+    private ScaffoldedFile Write(string repoRoot, string relativePath, string content, bool force)
     {
         // Enforced per write as well as up front, so the invariant holds for every path
         // this type will ever emit, not only the ones routed through the docs root.
         string absolute = RequireContained(repoRoot, relativePath, nameof(relativePath));
 
-        bool existed = File.Exists(absolute);
+        bool existed = _files.FileExists(absolute);
         if (existed && !force)
             return new ScaffoldedFile(relativePath, ScaffoldOutcome.Skipped);
 
-        Directory.CreateDirectory(Path.GetDirectoryName(absolute)!);
-        File.WriteAllText(absolute, content);
+        _files.CreateDirectory(Path.GetDirectoryName(absolute)!);
+        _files.WriteAllText(absolute, content);
         return new ScaffoldedFile(
             relativePath, existed ? ScaffoldOutcome.Updated : ScaffoldOutcome.Created);
     }
 
-    private static string HostConfig(string docsRoot, bool kyberStandards = false)
-    {
-        string yamlDocsRoot = HostConfigYaml.QuoteScalar(docsRoot);
-        string technologiesBlock;
-        if (kyberStandards)
-        {
-            technologiesBlock = "technologies:\n" + string.Join(
-                "\n",
-                KyberStandardsTemplates.All.Select(t => $"    - {t}"));
-        }
-        else
-        {
-            technologiesBlock = "technologies: []";
-        }
-
-        return $"""
-        # Kyber-Weave host configuration. Every ontology default is overridable here.
-        # Reference: {docsRoot}/documentation-ontology.md
-        ontology:
-          docs-root: {yamlDocsRoot}
-
-          # Product defaults exclude five DevOps paths from the repository the ontology
-          # was first built for. An empty list clears them.
-          excluded-files: []
-
-          # Technologies this repository declares a coding standard for. Adding one and
-          # re-running 'docs init' creates {docsRoot}/standards/<technology>/, publishes its
-          # registry property, and legalizes that value in the standard's 'technology' key.
-          {technologiesBlock}
-
-        {McpDeclarationBlockWriter.DeclarationYaml}
-
-        # Additions to the configuration registry rendered into AGENTS.md. Everything
-        # 'docs init' creates is already published; name only what is yours.
-        # config-reg:
-        #   auth-design: {docsRoot}/reference/auth-design.md
-
-        """;
-    }
-
-    private static string Catalog(string owner)
-    {
-        RequireCatalogValue(owner, nameof(owner));
-        string yamlOwner = HostConfigYaml.QuoteScalar(owner);
-        return $"""
-        ---
-        id: catalog
-        title: Component and owner catalog
-        doc-type: reference
-        status: draft
-        owner: {yamlOwner}
-        last-reviewed: {Today}
-        ---
-
-        # Component and owner catalog
-
-        This table is the **authoritative vocabulary** for the `component` and `owner`
-        frontmatter keys. A document naming a component with no row here fails
-        `KW-DOC-SPEC-004`. The check exists so that components cannot be invented one
-        document at a time until nobody can say how many there are.
-
-        Replace the example row below with the real units of your system. One row per
-        component that genuinely exists — a catalog with forty rows is a list of files.
-
-        | Component | Type | Source root | Overview | Detailed documentation | Owner | Last reviewed | Status |
-        |---|---|---|---|---|---|---|---|
-        | Example | Service | `src/Example` | Replace this row. | — | {owner} | {Today} | draft |
-
-        ## How the columns are read
-
-        Only **Component** (index 1) and **Owner** (index 6) are parsed, counting the empty
-        cell produced by the leading pipe. The other columns are for human readers and may
-        be reworded freely. Moving either parsed column requires a matching
-        `ontology.catalog` override in `.kyber-weave/kyber-weave.yml`.
-
-        """;
-    }
-
-    private static string Today =>
-        DateTime.UtcNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
-
-    /// <summary>
-    /// What each scaffolded folder is for, as the paragraph its README opens with. Wrapped
-    /// here rather than left to the editor, so a generated document matches the width of the
-    /// hand-authored ones beside it.
-    /// </summary>
-    private static (string Title, string Purpose) FolderIdentity(string folder) => folder switch
-    {
-        DocsLayout.Standards => ("Coding standards",
-            "How code is written in this repository, one directory per technology. A standard\n"
-            + "is project-specific; the agents and skills that read it are not, which is why they\n"
-            + "resolve it through the configuration registry rather than carrying their own. Only\n"
-            + "the agent working in a technology reads its standard, so per-technology detail belongs\n"
-            + "here, not in a rule (see the documentation ontology's \"Rules and standards\")."),
-        "plans" => ("Plans",
-            "Sequenced implementation work: what will be done, in what order, and how it will be\n"
-            + "verified. A plan is a record of intent rather than current guidance — retrieval\n"
-            + "demotes it accordingly. While open it is linked from this index; once closed it is\n"
-            + "archived."),
-        "specs" => ("Specifications",
-            "Upfront specification work for a greenfield project or a large feature, written when\n"
-            + "requirements and architecture still need defining before a plan can exist."),
-        "todo" => ("Todos",
-            "Work identified but not done now — a finding, a deferred fix, a declined suggestion.\n"
-            + "Capturing it here is what stops it evaporating between sessions."),
-        "adr" => ("Architecture decision records",
-            "One record per architectural decision: what was decided, the alternatives, and why.\n"
-            + "An ADR is edited in place to state only the current decision; outdated content is\n"
-            + "removed, because git holds the history."),
-        "rules" => ("Rules",
-            "Repository-wide rules that govern how the system is built, independent of any one\n"
-            + "technology. Every agent reads them on every task, so a rule applies to every task and\n"
-            + "breaking it is never acceptable; anything else, including how one language is\n"
-            + "written, belongs in a coding standard (see the documentation ontology's \"Rules and\n"
-            + "standards\"). Keep each rule short."),
-        "reference" => ("Reference",
-            "Reference material with no other home: environment variables, naming standards, the\n"
-            + "external systems this repository depends on."),
-        _ => throw new InvalidOperationException($"No identity defined for scaffolded folder '{folder}'.")
-    };
-
-    private static string FolderIndex(string folder, string owner)
-    {
-        (string title, string purpose) = FolderIdentity(folder);
-        string yamlOwner = HostConfigYaml.QuoteScalar(owner);
-        string body = folder == DocsLayout.Standards
-            ? StandardsRegistry()
-#pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
-            : $"Add one document per {title.TrimEnd('s').ToLowerInvariant()} and list it here.\n";
-#pragma warning restore CA1308
-
-        return $"""
-        ---
-        id: {folder}/index
-        title: {title}
-        doc-type: index
-        status: draft
-        owner: {yamlOwner}
-        last-reviewed: {Today}
-        ---
-
-        # {title}
-
-        {purpose}
-
-        {body}
-        """;
-    }
-
-    /// <summary>
-    /// The standards folder's README: how a technology comes to have a standard here.
-    /// </summary>
-    /// <remarks>
-    /// Deliberately not a table of the declared technologies. This file is scaffolding, which
-    /// means it is written once and never regenerated, so a list inside it would be wrong the
-    /// first time a technology was added. The registry in <c>AGENTS.md</c> is regenerated on
-    /// every run and is therefore the one place that list can be trusted.
-    /// </remarks>
-    private static string StandardsRegistry() =>
-        """
-        ## Declaring a technology
-
-        Add it to `ontology.technologies` in `.kyber-weave/kyber-weave.yml` and re-run
-        `kyber-weave docs init`. That one list creates the technology's folder, publishes its
-        `<name-coding-standard>` property in the Config Reg block of the repository root
-        `AGENTS.md`, and legalizes the `technology` value in the standard's frontmatter — so
-        the three cannot disagree.
-
-        A technology name is a slug: lowercase letters, digits and single hyphens.
-
-        The declared technologies are listed in that registry, which is regenerated on every
-        run. This file is not.
-
-        """;
-
-    /// <summary>
-    /// Builds the draft coding-standard stub <c>docs init</c> writes for a declared technology.
-    /// </summary>
-    private static string TechnologyStandard(string technology, string owner)
-    {
-        string yamlOwner = HostConfigYaml.QuoteScalar(owner);
-        return $"""
-        ---
-        id: standards/{technology}
-        title: {technology} coding standard
-        doc-type: coding-standard
-        status: draft
-        technology: {technology}
-        owner: {yamlOwner}
-        last-reviewed: {Today}
-        ---
-
-        # {technology} coding standard
-
-        How {technology} code is written in this repository. Agents and skills resolve this
-        document as `<{technology}{ConfigRegConfig.CodingStandardSuffix}>` in the repository
-        root `AGENTS.md`.
-
-        ## Authority & status
-
-        When this standard is in `status: current`, it is how this technology is written in this
-        repository and what reviewers grade against. Portable agents ship no built-in default to fall back on. While it is in
-        `status: draft` it is a proposal, but a worker never stops for it: it uses the draft as
-        the best available guidance and names the draft standard it relied on in one line of its
-        report.
-
-        Replace this file with the decisions that actually apply, and promote `status` to
-        `current`. A standard that restates a language's own documentation is noise; write the
-        decisions this repository has made and would otherwise have to re-argue. Only the agent
-        working in {technology} reads this file; a statement that applies to every task and is
-        never OK to break is a rule, and belongs in the root `AGENTS.md` or `rules/` instead.
-
-        ## Structure
-
-        ## Naming
-
-        ## Error handling
-
-        ## Testing
-
-        """;
-    }
-
-    private static string DocumentationIndex(string docsRoot, string owner)
-    {
-        string yamlOwner = HostConfigYaml.QuoteScalar(owner);
-        return $"""
-        ---
-        id: documentation-index
-        title: Documentation
-        doc-type: index
-        status: draft
-        owner: {yamlOwner}
-        last-reviewed: {Today}
-        ---
-
-        # Documentation
-
-        The governed documentation corpus for this repository. Every document under
-        `{docsRoot}/` conforms to [the documentation ontology](documentation-ontology.md) and is
-        checked by `kyber-weave docs validate` and `kyber-weave docs drift`.
-
-        | Directory | Holds |
-        |---|---|
-        | [standards/](standards/README.md) | Coding standards, one per technology |
-        | [plans/](plans/README.md) | Sequenced implementation work |
-        | [specs/](specs/README.md) | Upfront specification work |
-        | [todo/](todo/README.md) | Work identified but not done now |
-        | [adr/](adr/README.md) | Architecture decision records |
-        | [rules/](rules/README.md) | Repository-wide rules |
-        | [reference/](reference/README.md) | Reference material |
-
-        [`catalog.md`](catalog.md) is the authoritative vocabulary for the `component` and
-        `owner` keys. Start there when adding a document for something new.
-
-        """;
-    }
-
-    private static string OntologyReference(string docsRoot, string owner)
-    {
-        string yamlOwner = HostConfigYaml.QuoteScalar(owner);
-        return $"""
-        ---
-        id: documentation-ontology
-        title: The documentation ontology
-        doc-type: reference
-        status: draft
-        owner: {yamlOwner}
-        last-reviewed: {Today}
-        ---
-
-        # The documentation ontology
-
-        Every governed document in `{docsRoot}/` conforms to this schema. `kyber-weave docs
-        validate` enforces it; `kyber-weave docs drift` checks that what documents claim
-        about code is still true.
-
-        ## Frontmatter
-
-        Keys are hyphenated. Unknown keys are ignored, so your own metadata never breaks
-        parsing.
-
-        ```yaml
-        ---
-        id: payments/architecture
-        title: Payments service
-        doc-type: architecture
-        status: current
-        component: Payments
-        source-root: src/Payments
-        owner: payments-team
-        last-reviewed: {Today}
-        code-refs:
-          - PaymentProcessor
-        ---
-        ```
-
-        | Key | Meaning |
-        |---|---|
-        | `id` | Permanent, unique slug. Other documents reference this, never the file path. |
-        | `title` | Human title. |
-        | `doc-type` | One of the closed set below. Decides which other keys are required. |
-        | `status` | Currency of the document, from the closed set below. |
-        | `component` | The unit of the system this covers. Must exist in `catalog.md`. |
-        | `source-root` | Repository-relative path to that component's source. Must exist. |
-        | `technology` | The stack a coding standard governs. Declared in configuration; matches its folder. |
-        | `owner` | Who answers for it. Must exist in `catalog.md`. |
-        | `last-reviewed` | ISO `yyyy-MM-dd`. Any other format is an error. |
-        | `code-refs` | Symbols this document formally claims. Resolved against the code graph. |
-        | `api-endpoints` | Exact route strings, e.g. `GET /api/me/usage`. |
-        | `decided-by` | Ids of the ADRs that decided this document's content. |
-        | `supersedes` | Ids of documents this one replaces. |
-
-        ## Closed vocabularies
-
-        **doc-type** — `architecture`, `onboarding`, `requirements`, `adr`, `plan`, `spec`,
-        `todo`, `runbook`, `reference`, `rule`, `governance`, `index`, `coding-standard`
-
-        **status** — `current`, `draft`, `needs-review`, `superseded`
-
-        **technology** — whatever `ontology.technologies` declares. Empty until this
-        repository says which stacks it writes code in, which is also what creates each
-        standard's folder and its registry property.
-
-        A value outside these sets is an error. An open vocabulary is not a vocabulary — it
-        is a text field that drifts until two documents of the same kind carry different
-        labels and neither is findable by the other's name. If nothing fits, use
-        `reference`; widen the set in `.kyber-weave/kyber-weave.yml` deliberately or not at
-        all.
-
-        ## Required keys
-
-        **Every document**: `id`, `title`, `owner`, `last-reviewed`, `doc-type`, `status`
-
-        | Doc type | Additionally required |
-        |---|---|
-        | `architecture`, `requirements`, `runbook`, `plan`, `spec`, `todo` | `component` |
-        | `onboarding` | `component`, `source-root` |
-        | `coding-standard` | `technology` |
-        | `adr`, `reference`, `rule`, `governance`, `index` | — |
-
-        A standard takes no `component`: a language's standard governs code in every component
-        the catalog lists, so naming one of them would be a false claim about its reach.
-
-        ## Rules and standards
-
-        Every instruction this repository gives its agents is a rule or part of a standard.
-
-        - **Rules** apply to every task, whatever the technology, and breaking one is never
-          acceptable: secrets, what may be committed or pushed, architecture boundaries, scope,
-          what needs human approval. Every agent reads them on every dispatch, so they are few and
-          short, and ideally checkable by a gate. They live in the root `AGENTS.md` and `rules/`.
-        - **Standards** are per technology, under `standards/<technology>/`. Only the agent
-          working in that technology fetches one, through `docs_get_coding_standard_for_technology`.
-          They can be long, with examples; reviewers grade against them.
-
-        **The placement test:** does the statement apply to every task, and is breaking it never
-        OK? Yes means a rule; anything else goes in a standard. Each statement has one home: a
-        rule may point to a standard for detail, never restate it. Keep everything always loaded
-        (the root `AGENTS.md`, the files it tells every agent to read, harness instruction files)
-        to about 3 KB; a rule set larger than that contains standards.
-
-        ## The pairing invariant
-
-        For `architecture` and `runbook`, `source-root` and `code-refs` travel together. A
-        source root without symbols claims coverage the document does not have; symbols
-        without a root leave nothing to check them against. Both halves are what make drift
-        detection possible.
-
-        ## code-refs are claims, not mentions
-
-        Listing a symbol asserts the document is answerable for it. A document that merely
-        discusses `PaymentProcessor` in prose has not claimed it; one listing it in
-        `code-refs` has, and will fail `KW-DOC-DRIFT-001` when the symbol is renamed.
-
-        That distinction is the point of the ontology. After a rename, prose still reads
-        correctly — no linter, reviewer, or test notices. Only resolution does.
-
-        ## Ranking consequences
-
-        Retrieval weights declared identity above prose, and scales by how far a document
-        counts as current guidance: `plan` and `spec` are demoted to 0.55, `superseded` to
-        0.4, `draft` and `needs-review` to 0.85, `adr` to 0.9.
-
-        So `doc-type` and `status` are not cosmetic. Labelling a standard as a `plan` buries
-        it; labelling a closed plan as `reference` promotes a work artifact into guidance an
-        agent will act on.
-
-        ## Adopting an existing tree
-
-        Fill the mechanical keys in bulk with `status: draft`, get `docs validate` clean,
-        then add `code-refs` selectively and promote to `current` as each component is
-        reviewed. The `kyber-docs-authoring` skill covers the whole procedure.
-
-        """;
-    }
+    private string Today =>
+        _time.GetUtcNow().UtcDateTime.ToString(
+            "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
 }

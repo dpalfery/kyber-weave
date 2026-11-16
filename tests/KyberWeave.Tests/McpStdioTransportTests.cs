@@ -6,6 +6,7 @@ using KyberWeave.Core.Processes;
 using KyberWeave.Mcp;
 using ModelContextProtocol.Server;
 using Xunit;
+using KyberWeave.Tests.Fakes;
 
 namespace KyberWeave.Tests;
 
@@ -77,7 +78,7 @@ public sealed class McpStdioTransportTests
     public void TheExecutableAnswersRequestsPipedInBeforeStdinCloses()
     {
         using TempDirectory repository = new TempDirectory();
-        DocsScaffolder.Scaffold(repository.Path);
+        DocsTestCommands.Scaffolding.Scaffold(repository.Path);
         ProcessStartInfo startInfo = new ProcessStartInfo("dotnet")
         {
             RedirectStandardInput = true,

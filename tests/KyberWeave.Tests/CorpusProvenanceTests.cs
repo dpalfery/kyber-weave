@@ -59,7 +59,7 @@ public sealed class CorpusProvenanceTests : IDisposable
     [Fact]
     public void ProvenanceLineNamesTheBranchAndTheRepositoryGitDirectory()
     {
-        DocsScaffolder.Scaffold(_root.Path);
+        DocsTestCommands.Scaffolding.Scaffold(_root.Path);
 
         string line = Status(_root.Path);
 
@@ -79,7 +79,7 @@ public sealed class CorpusProvenanceTests : IDisposable
     public void ProvenanceBranchAndRepoCarryTheCheckoutValues()
     {
         TestGitRepositoryTemplate.CreateReviewGatesCouncilRepository(_root.Path);
-        DocsScaffolder.Scaffold(_root.Path);
+        DocsTestCommands.Scaffolding.Scaffold(_root.Path);
 
         string branch = BranchFromHead(_root.Path);
         string line = Status(_root.Path);
@@ -104,7 +104,7 @@ public sealed class CorpusProvenanceTests : IDisposable
         string spacedRoot = Path.Combine(_root.Path, "repo with spaces");
         Directory.CreateDirectory(spacedRoot);
         TestGitRepositoryTemplate.CreateReviewGatesCouncilRepository(spacedRoot);
-        DocsScaffolder.Scaffold(spacedRoot);
+        DocsTestCommands.Scaffolding.Scaffold(spacedRoot);
 
         string line = Status(spacedRoot);
         string servedRepo = FieldValue(RepoField, line);
@@ -122,7 +122,7 @@ public sealed class CorpusProvenanceTests : IDisposable
     {
         string corruptRoot = Path.Combine(_root.Path, "corrupt-dot-git");
         Directory.CreateDirectory(corruptRoot);
-        DocsScaffolder.Scaffold(corruptRoot);
+        DocsTestCommands.Scaffolding.Scaffold(corruptRoot);
         File.WriteAllText(Path.Combine(corruptRoot, ".git"), "gitdir: \0illegal\0path");
 
         string line = Status(corruptRoot);
@@ -154,7 +154,7 @@ public sealed class CorpusProvenanceTests : IDisposable
     {
         string corruptRoot = Path.Combine(_root.Path, "corrupt-commondir");
         Directory.CreateDirectory(corruptRoot);
-        DocsScaffolder.Scaffold(corruptRoot);
+        DocsTestCommands.Scaffolding.Scaffold(corruptRoot);
         string dotGit = Path.Combine(corruptRoot, ".git");
         Directory.CreateDirectory(dotGit);
         File.WriteAllText(Path.Combine(dotGit, "commondir"), "\0illegal\0path");

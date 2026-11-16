@@ -87,6 +87,12 @@ internal static class DocsTestCommands
 
     public static IPacketHostFacts HostFacts => Services().GetRequiredService<IPacketHostFacts>();
 
+    /// <summary>The review-gate catalogue over the real adapters the host wires.</summary>
+    public static IReviewGateCatalogue Catalogue => Services().GetRequiredService<IReviewGateCatalogue>();
+
+    /// <summary>The scaffolder over the real adapters the host wires.</summary>
+    public static IDocsScaffoldingService Scaffolding => Services().GetRequiredService<IDocsScaffoldingService>();
+
     public static RunDeliveryPorts DeliveryPorts => Services().GetRequiredService<RunDeliveryPorts>();
 }
 

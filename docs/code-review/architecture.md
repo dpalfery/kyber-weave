@@ -25,7 +25,7 @@ code-refs:
   - ReviewTaskGate
   - TaskGateSelection
   - GateCatalogue
-  - ProjectRootDetector
+  - ProjectRootDetection
   - ReviewBlockWriter
   - ReviewCatalogueCommand
   - SeatOutputParser
@@ -1008,7 +1008,7 @@ their gates and a host that does not receives none of them. Each of the three ca
 and the family's `sources` map carries the download or install page for its tool; a gate skipped
 outside that restriction is reported rather than read as a pass.
 
-Root detection (`ProjectRootDetector`) skips dependency, build-output and ignored
+Root detection (`ProjectRootDetection`) skips dependency, build-output and ignored
 directories, orders roots by ordinal path so the same tree always yields the same
 output, and writes one copy of each root-bound gate per root: the id is the family
 prefix plus the entry id plus a suffix derived from the root's path (empty for a single
