@@ -13,7 +13,7 @@ keywords:
   - dev-easy
   - dev-medium
   - dev-hard
-  - cli-researcher
+  - platform-researcher
   - technology folder
   - task difficulty
   - task prompt tool
@@ -44,18 +44,23 @@ Owner decisions made on 2026-11-16 that shape these requirements:
 3. **A failed task moves one tier up** on its next attempt. This is a conductor rule.
 4. **Agents that go away:** the ten technology agents, `sql-database-architect` (planning moves to
    `architect`, its rules to a SQL Server technology folder), `test-dev` (testing becomes a section
-   of every standard) and `azure-reader` (replaced by a command-line research agent).
+   of every standard), `azure-reader` (replaced by `platform-researcher`) and `github-devops`
+   (replaced by `devops`, which works with GitHub, Azure DevOps, GitLab or Jira through a folder
+   per platform).
 5. **Agents that stay:** `conductor`, `architect`, `product-owner`, `code-reviewer`, `review-lens`,
-   `review-triage`, `bug-crusher`, `bug-crusher-investigator`, `research-agent`, `docs-dev`,
-   `github-devops`.
-6. **Models are assigned at run time by default.** The conductor has no model profile: it runs on
-   the model the user or the headless caller starts it with.
+   `review-triage`, `bug-crusher`, `bug-crusher-investigator`, `research-agent`, `docs-dev`.
+6. **The model comes from the agent.** Each agent names a model profile, as today, and choosing the
+   agent chooses the model. Nothing assigns a model at dispatch. The conductor has no model
+   profile: it runs on the model the user or the headless caller starts it with.
 7. **Technology folders** follow the plan on
-   [pull request 625](https://github.com/dpalfery/kyber-weave/pull/625): `README.md` (the standard),
-   `rules.md`, `skills.md`. This specification adds a machine rules file for the Arbiter beside them.
+   [pull request 625](https://github.com/dpalfery/kyber-weave/pull/625), with the standard named
+   `<technology>.standards.md` beside `rules.md` and `skills.md`. This specification adds a machine
+   rules file for the Arbiter beside them. Role folders have the same four files.
+11. **The old agents stay for now.** They remain selectable until the owner decides to remove them.
 8. **Standards are templates.** Kyber-Weave ships one template folder per technology, the community
    can submit more, and onboarding installs the ones the user picks.
-9. **One stored-file format.** Files this work adds or changes use one format, not a mix.
+9. **One stored-file format.** Data files this work adds or changes are YAML, the task file
+   included.
 10. **One specification** covers all of it.
 
 Terms used below:
@@ -64,7 +69,9 @@ Terms used below:
 - **Technology agent**: one of the eleven per-technology workers named above.
 - **Technology folder**: `docs/standards/<technology>/` in a host repository.
 - **Role folder**: a folder of the same shape for a role instead of a technology (`conductor`,
-  `architect`, `reviewer`).
+  `architect`, `reviewer`, `devops`).
+- **Platform folder**: a technology folder for a delivery platform (`github`, `azure-devops`,
+  `gitlab`, `jira`).
 - **Machine rules file**: `arbiter-rules.yml`, rules the Arbiter evaluates. `rules.md` is prose a
   model reads; the Arbiter cannot evaluate it.
 - **Task prompt**: the single text a worker receives for one task.
@@ -91,15 +98,16 @@ Copilot tool list; they SHALL differ only in name, description and model profile
 
 1.3. A developer agent's body SHALL name no technology-specific rule, command, library or skill.
 
-1.4. THE Squad source SHALL define one read-only research agent named `cli-researcher` that replaces
-`azure-reader` (Requirement 9).
+1.4. THE Squad source SHALL define one read-only research agent named `platform-researcher` that replaces
+`azure-reader` (Requirement 8).
 
 1.5. THE agents `conductor`, `architect`, `product-owner`, `code-reviewer`, `review-lens`,
-`review-triage`, `bug-crusher`, `bug-crusher-investigator`, `research-agent`, `docs-dev` and
-`github-devops` SHALL stay, with unchanged names.
+`review-triage`, `bug-crusher`, `bug-crusher-investigator`, `research-agent` and `docs-dev` SHALL
+stay, with unchanged names.
 
-1.6. WHEN the removal phase (Requirement 14) completes THEN the ten technology agents,
-`sql-database-architect`, `test-dev` and `azure-reader` SHALL no longer be in the Squad source.
+1.6. WHEN the removal phase (Requirement 13) completes THEN the ten technology agents,
+`sql-database-architect`, `test-dev`, `azure-reader` and `github-devops` SHALL no longer be in the
+Squad source.
 
 1.7. THE `architect` agent SHALL take over the schema and data-model planning
 `sql-database-architect` does today; writing SQL SHALL be developer-agent work.
@@ -107,9 +115,21 @@ Copilot tool list; they SHALL differ only in name, description and model profile
 1.8. THE thirteen harness renderers SHALL render the new agents with no renderer code that names an
 agent.
 
-1.9. EVERY agent that may dispatch a technology agent or `azure-reader` today SHALL list the
-developer agents or `cli-researcher` in its `delegates-to`, so no existing Arbiter rule refuses the
-dispatch.
+1.9. EVERY agent that may dispatch a technology agent, `azure-reader` or `github-devops` today SHALL
+list its replacement in its `delegates-to`, so no existing Arbiter rule refuses the dispatch.
+
+1.10. THE Squad source SHALL define a delivery agent named `devops` that replaces `github-devops`,
+with the `publishing-worker` capability profile, and that takes its platform from the task or from
+the host configuration (Requirement 6.7).
+
+1.11. EACH agent SHALL name its model profile in its own definition, as today; the system SHALL NOT
+assign a model at dispatch as part of this work.
+
+1.12. THE `dev-hard` agent SHALL use a model profile of its own, separate from the planning
+profiles, so a change to one does not change the other.
+
+1.13. THE `conductor` agent SHALL have no model profile; it SHALL run on the model its session was
+started with, by the user or by the headless caller.
 
 ### Requirement 2: Every task carries a difficulty
 
@@ -161,7 +181,7 @@ SHALL dispatch the next attempt to the next tier up.
 3.3. IF the failed attempt ran on `dev-hard` THEN the next attempt SHALL stay on `dev-hard`, and the
 existing limit of three rework dispatches per failure cluster SHALL apply unchanged.
 
-3.4. THE step-up rule SHALL be a rule in the `conductor` role folder (Requirement 8), and the
+3.4. THE step-up rule SHALL be a rule in the `conductor` role folder (Requirement 7), and the
 conductor's instructions SHALL state the same rule in prose for a run with the Arbiter off.
 
 3.5. A failed attempt SHALL never be retried on a lower tier.
@@ -169,61 +189,31 @@ conductor's instructions SHALL state the same rule in prose for a run with the A
 3.6. A developer-agent dispatch that belongs to no task SHALL start on `dev-medium` and SHALL follow
 the same step-up.
 
-### Requirement 4: Models are assigned at run time
-
-**User Story:** As the owner, I want the model chosen when an agent is dispatched, so that model
-choice is a table and not text spread over agent files.
-
-#### Acceptance Criteria
-
-4.1. THE model profiles SHALL be `architect`, `dev-easy`, `dev-medium`, `dev-hard`, `reader`,
-`reviewer` and `investigator`.
-
-4.2. THE `dev-hard` profile SHALL be separate from the planning profiles; a change to one SHALL NOT
-change the other.
-
-4.3. THE `conductor` agent SHALL have no model profile; it SHALL run on the model its session was
-started with, by the user or by the headless caller.
-
-4.4. WHEN a harness accepts a model on a dispatch THEN the conductor SHALL pass the target profile's
-model on the dispatch, and the rendered agent file for that harness SHALL name no model.
-
-4.5. WHEN a harness accepts no model on a dispatch THEN the renderer SHALL write the profile's model
-into the rendered agent file, as it does today.
-
-4.6. THE design SHALL state, per harness, which of 4.4 and 4.5 applies, from evidence.
-
-4.7. WHEN the Arbiter's model targeting is enforced on a harness of criterion 4.4 THEN the Arbiter
-SHALL write the model on the dispatch; otherwise the conductor SHALL pass it from the profile table.
-
-4.8. A user's model preset that names a profile removed or renamed by this work SHALL keep working
-for at least two minor releases, and the system SHALL report the old name as a warning.
-
-### Requirement 5: A task declares its technologies
+### Requirement 4: A task declares its technologies
 
 **User Story:** As an architect, I want each task to name the technologies it touches, so that the
 right standards, rules, skills and gates are chosen by the machine.
 
 #### Acceptance Criteria
 
-5.1. THE plan and specification task formats SHALL accept a `Technologies:` line listing one or more
+4.1. THE plan and specification task formats SHALL accept a `Technologies:` line listing one or more
 technology names.
 
-5.2. WHEN a task file is written THEN each task entry SHALL carry its technologies as a list.
+4.2. WHEN a task file is written THEN each task entry SHALL carry its technologies as a list.
 
-5.3. IF a task names a technology the host's `ontology.technologies` does not declare THEN
+4.3. IF a task names a technology the host's `ontology.technologies` does not declare THEN
 `docs validate` SHALL report an error naming the task, the value and the declared list.
 
-5.4. IF the active roster is `tiered` and a task that changes files has no `Technologies:` line THEN
+4.4. IF the active roster is `tiered` and a task that changes files has no `Technologies:` line THEN
 `docs validate` SHALL report an error naming the task.
 
-5.5. THE `architect` and `product-owner` SHALL read a technology's standard through
+4.5. THE `architect` and `product-owner` SHALL read a technology's standard through
 `docs_get_coding_standard_for_technology`, only for a technology a task names, and SHALL read a
 standards file directly only when the tool is missing or reports a failure.
 
-5.6. THE `Capabilities:` line SHALL stay as it is: plain words, no fixed vocabulary.
+4.6. THE `Capabilities:` line SHALL stay as it is: plain words, no fixed vocabulary.
 
-### Requirement 6: A technology folder holds everything about a technology
+### Requirement 5: A technology folder holds everything about a technology
 
 **User Story:** As a host repository owner, I want one folder per technology that holds its
 standard, rules, skills and machine rules, so that I change how my project uses a technology in one
@@ -231,247 +221,258 @@ place.
 
 #### Acceptance Criteria
 
-6.1. A technology folder SHALL hold `README.md` (the standard), `rules.md`, `skills.md` and
-`arbiter-rules.yml`.
+5.1. A technology folder SHALL hold `<technology>.standards.md` (the standard), `rules.md`,
+`skills.md` and `arbiter-rules.yml`; a role folder SHALL hold the same four files, with the standard
+named `<role>.standards.md`.
 
-6.2. THE standard SHALL use these six headings, in this order: Scope and layout; Coding standards;
+5.2. THE standard SHALL use these six headings, in this order: Naming and layout; Coding standards;
 Testing; Commands; Security and data handling; Done checklist.
 
-6.3. THE Testing section SHALL state how tests are written, named, placed and run for that
+5.3. THE Testing section SHALL state how tests are written, named, placed and run for that
 technology, and SHALL replace what `test-dev` and the `test` standard state today.
 
-6.4. Rules that hold for every technology, including the cross-technology testing rules, SHALL live
+5.4. Rules that hold for every technology, including the cross-technology testing rules, SHALL live
 once in `shared-rules.md`.
 
-6.5. THE delivery SHALL produce an inventory of every technology-specific rule in the bodies of the
+5.5. THE delivery SHALL produce an inventory of every technology-specific rule in the bodies of the
 eleven technology agents, `test-dev` and `azure-reader`, each mapped to the file and heading that
 now states it.
 
-6.6. WHEN the inventory marks a rule as stated nowhere THEN the rule SHALL be added to that
+5.6. WHEN the inventory marks a rule as stated nowhere THEN the rule SHALL be added to that
 technology's template before the agent that held it is removed.
 
-6.7. THE rules `sql-database-architect` holds SHALL move to a SQL Server technology folder.
+5.7. THE rules `sql-database-architect` holds SHALL move to a SQL Server technology folder.
 
-6.8. `docs validate` SHALL report a technology folder that lacks one of the four files, or a
+5.8. `docs validate` SHALL report a technology folder that lacks one of the four files, or a
 standard that lacks one of the six headings, naming the folder and what is missing.
 
-6.9. `arbiter-rules.yml` SHALL be valid when it declares no rule.
+5.9. `arbiter-rules.yml` SHALL be valid when it declares no rule.
 
-### Requirement 7: Standards ship as templates
+### Requirement 6: Standards ship as templates
 
 **User Story:** As a new user, I want to pick my technologies during onboarding and receive a
 complete folder for each, so that my agents follow sound standards on the first run.
 
 #### Acceptance Criteria
 
-7.1. Kyber-Weave SHALL ship one template folder per supported technology, each holding the four
-files of Requirement 6.1.
+6.1. Kyber-Weave SHALL ship one template folder per supported technology, each holding the four
+files of Requirement 5.1.
 
-7.2. WHEN the user names technologies during onboarding THEN the system SHALL install the template
+6.2. WHEN the user names technologies during onboarding THEN the system SHALL install the template
 folder for each named technology and no other.
 
-7.3. IF a host already has a file the template would write THEN the system SHALL leave the host's
+6.3. IF a host already has a file the template would write THEN the system SHALL leave the host's
 file unchanged and report it.
 
-7.4. THE system SHALL provide a command that shows, per technology, how a host's folder differs from
+6.4. THE system SHALL provide a command that shows, per technology, how a host's folder differs from
 the current template, and changes nothing.
 
-7.5. THE repository SHALL document how to contribute a new technology template, and one check SHALL
-decide whether a submitted template is complete (Requirement 6.8).
+6.5. THE repository SHALL document how to contribute a new technology template, and one check SHALL
+decide whether a submitted template is complete (Requirement 5.8).
 
-7.6. THE `conductor`, `architect` and `reviewer` role folders SHALL ship as templates in the same
-way, and a host SHALL be able to override them in its own repository.
+6.6. THE `conductor`, `architect`, `reviewer` and `devops` role folders SHALL ship as templates in
+the same way, and a host SHALL be able to override them in its own repository.
 
-### Requirement 8: The Arbiter reads its rules from role and technology folders
+6.7. Kyber-Weave SHALL ship one platform folder template each for GitHub, Azure DevOps, GitLab and
+Jira; onboarding SHALL install the ones the user names, and the `devops` agent SHALL receive the
+rules and skills of the platform its task names.
+
+### Requirement 7: The Arbiter reads its rules from role and technology folders
 
 **User Story:** As a host repository owner, I want the Arbiter's rules to sit beside the standards
 they belong to, so that I see and override them where I already work.
 
 #### Acceptance Criteria
 
-8.1. EACH of the 36 shipped Arbiter rules SHALL move to the machine rules file of exactly one role
+7.1. EACH of the 36 shipped Arbiter rules SHALL move to the machine rules file of exactly one role
 folder, with its id, question, answers and effects unchanged.
 
-8.2. WHEN the Arbiter evaluates an event THEN it SHALL apply the rules of the role folders, and,
+7.2. WHEN the Arbiter evaluates an event THEN it SHALL apply the rules of the role folders, and,
 when the event concerns a task, the rules of each technology that task names.
 
-8.3. WHEN a host folder declares a rule id the shipped template also declares THEN the host's
+7.3. WHEN a host folder declares a rule id the shipped template also declares THEN the host's
 declaration SHALL be used.
 
-8.4. THE existing `arbiter.rules` settings in the host configuration SHALL keep working and SHALL
+7.4. THE existing `arbiter.rules` settings in the host configuration SHALL keep working and SHALL
 be applied after the folders are read.
 
-8.5. No Arbiter rule id SHALL be reused or renumbered.
+7.5. No Arbiter rule id SHALL be reused or renumbered.
 
-8.6. No rule SHALL be locked: a host SHALL be able to turn any rule down to log only, through the
+7.6. No rule SHALL be locked: a host SHALL be able to turn any rule down to log only, through the
 switch that rule has today.
 
-8.7. IF a machine rules file cannot be parsed, or names a trigger or fact the Arbiter does not have,
+7.7. IF a machine rules file cannot be parsed, or names a trigger or fact the Arbiter does not have,
 THEN `kyber-weave arbiter validate` SHALL report an error naming the file and the rule, and the
 Arbiter SHALL use the shipped rules for that folder.
 
-8.8. THE rule that exempts `test-dev` by name from the test-first check SHALL instead exempt a task
+7.8. THE rule that exempts `test-dev` by name from the test-first check SHALL instead exempt a task
 whose files are all test files, decided from the task's file list.
 
-8.9. WHEN the Arbiter is off THEN nothing in this requirement SHALL be needed for a run to work.
+7.9. WHEN the Arbiter is off THEN nothing in this requirement SHALL be needed for a run to work.
 
-### Requirement 9: A command-line research agent reads live systems
+### Requirement 8: A platform research agent reads live systems
 
 **User Story:** As an architect or bug investigator, I want one read-only agent that can inspect a
 cloud or platform through its own tools, so that plans rest on how a deployed system really is.
 
 #### Acceptance Criteria
 
-9.1. THE `cli-researcher` agent SHALL take the technology to inspect from its task (for example
+8.1. THE `platform-researcher` agent SHALL take the technology to inspect from its task (for example
 `azure`, `aws`, `kubernetes`) and SHALL load that technology's skills and rules.
 
-9.2. THE technology's `skills.md` SHALL state how to sign in, which command-line tools and tool
+8.2. THE technology's `skills.md` SHALL state how to sign in, which command-line tools and tool
 servers to use, how to query, and how to shape output.
 
-9.3. THE technology's `rules.md` SHALL state that the agent changes nothing and prints no secret.
+8.3. THE technology's `rules.md` SHALL state that the agent changes nothing and prints no secret.
 
-9.4. THE agent's capability profile SHALL deny file writes, publishing and delegation, and SHALL
+8.4. THE agent's capability profile SHALL deny file writes, publishing and delegation, and SHALL
 allow command execution.
 
-9.5. THE technology's `arbiter-rules.yml` SHALL be able to declare the command forms that are
+8.5. THE technology's `arbiter-rules.yml` SHALL be able to declare the command forms that are
 allowed, and a command outside them SHALL be refused on a harness where the Arbiter sees a
 sub-agent's own tool calls.
 
-9.6. THE design SHALL state on which harnesses 9.5 is enforced and on which it is an instruction
+8.6. THE design SHALL state on which harnesses 9.5 is enforced and on which it is an instruction
 only.
 
-9.7. IF the task names a technology with no folder THEN the agent SHALL report that and SHALL NOT
+8.7. IF the task names a technology with no folder THEN the agent SHALL report that and SHALL NOT
 improvise commands.
 
-### Requirement 10: One docs tool builds the whole task prompt
+### Requirement 9: One docs tool builds the whole task prompt
 
 **User Story:** As a conductor, I want one tool call that returns everything a worker needs for a
 task, so that I pass one prompt and the worker never has to remember to fetch its standards.
 
 #### Acceptance Criteria
 
-10.1. THE docs tool server SHALL provide a tool that takes a task id and returns the task prompt.
+9.1. THE docs tool server SHALL provide a tool that takes a task id and returns the task prompt.
 
-10.2. THE task prompt SHALL contain, in this order: the task's own prompt from the task file; the
+9.2. THE task prompt SHALL contain, in this order: the task's own prompt from the task file; the
 host facts; the shared rules; then, for each technology the task names, its rules, its skills and
 the sections of its standard that bear on the task.
 
-10.3. THE tool's result SHALL also name the agent to dispatch, the difficulty in use and its source,
+9.3. THE tool's result SHALL also name the agent to dispatch, the difficulty in use and its source,
 and the model profile.
 
-10.4. THE `kyber-weave docs packet` command SHALL print the same task prompt for the same task.
+9.4. THE `kyber-weave docs packet` command SHALL print the same task prompt for the same task.
 
-10.5. THE stitched text SHALL be added when the prompt is built and SHALL NOT be written into the
+9.5. THE stitched text SHALL be added when the prompt is built and SHALL NOT be written into the
 task file, so the task file's digest and staleness check are unchanged.
 
-10.6. WHEN the stitched text would exceed the prompt budget THEN rules SHALL be kept whole, skills
+9.6. WHEN the stitched text would exceed the prompt budget THEN rules SHALL be kept whole, skills
 and standard sections SHALL be cut by relevance to the task, and the prompt SHALL list what was
 left out.
 
-10.7. A developer agent's instructions SHALL NOT require it to fetch its standards at start; it MAY
+9.7. A developer agent's instructions SHALL NOT require it to fetch its standards at start; it MAY
 call `docs_get_coding_standard_for_technology` for a topic the prompt left out.
 
-10.8. IF the task file is missing or does not match its plan THEN the tool SHALL return no prompt
+9.8. IF the task file is missing or does not match its plan THEN the tool SHALL return no prompt
 and SHALL say which command repairs it.
 
-10.9. IF a named technology has no folder THEN the prompt SHALL say so in its own section and the
+9.9. IF a named technology has no folder THEN the prompt SHALL say so in its own section and the
 tool SHALL still return the rest.
 
-10.10. WHEN the tool is given technologies and no task id THEN it SHALL return the shared rules and
+9.10. WHEN the tool is given technologies and no task id THEN it SHALL return the shared rules and
 each technology's rules, skills and standard sections, for a dispatch that belongs to no task.
 
-### Requirement 11: Task gates resolve by technology
+9.11. THE shipped prompt budget SHALL be large enough that, for every shipped template, a task
+that names one technology receives its rules, skills and standard with nothing cut; one test SHALL
+prove this for every template.
+
+### Requirement 10: Task gates resolve by technology
 
 **User Story:** As a host repository owner, I want task gates declared per technology, so that they
 keep working when no agent is named after a technology.
 
 #### Acceptance Criteria
 
-11.1. THE host configuration SHALL accept task gates keyed by technology.
+10.1. THE host configuration SHALL accept task gates keyed by technology.
 
-11.2. WHEN a developer agent runs its task gates THEN the system SHALL run the gates declared for
+10.2. WHEN a developer agent runs its task gates THEN the system SHALL run the gates declared for
 each technology the task names.
 
-11.3. IF a host declares no technology-keyed gates for a technology THEN the system SHALL use the
+10.3. IF a host declares no technology-keyed gates for a technology THEN the system SHALL use the
 gates declared under the technology agent that technology maps to, from one shipped map.
 
-11.4. WHEN two technologies of one task resolve to gates with the same id and the same command THEN
+10.4. WHEN two technologies of one task resolve to gates with the same id and the same command THEN
 the system SHALL run that gate once; with different commands it SHALL run both and report each
 under its technology and id.
 
-11.5. IF a developer agent's task names technologies and no gate resolves for any of them THEN the
+10.5. IF a developer agent's task names technologies and no gate resolves for any of them THEN the
 system SHALL report an error and SHALL exit non-zero.
 
-11.6. THE task prompt, the test command it carries and the Arbiter's gates-declared fact SHALL use
+10.6. THE task prompt, the test command it carries and the Arbiter's gates-declared fact SHALL use
 the same resolution as the gate run.
 
-11.7. THE council's `review.gates` SHALL NOT change.
+10.7. THE council's `review.gates` SHALL NOT change.
 
-11.8. THIS specification SHALL add no gate.
+10.8. THIS specification SHALL add no gate.
 
-### Requirement 12: One stored-file format
+### Requirement 11: One stored-file format
 
 **User Story:** As the owner, I want every file this work adds or changes to use one format, so that
 people and tools learn one syntax.
 
 #### Acceptance Criteria
 
-12.1. EVERY data file this work adds SHALL be YAML.
+11.1. EVERY data file this work adds SHALL be YAML.
 
-12.2. THE design SHALL list every data file the work reads or writes with its format today, and
+11.2. THE design SHALL list every data file the work reads or writes with its format today, and
 SHALL state for each that is not YAML whether it converts and when.
 
-12.3. IF a file's format changes THEN the system SHALL read the old format for at least two minor
+11.3. IF a file's format changes THEN the system SHALL read the old format for at least two minor
 releases and SHALL report it as a warning that names the conversion command.
 
-12.4. Prose files (`README.md`, `rules.md`, `skills.md`, agent files) SHALL stay Markdown.
+11.4. Prose files (`README.md`, `rules.md`, `skills.md`, agent files) SHALL stay Markdown.
 
-### Requirement 13: The old and new rosters can run side by side until removal
+11.5. THE task file SHALL be written as YAML.
+
+### Requirement 12: The old and new rosters can run side by side until removal
 
 **User Story:** As the owner, I want to switch a run between today's agents and the new ones, so
 that I can compare them before the old ones are deleted.
 
 #### Acceptance Criteria
 
-13.1. THE host configuration SHALL accept a `worker-roster` value of `technology` or `tiered`,
+12.1. THE host configuration SHALL accept a `worker-roster` value of `technology` or `tiered`,
 defaulting to `technology` until the removal phase.
 
-13.2. THE task file SHALL record the roster it was written under, and every later reader SHALL take
+12.2. THE task file SHALL record the roster it was written under, and every later reader SHALL take
 the run's roster from the task file.
 
-13.3. WHEN the roster is `technology` THEN a run SHALL behave as it does today, apart from the task
-prompt of Requirement 10, and no file that roster reads SHALL be removed before the removal phase.
+12.3. WHEN the roster is `technology` THEN a run SHALL behave as it does today, apart from the task
+prompt of Requirement 9, and no file that roster reads SHALL be removed before the removal phase.
 
-13.4. THE delivery SHALL define a comparison procedure: the same approved plan run once per roster
+12.4. THE delivery SHALL define a comparison procedure: the same approved plan run once per roster
 from the same base commit on the same harness.
 
-13.5. THE procedure SHALL record, per run: tasks completed, attempts per task and tier of each
+12.5. THE procedure SHALL record, per run: tasks completed, attempts per task and tier of each
 attempt, task-gate failures, review findings by severity, tokens and wall time.
 
-### Requirement 14: Removal has a migration path
+### Requirement 13: Removal has a migration path
 
 **User Story:** As a host repository owner, I want old agent names to keep working for a stated
 period, so that my configuration does not silently stop gating.
 
 #### Acceptance Criteria
 
-14.1. THE removal phase SHALL start only after the comparison of Requirement 13 has been run and the
+13.1. THE removal phase SHALL start only after the comparison of Requirement 12 has been run and the
 owner has recorded the decision.
 
-14.2. A host's agent-keyed task-gate entries SHALL keep resolving for at least two minor releases
-after removal, through the shipped map of Requirement 11.3.
+13.2. A host's agent-keyed task-gate entries SHALL keep resolving for at least two minor releases
+after removal, through the shipped map of Requirement 10.3.
 
-14.3. THE system SHALL provide a command that rewrites a host's agent-keyed task gates as
+13.3. THE system SHALL provide a command that rewrites a host's agent-keyed task gates as
 technology-keyed gates, prints the change before writing, and changes nothing else.
 
-14.4. `docs validate` SHALL report each agent-keyed entry for a removed agent as a warning that
+13.4. `docs validate` SHALL report each agent-keyed entry for a removed agent as a warning that
 names the migration command.
 
-14.5. A plan or task file that names a removed agent SHALL resolve to a developer agent by the
+13.5. A plan or task file that names a removed agent SHALL resolve to a developer agent by the
 task's difficulty and SHALL report the substitution.
 
-14.6. A Squad update SHALL remove a removed agent's rendered files only when the lock records that
+13.6. A Squad update SHALL remove a removed agent's rendered files only when the lock records that
 the Squad wrote them and the host has not edited them.
 
-14.7. WHEN removal completes THEN `worker-roster` SHALL default to `tiered`, and the value
+13.7. WHEN removal completes THEN `worker-roster` SHALL default to `tiered`, and the value
 `technology` SHALL be reported as an error that names this change.

@@ -15,8 +15,7 @@ keywords:
   - standards templates
   - task prompt tool
   - arbiter rules by folder
-  - cli-researcher
-  - run-time model assignment
+  - platform-researcher
 ---
 
 # Role-based worker agents design
@@ -29,11 +28,12 @@ Replace the eleven per-technology worker agents with three developer agents that
 model strength: `dev-easy`, `dev-medium`, `dev-hard`. Each task carries a difficulty and a list of
 technologies. Everything a technology agent knows moves into that technology's folder, which ships
 as a template. One docs tool builds the whole prompt for a task. The Arbiter reads its rules from
-role and technology folders. `test-dev`, `sql-database-architect` and `azure-reader` go away; a
-read-only `cli-researcher` replaces the last.
+role and technology folders. `test-dev`, `sql-database-architect`, `azure-reader` and
+`github-devops` go away; a read-only `platform-researcher` and a platform-neutral `devops` agent
+replace the last two.
 
-The Squad goes from 24 agents to 15. The old agents stay selectable until a comparison has been run,
-then they are removed with a migration path.
+The Squad goes from 24 agents to 15. The old agents stay selectable for now; the owner decides
+later when they are removed, with a migration path.
 
 This design covers the [requirements](requirements.md). It depends on the technology folder layout
 planned on [pull request 625](https://github.com/dpalfery/kyber-weave/pull/625), reverses one
@@ -58,6 +58,109 @@ marked as estimates.
 | Six model profiles exist | `products/kyber-squad/profiles/models.yml`: `architect`, `deep-planning`, `fast`, `general`, `orchestration`, `reviewer`. `orchestration` already defaults to `inherit`, with a named model on five harnesses. |
 | `azure-reader` runs no shell | Its profile `read-only` sets `process.execute: deny`. It works through Azure tool servers, not a command line. |
 | Fourteen standards templates ship | `products/kyber-squad/standards/`: azure, csharp, data-access-layer, github-actions, go, maui, pulumi, python, react, rust, sql, tauri, test, typescript. `docs init --kyber-standards` seeds them. |
+
+### Developer agent instructions
+
+The text below is the proposed agent file for `dev-medium`. `dev-easy` and `dev-hard` are the same
+file with a different `name`, `description` and `model-profile` (`fast` and `dev-hard`). It is
+adapted from today's technology agents with every technology removed. The shared worker baseline
+that every worker already receives (task scope, task gate commands, build isolation) is unchanged
+and is not repeated here.
+
+````markdown
+---
+schema: kyber-squad.agent/v1
+name: dev-medium
+description: "Implements application code and its tests in any technology, for a task rated medium: several files or a non-obvious path, no cross-cutting risk. Use only when the host's worker roster is tiered. Do not use for documentation-only work or for pushing, publishing and pipelines."
+invocation: subagent
+model-profile: general
+capability-profile: worker
+copilot-tools: [the same list every worker agent carries today]
+delegates-to: []
+fallback: role-skill
+aliases: []
+---
+# Developer
+
+You implement one task: the code and its tests. You are not tied to a technology. Your task prompt
+tells you which technology the task uses and carries that technology's rules, skills and standard.
+Those outrank any habit you bring with you.
+
+## What your task prompt contains
+
+Read it top to bottom before you touch a file.
+
+1. **Header**: task id, technology, difficulty.
+2. **Task**: what to build, the files in scope, the tests the task must add or change.
+3. **Host facts**: paths, the task gate commands for this technology, the host's own rules.
+4. **Shared rules**: rules for every technology.
+5. **Technology rules, skills and standard** for this task.
+6. **Left out**: anything the prompt had no room for.
+
+When two parts disagree: technology rules beat shared rules, rules beat skills, and skills beat the
+standard's general guidance.
+
+## Scope
+
+Your task's files are your scope. Do not edit a file outside them. If the task cannot be done
+inside them, stop and report it as an open question. Never edit secrets or deployment credentials.
+
+## Workflow
+
+1. Read the whole task prompt. Do not open the plan, the specification or the task file.
+2. If the prompt names a technology and gives no rules or standard for it, stop and report that.
+   Do not improvise a standard.
+3. If "Left out" lists a section you need, fetch it with `docs_get_coding_standard_for_technology`,
+   naming the technology and the topic. Fetch nothing else by default.
+4. Look up current library documentation for any library you configure or call in a way that is new
+   to this repository. Use the standard for which libraries this repository takes.
+5. In test-first mode, write the task's tests first, following the standard's Testing section, and
+   run the task gate so it fails on them.
+6. Implement the change. Match the repository's existing naming and layout unless the standard says
+   otherwise.
+7. Run the task gate on your changed files. Fix what fails and run it again.
+8. Check your change against the standard's Done checklist.
+9. Return the completion digest.
+
+## When you cannot finish
+
+Do not loop. After three failed attempts to make the task gate pass, or as soon as you see the task
+needs a design decision you cannot make, stop and report what you tried and what failed. A stronger
+agent takes the next attempt, and your report is what it starts from. An honest failure is a good
+result; a pass you forced is not.
+
+## Discovery order
+
+Use the host's indexes before raw reads.
+
+- Code: `codegraph_explore` first. Do not re-read what it returned.
+- Documentation: the docs tools before searching or opening documentation files.
+- Read a file directly only for what an index does not cover, or when a tool reports a failure.
+  Say so, quoting the error.
+- Report discovery in your final report: `Discovery: codegraph N, docs N, direct reads N`.
+
+## Hard rules
+
+- Never report done without a `TASK_GATE:` line from a run on your current changes.
+- Never weaken, skip or delete a test to make the gate pass.
+- Never hide a command's failure behind another command or a redirect.
+- If your change handles a value that arrives from outside the system, fill the input-site table
+  before you report done; otherwise write `Input sites: none`.
+- A fix for a reported defect covers the whole class of that defect, not the one reported line.
+
+## Completion digest
+
+```text
+STATUS: READY_FOR_REVIEW
+ARTIFACTS: <files changed or created>
+SUMMARY: <2 to 4 sentences: what was built, what was tested, any hand-off>
+TASK_GATE: <PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE>, agent=dev-medium gates=<n> failed=<ids|none> skipped=<n> report=<path> runs=<k>
+OPEN_QUESTIONS: <bullets, or "none">
+```
+````
+
+Three things differ from a technology agent today: it does not fetch its standard as a first step,
+it loads no skill by name, and it has a stated stopping rule that feeds the step-up.
 
 ### Difficulty, retries and models today
 
@@ -88,6 +191,7 @@ marked as estimates.
 | Council gates are keyed by gate id | `review.gates`: this repository declares 44, of which 24 are three skill checks repeated for eight skills. They do not name agents. |
 | A task packet command exists | `kyber-weave docs packet <task>` prints the task file's prompt plus a host facts section built by `PacketHostFacts` at print time, capped at 6,000 characters of host rules, never written into the task file. |
 | Workers fetch standards themselves | [ADR 0064](../../adr/0064-project-knowledge-lives-in-gates-and-standards-reached-through-tools.md) and decision D3 of the plan on pull request 625: the worker calls `docs_get_coding_standard_for_technology` in its first step. |
+| Standards and skills are small | Shipped standards run 4,153 to 10,215 characters (C# is the largest); the nine skills run 997 to 7,487; the four largest agent bodies run 10,352 to 12,858. Host rules in a packet are capped at 6,000 characters. |
 | The task file is JSON | `<plan>.tasks.json` and a specification's `tasks.json` (ADR 0063). Host configuration, Arbiter rules, model and capability profiles are YAML. |
 
 ### Size of the references
@@ -103,12 +207,13 @@ marked as estimates.
 
 Stated so the owner can weigh them. The design follows the owner's direction in each case.
 
-1. **Kyber-Weave assigns a model at run time on one harness of thirteen today.** On the other
-   twelve the model is still written into the rendered agent file. That is why three developer agents exist
-   instead of one: choosing an agent works everywhere, choosing a model at dispatch does not.
+1. **Three agents instead of one is a cost paid for model choice.** The three developer agents are
+   one body rendered three times. They exist because choosing an agent is the one way to choose a
+   model that works on all thirteen harnesses.
+
 2. **No Arbiter rule is technology-specific today.** Every technology's `arbiter-rules.yml` starts
    empty. All 36 rules land in three role folders. The technology files earn their place only when
-   a rule such as the command allow-list of Requirement 9 is written.
+   a rule such as the command allow-list of Requirement 8 is written.
 3. **`rules.md` and `arbiter-rules.yml` are different things with one name.** The first is prose a
    model reads. The second is evaluated by the Arbiter. A host can read a rule in `rules.md` and
    assume it is enforced. The template header of each file must say which it is.
@@ -116,14 +221,14 @@ Stated so the owner can weigh them. The design follows the owner's direction in 
    rules, technology rules, skills and standard sections into the conductor's context once per
    dispatch. The plan on pull request 625 avoided that by having the worker fetch. The comparison
    must measure it (open question 3).
-5. **A command-line research agent is wider than the agent it replaces.** `azure-reader` cannot run
-   a command. `cli-researcher` can, and the allow-list that keeps it read-only is enforced on two
+5. **The platform research agent is wider than the agent it replaces.** `azure-reader` cannot run
+   a command. `platform-researcher` can, and the allow-list that keeps it read-only is enforced on two
    harnesses and is an instruction on eleven.
 6. **Removing `test-dev` removes a second pair of eyes.** Today a different agent can write the
    tests. After this, the developer agent writes code and tests, and the review council is the
    independent check.
 7. **Host standards are host-owned.** A rule moved from an agent body into a template reaches new
-   hosts only. Requirement 7.4 exists so an existing host can see what it is missing.
+   hosts only. Requirement 6.4 exists so an existing host can see what it is missing.
 8. **Routing was rebuilt three days ago.** ADR 0080 and ADR 0082 moved routing to capabilities and a
    model pick. Under the tiered roster that pick shrinks to "developer, docs or delivery", and
    difficulty picks the tier.
@@ -138,19 +243,22 @@ Stated so the owner can weigh them. The design follows the owner's direction in 
 | `architect` | stays; gains schema and data-model planning | `architect` | `architect` |
 | `product-owner` | stays | `product-planning` | `architect` |
 | `code-reviewer`, `review-lens`, `review-triage` | stay | unchanged | `reviewer` |
-| `bug-crusher` | stays | `root-fixer` | `dev-easy` |
-| `bug-crusher-investigator` | stays | `investigator` | `investigator` |
-| `research-agent` | stays | `read-only` | `reader` |
-| `docs-dev` | stays | `documentation` | `dev-easy` |
-| `github-devops` | stays | `publishing-worker` | `dev-medium` |
-| `dev-easy`, `dev-medium`, `dev-hard` | new | `worker` | same name as the agent |
-| `cli-researcher` | new; replaces `azure-reader` | `cli-reader` (new) | `reader` |
-| Ten technology agents, `sql-database-architect`, `test-dev`, `azure-reader` | removed in phase 5 | | |
+| `bug-crusher`, `bug-crusher-investigator`, `research-agent`, `docs-dev` | stay | unchanged | unchanged |
+| `dev-easy` | new | `worker` | `fast` |
+| `dev-medium` | new | `worker` | `general` |
+| `dev-hard` | new | `worker` | `dev-hard` (new) |
+| `platform-researcher` | new; replaces `azure-reader` | `platform-reader` (new) | `fast` |
+| `devops` | new; replaces `github-devops` | `publishing-worker` | `general` |
+| Ten technology agents, `sql-database-architect`, `test-dev`, `azure-reader`, `github-devops` | stay for now; removed in phase 5 | | |
 
 The three developer agents are one body rendered three times. The body states the workflow and the
 rules that hold for every technology, and names no technology. `docs-dev` keeps its own rules
 because they follow the documentation ontology and the Config Reg, which a host already customises
 through its configuration.
+
+`devops` does what `github-devops` does today (run start, push, pull request, pipeline files) and
+names no platform. Its task or the host configuration names one platform, and it receives that
+platform folder's rules and skills.
 
 ### Difficulty
 
@@ -170,7 +278,7 @@ Nothing checks whether a rating is right. A wrong rating costs one attempt, beca
 ### Choosing the agent and stepping up
 
 Under the tiered roster the pick of ADR 0082 chooses the kind of worker (developer, `docs-dev` or
-`github-devops`), and difficulty chooses the tier:
+`devops`), and difficulty chooses the tier:
 
 ```text
 tier = min(hard, rated difficulty + failed attempts at this task)
@@ -192,7 +300,7 @@ disagree.
 
 `KW-ARB-OWNER-001` is unaffected: a current plan answers `no-mapping`. The `delegates-to` lists of
 `conductor` and `bug-crusher` gain the three developer agents, and those of `conductor`,
-`architect` and `code-reviewer` gain `cli-researcher`, so `KW-ARB-ROSTER-001` allows them. The old
+`architect` and `code-reviewer` gain `platform-researcher`, so `KW-ARB-ROSTER-001` allows them. The old
 names leave those lists in phase 5.
 
 A dispatch with no task, such as a fix `bug-crusher` hands on, starts at `dev-medium` and moves to
@@ -200,29 +308,17 @@ A dispatch with no task, such as a fix `bug-crusher` hands on, starts at `dev-me
 
 ### Models
 
-| New profile | From | Used by |
-|---|---|---|
-| `architect` | `architect` | `architect`, `product-owner` |
-| `dev-easy` | `fast` | `dev-easy`, `docs-dev`, `bug-crusher` |
-| `dev-medium` | `general` | `dev-medium`, `github-devops` |
-| `dev-hard` | new | `dev-hard` |
-| `reader` | new; today's readers use `fast` | `research-agent`, `cli-researcher` |
-| `reviewer` | `reviewer` | the three review agents |
-| `investigator` | `deep-planning` | `bug-crusher-investigator` |
+The model comes from the agent. Each agent names a model profile in its own definition and the
+renderer writes that profile's model for the harness, as today. Nothing in this work assigns a model
+at dispatch.
 
-`orchestration` is removed: the conductor is rendered with no model on every harness. `dev-hard` is
-its own row, so changing the planning models never changes it. Old profile names stay readable as
-aliases for two minor releases, with a warning, so user presets keep working.
+- One profile is added: `dev-hard`. It is separate from `deep-planning` and `architect`, so changing
+  a planning model never changes it.
+- The conductor has no model profile. `orchestration` is removed and the conductor is rendered with
+  no model on every harness; it runs on the model its session was started with.
+- No existing profile is renamed, so user presets keep working.
 
-Delivery per harness:
-
-| Harness | How the model reaches the agent |
-|---|---|
-| Claude | On the dispatch. The rendered agent file names no model. When the Arbiter's model targeting is enforced the Arbiter writes it; otherwise the conductor passes it from the profile table. |
-| The other twelve | The renderer writes the profile's model into the agent file, as today. Choosing the agent chooses the model. |
-
-Each renderer declares whether its harness takes a model on a dispatch; that one flag drives both
-columns. Whether any of the twelve can gain it is not established here (open question 4).
+The Arbiter's existing model targeting is untouched. It stays in shadow by default.
 
 ### Technology folders and templates
 
@@ -230,51 +326,57 @@ columns. Whether any of the twelve can gain it is not established here (open que
 docs/standards/
   shared-rules.md
   <technology>/
-    README.md           the standard, six headings
-    rules.md            prose rules a model reads
-    skills.md           how to do the work
-    arbiter-rules.yml   rules the Arbiter evaluates; may declare none
-  conductor/  architect/  reviewer/
-    rules.md  skills.md  arbiter-rules.yml
+    <technology>.standards.md   the standard, six headings
+    rules.md                    prose rules a model reads
+    skills.md                   how to do the work
+    arbiter-rules.yml           rules the Arbiter evaluates; may declare none
+  conductor/  architect/  reviewer/  devops/
+    <role>.standards.md  rules.md  skills.md  arbiter-rules.yml
+  github/  azure-devops/  gitlab/  jira/
+    the same four files, one folder per delivery platform
 ```
 
-The first three files per technology and `shared-rules.md` are the plan on pull request 625. This
-design adds `arbiter-rules.yml`, the six headings, and the role folders.
+`rules.md`, `skills.md` and `shared-rules.md` are the plan on pull request 625. This design names
+the standard `<technology>.standards.md` instead of that plan's `README.md`, and adds
+`arbiter-rules.yml`, the six headings, the role folders and the platform folders.
 
 The standard's headings, in order:
 
-1. **Scope and layout**: versions, project layout, where code goes.
-2. **Coding standards**: naming, patterns, error handling.
+1. **Naming and layout**: names, versions, project layout, where code goes.
+2. **Coding standards**: patterns, error handling.
 3. **Testing**: frameworks, what to test, naming, placement, how to run.
 4. **Commands**: build, format, lint and test commands.
 5. **Security and data handling**.
 6. **Done checklist**: what a reviewer checks.
 
 Role folders are declared in a new `ontology.roles` list, so validation tells a role from a
-technology. A role folder has no standard; the agent file is its standard.
+technology. A platform folder is a technology folder; the `devops` agent's task names it the way a
+developer task names `csharp`.
 
-Content moves:
+Content moves, all additive until phase 5:
 
 - Every technology rule in the eleven technology agents, `test-dev` and `azure-reader` goes to the
-  matching template, tracked by the inventory of Requirement 6.5.
+  matching template, tracked by the inventory of Requirement 5.5.
 - The `test` template's cross-technology rules are copied to `shared-rules.md`; the rest is copied
   to each technology's Testing section. The `test` technology and the `testing` skill stay until
   phase 5, so the old roster keeps working.
 - A `sql-server` template is added and takes the rules `sql-database-architect` holds. The `sql`
   template stays until phase 5.
 - `azure` gains the skills and rules `azure-reader` holds. An `aws` template is added.
+- A `github` platform template takes the `github-actions` standard and the `github-devops` skill.
+  `azure-devops`, `gitlab` and `jira` templates are new.
 
 Templates live in `products/kyber-squad/standards/<technology>/`. A contribution is a pull request
-that adds one folder; the completeness check of Requirement 6.8 runs on it. Onboarding installs the
-folders for the technologies the user names. `kyber-weave docs standards diff [technology]` shows
-how a host folder differs from the current template and writes nothing.
+that adds one folder; the completeness check of Requirement 5.8 runs on it. Onboarding installs the
+folders for the technologies and platforms the user names. `kyber-weave docs standards diff
+[technology]` shows how a host folder differs from the current template and writes nothing.
 
 ### The task prompt tool
 
 A new tool on the docs server, `docs_build_task_prompt_for_agent_dispatch`, takes the project path
 and a task id (and optionally the plan, a prior-results file and the number of failed attempts).
 Given technologies instead of a task id, it returns parts 4 to 6 only, for a dispatch that has no
-task: a `cli-researcher` request or a fix `bug-crusher` hands on. It is built on the service behind
+task: a `platform-researcher` request or a fix `bug-crusher` hands on. It is built on the service behind
 `docs packet`, and that command prints the same text.
 
 Returned, in order:
@@ -283,15 +385,29 @@ Returned, in order:
 2. The task's own prompt from the task file.
 3. Host facts, as `PacketHostFacts` builds them today, with gates resolved by technology.
 4. Shared rules.
-5. Per technology: its `rules.md`, its `skills.md`, then the sections of its standard that bear on
-   the task.
+5. Per technology: its `rules.md`, its `skills.md`, then its standard.
 6. A list of anything left out.
 
 Stitching happens when the prompt is built. Nothing is written into the task file, so its digest and
-staleness check are unchanged. The budget rule: rules are never cut; skills are cut before standard
-sections; within each, the least relevant to the task text goes first; every cut is listed. The
-budget is one host configuration value with a shipped default set in the tasks phase from
-measurement.
+staleness check are unchanged.
+
+**Budget.** The shipped default is 60,000 characters, about 15,000 tokens. Sized from today's files:
+
+| Part | Characters, largest case |
+|---|---|
+| Task's own prompt | 6,000 (today's cap) |
+| Host facts | 6,000 (today's cap) |
+| Shared rules, with the cross-technology testing rules | about 5,000 |
+| One technology's standard, with its new Testing section | about 15,000 (C# is 10,215 today) |
+| One technology's rules, taking what its agent body holds | up to 12,000 (Tauri's agent is 12,858) |
+| One technology's skills | up to 3,000 |
+| **Total for one technology** | **about 47,000** |
+
+So a task that names one technology gets everything with nothing cut, and one test proves it for
+every shipped template. Past the budget: rules are never cut; skills are cut before standard
+sections; the least relevant to the task text goes first; every cut is listed. If measured prompts
+do not fit, the fallback is to keep rules and skills in the prompt and have the worker fetch
+standard sections by topic, as it does today.
 
 The developer agent's first step is no longer "fetch your standards". It may still call
 `docs_get_coding_standard_for_technology` for a topic the prompt left out. The architect and
@@ -302,7 +418,7 @@ The developer agent's first step is no longer "fetch your standards". It may sti
 One resolver, `TaskGateResolver`, replaces the four lookups by agent name.
 
 1. An agent with its own `review.task-gates` entry uses it (today's path, kept for `docs-dev`,
-   `github-devops` and the old roster).
+   `devops` and the old roster).
 2. Otherwise, for each technology of the task: `review.technology-gates.<technology>` when the host
    declares it, else the entry of the technology agent the shipped map names.
 3. Lists merge in technology order. Same id and same command runs once; same id with a different
@@ -346,12 +462,12 @@ host already declares for its gates.
 Technology rule files start empty. The first use is the command allow-list below, which needs one
 new trigger, `worker.command`, raised by the existing worker guard.
 
-### The command-line research agent
+### The platform research agent
 
-`cli-researcher` takes one or more technologies from its task and receives their `skills.md` and
+`platform-researcher` takes one or more technologies from its task and receives their `skills.md` and
 `rules.md` through the task prompt tool, the same way a developer agent does.
 
-- New capability profile `cli-reader`: `read-only` plus `process.execute: allow`.
+- New capability profile `platform-reader`: `read-only` plus `process.execute: allow`.
 - A technology's `skills.md` covers sign-in, the command-line tools and tool servers to use, query
   patterns and output shaping. Tool servers stay first choice where they exist, as `azure-reader`
   works today.
@@ -375,9 +491,9 @@ passed through the conductor.
 
 ### Removal
 
-After the comparison and the owner's recorded decision:
+Not scheduled. The old agents stay until the owner decides, after the comparison:
 
-- The thirteen agents are deleted from the Squad source; a Squad update removes their rendered
+- The fourteen agents are deleted from the Squad source; a Squad update removes their rendered
   files only where the lock shows the Squad wrote them unedited.
 - Agent-keyed task gates keep resolving through the shipped map for two minor releases;
   `docs validate` warns and names `kyber-weave review migrate-task-gates`, which rewrites them as
@@ -392,9 +508,9 @@ After the comparison and the owner's recorded decision:
 |---|---|---|
 | Host configuration, model and capability profiles, gate catalogue | YAML | unchanged |
 | Arbiter rules | YAML, one file | YAML, one file per folder (`arbiter-rules.yml`) |
-| Task file | JSON (`tasks.json`, `<plan>.tasks.json`) | YAML, converted in the phase that already raises its schema version; JSON is read for two minor releases with a warning (open question 1) |
+| Task file | JSON (`tasks.json`, `<plan>.tasks.json`) | YAML, converted in the phase that already raises its schema version; JSON is read for two minor releases with a warning |
 | Standards, rules, skills, agents | Markdown | unchanged |
-| Tool output (the standards bundle, the task prompt) | text with tagged sections | not a stored file; unchanged (open question 2) |
+| Tool output (the standards bundle, the task prompt) | text with tagged sections | not a stored file (open question 1) |
 | Arbiter decision log, gate reports | JSON lines, JSON | machine output, not authored; out of scope |
 
 New files use the `.yml` extension, as every YAML file in the repository does.
@@ -407,21 +523,21 @@ Each phase ships on its own and leaves a working product.
 |---|---|---|
 | 1. Technology folders | Six-heading templates with four files each, the rule inventory, `shared-rules.md` testing rules, role folder templates, onboarding by chosen technology, `docs standards diff`. Additive: nothing the old roster reads is deleted | Pull request 625 |
 | 2. Task fields and the prompt tool | `Difficulty:` and `Technologies:`, the task file change, `TaskGateResolver`, the task prompt tool | Phase 1 |
-| 3. Agents and models | The three developer agents, `cli-researcher`, the seven model profiles, run-time model on Claude, the roster switch, the step-up | Phase 2 |
+| 3. Agents | The three developer agents, `platform-researcher`, `devops`, the `dev-hard` profile, the conductor without a profile, the roster switch, the step-up | Phase 2 |
 | 4. Arbiter rules from folders | The split of the 36 rules, folder loading, the `MODE-002` change, the command allow-list | Phases 1 and 3 |
-| 5. Comparison and removal | The comparison runbook and runs, the decision, removal of the thirteen agents, the `test` technology, the `testing` skill and the `sql` template, and migration | Phases 1 to 4 |
+| 5. Comparison and removal | The comparison runbook and runs, the owner's decision, removal of the fourteen agents, the `test` technology, the `testing` skill and the `sql` template, and migration | Phases 1 to 4 |
 
 ## Data models
 
 | Model | Change |
 |---|---|
 | Agent frontmatter | `model-profile` becomes optional (the conductor has none); optional `worker-roster: technology \| tiered`. |
-| Model profiles | Seven profiles as above; aliases for `fast`, `general`, `deep-planning`. |
-| Capability profiles | New `cli-reader`. |
+| Model profiles | New `dev-hard`; `orchestration` removed. |
+| Capability profiles | New `platform-reader`. |
 | Host configuration | `worker-roster`; `review.technology-gates`; `ontology.roles`; a task prompt budget. |
 | Plan and specification task text | Optional `Difficulty:` and `Technologies:` lines. |
 | Task file | Schema version plus one; YAML; top-level `worker-roster`; per entry `difficulty`, `difficulty-source`, `technologies`. |
-| Technology and role folders | New `arbiter-rules.yml`. |
+| Technology, role and platform folders | The standard is `<name>.standards.md`; new `arbiter-rules.yml`. |
 | Arbiter | Trigger `worker.command`; fact `plan.task.files-all-tests`. |
 | Docs tool server | New tool `docs_build_task_prompt_for_agent_dispatch`. |
 
@@ -440,7 +556,7 @@ Each phase ships on its own and leaves a working product.
 | `arbiter-rules.yml` unreadable or naming an unknown trigger or fact | `arbiter validate` error; shipped rules used for that folder. |
 | Technology folder missing a file, or a standard missing a heading | `docs validate` error naming the folder and what is missing. |
 | Command outside a technology's allow-list | Refused where the worker guard runs; an instruction elsewhere. |
-| Old profile name in a preset; JSON task file | Read, with a warning, for two minor releases. |
+| JSON task file | Read, with a warning, for two minor releases. |
 | Removed agent named in a plan or task file | Resolved to a developer agent by difficulty; substitution reported. |
 
 ## Testing strategy
@@ -452,8 +568,8 @@ Test-first, with targeted classes only; no task runs the full suite.
   validation; `TaskGateResolver`; the prompt tool (order, budget cuts, missing folder, stale task
   file, parity with `docs packet`); folder completeness and the six headings; template install by
   chosen technology; `docs standards diff`; rule loading order and host override; the `MODE-002`
-  clause; the command allow-list; model profile aliases; rendering with and without a model;
-  developer-agent content (no technology named).
+  clause; the command allow-list; the budget test over every template; rendering the conductor
+  without a model; developer-agent content (no technology named).
 - **Existing tests that change** (estimate: 25 to 40 files before removal): the classes that pin
   the shipped roster, bundle, model profiles, default rules file, task file shape and packet text.
 - **Removal** (estimate: 40 to 60 more files): tests that use a removed agent as an example slug
@@ -465,11 +581,11 @@ Estimates, for planning only.
 
 | Phase | Source | Tests | Docs and prompts |
 |---|---|---|---|
-| 1. Technology folders | 6 to 9 files | 4 new classes, 4 to 6 changed | 15 template folders reshaped, 3 role folders, 1 inventory, 4 docs |
+| 1. Technology folders | 6 to 9 files | 4 new classes, 4 to 6 changed | 15 template folders reshaped, 4 role folders, 4 platform folders, 1 inventory, 4 docs |
 | 2. Task fields and the prompt tool | 12 to 16 files | 6 new classes, 10 to 15 changed | 4 prompt files, 4 docs |
-| 3. Agents and models | 8 to 12 files | 4 new classes, 8 to 12 changed | 4 new agents, 11 agent edits, 13 rendered sets, 4 docs |
+| 3. Agents | 6 to 9 files | 3 new classes, 8 to 12 changed | 5 new agents, 13 rendered sets, 4 docs |
 | 4. Arbiter rules from folders | 8 to 12 files | 4 new classes, 6 to 10 changed | 3 rule files, 3 docs |
-| 5. Comparison and removal | 10 to 15 files | 40 to 60 changed | 13 agents deleted, 1 runbook, 39 live docs, 84 product files |
+| 5. Comparison and removal | 10 to 15 files | 40 to 60 changed | 14 agents deleted, 1 runbook, 39 live docs, 84 product files |
 
 ## Decisions
 
@@ -478,38 +594,47 @@ Estimates, for planning only.
 | D1 | What replaces the technology agents? | Three developer agents by difficulty: `dev-easy`, `dev-medium`, `dev-hard`. | Server and client agents were mechanically identical once technology moved to the task; model strength is the one real difference. | user: explicit decision 2026-11-16 |
 | D2 | Who rates difficulty? | The architect; the decision model instead when the Arbiter runs with one. No gate checks the rating. | The decision model is asked when the task file is written, in the call that already picks the agent, so the rating is recorded once. | user: explicit decision 2026-11-16; timing is autonomous, pending owner approval |
 | D3 | What happens when a task fails? | The next attempt goes one tier up; the three-dispatch limit stays. | The owner chose the existing one-step rule over a jump to `dev-hard` on the third try. | user: explicit decision 2026-11-16 |
-| D4 | Which agents are removed? | The ten technology agents, `sql-database-architect`, `test-dev`, `azure-reader`. | `docs-dev` and `github-devops` stay: different permissions, and `docs-dev` follows the documentation settings. | user: explicit decision 2026-11-16 |
-| D5 | Are the old agents deleted at once? | No. They stay selectable until a comparison has run, then phase 5 removes them. | Reconciles the earlier "side by side" decision with "goes away". | autonomous: recommendation, pending owner approval |
-| D6 | How is the model assigned? | At dispatch where the harness allows it; otherwise written into the agent file. The conductor has no profile. | Only Claude takes a model on a dispatch today. | user: explicit decision 2026-11-16; fallback is autonomous, pending owner approval |
-| D7 | Which model profiles exist? | `architect`, `dev-easy`, `dev-medium`, `dev-hard`, `reader`, `reviewer`, `investigator`. | `investigator` is added to the owner's list because the bug investigator needs deep reasoning and is not a developer. `dev-hard` is separate from planning. | user: explicit decision 2026-11-16; `investigator` is autonomous, pending owner approval |
-| D8 | What does a technology folder hold? | `README.md`, `rules.md`, `skills.md`, `arbiter-rules.yml`. | The first three are the plan on pull request 625. | user: explicit decision 2026-11-16 |
-| D9 | What are the standard's headings? | Scope and layout; Coding standards; Testing; Commands; Security and data handling; Done checklist. | Proposed to the owner on 2026-11-16; not yet confirmed heading by heading. | autonomous: recommendation, pending owner approval |
+| D4 | Which agents are removed? | The ten technology agents, `sql-database-architect`, `test-dev`, `azure-reader`, `github-devops`. | `docs-dev` stays: it follows the documentation settings a host already customises. | user: explicit decision 2026-11-16 |
+| D5 | Are the old agents deleted at once? | No. They stay selectable for now; removal waits for the owner's decision after a comparison. | Keeps every earlier phase additive. | user: explicit decision 2026-11-16 |
+| D6 | How is the model assigned? | By the agent: each agent names a model profile, as today. Nothing assigns a model at dispatch. The conductor has no profile. | Run-time assignment was drafted and removed by the owner. Choosing an agent works on all thirteen harnesses. | user: explicit decision 2026-11-16 |
+| D7 | Which model profiles change? | `dev-hard` is added, separate from the planning profiles. `orchestration` is removed. Nothing is renamed. | `dev-easy` uses `fast` and `dev-medium` uses `general`, so no preset breaks. | user: `dev-hard` separate and no conductor profile, 2026-11-16; reuse of `fast` and `general` is autonomous, pending owner approval |
+| D8 | What does a technology or role folder hold? | `<name>.standards.md`, `rules.md`, `skills.md`, `arbiter-rules.yml`. | `rules.md` and `skills.md` are the plan on pull request 625; that plan's `README.md` standard is renamed. | user: explicit decision 2026-11-16 |
+| D9 | What are the standard's headings? | Naming and layout; Coding standards; Testing; Commands; Security and data handling; Done checklist. | | user: explicit decision 2026-11-16 |
 | D10 | Where do the 36 Arbiter rules go? | Into `conductor`, `architect` and `reviewer` role folders, split by trigger. | The owner named conductor and architect. `reviewer` is added because 13 rules are review rules. | user: explicit decision 2026-11-16; `reviewer` folder is autonomous, pending owner approval |
 | D11 | Is any Arbiter rule locked? | No. | The owner's view, and the code agrees: every rule can already be set to log only. | user: explicit decision 2026-11-16 |
 | D12 | Who builds the task prompt? | A docs tool the conductor calls; it returns one prompt. | Reverses decision D3 of the plan on pull request 625. Deterministic, and the worker cannot skip it. | user: explicit decision 2026-11-16 |
 | D13 | How are task gates keyed? | By the task's technologies, with a fallback to the old agent-keyed entries. | No agent is named after a technology any more. No gate is added. | autonomous: recommendation, pending owner approval |
-| D14 | Which file format? | YAML for every data file added or changed, extension `.yml`. | The owner asked for one format. `.yml` matches every YAML file in the repository. | user: explicit decision 2026-11-16; extension is autonomous |
-| D15 | What replaces `azure-reader`? | `cli-researcher`, which loads the skills and rules of the technology its task names. | Needs a new capability profile that can run commands. | user: explicit decision 2026-11-16 |
+| D14 | Which file format? | YAML for every data file added or changed, the task file included, extension `.yml`. | The owner asked for one format and approved converting the task file. `.yml` matches every YAML file in the repository. | user: explicit decision 2026-11-16; extension is autonomous |
+| D15 | What replaces `azure-reader`? | `platform-researcher`, which loads the skills and rules of the technology its task names. | Needs a new capability profile that can run commands. | user: explicit decision 2026-11-16 |
 | D16 | Where does testing guidance live? | A Testing section in every standard; cross-technology rules in `shared-rules.md`. | `test-dev` and the `test` technology are removed. | user: explicit decision 2026-11-16 |
 | D17 | How many specifications? | One, in five phases. | The owner's direction. | user: explicit decision 2026-11-16 |
 | D18 | Does this need ADRs? | Yes: one for tiers, difficulty and the task prompt (amending ADR 0080 and ADR 0082), one for rules by folder, one for the task file format (amending ADR 0063). | Each is a contract hosts depend on. | autonomous: recommendation, pending owner approval |
+| D19 | What replaces `github-devops`? | A platform-neutral `devops` agent with a `devops` role folder and one platform folder each for GitHub, Azure DevOps, GitLab and Jira. | The agent names no platform; the task or the host configuration does. | user: explicit decision 2026-11-16 |
+| D20 | How large is the prompt budget? | 60,000 characters by default; a one-technology task must fit with nothing cut. | Sized from today's files at about 47,000 for the largest case. | autonomous: recommendation, pending owner approval |
 
 ## Open questions
 
-1. **Task file format (D14).** Convert the task file from JSON to YAML in phase 2? Recommendation:
-   yes. Its schema changes in that phase anyway, and JSON stays readable for two minor releases.
-2. **Tool output.** Do the standards bundle and the task prompt count under the one-format rule?
-   Recommendation: no. They are text handed to a model, not stored files; keep tagged sections.
-3. **Prompt through the conductor (D12).** Return the full prompt, or write it to the run's scratch
-   folder and return its path? Recommendation: return the prompt as decided, measure the conductor's
-   context in the comparison, and switch only if the numbers say so.
-4. **Run-time model on more harnesses (D6).** Check each of the twelve for a per-dispatch model
-   before phase 3? Recommendation: yes, as the first task of phase 3.
-5. **Old agents (D5).** Keep them selectable until the comparison, or delete them when the new
-   agents ship? Recommendation: keep them until the comparison.
-6. **Headings (D9).** Are the six headings right? Recommendation: yes.
-7. **Order against pull request 625.** Phase 1 cannot start before that plan lands.
-   Recommendation: land it first, with its decision D3 changed to match D12 here.
+1. **Tool output.** The task prompt is text handed to a model. Its sections (shared rules, each
+   technology's rules, skills and standard) are Markdown, and each standard has its own headings.
+   Should section boundaries be marked with tags, as the plan on pull request 625 does, or does the
+   one-format rule forbid that? Recommendation: keep tags as separators only. Without them a
+   heading inside a standard reads as the start of a new section.
+2. **Prompt through the conductor (D12).** A full prompt is up to about 47,000 characters, roughly
+   12,000 tokens. A 20-task plan sends about 240,000 tokens through the conductor, more with
+   retries. The alternative: the tool writes the prompt to the run's scratch folder and returns a
+   short header and the path; the conductor dispatches "read this file and do the task". The worker
+   reads the same text either way. Recommendation: return the path.
+3. **One technology per task?** Cases that need two today: an endpoint plus its migration (C# and
+   SQL Server); a Tauri command (Rust and TypeScript); a React component (React and TypeScript).
+   One technology keeps the prompt inside the budget and removes gate merging. Recommendation: one
+   technology per task, and a template may name one parent it builds on (React on TypeScript, Tauri
+   on Rust), whose rules are included. The architect splits an endpoint and its migration into two
+   tasks.
+4. **Test role folder.** Testing guidance is in the shared rules and each standard's Testing
+   section. Is a separate `test` role folder also wanted? Recommendation: no.
+5. **Order against pull request 625.** Phase 1 cannot start before that plan lands, with two
+   changes: its decision D3 (the worker fetches) and its `README.md` standard name.
+   Recommendation: change that plan first, then land it.
 
 ## Scale
 
@@ -521,13 +646,13 @@ Estimates, for planning only.
 |---|---|---|---|
 | H1 | The roster, the developer tiers and the removed agents (Roster) | KyberSquad | architecture |
 | H2 | Difficulty, its sources and the step-up (Difficulty; Choosing the agent and stepping up) | KyberSquad | architecture |
-| H3 | Model profiles and per-harness delivery (Models) | KyberSquad | reference |
+| H3 | The `dev-hard` profile and the conductor without a profile (Models) | KyberSquad | reference |
 | H4 | Technology and role folders, the six headings, templates and contribution (Technology folders and templates) | DocGraph | reference |
 | H5 | Installing templates and comparing a host folder with its template (Technology folders and templates) | DocGraph | onboarding |
 | H6 | The task prompt tool, its order and budget (The task prompt tool) | DocGraph | runbook |
 | H7 | Technology-resolved task gates and `review.technology-gates` (Task gates by technology) | ReviewCouncil | architecture |
 | H8 | Rules by folder, loading order and overrides (Arbiter rules from folders) | KyberArbiter | architecture |
-| H9 | The command-line research agent and its allow-list (The command-line research agent) | KyberSquad | runbook |
+| H9 | The platform research agent, the `devops` agent and platform folders (The platform research agent; Roster) | KyberSquad | runbook |
 | H10 | The roster switch and the comparison procedure (Roster switch and comparison) | KyberSquad | runbook |
 | H11 | Migration from agent-keyed gates and removed agent names (Removal) | ReviewCouncil | runbook |
 | H12 | Tiers and the task prompt; rules by folder; the task file format (Decisions D1, D10, D12, D14, D18) | KyberSquad | adr |
