@@ -25,8 +25,8 @@ keywords:
 ## Overview
 
 Replace the eleven per-technology worker agents with three developer agents that differ only in
-model strength: `dev-easy`, `dev-medium`, `dev-hard`. Each task carries a difficulty and a list of
-technologies. Everything a technology agent knows moves into that technology's folder, which ships
+model strength: `dev-easy`, `dev-medium`, `dev-hard`. Each task carries a difficulty and one
+technology. Everything a technology agent knows moves into that technology's folder, which ships
 as a template. One docs tool builds the whole prompt for a task. The Arbiter reads its rules from
 role and technology folders. `test-dev`, `sql-database-architect`, `azure-reader` and
 `github-devops` go away; a read-only `platform-researcher` and a platform-neutral `devops` agent
@@ -83,22 +83,23 @@ aliases: []
 # Developer
 
 You implement one task: the code and its tests. You are not tied to a technology. Your task prompt
-tells you which technology the task uses and carries that technology's rules, skills and standard.
+is a file. It tells you which one technology the task uses and carries that technology's rules,
+skills and standard.
 Those outrank any habit you bring with you.
 
 ## What your task prompt contains
 
-Read it top to bottom before you touch a file.
+Your dispatch names one file. It holds these parts, each inside its own tag:
 
-1. **Header**: task id, technology, difficulty.
-2. **Task**: what to build, the files in scope, the tests the task must add or change.
-3. **Host facts**: paths, the task gate commands for this technology, the host's own rules.
-4. **Shared rules**: rules for every technology.
-5. **Technology rules, skills and standard** for this task.
-6. **Left out**: anything the prompt had no room for.
+1. `<task>`: what to build, the files in scope, the tests the task must add or change.
+2. `<host-facts>`: paths, the task gate commands for this technology, the host's own rules.
+3. `<shared-rules>`: rules for every technology.
+4. `<parent-rules>`: present when this technology builds on another.
+5. `<technology-rules>`, `<skills>` and `<standard>` for this task's technology.
+6. `<left-out>`: anything the prompt had no room for.
 
-When two parts disagree: technology rules beat shared rules, rules beat skills, and skills beat the
-standard's general guidance.
+When two parts disagree: technology rules beat parent rules, parent rules beat shared rules, rules
+beat skills, and skills beat the standard's general guidance.
 
 ## Scope
 
@@ -107,10 +108,11 @@ inside them, stop and report it as an open question. Never edit secrets or deplo
 
 ## Workflow
 
-1. Read the whole task prompt. Do not open the plan, the specification or the task file.
+1. Read the whole prompt file before you touch anything else. Do not open the plan, the
+   specification or the task file.
 2. If the prompt names a technology and gives no rules or standard for it, stop and report that.
    Do not improvise a standard.
-3. If "Left out" lists a section you need, fetch it with `docs_get_coding_standard_for_technology`,
+3. If `<left-out>` lists a section you need, fetch it with `docs_get_coding_standard_for_technology`,
    naming the technology and the topic. Fetch nothing else by default.
 4. Look up current library documentation for any library you configure or call in a way that is new
    to this repository. Use the standard for which libraries this repository takes.
@@ -217,10 +219,9 @@ Stated so the owner can weigh them. The design follows the owner's direction in 
 3. **`<name>.rules.md` and `<name>.arbiter-rules.yml` are different things with one name.** The first is prose a
    model reads. The second is evaluated by the Arbiter. A host can read a rule in `<name>.rules.md` and
    assume it is enforced. The template header of each file must say which it is.
-4. **The whole brief passes through the conductor.** A tool that returns the prompt puts shared
-   rules, technology rules, skills and standard sections into the conductor's context once per
-   dispatch. The plan on pull request 625 avoided that by having the worker fetch. The comparison
-   must measure it (open question 3).
+4. **One technology per task changes how work is cut.** A change that touches an endpoint and its
+   migration becomes two tasks, and the second waits for the first. Plans get more, smaller tasks.
+
 5. **The platform research agent is wider than the agent it replaces.** `azure-reader` cannot run
    a command. `platform-researcher` can, and the allow-list that keeps it read-only is enforced on two
    harnesses and is an instruction on eleven.
@@ -378,22 +379,37 @@ folders for the technologies and platforms the user names. `kyber-weave docs sta
 ### The task prompt tool
 
 A new tool on the docs server, `docs_build_task_prompt_for_agent_dispatch`, takes the project path
-and a task id (and optionally the plan, a prior-results file and the number of failed attempts).
-Given technologies instead of a task id, it returns parts 4 to 6 only, for a dispatch that has no
-task: a `platform-researcher` request or a fix `bug-crusher` hands on. It is built on the service behind
-`docs packet`, and that command prints the same text.
+and a task id (and optionally the plan, a prior-results file and the number of failed attempts). It
+is built on the service behind `docs packet`, and that command prints the same text.
 
-Returned, in order:
+The tool writes the prompt to one file, `.agent_scratchpad/<task>/prompt.md`, and replies with a
+few lines: the file's path, the agent to dispatch, the difficulty and its source, the technology,
+and anything left out. The prompt text never enters the conductor's context. The conductor's
+dispatch is one short message that names the file; the worker's first step is to read it.
 
-1. A header: task id, agent to dispatch, difficulty and its source, model profile, technologies.
-2. The task's own prompt from the task file.
-3. Host facts, as `PacketHostFacts` builds them today, with gates resolved by technology.
-4. Shared rules.
-5. Per technology: its `<name>.rules.md`, its `<name>.skills.md`, then its standard.
-6. A list of anything left out.
+The file holds, in order, each part inside its own tag:
 
-Stitching happens when the prompt is built. Nothing is written into the task file, so its digest and
-staleness check are unchanged.
+```text
+<task>              the task's own prompt from the task file
+<host-facts>        as PacketHostFacts builds them today, with gates resolved by technology
+<shared-rules>      shared-rules.md
+<parent-rules>      the parent technology's rules and skills, when the template names a parent
+<technology-rules>  the task technology's rules file
+<skills>            the task technology's skills file
+<standard>          the task technology's standard
+<left-out>          anything the budget cut
+```
+
+The tags only mark where a part starts and ends. What is inside stays Markdown, so a heading inside
+a standard cannot be mistaken for the start of the next part.
+
+Given a technology instead of a task id, the tool writes the parts from `<shared-rules>` on, for a
+dispatch that has no task: a `platform-researcher` request or a fix `bug-crusher` hands on.
+
+The file is in the run's scratch folder, which is not tracked, so it is never committed and the
+task file's digest and staleness check are unchanged. `KW-ARB-PLANREAD-001` stops a dispatch that
+tells a worker to open a plan, specification or todo file; the prompt file is none of those, and
+the rule's criteria gain one line saying so.
 
 **Budget.** The shipped default is 60,000 characters, about 15,000 tokens. Sized from today's files:
 
@@ -402,20 +418,32 @@ staleness check are unchanged.
 | Task's own prompt | 6,000 (today's cap) |
 | Host facts | 6,000 (today's cap) |
 | Shared rules, with the cross-technology testing rules | about 5,000 |
-| One technology's standard, with its new Testing section | about 15,000 (C# is 10,215 today) |
-| One technology's rules, taking what its agent body holds | up to 12,000 (Tauri's agent is 12,858) |
-| One technology's skills | up to 3,000 |
+| The technology's standard, with its new Testing section | about 15,000 (C# is 10,215 today) |
+| The technology's rules, taking what its agent body holds | up to 12,000 (Tauri's agent is 12,858) |
+| The technology's skills | up to 3,000 |
 | **Total for one technology** | **about 47,000** |
+| A parent's rules and skills, where a template names one | up to 10,000 more |
 
-So a task that names one technology gets everything with nothing cut, and one test proves it for
-every shipped template. Past the budget: rules are never cut; skills are cut before standard
-sections; the least relevant to the task text goes first; every cut is listed. If measured prompts
-do not fit, the fallback is to keep rules and skills in the prompt and have the worker fetch
-standard sections by topic, as it does today.
+So a task gets everything with nothing cut, and one test proves it for every shipped template with
+its parent. Past the budget: rules are never cut; skills are cut before standard sections; the
+least relevant to the task text goes first; every cut is listed. A worker may still call
+`docs_get_coding_standard_for_technology` for a topic that was left out. The architect and
+`product-owner` keep fetching just in time, for a technology a task names.
 
-The developer agent's first step is no longer "fetch your standards". It may still call
-`docs_get_coding_standard_for_technology` for a topic the prompt left out. The architect and
-`product-owner` keep fetching just in time, per technology a task names.
+### One technology per task
+
+A task gains one line, `Technology: <name>`, checked against `ontology.technologies`. Naming two is
+a validation error that tells the author to split the task. This keeps every prompt inside the
+budget and means a task has one set of gates.
+
+Two cases would otherwise need two technologies:
+
+- **A technology built on another**: React on TypeScript, Tauri on Rust, the data-access layer on
+  C#. The template declares one parent with a `builds-on` key in its standard's frontmatter. The
+  task names the child and also receives the parent's rules and skills.
+- **Unrelated technologies in one change**: an endpoint and its database migration. The architect
+  writes two tasks with a dependency. The instruction is added to `architect` and to the
+  `product-owner` tasks reference.
 
 ### Task gates by technology
 
@@ -423,15 +451,15 @@ One resolver, `TaskGateResolver`, replaces the four lookups by agent name.
 
 1. An agent with its own `review.task-gates` entry uses it (today's path, kept for `docs-dev`,
    `devops` and the old roster).
-2. Otherwise, for each technology of the task: `review.technology-gates.<technology>` when the host
-   declares it, else the entry of the technology agent the shipped map names.
-3. Lists merge in technology order. Same id and same command runs once; same id with a different
-   command runs both, reported as `<technology>:<id>`.
-4. A developer agent whose task names technologies and resolves no gate is an error with a non-zero
+2. Otherwise `review.technology-gates.<technology>` for the task's technology, when the host
+   declares it; else the entry of the technology agent the shipped map names.
+3. If nothing resolved and the template names a parent, the parent's gates by the same two steps.
+4. A developer agent whose task names a technology and resolves no gate is an error with a non-zero
    exit.
 
-No gate is added. In this repository the twelve agent-keyed blocks hold 14 distinct gates and
-become about six technology blocks. `review.gates` is untouched.
+There is no merging of gate lists, because a task has one technology. No gate is added. In this
+repository the twelve agent-keyed blocks hold 14 distinct gates and become about six technology
+blocks. `review.gates` is untouched.
 
 ### Arbiter rules from folders
 
@@ -447,8 +475,8 @@ do not change.
 Each id above carries the `KW-ARB-` prefix.
 
 Loading order: the shipped role templates; the host's role folders (a host declaration of the same
-id wins); for an event that concerns a task, the `<name>.arbiter-rules.yml` of each technology the task
-names; then the host's `arbiter.rules` settings, which keep working as they do today. A file that
+id wins); for an event that concerns a task, the `<name>.arbiter-rules.yml` of the task's technology
+and of its parent; then the host's `arbiter.rules` settings, which keep working as they do today. A file that
 fails to parse, or names a trigger or fact the Arbiter lacks, is an `arbiter validate` error and
 the shipped rules for that folder are used.
 
@@ -468,8 +496,9 @@ new trigger, `worker.command`, raised by the existing worker guard.
 
 ### The platform research agent
 
-`platform-researcher` takes one or more technologies from its task and receives their `<name>.skills.md` and
-`<name>.rules.md` through the task prompt tool, the same way a developer agent does.
+`platform-researcher` takes one technology from its request and receives that folder's
+`<name>.skills.md` and `<name>.rules.md` through the task prompt tool, the same way a developer agent
+does.
 
 - New capability profile `platform-reader`: `read-only` plus `process.execute: allow`.
 - A technology's `<name>.skills.md` covers sign-in, the command-line tools and tool servers to use, query
@@ -490,8 +519,7 @@ task file. Under `technology`, a run behaves as today apart from the task prompt
 
 A runbook defines the comparison: three approved plans, each run once per roster from one base
 commit on one harness. It records tasks completed, attempts per task and the tier of each, task
-gate failures, review findings by severity, tokens and wall time, and the size of the prompts that
-passed through the conductor.
+gate failures, review findings by severity, tokens and wall time.
 
 ### Removal
 
@@ -514,7 +542,7 @@ Not scheduled. The old agents stay until the owner decides, after the comparison
 | Arbiter rules | YAML, one file | YAML, one file per folder (`<name>.arbiter-rules.yml`) |
 | Task file | JSON (`tasks.json`, `<plan>.tasks.json`) | YAML, converted in the phase that already raises its schema version; JSON is read for two minor releases with a warning |
 | Standards, rules, skills, agents | Markdown | unchanged |
-| Tool output (the standards bundle, the task prompt) | text with tagged sections | not a stored file (open question 1) |
+| The task prompt file | does not exist | Markdown parts inside named tags, written to the untracked scratch folder |
 | Arbiter decision log, gate reports | JSON lines, JSON | machine output, not authored; out of scope |
 
 New files use the `.yml` extension, as every YAML file in the repository does.
@@ -526,7 +554,7 @@ Each phase ships on its own and leaves a working product.
 | Phase | Delivers | Depends on |
 |---|---|---|
 | 1. Technology folders | Six-heading templates with four files each, the rule inventory, `shared-rules.md` testing rules, role folder templates, onboarding by chosen technology, `docs standards diff`. Additive: nothing the old roster reads is deleted | Pull request 625 |
-| 2. Task fields and the prompt tool | `Difficulty:` and `Technologies:`, the task file change, `TaskGateResolver`, the task prompt tool | Phase 1 |
+| 2. Task fields and the prompt tool | `Difficulty:` and `Technology:`, the task file change, `TaskGateResolver`, the task prompt tool | Phase 1 |
 | 3. Agents | The three developer agents, `platform-researcher`, `devops`, the `dev-hard` profile, the conductor without a profile, the roster switch, the step-up | Phase 2 |
 | 4. Arbiter rules from folders | The split of the 36 rules, folder loading, the `MODE-002` change, the command allow-list | Phases 1 and 3 |
 | 5. Comparison and removal | The comparison runbook and runs, the owner's decision, removal of the fourteen agents, the `test` technology, the `testing` skill and the `sql` template, and migration | Phases 1 to 4 |
@@ -539,11 +567,13 @@ Each phase ships on its own and leaves a working product.
 | Model profiles | New `dev-hard`; `orchestration` removed. |
 | Capability profiles | New `platform-reader`. |
 | Host configuration | `worker-roster`; `review.technology-gates`; `ontology.roles`; a task prompt budget. |
-| Plan and specification task text | Optional `Difficulty:` and `Technologies:` lines. |
-| Task file | Schema version plus one; YAML; top-level `worker-roster`; per entry `difficulty`, `difficulty-source`, `technologies`. |
+| Plan and specification task text | Optional `Difficulty:` and `Technology:` lines. |
+| Standard frontmatter | Optional `builds-on: <technology>`. |
+| Task file | Schema version plus one; YAML; top-level `worker-roster`; per entry `difficulty`, `difficulty-source`, `technology`. |
 | Technology, role and platform folders | The standard is `<name>.standards.md`; new `<name>.arbiter-rules.yml`. |
 | Arbiter | Trigger `worker.command`; fact `plan.task.files-all-tests`. |
 | Docs tool server | New tool `docs_build_task_prompt_for_agent_dispatch`. |
+| Run scratch folder | New untracked file `.agent_scratchpad/<task>/prompt.md`. |
 
 ## Error handling
 
@@ -552,7 +582,8 @@ Each phase ships on its own and leaves a working product.
 | `Difficulty:` holds another value | `docs validate` error naming the task and the three values. |
 | No `Difficulty:` line | Treated as `medium`, source `default`. |
 | Unknown technology on a task | `docs validate` error naming the task, the value and the declared list. |
-| Tiered roster, file-changing task without technologies | `docs validate` error naming the task. |
+| Tiered roster, file-changing task without a technology | `docs validate` error naming the task. |
+| `Technology:` names two | `docs validate` error telling the author to split the task. |
 | Technology named, folder missing | The prompt says so in that technology's section; the rest is returned. |
 | Prompt over budget | Rules kept; skills then standard sections cut; cuts listed. |
 | Task file missing or stale | No prompt; the reply names the repair command. |
@@ -606,39 +637,24 @@ Estimates, for planning only.
 | D9 | What are the standard's headings? | Naming and layout; Coding standards; Testing; Commands; Security and data handling; Done checklist. | | user: explicit decision 2026-11-16 |
 | D10 | Where do the 36 Arbiter rules go? | Into `conductor`, `architect` and `reviewer` role folders, split by trigger. | The owner named conductor and architect. `reviewer` is added because 13 rules are review rules. | user: explicit decision 2026-11-16; `reviewer` folder is autonomous, pending owner approval |
 | D11 | Is any Arbiter rule locked? | No. | The owner's view, and the code agrees: every rule can already be set to log only. | user: explicit decision 2026-11-16 |
-| D12 | Who builds the task prompt? | A docs tool the conductor calls; it returns one prompt. | Reverses decision D3 of the plan on pull request 625. Deterministic, and the worker cannot skip it. | user: explicit decision 2026-11-16 |
-| D13 | How are task gates keyed? | By the task's technologies, with a fallback to the old agent-keyed entries. | No agent is named after a technology any more. No gate is added. | autonomous: recommendation, pending owner approval |
+| D12 | Who builds the task prompt, and how does it reach the worker? | A docs tool the conductor calls. It writes the prompt to a file in the run's scratch folder and replies with the path; the worker reads the file. | Reverses decision D3 of the plan on pull request 625. Deterministic, the worker cannot skip it, and about 12,000 tokens per dispatch stay out of the conductor's context. | user: explicit decision 2026-11-16 |
+| D13 | How are task gates keyed? | By the task's one technology, then its parent, with a fallback to the old agent-keyed entries. | No agent is named after a technology any more. No gate is added and no lists are merged. | autonomous: recommendation, pending owner approval |
 | D14 | Which file format? | YAML for every data file added or changed, the task file included, extension `.yml`. | The owner asked for one format and approved converting the task file. `.yml` matches every YAML file in the repository. | user: explicit decision 2026-11-16; extension is autonomous |
 | D15 | What replaces `azure-reader`? | `platform-researcher`, which loads the skills and rules of the technology its task names. | Needs a new capability profile that can run commands. | user: explicit decision 2026-11-16 |
 | D16 | Where does testing guidance live? | A Testing section in every standard; cross-technology rules in `shared-rules.md`. | `test-dev` and the `test` technology are removed. | user: explicit decision 2026-11-16 |
 | D17 | How many specifications? | One, in five phases. | The owner's direction. | user: explicit decision 2026-11-16 |
 | D18 | Does this need ADRs? | Yes: one for tiers, difficulty and the task prompt (amending ADR 0080 and ADR 0082), one for rules by folder, one for the task file format (amending ADR 0063). | Each is a contract hosts depend on. | autonomous: recommendation, pending owner approval |
 | D19 | What replaces `github-devops`? | A platform-neutral `devops` agent with a `devops` role folder and one platform folder each for GitHub, Azure DevOps, GitLab and Jira. | The agent names no platform; the task or the host configuration does. | user: explicit decision 2026-11-16 |
-| D20 | How large is the prompt budget? | 60,000 characters by default; a one-technology task must fit with nothing cut. | Sized from today's files at about 47,000 for the largest case. | autonomous: recommendation, pending owner approval |
+| D20 | How large is the prompt budget? | 60,000 characters by default; a task must fit with nothing cut. | Sized from today's files at about 47,000 for the largest case, 57,000 with a parent. | autonomous: recommendation, pending owner approval |
+| D21 | How many technologies may a task name? | One. A template may name one parent it builds on; unrelated technologies are separate tasks. | Keeps the prompt inside the budget and gives a task one set of gates. | user: explicit decision 2026-11-16 |
+| D22 | How are the prompt's parts separated? | Named tags around each part; Markdown inside. | The one-format rule covers stored data files; the prompt is text for a model. | user: explicit decision 2026-11-16 |
+| D23 | Is there a test role folder? | No. | Testing lives in the shared rules and each standard's Testing section. | user: explicit decision 2026-11-16 |
 
 ## Open questions
 
-1. **Tool output.** The task prompt is text handed to a model. Its sections (shared rules, each
-   technology's rules, skills and standard) are Markdown, and each standard has its own headings.
-   Should section boundaries be marked with tags, as the plan on pull request 625 does, or does the
-   one-format rule forbid that? Recommendation: keep tags as separators only. Without them a
-   heading inside a standard reads as the start of a new section.
-2. **Prompt through the conductor (D12).** A full prompt is up to about 47,000 characters, roughly
-   12,000 tokens. A 20-task plan sends about 240,000 tokens through the conductor, more with
-   retries. The alternative: the tool writes the prompt to the run's scratch folder and returns a
-   short header and the path; the conductor dispatches "read this file and do the task". The worker
-   reads the same text either way. Recommendation: return the path.
-3. **One technology per task?** Cases that need two today: an endpoint plus its migration (C# and
-   SQL Server); a Tauri command (Rust and TypeScript); a React component (React and TypeScript).
-   One technology keeps the prompt inside the budget and removes gate merging. Recommendation: one
-   technology per task, and a template may name one parent it builds on (React on TypeScript, Tauri
-   on Rust), whose rules are included. The architect splits an endpoint and its migration into two
-   tasks.
-4. **Test role folder.** Testing guidance is in the shared rules and each standard's Testing
-   section. Is a separate `test` role folder also wanted? Recommendation: no.
-5. **Order against pull request 625.** Phase 1 cannot start before that plan lands, with two
-   changes: its decision D3 (the worker fetches) and its `README.md` standard name.
-   Recommendation: change that plan first, then land it.
+1. **Order against pull request 625.** Phase 1 cannot start before that plan lands, with three
+   changes: its decision D3 (the worker fetches), its file names, and the tool's output going to a
+   file. Recommendation: change that plan first, then land it.
 
 ## Scale
 

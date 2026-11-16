@@ -28,6 +28,6 @@ It depends on the technology folder layout planned on
 | Document | Covers |
 |---|---|
 | [Requirements](requirements.md) | 13 requirements in EARS form. Draft. |
-| [Design](design.md) | Evidence from the code, where the evidence is against the idea, the roster, the developer agent's instructions, difficulty and the step-up, technology, role and platform folders, the task prompt tool and its budget, technology-resolved task gates, Arbiter rules by folder, five phases, 20 decisions and 5 open questions. Draft. |
+| [Design](design.md) | Evidence from the code, where the evidence is against the idea, the roster, the developer agent's instructions, difficulty and the step-up, technology, role and platform folders, the task prompt tool and its budget, one technology per task, technology-resolved task gates, Arbiter rules by folder, five phases, 23 decisions and 1 open question. Draft. |
 
 The task list is not written yet. It follows once the requirements and design are approved.

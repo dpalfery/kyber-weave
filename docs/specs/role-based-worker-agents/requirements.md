@@ -192,29 +192,39 @@ conductor's instructions SHALL state the same rule in prose for a run with the A
 3.6. A developer-agent dispatch that belongs to no task SHALL start on `dev-medium` and SHALL follow
 the same step-up.
 
-### Requirement 4: A task declares its technologies
+### Requirement 4: A task declares one technology
 
-**User Story:** As an architect, I want each task to name the technologies it touches, so that the
-right standards, rules, skills and gates are chosen by the machine.
+**User Story:** As an architect, I want each task to name the one technology it is written in, so
+that the right standards, rules, skills and gates are chosen by the machine and fit in one prompt.
 
 #### Acceptance Criteria
 
-4.1. THE plan and specification task formats SHALL accept a `Technologies:` line listing one or more
-technology names.
+4.1. THE plan and specification task formats SHALL accept a `Technology:` line naming exactly one
+technology.
 
-4.2. WHEN a task file is written THEN each task entry SHALL carry its technologies as a list.
+4.2. WHEN a task file is written THEN each task entry SHALL carry its technology.
 
 4.3. IF a task names a technology the host's `ontology.technologies` does not declare THEN
 `docs validate` SHALL report an error naming the task, the value and the declared list.
 
-4.4. IF the active roster is `tiered` and a task that changes files has no `Technologies:` line THEN
+4.4. IF the active roster is `tiered` and a task that changes files has no `Technology:` line THEN
 `docs validate` SHALL report an error naming the task.
 
-4.5. THE `architect` and `product-owner` SHALL read a technology's standard through
+4.5. IF a `Technology:` line names more than one technology THEN `docs validate` SHALL report an
+error that tells the author to split the task.
+
+4.6. A technology template SHALL be able to name one parent technology it builds on (for example
+React on TypeScript); a task in that technology SHALL also receive the parent's rules and skills.
+
+4.7. THE `architect` and `product-owner` instructions SHALL require work that spans two unrelated
+technologies (for example an endpoint and its database migration) to be written as separate tasks
+with a dependency between them.
+
+4.8. THE `architect` and `product-owner` SHALL read a technology's standard through
 `docs_get_coding_standard_for_technology`, only for a technology a task names, and SHALL read a
 standards file directly only when the tool is missing or reports a failure.
 
-4.6. THE `Capabilities:` line SHALL stay as it is: plain words, no fixed vocabulary.
+4.9. THE `Capabilities:` line SHALL stay as it is: plain words, no fixed vocabulary.
 
 ### Requirement 5: A technology folder holds everything about a technology
 
@@ -250,6 +260,9 @@ technology's template before the agent that held it is removed.
 standard that lacks one of the six headings, naming the folder and what is missing.
 
 5.9. `<name>.arbiter-rules.yml` SHALL be valid when it declares no rule.
+
+5.10. THE system SHALL ship no role folder for testing; testing guidance SHALL live only in
+`shared-rules.md` and in each standard's Testing section.
 
 ### Requirement 6: Standards ship as templates
 
@@ -291,7 +304,7 @@ they belong to, so that I see and override them where I already work.
 folder, with its id, question, answers and effects unchanged.
 
 7.2. WHEN the Arbiter evaluates an event THEN it SHALL apply the rules of the role folders, and,
-when the event concerns a task, the rules of each technology that task names.
+when the event concerns a task, the rules of that task's technology.
 
 7.3. WHEN a host folder declares a rule id the shipped template also declares THEN the host's
 declaration SHALL be used.
@@ -343,44 +356,56 @@ improvise commands.
 
 ### Requirement 9: One docs tool builds the whole task prompt
 
-**User Story:** As a conductor, I want one tool call that returns everything a worker needs for a
-task, so that I pass one prompt and the worker never has to remember to fetch its standards.
+**User Story:** As a conductor, I want one tool call that prepares everything a worker needs for a
+task, so that I dispatch with one short message and the worker never has to remember to fetch its
+standards.
 
 #### Acceptance Criteria
 
-9.1. THE docs tool server SHALL provide a tool that takes a task id and returns the task prompt.
+9.1. THE docs tool server SHALL provide a tool that takes a task id, builds the task prompt and
+writes it to one file in the run's scratch folder.
 
 9.2. THE task prompt SHALL contain, in this order: the task's own prompt from the task file; the
-host facts; the shared rules; then, for each technology the task names, its rules, its skills and
-the sections of its standard that bear on the task.
+host facts; the shared rules; the parent technology's rules and skills, when the template names a
+parent; then the task technology's rules, skills and standard.
 
-9.3. THE tool's result SHALL also name the agent to dispatch, the difficulty in use and its source,
-and the model profile.
+9.3. THE tool's reply SHALL be short: the path of the prompt file, the agent to dispatch, the
+difficulty in use and its source, the technology, and a list of anything left out. It SHALL NOT
+contain the prompt text.
 
-9.4. THE `kyber-weave docs packet` command SHALL print the same task prompt for the same task.
+9.4. THE conductor's dispatch SHALL name the prompt file and SHALL NOT restate its content; the
+worker's first step SHALL be to read that file.
 
-9.5. THE stitched text SHALL be added when the prompt is built and SHALL NOT be written into the
-task file, so the task file's digest and staleness check are unchanged.
+9.5. THE `kyber-weave docs packet` command SHALL print the same task prompt for the same task.
 
-9.6. WHEN the stitched text would exceed the prompt budget THEN rules SHALL be kept whole, skills
+9.6. THE prompt file SHALL be written outside the task file and outside tracked files, so the task
+file's digest and staleness check are unchanged and the prompt is never committed.
+
+9.7. EACH stitched part SHALL be enclosed in a named tag that marks where it starts and ends; the
+content inside a tag SHALL stay Markdown.
+
+9.8. WHEN the stitched text would exceed the prompt budget THEN rules SHALL be kept whole, skills
 and standard sections SHALL be cut by relevance to the task, and the prompt SHALL list what was
 left out.
 
-9.7. A developer agent's instructions SHALL NOT require it to fetch its standards at start; it MAY
+9.9. THE shipped prompt budget SHALL be large enough that, for every shipped template together
+with its parent, a task receives its rules, skills and standard with nothing cut; one test SHALL
+prove this for every template.
+
+9.10. A developer agent's instructions SHALL NOT require it to fetch its standards at start; it MAY
 call `docs_get_coding_standard_for_technology` for a topic the prompt left out.
 
-9.8. IF the task file is missing or does not match its plan THEN the tool SHALL return no prompt
+9.11. IF the task file is missing or does not match its plan THEN the tool SHALL write no prompt
 and SHALL say which command repairs it.
 
-9.9. IF a named technology has no folder THEN the prompt SHALL say so in its own section and the
-tool SHALL still return the rest.
+9.12. IF the named technology has no folder THEN the prompt SHALL say so in that part and the tool
+SHALL still write the rest.
 
-9.10. WHEN the tool is given technologies and no task id THEN it SHALL return the shared rules and
-each technology's rules, skills and standard sections, for a dispatch that belongs to no task.
+9.13. WHEN the tool is given a technology and no task id THEN it SHALL write the shared rules and
+that technology's rules, skills and standard, for a dispatch that belongs to no task.
 
-9.11. THE shipped prompt budget SHALL be large enough that, for every shipped template, a task
-that names one technology receives its rules, skills and standard with nothing cut; one test SHALL
-prove this for every template.
+9.14. No existing Arbiter rule SHALL treat a dispatch that names the prompt file as a dispatch that
+tells a worker to read a plan.
 
 ### Requirement 10: Task gates resolve by technology
 
@@ -392,17 +417,16 @@ keep working when no agent is named after a technology.
 10.1. THE host configuration SHALL accept task gates keyed by technology.
 
 10.2. WHEN a developer agent runs its task gates THEN the system SHALL run the gates declared for
-each technology the task names.
+the task's technology.
 
 10.3. IF a host declares no technology-keyed gates for a technology THEN the system SHALL use the
 gates declared under the technology agent that technology maps to, from one shipped map.
 
-10.4. WHEN two technologies of one task resolve to gates with the same id and the same command THEN
-the system SHALL run that gate once; with different commands it SHALL run both and report each
-under its technology and id.
+10.4. IF no gate resolves for the task's technology and its template names a parent THEN the
+system SHALL use the parent's gates.
 
-10.5. IF a developer agent's task names technologies and no gate resolves for any of them THEN the
-system SHALL report an error and SHALL exit non-zero.
+10.5. IF a developer agent's task names a technology and no gate resolves THEN the system SHALL
+report an error and SHALL exit non-zero.
 
 10.6. THE task prompt, the test command it carries and the Arbiter's gates-declared fact SHALL use
 the same resolution as the gate run.
