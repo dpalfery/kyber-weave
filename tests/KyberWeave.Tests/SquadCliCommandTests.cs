@@ -69,7 +69,7 @@ public sealed class SquadCliCommandTests : IDisposable
         Assert.Null(SquadPackSourceLocator.Resolve(childDir));
 
         // Assert CLI, Core and Squad assemblies have no embedded resource for products/kyber-squad corpus
-        Assembly cliAssembly = typeof(SquadPackSourceLocator).Assembly;
+        Assembly cliAssembly = typeof(KyberWeave.Cli.CliApplication).Assembly;
         Assembly coreAssembly = typeof(KyberWeaveConfigLoader).Assembly;
         Assembly squadAssembly = typeof(SquadSource).Assembly;
 
@@ -122,7 +122,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string outDir = Path.Combine(_temp.Path, "pack-out");
 
         FakeProcessExecutor executor = new FakeProcessExecutor();
-        SquadPackCommand command = new SquadPackCommand(executor, workingDirectory: workingDir);
+        SquadPackCommand command = SquadTestCommands.Pack(workingDir);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -148,7 +148,7 @@ public sealed class SquadCliCommandTests : IDisposable
     public void Pack_InvalidFormatToken_ExitsTwo(string format)
     {
         FakeProcessExecutor executor = new FakeProcessExecutor();
-        SquadPackCommand command = new SquadPackCommand(executor, workingDirectory: _temp.Path);
+        SquadPackCommand command = SquadTestCommands.Pack(_temp.Path);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -174,7 +174,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string outDir = Path.Combine(_temp.Path, "pack-output");
 
         FakeProcessExecutor executor = new FakeProcessExecutor();
-        SquadPackCommand command = new SquadPackCommand(executor, workingDirectory: repoPath);
+        SquadPackCommand command = SquadTestCommands.Pack(repoPath);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -1677,7 +1677,7 @@ public sealed class SquadCliCommandTests : IDisposable
         SquadUninstallCommand uninstall = SquadTestCommands.Uninstall();
         SquadStatusCommand status = SquadTestCommands.Status();
         SquadDoctorCommand doctor = SquadTestCommands.Doctor();
-        SquadPackCommand pack = new SquadPackCommand();
+        SquadPackCommand pack = SquadTestCommands.Pack();
 
         Assert.NotNull(install);
         Assert.NotNull(update);

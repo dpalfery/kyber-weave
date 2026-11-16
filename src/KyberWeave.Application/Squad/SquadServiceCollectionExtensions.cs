@@ -1,3 +1,4 @@
+using KyberWeave.Application.Squad.Packaging;
 using KyberWeave.Application.Update;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Update;
@@ -34,6 +35,7 @@ public static class SquadServiceCollectionExtensions
             FindLocalProductSquadRoot(sp.GetRequiredService<ISquadFileAccess>()) is { } local
                 ? new LocalCheckoutSquadReleaseSource(local)
                 : sp.GetRequiredService<ISquadReleaseSource>()));
+        services.TryAddSingleton<ISquadPackService, SquadPackService>();
         services.TryAddSingleton<ISelfUpdateService>(sp => new SelfUpdateService(
             sp.GetRequiredService<Func<SelfUpdateHost>>(),
             sp.GetRequiredService<IProcessEnvironment>(),
