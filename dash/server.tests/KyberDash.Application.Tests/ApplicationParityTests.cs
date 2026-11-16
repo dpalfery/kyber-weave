@@ -123,6 +123,39 @@ public class ApplicationParityTests
     }
 
     [Fact]
+    public void SessionContentForASpanAnswersFlatPartsAndNothingForASpanThatCapturedNone()
+    {
+        FakeCanonStoreRepository store = new();
+        CanonicalRecord empty = MakeLlmRecord("span-empty", "sess-content", "droid", "2026-11-14T10:00:00.000Z", 0, 0);
+        CanonicalRecord withParts = MakeLlmRecord("span-parts", "sess-content", "droid", "2026-11-14T10:01:00.000Z", 0, 0) with
+        {
+            Parts = [new ContentPart("user_prompt", "hello", Tokens: 3)],
+        };
+        CanonicalRecord fromContent = MakeLlmRecord("span-content", "sess-content", "droid", "2026-11-14T10:02:00.000Z", 0, 0) with
+        {
+            Parts = null,
+            Content = new Dictionary<string, string> { ["user_prompt"] = "hi" },
+        };
+        store.PutRecords([empty, withParts, fromContent]);
+        KyberBridgeEngine bridge = Bridge(store);
+
+        JsonElement none = bridge.GetSessionContent("sess-content", spanId: "span-empty", full: true)!.Value;
+        Assert.Equal(0, none.GetProperty("parts").GetArrayLength());
+
+        JsonElement flat = bridge.GetSessionContent("sess-content", spanId: "span-parts", full: true)!.Value;
+        JsonElement entry = Assert.Single(flat.GetProperty("parts").EnumerateArray().ToList());
+        Assert.Equal("span-parts", entry.GetProperty("spanId").GetString());
+        Assert.Equal("user_prompt", entry.GetProperty("part").GetString());
+        Assert.Equal("hello", entry.GetProperty("text").GetString());
+        Assert.Equal(3, entry.GetProperty("tokens").GetInt64());
+
+        JsonElement viaContent = bridge.GetSessionContent("sess-content", spanId: "span-content", full: true)!.Value;
+        JsonElement contentEntry = Assert.Single(viaContent.GetProperty("parts").EnumerateArray().ToList());
+        Assert.Equal("user_prompt", contentEntry.GetProperty("part").GetString());
+        Assert.Equal("hi", contentEntry.GetProperty("text").GetString());
+    }
+
+    [Fact]
     public void PredictionRecordingValidatesTheBodyAndStoresTheRow()
     {
         FakeCanonStoreRepository store = new();
