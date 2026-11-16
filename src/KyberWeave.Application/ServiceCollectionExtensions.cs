@@ -113,6 +113,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IReviewDecisionSteps, ReviewDecisionSteps>();
         services.TryAddSingleton<ITaskGateSelectionService, TaskGateSelectionService>();
         services.TryAddSingleton<IReviewDecisionModelFactory, ReviewDecisionModelFactory>();
+        services.TryAddSingleton<IReviewVerdictService, ReviewVerdictService>();
         _ = services.AddWeaveArbiterApplication();
         return services;
     }

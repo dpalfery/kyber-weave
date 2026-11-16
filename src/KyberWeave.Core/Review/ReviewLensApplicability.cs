@@ -25,7 +25,7 @@ public static class ReviewLensApplicability
 
     /// <inheritdoc cref="IReviewDecisionSteps.NotApplicableLensesAsync" />
     public static Task<IReadOnlyDictionary<string, string>> NotApplicableAsync(
-        ReviewDecisionModel model, IReadOnlyList<string> seated, string changeSummary, CancellationToken cancellationToken = default) =>
+        IReviewDecisionModel model, IReadOnlyList<string> seated, string changeSummary, CancellationToken cancellationToken = default) =>
         Steps.NotApplicableLensesAsync(model, seated, changeSummary, cancellationToken);
 
     /// <inheritdoc cref="ReviewLensRules.Summarize" />

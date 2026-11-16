@@ -6,13 +6,13 @@ using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Review;
 using KyberWeave.Core.FileSystem;
 
-namespace KyberWeave.Cli.Commands.Review;
+namespace KyberWeave.Application.Review;
 
 /// <summary>
-///     What <c>review cycle</c> and the council's <c>review gates</c> run share: choosing the task's review folder,
-///     reading the findings to re-check, and describing a cycle plan in the same lines.
+///     What <c>review cycle</c>, the council's <c>review gates</c> run and <c>review verdict</c> share: choosing the
+///     task's review folder, reading the findings to re-check, and describing a cycle plan in the same lines.
 /// </summary>
-internal static class ReviewCycleView
+public static class ReviewCycleView
 {
     private const string InvalidInput = "KW-REVIEW-028";
     private const string FolderPrefix = "cycle-";
@@ -21,6 +21,8 @@ internal static class ReviewCycleView
     ///     The task folder name: the given id normalised and matched to an existing folder without regard to case; with
     ///     no id, the one review folder there is, or the one named for the current branch.
     /// </summary>
+    /// <param name="cycles">The cycle store that lists the task folders.</param>
+    /// <param name="git">Names the current branch, so the folder named for it is chosen.</param>
     /// <param name="root">The repository root.</param>
     /// <param name="scratchpad">The <c>.agent_scratchpad</c> folder.</param>
     /// <param name="given">The id the caller gave, or null.</param>
@@ -127,7 +129,7 @@ internal static class ReviewCycleView
         ReviewCycleRecord prior,
         ReviewPolicy policy,
         DiagnosticReport report,
-        List<ReviewFinding> recheck,
+        IList<ReviewFinding> recheck,
         string unreadableCode,
         Severity unreadableSeverity,
         string subject)
@@ -135,7 +137,8 @@ internal static class ReviewCycleView
         try
         {
             FindingsReport findings = ReviewJson.ReadFindings(files.ReadAllText(prior.FindingsPath));
-            recheck.AddRange(findings.Findings.Where(policy.FixRoundTakes));
+            foreach (ReviewFinding finding in findings.Findings.Where(policy.FixRoundTakes))
+                recheck.Add(finding);
             return true;
         }
         catch (Exception ex) when (FileFailure.Is(ex) || ex is JsonException or InvalidOperationException)
