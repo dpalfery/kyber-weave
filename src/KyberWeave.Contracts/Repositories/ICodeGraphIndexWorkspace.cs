@@ -19,4 +19,12 @@ public interface ICodeGraphIndexWorkspace
     /// <param name="directory">The directory.</param>
     /// <returns>True when a file could be created and removed there.</returns>
     bool IsWritable(string directory);
+
+    /// <summary>
+    /// Whether CodeGraph's own lock file in <paramref name="indexDirectory"/> names a process that is still running,
+    /// which is the rule CodeGraph itself uses to tell a held lock from a stale one.
+    /// </summary>
+    /// <param name="indexDirectory">The <c>.codegraph/</c> directory.</param>
+    /// <returns>True when another live process holds the lock; false when there is no lock file or it is stale.</returns>
+    bool IsCodeGraphLockHeld(string indexDirectory);
 }

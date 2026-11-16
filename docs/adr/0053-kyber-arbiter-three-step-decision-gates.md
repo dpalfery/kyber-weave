@@ -249,7 +249,8 @@ fact outside those declared states leaves the machine.
   no hooks, and the MCP fallback records the harness as `fallback-only` with the reason code
   `hooks-disabled-by-harness` or `dispatch-unconfirmed` until the hook matrix is verified.
 - **Completion is the worker's own report.** A task counts as complete when its worker's
-  report reads `RESULT: PASS`, because the separate task reviewer the design named no longer
+  report reads `RESULT: PASS`, or its completion digest reads `TASK_GATE: PASS` under `STATUS: PASS` or
+  `STATUS: READY_FOR_REVIEW` (the form the worker templates write), because the separate task reviewer the design named no longer
   exists. A worker can therefore mark its own task complete; the final review still judges
   the whole change.
 - **Ledger loss needs attestation.** Completion lives in `artifacts/`, which

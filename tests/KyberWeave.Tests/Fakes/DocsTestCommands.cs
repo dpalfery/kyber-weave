@@ -99,8 +99,9 @@ internal static class DocsTestCommands
     /// <param name="root">The bound repository root.</param>
     /// <param name="executor">Runs the CodeGraph child; null for the bounded production runner.</param>
     /// <param name="refreshEnabled">False to model <c>--no-codegraph-refresh</c>.</param>
+    /// <param name="pause">Waits between sync attempts on a held CodeGraph lock; null to really wait.</param>
     public static CodeGraphFreshness Freshness(
-        string root, IProcessExecutor? executor = null, bool refreshEnabled = true)
+        string root, IProcessExecutor? executor = null, bool refreshEnabled = true, Action<TimeSpan>? pause = null)
     {
         IServiceProvider provider = Services();
         return new CodeGraphFreshness(
@@ -109,7 +110,8 @@ internal static class DocsTestCommands
             provider.GetRequiredService<ICodeGraphProvisioner>(),
             provider.GetRequiredService<IKyberWeaveConfigRepository>(),
             provider.GetRequiredService<TimeProvider>(),
-            executor);
+            executor,
+            pause);
     }
 
     /// <summary>The review-gate catalogue over the real adapters the host wires.</summary>

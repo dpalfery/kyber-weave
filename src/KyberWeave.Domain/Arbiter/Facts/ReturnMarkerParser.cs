@@ -30,10 +30,11 @@ internal static partial class ReturnMarkerParser
         string text = Flatten(output);
         string? review = LastGroup(ResultRegex(), text);
         string? status = LastGroup(StatusRegex(), text);
+        string? gate = LastGroup(TaskGateRegex(), text);
         IReadOnlyList<string>? attested = readAttestations ? ReadAttested(text) : null;
-        return review is null && status is null && attested is null
+        return review is null && status is null && attested is null && gate is null
             ? null
-            : new ArbiterReturnMarkers(review, status, attested);
+            : new ArbiterReturnMarkers(review, status, attested, gate);
     }
 
     private static IReadOnlyList<string>? ReadAttested(string text)
@@ -109,6 +110,9 @@ internal static partial class ReturnMarkerParser
 
     [GeneratedRegex(@"^STATUS:[ \t]*(\S+)", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     private static partial Regex StatusRegex();
+
+    [GeneratedRegex(@"^TASK_GATE:[ \t]*([A-Z_]+)\b", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
+    private static partial Regex TaskGateRegex();
 
     [GeneratedRegex(@"^ATTESTED:[ \t]*(.+?)[ \t]*\r?$", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     private static partial Regex AttestedRegex();

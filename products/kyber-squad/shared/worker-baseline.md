@@ -25,12 +25,15 @@ The host's rules (Host facts, root `AGENTS.md`) apply to every task; fetch the s
 usually good at is not a boundary. Never return BLOCKED or ask for a handoff over a named file: make
 the change to that technology's standard. Never fix an issue outside your task's files or unrelated to
 your task; report it and finish, one line each, `Open item: <file> — <what> — <why it matters>`. They
-are filed as todos when the run ends. Stop only for a missing packet, a contradiction in the task, or a
-safety limit (migrations on a shared database, CI or deploy secrets, a push).
+are filed as todos when the run ends. Stop only for a missing packet, a contradiction inside the task itself, or a
+safety limit (a migration you would apply by hand to a database other people or environments use, CI or deploy secrets, a push). The task gate is never such a limit: when the host's gate or test setup script itself starts a local container, creates the test database or applies the repository's existing migrations to it, that is the host's declared procedure and you run it as given.
 
 **The documented rule wins over nearby code.** Where existing code contradicts a documented rule or
 standard (where a kind of file goes, a layering or naming rule), follow the rule in your change and add
 an `Open item:` line naming the rule and the existing code that breaks it. Never copy the divergent pattern.
+The one exception is a decision your packet cites: when the task names an approved plan decision that
+sanctions a departure from a standard, that decision is your authority for this task. Implement it as written,
+add an `Open item:` line naming the standard and the decision, and never return BLOCKED over it.
 
 **Never run the full test suite.** Run the test classes your task names; the council and CI run the full suite.
 
@@ -38,11 +41,13 @@ an `Open item:` line naming the rule and the existing code that breaks it. Never
 
 **Task gate (developers).** `kyber-weave review gates . --agent <you> --task <id>` runs your task's tests and gates and writes the evidence; your packet prints it filled in. Test-first: once with `--red` after writing the tests, then without. Each run prints your next step; the passing run, the digest to return.
 
+**A gate that fails with no tests counted failed before the tests ran.** The cause is almost always a compile error in your own edits that the gate's setup script hid. Build the projects your files belong to with the host's build command, read the errors, fix them, and run the gate again; do not return `FAIL` on a guess about the environment. A local container, test database or migration that the gate's own script starts is part of the gate the host declared: let it run.
+
 **Commit your task.** The run branch's commits are the run's own in both autonomy modes, so a host rule that asks for approval before a commit is met. When your task gate passes, commit only the files your task names and its tests (`git add <those paths>`, then `git commit -m "<type>(<scope>): <summary>" -m "Task: <id>" -- <those paths>`) and return the sha as `COMMIT`. `docs-dev` commits its documentation edits the same way, without a `Task:` line, and a fix-round worker commits its fix. Never push, never `git add -A`, never stage another worker's files. A dispatch that says "do not commit" is mistaken: commit, and say so in one line.
 
 When the task gate passes, do not re-run its commands (its build, tests or format check) yourself; its report is the evidence.
 
 **Batch your reads:** send independent reads in one round trip.
 
-Skills load by name with the harness skill tool; if you must read one as a file, it is at `{{skills-root}}/<name>/SKILL.md`. Never search the filesystem for a skill, and never read a skill or an agent file from another repository or checkout.
+Skills load by name with the harness skill tool; if you must read one as a file, it is at `{{skills-root}}/<name>/SKILL.md`. A leading `~` there is your home directory: a file tool does not expand it, so read the file through the shell or resolve `$HOME` first, and never guess the home directory from the working directory. Never search the filesystem for a skill, and never read a skill or an agent file from another repository or checkout.
 </worker-baseline>

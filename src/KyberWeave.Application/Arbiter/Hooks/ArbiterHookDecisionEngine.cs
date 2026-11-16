@@ -33,7 +33,7 @@ namespace KyberWeave.Arbiter.Hooks;
 /// Evaluation is synchronous at this boundary because the adapters are; the wait
 /// stays inside the harness's per-hook timeout.
 /// </remarks>
-public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, IArbiterProviderSource
+public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, IBackgroundDispatchEngine, IArbiterProviderSource
 {
     private const string ModelTrigger = "delegate.model";
     private const string TriageShortcutTrigger = "triage.shortcut";
@@ -57,6 +57,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     private readonly IPlanRootResolver _planRoots;
     private readonly IArbiterHostConfig _hostConfig;
     private readonly IProcessEnvironment _process;
+    private readonly IBackgroundDispatchStore _background;
 
     /// <summary>
     /// Creates an engine over the ports it decides through. Every factory is injectable so tests run the real
@@ -72,6 +73,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     /// <param name="credentials">The operating system credential store the provider key is read from.</param>
     /// <param name="hostConfig">Resolves the home directory a global-scope evaluation keeps its state under.</param>
     /// <param name="process">The process the engine reads its home, directory and environment variables from.</param>
+    /// <param name="background">Keeps the background dispatches whose turns are still to return.</param>
     /// <param name="providerFactory">Replaces the provider the configuration names.</param>
     /// <param name="gitFactsFactory">Replaces the git facts.</param>
     /// <param name="planReaderFactory">Replaces the plan reader.</param>
@@ -90,6 +92,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         ICredentialStore credentials,
         IArbiterHostConfig hostConfig,
         IProcessEnvironment process,
+        IBackgroundDispatchStore background,
         Func<KyberWeaveConfig, IArbiterProvider>? providerFactory = null,
         Func<string, IArbiterGitFacts>? gitFactsFactory = null,
         Func<string, IArbiterPlanReader>? planReaderFactory = null,
@@ -108,6 +111,8 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         ArgumentNullException.ThrowIfNull(credentials);
         ArgumentNullException.ThrowIfNull(hostConfig);
         ArgumentNullException.ThrowIfNull(process);
+        ArgumentNullException.ThrowIfNull(background);
+        _background = background;
         _evaluators = evaluators;
         _state = state;
         _providers = providers;
@@ -203,6 +208,103 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         return Decide(harness, caller, target, prompt, toolOutput, isPost: true, config, context, toolCallId, sessionId);
     }
 
+    /// <inheritdoc/>
+    public void TrackBackgroundDispatch(BackgroundDispatch dispatch, HookContext context)
+    {
+        ArgumentNullException.ThrowIfNull(dispatch);
+        ArgumentNullException.ThrowIfNull(context);
+        string arbiterDirectory = ResolveArbiterDirectory(context.RepoRoot, context.Scope, context.HomeDirectory);
+        string? digest = ArbiterLedgerQueries.PairDigest(dispatch.Target, dispatch.Prompt);
+        IReadOnlyList<ArbiterLedgerEvent> events = _state.OpenLedger(arbiterDirectory).ReadAll();
+
+        // The pre event of this dispatch was appended a moment ago, so the newest one still open is its own: an
+        // older one with the same prompt is a dispatch that was refused, or one another agent already answers.
+        HashSet<string> taken = events
+            .Where(e => e.Phase == ArbiterLedgerPhases.Post && e.PreId is not null)
+            .Select(e => e.PreId!)
+            .Concat(_background.ForSession(arbiterDirectory, dispatch.SessionId).Select(record => record.PreId))
+            .ToHashSet(StringComparer.Ordinal);
+        string? preId = digest is null
+            ? null
+            : events.LastOrDefault(e => e.Phase == ArbiterLedgerPhases.Pre
+                && string.Equals(e.Harness, dispatch.Harness, StringComparison.Ordinal)
+                && string.Equals(e.PairDigest, digest, StringComparison.Ordinal)
+                && !taken.Contains(e.Id))?.Id;
+        if (preId is null)
+        {
+            context.Log.WriteLine(
+                $"Arbiter: background agent '{dispatch.AgentId}' has no dispatch on the ledger; its returns are not recorded.");
+            return;
+        }
+
+        _background.Save(arbiterDirectory, new BackgroundDispatchRecord(dispatch, preId));
+        context.Log.WriteLine(
+            $"Arbiter: background agent '{dispatch.AgentId}' started for dispatch {preId}; each finished turn is recorded as its return.");
+    }
+
+    /// <inheritdoc/>
+    public HookOutcome DecideBackgroundReturn(
+        string harness,
+        string sessionId,
+        string agentId,
+        string response,
+        KyberWeaveConfig config,
+        HookContext context)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(harness);
+        ArgumentNullException.ThrowIfNull(sessionId);
+        ArgumentNullException.ThrowIfNull(agentId);
+        ArgumentNullException.ThrowIfNull(response);
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(context);
+
+        string arbiterDirectory = ResolveArbiterDirectory(context.RepoRoot, context.Scope, context.HomeDirectory);
+        BackgroundDispatchRecord? record = _background.Find(arbiterDirectory, sessionId, agentId);
+        if (record is null)
+        {
+            return new HookOutcome(HookOutcomeKind.PassThrough);
+        }
+
+        string digest = Convert.ToHexStringLower(
+            System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(response)));
+        if (string.Equals(record.LastResponseDigest, digest, StringComparison.Ordinal))
+        {
+            context.Log.WriteLine($"Arbiter: this turn of background agent '{agentId}' is already recorded.");
+            return new HookOutcome(HookOutcomeKind.PassThrough);
+        }
+
+        BackgroundDispatch dispatch = record.Dispatch;
+        HookOutcome outcome = Decide(
+            harness, dispatch.Caller, dispatch.Target, dispatch.Prompt, response, isPost: true, config, context,
+            toolCallId: null, sessionId: null, preId: record.PreId);
+        _background.Save(
+            arbiterDirectory,
+            record with { LastResponseDigest = digest, PendingNote = string.IsNullOrWhiteSpace(outcome.Reason) ? null : outcome.Reason });
+        return outcome;
+    }
+
+    /// <inheritdoc/>
+    public IReadOnlyList<string> TakePendingNotes(string sessionId, string caller, HookContext context)
+    {
+        ArgumentNullException.ThrowIfNull(sessionId);
+        ArgumentNullException.ThrowIfNull(caller);
+        ArgumentNullException.ThrowIfNull(context);
+        string arbiterDirectory = ResolveArbiterDirectory(context.RepoRoot, context.Scope, context.HomeDirectory);
+        List<string> notes = [];
+        foreach (BackgroundDispatchRecord record in _background.ForSession(arbiterDirectory, sessionId))
+        {
+            if (record.PendingNote is null || !string.Equals(record.Dispatch.Caller, caller, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            notes.Add($"Arbiter note on the return of background agent '{record.Dispatch.Target ?? record.Dispatch.AgentId}':\n{record.PendingNote}");
+            _background.Save(arbiterDirectory, record with { PendingNote = null });
+        }
+
+        return notes;
+    }
+
     private HookOutcome Decide(
         string harness,
         string caller,
@@ -214,7 +316,8 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         HookContext context,
         string? toolCallId,
         string? sessionId,
-        string? dispatchModel = null)
+        string? dispatchModel = null,
+        string? preId = null)
     {
         string? resolved = string.IsNullOrWhiteSpace(caller) || IsUnidentified(caller) ? null : caller;
 
@@ -279,6 +382,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
                 Target = target,
                 Prompt = prompt,
                 ToolCallId = toolCallId,
+                PreId = preId,
                 Session = sessionId,
                 Cwd = evaluationRoot,
                 ObservesReturns = context.ObservesReturns,

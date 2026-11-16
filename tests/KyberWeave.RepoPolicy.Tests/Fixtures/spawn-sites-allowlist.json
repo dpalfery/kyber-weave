@@ -740,16 +740,10 @@
       "bound": "Builds only; nothing starts on this line. Started by ProcessRunner.Run at CodeGraphResolverAdapter.cs:203 with SqliteReadTimeout = 60 s."
     },
     {
-      "file": "src/KyberWeave.Application/Docs/Validation/PlanFileScope.cs",
-      "text": "ProcessStartInfo start = new(\"git\") { RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true, UseShellExecute = false, WorkingDirectory = _root };",
-      "count": 1,
-      "bound": "Builds only; nothing starts on this line. Started through IBoundedProcessExecutor in PlanFileScope.ReadExtensions with a 20 s timeout."
-    },
-    {
       "file": "src/KyberWeave.Data/Docs/FileSystem/KernelBoundedProcessExecutor.cs",
       "text": "ProcessRunner.Run(startInfo, standardInput, timeout);",
       "count": 1,
-      "bound": "The kernel's deadlock-safe runner with the caller's timeout, which kills the process tree on expiry. Callers: the plan lifecycle's git add, diff, status and commit (60 s, never push) and PlanFileScope's git ls-files (20 s)."
+      "bound": "The kernel's deadlock-safe runner with the caller's timeout, which kills the process tree on expiry. Callers: the plan lifecycle's git add, diff, status and commit (60 s, never push)."
     },
     {
       "file": "src/KyberWeave.Data/Docs/Analysis/Persistence/AnalysisCacheSafety.cs",
@@ -932,6 +926,18 @@
       "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; the Arbiter serve process is expected to exit or fail fast."
     },
     {
+      "file": "tests/KyberWeave.Tests/Arbiter/CopilotBackgroundReturnHookProcessTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"dotnet\")",
+      "count": 1,
+      "bound": "Started by the ProcessRunner.Run in the same method: timeout 60 s kills the child tree on expiry."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/Arbiter/CopilotBackgroundReturnHookProcessTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, stdin, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry. The child is the kyber-weave-arbiter host answering one hook event read from stdin, with HOME pointed at a TempDirectory and the provider set to none, so it reaches no network and exits after one decision."
+    },
+    {
       "file": "tests/KyberWeave.Tests/ArbiterServeStdioTransportTests.cs",
       "text": "ProcessStartInfo startInfo = new ProcessStartInfo(\"dotnet\")",
       "count": 1,
@@ -1095,6 +1101,18 @@
     },
     {
       "file": "tests/KyberWeave.Tests/McpPlanLifecycleToolsTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout kills the child tree on expiry; 60 s; git argv only, in a temp repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/McpToolingCheckToolTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "ProcessRunner timeout kills the child tree on expiry; started by the Run below with a 60 s timeout; git argv only, in a temp repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/McpToolingCheckToolTests.cs",
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
       "count": 1,
       "bound": "ProcessRunner timeout kills the child tree on expiry; 60 s; git argv only, in a temp repository."

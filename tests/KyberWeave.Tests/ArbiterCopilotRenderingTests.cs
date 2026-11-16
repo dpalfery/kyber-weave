@@ -98,7 +98,7 @@ public sealed class ArbiterCopilotRenderingTests : IDisposable
 
         JsonElement hooks = root.GetProperty("hooks");
         Assert.Equal(
-            new HashSet<string> { "preToolUse", "postToolUse" },
+            new HashSet<string> { "preToolUse", "postToolUse", "subagentStop" },
             hooks.EnumerateObject().Select(property => property.Name).ToHashSet(StringComparer.Ordinal));
 
         foreach (string eventName in new[] { "preToolUse", "postToolUse" })
@@ -113,6 +113,15 @@ public sealed class ArbiterCopilotRenderingTests : IDisposable
             Assert.Equal("kyber-weave-arbiter hook --harness copilot-cli", entry.GetProperty("powershell").GetString());
             Assert.Equal(HookTimeoutSeconds, entry.GetProperty("timeoutSec").GetInt32());
         }
+
+        // A background task's only return is the end of each of its agent's turns, which has no tool to match on.
+        JsonElement stop = Assert.Single(hooks.GetProperty("subagentStop").EnumerateArray());
+        Assert.Equal(
+            new HashSet<string> { "type", "bash", "powershell", "timeoutSec" },
+            stop.EnumerateObject().Select(property => property.Name).ToHashSet(StringComparer.Ordinal));
+        Assert.Equal("kyber-weave-arbiter hook --harness copilot-cli", stop.GetProperty("bash").GetString());
+        Assert.Equal("kyber-weave-arbiter hook --harness copilot-cli", stop.GetProperty("powershell").GetString());
+        Assert.Equal(HookTimeoutSeconds, stop.GetProperty("timeoutSec").GetInt32());
     }
 
     [Fact]

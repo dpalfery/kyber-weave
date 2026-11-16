@@ -8,7 +8,16 @@ The plan file is durable state. A live agent instance is disposable.
 2. Use a prompt-supplied `PLAN_FILE` only when its canonical path remains beneath the plans directory. If none is supplied, create a date-prefixed Draft plan and its index row before broad discovery. Every new plan file name starts with today's date as `yyyy-MM-dd-`, even when the name was handed to you: if a supplied `PLAN_FILE` names a plan that does not exist yet and lacks the date, add the date in front, create that file, and return the dated path as `PLAN_FILE`. Never rename a plan that already exists. Change an existing file with an in-place edit, never a whole-file rewrite, whenever the harness gives you an edit tool. On harnesses where file editing requires an existing destination file (such as Devin), initialize the file via shell (for example, `touch <file>`) before editing. A note or excuse for why the process was not followed is not a resolution. The process exists to ensure quality; going around it signals bad quality. Do not put such a note in **Active Plans**. A pull request that does will not be approved.
 3. Reconcile body status, frontmatter lifecycle, and index status in the same save. The body status is authoritative when they disagree.
 4. Reconcile conductor-supplied answers against the decision ledger before more discovery.
-5. Save after every discovery batch and before every status handoff.
+5. Save after every discovery batch and before every status handoff. Write each material choice into the Decisions section in the same save as the batch that settled it, and do not reopen a decided row unless new evidence contradicts it: a choice held only in your reasoning is argued again every turn and lost when context is compacted.
+
+## Working order
+
+A plan is written, not thought through and then typed. Reasoning you do not write into the plan is paid for again on every later turn and lost when context is compacted.
+
+1. Send one discovery batch: the code, standards and documents the request lets you name, together.
+2. Write the Draft next, from the skeleton below: frontmatter, problem and goal, and a Decisions row for every choice that batch settled. Never open another plan to copy its shape; the skeleton is the shape.
+3. Every later turn either sends a batch that answers named open questions or writes answers into the plan. Decide each choice once, in its Decisions row.
+4. Size the plan as you write it, and never rewrite a saved section only to shorten it. A Decisions cell is one or two sentences. A finding is a fact no task already states. A risk is one line with its mitigation. Cut any sentence a worker or reviewer would not act on.
 
 Open only active Draft, Ready, In progress, or Blocked plans. Draft supports planning only. Review required, Completed, Superseded, and archived artifacts are not implementation authority.
 
@@ -30,13 +39,91 @@ Every plan contains:
 - a dependency graph;
 - risks, out-of-scope boundaries, verification gates, review, and `docs-dev` closeout.
 
-Each task carries a `Capabilities:` line: the abilities its work needs, in plain words (for example "React and TypeScript UI with Playwright tests" or "documentation"). Never name an agent or a skill for it: the conductor picks the agent whose description fits. Declare a dependency only when a task consumes another task's concrete output or their file scopes cannot safely overlap. Component labels and table order do not create scheduling barriers. Maximize parallel execution and err on the side of risk: prefer optimistic file scopes and add a dependency only for a real consumed output or a certain file overlap. Size each task for efficient execution by a single worker; do not split work further just to add parallelism. Four small file edits belong to one worker; changes of substantial size across independent projects belong to separate workers. Tasks needing different abilities can run at the same time. Split changes across several projects into separate tasks only if each project's change is large enough and decoupled enough to justify it. Respect `review.max-concurrent-workers` (default 4, host-configurable in `.kyber-weave/kyber-weave.yml`); the harness runs ready tasks up to that cap. (Q4 reversal, issue #386: this supersedes the 2026-10-14 "no max concurrency" directive.) Each developer task ends with the worker's own `task-gate` run, and a failing gate goes straight back to the same worker; no agent reviews a single task.
+### Plan skeleton
+
+Fill this in; keep the headings and the table columns exactly.
+
+````markdown
+---
+id: plans/<yyyy-MM-dd>-<slug>
+title: <title>
+doc-type: plan
+status: draft
+component: <catalog component>
+owner: <owner or unassigned>
+last-reviewed: <yyyy-MM-dd>
+development-mode: test-first
+documentation-impact: extends-component
+impact-components:
+  - <catalog component>
+---
+
+# <title>
+
+**Status: Draft.**
+
+## Problem and goal
+## Scale
+## Decisions
+
+| ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+|---|---|---|---|---|
+
+## Design harvest
+
+| Target component | Target doc type | Section | Content to harvest |
+|---|---|---|---|
+
+## Investigation findings
+## Test contract (development-mode: test-first)
+
+| Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+|---|---|---|---|---|---|
+
+## Tasks
+
+### T1: <name>
+
+- **Objective:** <one sentence>
+- **Capabilities:** <abilities in plain words>
+- **Session:** `<group>`
+- **Depends on:** none | T<n> (<the output it consumes>)
+- **Files:**
+  - `<path>`: <type or member>, <the change>
+- **Commands:**
+  - <exact command>
+- **Acceptance:**
+  - <checkable outcome>
+
+## Dependency graph
+## Risks
+## Out-of-scope boundaries
+## Verification gates
+## Review
+## docs-dev closeout
+````
+
+Where the host declares task gates, a task's **Commands** are the task-gate runs only, exactly as the worker's packet prints them (test-first: the failing run with `--red`, then the passing run; standard mode: the one passing run): the gate runs the Test contract's runner command, so listing that command as a step of its own makes the worker run every test twice.
+
+Each task carries a `Capabilities:` line: the abilities its work needs, in plain words (for example "React and TypeScript UI with Playwright tests" or "documentation"). Never name an agent or a skill for it: the conductor picks the agent whose description fits. Declare a dependency only when a task consumes another task's concrete output or their file scopes cannot safely overlap. Component labels and table order do not create scheduling barriers. Maximize parallel execution and err on the side of risk: prefer optimistic file scopes and add a dependency only for a real consumed output or a certain file overlap. Size each task for efficient execution by a single worker; do not split work further just to add parallelism. A chain of small tasks in one technology, each consuming the one before (a repository method, then the service and endpoint that call it), is one task: every extra worker pays again to load context, and a dependent task cannot start until the first finishes. Four small file edits belong to one worker; changes of substantial size across independent projects belong to separate workers. Tasks needing different abilities can run at the same time. Split changes across several projects into separate tasks only if each project's change is large enough and decoupled enough to justify it. Respect `review.max-concurrent-workers` (default 4, host-configurable in `.kyber-weave/kyber-weave.yml`); the harness runs ready tasks up to that cap. (Q4 reversal, issue #386: this supersedes the 2026-10-14 "no max concurrency" directive.) Each developer task ends with the worker's own `task-gate` run, and a failing gate goes straight back to the same worker; no agent reviews a single task.
 
 A plan never carries the review command. The end-of-run council derives it from the `code-review` skill — measured against the change with `--base`, and admitted to the full-suite gates with `--council` — so a command copied into a plan, an index row or a task packet goes stale the moment the gate list or one of its flags moves, and the reviewer then runs something nobody validated. Say who reviews and which skill governs it; leave the argv to the reviewer.
 
 ## Documented rules over existing code
 
-When existing code contradicts a documented rule or standard (where a kind of file goes, a layering or naming rule), new work follows the documented rule, not the surrounding code: never copy the divergent pattern forward, and name the documented location in the task. Existing code that carries a comment marking it as a deliberate exception is respected. Record each other divergence you find, with the rule and the existing offending paths, in the investigation findings, then decide by the size of the debt: when fixing it is small and touches the same files, add it to a task in this plan; otherwise write a todo under the directory named by **<todo-index>**, add it to that index's inventory, and link it from the plan's out-of-scope boundaries (and from a `RESIDUAL` row of the Closeout mapping when closeout leaves it open). The deliver tool commits the todo with the run.
+Before writing a task, fetch the standard for every technology its files fall under with one `docs_get_coding_standard_for_technology` call each, using the Config Reg's standards list: a repository or query file falls under the data-access and SQL standards as well as the language standard. Ask about the pattern the task will copy. When the standard forbids that pattern, the task follows the standard. When the standard names a target the code does not have yet (one a todo tracks), decide it now: record a Decisions row and write the sanctioned exception into the task text, so the worker is never the first to find the conflict.
+
+When existing code contradicts a documented rule or standard (where a kind of file goes, a layering or naming rule), new work follows the documented rule, not the surrounding code: never copy the divergent pattern forward, and name the documented location in the task. This holds for every new file's location even when all of its existing siblings sit elsewhere and following them looks cheaper: the end-of-run review reports a new file placed against the standard as a major finding, which costs a fix round, so the documented location is also the fast choice. It is never a low-confidence decision. Existing code that carries a comment marking it as a deliberate exception is respected. Record each other divergence you find, with the rule and the existing offending paths, in the investigation findings, then decide by the size of the debt: when fixing it is small and touches the same files, add it to a task in this plan; otherwise write a todo under the directory named by **<todo-index>**, add it to that index's inventory, and link it from the plan's out-of-scope boundaries (and from a `RESIDUAL` row of the Closeout mapping when closeout leaves it open). The deliver tool commits the todo with the run.
+
+## The request's explicit instructions
+
+A value, class name, layout, endpoint shape or check the request states outright is a requirement, not a suggestion. Plan it as written. Where you think it is wrong, keep it and add a risk row saying why; do not replace it with the option you prefer. Before `PLAN_READY`, walk the request line by line: each instruction is met by a task's acceptance, or sits in the out-of-scope boundaries with the reason. A request that asks for proof (for example that values reach the screen from the database) gets a task or verification step that is actually executed, with its command and evidence, not a mocked stand-in. A plan the conductor has to send back for a missed instruction costs a planning round.
+
+## Facts that depend on a version, and existing tests
+
+A decision that says a library class, token or API yields a specific value (a colour, a default, a signature) is checked against the version the repository installs: read the package manifest or lock file once and state the version in the decision row. A value true in another major version is a wrong decision that the worker cannot see and a later task has to find.
+
+Do not write "existing tests stay unchanged" as an absolute. New UI or new rows can make an existing test's locator or fixture ambiguous without changing what it means. Write the rule as: an existing test keeps its assertions; the worker may narrow a locator or a fixture query that the new work made ambiguous, and names each such edit in its report. A worker that would have to change what an existing test asserts escalates.
 
 ## Task granularity
 
@@ -147,7 +234,7 @@ is written.
 Finalization runs in this order:
 
 1. Make every plan edit first: the approval rows, the bold body status line, the frontmatter status (`current`) and the index row.
-2. Run `kyber-weave docs tasks <plan file> --write` in the checkout that holds the plan. It derives the whole file from the plan: file scopes, dependencies, capabilities, the execution digest, and each prompt from the task's own text plus its command and acceptance criteria. When it refuses — a task lacks a command, acceptance criteria or capabilities, or a `Depends on` token names no task — it names the task and what to add or correct in the plan; fix the plan and run it again. Run `kyber-weave docs tasks <plan file> --check` before `PLAN_READY` and fix every `KW-DOC-TASKS-008` to `-011` warning it prints: each names a task whose packet cannot be understood without the plan, or a worker who cannot open the plan.
+2. Run `kyber-weave docs tasks <plan file> --write` in the checkout that holds the plan. It derives the whole file from the plan: file scopes, dependencies, capabilities, the execution digest, and each prompt from the task's own text plus its command and acceptance criteria. When it refuses — a task lacks a command, acceptance criteria or capabilities, a `Depends on` token names no task, or a task's Files list names a path under the scratch folder `.agent_scratchpad/` — it names the task and what to add or correct in the plan; fix the plan and run it again. Run `kyber-weave docs tasks <plan file> --check` before `PLAN_READY` and fix every `KW-DOC-TASKS-008` to `-011` warning it prints: each names a task whose packet cannot be understood without the plan, or a worker who cannot open the plan.
 3. Run both documentation checks. Any `KW-DOC-TASKS-*` finding is fixed by changing the plan and repeating step 2, never by editing the file.
 
 Never write, edit or compute the task file or its digest by hand, with a script, or through a sibling such as a `.new` or `.tmp` copy. An edit to a task, a test contract row, an out-of-scope path or the development mode after step 2 means repeating step 2; a status or Decisions edit does not. `kyber-weave docs tasks <plan file> --check` exits 1 and says what differs without writing.

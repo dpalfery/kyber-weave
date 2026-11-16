@@ -49,6 +49,11 @@ internal static class WorkerGuardRules
     {
         try
         {
+            if (TurnEndOf(harness, stdin) is not null)
+            {
+                return true;
+            }
+
             ToolCall? call = Read(harness, stdin);
             return call is not null
                 && (call.WritePath is not null
@@ -84,6 +89,28 @@ internal static class WorkerGuardRules
 
         TimeSpan idle = now - window.LastCall;
         return idle > TimeSpan.FromMinutes(window.Minutes) || (window.IsOver(window.LastCall) && idle > TimeSpan.FromMinutes(1));
+    }
+
+    /// <summary>
+    /// The agent whose turn a Copilot CLI <c>subagentStop</c> event ends, or null for any other event. The event
+    /// names an agent and a stop reason and no tool.
+    /// </summary>
+    /// <param name="harness">The harness token.</param>
+    /// <param name="stdin">The hook event as JSON.</param>
+    internal static string? TurnEndOf(string harness, string stdin)
+    {
+        if (!string.Equals(harness, CopilotCliHarness, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        using JsonDocument document = JsonDocument.Parse(stdin);
+        JsonElement root = document.RootElement;
+        return root.ValueKind == JsonValueKind.Object
+            && Text(root, "toolName") is null
+            && Text(root, "stopReason") is not null
+                ? Text(root, "agentId")
+                : null;
     }
 
     internal static string KeyOf(string harness, string agentId) =>

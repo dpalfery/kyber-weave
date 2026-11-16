@@ -54,10 +54,9 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IManagedGlossaryFactory>(sp => new ManagedGlossaryFactory(
             sp.GetRequiredService<IRepositoryFileStore>(), sp.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton<IPlanTaskService>(sp => new PlanTaskService(
-            sp.GetRequiredService<IRepositoryFileStore>(), sp.GetRequiredService<IBoundedProcessExecutor>()));
+            sp.GetRequiredService<IRepositoryFileStore>()));
         services.TryAddSingleton<IDocsSchemaGate>(sp => new DocsSchemaGate(
             sp.GetRequiredService<IRepositoryFileStore>(),
-            sp.GetRequiredService<IBoundedProcessExecutor>(),
             sp.GetRequiredService<IGitChangeReader>(),
             sp.GetRequiredService<ISeverityOverrideSource>(),
             sp.GetRequiredService<TimeProvider>()));

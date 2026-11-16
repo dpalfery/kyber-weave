@@ -89,6 +89,13 @@ public sealed class ArbiterGlobalClaudeCopilotRenderingTests : IDisposable
             entry.GetProperty("powershell").GetString());
         Assert.Equal(HookTimeoutSeconds, entry.GetProperty("timeoutSec").GetInt32());
 
+        // The end of a subagent's turn reaches the return gate and closes the worker's budget window.
+        JsonElement subagentStop = hooks.GetProperty("subagentStop");
+        Assert.Equal(
+            ["kyber-weave-arbiter hook --harness copilot-cli --scope global", "kyber-weave-arbiter worker-guard --harness copilot-cli"],
+            subagentStop.EnumerateArray().Select(stop => stop.GetProperty("bash").GetString()));
+        Assert.All(subagentStop.EnumerateArray(), stop => Assert.False(stop.TryGetProperty("matcher", out _)));
+
         Assert.Contains(
             ArbiterHookWiring.TargetDegradations([SquadTarget.Copilot], SquadDeploymentScope.Global),
             record => record.Code == "arbiter-not-enforced" &&

@@ -230,6 +230,46 @@ public sealed class ArbiterPlanParserTests
         Assert.Equal("test-first", parsed.DevelopmentMode);
     }
 
+    /// <summary>
+    /// "none" followed by an explanation is still none: a task id named there says what the task does
+    /// not depend on. Run 4 of the Copilot loop wrote "none (consumes the JSON contract, not T1's code)"
+    /// and the task file made the frontend task wait for the backend one.
+    /// </summary>
+    [Fact]
+    public void DependsOnNoneFollowedByAnExplanationNamingATaskHasNoDependencies()
+    {
+        PlanDocument parsed = PlanDocumentParser.Parse(
+            """
+            ---
+            development-mode: standard
+            ---
+            # Plan
+
+            ## Tasks
+
+            ### T1: Endpoint
+
+            - **Depends on:** none
+            - **Files:**
+              - `src/Api/JobController.cs`
+
+            ### T2: Cards
+
+            - **Depends on:** none (consumes the JSON contract fixed in D2, not T1's code)
+            - **Files:**
+              - `web/src/JobStatusCards.tsx`
+
+            ### T3: Verify
+
+            - **Depends on:** T1 (endpoint), T2 (cards)
+            - **Files:** none
+            """);
+
+        Assert.Empty(Task(parsed, "T1").DependsOn);
+        Assert.Empty(Task(parsed, "T2").DependsOn);
+        Assert.Equal(["T1", "T2"], Task(parsed, "T3").DependsOn);
+    }
+
     [Fact]
     public void BothTitleSeparatorsAndIdFormsAreParsed()
     {

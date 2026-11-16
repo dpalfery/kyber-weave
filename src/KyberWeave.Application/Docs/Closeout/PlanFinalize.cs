@@ -184,7 +184,7 @@ public sealed partial class PlanFinalize
         if (withApproval is null)
             return Refused();
 
-        PlanTaskFileGenerator generator = new(_repoRoot, _config, _store, _process, _picker);
+        PlanTaskFileGenerator generator = new(_repoRoot, _config, _store, _picker);
         PlanTaskFileOutcome preview = generator.Run(plan, PlanTaskFileMode.Preview);
         if (preview.Report.HasErrors)
         {
@@ -283,7 +283,7 @@ public sealed partial class PlanFinalize
 
     private PlanFinalizeOutcome AlreadyReady(string plan, DiagnosticReport report, string taskFile)
     {
-        PlanTaskFileOutcome check = new PlanTaskFileGenerator(_repoRoot, _config, _store, _process).Run(plan, PlanTaskFileMode.Check);
+        PlanTaskFileOutcome check = new PlanTaskFileGenerator(_repoRoot, _config, _store).Run(plan, PlanTaskFileMode.Check);
         if (check.Report.HasErrors)
         {
             report.AddRange(check.Report.Items);

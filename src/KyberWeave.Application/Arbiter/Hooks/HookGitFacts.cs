@@ -53,8 +53,30 @@ internal sealed class HookGitFacts(
     TimeProvider clock,
     string workingDirectory,
     string? homeDirectory = null,
-    string? arbiterDirectory = null) : IArbiterGitFacts
+    string? arbiterDirectory = null) : IArbiterGitFacts, IArbiterRunScopeSource
 {
+    /// <inheritdoc/>
+    public ArbiterRunScope? RunScopeOf(string? directory)
+    {
+        string cwd = !string.IsNullOrWhiteSpace(directory) ? directory : workingDirectory;
+        string home = homeDirectory ?? process.HomeDirectory;
+        if (string.IsNullOrWhiteSpace(cwd) || string.IsNullOrWhiteSpace(home))
+        {
+            return null;
+        }
+
+        // The newest record wins: a run that reuses a directory replaces the run that worked there before.
+        string wanted = KyberWeave.Core.RunStart.RunBaseStateFormat.NormalizeDirectory(cwd);
+        KyberWeave.Core.RunStart.RunRecord? record = runStates.ReadRecords(home)?
+            .Where(candidate => string.Equals(
+                KyberWeave.Core.RunStart.RunBaseStateFormat.NormalizeDirectory(candidate.Worktree),
+                wanted,
+                KyberWeave.Core.RunStart.RunBaseStateFormat.PathComparison))
+            .OrderBy(candidate => candidate.StartedAt ?? DateTimeOffset.MinValue)
+            .LastOrDefault();
+        return record is null ? null : new ArbiterRunScope(cwd, record.StartedAt);
+    }
+
     /// <summary>
     /// The ref the review's changed set is measured from: <c>origin/HEAD</c>, the
     /// default <c>review gates</c> diffs against, so the lenses judge the same change

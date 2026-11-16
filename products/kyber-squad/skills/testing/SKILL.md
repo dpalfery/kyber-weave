@@ -91,8 +91,10 @@ Other workers run their tests at the same time as yours, against the same databa
 - **Scope what you create, not what the standard provides.** A port, temporary directory or fixture
   file you create gets your task id or a generated name. How tests get a database is whatever the
   test standard says: where it prescribes a shared development database with per-test unique ids and
-  cleanup, use it. Never run a migration or rewrite a connection string against a shared database; if
-  the task needs that, report it, and still run the task's tests.
+  cleanup, use it. Never run a migration by hand or rewrite a connection string against a shared database; if
+  the task needs that, report it, and still run the task's tests. A task gate or test setup script
+  that itself brings the test database up to the repository's existing migrations is the host's
+  procedure, not a migration you run: let it run.
 - **No order dependence** and no shared mutable static state between tests.
 
 ## What the test-adequacy review checks

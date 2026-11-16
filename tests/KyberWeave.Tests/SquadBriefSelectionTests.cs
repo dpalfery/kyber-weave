@@ -92,6 +92,24 @@ public sealed class SquadBriefSelectionTests : IDisposable
         Assert.Empty(part.LeftOut);
     }
 
+    /// <summary>
+    /// The autonomous rule is in the header of the brief, not only in a reference section: run 7 of the Copilot
+    /// loop stopped to ask for plan approval with the autonomy section in its brief.
+    /// </summary>
+    [Fact]
+    public void AnAutonomousBriefStatesTheNoApprovalRuleInItsHeaderAndASupervisedOneDoesNot()
+    {
+        string autonomous = BriefFormatter.ToText(Assemble(new BriefFacts("plan", "autonomous", null)));
+        string supervised = BriefFormatter.ToText(Assemble(new BriefFacts("plan", "supervised", null)));
+
+        Assert.Contains(BriefFormatter.AutonomousLine, autonomous, StringComparison.Ordinal);
+        Assert.True(
+            autonomous.IndexOf(BriefFormatter.AutonomousLine, StringComparison.Ordinal)
+                < autonomous.IndexOf("\n=== ", StringComparison.Ordinal),
+            "The autonomy line comes before the first file section.");
+        Assert.DoesNotContain("BRIEF autonomy |", supervised, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void ASectionCarriesItsSubheadingsOut()
     {

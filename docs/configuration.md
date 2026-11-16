@@ -249,7 +249,8 @@ stop-on-tool-failure: false
 - **`false` warns and continues.** The failure is reported and the work proceeds, with code joins
   possibly missing.
 - **Who reads it.** `kyber-weave doctor --ensure` reads it and applies it to its own exit code, so
-  no agent has to judge a degraded result; the docs MCP server reads it at each refresh to decide
+  no agent has to judge a degraded result, and the docs MCP tool
+  `docs_run_tooling_check_and_repair_code_index` reports that same exit code; the docs MCP server reads it at each refresh to decide
   between `STATUS: TOOL_FAILURE` and a `warning:` line; the conductor and `bug-crusher` instructions
   route the exit code rather than interpreting it. `kyber-weave run start` reads it for the index of
   the tree it places the branch in.
@@ -618,7 +619,7 @@ arbiter:
 | `stores.max-item-bytes` | `16384` | 1 to 1048576 | `KW-ARB-CONFIG-015` |
 | `stores.retain-days` | `14` | At least 1 (values above 3650 are clamped to 3650 when swept) | `KW-ARB-CONFIG-015` |
 | `comment-triage.bot-logins` | `[]` | Non-blank login names | `KW-ARB-CONFIG-015` |
-| `dispatch-budget.minutes` / `tool-calls` | `15` / `150` | At least 1. One developer or docs dispatch may run this long, or make this many tool calls, before the worker guard denies its next call (`KW-ARB-BUDGET-001`) | `KW-ARB-CONFIG-015` |
+| `dispatch-budget.minutes` / `tool-calls` | `15` / `150` | At least 1. One turn of a developer or docs dispatch may run this long, or make this many tool calls, before the worker guard denies its next call (`KW-ARB-BUDGET-001`). Idle time between turns is not counted, and a rework sent to the same agent starts a fresh turn | `KW-ARB-CONFIG-015` |
 | `seat-budget.minutes` / `tool-calls` / `call-minutes` | `3` / `30` / `2` | At least 1. The same limits for one review council seat (`review-lens`, `review-triage`). Past them the guard denies every read and tells the seat to return what it has with a `Budget reached, not examined:` line; its seat-file write is still allowed (`KW-ARB-BUDGET-001`) | `KW-ARB-CONFIG-015` |
 | `dispatch-budget.call-minutes` | `5` | At least 1. A gap longer than this between two tool calls of one such dispatch means the earlier call hung: the guard denies the next call once, telling the worker to stop the process and record it as not verified (`KW-ARB-BUDGET-001`) | `KW-ARB-CONFIG-015` |
 | `rules[].shadow` | Per rule | `true` or `false`, on a step-1 shipped rule | `KW-ARB-CONFIG-014` on `KW-ARB-DIFFICULTY-001` and `KW-ARB-LADDER-001`, which take their state from `mode` |
