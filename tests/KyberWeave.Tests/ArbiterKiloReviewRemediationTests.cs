@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Arbiter;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -279,11 +280,11 @@ public sealed class ArbiterKiloReviewRemediationTests
     }
 
     [Fact]
-    public void Item12_ArbiterCommandComposition_TryResolveConfig_EmptyRepoRoot_FailsCleanly()
+    public void Item12_ArbiterConfigResolver_TryResolve_EmptyRepoRoot_FailsCleanly()
     {
         DiagnosticReport report = new();
-        ArbiterSettings settings = new() { Path = "" };
-        bool success = ArbiterCommandComposition.TryResolveConfig(settings, report, out KyberWeaveConfig _, out string? _);
+        using ArbiterTestHost host = ArbiterTestHost.Create();
+        bool success = host.Get<IArbiterConfigResolver>().TryResolve("", null, report, out KyberWeaveConfig _, out string? _);
 
         Assert.False(success);
         Assert.NotEmpty(report.Items);
@@ -424,11 +425,11 @@ public sealed class ArbiterKiloReviewRemediationTests
         using TempDirectory home = new();
 
         ThrowingGlobalRoots throwingRoots = new(new ArgumentException("Invalid or relative root override"));
-        string? result = ArbiterHookRefresher.ResolveGlobalHookPath(SquadTarget.Cursor, home.Path, globalRoots: throwingRoots);
+        string? result = ArbiterGlobalHookPaths.Resolve(SquadTarget.Cursor, home.Path, globalRoots: throwingRoots);
         Assert.Null(result);
 
         Func<string, string?> envWithRelativePath = varName => varName == "CURSOR_CONFIG_DIR" ? "relative/path" : null;
-        string? envResult = ArbiterHookRefresher.ResolveGlobalHookPath(SquadTarget.Cursor, home.Path, environmentReader: envWithRelativePath);
+        string? envResult = ArbiterGlobalHookPaths.Resolve(SquadTarget.Cursor, home.Path, environmentReader: envWithRelativePath);
         Assert.Null(envResult);
     }
 

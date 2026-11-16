@@ -1,3 +1,5 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -22,7 +24,7 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 /// recorded on each decision, because that is the threshold the answer was actually judged by.
 /// A decision whose ledger event carries a return shows that return's <c>RESULT</c> beside its score.
 /// </remarks>
-public sealed class ArbiterTuneCommand : Command<ArbiterSettings>
+public sealed class ArbiterTuneCommand(IArbiterRepositoryLocator locator, IArbiterStateFactory state) : Command<ArbiterSettings>
 {
     /// <summary>The number of confidence bins: one per tenth of the unit interval.</summary>
     public const int HistogramBins = 10;
@@ -53,14 +55,14 @@ public sealed class ArbiterTuneCommand : Command<ArbiterSettings>
             return 1;
         }
 
-        string arbiterDirectory = ArbiterCommandComposition.ResolveArbiterDirectory(settings.Path);
+        string arbiterDirectory = locator.ResolveArbiterDirectory(settings.Path);
         IReadOnlyList<ArbiterDecisionRecord> records;
         IReadOnlyList<ArbiterLedgerEvent> events;
         string? truncationNote;
         try
         {
-            ArbiterLogRead<ArbiterDecisionRecord> decisionRead = ArbiterCommandComposition.State.OpenDecisionLog(arbiterDirectory).ReadAllWithDiagnostics();
-            ArbiterLogRead<ArbiterLedgerEvent> ledgerRead = ArbiterCommandComposition.State.OpenLedger(arbiterDirectory).ReadAllWithDiagnostics();
+            ArbiterLogRead<ArbiterDecisionRecord> decisionRead = state.OpenDecisionLog(arbiterDirectory).ReadAllWithDiagnostics();
+            ArbiterLogRead<ArbiterLedgerEvent> ledgerRead = state.OpenLedger(arbiterDirectory).ReadAllWithDiagnostics();
             records = decisionRead.Records;
             events = ledgerRead.Records;
             if (ArbiterLogProblems.Unreadable(ledgerRead, decisionRead) is { } unreadable)

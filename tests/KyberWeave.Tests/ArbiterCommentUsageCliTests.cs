@@ -22,7 +22,7 @@ public sealed class ArbiterCommentUsageCliTests : IDisposable
     [Fact]
     public void ACommentWithoutAPathIsAUsageErrorNotAnException()
     {
-        ArbiterCommentCommand command = new(ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<ICommentTriageFactory>());
+        ArbiterCommentCommand command = ArbiterTestServices.Command<ArbiterCommentCommand>();
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
@@ -41,7 +41,7 @@ public sealed class ArbiterCommentUsageCliTests : IDisposable
     [Fact]
     public void ACommentWithoutABodyIsAUsageErrorNotAnException()
     {
-        ArbiterCommentCommand command = new(ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<ICommentTriageFactory>());
+        ArbiterCommentCommand command = ArbiterTestServices.Command<ArbiterCommentCommand>();
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,

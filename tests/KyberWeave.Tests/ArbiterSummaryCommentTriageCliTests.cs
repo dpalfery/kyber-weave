@@ -49,7 +49,7 @@ public sealed class ArbiterSummaryCommentTriageCliTests : IDisposable
     public void Summary_PrintsOneLinePerTableRow()
     {
         WriteCitedFiles();
-        ArbiterCommentCommand command = new(ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<ICommentTriageFactory>());
+        ArbiterCommentCommand command = ArbiterTestServices.Command<ArbiterCommentCommand>();
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -66,7 +66,7 @@ public sealed class ArbiterSummaryCommentTriageCliTests : IDisposable
     public void Summary_HumanAuthor_PrintsEveryItemReal()
     {
         WriteCitedFiles();
-        ArbiterCommentCommand command = new(ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<ICommentTriageFactory>());
+        ArbiterCommentCommand command = ArbiterTestServices.Command<ArbiterCommentCommand>();
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -82,7 +82,7 @@ public sealed class ArbiterSummaryCommentTriageCliTests : IDisposable
     public void Summary_NoAuthor_ExitsZeroWithRealItems()
     {
         WriteCitedFiles();
-        ArbiterCommentCommand command = new(ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<ICommentTriageFactory>());
+        ArbiterCommentCommand command = ArbiterTestServices.Command<ArbiterCommentCommand>();
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -97,7 +97,7 @@ public sealed class ArbiterSummaryCommentTriageCliTests : IDisposable
     public void Summary_IssueWithMarkupCharacters_RendersLiterally()
     {
         WriteCitedFiles();
-        ArbiterCommentCommand command = new(ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<ICommentTriageFactory>());
+        ArbiterCommentCommand command = ArbiterTestServices.Command<ArbiterCommentCommand>();
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,

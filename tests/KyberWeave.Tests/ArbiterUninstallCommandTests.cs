@@ -1,5 +1,10 @@
 using System.Diagnostics.CodeAnalysis;
+using KyberWeave.Cli;
 using KyberWeave.Cli.Commands.Arbiter;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Tests.Arbiter;
+using Microsoft.Extensions.DependencyInjection;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Configuration;
@@ -21,31 +26,35 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
     private readonly TempDirectory _temp = new();
     private readonly TempDirectory _home = new();
     private readonly FakeCredentialStore _store = new();
-    private readonly AsyncLocal<bool> _isolated = new();
-
-    private readonly Func<string> _savedHome;
-    private readonly Func<ICredentialStore> _savedStore;
-    private readonly Func<string, string?> _savedEnvironment;
+    private readonly ArbiterTestHost _host;
 
     public ArbiterUninstallCommandTests()
     {
-        _savedHome = ArbiterCommandComposition.HomeDirectory;
-        _savedStore = ArbiterCommandComposition.CredentialStore;
-        _savedEnvironment = ArbiterCommandComposition.GetEnvironmentVariable;
-
-        ArbiterCommandComposition.HomeDirectory = () => _isolated.Value ? _home.Path : _savedHome();
-        ArbiterCommandComposition.CredentialStore = () => _isolated.Value ? _store : _savedStore();
-        ArbiterCommandComposition.GetEnvironmentVariable = _ => _isolated.Value ? null : _savedEnvironment(_);
+        _host = ArbiterTestHost.Create(RegisterFakes);
     }
 
     public void Dispose()
     {
-        ArbiterCommandComposition.HomeDirectory = _savedHome;
-        ArbiterCommandComposition.CredentialStore = _savedStore;
-        ArbiterCommandComposition.GetEnvironmentVariable = _savedEnvironment;
+        _host.Dispose();
         _temp.Dispose();
         _home.Dispose();
     }
+
+    // The commands resolve the injected home and store, never the real home or keychain, and read no environment variable.
+    private void RegisterFakes(IServiceCollection services)
+    {
+        services.AddSingleton<IProcessEnvironment>(new FakeProcessEnvironment(() => _home.Path));
+        services.AddSingleton<ICredentialStore>(_store);
+    }
+
+    // A command over a host whose Squad state lives in a particular store.
+    private ArbiterTestHost HostWith(SquadStateStore store) =>
+        ArbiterTestHost.Create(services =>
+        {
+            RegisterFakes(services);
+            services.AddSingleton(store);
+            services.AddSingleton<ISquadStateStore>(store);
+        });
 
     /// <summary>
     /// The kilo uninstall removes the receipt-owned plugin file and owned blocks,
@@ -62,7 +71,7 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
         string nonOwned = Path.Combine(host, ".kilo", "plugin", "custom.ts");
         File.WriteAllText(nonOwned, "// operator-owned plugin, never touched\n");
 
-        ArbiterUninstallCommand command = new();
+        ArbiterUninstallCommand command = _host.Command<ArbiterUninstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterUninstallSettings { Path = host, Target = "kilo" }));
@@ -84,7 +93,7 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
         _store.Write(origin, key);
         string host = NewDir("uninstall-keep-key");
 
-        ArbiterUninstallCommand command = new();
+        ArbiterUninstallCommand command = _host.Command<ArbiterUninstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterUninstallSettings { Path = host, Target = "kilo" }));
@@ -104,7 +113,7 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
         _store.Write(origin, key);
         string host = NewDir("uninstall-drop-key");
 
-        ArbiterUninstallCommand command = new();
+        ArbiterUninstallCommand command = _host.Command<ArbiterUninstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterUninstallSettings { Path = host, Target = "kilo", RemoveKey = true }));
@@ -121,7 +130,7 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
     {
         string host = NewDir("uninstall-bad-target");
 
-        ArbiterUninstallCommand command = new();
+        ArbiterUninstallCommand command = _host.Command<ArbiterUninstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterUninstallSettings { Path = host, Target = "hal9000" }));
@@ -139,7 +148,7 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
     {
         string host = NewDir("uninstall-empty");
 
-        ArbiterUninstallCommand command = new();
+        ArbiterUninstallCommand command = _host.Command<ArbiterUninstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterUninstallSettings { Path = host, Target = "kilo" }));
@@ -166,7 +175,8 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
         Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
         File.WriteAllText(receiptPath, "{ this is not a receipt");
 
-        ArbiterUninstallCommand command = new(uninstaller: null, stateStore: store);
+        using ArbiterTestHost stateHost = HostWith(store);
+        ArbiterUninstallCommand command = stateHost.Command<ArbiterUninstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterUninstallSettings { Path = host, Target = "kilo" }));
@@ -193,7 +203,7 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
         Directory.CreateDirectory(directory);
         File.WriteAllText(Path.Combine(directory, "kyber-weave.yml"), "arbiter: [unclosed\n");
 
-        ArbiterUninstallCommand command = new();
+        ArbiterUninstallCommand command = _host.Command<ArbiterUninstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterUninstallSettings { Path = host, Target = "kilo", RemoveKey = true }));
@@ -223,7 +233,8 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
                 OwnedFile(".opencode/plugins/kyber-arbiter.ts", "opencode"),
             ]);
 
-        ArbiterUninstallCommand command = new(uninstaller: null, stateStore: store);
+        using ArbiterTestHost stateHost = HostWith(store);
+        ArbiterUninstallCommand command = stateHost.Command<ArbiterUninstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterUninstallSettings { Path = host, Target = "kilo", RemoveKey = true }));
@@ -242,7 +253,6 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
     [Fact]
     public void Uninstall_DefaultScope_GlobalRealInstall_RemovesOwnedClaudeBlock_CleansState_AndPreservesForeignBytes()
     {
-        _isolated.Value = true;
         string home = _home.Path;
         string settingsPath = Path.Combine(home, ".claude", "settings.json");
         Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
@@ -275,7 +285,7 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
             """;
         File.WriteAllText(settingsPath, foreign);
 
-        ArbiterInstallCommand install = new();
+        ArbiterInstallCommand install = _host.Command<ArbiterInstallCommand>();
         CommandExecution installExecution = Capture(() => install.Execute(
             null!,
             new ArbiterInstallSettings
@@ -296,7 +306,7 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
         string receiptPath = stateStore.ResolveReceiptPath(home, SquadDeploymentScope.Global);
         Assert.True(File.Exists(receiptPath), "the real global install must write a global receipt");
 
-        ArbiterUninstallCommand uninstall = new();
+        ArbiterUninstallCommand uninstall = _host.Command<ArbiterUninstallCommand>();
         CommandExecution execution = Capture(() => uninstall.Execute(
             null!,
             new ArbiterUninstallSettings { Path = home, Target = "claude" }));
@@ -354,7 +364,7 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
             """;
         File.WriteAllText(hooksPath, foreign);
 
-        ArbiterInstallCommand install = new();
+        ArbiterInstallCommand install = _host.Command<ArbiterInstallCommand>();
         CommandExecution installExecution = Capture(() => install.Execute(
             null!,
             new ArbiterInstallSettings
@@ -370,7 +380,7 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
         Assert.Contains("kyber-weave-arbiter hook --harness codex", installed, StringComparison.Ordinal);
         Assert.Contains("user-owned read hook", installed, StringComparison.Ordinal);
 
-        ArbiterUninstallCommand uninstall = new();
+        ArbiterUninstallCommand uninstall = _host.Command<ArbiterUninstallCommand>();
         CommandExecution execution = Capture(() => uninstall.Execute(
             null!,
             new ArbiterUninstallSettings { Path = home, Target = "codex" }));
@@ -402,7 +412,7 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
             }
             """);
 
-        ArbiterInstallCommand install = new();
+        ArbiterInstallCommand install = _host.Command<ArbiterInstallCommand>();
         CommandExecution installExecution = Capture(() => install.Execute(
             null!,
             new ArbiterInstallSettings
@@ -419,7 +429,7 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
         Assert.Contains("\"SubagentStop\"", installed, StringComparison.Ordinal);
         Assert.Contains("user-own-stop-notifier", installed, StringComparison.Ordinal);
 
-        ArbiterUninstallCommand uninstall = new();
+        ArbiterUninstallCommand uninstall = _host.Command<ArbiterUninstallCommand>();
         CommandExecution execution = Capture(() => uninstall.Execute(
             null!,
             new ArbiterUninstallSettings { Path = home, Target = "factory" }));
@@ -446,7 +456,7 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
         Directory.CreateDirectory(Path.GetDirectoryName(nonOwned)!);
         File.WriteAllText(nonOwned, "// operator-owned plugin, never touched\n");
 
-        ArbiterInstallCommand install = new();
+        ArbiterInstallCommand install = _host.Command<ArbiterInstallCommand>();
         CommandExecution installExecution = Capture(() => install.Execute(
             null!,
             new ArbiterInstallSettings
@@ -460,7 +470,7 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
         Assert.Equal(0, installExecution.ExitCode);
         Assert.True(File.Exists(owned), "the real install should write the OpenCode shim beneath the target's global root");
 
-        ArbiterUninstallCommand uninstall = new();
+        ArbiterUninstallCommand uninstall = _host.Command<ArbiterUninstallCommand>();
         CommandExecution execution = Capture(() => uninstall.Execute(
             null!,
             new ArbiterUninstallSettings { Path = home, Target = "opencode" }));
@@ -483,7 +493,7 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
         InstallGlobal(home, "claude");
         InstallGlobal(home, "codex");
 
-        ArbiterUninstallCommand uninstall = new();
+        ArbiterUninstallCommand uninstall = _host.Command<ArbiterUninstallCommand>();
         CommandExecution execution = Capture(() => uninstall.Execute(
             null!,
             new ArbiterUninstallSettings { Path = home, Target = "claude" }));
@@ -506,12 +516,7 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
         {
-            CommandApp app = new();
-            app.Configure(config =>
-            {
-                config.UseStrictParsing();
-                config.AddBranch("arbiter", branch => branch.AddCommand<ArbiterUninstallCommand>("uninstall"));
-            });
+            CommandApp app = CliApplication.Create();
             return app.Run(["arbiter", "uninstall", "--target", "claude", "--path", home]);
         });
 
@@ -529,12 +534,7 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
     {
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
         {
-            CommandApp app = new();
-            app.Configure(config =>
-            {
-                config.UseStrictParsing();
-                config.AddBranch("arbiter", branch => branch.AddCommand<ArbiterUninstallCommand>("uninstall"));
-            });
+            CommandApp app = CliApplication.Create();
             return app.Run(["arbiter", "uninstall", "--target", "claude", "--global", "--project"]);
         });
 
@@ -549,11 +549,11 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
     [Fact]
     public void AnotherTargetIsDeployed_UnreadableState_ReportsNoOtherTargetWithoutThrowing()
     {
-        _isolated.Value = true;
         SquadStateStore store = new(new BlankHomeUserPaths(Path.Combine(_temp.Path, "blank-home")));
+        using ArbiterTestHost stateHost = HostWith(store);
 
         Assert.False(
-            ArbiterUninstallCommand.AnotherTargetIsDeployed(_temp.Path, SquadTarget.Kilo, store));
+            stateHost.Get<IArbiterUninstaller>().AnotherTargetIsDeployed(_temp.Path, SquadTarget.Kilo));
     }
 
     /// <summary>
@@ -576,7 +576,7 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
             ["codex", "cursor"],
             ReadGlobalReceipt(home).Blocks.Select(block => block.Target).Order(StringComparer.Ordinal).ToArray());
 
-        ArbiterUninstallCommand uninstall = new();
+        ArbiterUninstallCommand uninstall = _host.Command<ArbiterUninstallCommand>();
         CommandExecution execution = Capture(() => uninstall.Execute(
             null!,
             new ArbiterUninstallSettings { Path = home, Target = "codex" }));
@@ -598,7 +598,7 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
 
     private void InstallGlobal(string home, string target)
     {
-        ArbiterInstallCommand command = new();
+        ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterInstallSettings
@@ -670,18 +670,10 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
         return dir;
     }
 
-    private CommandExecution Capture(Func<int> execute)
+    private static CommandExecution Capture(Func<int> execute)
     {
-        _isolated.Value = true;
-        try
-        {
-            CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
-            return new CommandExecution(execution.Result, execution.Output);
-        }
-        finally
-        {
-            _isolated.Value = false;
-        }
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
+        return new CommandExecution(execution.Result, execution.Output);
     }
 
     private sealed record CommandExecution(int ExitCode, string Output);
@@ -720,9 +712,13 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
         Justification = "The probe binds the uninstaller port so the contract names it; the command tests drive the behavior.")]
     private sealed class RecordingArbiterUninstaller : IArbiterUninstaller
     {
-        public void Uninstall(string target)
+        public void Uninstall(string root, SquadDeploymentScope scope, string target)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(target);
         }
+
+        public bool HasDeployment(string root, SquadTarget target, SquadDeploymentScope scope) => false;
+
+        public bool AnotherTargetIsDeployed(string root, SquadTarget target) => false;
     }
 }

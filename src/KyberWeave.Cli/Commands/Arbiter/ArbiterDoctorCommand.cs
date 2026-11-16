@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using KyberWeave.Cli;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Arbiter;
@@ -9,7 +10,7 @@ using KyberWeave.Core.Arbiter.ModelTargets;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
-using KyberWeave.Core.Processes;
+using KyberWeave.Core.RunStart;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
@@ -31,7 +32,19 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 /// post-dispatch advisory limitation as information (no diagnostic id: nothing is
 /// wrong, so there is nothing to suppress or baseline).
 /// </remarks>
-public sealed class ArbiterDoctorCommand(IArbiterModelTargetsReader modelTargets) : Command<ArbiterSettings>
+public sealed class ArbiterDoctorCommand(
+    IArbiterModelTargetsReader modelTargets,
+    IArbiterConfigResolver configs,
+    IArbiterKeyService keys,
+    IArbiterUserSettings userSettings,
+    IProcessEnvironment environment,
+    IUserHostConfigStore userConfig,
+    IArbiterRepositoryLocator locator,
+    IArbiterHarnessGating gating,
+    IGitCommandRunner git,
+    IWritableFileSystem files,
+    IFileStatReader fileStats,
+    ArbiterProcessProbe probe) : Command<ArbiterSettings>
 {
     /// <summary><c>artifacts/arbiter/</c> is not ignored by git.</summary>
     public const string LogNotIgnored = "KW-ARB-LOG-001";
@@ -81,16 +94,16 @@ public sealed class ArbiterDoctorCommand(IArbiterModelTargetsReader modelTargets
 
     private void Inspect(ArbiterSettings settings, DiagnosticReport report)
     {
-        _ = ArbiterCommandComposition.TryResolveConfig(settings, report, out KyberWeaveConfig config, out string? configPath);
-        string home = ArbiterCommandComposition.HomeDirectory();
-        IReadOnlyList<string> globalTargets = UserHostConfig.ReadGlobalTargets(home);
-        string root = ArbiterCommandComposition.ResolveRepositoryRoot(settings.Path);
-        HarnessGatingReport gating = ArbiterHarnessGating.Build(root, home, config, globalTargets);
+        _ = configs.TryResolve(settings.Path, settings.Config, report, out KyberWeaveConfig config, out string? configPath);
+        string home = environment.HomeDirectory;
+        IReadOnlyList<string> globalTargets = userConfig.ReadGlobalTargets(home);
+        string root = locator.ResolveRepositoryRoot(settings.Path);
+        HarnessGatingReport gatingReport = gating.Build(root, home, config, globalTargets);
 
         AnsiConsole.MarkupLine("[bold]Kyber-Arbiter Doctor[/]");
         AnsiConsole.WriteLine();
         WriteGlobalScope(globalTargets);
-        WriteProjectScope(gating, config.Arbiter.Enabled);
+        WriteProjectScope(gatingReport, config.Arbiter.Enabled);
 
         report.AddRange(RuleValidator.Validate(config.Arbiter, configPath));
         report.AddRange(RuleValidator.CheckModelTuning(config.Arbiter));
@@ -99,7 +112,7 @@ public sealed class ArbiterDoctorCommand(IArbiterModelTargetsReader modelTargets
         CheckLogIgnored(settings, report);
         CheckBinary(report);
         CheckGuard(config, settings, report);
-        CheckProjectHooks(gating, report);
+        CheckProjectHooks(gatingReport, report);
         CheckModelTargets(config, home, globalTargets, report);
         CheckAdvisoryPostDispatchTargets();
     }
@@ -113,12 +126,12 @@ public sealed class ArbiterDoctorCommand(IArbiterModelTargetsReader modelTargets
     /// Warns (<c>KW-ARB-CONFIG-016</c>) when the user override's provider timeout cannot finish inside the hook
     /// timeout the repository renders. A malformed override is reported by the hook and validate paths, not here.
     /// </summary>
-    private static void CheckProviderTimeout(KyberWeaveConfig config, string home, DiagnosticReport report)
+    private void CheckProviderTimeout(KyberWeaveConfig config, string home, DiagnosticReport report)
     {
         ArbiterProviderConfig effective;
         try
         {
-            effective = ArbiterCommandComposition.UserSettings.ApplyTo(config.Arbiter.Provider, home);
+            effective = userSettings.ApplyTo(config.Arbiter.Provider, home);
         }
         catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or YamlDotNet.Core.YamlException)
         {
@@ -175,12 +188,12 @@ public sealed class ArbiterDoctorCommand(IArbiterModelTargetsReader modelTargets
     /// <param name="path">The file to stat.</param>
     /// <param name="writtenUtc">The last write time in UTC when the file exists and can be stat'ed.</param>
     /// <returns>True when a real write time was read; false when the file is missing or cannot be stat'ed.</returns>
-    internal static bool TryGetWriteTimeUtc(string path, out DateTime writtenUtc)
+    internal bool TryGetWriteTimeUtc(string path, out DateTime writtenUtc)
     {
         writtenUtc = default;
         try
         {
-            writtenUtc = File.GetLastWriteTimeUtc(path);
+            writtenUtc = fileStats.GetLastWriteTimeUtc(path);
         }
         catch (Exception exception) when (FileFailure.Is(exception))
         {
@@ -228,7 +241,7 @@ public sealed class ArbiterDoctorCommand(IArbiterModelTargetsReader modelTargets
             AnsiConsole.MarkupLine("  arbiter.enabled: true");
         }
 
-        ArbiterHarnessGating.WriteRows(gating, TargetDisplayName);
+        ArbiterGatingConsole.WriteRows(gating, TargetDisplayName);
     }
 
     private static string GlobalReason(string token)
@@ -305,7 +318,7 @@ public sealed class ArbiterDoctorCommand(IArbiterModelTargetsReader modelTargets
         }
     }
 
-    private static void CheckKey(KyberWeaveConfig config, DiagnosticReport report)
+    private void CheckKey(KyberWeaveConfig config, DiagnosticReport report)
     {
         ArbiterProviderConfig provider = config.Arbiter.Provider;
         if (provider.Kind == ArbiterProviderKind.None || ArbiterKeyResolver.IsLoopbackEndpoint(provider.Endpoint))
@@ -318,7 +331,7 @@ public sealed class ArbiterDoctorCommand(IArbiterModelTargetsReader modelTargets
         string? key;
         try
         {
-            key = ArbiterCommandComposition.ResolveKey(config, provider.Endpoint);
+            key = keys.ResolveKey(config, provider.Endpoint);
         }
         catch (SecretServiceUnavailableException exception)
         {
@@ -353,9 +366,9 @@ public sealed class ArbiterDoctorCommand(IArbiterModelTargetsReader modelTargets
             Hint: $"Run 'arbiter setup' or export {ArbiterKeyResolver.EnvVarName}."));
     }
 
-    private static void CheckLogIgnored(ArbiterSettings settings, DiagnosticReport report)
+    private void CheckLogIgnored(ArbiterSettings settings, DiagnosticReport report)
     {
-        string root = ArbiterCommandComposition.ResolveRepositoryRoot(settings.Path);
+        string root = locator.ResolveRepositoryRoot(settings.Path);
         if (IsIgnoredByGit(root))
         {
             AnsiConsole.MarkupLine("  [green]ok[/] Log: artifacts/arbiter/ is ignored by git.");
@@ -371,34 +384,22 @@ public sealed class ArbiterDoctorCommand(IArbiterModelTargetsReader modelTargets
             Hint: "Add artifacts/arbiter/ to .gitignore."));
     }
 
-    private static bool IsIgnoredByGit(string root)
+    private bool IsIgnoredByGit(string root)
     {
         try
         {
-            ProcessStartInfo startInfo = new("git")
-            {
-                WorkingDirectory = root,
-                UseShellExecute = false,
-                RedirectStandardInput = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-            };
-            startInfo.ArgumentList.Add("check-ignore");
-            startInfo.ArgumentList.Add("-q");
-            startInfo.ArgumentList.Add("artifacts/arbiter");
-            ProcessResult result = ArbiterCommandComposition.RunProcess(startInfo, string.Empty);
+            GitOutcome result = git.Run(root, ["check-ignore", "-q", "artifacts/arbiter"]);
             return result.ExitCode == 0;
         }
-        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception or TimeoutException)
         {
             // Without git there is no evidence the log is ignored: warn, the safe direction.
             return false;
         }
     }
 
-    private static void CheckBinary(DiagnosticReport report)
+    private void CheckBinary(DiagnosticReport report)
     {
-        ArbiterProcessProbe probe = new(ArbiterCommandComposition.ArbiterProbeExecutor());
         ToolProbeResult result = probe.Probe();
         string cliVersion = CliAssemblyVersion.ForProbe(typeof(ArbiterDoctorCommand).Assembly);
 
@@ -422,9 +423,9 @@ public sealed class ArbiterDoctorCommand(IArbiterModelTargetsReader modelTargets
             Hint: "Install the kyber-weave-arbiter binary matching this CLI version."));
     }
 
-    private static void CheckGuard(KyberWeaveConfig config, ArbiterSettings settings, DiagnosticReport report)
+    private void CheckGuard(KyberWeaveConfig config, ArbiterSettings settings, DiagnosticReport report)
     {
-        string root = ArbiterCommandComposition.ResolveRepositoryRoot(settings.Path);
+        string root = locator.ResolveRepositoryRoot(settings.Path);
         IReadOnlyList<ConfigRegEntry> entries = config.ConfigReg.Resolve(config.Ontology);
         string[] wanted =
         [
@@ -473,12 +474,12 @@ public sealed class ArbiterDoctorCommand(IArbiterModelTargetsReader modelTargets
         ("Cursor", "cursor", "additional_context"),
     ];
 
-    private static bool IndexExists(string root, string path)
+    private bool IndexExists(string root, string path)
     {
         try
         {
             string full = Path.IsPathRooted(path) ? path : Path.Combine(root, path);
-            return File.Exists(full) || Directory.Exists(full);
+            return files.PathExists(full);
         }
         catch (Exception exception) when (FileFailure.Is(exception))
         {

@@ -35,7 +35,7 @@ public static class SquadServiceCollectionExtensions
         return services;
     }
 
-    private static SquadLifecycleService CreateLifecycle(IServiceProvider sp, ISquadReleaseSource releaseSource) =>
+    internal static SquadLifecycleService CreateLifecycle(IServiceProvider sp, ISquadReleaseSource releaseSource) =>
         new(
             releaseSource,
             sp.GetRequiredService<ISquadRenderer>(),

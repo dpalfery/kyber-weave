@@ -120,7 +120,7 @@ public sealed class ArbiterServedContainmentTests : IDisposable
     [Fact]
     public void TheCommentCommandRefusesAFileOutsideTheRoot()
     {
-        ArbiterCommentCommand command = new(ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<ICommentTriageFactory>());
+        ArbiterCommentCommand command = ArbiterTestServices.Command<ArbiterCommentCommand>();
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
             new ArbiterCommentSettings

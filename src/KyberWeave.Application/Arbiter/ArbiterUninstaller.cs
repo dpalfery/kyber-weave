@@ -1,5 +1,8 @@
-using KyberWeave.Cli.Commands.Squad;
+using System.Text.Json;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Rendering;
 
 namespace KyberWeave.Cli.Commands.Arbiter;
 
@@ -8,7 +11,7 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 /// owned hook blocks beneath one deployment root. Shared files are never deleted, only scrubbed;
 /// agent frontmatter, MCP grants, and every non-arbiter entry stay byte-identical.
 /// </summary>
-internal sealed class ArbiterUninstaller : IArbiterUninstaller
+public sealed class ArbiterUninstaller : IArbiterUninstaller
 {
     private static readonly IReadOnlyDictionary<SquadTarget, string[]> OwnedFiles =
         new Dictionary<SquadTarget, string[]>
@@ -30,56 +33,60 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
             [SquadTarget.Antigravity] = SquadHookBlockFormat.Antigravity,
         };
 
-    private readonly string _root;
-    private readonly SquadDeploymentScope _scope;
-    private readonly SquadStateStore _stateStore;
+    private readonly ISquadStateStore _stateStore;
     private readonly ISquadGlobalRootResolver _globalRoots;
+    private readonly IWritableFileSystem _files;
+    private readonly IUserHostConfigStore _userConfig;
+    private readonly IProcessEnvironment _environment;
 
-    internal ArbiterUninstaller(string root)
-        : this(root, SquadDeploymentScope.Project, SquadHostDefaults.ResolveStateStore(null, ArbiterCommandComposition.GetEnvironmentVariable))
+    /// <summary>Creates the uninstaller over the registered Squad state, global roots, user config and file system.</summary>
+    /// <param name="stateStore">Reads and writes the deployment receipts.</param>
+    /// <param name="globalRoots">Resolves each harness's global root.</param>
+    /// <param name="files">Probes, reads, writes and deletes the owned files.</param>
+    /// <param name="userConfig">Reads the global targets the user config lists.</param>
+    /// <param name="environment">Supplies the home directory.</param>
+    public ArbiterUninstaller(
+        ISquadStateStore stateStore,
+        ISquadGlobalRootResolver globalRoots,
+        IWritableFileSystem files,
+        IUserHostConfigStore userConfig,
+        IProcessEnvironment environment)
     {
-    }
-
-    internal ArbiterUninstaller(string root, SquadStateStore stateStore)
-        : this(root, SquadDeploymentScope.Project, stateStore)
-    {
-    }
-
-    internal ArbiterUninstaller(
-        string root,
-        SquadDeploymentScope scope,
-        SquadStateStore stateStore,
-        ISquadGlobalRootResolver? globalRoots = null)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentNullException.ThrowIfNull(stateStore);
-        _root = Path.GetFullPath(root);
-        _scope = scope;
+        ArgumentNullException.ThrowIfNull(globalRoots);
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(userConfig);
+        ArgumentNullException.ThrowIfNull(environment);
         _stateStore = stateStore;
-        _globalRoots = globalRoots ?? SquadHostDefaults.ResolveGlobalRoots(ArbiterCommandComposition.GetEnvironmentVariable);
+        _globalRoots = globalRoots;
+        _files = files;
+        _userConfig = userConfig;
+        _environment = environment;
     }
 
     /// <inheritdoc />
-    public void Uninstall(string target)
+    public void Uninstall(string root, SquadDeploymentScope scope, string target)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentException.ThrowIfNullOrWhiteSpace(target);
+        string fullRoot = Path.GetFullPath(root);
         if (!SquadTargetCatalog.TryResolve(target, out SquadTarget parsed))
             throw new ArgumentException($"Unknown target '{target}'.", nameof(target));
 
         string targetToken = SquadTargetCatalog.GetToken(parsed);
 
-        if (_scope == SquadDeploymentScope.Global)
+        if (scope == SquadDeploymentScope.Global)
         {
-            UninstallGlobal(parsed, targetToken);
+            UninstallGlobal(fullRoot, parsed, targetToken);
             return;
         }
 
-        UninstallProject(parsed, targetToken);
+        UninstallProject(fullRoot, parsed, targetToken);
     }
 
-    private void UninstallGlobal(SquadTarget target, string targetToken)
+    private void UninstallGlobal(string root, SquadTarget target, string targetToken)
     {
-        SquadReceipt? receipt = _stateStore.ReadReceipt(_root, SquadDeploymentScope.Global);
+        SquadReceipt? receipt = _stateStore.ReadReceipt(root, SquadDeploymentScope.Global);
         if (receipt is not null)
         {
             foreach (SquadOwnedFile file in receipt.Files)
@@ -87,9 +94,9 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
                 if (!string.Equals(file.Target, targetToken, StringComparison.Ordinal))
                     continue;
 
-                string path = ResolveGlobalFilePath(target, file.RelativePath);
-                if (File.Exists(path))
-                    File.Delete(path);
+                string path = ResolveGlobalFilePath(root, target, file.RelativePath);
+                if (_files.FileExists(path))
+                    _files.DeleteFile(path);
             }
 
             foreach (SquadOwnedBlock block in receipt.Blocks)
@@ -97,13 +104,13 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
                 if (!string.Equals(block.Target, targetToken, StringComparison.Ordinal))
                     continue;
 
-                string path = ResolveGlobalBlockPath(target, block.RelativePath);
-                if (File.Exists(path))
+                string path = ResolveGlobalBlockPath(root, target, block.RelativePath);
+                if (_files.FileExists(path))
                 {
                     SquadHookBlockFormat blockFormat = OwnedBlocks.TryGetValue(target, out SquadHookBlockFormat fmt)
                         ? fmt
                         : SquadHookBlockFormat.Claude;
-                    SquadHookJsonFile.RemoveFile(blockFormat, path);
+                    RemoveHookBlocks(blockFormat, path);
                 }
             }
 
@@ -114,11 +121,11 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
                 .Where(block => !string.Equals(block.Target, targetToken, StringComparison.Ordinal))
                 .ToList();
 
-            string receiptPath = _stateStore.ResolveReceiptPath(_root, SquadDeploymentScope.Global);
+            string receiptPath = _stateStore.ResolveReceiptPath(root, SquadDeploymentScope.Global);
             if (remainingFiles.Count == 0 && remainingBlocks.Count == 0)
             {
-                if (File.Exists(receiptPath))
-                    File.Delete(receiptPath);
+                if (_files.FileExists(receiptPath))
+                    _files.DeleteFile(receiptPath);
             }
             else
             {
@@ -134,7 +141,7 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
                     Blocks = remainingBlocks,
                     HomeFiles = receipt.HomeFiles
                 };
-                File.WriteAllText(receiptPath, _stateStore.SerializeReceipt(updated));
+                _files.WriteAllText(receiptPath, _stateStore.SerializeReceipt(updated));
             }
 
             return;
@@ -143,17 +150,17 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
         // Unreceipted fallback:
         if (target == SquadTarget.Claude)
         {
-            string settingsPath = ResolveGlobalBlockPath(SquadTarget.Claude, "settings.json");
-            if (File.Exists(settingsPath))
-                SquadHookJsonFile.RemoveFile(SquadHookBlockFormat.Claude, settingsPath);
+            string settingsPath = ResolveGlobalBlockPath(root, SquadTarget.Claude, "settings.json");
+            if (_files.FileExists(settingsPath))
+                RemoveHookBlocks(SquadHookBlockFormat.Claude, settingsPath);
             return;
         }
 
         if (OwnedBlocks.TryGetValue(target, out SquadHookBlockFormat format))
         {
-            string blockPath = ResolveGlobalBlockPath(target, SquadHookJsonBlock.RelativePath(format));
-            if (File.Exists(blockPath))
-                SquadHookJsonFile.RemoveFile(format, blockPath);
+            string blockPath = ResolveGlobalBlockPath(root, target, SquadHookJsonBlock.RelativePath(format));
+            if (_files.FileExists(blockPath))
+                RemoveHookBlocks(format, blockPath);
             return;
         }
 
@@ -161,18 +168,18 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
         {
             foreach (string rel in files)
             {
-                string filePath = ResolveGlobalFilePath(target, rel);
-                if (File.Exists(filePath))
-                    File.Delete(filePath);
+                string filePath = ResolveGlobalFilePath(root, target, rel);
+                if (_files.FileExists(filePath))
+                    _files.DeleteFile(filePath);
             }
         }
     }
 
-    private void UninstallProject(SquadTarget target, string targetToken)
+    private void UninstallProject(string root, SquadTarget target, string targetToken)
     {
-        SquadReceipt? receipt = _stateStore.ReadReceipt(_root, SquadDeploymentScope.Project);
-        RemoveOwnedFiles(target, receipt);
-        RemoveOwnedBlocks(target, receipt);
+        SquadReceipt? receipt = _stateStore.ReadReceipt(root, SquadDeploymentScope.Project);
+        RemoveOwnedFiles(root, target, receipt);
+        RemoveOwnedBlocks(root, target, receipt);
 
         if (receipt is not null)
         {
@@ -183,11 +190,11 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
                 .Where(block => !string.Equals(block.Target, targetToken, StringComparison.Ordinal))
                 .ToList();
 
-            string receiptPath = _stateStore.ResolveReceiptPath(_root, SquadDeploymentScope.Project);
+            string receiptPath = _stateStore.ResolveReceiptPath(root, SquadDeploymentScope.Project);
             if (remainingFiles.Count == 0 && remainingBlocks.Count == 0)
             {
-                if (File.Exists(receiptPath))
-                    File.Delete(receiptPath);
+                if (_files.FileExists(receiptPath))
+                    _files.DeleteFile(receiptPath);
             }
             else
             {
@@ -203,12 +210,12 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
                     Blocks = remainingBlocks,
                     HomeFiles = receipt.HomeFiles
                 };
-                File.WriteAllText(receiptPath, _stateStore.SerializeReceipt(updated));
+                _files.WriteAllText(receiptPath, _stateStore.SerializeReceipt(updated));
             }
         }
     }
 
-    private string ResolveGlobalFilePath(SquadTarget target, string relativePath)
+    private string ResolveGlobalFilePath(string root, SquadTarget target, string relativePath)
     {
         string targetRoot;
         try
@@ -217,7 +224,7 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
         }
         catch (ArgumentException)
         {
-            targetRoot = _root;
+            targetRoot = root;
         }
 
         string token = SquadTargetCatalog.GetToken(target);
@@ -226,17 +233,17 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
             : relativePath;
 
         string candidate1 = Path.Combine(targetRoot, normalizedRel);
-        if (File.Exists(candidate1))
+        if (_files.FileExists(candidate1))
             return candidate1;
 
-        string candidate2 = Path.Combine(_root, relativePath);
-        if (File.Exists(candidate2))
+        string candidate2 = Path.Combine(root, relativePath);
+        if (_files.FileExists(candidate2))
             return candidate2;
 
         return candidate1;
     }
 
-    private string ResolveGlobalBlockPath(SquadTarget target, string relativePath)
+    private string ResolveGlobalBlockPath(string root, SquadTarget target, string relativePath)
     {
         string targetRoot;
         try
@@ -245,15 +252,15 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
         }
         catch (ArgumentException)
         {
-            targetRoot = _root;
+            targetRoot = root;
         }
 
         string candidate1 = Path.Combine(targetRoot, relativePath);
-        if (File.Exists(candidate1))
+        if (_files.FileExists(candidate1))
             return candidate1;
 
-        string candidate2 = Path.Combine(_root, relativePath);
-        if (File.Exists(candidate2))
+        string candidate2 = Path.Combine(root, relativePath);
+        if (_files.FileExists(candidate2))
             return candidate2;
 
         string token = SquadTargetCatalog.GetToken(target);
@@ -261,7 +268,7 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
         {
             string trimmedRel = relativePath[(token.Length + 2)..];
             string candidate3 = Path.Combine(targetRoot, trimmedRel);
-            if (File.Exists(candidate3))
+            if (_files.FileExists(candidate3))
                 return candidate3;
         }
 
@@ -275,18 +282,14 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
     /// in <see cref="Uninstall"/> instead of reading as "nothing to uninstall". An unreadable
     /// receipt propagates for the same reason rather than reading as absent.
     /// </summary>
-    internal static bool HasDeployment(
-        string root,
-        SquadTarget target,
-        SquadStateStore stateStore,
-        SquadDeploymentScope scope = SquadDeploymentScope.Global,
-        ISquadGlobalRootResolver? globalRoots = null)
+    /// <inheritdoc cref="IArbiterUninstaller.HasDeployment" />
+    public bool HasDeployment(string root, SquadTarget target, SquadDeploymentScope scope)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
-        ArgumentNullException.ThrowIfNull(stateStore);
+        ISquadStateStore stateStore = _stateStore;
+        ISquadGlobalRootResolver globalRoots = _globalRoots;
         string full = Path.GetFullPath(root);
         string token = SquadTargetCatalog.GetToken(target);
-        globalRoots ??= SquadHostDefaults.ResolveGlobalRoots(ArbiterCommandComposition.GetEnvironmentVariable);
 
         if (scope == SquadDeploymentScope.Global)
         {
@@ -310,12 +313,12 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
                 }
 
                 string settingsPath = Path.Combine(claudeRoot, "settings.json");
-                if (!File.Exists(settingsPath))
+                if (!_files.FileExists(settingsPath))
                     return false;
 
                 try
                 {
-                    string before = File.ReadAllText(settingsPath);
+                    string before = _files.ReadAllText(settingsPath);
                     return !string.Equals(
                         SquadHookJsonBlock.NormalizeContent(before),
                         SquadHookJsonBlock.RemoveContent(SquadHookBlockFormat.Claude, before),
@@ -342,20 +345,20 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
                 string relativePath = SquadHookJsonBlock.RelativePath(format);
                 string candidate1 = Path.Combine(targetRoot, relativePath);
                 string candidate2 = Path.Combine(full, relativePath);
-                string path = File.Exists(candidate1) ? candidate1 : candidate2;
-                if (!File.Exists(path) && relativePath.StartsWith("." + token + "/", StringComparison.OrdinalIgnoreCase))
+                string path = _files.FileExists(candidate1) ? candidate1 : candidate2;
+                if (!_files.FileExists(path) && relativePath.StartsWith("." + token + "/", StringComparison.OrdinalIgnoreCase))
                 {
                     string candidate3 = Path.Combine(targetRoot, relativePath[(token.Length + 2)..]);
-                    if (File.Exists(candidate3))
+                    if (_files.FileExists(candidate3))
                         path = candidate3;
                 }
 
-                if (!File.Exists(path))
+                if (!_files.FileExists(path))
                     return false;
 
                 try
                 {
-                    string before = File.ReadAllText(path);
+                    string before = _files.ReadAllText(path);
                     return !string.Equals(
                         SquadHookJsonBlock.NormalizeContent(before),
                         SquadHookJsonBlock.RemoveContent(format, before),
@@ -380,7 +383,7 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
                 }
 
                 return globalFiles.Any(rel =>
-                    File.Exists(Path.Combine(targetRoot, rel)) || File.Exists(Path.Combine(full, rel)));
+                    _files.FileExists(Path.Combine(targetRoot, rel)) || _files.FileExists(Path.Combine(full, rel)));
             }
 
             return false;
@@ -391,7 +394,7 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
 
         if (OwnedFiles.TryGetValue(target, out string[]? files)
             && files.Any(relative =>
-                File.Exists(Path.Combine(full, relative))
+                _files.FileExists(Path.Combine(full, relative))
                 && (receipt is null || ReceiptOwnsFile(receipt, token, relative))))
         {
             return true;
@@ -405,12 +408,12 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
             return false;
 
         string projPath = Path.Combine(full, projRelativePath);
-        if (!File.Exists(projPath))
+        if (!_files.FileExists(projPath))
             return false;
 
         try
         {
-            string before = File.ReadAllText(projPath);
+            string before = _files.ReadAllText(projPath);
             return !string.Equals(
                 SquadHookJsonBlock.NormalizeContent(before),
                 SquadHookJsonBlock.RemoveContent(projFormat, before),
@@ -437,7 +440,7 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
             && string.Equals(block.Target, targetToken, StringComparison.Ordinal));
     }
 
-    private void RemoveOwnedFiles(SquadTarget target, SquadReceipt? receipt)
+    private void RemoveOwnedFiles(string root, SquadTarget target, SquadReceipt? receipt)
     {
         if (!OwnedFiles.TryGetValue(target, out string[]? files))
             return;
@@ -448,13 +451,13 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
             if (receipt is not null && !ReceiptOwnsFile(receipt, token, relative))
                 continue;
 
-            string path = Path.Combine(_root, relative);
-            if (File.Exists(path))
-                File.Delete(path);
+            string path = Path.Combine(root, relative);
+            if (_files.FileExists(path))
+                _files.DeleteFile(path);
         }
     }
 
-    private void RemoveOwnedBlocks(SquadTarget target, SquadReceipt? receipt)
+    private void RemoveOwnedBlocks(string root, SquadTarget target, SquadReceipt? receipt)
     {
         if (!OwnedBlocks.TryGetValue(target, out SquadHookBlockFormat format))
             return;
@@ -463,8 +466,108 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
         if (receipt is not null && !ReceiptOwnsBlock(receipt, SquadTargetCatalog.GetToken(target), relative))
             return;
 
-        string path = Path.Combine(_root, relative);
-        if (File.Exists(path))
-            SquadHookJsonFile.RemoveFile(format, path);
+        string path = Path.Combine(root, relative);
+        if (_files.FileExists(path))
+            RemoveHookBlocks(format, path);
+    }
+
+    /// <inheritdoc />
+    public bool AnotherTargetIsDeployed(string root, SquadTarget target)
+    {
+        string token = SquadTargetCatalog.GetToken(target);
+        string home = _environment.HomeDirectory;
+        ISquadStateStore stateStore = _stateStore;
+
+        try
+        {
+            IReadOnlyList<string> globalTargets = _userConfig.ReadGlobalTargets(home);
+            if (globalTargets.Any(t => !string.Equals(t, token, StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+
+            SquadReceipt? globalReceipt = stateStore.ReadReceipt(home, SquadDeploymentScope.Global);
+            if (globalReceipt is not null &&
+                (globalReceipt.Files.Any(file => !string.Equals(file.Target, token, StringComparison.Ordinal))
+                 || globalReceipt.Blocks.Any(block => !string.Equals(block.Target, token, StringComparison.Ordinal))))
+            {
+                return true;
+            }
+
+            SquadReceipt? currentProjectReceipt = stateStore.ReadReceipt(root, SquadDeploymentScope.Project);
+            if (currentProjectReceipt is not null &&
+                (currentProjectReceipt.Files.Any(file => !string.Equals(file.Target, token, StringComparison.Ordinal))
+                 || currentProjectReceipt.Blocks.Any(block => !string.Equals(block.Target, token, StringComparison.Ordinal))))
+            {
+                return true;
+            }
+
+            IReadOnlyList<SquadProjectRegistryEntry> projects = stateStore.ListProjects();
+            foreach (SquadProjectRegistryEntry project in projects)
+            {
+                SquadReceipt? projReceipt = stateStore.ReadReceipt(project.Path, SquadDeploymentScope.Project);
+                if (projReceipt is null)
+                {
+                    continue;
+                }
+
+                bool isCurrent = string.Equals(
+                    Path.GetFullPath(project.Path),
+                    Path.GetFullPath(root),
+                    StringComparison.OrdinalIgnoreCase);
+
+                if (isCurrent)
+                {
+                    if (projReceipt.Files.Any(f => !string.Equals(f.Target, token, StringComparison.Ordinal))
+                        || projReceipt.Blocks.Any(b => !string.Equals(b.Target, token, StringComparison.Ordinal)))
+                    {
+                        return true;
+                    }
+                }
+                else
+                {
+                    if (projReceipt.Files.Count > 0 || projReceipt.Blocks.Count > 0)
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        catch (Exception ex) when (ex is ArgumentException
+                                       or IOException
+                                       or UnauthorizedAccessException
+                                       or InvalidDataException
+                                       or InvalidOperationException)
+        {
+            return false;
+        }
+
+        return false;
+    }
+
+    /// <summary>Scrubs the Arbiter's owned hook entries from a shared hook file. A missing file needs no work; an unparsable file fails and is left untouched.</summary>
+    private void RemoveHookBlocks(SquadHookBlockFormat format, string filePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+
+        if (!_files.FileExists(filePath))
+        {
+            return;
+        }
+
+        string existing = _files.ReadAllText(filePath);
+        string content;
+        try
+        {
+            content = SquadHookJsonBlock.RemoveContent(format, existing);
+        }
+        catch (Exception ex) when (ex is JsonException || ex is InvalidOperationException)
+        {
+            throw new InvalidOperationException(
+                $"Squad hook removal failed: '{filePath}' does not parse as a hook file for {SquadHookJsonBlock.Harness(format)}.",
+                ex);
+        }
+
+        _files.WriteAllText(filePath, content);
     }
 }

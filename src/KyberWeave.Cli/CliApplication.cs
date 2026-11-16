@@ -33,6 +33,7 @@ internal static class CliApplication
         services.TryAddSingleton<IRepositoryToolSettings, ConfigFileToolSettings>();
         services.TryAddSingleton<IMcpDeclarationReader, McpDeclarationReader>();
         _ = services.AddSquadCliServices();
+        _ = services.AddArbiterCliServices();
         _ = services.AddWeaveApplication();
         CommandApp app = new(new ServiceCollectionTypeRegistrar(services));
         app.Configure(config =>

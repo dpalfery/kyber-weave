@@ -31,7 +31,7 @@ public sealed class ArbiterCommentRootContainmentCliTests : IDisposable
         string cited = Path.Combine(_temp.Path, "secret.md");
         File.WriteAllText(cited, "# Secret\nText.\n");
 
-        ArbiterCommentCommand command = new(ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<ICommentTriageFactory>());
+        ArbiterCommentCommand command = ArbiterTestServices.Command<ArbiterCommentCommand>();
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
             new ArbiterCommentSettings

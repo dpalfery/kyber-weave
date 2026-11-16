@@ -30,6 +30,9 @@ internal static class ArbiterDataServiceCollectionExtensions
         services.TryAddSingleton<IPlanFacts>(sp => new PlanFacts(sp.GetRequiredService<IPlanFileResolver>()));
         services.TryAddSingleton<IClaudeHookCoverage, ClaudeHookCoverage>();
         services.TryAddSingleton<IArbiterProviderFactory, SystemOneProviderFactory>();
+        services.TryAddSingleton<IArbiterHttpHandlers, SocketArbiterHttpHandlers>();
+        services.TryAddSingleton<IFileStatReader, FileStatReader>();
+        services.TryAddSingleton<IArbiterUserOverrideWriter>(sp => new FileArbiterUserOverrideWriter(sp.GetRequiredService<IWritableFileSystem>()));
         return services;
     }
 }

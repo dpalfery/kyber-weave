@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json;
-using KyberWeave.Cli.Commands.Squad;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
@@ -16,23 +17,15 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 /// survives unless <c>--remove-key</c> is given; an unknown target exits 2 naming the roster;
 /// a root with no deployment exits 0 as a no-op.
 /// </summary>
-public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
+public sealed class ArbiterUninstallCommand(
+    IArbiterUninstaller uninstaller,
+    ISquadStateStore stateStore,
+    IProcessEnvironment environment,
+    IUserHostConfigStore userConfig,
+    IArbiterConfigResolver configs,
+    ICredentialStore credentials,
+    IFileSystem files) : Command<ArbiterUninstallSettings>
 {
-    private readonly IArbiterUninstaller? _uninstaller;
-    private readonly SquadStateStore? _stateStore;
-
-    /// <summary>Creates a new uninstall command using default collaborators.</summary>
-    public ArbiterUninstallCommand()
-    {
-    }
-
-    /// <summary>Creates a new uninstall command over injected collaborators.</summary>
-    internal ArbiterUninstallCommand(IArbiterUninstaller? uninstaller, SquadStateStore? stateStore = null)
-    {
-        _uninstaller = uninstaller;
-        _stateStore = stateStore;
-    }
-
     /// <inheritdoc />
     public override int Execute(
         CommandContext context,
@@ -68,10 +61,6 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
             return 2;
         }
 
-        SquadStateStore stateStore = _stateStore ?? SquadHostDefaults.ResolveStateStore(
-            null,
-            ArbiterCommandComposition.GetEnvironmentVariable);
-
         SquadDeploymentScope scope;
         string root;
         if (settings.Project)
@@ -85,7 +74,7 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
         {
             scope = SquadDeploymentScope.Global;
             root = Path.GetFullPath(string.IsNullOrWhiteSpace(settings.Path) || string.Equals(settings.Path, ".", StringComparison.Ordinal)
-                ? ArbiterCommandComposition.HomeDirectory()
+                ? environment.HomeDirectory
                 : settings.Path);
         }
         else
@@ -93,7 +82,7 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
             if (!string.IsNullOrWhiteSpace(settings.Path) && !string.Equals(settings.Path, ".", StringComparison.Ordinal))
             {
                 string candidate = Path.GetFullPath(settings.Path);
-                string home = Path.GetFullPath(ArbiterCommandComposition.HomeDirectory());
+                string home = Path.GetFullPath(environment.HomeDirectory);
                 if (string.Equals(candidate, home, StringComparison.Ordinal))
                 {
                     scope = SquadDeploymentScope.Global;
@@ -132,17 +121,15 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
             else
             {
                 scope = SquadDeploymentScope.Global;
-                root = Path.GetFullPath(ArbiterCommandComposition.HomeDirectory());
+                root = Path.GetFullPath(environment.HomeDirectory);
             }
         }
-
-        ISquadGlobalRootResolver globalRoots = SquadHostDefaults.ResolveGlobalRoots(ArbiterCommandComposition.GetEnvironmentVariable);
 
         bool deployed;
         try
         {
-            deployed = Directory.Exists(root)
-                       && ArbiterUninstaller.HasDeployment(root, target, stateStore, scope, globalRoots);
+            deployed = files.DirectoryExists(root)
+                       && uninstaller.HasDeployment(root, target, scope);
         }
         catch (Exception ex) when (ex is ArgumentException
                                        or IOException
@@ -161,7 +148,7 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
                 $"[grey]No Arbiter deployment found at [bold]{Markup.Escape(root)}[/] " +
                 $"for target '[bold]{Markup.Escape(SquadTargetCatalog.GetToken(target))}[/]'. " +
                 "Nothing to uninstall.[/]");
-            if (settings.RemoveKey && !RemoveKey(root, scope, settings, target, stateStore))
+            if (settings.RemoveKey && !RemoveKey(root, scope, settings, target))
                 return 1;
 
             return 0;
@@ -169,8 +156,7 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
 
         try
         {
-            IArbiterUninstaller uninstaller = _uninstaller ?? new ArbiterUninstaller(root, scope, stateStore, globalRoots);
-            uninstaller.Uninstall(SquadTargetCatalog.GetToken(target));
+            uninstaller.Uninstall(root, scope, SquadTargetCatalog.GetToken(target));
         }
         catch (Exception ex) when (ex is ArgumentException
                                        or IOException
@@ -187,7 +173,7 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
         {
             try
             {
-                UserHostConfig.RemoveGlobalTarget(root, SquadTargetCatalog.GetToken(target));
+                userConfig.RemoveGlobalTarget(root, SquadTargetCatalog.GetToken(target));
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
             {
@@ -195,7 +181,7 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
             }
         }
 
-        if (settings.RemoveKey && !RemoveKey(root, scope, settings, target, stateStore))
+        if (settings.RemoveKey && !RemoveKey(root, scope, settings, target))
             return 1;
 
         AnsiConsole.MarkupLine(
@@ -210,16 +196,13 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
         return Execute(context, settings, CancellationToken.None);
     }
 
-    private static bool RemoveKey(
+    private bool RemoveKey(
         string root,
         SquadDeploymentScope scope,
         ArbiterUninstallSettings settings,
-        SquadTarget target,
-        SquadStateStore stateStore)
+        SquadTarget target)
     {
-        KyberWeaveConfigLoadResult loaded = scope == SquadDeploymentScope.Project
-            ? KyberWeaveConfigLoader.TryLoad(root, settings.Config)
-            : KyberWeaveConfigLoader.TryLoadUserConfig(root, settings.Config);
+        KyberWeaveConfigLoadResult loaded = configs.Load(root, settings.Config, scope == SquadDeploymentScope.Project);
         if (!loaded.Success)
         {
             AnsiConsole.MarkupLine(
@@ -234,7 +217,7 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
 
         string origin = ArbiterKeyResolver.GetOrigin(endpoint) ?? ArbiterKeyResolver.TypeSafeOrigin;
 
-        if (AnotherTargetIsDeployed(root, target, stateStore))
+        if (uninstaller.AnotherTargetIsDeployed(root, target))
         {
             AnsiConsole.MarkupLine(
                 $"[yellow]warn:[/] The key for {Markup.Escape(origin)} is stored per endpoint origin " +
@@ -244,7 +227,7 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
 
         try
         {
-            ArbiterCommandComposition.CredentialStore().Delete(origin);
+            credentials.Delete(origin);
         }
         catch (Exception ex) when (ex is InvalidOperationException
                                        or IOException
@@ -257,89 +240,5 @@ public sealed class ArbiterUninstallCommand : Command<ArbiterUninstallSettings>
 
         AnsiConsole.MarkupLine($"[grey]Removed the stored key for {Markup.Escape(origin)}.[/]");
         return true;
-    }
-
-    /// <summary>
-    /// Whether the receipt records another target in this root. The key is stored per endpoint
-    /// origin, not per target, so deleting it while another target remains deployed removes that
-    /// target's auth too.
-    /// </summary>
-    /// <remarks>
-    /// The warning is best effort: an unreadable receipt says nothing about the other targets,
-    /// and <c>--remove-key</c> is the operator's explicit request either way.
-    /// </remarks>
-    internal static bool AnotherTargetIsDeployed(
-        string root,
-        SquadTarget target,
-        SquadStateStore stateStore)
-    {
-        string token = SquadTargetCatalog.GetToken(target);
-        string home = ArbiterCommandComposition.HomeDirectory();
-
-        try
-        {
-            IReadOnlyList<string> globalTargets = UserHostConfig.ReadGlobalTargets(home);
-            if (globalTargets.Any(t => !string.Equals(t, token, StringComparison.OrdinalIgnoreCase)))
-            {
-                return true;
-            }
-
-            SquadReceipt? globalReceipt = stateStore.ReadReceipt(home, SquadDeploymentScope.Global);
-            if (globalReceipt is not null &&
-                (globalReceipt.Files.Any(file => !string.Equals(file.Target, token, StringComparison.Ordinal))
-                 || globalReceipt.Blocks.Any(block => !string.Equals(block.Target, token, StringComparison.Ordinal))))
-            {
-                return true;
-            }
-
-            SquadReceipt? currentProjectReceipt = stateStore.ReadReceipt(root, SquadDeploymentScope.Project);
-            if (currentProjectReceipt is not null &&
-                (currentProjectReceipt.Files.Any(file => !string.Equals(file.Target, token, StringComparison.Ordinal))
-                 || currentProjectReceipt.Blocks.Any(block => !string.Equals(block.Target, token, StringComparison.Ordinal))))
-            {
-                return true;
-            }
-
-            IReadOnlyList<SquadProjectRegistryEntry> projects = stateStore.ListProjects();
-            foreach (SquadProjectRegistryEntry project in projects)
-            {
-                SquadReceipt? projReceipt = stateStore.ReadReceipt(project.Path, SquadDeploymentScope.Project);
-                if (projReceipt is null)
-                {
-                    continue;
-                }
-
-                bool isCurrent = string.Equals(
-                    Path.GetFullPath(project.Path),
-                    Path.GetFullPath(root),
-                    StringComparison.OrdinalIgnoreCase);
-
-                if (isCurrent)
-                {
-                    if (projReceipt.Files.Any(f => !string.Equals(f.Target, token, StringComparison.Ordinal))
-                        || projReceipt.Blocks.Any(b => !string.Equals(b.Target, token, StringComparison.Ordinal)))
-                    {
-                        return true;
-                    }
-                }
-                else
-                {
-                    if (projReceipt.Files.Count > 0 || projReceipt.Blocks.Count > 0)
-                    {
-                        return true;
-                    }
-                }
-            }
-        }
-        catch (Exception ex) when (ex is ArgumentException
-                                       or IOException
-                                       or UnauthorizedAccessException
-                                       or InvalidDataException
-                                       or InvalidOperationException)
-        {
-            return false;
-        }
-
-        return false;
     }
 }

@@ -1,5 +1,6 @@
 using System.Runtime.Versioning;
 using KyberWeave.Cli.Commands.Arbiter;
+using KyberWeave.Tests.Arbiter;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -14,9 +15,11 @@ namespace KyberWeave.Tests;
 public sealed class ArbiterDoctorModelTargetsStatTests : IDisposable
 {
     private readonly TempDirectory _root = new();
+    private readonly ArbiterTestHost _host = ArbiterTestHost.Create();
 
     public void Dispose()
     {
+        _host.Dispose();
         // A directory left unsearchable by a test must be restored before it can be deleted.
         string locked = Path.Combine(_root.Path, "locked");
         if (Directory.Exists(locked))
@@ -33,7 +36,7 @@ public sealed class ArbiterDoctorModelTargetsStatTests : IDisposable
         string path = Path.Combine(_root.Path, "model-targets.claude.json");
         File.WriteAllText(path, "{}");
 
-        bool present = ArbiterDoctorCommand.TryGetWriteTimeUtc(path, out DateTime written);
+        bool present = _host.Command<ArbiterDoctorCommand>().TryGetWriteTimeUtc(path, out DateTime written);
 
         Assert.True(present);
         Assert.True(written > DateTime.UnixEpoch);
@@ -44,7 +47,7 @@ public sealed class ArbiterDoctorModelTargetsStatTests : IDisposable
     {
         string path = Path.Combine(_root.Path, "absent.json");
 
-        bool present = ArbiterDoctorCommand.TryGetWriteTimeUtc(path, out _);
+        bool present = _host.Command<ArbiterDoctorCommand>().TryGetWriteTimeUtc(path, out _);
 
         Assert.False(present);
     }
@@ -64,7 +67,7 @@ public sealed class ArbiterDoctorModelTargetsStatTests : IDisposable
         File.WriteAllText(path, "{}");
         File.SetUnixFileMode(locked, UnixFileMode.UserRead | UnixFileMode.UserWrite);
 
-        bool present = ArbiterDoctorCommand.TryGetWriteTimeUtc(path, out _);
+        bool present = _host.Command<ArbiterDoctorCommand>().TryGetWriteTimeUtc(path, out _);
 
         Assert.False(present);
     }

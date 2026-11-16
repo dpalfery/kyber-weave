@@ -1,3 +1,6 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Tests.Arbiter;
+using Microsoft.Extensions.DependencyInjection;
 using System.Text.RegularExpressions;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Core.Configuration;
@@ -13,17 +16,17 @@ public sealed class ArbiterStatusCommandTests : IDisposable
 {
     private readonly TempDirectory _home = new();
     private readonly TempDirectory _repo = new();
-    private readonly Func<string> _savedHome;
+    private readonly ArbiterTestHost _host;
 
     public ArbiterStatusCommandTests()
     {
-        _savedHome = ArbiterCommandComposition.HomeDirectory;
-        ArbiterCommandComposition.HomeDirectory = () => _home.Path;
+        _host = ArbiterTestHost.Create(services =>
+            services.AddSingleton<IProcessEnvironment>(new FakeProcessEnvironment(() => _home.Path)));
     }
 
     public void Dispose()
     {
-        ArbiterCommandComposition.HomeDirectory = _savedHome;
+        _host.Dispose();
         _home.Dispose();
         _repo.Dispose();
     }
@@ -43,7 +46,7 @@ public sealed class ArbiterStatusCommandTests : IDisposable
                 kind: none
             """);
 
-        CommandExecution execution = Capture(() => new ArbiterStatusCommand().Execute(
+        CommandExecution execution = Capture(() => _host.Command<ArbiterStatusCommand>().Execute(
             null!,
             new ArbiterSettings { Path = _repo.Path }));
 

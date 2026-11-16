@@ -1,4 +1,6 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Squad.Release;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -14,6 +16,16 @@ internal static class ArbiterApplicationServiceCollectionExtensions
     {
         services.TryAddSingleton<IArbiterEvaluatorFactory, Core.Arbiter.ArbiterEvaluatorFactory>();
         services.TryAddSingleton<ICommentTriageFactory, Core.Arbiter.CommentTriageFactory>();
+        services.TryAddSingleton<IArbiterKeyService, Core.Arbiter.ArbiterKeyService>();
+        services.TryAddSingleton<IArbiterDryRunService, Core.Arbiter.ArbiterDryRunService>();
+        services.TryAddSingleton<IOllamaProbe, Core.Arbiter.OllamaProbe>();
+        services.TryAddSingleton<IArbiterRepositoryLocator, Core.Arbiter.ArbiterRepositoryLocator>();
+        services.TryAddSingleton<IArbiterUninstaller, Cli.Commands.Arbiter.ArbiterUninstaller>();
+        services.TryAddSingleton<IArbiterHarnessGating, Cli.Commands.Arbiter.ArbiterHarnessGating>();
+        services.TryAddSingleton<IArbiterInstallLifecycle>(sp => new Core.Arbiter.ArbiterInstallLifecycle(() =>
+            Squad.SquadServiceCollectionExtensions.CreateLifecycle(
+                sp,
+                sp.GetService<ISquadInstanceReleaseSource>() ?? sp.GetRequiredService<ISquadReleaseSource>())));
         return services;
     }
 }

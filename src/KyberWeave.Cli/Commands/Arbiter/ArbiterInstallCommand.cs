@@ -1,8 +1,8 @@
 using System.ComponentModel;
-using System.Diagnostics.CodeAnalysis;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
-using KyberWeave.Cli.Update;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Arbiter.Rules;
@@ -33,40 +33,19 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 /// one-line argv/shell-history warning, while <c>--key-stdin</c> and
 /// <c>TYPESAFE_API_KEY</c> remain the safer paths.
 /// </remarks>
-public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
+internal sealed class ArbiterInstallCommand(
+    IProcessEnvironment environment,
+    IUserHostConfigStore userConfig,
+    IArbiterConfigResolver configs,
+    IArbiterUserSettings userSettings,
+    IArbiterKeyInput keyInput,
+    ICredentialStore credentials,
+    IWritableFileSystem files,
+    ISquadStateStore stateStore,
+    IArbiterInstallLifecycle lifecycle,
+    SquadConsoleOptions console,
+    ArbiterProcessProbe probe) : Command<ArbiterInstallSettings>
 {
-    private readonly ISquadUserPaths? _userPaths;
-    private readonly SquadStateStore? _stateStore;
-    private readonly ISquadReleaseSource? _releaseSource;
-    private readonly ISquadRenderer? _renderer;
-    private readonly bool? _isInteractive;
-    private readonly Func<string, bool>? _readAnswer;
-    private readonly Func<string, string?>? _environmentReader;
-
-    /// <summary>Creates a new install command using default dependencies.</summary>
-    public ArbiterInstallCommand()
-    {
-    }
-
-    /// <summary>Creates a new install command over injected collaborators.</summary>
-    internal ArbiterInstallCommand(
-        ISquadUserPaths? userPaths = null,
-        SquadStateStore? stateStore = null,
-        ISquadReleaseSource? releaseSource = null,
-        ISquadRenderer? renderer = null,
-        bool? isInteractive = null,
-        Func<string, bool>? readAnswer = null,
-        Func<string, string?>? environmentReader = null)
-    {
-        _userPaths = userPaths;
-        _stateStore = stateStore;
-        _releaseSource = releaseSource;
-        _renderer = renderer;
-        _isInteractive = isInteractive;
-        _readAnswer = readAnswer;
-        _environmentReader = environmentReader;
-    }
-
     /// <inheritdoc />
     public override int Execute(CommandContext context, ArbiterInstallSettings settings,
         CancellationToken cancellationToken)
@@ -120,7 +99,7 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
             ? Path.GetFullPath(string.IsNullOrWhiteSpace(settings.PathOption)
                 ? (string.IsNullOrWhiteSpace(settings.Path) ? "." : settings.Path)
                 : settings.PathOption)
-            : Path.GetFullPath(ArbiterCommandComposition.HomeDirectory());
+            : Path.GetFullPath(environment.HomeDirectory);
 
         ArbiterProviderKind existingKind;
         ArbiterProviderKind effectiveKind;
@@ -239,14 +218,14 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         }
         else
         {
-            configPath = UserHostConfig.GetPath(root);
-            if (settings.DryRun && File.Exists(configPath))
+            configPath = UserHostConfigPath.Of(root);
+            if (settings.DryRun && files.FileExists(configPath))
             {
-                existingText = File.ReadAllText(configPath);
+                existingText = files.ReadAllText(configPath);
             }
-            else if (!settings.DryRun && File.Exists(configPath))
+            else if (!settings.DryRun && files.FileExists(configPath))
             {
-                existingText = File.ReadAllText(configPath);
+                existingText = files.ReadAllText(configPath);
             }
             else if (settings.DryRun)
             {
@@ -254,10 +233,10 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
             }
             else
             {
-                existingText = UserHostConfig.EnsureUserConfig(root);
+                existingText = userConfig.EnsureUserConfig(root);
             }
 
-            List<string> globalTargets = UserHostConfig.ReadGlobalTargets(root).ToList();
+            List<string> globalTargets = userConfig.ReadGlobalTargets(root).ToList();
             if (!globalTargets.Any(token => string.Equals(token, targetToken, StringComparison.OrdinalIgnoreCase)))
             {
                 globalTargets.Add(targetToken);
@@ -279,13 +258,6 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
 
             configChanged = !string.Equals(desiredText, existingText, StringComparison.Ordinal);
         }
-
-        ISquadUserPaths resolvedUserPaths = _userPaths ?? new SquadHostDefaults.CliSquadUserPaths(
-            ArbiterCommandComposition.HomeDirectory(),
-            string.IsNullOrWhiteSpace(ArbiterCommandComposition.GetEnvironmentVariable("APPDATA"))
-                ? Path.Combine(ArbiterCommandComposition.HomeDirectory(), ".config")
-                : ArbiterCommandComposition.GetEnvironmentVariable("APPDATA")!);
-        SquadStateStore stateStore = _stateStore ?? SquadHostDefaults.ResolveStateStore(resolvedUserPaths, _environmentReader);
 
         SquadReceipt? existingReceipt;
         try
@@ -312,9 +284,9 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
                 root,
                 scope,
                 "install",
-                _isInteractive ?? SquadCommandComposition.IsInteractiveConsole(),
+                console.IsInteractive ?? SquadCommandComposition.IsInteractiveConsole(),
                 settings.Yes,
-                _readAnswer ?? SquadTargetRootConfirmation.ReadConsoleAnswer))
+                console.ReadAnswer ?? SquadTargetRootConfirmation.ReadConsoleAnswer))
         {
             AnsiConsole.MarkupLine("[yellow]Declined. No changes were made.[/]");
             return 2;
@@ -335,12 +307,12 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         KyberWeaveConfigLoadResult configLoad;
         if (settings.DryRun
             && string.IsNullOrWhiteSpace(settings.Config)
-            && !File.Exists(configPath))
+            && !files.FileExists(configPath))
         {
             try
             {
                 configLoad = KyberWeaveConfigLoadResult.Ok(
-                    KyberWeaveConfigLoader.LoadFromYaml(desiredText), configPath);
+                    configs.LoadFromYaml(desiredText), configPath);
             }
             catch (YamlException ex)
             {
@@ -349,9 +321,7 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         }
         else
         {
-            configLoad = isProjectScope
-                ? KyberWeaveConfigLoader.TryLoad(root, settings.Config)
-                : KyberWeaveConfigLoader.TryLoadUserConfig(root, settings.Config);
+            configLoad = configs.Load(root, settings.Config, isProjectScope);
         }
 
         if (!configLoad.Success || configLoad.Config is null)
@@ -366,44 +336,11 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
             SquadCommandComposition.ResolveArbiterWiring(configLoad.Config.Arbiter);
 
 
-        SquadLifecycleService lifecycle = CreateLifecycleService(stateStore);
         SquadLifecycleResult result;
         try
         {
-            if (existingReceipt is not null)
-            {
-                HashSet<string> existingTargetTokens = existingReceipt.Files
-                    .Select(f => f.Target)
-                    .Concat(existingReceipt.Blocks.Select(b => b.Target))
-                    .Distinct(StringComparer.Ordinal)
-                    .ToHashSet(StringComparer.Ordinal);
-                List<SquadTarget> combinedTargets = [target];
-                foreach (string token in existingTargetTokens)
-                {
-                    if (SquadTargetCatalog.TryResolve(token, out SquadTarget existingTarget) && !combinedTargets.Contains(existingTarget))
-                    {
-                        combinedTargets.Add(existingTarget);
-                    }
-                }
-
-                SquadUpdateRequest updateRequest = new(
-                    root,
-                    scope,
-                    combinedTargets,
-                    DryRun: settings.DryRun,
-                    Arbiter: wiring);
-                result = lifecycle.UpdateAsync(updateRequest, cancellationToken).GetAwaiter().GetResult();
-            }
-            else
-            {
-                SquadInstallRequest request = new(
-                    root,
-                    scope,
-                    [target],
-                    DryRun: settings.DryRun,
-                    Arbiter: wiring);
-                result = lifecycle.InstallAsync(request, cancellationToken).GetAwaiter().GetResult();
-            }
+            result = lifecycle.InstallAsync(root, scope, target, existingReceipt, settings.DryRun, wiring, cancellationToken)
+                .GetAwaiter().GetResult();
         }
         catch (SquadDeploymentConflictException ex)
         {
@@ -470,9 +407,9 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         return Execute(context, settings, CancellationToken.None);
     }
 
-    private static void WriteGlobalScopeTable(string home)
+    private void WriteGlobalScopeTable(string home)
     {
-        IReadOnlyList<string> targets = UserHostConfig.ReadGlobalTargets(home);
+        IReadOnlyList<string> targets = userConfig.ReadGlobalTargets(home);
         if (targets.Count == 0)
         {
             return;
@@ -516,17 +453,15 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
     /// and the kind in effect once the per-user override is applied over it.
     /// </summary>
     /// <exception cref="YamlException">Thrown when the per-user override is malformed.</exception>
-    private static (ArbiterProviderKind Configured, ArbiterProviderKind Effective) ReadExistingProviderKind(
+    private (ArbiterProviderKind Configured, ArbiterProviderKind Effective) ReadExistingProviderKind(
         string root, string? configOption, bool projectScope)
     {
-        KyberWeaveConfigLoadResult loaded = projectScope
-            ? KyberWeaveConfigLoader.TryLoad(root, configOption)
-            : KyberWeaveConfigLoader.TryLoadUserConfig(root, configOption);
+        KyberWeaveConfigLoadResult loaded = configs.Load(root, configOption, projectScope);
         ArbiterProviderConfig repository = loaded.Success && loaded.Config is not null
             ? loaded.Config.Arbiter.Provider
             : KyberWeaveConfig.ProductDefaults.Arbiter.Provider;
         ArbiterProviderKind effective =
-            ArbiterCommandComposition.UserSettings.ApplyTo(repository, ArbiterCommandComposition.HomeDirectory()).Kind;
+            userSettings.ApplyTo(repository, environment.HomeDirectory).Kind;
         return (repository.Kind, effective);
     }
 
@@ -565,11 +500,11 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         return string.IsNullOrEmpty(value) ? null : value;
     }
 
-    private static string? ReadStdinKey()
+    private string? ReadStdinKey()
     {
         try
         {
-            return ArbiterCommandComposition.KeyStdinReader();
+            return keyInput.ReadFromStandardInput();
         }
         catch (Exception ex) when (FileFailure.Is(ex))
         {
@@ -577,11 +512,11 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         }
     }
 
-    private static string? ReadPromptedKey()
+    private string? ReadPromptedKey()
     {
         try
         {
-            return ArbiterCommandComposition.KeyPrompt();
+            return keyInput.PromptHidden();
         }
         catch (Exception ex) when (ex is InvalidOperationException or IOException)
         {
@@ -589,16 +524,9 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         }
     }
 
-    private Func<string, string?> EnvironmentReader()
-    {
-        return _environmentReader ?? Environment.GetEnvironmentVariable;
-    }
-
     private string ResolveEndpoint(string root, string? configOption, bool projectScope)
     {
-        KyberWeaveConfigLoadResult loaded = projectScope
-            ? KyberWeaveConfigLoader.TryLoad(root, configOption)
-            : KyberWeaveConfigLoader.TryLoadUserConfig(root, configOption);
+        KyberWeaveConfigLoadResult loaded = configs.Load(root, configOption, projectScope);
         if (loaded.Success
             && loaded.Config is not null
             && !string.IsNullOrWhiteSpace(loaded.Config.Arbiter.Provider.Endpoint))
@@ -621,19 +549,9 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
 
     private string? ResolveStoredKey(string endpoint)
     {
-        ICredentialStore store;
         try
         {
-            store = ArbiterCommandComposition.CredentialStore();
-        }
-        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or Win32Exception)
-        {
-            return null;
-        }
-
-        try
-        {
-            return ArbiterKeyResolver.Resolve(endpoint, store, EnvironmentReader());
+            return ArbiterKeyResolver.Resolve(endpoint, credentials, environment.GetVariable);
         }
         catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or Win32Exception)
         {
@@ -645,7 +563,7 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
     {
         try
         {
-            return ArbiterCommandComposition.CredentialStore().Read(origin);
+            return credentials.Read(origin);
         }
         catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or Win32Exception)
         {
@@ -653,11 +571,11 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         }
     }
 
-    private static bool WriteStoredKey(string origin, string key)
+    private bool WriteStoredKey(string origin, string key)
     {
         try
         {
-            ArbiterCommandComposition.CredentialStore().Write(origin, key);
+            credentials.Write(origin, key);
         }
         catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or Win32Exception)
         {
@@ -680,7 +598,7 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         return existing.SetEquals([targetToken]);
     }
 
-    private static string ResolveConfigPath(string root, string? configOption)
+    private string ResolveConfigPath(string root, string? configOption)
     {
         if (!string.IsNullOrWhiteSpace(configOption))
         {
@@ -692,24 +610,24 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         return FindConfigPath(root) ?? Path.Combine(root, ".kyber-weave", "kyber-weave.yml");
     }
 
-    private static string? FindConfigPath(string root)
+    private string? FindConfigPath(string root)
     {
         string defaultPath = Path.Combine(root, ".kyber-weave", "kyber-weave.yml");
-        if (File.Exists(defaultPath))
+        if (files.FileExists(defaultPath))
             return defaultPath;
 
         string legacyPath = Path.Combine(root, "kyber-weave.yml");
-        return File.Exists(legacyPath) ? legacyPath : null;
+        return files.FileExists(legacyPath) ? legacyPath : null;
     }
 
-    private static string? ReadConfigText(string configPath)
+    private string? ReadConfigText(string configPath)
     {
-        if (!File.Exists(configPath))
+        if (!files.FileExists(configPath))
             return string.Empty;
 
         try
         {
-            return File.ReadAllText(configPath);
+            return files.ReadAllText(configPath);
         }
         catch (Exception ex) when (FileFailure.Is(ex))
         {
@@ -718,15 +636,15 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         }
     }
 
-    private static bool WriteConfigText(string configPath, string text)
+    private bool WriteConfigText(string configPath, string text)
     {
         try
         {
             string? directory = Path.GetDirectoryName(configPath);
             if (!string.IsNullOrEmpty(directory))
-                Directory.CreateDirectory(directory);
+                files.CreateDirectory(directory);
 
-            File.WriteAllText(configPath, text);
+            files.WriteAllText(configPath, text);
             return true;
         }
         catch (Exception ex) when (FileFailure.Is(ex))
@@ -736,11 +654,9 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         }
     }
 
-    private static bool Verify(string root, string? configOption, string endpoint, bool needsKey, bool projectScope)
+    private bool Verify(string root, string? configOption, string endpoint, bool needsKey, bool projectScope)
     {
-        KyberWeaveConfigLoadResult loaded = projectScope
-            ? KyberWeaveConfigLoader.TryLoad(root, configOption)
-            : KyberWeaveConfigLoader.TryLoadUserConfig(root, configOption);
+        KyberWeaveConfigLoadResult loaded = configs.Load(root, configOption, projectScope);
         if (!loaded.Success || loaded.Config is null || !loaded.Config.Arbiter.Enabled)
         {
             WriteError(
@@ -756,8 +672,8 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
             {
                 key = ArbiterKeyResolver.Resolve(
                     endpoint,
-                    ArbiterCommandComposition.CredentialStore(),
-                    ArbiterCommandComposition.GetEnvironmentVariable);
+                    credentials,
+                    environment.GetVariable);
             }
             catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or Win32Exception)
             {
@@ -778,11 +694,10 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
         return true;
     }
 
-    private static void ProbeBinary()
+    private void ProbeBinary()
     {
         try
         {
-            ArbiterProcessProbe probe = SquadCommandComposition.ResolveArbiterProbe();
             ToolProbeResult result = probe.Probe();
             if (!result.IsAvailable)
             {
@@ -798,55 +713,5 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
                 "[yellow]warn:[/] The 'kyber-weave-arbiter' binary probe failed: " +
                 $"{Markup.Escape(ex.Message)}");
         }
-    }
-
-    [SuppressMessage(
-        "Reliability",
-        "CA2000:Dispose objects before losing scope",
-        Justification = "The lifecycle owns the release source and renderer lifetimes for the run.")]
-    private SquadLifecycleService CreateLifecycleService(SquadStateStore stateStore)
-    {
-        ISquadReleaseSource releaseSource = _releaseSource ?? ResolveReleaseSource();
-        ISquadRenderer renderer = _renderer ?? SquadHostDefaults.ResolveRenderer();
-        ISquadGlobalRootResolver globalRoots = new SquadGlobalRoots(
-            _environmentReader ?? ArbiterCommandComposition.GetEnvironmentVariable,
-            ArbiterCommandComposition.HomeDirectory());
-        return SquadHostDefaults.CreateLifecycleService(
-            releaseSource,
-            renderer,
-            stateStore,
-            globalRoots: globalRoots,
-            environmentReader: _environmentReader);
-    }
-
-    private ISquadReleaseSource ResolveReleaseSource()
-    {
-        string? local = FindLocalSquadRoot();
-        if (local is not null)
-            return new LocalCheckoutSquadReleaseSource(local);
-
-        return new GitHubSquadReleaseSource(
-            ReleaseOrigin.Resolve(_environmentReader ?? Environment.GetEnvironmentVariable).ApiRoot);
-    }
-
-    private static string? FindLocalSquadRoot()
-    {
-        try
-        {
-            DirectoryInfo? directory = new(AppContext.BaseDirectory);
-            while (directory is not null)
-            {
-                string candidate = Path.Combine(directory.FullName, "products", "kyber-squad");
-                if (File.Exists(Path.Combine(candidate, "squad.yml")))
-                    return candidate;
-
-                directory = directory.Parent;
-            }
-        }
-        catch (Exception ex) when (FileFailure.Is(ex))
-        {
-        }
-
-        return null;
     }
 }

@@ -69,7 +69,7 @@ public sealed class ArbiterCommentShadowCliTests : IDisposable
     }
 
     private ArbiterCommentCommand Command(IArbiterProvider provider) =>
-        new(ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<ICommentTriageFactory>()) { ProviderFactory = (_, _) => provider };
+        ArbiterTestServices.CommentCommand((_, _) => provider);
 
     private static CommandExecution Capture(Func<int> execute)
     {

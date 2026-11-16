@@ -36,7 +36,7 @@ public sealed class ArbiterCommentBodyLimitCliTests : IDisposable
     public void Comment_BodyOverTheTextLimit_IsRefused(bool summary)
     {
         WriteDocument();
-        ArbiterCommentCommand command = new(ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<ICommentTriageFactory>());
+        ArbiterCommentCommand command = ArbiterTestServices.Command<ArbiterCommentCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterCommentSettings

@@ -1,4 +1,5 @@
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
@@ -13,7 +14,12 @@ using KyberWeave.Core.FileSystem;
 namespace KyberWeave.Cli.Commands.Arbiter;
 
 /// <summary>Reports what the decision log and ledger say about past dispatches.</summary>
-public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
+public sealed class ArbiterAuditCommand(
+    IArbiterConfigResolver configs,
+    IArbiterRepositoryLocator locator,
+    IArbiterStateFactory state,
+    IProcessEnvironment environment,
+    IArbiterUserSettings userSettings) : Command<ArbiterSettings>
 {
     /// <summary>A ledger event with no decision: the hook was killed, timed out or crashed after recording the event.</summary>
     public const string MissingDecision = "KW-ARB-AUDIT-001";
@@ -53,7 +59,7 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
     public override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new();
-        if (!ArbiterCommandComposition.TryResolveConfig(settings, report, out KyberWeaveConfig config, out _))
+        if (!configs.TryResolve(settings.Path, settings.Config, report, out KyberWeaveConfig config, out _))
         {
             CommandHelpers.Finish(report, settings, "arbiter audit", "Event");
             return 1;
@@ -81,7 +87,7 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
             since = parsed;
         }
 
-        string repositoryRoot = ArbiterCommandComposition.ResolveRepositoryRoot(settings.Path);
+        string repositoryRoot = locator.ResolveRepositoryRoot(settings.Path);
         PlanFilter? planFilter = null;
         if (!string.IsNullOrWhiteSpace(settings.Plan))
         {
@@ -96,9 +102,9 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
             planFilter = new PlanFilter(repositoryRoot, config, relative);
         }
 
-        string arbiterDirectory = ArbiterCommandComposition.ResolveArbiterDirectory(settings.Path);
-        IArbiterLedger ledger = ArbiterCommandComposition.State.OpenLedger(arbiterDirectory);
-        IArbiterDecisionLog decisions = ArbiterCommandComposition.State.OpenDecisionLog(arbiterDirectory);
+        string arbiterDirectory = locator.ResolveArbiterDirectory(settings.Path);
+        IArbiterLedger ledger = state.OpenLedger(arbiterDirectory);
+        IArbiterDecisionLog decisions = state.OpenDecisionLog(arbiterDirectory);
 
         IReadOnlyList<ArbiterLedgerEvent> events;
         IReadOnlyList<ArbiterDecisionRecord> records;
@@ -205,7 +211,7 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
     /// <see cref="NoModelEvaluations"/> when a model is configured, implementation agents were dispatched, and the model
     /// was asked nothing. The count is always reported as a metric; with provider <c>none</c> the finding stays silent.
     /// </summary>
-    private static void CheckModelEvaluations(
+    private void CheckModelEvaluations(
         KyberWeaveConfig config,
         IReadOnlyList<ArbiterLedgerEvent> events,
         IReadOnlyList<ArbiterDecisionRecord> records,
@@ -248,12 +254,12 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
                   "investigate runs only the machine-fact rules. See ADR 0082."));
     }
 
-    internal static bool ModelConfigured(KyberWeaveConfig config, DiagnosticReport report, ref int reported)
+    internal bool ModelConfigured(KyberWeaveConfig config, DiagnosticReport report, ref int reported)
     {
-        string home = ArbiterCommandComposition.HomeDirectory();
+        string home = environment.HomeDirectory;
         try
         {
-            return ArbiterCommandComposition.UserSettings.ApplyTo(config.Arbiter.Provider, home).Kind
+            return userSettings.ApplyTo(config.Arbiter.Provider, home).Kind
                    != ArbiterProviderKind.None;
         }
         catch (Exception exception) when (FileFailure.Is(exception) || exception is YamlDotNet.Core.YamlException)

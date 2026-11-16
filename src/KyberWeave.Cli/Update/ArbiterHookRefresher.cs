@@ -225,43 +225,10 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
             if (!SquadTargetCatalog.TryResolve(token, out SquadTarget target))
                 continue;
 
-            string? hookPath = ResolveGlobalHookPath(target, home, environmentReader: _environmentReader);
+            string? hookPath = ArbiterGlobalHookPaths.Resolve(target, home, environmentReader: _environmentReader);
             if (!string.IsNullOrWhiteSpace(hookPath))
                 yield return (SquadTargetCatalog.GetToken(target), hookPath);
         }
-    }
-
-    internal static string? ResolveGlobalHookPath(
-        SquadTarget target,
-        string home,
-        ISquadGlobalRootResolver? globalRoots = null,
-        Func<string, string?>? environmentReader = null)
-    {
-        ISquadGlobalRootResolver roots = globalRoots ?? new SquadGlobalRoots(environmentReader ?? (_ => null), home);
-        string root;
-        try
-        {
-            root = roots.ResolveGlobalRoot(target);
-        }
-        catch (ArgumentException)
-        {
-            return null;
-        }
-
-        return target switch
-        {
-            SquadTarget.Claude => Path.Combine(root, "settings.json"),
-            SquadTarget.Cursor => Path.Combine(root, "hooks.json"),
-            SquadTarget.Codex => Path.Combine(root, "hooks.json"),
-            SquadTarget.Factory => Path.Combine(root, "hooks.json"),
-            SquadTarget.Devin => Path.Combine(root, "hooks.v1.json"),
-            SquadTarget.Antigravity => Path.Combine(root, "hooks.json"),
-            SquadTarget.Kilo => Path.Combine(root, "plugin", "kyber-arbiter.ts"),
-            SquadTarget.OpenCode => Path.Combine(root, "plugins", "kyber-arbiter.ts"),
-            SquadTarget.Pi => Path.Combine(root, "extensions", "kyber-arbiter.ts"),
-            SquadTarget.Copilot => Path.Combine(root, "hooks", "kyber-arbiter.json"),
-            _ => null,
-        };
     }
 
     private static bool RefreshGlobalHook(
