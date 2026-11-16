@@ -19,6 +19,9 @@ public static class ArbiterKeyResolver
     /// <summary>Origin the environment key always serves.</summary>
     public const string TypeSafeOrigin = "https://api.typesafe.ai";
 
+    /// <summary>The finding <c>arbiter setup</c>, <c>status</c>, <c>doctor</c> and <c>install</c> raise when no key resolves.</summary>
+    public const string MissingKeyCode = "KW-ARB-KEY-001";
+
     /// <summary>
     /// Resolves the key for <paramref name="endpoint"/>, reading the environment through
     /// <paramref name="environment"/> for testability.

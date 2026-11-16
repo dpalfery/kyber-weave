@@ -18,6 +18,7 @@ internal static class ArbiterCliServices
         services.TryAddSingleton<IArbiterKeyInput, ConsoleArbiterKeyInput>();
         services.TryAddSingleton<IProcessExecutor>(_ => ProcessExecutor.Instance);
         services.TryAddSingleton(sp => new ArbiterProcessProbe(sp.GetRequiredService<IProcessExecutor>()));
+        services.TryAddSingleton<IArbiterBinaryProbe>(sp => sp.GetRequiredService<ArbiterProcessProbe>());
         return services;
     }
 }

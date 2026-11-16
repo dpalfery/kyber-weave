@@ -26,7 +26,7 @@ public sealed class ArbiterStatusCommand(
     IArbiterHarnessGating gating) : Command<ArbiterSettings>
 {
     /// <summary>A remote provider is configured, and no key resolves for its origin.</summary>
-    public const string KeyMissing = "KW-ARB-KEY-001";
+    public const string KeyMissing = ArbiterKeyResolver.MissingKeyCode;
 
     /// <summary>
     /// Prints provider, model, endpoint origin and whether a key was found. Writes

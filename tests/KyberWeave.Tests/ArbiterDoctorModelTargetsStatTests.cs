@@ -1,5 +1,5 @@
 using System.Runtime.Versioning;
-using KyberWeave.Cli.Commands.Arbiter;
+using KyberWeave.Application.Arbiter;
 using KyberWeave.Tests.Arbiter;
 using Xunit;
 
@@ -36,7 +36,7 @@ public sealed class ArbiterDoctorModelTargetsStatTests : IDisposable
         string path = Path.Combine(_root.Path, "model-targets.claude.json");
         File.WriteAllText(path, "{}");
 
-        bool present = _host.Command<ArbiterDoctorCommand>().TryGetWriteTimeUtc(path, out DateTime written);
+        bool present = _host.Command<ArbiterDoctorService>().TryGetWriteTimeUtc(path, out DateTime written);
 
         Assert.True(present);
         Assert.True(written > DateTime.UnixEpoch);
@@ -47,7 +47,7 @@ public sealed class ArbiterDoctorModelTargetsStatTests : IDisposable
     {
         string path = Path.Combine(_root.Path, "absent.json");
 
-        bool present = _host.Command<ArbiterDoctorCommand>().TryGetWriteTimeUtc(path, out _);
+        bool present = _host.Command<ArbiterDoctorService>().TryGetWriteTimeUtc(path, out _);
 
         Assert.False(present);
     }
@@ -67,7 +67,7 @@ public sealed class ArbiterDoctorModelTargetsStatTests : IDisposable
         File.WriteAllText(path, "{}");
         File.SetUnixFileMode(locked, UnixFileMode.UserRead | UnixFileMode.UserWrite);
 
-        bool present = _host.Command<ArbiterDoctorCommand>().TryGetWriteTimeUtc(path, out _);
+        bool present = _host.Command<ArbiterDoctorService>().TryGetWriteTimeUtc(path, out _);
 
         Assert.False(present);
     }
