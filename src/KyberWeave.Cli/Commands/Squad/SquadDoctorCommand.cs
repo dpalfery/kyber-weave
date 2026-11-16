@@ -784,7 +784,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 }
 
                 List<string> warnings = [];
-                string effectiveGuidance = SquadResponseGuidanceSource.ReadEffective(
+                string effectiveGuidance = SquadResponseGuidanceReader.ReadEffective(
                     Path.Combine(stateStore.UserPaths.HomeDirectory, ".kyber-weave"),
                     warnings);
                 if (!SquadResponsePreferencesInjector.HasAnyBlock(render))
@@ -792,7 +792,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 SquadCommandComposition.WriteTransactionWarnings(warnings);
                 render = SquadResponsePreferencesInjector.Inject(render, effectiveGuidance);
 
-                collisions.AddRange(SquadDeploymentPlan.CollectUnmanagedCollisions(
+                collisions.AddRange(SquadDeploymentPlanner.CollectUnmanagedCollisions(
                     workingDirectory,
                     SquadDeploymentScope.Global,
                     render.Files,

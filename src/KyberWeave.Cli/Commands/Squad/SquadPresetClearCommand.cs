@@ -266,7 +266,7 @@ public sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings>
             ModelPresets = applied.Count > 0 ? applied : null
         };
 
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
             anchorRoot,
             scope,
             nextLock,

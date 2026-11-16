@@ -1553,7 +1553,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
                 file.Target))
             .ToList();
 
-        return SquadDeploymentPlan.CreateUpdate(
+        return SquadDeploymentPlanner.CreateUpdate(
             h.Home,
             SquadDeploymentScope.Global,
             LockFor(UpdatedVersion),

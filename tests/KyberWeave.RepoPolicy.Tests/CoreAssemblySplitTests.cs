@@ -15,7 +15,7 @@ public sealed class CoreAssemblySplitTests
     {
         { "KyberWeave.Core", ["KyberWeave.Contracts", "KyberWeave.Data", "KyberWeave.Domain", "KyberWeave.Kernel"] },
         { "KyberWeave.Core.Docs", ["KyberWeave.Application", "KyberWeave.Core", "KyberWeave.Domain"] },
-        { "KyberWeave.Core.Squad", ["KyberWeave.Core", "KyberWeave.Domain"] }
+        { "KyberWeave.Core.Squad", ["KyberWeave.Application", "KyberWeave.Core", "KyberWeave.Data", "KyberWeave.Domain"] }
     };
 
     [Theory]

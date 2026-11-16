@@ -103,7 +103,7 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
                     SquadHookBlockFormat blockFormat = OwnedBlocks.TryGetValue(target, out SquadHookBlockFormat fmt)
                         ? fmt
                         : SquadHookBlockFormat.Claude;
-                    SquadHookJsonBlock.RemoveFile(blockFormat, path);
+                    SquadHookJsonFile.RemoveFile(blockFormat, path);
                 }
             }
 
@@ -145,7 +145,7 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
         {
             string settingsPath = ResolveGlobalBlockPath(SquadTarget.Claude, "settings.json");
             if (File.Exists(settingsPath))
-                SquadHookJsonBlock.RemoveFile(SquadHookBlockFormat.Claude, settingsPath);
+                SquadHookJsonFile.RemoveFile(SquadHookBlockFormat.Claude, settingsPath);
             return;
         }
 
@@ -153,7 +153,7 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
         {
             string blockPath = ResolveGlobalBlockPath(target, SquadHookJsonBlock.RelativePath(format));
             if (File.Exists(blockPath))
-                SquadHookJsonBlock.RemoveFile(format, blockPath);
+                SquadHookJsonFile.RemoveFile(format, blockPath);
             return;
         }
 
@@ -465,6 +465,6 @@ internal sealed class ArbiterUninstaller : IArbiterUninstaller
 
         string path = Path.Combine(_root, relative);
         if (File.Exists(path))
-            SquadHookJsonBlock.RemoveFile(format, path);
+            SquadHookJsonFile.RemoveFile(format, path);
     }
 }

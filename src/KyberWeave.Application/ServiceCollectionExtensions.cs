@@ -1,5 +1,6 @@
 using KyberWeave.Application.Hooks;
 using KyberWeave.Application.RunStart;
+using KyberWeave.Core.Squad.Briefs;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Data;
 using Microsoft.Extensions.DependencyInjection;
@@ -26,6 +27,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<IEditHookService, EditHookService>();
         services.TryAddSingleton<IRunStartRunnerFactory, RunStartRunnerFactory>();
+        services.TryAddSingleton<ISquadBriefService, SquadBriefService>();
         return services;
     }
 }

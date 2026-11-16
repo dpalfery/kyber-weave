@@ -580,7 +580,7 @@ public sealed class SquadStateMigrationTests
         string leaseKey = scenario.Store.ResolveLeaseIdentity(scenario.Home, SquadDeploymentScope.Global);
 
         SquadMigrationReport whileHeld;
-        using (SquadTransaction.TransactionLease held = SquadTransaction.AcquireLease(leaseKey))
+        using (TransactionLease held = SquadTransaction.AcquireLease(leaseKey))
         {
             whileHeld = scenario.Migration.MigrateGlobal(invokingCwd: null);
         }
@@ -612,7 +612,7 @@ public sealed class SquadStateMigrationTests
         string leaseKey = scenario.Store.ResolveLeaseIdentity(repo, SquadDeploymentScope.Project);
 
         SquadMigrationReport whileHeld;
-        using (SquadTransaction.TransactionLease held = SquadTransaction.AcquireLease(leaseKey))
+        using (TransactionLease held = SquadTransaction.AcquireLease(leaseKey))
         {
             whileHeld = scenario.Migration.ImportProject(repo);
         }

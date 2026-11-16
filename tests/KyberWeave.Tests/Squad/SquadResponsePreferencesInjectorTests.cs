@@ -21,7 +21,7 @@ public sealed class SquadResponsePreferencesInjectorTests
         File.WriteAllText(path, expected, Encoding.UTF8);
 
         List<string> warnings = [];
-        string actual = SquadResponseGuidanceSource.ReadEffective(home, warnings);
+        string actual = SquadResponseGuidanceReader.ReadEffective(home, warnings);
 
         Assert.Equal(expected, actual);
         Assert.Empty(warnings);
@@ -40,7 +40,7 @@ public sealed class SquadResponsePreferencesInjectorTests
         File.WriteAllText(path, homeText, Encoding.UTF8);
 
         List<string> warnings = [];
-        string actual = SquadResponseGuidanceSource.ReadEffective(home, warnings);
+        string actual = SquadResponseGuidanceReader.ReadEffective(home, warnings);
 
         Assert.Equal(SquadResponseGuidanceSource.DefaultText, actual);
         string warning = Assert.Single(warnings);
@@ -53,7 +53,7 @@ public sealed class SquadResponsePreferencesInjectorTests
         string home = NewHomeDirectory();
 
         List<string> warnings = [];
-        string actual = SquadResponseGuidanceSource.ReadEffective(home, warnings);
+        string actual = SquadResponseGuidanceReader.ReadEffective(home, warnings);
 
         Assert.Equal(SquadResponseGuidanceSource.DefaultText, actual);
         Assert.Empty(warnings);
@@ -68,7 +68,7 @@ public sealed class SquadResponsePreferencesInjectorTests
         Directory.CreateDirectory(Path.Combine(home, SquadResponseGuidanceDeployer.FileName));
 
         List<string> warnings = [];
-        string actual = SquadResponseGuidanceSource.ReadEffective(home, warnings);
+        string actual = SquadResponseGuidanceReader.ReadEffective(home, warnings);
 
         Assert.Equal(SquadResponseGuidanceSource.DefaultText, actual);
         string warning = Assert.Single(warnings);
@@ -88,7 +88,7 @@ public sealed class SquadResponsePreferencesInjectorTests
         using (SquadHomeHarness.DenyReadOrSkip(path))
         {
             // The file exists but the process is refused its bytes: a genuine degradable read failure.
-            actual = SquadResponseGuidanceSource.ReadEffective(home, warnings);
+            actual = SquadResponseGuidanceReader.ReadEffective(home, warnings);
         }
 
         Assert.Equal(SquadResponseGuidanceSource.DefaultText, actual);
@@ -110,7 +110,7 @@ public sealed class SquadResponsePreferencesInjectorTests
         string actual;
         using (SquadHomeHarness.DenyReadOrSkip(path))
         {
-            actual = SquadResponseGuidanceSource.ReadEffective(home, warnings, () => seamDefault);
+            actual = SquadResponseGuidanceReader.ReadEffective(home, warnings, () => seamDefault);
         }
 
         Assert.Equal(seamDefault, actual);
@@ -127,7 +127,7 @@ public sealed class SquadResponsePreferencesInjectorTests
 
         List<string> warnings = [];
         Assert.Throws<SquadShippedGuidanceUnavailableException>(() =>
-            SquadResponseGuidanceSource.ReadEffective(
+            SquadResponseGuidanceReader.ReadEffective(
                 home,
                 warnings,
                 () => throw new SquadShippedGuidanceUnavailableException("The embedded default is missing.")));

@@ -55,7 +55,7 @@ public sealed class SquadProjectRegistryTests
         new SquadTransaction(store).Execute(Install(root, SquadDeploymentScope.Project));
         DateTimeOffset updatedAt = InstalledAt.AddDays(1);
 
-        new SquadTransaction(store).Execute(SquadDeploymentPlan.CreateUpdate(
+        new SquadTransaction(store).Execute(SquadDeploymentPlanner.CreateUpdate(
             root,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),
@@ -83,7 +83,7 @@ public sealed class SquadProjectRegistryTests
         SquadStateStore store = StoreFor(home);
         new SquadTransaction(store).Execute(Install(root, SquadDeploymentScope.Project));
 
-        new SquadTransaction(store).Execute(SquadDeploymentPlan.CreateUninstall(
+        new SquadTransaction(store).Execute(SquadDeploymentPlanner.CreateUninstall(
             root,
             SquadDeploymentScope.Project,
             Assert.IsType<SquadReceipt>(store.ReadReceipt(root, SquadDeploymentScope.Project))));
@@ -387,7 +387,7 @@ public sealed class SquadProjectRegistryTests
     /// back as the legacy single-root layout (#91).
     /// </summary>
     private static SquadDeploymentPlan Install(string root, SquadDeploymentScope scope) =>
-        SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentPlanner.CreateInstall(
             root,
             scope,
             Lock(),

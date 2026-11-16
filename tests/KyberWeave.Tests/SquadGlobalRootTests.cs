@@ -928,7 +928,7 @@ public sealed class SquadGlobalRootTests : IDisposable
             ]);
 
         SquadDeploymentConflictException exception = Assert.Throws<SquadDeploymentConflictException>(() =>
-            SquadDeploymentPlan.CreateInstall(
+            SquadDeploymentPlanner.CreateInstall(
                 projectRoot,
                 SquadDeploymentScope.Global,
                 GlobalLock(["pi"]),
@@ -968,7 +968,7 @@ public sealed class SquadGlobalRootTests : IDisposable
             [owned]);
         SquadReceipt sibling = receipt;
 
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUninstall(
+        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUninstall(
             projectRoot,
             SquadDeploymentScope.Global,
             receipt,

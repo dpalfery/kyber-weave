@@ -1113,7 +1113,7 @@ public sealed class SquadCliCommandTests : IDisposable
             "a".PadRight(64, '0'),
             "b".PadRight(64, '0'),
             new SquadApmIdentity("0.28.0", "c".PadRight(40, '0'), "d".PadRight(64, '0')));
-        new SquadTransaction(stateStore).Execute(SquadDeploymentPlan.CreateInstall(
+        new SquadTransaction(stateStore).Execute(SquadDeploymentPlanner.CreateInstall(
             home,
             SquadDeploymentScope.Global,
             squadLock,
