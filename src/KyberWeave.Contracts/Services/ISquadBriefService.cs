@@ -12,4 +12,11 @@ public interface ISquadBriefService
     /// <param name="referencesDirectory">The directory holding that agent's installed reference files.</param>
     /// <returns>The brief, with what was left out.</returns>
     BriefResult Assemble(BriefMap map, string agent, BriefFacts facts, string referencesDirectory);
+
+    /// <summary>Finds a reference file under the name the map gives it, or under its installed <c>.markdown</c> name.</summary>
+    /// <param name="referencesDirectory">The directory holding the installed reference files.</param>
+    /// <param name="file">The file name the map gives.</param>
+    /// <returns>The path of the file that exists.</returns>
+    /// <exception cref="BriefMapException">Neither name exists; the message names both paths.</exception>
+    string ResolveFile(string referencesDirectory, string file);
 }

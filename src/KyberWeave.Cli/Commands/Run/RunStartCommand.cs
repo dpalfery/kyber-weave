@@ -62,6 +62,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
     private readonly IRunStartRunnerFactory _runners;
+    private readonly ISquadBriefService _briefs;
     private readonly IRunStateStore _state;
     private readonly IWritableFileSystem _files;
     private readonly IProcessEnvironment _environment;
@@ -77,6 +78,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
     /// <param name="executor">The executor the CodeGraph index run goes through; the bounded production executor when none is registered.</param>
     public RunStartCommand(
         IRunStartRunnerFactory runners,
+        ISquadBriefService briefs,
         IRunStateStore state,
         IWritableFileSystem files,
         IProcessEnvironment environment,
@@ -84,12 +86,14 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         IProcessExecutor? executor = null)
     {
         ArgumentNullException.ThrowIfNull(runners);
+        ArgumentNullException.ThrowIfNull(briefs);
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(clock);
 
         _runners = runners;
+        _briefs = briefs;
         _state = state;
         _files = files;
         _environment = environment;
@@ -497,7 +501,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
             roots,
             config);
 
-        if (SquadBriefBuilder.TryBuild(request, out BriefResult? result, out string error))
+        if (SquadBriefBuilder.TryBuild(request, _briefs, _files, out BriefResult? result, out string error))
         {
             return result;
         }

@@ -2,6 +2,8 @@ using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Squad.Briefs;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.FileSystem;
 
@@ -37,7 +39,7 @@ internal static class SquadBriefBuilder
     /// Builds the brief. A failure is a message, not an exception: a refused fact, an unknown agent, a plan
     /// that cannot be read, or reference files that cannot be found each say what to change.
     /// </summary>
-    public static bool TryBuild(SquadBriefRequest request, out BriefResult? result, out string error)
+    public static bool TryBuild(SquadBriefRequest request, ISquadBriefService briefs, IFileSystem files, out BriefResult? result, out string error)
     {
         result = null;
         Dictionary<string, string> sources = new(StringComparer.Ordinal);
@@ -62,7 +64,7 @@ internal static class SquadBriefBuilder
 
         if (!string.IsNullOrWhiteSpace(request.Plan))
         {
-            if (!TryReadPlan(request, out PlanDocument? plan, out error))
+            if (!TryReadPlan(request, files, out PlanDocument? plan, out error))
             {
                 return false;
             }
@@ -81,7 +83,7 @@ internal static class SquadBriefBuilder
             }
         }
 
-        string? agentsMarkdown = ReadRootAgents(request.RepositoryRoot);
+        string? agentsMarkdown = ReadRootAgents(request.RepositoryRoot, files);
         (string autonomy, string autonomySource) = BriefFacts.ResolveAutonomy(
             request.Autonomy, agentsMarkdown, request.Config?.ConfigReg.Autonomy);
         sources["autonomy"] = request.Autonomy is null ? autonomySource : "given";
@@ -105,14 +107,14 @@ internal static class SquadBriefBuilder
             return false;
         }
 
-        if (!TryFindReferences(request, map, out string? directory, out error))
+        if (!TryFindReferences(request, map, briefs, files, out string? directory, out error))
         {
             return false;
         }
 
         try
         {
-            result = BriefAssembler.Assemble(map, request.Agent, facts, directory!);
+            result = briefs.Assemble(map, request.Agent, facts, directory!);
             return true;
         }
         catch (BriefMapException exception)
@@ -138,7 +140,7 @@ internal static class SquadBriefBuilder
         return false;
     }
 
-    private static bool TryReadPlan(SquadBriefRequest request, out PlanDocument? plan, out string error)
+    private static bool TryReadPlan(SquadBriefRequest request, IFileSystem files, out PlanDocument? plan, out string error)
     {
         plan = null;
         DiagnosticReport report = new();
@@ -150,23 +152,23 @@ internal static class SquadBriefBuilder
         }
 
         string full = System.IO.Path.GetFullPath(relative, request.RepositoryRoot);
-        if (!File.Exists(full))
+        if (!files.FileExists(full))
         {
             error = $"No plan file '{request.Plan}' was found ({full}). Pass its path, or its file name or slug under the plans folder.";
             return false;
         }
 
-        plan = PlanDocumentParser.Parse(File.ReadAllText(full));
+        plan = PlanDocumentParser.Parse(files.ReadAllText(full));
         error = string.Empty;
         return true;
     }
 
-    private static string? ReadRootAgents(string repositoryRoot)
+    private static string? ReadRootAgents(string repositoryRoot, IFileSystem files)
     {
         string file = System.IO.Path.Combine(repositoryRoot, "AGENTS.md");
         try
         {
-            return File.Exists(file) ? File.ReadAllText(file) : null;
+            return files.FileExists(file) ? files.ReadAllText(file) : null;
         }
         catch (Exception exception) when (FileFailure.Is(exception))
         {
@@ -174,7 +176,7 @@ internal static class SquadBriefBuilder
         }
     }
 
-    private static bool TryFindReferences(SquadBriefRequest request, BriefMap map, out string? directory, out string error)
+    private static bool TryFindReferences(SquadBriefRequest request, BriefMap map, ISquadBriefService briefs, IFileSystem files, out string? directory, out string error)
     {
         directory = null;
         error = string.Empty;
@@ -183,7 +185,7 @@ internal static class SquadBriefBuilder
         if (!string.IsNullOrWhiteSpace(request.From))
         {
             string given = System.IO.Path.GetFullPath(request.From, request.RepositoryRoot);
-            if (!Directory.Exists(given))
+            if (!files.DirectoryExists(given))
             {
                 error = $"The reference directory '{given}' does not exist.";
                 return false;
@@ -207,7 +209,7 @@ internal static class SquadBriefBuilder
             }
         }
 
-        directory = candidates.Distinct(StringComparer.Ordinal).FirstOrDefault(candidate => HoldsAny(candidate, mapped));
+        directory = candidates.Distinct(StringComparer.Ordinal).FirstOrDefault(candidate => HoldsAny(candidate, mapped, briefs, files));
         if (directory is not null)
         {
             return true;
@@ -235,18 +237,18 @@ internal static class SquadBriefBuilder
         }
     }
 
-    private static bool HoldsAny(string directory, string[] files)
+    private static bool HoldsAny(string directory, string[] mappedFiles, ISquadBriefService briefs, IFileSystem files)
     {
-        if (!Directory.Exists(directory))
+        if (!files.DirectoryExists(directory))
         {
             return false;
         }
 
-        return files.Any(file =>
+        return mappedFiles.Any(file =>
         {
             try
             {
-                BriefAssembler.ResolveFile(directory, file);
+                briefs.ResolveFile(directory, file);
                 return true;
             }
             catch (BriefMapException)
