@@ -36,6 +36,7 @@ internal static class ArbiterDataServiceCollectionExtensions
         services.TryAddSingleton<IFileStatReader, FileStatReader>();
         services.TryAddSingleton<IArbiterUserOverrideWriter>(sp => new FileArbiterUserOverrideWriter(sp.GetRequiredService<IWritableFileSystem>()));
         services.TryAddSingleton<IDispatchClaimStore, FileDispatchClaimStore>();
+        services.TryAddSingleton<IBackgroundDispatchStore, FileBackgroundDispatchStore>();
         services.TryAddSingleton<IHookSnapshotStore, FileHookSnapshotStore>();
         services.TryAddSingleton<IHookFileWindowReader, FileHookFileWindowReader>();
         services.TryAddSingleton<IWorkerBudgetStore, FileWorkerBudgetStore>();

@@ -357,6 +357,160 @@ public sealed class CopilotHookAdapterTests
         Assert.Equal(note, doc.RootElement.GetProperty("additionalContext").GetString());
     }
 
+    /// <summary>An engine that follows background dispatches: it answers a turn's end with a note and keeps one pending.</summary>
+    private sealed class BackgroundEngine : IHookDecisionEngine, IBackgroundDispatchEngine
+    {
+        public List<BackgroundDispatch> Tracked { get; } = [];
+
+        public int PostCalls { get; private set; }
+
+        public HookOutcome ReturnResult { get; set; } = new(HookOutcomeKind.Allow);
+
+        public List<string> Pending { get; } = [];
+
+        public HookOutcome DecidePreDispatch(string caller, string? target, string prompt, KyberWeaveConfig config) =>
+            new(HookOutcomeKind.Allow);
+
+        public HookOutcome DecidePostDispatch(string caller, string? target, string toolOutput, KyberWeaveConfig config)
+        {
+            PostCalls++;
+            return new HookOutcome(HookOutcomeKind.Allow);
+        }
+
+        public void TrackBackgroundDispatch(BackgroundDispatch dispatch, HookContext context) => Tracked.Add(dispatch);
+
+        public HookOutcome DecideBackgroundReturn(
+            string harness, string sessionId, string agentId, string response, KyberWeaveConfig config, HookContext context) =>
+            ReturnResult;
+
+        public IReadOnlyList<string> TakePendingNotes(string sessionId, string caller, HookContext context)
+        {
+            List<string> notes = [.. Pending];
+            Pending.Clear();
+            return notes;
+        }
+    }
+
+    private static string RunCli(IHookDecisionEngine engine, string stdin)
+    {
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine), _ => EnabledConfig(), () => "decision-test-1");
+        using StringWriter stdout = new();
+        using StringWriter log = new();
+        Assert.Equal(0, command.Run(CopilotHookAdapter.CliToken, null, stdin, stdout, log));
+        Assert.DoesNotContain(HookCommand.FailClosedCode, log.ToString(), StringComparison.Ordinal);
+        return stdout.ToString();
+    }
+
+    private const string BackgroundStartPayload = """
+        {
+          "sessionId": "c232d9cc-6701-4a48-a2e9-03bfd9f8ccf2",
+          "timestamp": 1794839730926,
+          "cwd": "/repo",
+          "toolCallId": "call_PexVgPs78EWE3aGpkPEV3xAI",
+          "toolName": "task",
+          "toolArgs": { "description": "Run first probe", "prompt": "Reply with exactly: FIRST TURN DONE", "agent_type": "research-agent", "name": "hook-probe", "mode": "background" },
+          "toolResult": {
+            "textResultForLlm": "Agent started in background with agent_id: 28ec0b43-93e2-47b0-b3ad-2530846d5dd3. You'll be notified when it completes.",
+            "resultType": "success",
+            "toolTelemetry": {
+              "properties": { "agent_type": "custom-agent", "execution_mode": "background" },
+              "restrictedProperties": { "agent_name": "research-agent", "agent_id": "28ec0b43-93e2-47b0-b3ad-2530846d5dd3" }
+            }
+          }
+        }
+        """;
+
+    private const string SubagentStopPayload = """
+        {
+          "sessionId": "c232d9cc-6701-4a48-a2e9-03bfd9f8ccf2",
+          "timestamp": 1794839734914,
+          "cwd": "/repo",
+          "transcriptPath": "/home/.copilot/session-state/c232d9cc-6701-4a48-a2e9-03bfd9f8ccf2/events.jsonl",
+          "agentId": "28ec0b43-93e2-47b0-b3ad-2530846d5dd3",
+          "agentType": "research-agent",
+          "agentName": "research-agent",
+          "response": "FIRST TURN DONE",
+          "stopReason": "end_turn",
+          "stop_hook_active": false,
+          "parentAgentId": "c232d9cc-6701-4a48-a2e9-03bfd9f8ccf2"
+        }
+        """;
+
+    [Fact]
+    public void Cli_BackgroundStart_IsHandedToTheEngineToFollow_AndIsNotDecidedAsAReturn()
+    {
+        BackgroundEngine engine = new();
+
+        string stdout = RunCli(engine, BackgroundStartPayload);
+
+        Assert.Empty(stdout);
+        Assert.Equal(0, engine.PostCalls);
+        BackgroundDispatch tracked = Assert.Single(engine.Tracked);
+        Assert.Equal("28ec0b43-93e2-47b0-b3ad-2530846d5dd3", tracked.AgentId);
+        Assert.Equal("c232d9cc-6701-4a48-a2e9-03bfd9f8ccf2", tracked.SessionId);
+        Assert.Equal("research-agent", tracked.Target);
+        Assert.Equal("Reply with exactly: FIRST TURN DONE", tracked.Prompt);
+    }
+
+    [Fact]
+    public void Cli_BackgroundStart_IsRecognisedFromTelemetryWhenTheResultTextIsElided()
+    {
+        BackgroundEngine engine = new();
+
+        RunCli(engine, BackgroundStartPayload.Replace(
+            "Agent started in background with agent_id: 28ec0b43-93e2-47b0-b3ad-2530846d5dd3. You'll be notified when it completes.",
+            "[copilot:elided textResultForLlm (468 bytes)]",
+            StringComparison.Ordinal));
+
+        Assert.Equal("28ec0b43-93e2-47b0-b3ad-2530846d5dd3", Assert.Single(engine.Tracked).AgentId);
+        Assert.Equal(0, engine.PostCalls);
+    }
+
+    [Fact]
+    public void Cli_SubagentStop_WithANote_AppendsItToTheResponseTheDispatcherReads()
+    {
+        BackgroundEngine engine = new() { ReturnResult = new HookOutcome(HookOutcomeKind.PostBlock, "ARBITER_ESCALATION: gate report disagrees") };
+
+        string stdout = RunCli(engine, SubagentStopPayload);
+
+        using JsonDocument doc = JsonDocument.Parse(stdout);
+        Assert.Equal(
+            "FIRST TURN DONE\n\nARBITER_ESCALATION: gate report disagrees",
+            doc.RootElement.GetProperty("modifiedResponse").GetString());
+    }
+
+    [Fact]
+    public void Cli_SubagentStop_WithNothingToSay_WritesNothing()
+    {
+        Assert.Empty(RunCli(new BackgroundEngine(), SubagentStopPayload));
+    }
+
+    [Fact]
+    public void Cli_SubagentStop_PassesThroughForAnEngineThatDoesNotFollowBackgroundDispatches()
+    {
+        ScriptedEngine engine = new();
+
+        (int exit, string stdout, string log) = Run(CopilotHookAdapter.CliToken, SubagentStopPayload, null, engine);
+
+        Assert.Equal(0, exit);
+        Assert.Empty(stdout);
+        Assert.DoesNotContain(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Cli_NextTaskResult_CarriesANoteStillPendingFromABackgroundReturn()
+    {
+        BackgroundEngine engine = new();
+        engine.Pending.Add("Arbiter note on the return of background agent 'csharp-dev':\nARBITER_ESCALATION: gate report disagrees");
+
+        string stdout = RunCli(engine, BackgroundStartPayload);
+
+        using JsonDocument doc = JsonDocument.Parse(stdout);
+        Assert.Contains("ARBITER_ESCALATION: gate report disagrees", doc.RootElement.GetProperty("additionalContext").GetString(), StringComparison.Ordinal);
+        Assert.Empty(RunCli(engine, BackgroundStartPayload));
+    }
+
     [Fact]
     public void SchemaDetection_LocalPayloadUnderCliHarness_AnswersLocalShapeAndLogsVsCode()
     {

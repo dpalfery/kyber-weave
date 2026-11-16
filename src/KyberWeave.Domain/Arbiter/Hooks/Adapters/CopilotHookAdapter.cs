@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Configuration;
@@ -32,12 +33,17 @@ namespace KyberWeave.Arbiter.Hooks.Adapters;
 /// before configuration loads. VS Code ignores matchers, so the Read guard keys
 /// on the input content rather than the tool name. The CLI payload carries no
 /// call id, so return pairing uses <c>pair-digest</c> at the ledger layer and the
-/// adapter keeps no post state. The project-wide evaluation reuses a
+/// adapter keeps no post state. A CLI <c>task</c> that runs in the background returns
+/// at once with only the agent's id: that result is not a return, so the adapter hands
+/// the dispatch to the engine to remember, and each <c>subagentStop</c> event of that
+/// agent is its return. A <c>subagentStop</c> of an agent that was not remembered (a
+/// synchronous dispatch, whose <c>postToolUse</c> carries the return) records nothing.
+/// The project-wide evaluation reuses a
 /// trusted-caller decision already logged for the same <c>tool_use_id</c>:
 /// trusted pre-dispatch answers are kept in memory by tool-call id, and a repeat
 /// for the same id returns the stored document without re-evaluating.
 /// </remarks>
-public sealed class CopilotHookAdapter : IHarnessHookAdapter
+public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
 {
     /// <summary>The VS Code Local-schema harness token.</summary>
     public const string VsCodeToken = "copilot-vscode";
@@ -79,6 +85,16 @@ public sealed class CopilotHookAdapter : IHarnessHookAdapter
     /// <inheritdoc/>
     public bool IsPassThrough(JsonElement payload, string? renderedCaller)
     {
+        if (IsAgentLifecycle(payload))
+        {
+            // Only a finished turn with text can be a return, and only an engine that follows
+            // background dispatches can record one.
+            return _engine is not IBackgroundDispatchEngine
+                || string.IsNullOrWhiteSpace(GetString(payload, "response"))
+                || string.IsNullOrWhiteSpace(GetString(payload, "sessionId"))
+                || string.IsNullOrWhiteSpace(GetString(payload, "stopReason"));
+        }
+
         CopilotSchema schema;
         try
         {
@@ -106,6 +122,11 @@ public sealed class CopilotHookAdapter : IHarnessHookAdapter
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(context);
         _ = rawJson;
+
+        if (IsAgentLifecycle(payload))
+        {
+            return HandleSubagentStop(payload, config, context);
+        }
 
         CopilotSchema schema = DetectSchema(payload);
         LogSchemaDetection(schema, context);
@@ -153,6 +174,70 @@ public sealed class CopilotHookAdapter : IHarnessHookAdapter
 
         return _engine.DecidePostDispatch(caller, target, toolOutput, config);
     }
+
+    /// <summary>
+    /// A CLI <c>subagentStart</c> or <c>subagentStop</c> event: it names an agent and no tool. A tool event from
+    /// inside a subagent also names the agent, so the tool name is what tells them apart.
+    /// </summary>
+    private static bool IsAgentLifecycle(JsonElement payload) =>
+        payload.ValueKind == JsonValueKind.Object
+        && !payload.TryGetProperty("toolName", out _)
+        && !payload.TryGetProperty("hook_event_name", out _)
+        && !string.IsNullOrWhiteSpace(GetString(payload, "agentId"));
+
+    private string HandleSubagentStop(JsonElement payload, KyberWeaveConfig config, HookContext context)
+    {
+        if (_engine is not IBackgroundDispatchEngine background
+            || GetString(payload, "response") is not { Length: > 0 } response
+            || GetString(payload, "sessionId") is not { Length: > 0 } sessionId
+            || GetString(payload, "agentId") is not { Length: > 0 } agentId)
+        {
+            return string.Empty;
+        }
+
+        HookOutcome outcome = background.DecideBackgroundReturn(CliToken, sessionId, agentId, response, config, context);
+
+        // The stop hook can only rewrite the response the dispatching agent reads, so a note rides at its end.
+        // The engine also keeps the note for that agent's next dispatch hook, in case the rewrite is not delivered.
+        return string.IsNullOrWhiteSpace(outcome.Reason)
+            ? string.Empty
+            : new JsonObject { ["modifiedResponse"] = response + "\n\n" + outcome.Reason }.ToJsonString();
+    }
+
+    /// <summary>
+    /// The agent id of a <c>task</c> result that is not a return: the dispatch started in the background, or a
+    /// synchronous one was moved there while it was still working. Null for a result that carries the agent's
+    /// reply, and empty when the result names no agent.
+    /// </summary>
+    private static string? BackgroundAgentIdOf(JsonElement result)
+    {
+        string? text = GetString(result, "textResultForLlm");
+        Match named = text is null ? Match.Empty : BackgroundStartRegex().Match(text);
+        JsonElement telemetry = result.TryGetProperty("toolTelemetry", out JsonElement found) ? found : default;
+        JsonElement properties = telemetry.ValueKind == JsonValueKind.Object
+            && telemetry.TryGetProperty("properties", out JsonElement foundProperties) ? foundProperties : default;
+        bool background = named.Success
+            || string.Equals(GetString(properties, "execution_mode"), "background", StringComparison.Ordinal)
+            || !string.IsNullOrWhiteSpace(GetString(properties, "promotion_trigger"));
+        if (!background)
+        {
+            return null;
+        }
+
+        JsonElement restricted = telemetry.ValueKind == JsonValueKind.Object
+            && telemetry.TryGetProperty("restrictedProperties", out JsonElement foundRestricted) ? foundRestricted : default;
+        return named.Success ? named.Groups[1].Value : GetString(restricted, "agent_id") ?? string.Empty;
+    }
+
+    [GeneratedRegex(
+        @"^Agent (?:started in background with agent_id: |moved to background \(agent_id: )([0-9A-Za-z_-]+)",
+        RegexOptions.CultureInvariant)]
+    private static partial Regex BackgroundStartRegex();
+
+    private string PendingNotes(JsonElement payload, string caller, HookContext context) =>
+        _engine is IBackgroundDispatchEngine background && GetString(payload, "sessionId") is { Length: > 0 } sessionId
+            ? string.Join("\n\n", background.TakePendingNotes(sessionId, caller, context))
+            : string.Empty;
 
     private void LogSchemaDetection(CopilotSchema schema, HookContext context)
     {
@@ -360,27 +445,45 @@ public sealed class CopilotHookAdapter : IHarnessHookAdapter
                 "Malformed Copilot CLI hook event: postToolUse carries no toolResult object.");
         }
 
+        string pending = PendingNotes(payload, caller, context);
+        if (BackgroundAgentIdOf(result) is { } agentId)
+        {
+            // The agent is still working: this result is not its return. The engine remembers the dispatch, and
+            // each turn the agent finishes arrives later as a subagentStop event.
+            if (_engine is IBackgroundDispatchEngine background
+                && agentId.Length > 0
+                && GetString(payload, "sessionId") is { Length: > 0 } sessionId)
+            {
+                background.TrackBackgroundDispatch(
+                    new BackgroundDispatch(_harnessToken, sessionId, agentId, caller, target, prompt), context);
+            }
+            else
+            {
+                context.Log.WriteLine("Arbiter: a background dispatch could not be followed; its return is not recorded.");
+            }
+
+            return pending.Length > 0 ? RenderCliPostAnnotation(pending) : string.Empty;
+        }
+
         HookOutcome postOutcome = DecidePost(
             _harnessToken, payload, caller, target, prompt, result.GetRawText(), config, context);
-        return postOutcome.Kind switch
+        string? note = postOutcome.Kind switch
         {
-            HookOutcomeKind.PassThrough => string.Empty,
-            HookOutcomeKind.Allow => string.Empty,
-            HookOutcomeKind.Deny => RenderCliPostAnnotation(
-                postOutcome.Reason ?? throw new InvalidOperationException(
-                    "Hook engine denied without a reason.")),
-            HookOutcomeKind.PostBlock => RenderCliPostAnnotation(
-                postOutcome.Reason ?? throw new InvalidOperationException(
-                    "Hook engine blocked without a reason.")),
-            HookOutcomeKind.PostAnnotation => RenderCliPostAnnotation(
-                postOutcome.Reason ?? throw new InvalidOperationException(
-                    "Hook engine annotated without a note.")),
-            HookOutcomeKind.AllowWithNote => RenderCliPostAnnotation(
-                postOutcome.Reason ?? throw new InvalidOperationException(
-                    "Hook engine allowed with a note but wrote none.")),
+            HookOutcomeKind.PassThrough => null,
+            HookOutcomeKind.Allow => null,
+            HookOutcomeKind.Deny => postOutcome.Reason ?? throw new InvalidOperationException(
+                "Hook engine denied without a reason."),
+            HookOutcomeKind.PostBlock => postOutcome.Reason ?? throw new InvalidOperationException(
+                "Hook engine blocked without a reason."),
+            HookOutcomeKind.PostAnnotation => postOutcome.Reason ?? throw new InvalidOperationException(
+                "Hook engine annotated without a note."),
+            HookOutcomeKind.AllowWithNote => postOutcome.Reason ?? throw new InvalidOperationException(
+                "Hook engine allowed with a note but wrote none."),
             _ => throw new InvalidOperationException(
                 $"Hook engine returned pre-dispatch outcome '{postOutcome.Kind}' for a post-dispatch event."),
         };
+        string combined = string.Join("\n\n", new[] { note, pending }.Where(text => !string.IsNullOrEmpty(text)));
+        return combined.Length > 0 ? RenderCliPostAnnotation(combined) : string.Empty;
     }
 
     private static bool IsLocalPassThrough(JsonElement payload, string? renderedCaller)

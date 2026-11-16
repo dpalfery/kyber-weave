@@ -72,6 +72,7 @@ internal static class ArbiterTestServices
             Get<ICredentialStore>(),
             Get<IArbiterHostConfig>(),
             Get<IProcessEnvironment>(),
+            Get<IBackgroundDispatchStore>(),
             providerFactory,
             gitFactsFactory,
             planReaderFactory,

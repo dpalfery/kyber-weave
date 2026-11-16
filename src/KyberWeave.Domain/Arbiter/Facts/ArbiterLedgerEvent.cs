@@ -125,11 +125,13 @@ public sealed record ArbiterSnapshot(
 /// <param name="TaskReview">The <c>task-review</c> marker: <c>PASS</c> or <c>FAIL</c> from <c>^RESULT:\s+(PASS|FAIL)\b</c>.</param>
 /// <param name="PlannerStatus">The <c>planner-status</c> marker: the <c>STATUS:</c> value.</param>
 /// <param name="Attested">The <c>attested</c> markers (D31): <c>&lt;task&gt;=complete</c> pairs.</param>
+/// <param name="TaskGate">The <c>task-gate</c> marker: the result a worker's <c>TASK_GATE:</c> digest line claims.</param>
 /// <remarks>Ledgers written before test-first moved to one worker also carry <c>red-evidence</c>; it is ignored on read.</remarks>
 public sealed record ArbiterReturnMarkers(
     [property: JsonPropertyName("task-review")] string? TaskReview = null,
     [property: JsonPropertyName("planner-status")] string? PlannerStatus = null,
-    [property: JsonPropertyName("attested")] IReadOnlyList<string>? Attested = null);
+    [property: JsonPropertyName("attested")] IReadOnlyList<string>? Attested = null,
+    [property: JsonPropertyName("task-gate")] string? TaskGate = null);
 
 /// <summary>
 /// One ledger event (<c>ledger.jsonl</c>, schema

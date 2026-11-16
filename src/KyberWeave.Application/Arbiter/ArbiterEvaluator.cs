@@ -1345,7 +1345,8 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
             Caller = first.Caller,
             CallerSource = first.CallerSource,
             Headers = BuildHeaders(first),
-            PairDigest = PairDigestOf(ev),
+            PairDigest = ArbiterLedgerQueries.PairDigest(ev.Target, ev.Prompt),
+            PreId = phase == ArbiterLedgerPhases.Post ? ev.PreId : null,
             TaskFiles = taskFiles,
             ModelProfile = modelProfile,
             ModelToken = modelToken,
@@ -1444,21 +1445,6 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
                 ? found
                 : null;
         return (agent?.Profile, agent?.Token, source);
-    }
-
-    /// <summary>
-    /// Pairs a return with its dispatch when the harness has no call id: the target and
-    /// the prompt as finally executed, which is the prompt after its headers are stripped.
-    /// </summary>
-    private static string? PairDigestOf(ArbiterEvent ev)
-    {
-        if (string.IsNullOrWhiteSpace(ev.Target) || string.IsNullOrWhiteSpace(ev.Prompt))
-        {
-            return null;
-        }
-
-        string executed = HeaderBlock.Strip(ev.Prompt).Trim();
-        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(ev.Target + "\n" + executed)));
     }
 
     private static ArbiterLedgerHeaders? BuildHeaders(TriggerClassification classification)

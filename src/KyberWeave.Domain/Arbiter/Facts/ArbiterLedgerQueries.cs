@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using System.Text;
+
 namespace KyberWeave.Core.Arbiter.Facts;
 
 /// <summary>
@@ -160,7 +163,8 @@ public static class ArbiterLedgerQueries
 
     /// <summary>
     /// The completed tasks: a returned worker output whose
-    /// <c>^RESULT:\s+(PASS|FAIL)\b</c> marker read <c>PASS</c>, or an
+    /// <c>^RESULT:\s+(PASS|FAIL)\b</c> marker read <c>PASS</c>, a worker digest whose
+    /// <c>TASK_GATE:</c> line read <c>PASS</c> under a finished <c>STATUS:</c>, or an
     /// attestation <c>&lt;task&gt;=complete</c> (D31).
     /// </summary>
     /// <param name="events">The events a ledger read returned, in append order.</param>
@@ -212,13 +216,43 @@ public static class ArbiterLedgerQueries
     private static IEnumerable<string> CompletedTasksOf(ArbiterLedgerEvent e, string? task)
     {
         List<string> tasks = [];
-        if (task is not null && string.Equals(e.Returns?.TaskReview, "PASS", StringComparison.Ordinal))
+        if (task is not null
+            && (string.Equals(e.Returns?.TaskReview, "PASS", StringComparison.Ordinal) || IsPassingDigest(e.Returns)))
         {
             tasks.Add(task);
         }
 
         tasks.AddRange(AttestedTasks(e, "complete"));
         return tasks;
+    }
+
+    private static readonly HashSet<string> FinishedStatuses = new(StringComparer.Ordinal) { "PASS", "READY_FOR_REVIEW" };
+
+    /// <summary>
+    /// Whether a worker's completion digest reports a finished task: its own task gate passed and its status is
+    /// one a finished worker writes. A <c>RESULT: FAIL</c> beside it still fails the report.
+    /// </summary>
+    private static bool IsPassingDigest(ArbiterReturnMarkers? returns) =>
+        returns is not null
+        && string.Equals(returns.TaskGate, "PASS", StringComparison.Ordinal)
+        && !string.Equals(returns.TaskReview, "FAIL", StringComparison.Ordinal)
+        && FinishedStatuses.Contains(returns.PlannerStatus ?? string.Empty);
+
+    /// <summary>
+    /// The digest that pairs a return with its dispatch when the harness has no call id: the target and the prompt
+    /// as finally executed, which is the prompt after its headers are stripped. Null when either is missing.
+    /// </summary>
+    /// <param name="target">The dispatch target.</param>
+    /// <param name="prompt">The dispatch prompt, with or without its header block.</param>
+    public static string? PairDigest(string? target, string? prompt)
+    {
+        if (string.IsNullOrWhiteSpace(target) || string.IsNullOrWhiteSpace(prompt))
+        {
+            return null;
+        }
+
+        string executed = HeaderBlock.Strip(prompt).Trim();
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(target + "\n" + executed)));
     }
 
     private static IEnumerable<string> AttestedTasks(ArbiterLedgerEvent e, string value)

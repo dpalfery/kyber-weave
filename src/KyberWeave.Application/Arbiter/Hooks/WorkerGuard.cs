@@ -8,8 +8,8 @@ namespace KyberWeave.Arbiter.Hooks;
 /// <summary>
 /// The guard on a Squad subagent's own tool calls, from machine facts only. It refuses a write into the
 /// repository's canonical checkout while a live run works in a worktree of its own
-/// (<c>KW-ARB-CHECKOUT-001</c>), and it ends a developer dispatch that has run past its budget of tool calls
-/// or minutes, and tells a developer dispatch once that a tool call ran past its limit (<c>KW-ARB-BUDGET-001</c>).
+/// (<c>KW-ARB-CHECKOUT-001</c>), and it ends a developer dispatch whose current turn has run past its budget of
+/// tool calls or minutes, and tells a developer dispatch once that a tool call ran past its limit (<c>KW-ARB-BUDGET-001</c>).
 /// </summary>
 /// <remarks>
 /// It runs on every tool call a harness reports, so it starts no process and calls no model: the run records,
@@ -72,6 +72,12 @@ public sealed class WorkerGuard(
         try
         {
             string home = homeDirectory ?? process.HomeDirectory;
+            if (WorkerGuardRules.TurnEndOf(harness, stdin) is { } ended)
+            {
+                EndTurn(harness, ended, home);
+                return 0;
+            }
+
             WorkerGuardRules.ToolCall? call = WorkerGuardRules.Read(harness, stdin);
             if (call is null)
             {
@@ -96,6 +102,20 @@ public sealed class WorkerGuard(
         }
 
         return 0;
+    }
+
+    /// <summary>
+    /// Closes the budget window of a subagent whose turn ended. The budget measures one turn of work, so the time
+    /// the agent then sits idle is not counted, and a turn the dispatching agent starts later (a rework sent to the
+    /// same agent) begins a fresh window with its first tool call.
+    /// </summary>
+    private void EndTurn(string harness, string agentId, string home)
+    {
+        string key = WorkerGuardRules.KeyOf(harness, agentId);
+        if (budgets.Exists(home, key))
+        {
+            budgets.Delete(home, key);
+        }
     }
 
     /// <summary>
@@ -127,9 +147,10 @@ public sealed class WorkerGuard(
     /// line, so parallel hook processes never lose a count.
     /// </summary>
     /// <remarks>
-    /// A harness may resume the same subagent for a rework, under the same id. A window therefore ends when the
-    /// subagent has been idle longer than the budget's minutes, or for a minute after it ran past its budget
-    /// (the worker returned): the resumed dispatch starts a fresh window.
+    /// A harness may resume the same subagent for a rework, under the same id. Where the harness reports the end
+    /// of a turn (Copilot CLI's <c>subagentStop</c>), <see cref="EndTurn"/> closes the window there. Elsewhere a
+    /// window ends when the subagent has been idle longer than the budget's minutes, or for a minute after it ran
+    /// past its budget (the worker returned): the resumed dispatch starts a fresh window.
     /// </remarks>
     private string? BudgetRefusal(
         WorkerGuardRules.ToolCall call,
