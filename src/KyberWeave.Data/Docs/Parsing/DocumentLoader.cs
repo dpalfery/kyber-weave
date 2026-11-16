@@ -17,14 +17,6 @@ namespace KyberWeave.Core.Docs.Parsing;
 /// </summary>
 public sealed partial class DocumentLoader
 {
-    private static readonly MarkdownPipeline LeafPipeline = new MarkdownPipelineBuilder()
-        .UseAutoIdentifiers(AutoIdentifierOptions.GitHub)
-        .Build();
-
-    private static readonly MarkdownPipeline LinkDetailPipeline = new MarkdownPipelineBuilder()
-        .UsePreciseSourceLocation()
-        .Build();
-
     private readonly string _catalogPath;
     private readonly OntologyConfig _config;
     private readonly IReadOnlyList<string> _docsRoots;
@@ -168,7 +160,7 @@ public sealed partial class DocumentLoader
     ///     finding from the type. Matching the message would let a reword escape as an
     ///     unhandled error.
     /// </remarks>
-    internal DocumentModel LoadArchivedDocument(string relativePath)
+    public DocumentModel LoadArchivedDocument(string relativePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
         string normalized = relativePath.Replace('\\', '/');
@@ -263,29 +255,15 @@ public sealed partial class DocumentLoader
         };
     }
 
-    internal static string ResolveDocId(DocumentFrontmatter frontmatter, string relativePath)
-    {
-        return string.IsNullOrWhiteSpace(frontmatter.Id) ? relativePath : frontmatter.Id!;
-    }
+    public static string ResolveDocId(DocumentFrontmatter frontmatter, string relativePath) =>
+        DocumentMarkdown.ResolveDocId(frontmatter, relativePath);
 
     /// <summary>
     ///     GitHub slug fragments declared by headings in <paramref name="body"/>, using the
     ///     same AutoIdentifiers pipeline as retrieval leaves.
     /// </summary>
-    internal static IReadOnlySet<string> CollectHeadingFragmentSlugs(string body, string docId)
-    {
-        MarkdownDocument document = Markdown.Parse(body, LeafPipeline);
-        Dictionary<HeadingBlock, string> headingIds = BuildHeadingIds(document, docId);
-        HashSet<string> slugs = new(StringComparer.Ordinal);
-        foreach (string id in headingIds.Values)
-        {
-            int hash = id.IndexOf('#', StringComparison.Ordinal);
-            if (hash >= 0 && hash < id.Length - 1)
-                slugs.Add(id[(hash + 1)..]);
-        }
-
-        return slugs;
-    }
+    public static IReadOnlySet<string> CollectHeadingFragmentSlugs(string body, string docId) =>
+        DocumentMarkdown.CollectHeadingFragmentSlugs(body, docId);
 
     /// <summary>
     ///     Splits a body on <c>##</c> headings. Deeper headings stay inside their parent
@@ -293,53 +271,8 @@ public sealed partial class DocumentLoader
     ///     Fenced code blocks are tracked so that a <c>##</c> comment inside a shell fence
     ///     does not open a section.
     /// </summary>
-    internal static IReadOnlyList<DocumentSection> SplitSections(string body)
-    {
-        List<DocumentSection> sections = new();
-        string[] lines = body.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
-
-        string? heading = null;
-        int headingLine = 1;
-        List<string> buffer = new();
-        bool inFence = false;
-
-        void Flush()
-        {
-            // The leading run before the first '##' is usually nothing but the H1, which
-            // the caller already has as the document title. Emitting it as a retrievable
-            // section makes a title-only stub compete for relevance against real prose —
-            // and win, because a two-word section scores high on cosine similarity.
-            if (heading is null && !HasProse(buffer)) return;
-
-            sections.Add(new DocumentSection(
-                heading ?? string.Empty,
-                string.Join("\n", buffer).Trim('\n'),
-                headingLine));
-        }
-
-        for (int i = 0; i < lines.Length; i++)
-        {
-            string line = lines[i];
-
-            if (line.TrimStart().StartsWith("```", StringComparison.Ordinal))
-            {
-                inFence = !inFence;
-            }
-            else if (!inFence && line.StartsWith("## ", StringComparison.Ordinal))
-            {
-                Flush();
-                heading = line[3..].Trim();
-                headingLine = i + 1;
-                buffer = [];
-                continue;
-            }
-
-            buffer.Add(line);
-        }
-
-        Flush();
-        return sections;
-    }
+    public static IReadOnlyList<DocumentSection> SplitSections(string body) =>
+        DocumentMarkdown.SplitSections(body);
 
     /// <summary>True when the lines contain something other than headings and blanks.</summary>
     private static bool HasProse(IEnumerable<string> lines)
@@ -352,163 +285,14 @@ public sealed partial class DocumentLoader
     ///     stay inside their parent <c>###</c> leaf. Fenced blocks are ordinary content — a
     ///     <c>##</c> line inside a fence is not a section boundary.
     /// </summary>
-    internal static IReadOnlyList<DocumentLeaf> SplitLeaves(string body, string docId)
-    {
-        string normalized = body.Replace("\r\n", "\n", StringComparison.Ordinal);
-        MarkdownDocument document = Markdown.Parse(normalized, LeafPipeline);
-        Dictionary<HeadingBlock, string> headingIds = BuildHeadingIds(document, docId);
-
-        List<DocumentLeaf> leaves = new();
-        string? topicId = null;
-        StringBuilder? leadBuffer = null;
-        StringBuilder? leafBuffer = null;
-        string? leafId = null;
-
-        void FlushLeaf()
-        {
-            if (leafId is null || leafBuffer is null) return;
-
-            string text = leafBuffer.ToString().Trim('\n');
-            if (text.Length == 0) return;
-
-            leaves.Add(new DocumentLeaf(leafId, text));
-            leafId = null;
-            leafBuffer = null;
-        }
-
-        void StartLeaf(string id)
-        {
-            FlushLeaf();
-            leafId = id;
-            leafBuffer = new StringBuilder();
-        }
-
-        void AppendContent(string text)
-        {
-            if (text.Length == 0) return;
-
-            if (topicId is null)
-            {
-                if (leafId is null) StartLeaf($"{docId}#");
-
-                AppendWithNewline(leafBuffer, text);
-                return;
-            }
-
-            if (leafId is null)
-            {
-                leadBuffer ??= new StringBuilder();
-                AppendWithNewline(leadBuffer, text);
-            }
-            else
-            {
-                AppendWithNewline(leafBuffer, text);
-            }
-        }
-
-        void HandleHeading(HeadingBlock heading)
-        {
-            if (heading.Level == 1) return;
-
-            if (heading.Level == 2)
-            {
-                FlushLeaf();
-                topicId = headingIds[heading];
-                leadBuffer = new StringBuilder();
-                return;
-            }
-
-            if (heading.Level == 3)
-            {
-                if (leadBuffer is not null)
-                {
-                    string lead = leadBuffer.ToString().Trim('\n');
-                    if (HasProseLines(lead) && topicId is not null) leaves.Add(new DocumentLeaf(topicId, lead));
-
-                    leadBuffer = null;
-                }
-
-                StartLeaf(headingIds[heading]);
-                return;
-            }
-
-            if (leafId is not null)
-            {
-                AppendWithNewline(leafBuffer, Slice(normalized, heading.Span));
-            }
-            else if (topicId is not null)
-            {
-                leadBuffer ??= new StringBuilder();
-                AppendWithNewline(leadBuffer, Slice(normalized, heading.Span));
-            }
-        }
-
-        void VisitBlock(Block block)
-        {
-            switch (block)
-            {
-                case HeadingBlock heading:
-                    HandleHeading(heading);
-                    return;
-                case FencedCodeBlock:
-                case ParagraphBlock:
-                case HtmlBlock:
-                case ThematicBreakBlock:
-                case CodeBlock:
-                    AppendContent(Slice(normalized, block.Span));
-                    return;
-                case ContainerBlock container:
-                    foreach (Block child in container) VisitBlock(child);
-
-                    return;
-            }
-        }
-
-        foreach (Block block in document) VisitBlock(block);
-
-        if (leadBuffer is not null)
-        {
-            string lead = leadBuffer.ToString().Trim('\n');
-            if (HasProseLines(lead) && topicId is not null) leaves.Add(new DocumentLeaf(topicId, lead));
-        }
-
-        FlushLeaf();
-        return leaves;
-    }
+    public static IReadOnlyList<DocumentLeaf> SplitLeaves(string body, string docId) =>
+        DocumentMarkdown.SplitLeaves(body, docId);
 
     /// <summary>
     ///     Reads relative Markdown links with fragments, anchor text, and 1-based source lines.
     /// </summary>
-    internal static IReadOnlyList<BodyLink> ExtractBodyLinks(string markdown)
-    {
-        MarkdownDocument document = Markdown.Parse(markdown, LinkDetailPipeline);
-        List<BodyLink> links = new();
-        foreach (LinkInline link in document.Descendants<LinkInline>())
-        {
-            if (link.Url is null) continue;
-
-            string target = link.Url.Trim().Trim('<', '>');
-            if (target.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
-                || target.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
-                || target.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase)
-                || target.StartsWith('/'))
-                continue;
-
-            string path = target;
-            string fragment = string.Empty;
-            int hashIndex = target.IndexOf('#', StringComparison.Ordinal);
-            if (hashIndex >= 0)
-            {
-                path = target[..hashIndex];
-                fragment = target[(hashIndex + 1)..];
-            }
-
-            int line = link.Line + 1;
-            links.Add(new BodyLink(path, fragment, LinkPlainText(link), line));
-        }
-
-        return links;
-    }
+    public static IReadOnlyList<BodyLink> ExtractBodyLinks(string markdown) =>
+        DocumentMarkdown.ExtractBodyLinks(markdown);
 
     private static Dictionary<HeadingBlock, string> BuildHeadingIds(MarkdownDocument document, string docId)
     {
@@ -602,24 +386,8 @@ public sealed partial class DocumentLoader
         return Path.GetRelativePath(_repoRoot, absolutePath).Replace('\\', '/');
     }
 
-    internal static IReadOnlyList<string> ExtractRelativeLinks(string markdown)
-    {
-        List<string> links = new();
-        foreach (Match match in LinkPattern().Matches(markdown))
-        {
-            string target = match.Groups[1].Value.Trim().Trim('<', '>');
-            int hashIndex = target.IndexOf('#', StringComparison.Ordinal);
-            if (hashIndex >= 0) target = target[..hashIndex];
-            if (target.Length == 0) continue;
-            if (target.StartsWith("http://", StringComparison.OrdinalIgnoreCase)) continue;
-            if (target.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) continue;
-            if (target.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase)) continue;
-            if (target.StartsWith('/')) continue;
-            links.Add(target);
-        }
-
-        return links;
-    }
+    public static IReadOnlyList<string> ExtractRelativeLinks(string markdown) =>
+        DocumentMarkdown.ExtractRelativeLinks(markdown);
 
     /// <summary>
     ///     Reads the Component and Owner columns from the catalog. The catalog is the
@@ -666,8 +434,6 @@ public sealed partial class DocumentLoader
         return (components, owners);
     }
 
-    [GeneratedRegex(@"\]\(([^)]*)\)")]
-    private static partial Regex LinkPattern();
 
 #pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
     private static DocType ParseDocType(string? value)

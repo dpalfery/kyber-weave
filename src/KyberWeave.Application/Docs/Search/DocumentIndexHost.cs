@@ -6,7 +6,7 @@ using KyberWeave.Core.Docs.Parsing;
 namespace KyberWeave.Core.Docs.Search;
 
 /// <summary>
-/// Holds the current <see cref="DocumentIndex"/> for a long-lived process and rebuilds it
+/// Holds the current <c>DocumentIndex</c> for a long-lived process and rebuilds it
 /// when the corpus or the code graph changes underneath it.
 /// </summary>
 /// <remarks>

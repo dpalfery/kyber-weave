@@ -24,6 +24,11 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.14" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The staleness stamp the document index host rebuilds on is asserted directly by its tests. -->
+    <InternalsVisibleTo Include="KyberWeave.Tests" />
+  </ItemGroup>
+
   <!-- Each area owns one Areas\<Area>.props for its resources and package references, so parallel moves never edit the same lines. -->
   <Import Project="Areas\*.props" />
 

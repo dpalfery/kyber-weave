@@ -19,7 +19,7 @@ namespace KyberWeave.Core.Docs.Search;
 /// </para>
 /// <para>
 /// The index is immutable. Staleness is handled by rebuilding a whole snapshot — see
-/// <see cref="DocumentIndexHost"/> — rather than by mutating this object, so a request in
+/// <c>DocumentIndexHost</c> — rather than by mutating this object, so a request in
 /// flight always sees one coherent view of the corpus.
 /// </para>
 /// </remarks>
