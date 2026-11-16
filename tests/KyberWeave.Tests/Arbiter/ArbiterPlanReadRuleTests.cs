@@ -34,7 +34,7 @@ public sealed class ArbiterPlanReadRuleTests
     private const string PlanReadRule = "KW-ARB-PLANREAD-001";
 
     private static readonly string ShippedRulesPath =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Core", "Arbiter", "Rules", "default-rules.yml");
+        Path.Combine(KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Domain", "Arbiter", "Rules", "default-rules.yml");
 
     /// <summary>A dispatch prompt with the routing header block, a task, and a body.</summary>
     private static string Prompt(string body) =>

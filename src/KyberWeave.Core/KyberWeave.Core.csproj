@@ -14,19 +14,6 @@
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
   </PropertyGroup>
 
-  <PropertyGroup>
-    <!--
-      The LibraryImport source generator emits unsafe pinning code for the advapi32
-      string marshalling in Arbiter/Credentials/WindowsCredentialStore.cs (CredWriteW /
-      CredReadW take UTF-16 strings). The unsafe is confined to those generated stubs,
-      which never load off Windows: every call site is gated by
-      OperatingSystem.IsWindows(). AllowUnsafeBlocks applies assembly-wide, so it
-      permits hand-written unsafe too; none is present, and a source-scan test guards
-      that invariant.
-    -->
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-  </PropertyGroup>
-
   <ItemGroup>
     <!-- The legacy engine is being drained into these layers (ADR 0057 split, superseded by the layering
          in LayerReferenceTests). It references them; they never reference it. -->
@@ -59,17 +46,6 @@
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\rust\gates.yml" LogicalName="Gates.rust.yml" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\go\gates.yml" LogicalName="Gates.go.yml" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\python\gates.yml" LogicalName="Gates.python.yml" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <!-- The 18 shipped Arbiter rules plus the test-file patterns and the
-         LENS-001 step-0 path table: the single source of truth for defaults. -->
-    <EmbeddedResource Include="Arbiter\Rules\default-rules.yml" LogicalName="Arbiter.default-rules.yml" />
-    <!-- Embedded Squad copies the Arbiter reads in host repositories without a
-         canonical tree. Logical names mirror the Standards.* convention and avoid
-         the raw-corpus tokens the release test forbids in resource names. -->
-    <EmbeddedResource Include="..\..\products\kyber-squad\agents\*.md" LogicalName="Arbiter.Roster.%(Filename).md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\skills\code-review\references\lenses\*.md" LogicalName="Arbiter.Lens.%(Filename).md" />
   </ItemGroup>
 
   <ItemGroup>

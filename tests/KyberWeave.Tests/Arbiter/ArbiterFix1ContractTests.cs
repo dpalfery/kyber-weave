@@ -98,13 +98,17 @@ public sealed class ArbiterFix1ContractTests : IDisposable
         Assert.Empty(runner.Calls);
     }
 
-    // F3: no hand-written `unsafe` in Core outside generated LibraryImport stubs.
+    // F3: no hand-written `unsafe` in Core or Data outside generated LibraryImport stubs.
     [Fact]
     public void Fix3_CoreHasNoHandWrittenUnsafe()
     {
-        string coreRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Core");
+        string[] roots =
+        [
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Core"),
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Data"),
+        ];
         List<string> offenders = [];
-        foreach (string file in Directory.EnumerateFiles(coreRoot, "*.cs", SearchOption.AllDirectories))
+        foreach (string file in roots.SelectMany(root => Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)))
         {
             foreach (string line in StripCommentsAndStrings(File.ReadAllText(file)).Split('\n'))
             {

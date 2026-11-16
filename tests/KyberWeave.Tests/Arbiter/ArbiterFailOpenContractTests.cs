@@ -1,3 +1,5 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
@@ -69,6 +71,7 @@ public sealed class ArbiterFailOpenContractTests : IDisposable
         new DecisionLog(ArbiterEvaluatorFixtures.DirectoryFor(_root)),
         git ?? new ChangedPaths("src/a.cs"),
         new RealPlanReader(_root),
+        new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
         TimeProvider.System);
 
     private static KyberWeaveConfig ShippedConfig() =>

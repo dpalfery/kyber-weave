@@ -1,3 +1,5 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
 using System.Diagnostics;
 using System.Reflection;
 using KyberWeave.Core.Arbiter;
@@ -347,7 +349,7 @@ public sealed class ArbiterKeyResolutionTests
         Directory.CreateDirectory(dir);
         File.WriteAllText(Path.Combine(dir, "arbiter.yml"), "provider:\n  model: nimble\n");
 
-        ArbiterProviderConfig merged = ArbiterUserSettings.ApplyTo(ArbiterProviderConfig.DefaultNone, home.Path);
+        ArbiterProviderConfig merged = new FileArbiterUserSettings(new PhysicalFileSystem()).ApplyTo(ArbiterProviderConfig.DefaultNone, home.Path);
 
         Assert.Equal("nimble", merged.Model);
         Assert.Equal(ArbiterProviderConfig.DefaultNone.Kind, merged.Kind);
@@ -364,7 +366,7 @@ public sealed class ArbiterKeyResolutionTests
         File.WriteAllText(Path.Combine(dir, "arbiter.yml"), "provider:\n  model: nimble\nextra: 1\n");
 
         YamlDotNet.Core.YamlException exception = Assert.Throws<YamlDotNet.Core.YamlException>(
-            () => ArbiterUserSettings.ApplyTo(ArbiterProviderConfig.DefaultNone, home.Path));
+            () => new FileArbiterUserSettings(new PhysicalFileSystem()).ApplyTo(ArbiterProviderConfig.DefaultNone, home.Path));
 
         Assert.Contains("KW-ARB-CONFIG-009", exception.Message, StringComparison.Ordinal);
         Assert.DoesNotContain(SentinelKey, exception.Message, StringComparison.Ordinal);
@@ -380,7 +382,7 @@ public sealed class ArbiterKeyResolutionTests
         File.WriteAllText(path, "provider: [unclosed\n");
 
         YamlDotNet.Core.YamlException exception = Assert.Throws<YamlDotNet.Core.YamlException>(
-            () => ArbiterUserSettings.ApplyTo(ArbiterProviderConfig.DefaultNone, home.Path));
+            () => new FileArbiterUserSettings(new PhysicalFileSystem()).ApplyTo(ArbiterProviderConfig.DefaultNone, home.Path));
 
         Assert.Contains("KW-ARB-CONFIG-001", exception.Message, StringComparison.Ordinal);
         Assert.Contains(path, exception.Message, StringComparison.Ordinal);
@@ -396,7 +398,7 @@ public sealed class ArbiterKeyResolutionTests
             ArbiterUserSettings.GetPath(home.Path));
         Assert.Equal(
             ArbiterProviderConfig.DefaultNone,
-            ArbiterUserSettings.ApplyTo(ArbiterProviderConfig.DefaultNone, home.Path));
+            new FileArbiterUserSettings(new PhysicalFileSystem()).ApplyTo(ArbiterProviderConfig.DefaultNone, home.Path));
     }
 
     [Fact]

@@ -1,3 +1,5 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
 using System.Diagnostics;
 using System.Net;
 using System.Text;
@@ -140,7 +142,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
             }));
 
         Assert.Equal(0, execution.ExitCode);
-        ArbiterProviderConfig applied = ArbiterUserSettings.ApplyTo(
+        ArbiterProviderConfig applied = new FileArbiterUserSettings(new PhysicalFileSystem()).ApplyTo(
             ArbiterConfig.ProductDefaults.Provider,
             _home.Path);
         Assert.Equal(model.Trim(), applied.Model);
@@ -303,7 +305,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
     {
         string host = NewDir("doctor-006");
 
-        CommandExecution execution = Capture(() => new ArbiterDoctorCommand().Execute(
+        CommandExecution execution = Capture(() => new ArbiterDoctorCommand(new FileArbiterModelTargetsReader(new PhysicalFileSystem())).Execute(
             null!,
             new ArbiterSettings { Path = host, Format = "json" }));
 
@@ -318,7 +320,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
     {
         string host = NewDir("doctor-advisory-" + target);
 
-        CommandExecution execution = Capture(() => new ArbiterDoctorCommand().Execute(
+        CommandExecution execution = Capture(() => new ArbiterDoctorCommand(new FileArbiterModelTargetsReader(new PhysicalFileSystem())).Execute(
             null!,
             new ArbiterSettings { Path = host }));
 
@@ -334,7 +336,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
         WriteOverride("provider:\n  kind: systemone\n  endpoint: https://api.typesafe.ai/v1\n  model: mystery-model\n");
         string host = NewDir("doctor-007");
 
-        CommandExecution execution = Capture(() => new ArbiterDoctorCommand().Execute(
+        CommandExecution execution = Capture(() => new ArbiterDoctorCommand(new FileArbiterModelTargetsReader(new PhysicalFileSystem())).Execute(
             null!,
             new ArbiterSettings { Path = host, Format = "json" }));
 
@@ -347,7 +349,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
         WriteOverride("provider:\n  model: nimble\nextra: 1\n");
         string host = NewDir("doctor-009");
 
-        CommandExecution execution = Capture(() => new ArbiterDoctorCommand().Execute(
+        CommandExecution execution = Capture(() => new ArbiterDoctorCommand(new FileArbiterModelTargetsReader(new PhysicalFileSystem())).Execute(
             null!,
             new ArbiterSettings { Path = host, Format = "json" }));
 
@@ -361,7 +363,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
         WriteOverride("provider:\n  kind: systemone\n  endpoint: http://example.com/v1\n  model: jev-1.13.0\n");
         string host = NewDir("doctor-010");
 
-        CommandExecution execution = Capture(() => new ArbiterDoctorCommand().Execute(
+        CommandExecution execution = Capture(() => new ArbiterDoctorCommand(new FileArbiterModelTargetsReader(new PhysicalFileSystem())).Execute(
             null!,
             new ArbiterSettings { Path = host, Format = "json" }));
 
@@ -375,7 +377,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
         WriteOverride("provider:\n  kind: systemone\n  endpoint: https://api.typesafe.ai/v1\n  model: jev-1.13.0\n");
         string host = NewDir("doctor-key");
 
-        CommandExecution execution = Capture(() => new ArbiterDoctorCommand().Execute(
+        CommandExecution execution = Capture(() => new ArbiterDoctorCommand(new FileArbiterModelTargetsReader(new PhysicalFileSystem())).Execute(
             null!,
             new ArbiterSettings { Path = host }));
 
@@ -389,7 +391,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
         _storeOverride = new SecretServiceCredentialStore(new ArbiterSecretToolMissingTests.MissingExecutableCredentialProcessRunner());
         string host = NewDir("doctor-no-secret-tool");
 
-        CommandExecution execution = Capture(() => new ArbiterDoctorCommand().Execute(
+        CommandExecution execution = Capture(() => new ArbiterDoctorCommand(new FileArbiterModelTargetsReader(new PhysicalFileSystem())).Execute(
             null!,
             new ArbiterSettings { Path = host }));
 
@@ -433,7 +435,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
                 : new ProcessResult(1, string.Empty, "not a repo");
         string host = NewDir("doctor-log");
 
-        CommandExecution execution = Capture(() => new ArbiterDoctorCommand().Execute(
+        CommandExecution execution = Capture(() => new ArbiterDoctorCommand(new FileArbiterModelTargetsReader(new PhysicalFileSystem())).Execute(
             null!,
             new ArbiterSettings { Path = host }));
 
@@ -446,7 +448,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
         _probeResult = new ProcessResult(1, string.Empty, "missing");
         string host = NewDir("doctor-bin");
 
-        CommandExecution execution = Capture(() => new ArbiterDoctorCommand().Execute(
+        CommandExecution execution = Capture(() => new ArbiterDoctorCommand(new FileArbiterModelTargetsReader(new PhysicalFileSystem())).Execute(
             null!,
             new ArbiterSettings { Path = host }));
 
@@ -458,7 +460,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
     {
         string host = NewDir("doctor-guard");
 
-        CommandExecution execution = Capture(() => new ArbiterDoctorCommand().Execute(
+        CommandExecution execution = Capture(() => new ArbiterDoctorCommand(new FileArbiterModelTargetsReader(new PhysicalFileSystem())).Execute(
             null!,
             new ArbiterSettings { Path = host }));
 

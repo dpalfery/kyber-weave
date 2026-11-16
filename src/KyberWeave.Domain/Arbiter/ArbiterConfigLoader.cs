@@ -138,15 +138,6 @@ public static class ArbiterConfigLoader
         };
     }
 
-    /// <summary>Loads and merges the <c>arbiter:</c> section from a <c>kyber-weave.yml</c> file.</summary>
-    public static ArbiterConfig LoadMerged(ArbiterConfig defaults, string yamlPath)
-    {
-        ArgumentNullException.ThrowIfNull(defaults);
-        ArgumentException.ThrowIfNullOrWhiteSpace(yamlPath);
-        KyberWeaveYamlDocument document = KyberWeaveYamlFile.ParseFile(yamlPath);
-        return Merge(defaults, document.Arbiter);
-    }
-
     /// <summary>Loads the user-level host config YAML, where <c>arbiter.global.targets</c> is valid.</summary>
     public static ArbiterConfig LoadUserConfig(string yaml)
     {

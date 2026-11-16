@@ -526,7 +526,7 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
             ? loaded.Config.Arbiter.Provider
             : KyberWeaveConfig.ProductDefaults.Arbiter.Provider;
         ArbiterProviderKind effective =
-            ArbiterUserSettings.ApplyTo(repository, ArbiterCommandComposition.HomeDirectory()).Kind;
+            ArbiterCommandComposition.UserSettings.ApplyTo(repository, ArbiterCommandComposition.HomeDirectory()).Kind;
         return (repository.Kind, effective);
     }
 

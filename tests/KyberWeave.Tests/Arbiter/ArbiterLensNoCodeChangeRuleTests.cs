@@ -1,3 +1,5 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
@@ -224,6 +226,7 @@ public sealed class ArbiterLensNoCodeChangeRuleTests : IDisposable
             new DecisionLog(ArbiterDirectory),
             new FixedReviewFacts(review),
             new PassThroughPlanReader(),
+            new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             TimeProvider.System);
         KyberWeaveConfig config = new()
         {

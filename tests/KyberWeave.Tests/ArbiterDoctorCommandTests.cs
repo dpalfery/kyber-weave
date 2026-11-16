@@ -1,3 +1,5 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
 using System.Text.RegularExpressions;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Core.Configuration;
@@ -38,7 +40,7 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
               enabled: true
             """);
 
-        CommandExecution execution = Capture(() => new ArbiterDoctorCommand().Execute(
+        CommandExecution execution = Capture(() => new ArbiterDoctorCommand(new FileArbiterModelTargetsReader(new PhysicalFileSystem())).Execute(
             null!,
             new ArbiterSettings { Path = _repo.Path }));
 
@@ -187,7 +189,7 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
     }
 
     private CommandExecution RunDoctor() =>
-        Capture(() => new ArbiterDoctorCommand().Execute(
+        Capture(() => new ArbiterDoctorCommand(new FileArbiterModelTargetsReader(new PhysicalFileSystem())).Execute(
             null!,
             new ArbiterSettings { Path = _repo.Path }));
 

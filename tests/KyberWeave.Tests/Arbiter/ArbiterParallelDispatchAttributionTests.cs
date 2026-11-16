@@ -1,3 +1,5 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
 using System.Diagnostics;
 using KyberWeave.Core.Processes;
 using KyberWeave.Arbiter.Hooks;
@@ -239,6 +241,7 @@ public sealed class ArbiterParallelDispatchAttributionTests : IDisposable
         new DecisionLog(_arbiter),
         new HookGitFacts(_repo.Path, _home.Path, _arbiter),
         new RealPlanReader(_repo.Path),
+        new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
         TimeProvider.System);
 
     private Task<ArbiterEvaluationResult> Dispatch(ArbiterEvaluator evaluator, string phase, string task, string callId) =>
