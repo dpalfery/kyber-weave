@@ -60,8 +60,13 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - docs: `dotnet run --project src/KyberWeave.Cli -- docs validate .` and `dotnet run --project src/KyberWeave.Cli -- docs drift .`
 - **A run that reports zero tests verified nothing.**
 - **Rule ids.** Every new `KW-*` id takes the next free number in its family; none is reused.
-- **Phase order.** A phase starts after the last task of the phase before it. Inside a phase, tasks
-  with no dependency between them and no shared file may run in parallel.
+- **Order.** A task may start when every task on its `Depends on` line is done. Two tracks have no
+  dependency on each other and may run at the same time, each in its own worktree and branch:
+  - **Track A:** all of phase 1 (1.1 to 1.14).
+  - **Track B:** 2.1, then 2.2, 2.3, 2.4, 2.5, 2.11, 3.1, 3.2, 3.3 in that order. These share the
+    task-list source files, so they run one after another.
+  Every other task waits for the tasks it depends on. Both tracks merge into the specification's
+  branch, `claude/docs/role-based-worker-agents`.
 
 ## Tasks
 
