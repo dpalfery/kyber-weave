@@ -51,10 +51,12 @@ agents:
         Resolution: always
         Autonomous behaviour: autonomy=autonomous
         Hard-block escalation: autonomy=autonomous
+        A ready plan is not a question: autonomy=autonomous
         Gaps and open questions: autonomy=autonomous
         Delivery: always
         Autonomous approval of the run's delivery: autonomy=autonomous
         Supervised delivery: autonomy=supervised
+        The run's own process needs no approval: autonomy=autonomous
         Hard stops: autonomy=autonomous
         Circuit-breakers are non-fatal: autonomy=autonomous
         Circuit-breakers in supervised mode: autonomy=supervised
@@ -66,9 +68,13 @@ agents:
       sections:
         Plan Authoring: always
         Start or resume: path=plan
+        Working order: path=plan
         Status vocabulary: always
         Required plan contract: path=plan
+        Plan skeleton: path=plan
         Documented rules over existing code: path=plan
+        The request's explicit instructions: path=plan
+        Facts that depend on a version, and existing tests: path=plan
         Task granularity: path=plan
         Session groups: path=plan
         Decisions: always
@@ -108,5 +114,6 @@ agents:
       when: autonomy=autonomous
       sections:
         Autonomous Decisions: always
+        Rules that say to ask first: always
         Three checks per open decision: always
         Escalation (hard block): always

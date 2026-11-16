@@ -321,6 +321,278 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
         Assert.StartsWith("provenance:", response, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A sync that finds CodeGraph's own index lock held once is run again, and the answer carries
+    /// neither a failure nor a note once the second sync succeeds.
+    /// </summary>
+    /// <remarks>
+    /// Two agents starting in one worktree meet on CodeGraph's lock for a fraction of a second. The
+    /// index was healthy throughout, so the caller should not be able to tell the retry happened.
+    /// </remarks>
+    [Fact]
+    public void ASyncThatFindsTheIndexLockHeldOnceIsRetriedAndAnswersNormally()
+    {
+        ScriptedProcessExecutor executor = SyncAnswers(HeldIndexLock, SyncSucceeded);
+        List<TimeSpan> pauses = [];
+        DocsTools tools = ToolsWithAnIndex(Root, executor, pauses);
+
+        string response = tools.Explore("anything");
+
+        Assert.Equal(2, executor.Calls.Count);
+        Assert.Single(pauses);
+        Assert.DoesNotContain("STATUS: TOOL_FAILURE", response, StringComparison.Ordinal);
+        Assert.DoesNotContain("note: codegraph refresh skipped", response, StringComparison.Ordinal);
+        Assert.False(CodeGraphWarning.IsMatch(response), response);
+        Assert.StartsWith("provenance:", response, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A sync that finds CodeGraph's own index lock held on every attempt gives the answer with one
+    /// note, under either stop rule: no failure, and no warning that tells a worker to stop.
+    /// </summary>
+    /// <remarks>
+    /// The lock is held by CodeGraph's server, its watcher, or another sync, so the index on disk is
+    /// usable and only busy. Reporting it as a failure cost a live run a dispatch.
+    /// </remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ASyncThatAlwaysFindsTheIndexLockHeldAnswersWithANoteAndNoFailure(bool stopsOnToolFailure)
+    {
+        ScriptedProcessExecutor executor = SyncAnswers(HeldIndexLock);
+        List<TimeSpan> pauses = [];
+        DocsTools tools = ToolsWithAnIndex(Root, executor, pauses, stopsOnToolFailure);
+
+        string response = tools.Explore("anything");
+
+        Assert.Equal(3, executor.Calls.Count);
+        Assert.True(
+            pauses.Count == 2 && pauses.Sum(pause => pause.TotalSeconds) <= 1.5,
+            $"A held CodeGraph lock paused {string.Join(", ", pauses)}; a tool call may wait twice, 1.5 s in all.");
+        Assert.DoesNotContain("STATUS: TOOL_FAILURE", response, StringComparison.Ordinal);
+        Assert.False(CodeGraphWarning.IsMatch(response), response);
+        Assert.Contains("note: codegraph refresh skipped", response, StringComparison.Ordinal);
+        Assert.StartsWith("provenance:", response, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A sync that fails for any other reason is run once and fails the tool as before: the failure
+    /// token under the default stop rule, the warning line under <c>stop-on-tool-failure: false</c>.
+    /// </summary>
+    /// <remarks>
+    /// The second message is CodeGraph's "rebuild in progress". It is a lock message too, but the
+    /// database file is being replaced, so there is no index on disk to answer from.
+    /// </remarks>
+    [Theory]
+    [InlineData("✗ Failed to sync: SQLITE_ERROR: no such table: nodes", true)]
+    [InlineData("✗ Failed to sync: SQLITE_ERROR: no such table: nodes", false)]
+    [InlineData("✗ Failed to sync: A rebuild of this index is in progress; retry when it finishes.", true)]
+    public void ASyncThatFailsForAnotherReasonStillFailsTheToolWithoutARetry(string error, bool stopsOnToolFailure)
+    {
+        ScriptedProcessExecutor executor = SyncAnswers(new ProcessResult(1, SyncBanner, error + "\n"));
+        List<TimeSpan> pauses = [];
+        DocsTools tools = ToolsWithAnIndex(Root, executor, pauses, stopsOnToolFailure);
+
+        string response = tools.Explore("anything");
+
+        Assert.Single(executor.Calls);
+        Assert.Empty(pauses);
+        Assert.DoesNotContain("note: codegraph refresh skipped", response, StringComparison.Ordinal);
+        if (stopsOnToolFailure)
+        {
+            Assert.Contains("STATUS: TOOL_FAILURE", response, StringComparison.Ordinal);
+            Assert.Contains("reason: codegraph sync exited 1: " + error, response, StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.DoesNotContain("STATUS: TOOL_FAILURE", response, StringComparison.Ordinal);
+            Assert.True(CodeGraphWarning.IsMatch(response), response);
+        }
+    }
+
+    /// <summary>With no CodeGraph lock file the refresh syncs at once, without waiting.</summary>
+    [Fact]
+    public void WithNoLockFileTheRefreshSyncsAtOnce()
+    {
+        ScriptedProcessExecutor executor = SyncAnswers(SyncSucceeded);
+        List<TimeSpan> waits = [];
+        DocsTools tools = ToolsWithAnIndex(Root, executor, waits);
+
+        _ = tools.Explore("anything");
+
+        Assert.Single(executor.Calls);
+        Assert.Empty(waits);
+    }
+
+    /// <summary>
+    /// A CodeGraph lock file that goes away during the first, second or third wait lets the sync run
+    /// then, and not before: no sync is started while a look still finds the file.
+    /// </summary>
+    /// <remarks>
+    /// The owner's rule: look for the lock file before any sync; while it exists wait 1 second, then
+    /// 5, then 30, looking again after each.
+    /// </remarks>
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void ALockFileThatGoesAwayDuringAWaitLetsTheSyncRunThen(int waitsBeforeRelease)
+    {
+        ScriptedProcessExecutor executor = SyncAnswers(SyncSucceeded);
+        List<TimeSpan> waits = [];
+        DocsTools tools = ToolsWithAnIndex(Root, executor, wait =>
+        {
+            Assert.Empty(executor.Calls);
+            waits.Add(wait);
+            if (waits.Count == waitsBeforeRelease)
+                File.Delete(IndexLockFile);
+        });
+        File.WriteAllText(IndexLockFile, LivePid);
+
+        string response = tools.Explore("anything");
+
+        Assert.Equal(LockFileWaits.Take(waitsBeforeRelease), waits);
+        Assert.Single(executor.Calls);
+        Assert.DoesNotContain("STATUS: TOOL_FAILURE", response, StringComparison.Ordinal);
+        Assert.DoesNotContain("note: codegraph refresh skipped", response, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A lock file still present after the 1, 5 and 30 second waits fails the tool without one sync.
+    /// The failure names the file and the process it records, and the fix follows from whether that
+    /// process is running. The verdict is not kept: the next call looks for the file again.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ALockFileThatOutlastsEveryWaitFailsTheToolWithoutSyncing(bool holderIsRunning)
+    {
+        ScriptedProcessExecutor executor = SyncAnswers(SyncSucceeded);
+        List<TimeSpan> waits = [];
+        DocsTools tools = ToolsWithAnIndex(Root, executor, waits);
+        string pid = holderIsRunning ? LivePid : DeadPid;
+        File.WriteAllText(IndexLockFile, pid);
+
+        string response = tools.Explore("anything");
+
+        Assert.Empty(executor.Calls);
+        Assert.Equal(LockFileWaits, waits);
+        Assert.Contains("STATUS: TOOL_FAILURE", response, StringComparison.Ordinal);
+        Assert.Contains("tool: codegraph", response, StringComparison.Ordinal);
+        Assert.Contains("still held after 36 seconds", response, StringComparison.Ordinal);
+        Assert.Contains(IndexLockFile, response, StringComparison.Ordinal);
+        Assert.Contains(
+            $"PID {pid}, which is {(holderIsRunning ? "running" : "not running")}", response, StringComparison.Ordinal);
+        Assert.Contains(
+            holderIsRunning ? $"fix: wait for process {pid} to finish" : "fix: codegraph unlock ",
+            response,
+            StringComparison.Ordinal);
+
+        File.Delete(IndexLockFile);
+        string next = tools.Explore("anything");
+
+        Assert.Single(executor.Calls);
+        Assert.DoesNotContain("STATUS: TOOL_FAILURE", next, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Under <c>stop-on-tool-failure: false</c> the same outlasting lock file is the warning line and
+    /// the answer still comes back, again without a sync.
+    /// </summary>
+    [Fact]
+    public void ALockFileThatOutlastsEveryWaitIsAWarningWhenTheRepositoryOptedOut()
+    {
+        ScriptedProcessExecutor executor = SyncAnswers(SyncSucceeded);
+        List<TimeSpan> waits = [];
+        DocsTools tools = ToolsWithAnIndex(Root, executor, waits, stopsOnToolFailure: false);
+        File.WriteAllText(IndexLockFile, LivePid);
+
+        string response = tools.Explore("anything");
+
+        Assert.Empty(executor.Calls);
+        Assert.Equal(LockFileWaits, waits);
+        Assert.DoesNotContain("STATUS: TOOL_FAILURE", response, StringComparison.Ordinal);
+        Assert.True(CodeGraphWarning.IsMatch(response), response);
+        Assert.Contains("still held after 36 seconds", response, StringComparison.Ordinal);
+    }
+
+    /// <summary>The owner's schedule: the waits between looks at CodeGraph's lock file.</summary>
+    private static readonly TimeSpan[] LockFileWaits =
+        [TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30)];
+
+    /// <summary>This test process, which is running for as long as the test is.</summary>
+    private static readonly string LivePid =
+        Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>A process id above any the operating systems these tests run on hand out.</summary>
+    private const string DeadPid = "2147483600";
+
+    /// <summary>Where CodeGraph 1.6.2 keeps its own lock: <c>.codegraph/codegraph.lock</c>.</summary>
+    private string IndexLockFile => Path.Combine(Root, ".codegraph", "codegraph.lock");
+
+    /// <summary>What <c>codegraph sync .</c> prints on stdout before it reports anything.</summary>
+    private const string SyncBanner = "┌  Syncing CodeGraph\n│\n";
+
+    /// <summary>
+    /// What CodeGraph 1.6.2 answered, captured from a real run, when <c>codegraph sync .</c> found
+    /// <c>.codegraph/codegraph.lock</c> held by a live process: exit 1, and this one line on stderr.
+    /// </summary>
+    private static readonly ProcessResult HeldIndexLock = new(
+        1,
+        SyncBanner,
+        "✗ Failed to sync: Sync could not acquire the file lock; retry when the index is available. "
+        + "CodeGraph database is locked by another process (PID 91106). If this is stale, run "
+        + "'codegraph unlock' or delete /repo/.codegraph/codegraph.lock\n");
+
+    private static readonly ProcessResult SyncSucceeded = new(0, string.Empty, string.Empty);
+
+    /// <summary>
+    /// A CodeGraph child that gives each sync the next of <paramref name="answers"/>, and the last one
+    /// to every sync after that.
+    /// </summary>
+    private static ScriptedProcessExecutor SyncAnswers(params ProcessResult[] answers)
+    {
+        int next = 0;
+        return new ScriptedProcessExecutor(startInfo =>
+        {
+            if (Path.GetFileName(startInfo.FileName) != "codegraph" || startInfo.ArgumentList[0] != "sync")
+            {
+                throw new InvalidOperationException(
+                    $"The refresh ran '{startInfo.FileName} {string.Join(' ', startInfo.ArgumentList)}', not a sync.");
+            }
+
+            ProcessResult answer = answers[Math.Min(next, answers.Length - 1)];
+            next++;
+            return answer;
+        });
+    }
+
+    /// <summary>
+    /// Tools over a repository that requires CodeGraph and already has a <c>.codegraph/</c> folder, so
+    /// the refresh runs <c>sync</c> rather than <c>init</c>. The waits between sync attempts are
+    /// recorded in <paramref name="pauses"/> instead of being waited out.
+    /// </summary>
+    private static DocsTools ToolsWithAnIndex(
+        string root, IProcessExecutor executor, List<TimeSpan> pauses, bool stopsOnToolFailure = true) =>
+        ToolsWithAnIndex(root, executor, pauses.Add, stopsOnToolFailure);
+
+    /// <summary>The same tools, with each wait handed to <paramref name="pause"/> instead of being waited out.</summary>
+    private static DocsTools ToolsWithAnIndex(
+        string root, IProcessExecutor executor, Action<TimeSpan> pause, bool stopsOnToolFailure = true)
+    {
+        DocsTestCommands.Scaffolding.Scaffold(root);
+        McpDeclarationFixture.RequireCodeGraph(root);
+        if (!stopsOnToolFailure)
+        {
+            File.AppendAllText(
+                Path.Combine(root, ".kyber-weave", "kyber-weave.yml"),
+                Environment.NewLine + "stop-on-tool-failure: false" + Environment.NewLine);
+        }
+
+        Directory.CreateDirectory(Path.Combine(root, ".codegraph"));
+        return ScaffoldedTools(root, () => FakeCodeGraphResolver.WithSymbols(), executor, pause);
+    }
+
     private static string LockPath(string root) => CodeGraphProvisioner.LockPathFor(root, Path.GetTempPath());
 
     /// <summary>
@@ -353,7 +625,11 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
     /// requests it. The schedule is handed <see cref="ProvisionSucceeds"/>, so the refresh does not
     /// depend on a CodeGraph binary being installed on the machine running the test.
     /// </remarks>
-    private static DocsTools ScaffoldedTools(string root, Func<ICodeGraphResolver> resolverFactory)
+    private static DocsTools ScaffoldedTools(
+        string root,
+        Func<ICodeGraphResolver> resolverFactory,
+        IProcessExecutor? executor = null,
+        Action<TimeSpan>? pause = null)
     {
         KyberWeaveConfig config = KyberWeaveConfigLoader.Load(root);
         DocumentIndexHost host = new(
@@ -366,7 +642,7 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
         return DocsToolsComposition.Create(
             host,
             null,
-            DocsTestCommands.Freshness(root, ProvisionSucceeds()));
+            DocsTestCommands.Freshness(root, executor ?? ProvisionSucceeds(), pause: pause));
     }
 
     /// <summary>

@@ -357,10 +357,14 @@ A run that branched in place works in the canonical checkout, so neither check a
 
 ## Reading a budget stop
 
-`KW-ARB-BUDGET-001` ends a developer or `docs-dev` dispatch that thrashes. The worker guard counts each
-subagent's tool calls and minutes from its first call, keyed by the harness's subagent id, in append-only
+`KW-ARB-BUDGET-001` ends a developer or `docs-dev` dispatch that thrashes. The budget measures one turn of
+work, not the time since the agent was first dispatched. The worker guard counts each subagent's tool calls
+and minutes from the first call of its current turn, keyed by the harness's subagent id, in append-only
 files under `~/.kyber-weave/arbiter/budgets/` (swept after two days). A harness may resume the same subagent
-for a rework under the same id, so a window ends when the subagent has been idle longer than the budget's
+for a rework under the same id. On Copilot CLI the user-level hook file runs the guard on `subagentStop`,
+which ends the turn and closes its window, so the time the agent then sits idle is not counted and a rework
+sent to it later starts a fresh window with its first call. Elsewhere, and on a Copilot hook file rendered
+before that entry existed, a window ends when the subagent has been idle longer than the budget's
 minutes, or for a minute after it was stopped; the resumed dispatch starts a fresh one. Past `arbiter.dispatch-budget`
 (default 15 minutes or 150 tool calls) it denies every further call and tells the worker to return
 `STATUS: BUDGET_EXCEEDED` with what is done and what is not. A review council seat (`review-lens` or

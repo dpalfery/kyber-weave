@@ -14,6 +14,12 @@ public sealed record DoctorOptions(
     string CodeGraphExecutable,
     string McpExecutable)
 {
+    /// <summary>
+    ///     The pauses before each further <c>codegraph sync</c> when one finds CodeGraph's own index lock held. A
+    ///     test replaces them so it does not wait in real time.
+    /// </summary>
+    public IReadOnlyList<TimeSpan> HeldLockRetryPauses { get; init; } = CodeGraphIndexRules.HeldLockRetryPauses;
+
     /// <summary>The default bound on one CodeGraph index run, in seconds. Run-start and review commands reuse it.</summary>
     public const int DefaultIndexTimeoutSeconds = 600;
 

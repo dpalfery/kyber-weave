@@ -216,6 +216,13 @@ than in each caller's shell script:
   is not a shell alias: initialization rewrites tracked files, and reverting the operator's own
   edits would be unrecoverable. The set of dirty tracked files is recorded before the index
   work starts, so only what the index itself wrote is reverted.
+- **A held CodeGraph lock is never repaired.** A `sync` that fails only because CodeGraph's own
+  lock (`.codegraph/codegraph.lock`) is held is retried twice, after 0.3 and 0.7 seconds. If
+  the lock is still held, `codegraph.index` passes with a `warning:` message, the exit code is
+  not changed by it, and the `explore` and docs-server proofs still run against the index on
+  disk. No repair runs while another live process holds that lock, whatever failed:
+  `codegraph index` against a held lock exits 1 and leaves the database empty (measured on
+  CodeGraph 1.6.2), so the repair would break a healthy index.
 - **Never delete, never install.** A corrupt or unwritable `.codegraph/` is reported with a
   remedy a human applies; callers of the CLI are told to install CodeGraph rather than it being
   installed for them. The binary's absence is exit `3`, not a failure to route around.
@@ -241,13 +248,27 @@ with no shell was the only index it would ever see. It now refreshes the index i
   a **zero wait**: a tool call cannot block for the 600-second index timeout.
 - **Contention is a note, not a failure.** A held lock means another process is refreshing the
   index — a worker's `doctor --ensure`, the CodeGraph daemon — so the answer proceeds with one
-  `note:` line above the body. A refresh that fails while the lock is held is treated the same
-  way, because the lock is the one honest witness that someone is already working on it.
+  `note:` line above the body.
+- **No sync before a look for CodeGraph's lock file.** CodeGraph keeps a second lock, the file
+  `.codegraph/codegraph.lock`, which its server, its file watcher and every `sync` create while
+  they write. The refresh looks for that file before it starts a `sync`. If the file exists it
+  waits 1 second and looks again, then 5 seconds, then 30. As soon as a look finds no file the
+  `sync` runs. If the fourth look still finds it, after 36 seconds, no `sync` runs and the
+  tools fail as below: the reason names the file, the PID it records and whether that process
+  is running, and the fix is `codegraph unlock <root>` for a process that is not running and
+  "wait for it or stop it" otherwise. Existence is the test, not the PID. This failure is not
+  kept for the 60-second interval, so the next call looks again.
+- **Losing the race after the look is contention.** A `sync` can still find the lock taken
+  after the look found no file. It is retried twice, after 0.3 and 0.7 seconds, each after its
+  own look; if it is still held the answer proceeds with the same kind of `note:` line.
+  CodeGraph exits 1 for every `sync` failure, so this case is recognised by the message its
+  `sync` prints, "Sync could not acquire the file lock". Its "rebuild in progress" messages
+  stay failures, because the database file is being replaced.
 - **Failure is a token, not a sentence.** A missing binary or a failed `sync` returns
   `STATUS: TOOL_FAILURE` with `tool:`, `reason:` and `fix:` lines under the stop rule, or the
   same detail as a `warning:` line under `stop-on-tool-failure: false`. The token is a whole
   line so a passing mention cannot satisfy an orchestrator that routes on it. Seven of the
-  eight tools return the block; `docs_get_source_repository_and_revision` always answers so a
+  eight read-only tools return the block; `docs_get_source_repository_and_revision` always answers so a
   failure can be diagnosed, and
   `docs_detect_drift_between_documents_and_code` answers **with** the failure because its
   verdict is the failure report.

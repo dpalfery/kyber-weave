@@ -45,24 +45,20 @@ public sealed partial class PlanTaskFileValidator
     private readonly string _repoRoot;
     private readonly IDocsEngineConfig _config;
     private readonly IRepositoryFileStore _files;
-    private readonly IBoundedProcessExecutor _process;
 
     /// <summary>Creates the validator over a repository root and its registry and ontology.</summary>
     /// <param name="repoRoot">The absolute repository root the plan paths are relative to.</param>
     /// <param name="config">The effective host configuration, with its ontology applied.</param>
     /// <param name="files">Reads the task files and walks the plans folder.</param>
-    /// <param name="process">Runs git for the file-scope check.</param>
-    public PlanTaskFileValidator(string repoRoot, IDocsEngineConfig config, IRepositoryFileStore files, IBoundedProcessExecutor process)
+    public PlanTaskFileValidator(string repoRoot, IDocsEngineConfig config, IRepositoryFileStore files)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(files);
-        ArgumentNullException.ThrowIfNull(process);
 
         _repoRoot = repoRoot;
         _config = config;
         _files = files;
-        _process = process;
     }
 
     /// <summary>
@@ -453,7 +449,6 @@ public sealed partial class PlanTaskFileValidator
                 Hint: $"The plan is the authority. Run {fix} to drop the entry, or add the task to the plan first and then run it."));
         }
 
-        PlanFileScope fileScope = new(_repoRoot, _files, _process);
         foreach ((string id, PlanTaskFileEntry entry) in declared)
         {
             if (!byId.TryGetValue(id, out PlanTask? task))
@@ -474,7 +469,7 @@ public sealed partial class PlanTaskFileValidator
             }
 
             // The task file keeps the repository paths among the plan's file entries, so that is what it is compared to.
-            IReadOnlyList<string> planFiles = fileScope.Filter(task.Files).Kept;
+            IReadOnlyList<string> planFiles = PlanFileScope.Filter(task.Files).Kept;
             if (!SameSet(planFiles, entry.Files ?? []))
             {
                 report.Add(new Diagnostic(

@@ -21,7 +21,8 @@ internal static class LedgerFacts
         IArbiterLedger ledger,
         IArbiterDecisionLog decisions,
         ArbiterEvent ev,
-        string ledgerId)
+        string ledgerId,
+        ArbiterRunScope? run = null)
     {
         if (!facts.Contains(CompletedTasks))
         {
@@ -29,8 +30,8 @@ internal static class LedgerFacts
         }
 
         string? planFile = Text(facts, "delegation.plan-file");
-        facts = facts.With(CompletedTasks, ledger.CompletedTasks(planFile).ToList(), ArbiterFactLabel.Derived);
-        return facts.With(InFlightPaths, ReadInFlight(ledger, decisions, ev, ledgerId), ArbiterFactLabel.Derived);
+        facts = facts.With(CompletedTasks, ledger.CompletedTasks(planFile, run).ToList(), ArbiterFactLabel.Derived);
+        return facts.With(InFlightPaths, ReadInFlight(ledger, decisions, ev, ledgerId, run), ArbiterFactLabel.Derived);
     }
 
     /// <summary>
@@ -41,14 +42,15 @@ internal static class LedgerFacts
         IArbiterLedger ledger,
         IArbiterDecisionLog decisions,
         ArbiterEvent ev,
-        string ledgerId)
+        string ledgerId,
+        ArbiterRunScope? run)
     {
         if (!ev.ObservesReturns)
         {
             return [];
         }
 
-        return [.. ledger.InFlightPaths(ledgerId, ev.Session, NotDispatchedLedgerIds(decisions))];
+        return [.. ledger.InFlightPaths(ledgerId, ev.Session, NotDispatchedLedgerIds(decisions), run)];
     }
 
     /// <summary>

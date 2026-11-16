@@ -16,13 +16,11 @@ namespace KyberWeave.Core.Docs.Validation;
 /// surfaces cannot diverge on which validators run or in what order.
 /// </summary>
 /// <param name="files">Reads the registers and glossary the validators check.</param>
-/// <param name="process">Runs the git commands the task-file validator reads.</param>
 /// <param name="changes">Reads the files the working tree changed, for the archive-closeout gate.</param>
 /// <param name="severityOverrides">Validates the review guidance's severity overrides.</param>
 /// <param name="timeProvider">Dates new glossary rows.</param>
 public sealed class DocsSchemaGate(
     IRepositoryFileStore files,
-    IBoundedProcessExecutor process,
     IGitChangeReader changes,
     ISeverityOverrideSource severityOverrides,
     TimeProvider timeProvider) : IDocsSchemaGate
@@ -52,7 +50,7 @@ public sealed class DocsSchemaGate(
         report.AddRange(severityOverrides.Validate(repoRoot, config.ConfigReg).Items);
         report.AddRange(new PlanInventoryValidator(config).Validate(corpus).Items);
         report.AddRange(new TodoInventoryValidator(config).Validate(corpus).Items);
-        report.AddRange(new PlanTaskFileValidator(repoRoot, config, files, process).Validate(corpus).Items);
+        report.AddRange(new PlanTaskFileValidator(repoRoot, config, files).Validate(corpus).Items);
 
         try
         {

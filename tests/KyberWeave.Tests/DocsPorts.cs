@@ -14,5 +14,5 @@ internal static class DocsPorts
 
     internal static readonly IExclusiveFileWriter Exclusive = new ExclusiveFileWriter();
 
-    internal static IPlanTaskService Tasks => new PlanTaskService(Files, Process);
+    internal static IPlanTaskService Tasks => new PlanTaskService(Files);
 }

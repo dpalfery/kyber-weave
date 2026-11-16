@@ -26,11 +26,24 @@ public sealed class PacketTestCommandTests
     private static readonly PlanTaskFileEntry Task = new("T1", Files: [Source], Prompt: "Task T1: x\n");
 
     [Fact]
-    public void TheContractRowsRunnerCommandIsPrintedVerbatim()
+    public void AGatedTaskGetsTheGateCommandAndNotASecondCommandToRunByHand()
     {
         PlanContractRow row = new("T1", "tests/X.cs", "`dotnet test --filter FullyQualifiedName~XTests`", null, null, null);
 
         string? text = PacketTestCommand.Render(KyberWeaveTestPaths.ToolRoot, Config(), "csharp-dev", Task, row, windows: false);
+
+        Assert.NotNull(text);
+        Assert.Contains("kyber-weave review gates . --agent csharp-dev --task t1", text, StringComparison.Ordinal);
+        Assert.Contains("Never run the tests by hand as well", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ready to paste", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheContractRowsRunnerCommandIsPrintedVerbatimWhenNoGateRunsIt()
+    {
+        PlanContractRow row = new("T1", "tests/X.cs", "`dotnet test --filter FullyQualifiedName~XTests`", null, null, null);
+
+        string? text = PacketTestCommand.Render(KyberWeaveTestPaths.ToolRoot, Config(), "react-dev", Task, row, windows: false);
 
         Assert.NotNull(text);
         Assert.StartsWith("## Test command\n", text, StringComparison.Ordinal);

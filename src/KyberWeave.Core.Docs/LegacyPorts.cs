@@ -10,5 +10,4 @@ namespace KyberWeave.Core.Docs;
 internal static class LegacyPorts
 {
     internal static readonly IRepositoryFileStore Files = new PhysicalRepositoryFileStore();
-    internal static readonly IBoundedProcessExecutor Process = new KernelBoundedProcessExecutor();
 }

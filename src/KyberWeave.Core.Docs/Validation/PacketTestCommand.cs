@@ -19,7 +19,7 @@ public static class PacketTestCommand
     public const string Heading = PacketTestCommandRenderer.Heading;
 
     private static readonly IPlanTaskTargetService Targets = new PlanTaskTargetService(
-        new PlanTaskService(LegacyPorts.Files, LegacyPorts.Process),
+        new PlanTaskService(LegacyPorts.Files),
         new TaskGateSelectionService(new FileRepositoryTreeProbe(), new FileTestClassSources()));
 
     private static readonly ITaskGateSelectionService TaskGates =

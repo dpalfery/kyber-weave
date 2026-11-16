@@ -47,6 +47,53 @@ public static class CodeGraphIndexRules
     public static bool IsBusy(DoctorCheck check) =>
         check.Reason?.StartsWith("codegraph.index busy", StringComparison.Ordinal) == true;
 
+    /// <summary>The file CodeGraph keeps its own lock in, inside <see cref="IndexDirectoryName"/>.</summary>
+    public const string IndexLockFileName = "codegraph.lock";
+
+    /// <summary>
+    ///     How long the docs server waits before each further look at CodeGraph's lock file, when a refresh finds
+    ///     the file present. The owner set the schedule: 1, 5, then 30 seconds, and a failure after the last look.
+    /// </summary>
+    public static IReadOnlyList<TimeSpan> LockFileWaits { get; } =
+        [TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30)];
+
+    /// <summary>Returns CodeGraph's own lock file for a repository root: <c>.codegraph/codegraph.lock</c>.</summary>
+    /// <param name="root">The repository root.</param>
+    public static string IndexLockPathFor(string root) =>
+        Path.Combine(root, IndexDirectoryName, IndexLockFileName);
+
+    /// <summary>
+    ///     The pauses before the second and third <c>codegraph sync</c> when the first finds CodeGraph's own index
+    ///     lock held.
+    /// </summary>
+    /// <remarks>
+    ///     Measured against CodeGraph 1.6.2: a sync that finds the lock held returns in about 0.15 seconds, and a
+    ///     sync with nothing to do holds the lock for about 0.3 seconds. Three attempts one second apart in total
+    ///     outlast that and the short syncs a file watcher runs, and cost the caller at most about 1.5 seconds. A
+    ///     longer hold is an index rebuild, which no wait an interactive call can afford would outlast.
+    /// </remarks>
+    public static IReadOnlyList<TimeSpan> HeldLockRetryPauses { get; } =
+        [TimeSpan.FromMilliseconds(300), TimeSpan.FromMilliseconds(700)];
+
+    /// <summary>
+    ///     Whether a failed check reports that <c>codegraph sync</c> found CodeGraph's own index lock held by another
+    ///     process: its server, its file watcher, or another sync. The index on disk is then usable, only busy.
+    /// </summary>
+    /// <remarks>
+    ///     CodeGraph 1.6.2 exits 1 for every sync failure and prints no code or marker for this one, so the only
+    ///     signal is its message. The phrase matched is the one its sync prints when it cannot take
+    ///     <c>.codegraph/codegraph.lock</c>, whichever process holds it. It sits at the start of the first error
+    ///     line, so the 160-character cut the check's reason is given cannot remove it. Its two "rebuild in
+    ///     progress" messages are deliberately not matched: the database file is being replaced then, so the index
+    ///     on disk cannot be answered from.
+    /// </remarks>
+    /// <param name="check">The <c>codegraph.index</c> check a provisioning run returned.</param>
+    public static bool IsIndexLockHeld(DoctorCheck check) =>
+        !check.Passed
+        && check.Reason is { } reason
+        && reason.StartsWith("codegraph sync exited ", StringComparison.Ordinal)
+        && reason.Contains("Sync could not acquire the file lock", StringComparison.Ordinal);
+
     /// <summary>
     ///     Whether an <see cref="IOException"/> represents a sharing or locking violation caused by another process.
     /// </summary>

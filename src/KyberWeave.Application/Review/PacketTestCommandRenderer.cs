@@ -64,14 +64,15 @@ public static class PacketTestCommandRenderer
                 .Append("and writes the report that is your evidence:\n\n")
                 .Append("    ").Append(run).Append(" --red    # test-first only: once, after writing the tests and before implementing\n")
                 .Append("    ").Append(run).Append("          # every run after that, and the final passing run\n")
+                .Append("\nNever run the tests by hand as well: the gate run is the test run, and a second run of the same tests only costs time.\n")
                 .Append("\nThe tests it runs:\n");
             foreach (string line in gated)
                 text.Append("\n    ").Append(line);
         }
 
-        if (contract is not null)
+        if (gated.Count == 0 && contract is not null)
         {
-            text.Append(gated.Count > 0 ? "\n\n" : "\n").Append("This task's Test contract runner command, ready to paste:\n\n    ").Append(contract);
+            text.Append("\nThis task's Test contract runner command, ready to paste:\n\n    ").Append(contract);
         }
 
         return text.ToString();
