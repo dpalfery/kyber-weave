@@ -131,7 +131,12 @@ public class ApplicationParityTests
         {
             Parts = [new ContentPart("user_prompt", "hello", Tokens: 3)],
         };
-        store.PutRecords([empty, withParts]);
+        CanonicalRecord fromContent = MakeLlmRecord("span-content", "sess-content", "droid", "2026-11-14T10:02:00.000Z", 0, 0) with
+        {
+            Parts = null,
+            Content = new Dictionary<string, string> { ["user_prompt"] = "hi" },
+        };
+        store.PutRecords([empty, withParts, fromContent]);
         KyberBridgeEngine bridge = Bridge(store);
 
         JsonElement none = bridge.GetSessionContent("sess-content", spanId: "span-empty", full: true)!.Value;
@@ -143,6 +148,11 @@ public class ApplicationParityTests
         Assert.Equal("user_prompt", entry.GetProperty("part").GetString());
         Assert.Equal("hello", entry.GetProperty("text").GetString());
         Assert.Equal(3, entry.GetProperty("tokens").GetInt64());
+
+        JsonElement viaContent = bridge.GetSessionContent("sess-content", spanId: "span-content", full: true)!.Value;
+        JsonElement contentEntry = Assert.Single(viaContent.GetProperty("parts").EnumerateArray().ToList());
+        Assert.Equal("user_prompt", contentEntry.GetProperty("part").GetString());
+        Assert.Equal("hi", contentEntry.GetProperty("text").GetString());
     }
 
     [Fact]

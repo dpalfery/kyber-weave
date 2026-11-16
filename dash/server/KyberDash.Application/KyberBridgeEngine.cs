@@ -390,11 +390,10 @@ public class KyberBridgeEngine
                         ["spanId"] = record.SpanId,
                         ["index"] = index,
                         ["part"] = name,
-                        ["text"] = text,
+                        ["text"] = text ?? string.Empty,
                     };
                     if (source?.Tokens is long tokens) entry["tokens"] = tokens;
                     if (source?.Server is string server) entry["server"] = server;
-                    if (source?.Order is int order) entry["order"] = order;
                     if (source?.Resident is bool resident) entry["resident"] = resident;
                     if (source?.Truncated is bool clipped) entry["truncated"] = clipped;
                     chunks.Add(entry);
