@@ -97,23 +97,31 @@ if (!expectRootFromFlag && !string.IsNullOrWhiteSpace(expectRootEnvironment))
     }
 }
 
-OntologyConfig ontology = DocsRootRegistry.ResolveOntology(repoRoot);
-
 // Composition root. The shared layers register their own services first; every registration below this line
 // is a host decision made once from this process's own argv and root. Core never invents these collaborators.
 builder.Services.AddWeaveApplication();
-builder.Services.AddSingleton(services => new DocumentIndexHost(
-    repoRoot,
-    () => services.GetRequiredService<ICodeGraphPortsFactory>().ForRepository(repoRoot).Resolver,
-    () => services.GetRequiredService<IDocumentSourceFactory>().Create(repoRoot, ontology).Load(),
-    ontology.DocsRoots,
-    ontology.ResolvedCatalogPath));
+builder.Services.AddSingleton(services =>
+{
+    // Read through the container's configuration repository once, at first resolution, so the
+    // corpus this process serves is the one its configuration names.
+    OntologyConfig ontology = DocsRootRegistry.ResolveOntology(repoRoot, services);
+    return new DocumentIndexHost(
+        repoRoot,
+        () => services.GetRequiredService<ICodeGraphPortsFactory>().ForRepository(repoRoot).Resolver,
+        () => services.GetRequiredService<IDocumentSourceFactory>().Create(repoRoot, ontology).Load(),
+        ontology.DocsRoots,
+        ontology.ResolvedCatalogPath);
+});
 builder.Services.AddSingleton<IDocsAnalysisReader>(services => DocsToolsComposition.AnalysisReader(services, repoRoot));
 
 // The refresh schedule is a process-wide decision, made once from this process's own argv. The
 // tools receive it by injection so a test that asks them directly gets the default cadence.
-builder.Services.AddSingleton<ICodeGraphFreshnessGate>(new CodeGraphFreshness(repoRoot, codeGraphRefreshEnabled));
-builder.Services.AddSingleton<IDocsHostConfiguration, HostConfiguration>();
+builder.Services.AddSingleton<ICodeGraphFreshnessGate>(services => new CodeGraphFreshness(
+    repoRoot,
+    codeGraphRefreshEnabled,
+    services.GetRequiredService<ICodeGraphProvisioner>(),
+    services.GetRequiredService<IKyberWeaveConfigRepository>(),
+    services.GetRequiredService<TimeProvider>()));
 builder.Services.AddSingleton<IDocsGateRunner, DocsGateRunner>();
 builder.Services.AddSingleton<IDocsQueryService, DocsQueryService>();
 builder.Services.AddSingleton<IPlanLifecycleService>(services =>

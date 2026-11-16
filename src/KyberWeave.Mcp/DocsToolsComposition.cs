@@ -17,7 +17,7 @@ namespace KyberWeave.Mcp;
 internal static class DocsToolsComposition
 {
     private static readonly Lazy<IServiceProvider> DefaultServices = new(
-        () => new ServiceCollection().AddSingleton<IDocsHostConfiguration, HostConfiguration>().AddWeaveApplication().BuildServiceProvider());
+        () => new ServiceCollection().AddWeaveApplication().BuildServiceProvider());
 
     /// <summary>The container the shared collaborators are resolved from: <paramref name="services"/>, or the default one.</summary>
     /// <param name="services">The caller's container, or null.</param>
@@ -31,7 +31,7 @@ internal static class DocsToolsComposition
         ArgumentNullException.ThrowIfNull(provider);
         return new RepositoryDocsAnalysisReader(
             repositoryRoot,
-            provider.GetService<IDocsHostConfiguration>() ?? new HostConfiguration(),
+            provider.GetRequiredService<IDocsHostConfiguration>(),
             provider.GetRequiredService<ICodeGraphPortsFactory>(),
             provider.GetRequiredService<IManagedGlossaryFactory>(),
             provider.GetRequiredService<IDocumentSourceFactory>());
@@ -56,7 +56,7 @@ internal static class DocsToolsComposition
     {
         ArgumentNullException.ThrowIfNull(host);
         IServiceProvider provider = ServicesOrDefault(services);
-        IDocsHostConfiguration hostConfiguration = provider.GetService<IDocsHostConfiguration>() ?? new HostConfiguration();
+        IDocsHostConfiguration hostConfiguration = provider.GetRequiredService<IDocsHostConfiguration>();
         DocsQueryService query = new(
             host,
             analysisReader,

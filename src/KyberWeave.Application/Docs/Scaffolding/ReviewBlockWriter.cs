@@ -1,44 +1,15 @@
-using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review.Catalogue;
+using System.Text.RegularExpressions;
 using YamlDotNet.Core;
 
 namespace KyberWeave.Core.Docs.Scaffolding;
 
 /// <summary>
-/// What <c>docs init</c> decided about the catalogue review gates: whether it wrote them,
-/// left a host-owned block alone, or stayed out entirely.
-/// </summary>
-/// <param name="OptedOut">True when the operator passed <c>--no-review-gates</c>.</param>
-/// <param name="AlreadyPresent">True when the host configuration already had a <c>review:</c> section.</param>
-/// <param name="Written">True when this run appended the rendered block.</param>
-/// <param name="WrittenGates">Each live gate written, as the technology it serves and its final id.</param>
-/// <param name="CommentedOutGates">Each gate written commented out, with the reason it is not live.</param>
-/// <param name="NoFamily">Declared technologies with no catalogue family, so no gates ship for them.</param>
-/// <param name="MissingFromExisting">
-/// Rendered gate ids absent from a host-owned <c>review:</c> section, reported as information only.
-/// </param>
-public sealed record ReviewGatesOutcome(
-    bool OptedOut,
-    bool AlreadyPresent,
-    bool Written,
-    IReadOnlyList<(string Technology, string GateId)> WrittenGates,
-    IReadOnlyList<(string GateId, string Reason)> CommentedOutGates,
-    IReadOnlyList<string> NoFamily,
-    IReadOnlyList<string> MissingFromExisting);
-
-/// <summary>
-/// The rendered block <c>docs init</c> may write, and whether it may write it at all.
-/// </summary>
-/// <param name="Rendered">The catalogue render for the declared technologies.</param>
-/// <param name="ShouldWrite">
-/// False when no declared technology has a catalogue entry; there is then no block to write.
-/// </param>
-public sealed record ReviewGatesPlan(RenderedReviewBlock Rendered, bool ShouldWrite);
-
-/// <summary>
-/// Appends the rendered catalogue <c>review:</c> block to the host configuration, or reports
-/// why it wrote nothing.
+/// Renders the catalogue <c>review:</c> block for a repository's declared technologies, and
+/// appends it to a host configuration, or reports why it wrote nothing.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -55,8 +26,24 @@ public sealed record ReviewGatesPlan(RenderedReviewBlock Rendered, bool ShouldWr
 /// against it; without the root every nested-root gate would be refused as uncheckable.
 /// </para>
 /// </remarks>
-public static partial class ReviewBlockWriter
+public sealed partial class ReviewBlockWriter : IReviewGateCatalogue
 {
+    private readonly IRepositoryFileStore _files;
+    private readonly IRepositoryFileLister _lister;
+    private readonly IRepositoryTreeProbe _tree;
+
+    /// <summary>Creates the writer over the file reads and repository listing it needs.</summary>
+    /// <param name="files">Reads the repository root's files.</param>
+    /// <param name="lister">Lists the repository's files, for project-root detection.</param>
+    /// <param name="tree">Answers the path questions the review configuration parser asks.</param>
+    public ReviewBlockWriter(
+        IRepositoryFileStore files, IRepositoryFileLister lister, IRepositoryTreeProbe tree)
+    {
+        _files = files ?? throw new ArgumentNullException(nameof(files));
+        _lister = lister ?? throw new ArgumentNullException(nameof(lister));
+        _tree = tree ?? throw new ArgumentNullException(nameof(tree));
+    }
+
     /// <summary>
     /// True when <paramref name="configText"/> already carries a top-level <c>review:</c> key.
     /// The key must start in column zero, so a commented <c># review:</c> does not count.
@@ -73,12 +60,12 @@ public static partial class ReviewBlockWriter
     /// rules. The test-runner choice (MTP versus VSTest) is read from the repository's
     /// <c>global.json</c> by the render itself.
     /// </summary>
-    public static ReviewGatesPlan Plan(string repoRoot, IReadOnlyList<string> declaredTechnologies)
+    public ReviewGatesPlan Plan(string repoRoot, IReadOnlyList<string> declaredTechnologies)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(declaredTechnologies);
 
-        IReadOnlyList<GateCatalogueFamily> families = GateCatalogue.LoadEmbedded();
+        IReadOnlyList<GateCatalogueFamily> families = GateCatalogueRenderer.LoadEmbedded();
 
         // No declared technology maps to a family: there is nothing to detect and nothing to
         // write, so the repository is never even walked. The render would be an empty block;
@@ -99,14 +86,21 @@ public static partial class ReviewBlockWriter
             return new ReviewGatesPlan(empty, false);
         }
 
+        IReadOnlyList<string> repositoryFiles = _lister.List(repoRoot);
         Dictionary<string, ProjectRootSet> rootsByFamily = new(StringComparer.Ordinal);
         foreach (GateCatalogueFamily family in families)
         {
-            rootsByFamily[family.Family] = ProjectRootDetector.Detect(
-                repoRoot, [.. family.Markers], family.Nesting, family.Pair, family.Fallback?.ToArray());
+            rootsByFamily[family.Family] = ProjectRootDetection.Detect(
+                repositoryFiles,
+                [.. family.Markers],
+                family.Nesting,
+                family.Pair,
+                family.Fallback?.ToArray());
         }
 
-        RenderedReviewBlock rendered = GateCatalogue.Render(declaredTechnologies, rootsByFamily, repoRoot);
+        GateCatalogueFacts facts = new(_files.FileExists, _files.ReadAllText);
+        RenderedReviewBlock rendered = GateCatalogueRenderer.Render(
+            declaredTechnologies, rootsByFamily, repoRoot, facts);
         return new ReviewGatesPlan(rendered, true);
     }
 
@@ -146,7 +140,7 @@ public static partial class ReviewBlockWriter
     /// line, in the file's existing newline style. Throws before anything is written when the
     /// final text does not load.
     /// </summary>
-    public static string AppendBlock(string configText, RenderedReviewBlock block, string repoRoot)
+    public string AppendBlock(string configText, RenderedReviewBlock block, string repoRoot)
     {
         ArgumentNullException.ThrowIfNull(configText);
         ArgumentNullException.ThrowIfNull(block);
@@ -174,7 +168,7 @@ public static partial class ReviewBlockWriter
     /// The failure carries <c>KW-CONFIG-001</c> and names the first rendered gate, because a
     /// catalogue that cannot load is a catalogue bug the tests catch first.
     /// </summary>
-    public static void ValidateFinalText(string finalText, string repoRoot, RenderedReviewBlock block)
+    public void ValidateFinalText(string finalText, string repoRoot, RenderedReviewBlock block)
     {
         ArgumentNullException.ThrowIfNull(finalText);
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
@@ -183,11 +177,12 @@ public static partial class ReviewBlockWriter
         try
         {
             KyberWeaveYamlDocument document = KyberWeaveYamlParser.Parse(finalText);
-            ReviewConfigLoader.Merge(
+            ReviewConfigParser.Merge(
                 ReviewConfig.ProductDefaults,
                 document.Review,
                 repoRoot,
-                ReviewConfigLoader.UnknownKeyWarnings(finalText));
+                ReviewConfigParser.UnknownKeyWarnings(finalText),
+                new ReviewWorkingDirectoryFacts(_tree.DirectoryExists, _tree.LeadsOutsideThroughSymlink));
         }
         catch (Exception ex) when (ex is YamlException or InvalidDataException)
         {
@@ -197,7 +192,7 @@ public static partial class ReviewBlockWriter
                     ? block.CommentedOut[0].GateId
                     : "review";
             throw new InvalidDataException(
-                $"{KyberWeaveConfigLoader.ConfigLoadErrorCode}: The rendered review gates do not load " +
+                $"{IDocsHostConfiguration.ConfigLoadErrorCode}: The rendered review gates do not load " +
                 $"so nothing was written (gate '{gate}'): {ex.Message}",
                 ex);
         }
@@ -207,7 +202,8 @@ public static partial class ReviewBlockWriter
     /// The rendered gate ids absent from the host-owned <c>review:</c> section, live gates
     /// first in render order, each listed once. Reported as information; the exit code is unchanged.
     /// </summary>
-    public static IReadOnlyList<string> MissingGateIds(ReviewConfig? hostReview, RenderedReviewBlock rendered)
+    public static IReadOnlyList<string> MissingGateIds(
+        ReviewConfig? hostReview, RenderedReviewBlock rendered)
     {
         ArgumentNullException.ThrowIfNull(rendered);
 

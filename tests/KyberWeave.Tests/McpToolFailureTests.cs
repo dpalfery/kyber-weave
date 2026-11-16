@@ -6,6 +6,7 @@ using KyberWeave.Core.Docs.Search;
 using KyberWeave.Domain.CodeGraph;
 using KyberWeave.Mcp;
 using Xunit;
+using KyberWeave.Tests.Fakes;
 
 namespace KyberWeave.Tests;
 
@@ -59,7 +60,7 @@ public sealed class McpToolFailureTests : IDisposable
     [Fact]
     public void DocsToolsReportToolFailureWithReasonAndFixUnderTheDefaultStopRule()
     {
-        DocsScaffolder.Scaffold(Root);
+        DocsTestCommands.Scaffolding.Scaffold(Root);
         McpDeclarationFixture.RequireCodeGraph(Root);
 
         string response = Tools(Root).Explore("anything");
@@ -81,7 +82,7 @@ public sealed class McpToolFailureTests : IDisposable
     [Fact]
     public void DocsToolsWarnInsteadOfFailingWhenTheRepositoryOptsOutOfTheStopRule()
     {
-        DocsScaffolder.Scaffold(Root);
+        DocsTestCommands.Scaffolding.Scaffold(Root);
         McpDeclarationFixture.RequireCodeGraph(Root);
         File.AppendAllText(
             Path.Combine(Root, ".kyber-weave", "kyber-weave.yml"),
@@ -106,7 +107,7 @@ public sealed class McpToolFailureTests : IDisposable
     [Fact]
     public void TheRevisionToolStillAnswersWhileTheOtherDocsToolsReportToolFailure()
     {
-        DocsScaffolder.Scaffold(Root);
+        DocsTestCommands.Scaffolding.Scaffold(Root);
         McpDeclarationFixture.RequireCodeGraph(Root);
         DocsTools tools = Tools(Root);
 
@@ -136,7 +137,7 @@ public sealed class McpToolFailureTests : IDisposable
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
 
-        return DocsToolsComposition.Create(host, null, new CodeGraphFreshness(root, refreshEnabled: true));
+        return DocsToolsComposition.Create(host, null, DocsTestCommands.Freshness(root));
     }
 
     /// <summary>A CodeGraph port that reports no readable index, as a missing or unreadable database does.</summary>

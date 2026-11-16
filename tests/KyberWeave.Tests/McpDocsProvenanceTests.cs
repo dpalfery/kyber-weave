@@ -160,8 +160,8 @@ public sealed class McpDocsProvenanceTests : IDisposable
         string rootB = Path.Combine(_parent.Path, "repo-b");
         Directory.CreateDirectory(rootA);
         Directory.CreateDirectory(rootB);
-        DocsScaffolder.Scaffold(rootA, owner: "alpha-team");
-        DocsScaffolder.Scaffold(rootB, owner: "beta-team");
+        DocsTestCommands.Scaffolding.Scaffold(rootA, owner: "alpha-team");
+        DocsTestCommands.Scaffolding.Scaffold(rootB, owner: "beta-team");
         // Stop git from walking up into a parent checkout when TMPDIR sits inside one:
         // an invalid local gitdir keeps rev=unavailable / dirty=unknown deterministic.
         IsolateFromParentGit(rootA);

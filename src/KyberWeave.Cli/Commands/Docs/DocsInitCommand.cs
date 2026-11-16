@@ -27,11 +27,16 @@ namespace KyberWeave.Cli.Commands.Docs;
 public sealed class DocsInitCommand : Command<DocsInitSettings>
 {
     private readonly IMcpWiringService _wiring;
+    private readonly IDocsScaffoldingService _scaffolder;
 
-    /// <summary>Creates the command over the MCP wiring service the container resolves.</summary>
+    /// <summary>Creates the command over the services the container resolves.</summary>
     /// <param name="wiring">Inspects, repairs and renames the harness MCP configuration.</param>
-    public DocsInitCommand(IMcpWiringService wiring) =>
+    /// <param name="scaffolder">Bootstraps the documentation corpus.</param>
+    public DocsInitCommand(IMcpWiringService wiring, IDocsScaffoldingService scaffolder)
+    {
         _wiring = wiring ?? throw new ArgumentNullException(nameof(wiring));
+        _scaffolder = scaffolder ?? throw new ArgumentNullException(nameof(scaffolder));
+    }
 
     /// <summary>The package APM installs to obtain the authoring skill.</summary>
     private const string SkillPackage = "dpalfery/kyber-weave";
@@ -80,7 +85,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// <inheritdoc />
     public override int Execute(CommandContext context, DocsInitSettings settings, CancellationToken cancellationToken)
     {
-        (int ExitCode, ScaffoldResult? Result, string? Error) attempt = TryScaffold(settings);
+        (int ExitCode, ScaffoldResult? Result, string? Error) attempt = TryScaffold(_scaffolder, settings);
         if (attempt.ExitCode != 0)
         {
             AnsiConsole.MarkupLine($"[red]Could not scaffold: {Markup.Escape(attempt.Error!)}[/]");
@@ -167,12 +172,16 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     }
 
     /// <summary>Runs the scaffold step and translates expected operator failures to exit 1.</summary>
+    /// <param name="scaffolder">The scaffolding service to run.</param>
+    /// <param name="settings">The operator's options.</param>
     internal static (int ExitCode, ScaffoldResult? Result, string? Error) TryScaffold(
-        DocsInitSettings settings)
+        IDocsScaffoldingService scaffolder, DocsInitSettings settings)
     {
+        ArgumentNullException.ThrowIfNull(scaffolder);
+
         try
         {
-            ScaffoldResult result = DocsScaffolder.Scaffold(
+            ScaffoldResult result = scaffolder.Scaffold(
                 settings.Path,
                 settings.DocsRoot,
                 settings.Owner,

@@ -45,7 +45,8 @@ internal sealed class ArbiterInstallCommand(
     ISquadStateStore stateStore,
     IArbiterInstallLifecycle lifecycle,
     SquadConsoleOptions console,
-    ArbiterProcessProbe probe) : Command<ArbiterInstallSettings>
+    ArbiterProcessProbe probe,
+    IDocsScaffoldingService scaffolder) : Command<ArbiterInstallSettings>
 {
     /// <inheritdoc />
     public override int Execute(CommandContext context, ArbiterInstallSettings settings,
@@ -181,7 +182,7 @@ internal sealed class ArbiterInstallCommand(
         {
             try
             {
-                DocsScaffolder.Scaffold(root);
+                scaffolder.Scaffold(root);
             }
             catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException)
             {

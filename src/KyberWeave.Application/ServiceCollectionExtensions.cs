@@ -11,6 +11,7 @@ using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Data.Arbiter;
 using KyberWeave.Core.Docs.Closeout;
+using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Docs.Delivery;
 using KyberWeave.Application.Agents;
 using KyberWeave.Application.Skills;
@@ -98,7 +99,19 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<McpServerRenamer>(),
             sp.GetRequiredService<McpWiringFixes>(),
             sp.GetRequiredService<ILaunchCommandResolverFactory>()));
+        services.TryAddSingleton<IDocsHostConfiguration, HostConfiguration>();
         services.TryAddSingleton<ICorpusProvenance>(sp => new CorpusProvenanceService(sp.GetRequiredService<IGitCheckoutProbe>()));
+        services.TryAddSingleton(sp => new ReviewBlockWriter(
+            sp.GetRequiredService<IRepositoryFileStore>(),
+            sp.GetRequiredService<IRepositoryFileLister>(),
+            sp.GetRequiredService<IRepositoryTreeProbe>()));
+        services.TryAddSingleton<IReviewGateCatalogue>(sp => sp.GetRequiredService<ReviewBlockWriter>());
+        services.TryAddSingleton<IDocsScaffoldingService>(sp => new DocsScaffolder(
+            sp.GetRequiredService<IRepositoryFileStore>(),
+            sp.GetRequiredService<IKyberWeaveConfigRepository>(),
+            sp.GetRequiredService<IRepositoryFileLister>(),
+            sp.GetRequiredService<IRepositoryTreeProbe>(),
+            sp.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton<ISquadBriefService>(sp => new SquadBriefService(sp.GetRequiredService<IFileSystem>()));
         _ = services.AddWeaveSquadApplication();
         services.TryAddSingleton<IReviewEvidenceService, ReviewEvidenceService>();

@@ -60,7 +60,7 @@ public sealed class DocsInitProvisionTests : IDisposable
         using TempDirectory stubs = new();
         string repo = _repo.Path;
         ScriptedProcessExecutor executor = DoctorHarness.Executor(repo);
-        DocsInitCommand command = new(McpWiringTestServices.Wiring)
+        DocsInitCommand command = new(McpWiringTestServices.Wiring, DocsTestCommands.Scaffolding)
         {
             Executor = executor,
             McpExecutable = DoctorHarness.HealthyStub(stubs.Path, repo),

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using KyberWeave.Core.Docs.Scaffolding;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Processes;
 using Xunit;
 
@@ -31,7 +32,7 @@ public sealed class ReviewCatalogueCommandTests : IDisposable
     public void StdoutEqualsTheRenderedCatalogueBlockForTheFixtureTechnologies()
     {
         string repo = NewFixtureRepo("go", ["go"]);
-        ReviewGatesPlan plan = ReviewBlockWriter.Plan(repo, ["go"]);
+        ReviewGatesPlan plan = DocsTestCommands.Catalogue.Plan(repo, ["go"]);
         Assert.True(
             plan.ShouldWrite,
             "The go fixture planned no review block, so the stdout comparison proves nothing.");

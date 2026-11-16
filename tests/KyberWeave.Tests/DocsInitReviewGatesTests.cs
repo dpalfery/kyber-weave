@@ -55,7 +55,7 @@ public sealed class DocsInitReviewGatesTests : IDisposable
     {
         string repo = NewFixtureRepo(family, TechnologiesFor(family));
 
-        DocsScaffolder.Scaffold(repo);
+        DocsTestCommands.Scaffolding.Scaffold(repo);
 
         string written = NormalizeVersionStamp(ReadReviewSection(repo));
         string expected = NormalizeVersionStamp(File.ReadAllText(ExpectedReviewPath(family)));
@@ -86,7 +86,7 @@ public sealed class DocsInitReviewGatesTests : IDisposable
         Assert.Contains(
             loaded.Review.Gates, gate => string.Equals(gate.Id, "hand-owned-council", StringComparison.Ordinal));
 
-        DocsScaffolder.Scaffold(repo, force: force);
+        DocsTestCommands.Scaffolding.Scaffold(repo, force: force);
 
         // The operator's file, hand-owned review section included, is an exact prefix of what
         // was written; the declaration is the only thing appended after it.
@@ -103,10 +103,10 @@ public sealed class DocsInitReviewGatesTests : IDisposable
     {
         string repo = NewFixtureRepo("go", ["go"]);
 
-        DocsScaffolder.Scaffold(repo);
+        DocsTestCommands.Scaffolding.Scaffold(repo);
         string first = File.ReadAllText(ConfigPath(repo));
 
-        DocsScaffolder.Scaffold(repo);
+        DocsTestCommands.Scaffolding.Scaffold(repo);
         string second = File.ReadAllText(ConfigPath(repo));
 
         Assert.False(
@@ -137,7 +137,7 @@ public sealed class DocsInitReviewGatesTests : IDisposable
             repo, "-c", "user.name=t2r", "-c", "user.email=t2r@example.invalid",
             "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "config without review");
 
-        DocsScaffolder.Scaffold(repo);
+        DocsTestCommands.Scaffolding.Scaffold(repo);
 
         string updated = File.ReadAllText(ConfigPath(repo));
         Assert.Contains(newline + "review:", updated, StringComparison.Ordinal);
@@ -275,7 +275,7 @@ public sealed class DocsInitReviewGatesTests : IDisposable
     {
         string repo = NewFixtureRepo("go", ["go"]);
 
-        DocsScaffolder.Scaffold(repo);
+        DocsTestCommands.Scaffolding.Scaffold(repo);
 
         KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(repo);
         Assert.True(
@@ -304,7 +304,7 @@ public sealed class DocsInitReviewGatesTests : IDisposable
     {
         string repo = NewFixtureRepo(family, TechnologiesFor(family));
 
-        DocsScaffolder.Scaffold(repo);
+        DocsTestCommands.Scaffolding.Scaffold(repo);
 
         GateCatalogueFamily catalogue = GateCatalogue.LoadEmbedded()
             .Single(candidate => string.Equals(candidate.Family, family, StringComparison.Ordinal));
@@ -347,7 +347,7 @@ public sealed class DocsInitReviewGatesTests : IDisposable
     {
         string repo = NewFixtureRepo(family, TechnologiesFor(family));
 
-        DocsScaffolder.Scaffold(repo);
+        DocsTestCommands.Scaffolding.Scaffold(repo);
 
         KyberWeaveConfig config = KyberWeaveConfigLoader.Load(repo);
 
@@ -370,7 +370,7 @@ public sealed class DocsInitReviewGatesTests : IDisposable
     public void ReviewGatesRunsTheWrittenRustGatesAndReportsGatesDeclared()
     {
         string repo = NewFixtureRepo("rust", ["rust"]);
-        DocsScaffolder.Scaffold(repo);
+        DocsTestCommands.Scaffolding.Scaffold(repo);
         File.AppendAllText(Path.Combine(repo, "src", "lib.rs"), "\n// review probe\n");
         string reportPath = Path.Combine(_temp.Path, "rust-gates-" + Guid.NewGuid().ToString("N") + ".json");
 

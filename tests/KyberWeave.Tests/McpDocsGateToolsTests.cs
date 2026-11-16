@@ -15,6 +15,7 @@ using KyberWeave.Mcp;
 using ModelContextProtocol.Server;
 using Xunit.Sdk;
 using Xunit;
+using KyberWeave.Tests.Fakes;
 
 namespace KyberWeave.Tests;
 
@@ -295,7 +296,7 @@ public sealed class McpDocsGateToolsTests : IDisposable
     public void DocsValidateMergeReadyPassesWhenGitBaseResolvesAndCorpusIsClean()
     {
         using CloseoutGitRepo repo = new();
-        DocsScaffolder.Scaffold(repo.Root, owner: "gate-fixture");
+        DocsTestCommands.Scaffolding.Scaffold(repo.Root, owner: "gate-fixture");
         repo.Commit("initial");
 
         DocsTools tools = CreateTools(repo.Root, () => FakeCodeGraphResolver.WithSymbols());
@@ -308,7 +309,7 @@ public sealed class McpDocsGateToolsTests : IDisposable
     public void DocsValidateMergeReadyFailsWhenGitBaseDoesNotResolve()
     {
         using CloseoutGitRepo repo = new();
-        DocsScaffolder.Scaffold(repo.Root, owner: "gate-fixture");
+        DocsTestCommands.Scaffolding.Scaffold(repo.Root, owner: "gate-fixture");
         repo.Commit("initial");
 
         DocsTools tools = CreateTools(repo.Root, () => FakeCodeGraphResolver.WithSymbols());
@@ -326,7 +327,7 @@ public sealed class McpDocsGateToolsTests : IDisposable
 
         using CloseoutGitRepo repo = new();
         using TempDirectory outside = new();
-        DocsScaffolder.Scaffold(repo.Root, owner: "gate-fixture");
+        DocsTestCommands.Scaffolding.Scaffold(repo.Root, owner: "gate-fixture");
         repo.Commit("initial");
 
         string target = Path.Combine(outside.Path, "target.md");
@@ -395,7 +396,7 @@ public sealed class McpDocsGateToolsTests : IDisposable
     {
         string root = Path.Combine(_parent.Path, "repo-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
-        DocsScaffolder.Scaffold(root, owner: "gate-fixture");
+        DocsTestCommands.Scaffolding.Scaffold(root, owner: "gate-fixture");
         IsolateFromParentGit(root);
         return root;
     }

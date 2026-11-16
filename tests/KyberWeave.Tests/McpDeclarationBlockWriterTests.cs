@@ -2,6 +2,7 @@ using System.Text;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Scaffolding;
 using Xunit;
+using KyberWeave.Tests.Fakes;
 
 namespace KyberWeave.Tests;
 
@@ -76,7 +77,7 @@ public sealed class McpDeclarationBlockWriterTests : IDisposable
     [Fact]
     public void AFreshHostConfigDeclaresExactlyTheFirstPartyServer()
     {
-        DocsScaffolder.Scaffold(_temp.Path);
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
 
         KyberWeaveConfig config = KyberWeaveConfigLoader.Load(_temp.Path);
         KeyValuePair<string, RequiredMcpServer> declared = Assert.Single(config.Mcp.RequiredServers);
@@ -99,7 +100,7 @@ public sealed class McpDeclarationBlockWriterTests : IDisposable
     [Fact]
     public void ScaffoldedMcpDeclarationDoesNotCiteRetiredAlwaysHumanOrNeedsHumanPolicy()
     {
-        DocsScaffolder.Scaffold(_temp.Path);
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
 
         string configContent = File.ReadAllText(ConfigFile);
 
@@ -146,7 +147,7 @@ public sealed class McpDeclarationBlockWriterTests : IDisposable
         WriteHostConfig(original);
         byte[] originalBytes = File.ReadAllBytes(ConfigFile);
 
-        DocsScaffolder.Scaffold(_temp.Path, reviewGates: false);
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, reviewGates: false);
 
         byte[] appended = Encoding.UTF8.GetBytes("\n" + DeclarationBlock + "\n");
         Assert.Equal(originalBytes.Concat(appended), File.ReadAllBytes(ConfigFile));
@@ -185,7 +186,7 @@ public sealed class McpDeclarationBlockWriterTests : IDisposable
             "codegraph",
             Assert.Single(KyberWeaveConfigLoader.Load(_temp.Path).Mcp.RequiredServers).Key);
 
-        DocsScaffolder.Scaffold(_temp.Path, force: force, reviewGates: false);
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, force: force, reviewGates: false);
 
         Assert.Equal(handOwned, File.ReadAllText(ConfigFile));
     }
@@ -222,7 +223,7 @@ public sealed class McpDeclarationBlockWriterTests : IDisposable
     [Fact]
     public void AFreshScaffoldIgnoresBothLocalStateDirectories()
     {
-        DocsScaffolder.Scaffold(_temp.Path, reviewGates: false);
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, reviewGates: false);
 
         string[] lines = File.ReadAllLines(IgnoreFile);
         Assert.Single(lines, line => string.Equals(line, "cache/", StringComparison.Ordinal));
@@ -241,7 +242,7 @@ public sealed class McpDeclarationBlockWriterTests : IDisposable
         WriteIgnoreFile(existing);
         byte[] originalBytes = File.ReadAllBytes(IgnoreFile);
 
-        DocsScaffolder.Scaffold(_temp.Path, force: true, reviewGates: false);
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, force: true, reviewGates: false);
 
         Assert.Equal(originalBytes, File.ReadAllBytes(IgnoreFile).Take(originalBytes.Length));
         string[] lines = File.ReadAllLines(IgnoreFile);
@@ -259,11 +260,11 @@ public sealed class McpDeclarationBlockWriterTests : IDisposable
     [Fact]
     public void ReRunningDocsInitChangesNeitherTheDeclarationNorTheIgnoreFile()
     {
-        DocsScaffolder.Scaffold(_temp.Path, reviewGates: false);
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, reviewGates: false);
         string configAfterFirstRun = File.ReadAllText(ConfigFile);
         string ignoreAfterFirstRun = File.ReadAllText(IgnoreFile);
 
-        DocsScaffolder.Scaffold(_temp.Path, force: true, reviewGates: false);
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, force: true, reviewGates: false);
 
         Assert.Equal(configAfterFirstRun, File.ReadAllText(ConfigFile));
         Assert.Equal(ignoreAfterFirstRun, File.ReadAllText(IgnoreFile));
