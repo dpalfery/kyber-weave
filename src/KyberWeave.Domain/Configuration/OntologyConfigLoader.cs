@@ -14,40 +14,6 @@ public static class OntologyConfigLoader
 
     private const string TechnologiesKey = "ontology.technologies";
 
-    public static OntologyConfig LoadMerged(OntologyConfig defaults, string yamlPath)
-    {
-        ArgumentNullException.ThrowIfNull(defaults);
-        ArgumentException.ThrowIfNullOrWhiteSpace(yamlPath);
-
-        KyberWeaveYamlDocument document = KyberWeaveYamlFile.ParseFile(yamlPath);
-        return Merge(defaults, document.Ontology);
-    }
-
-    public static OntologyConfigLoadResult TryLoad(string yamlPath)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(yamlPath);
-
-        try
-        {
-            KyberWeaveYamlDocument document = KyberWeaveYamlFile.ParseFile(yamlPath);
-            return OntologyConfigLoadResult.Ok(Merge(OntologyConfig.ProductDefaults, document.Ontology));
-        }
-        catch (YamlException ex)
-        {
-            return OntologyConfigLoadResult.Fail(ex.Message);
-        }
-        catch (ArgumentException ex)
-        {
-            // YamlDotNet throws ArgumentException for a null mapping key (e.g. required-keys
-            // with an empty key). Surface it as a config failure rather than an unhandled crash.
-            return OntologyConfigLoadResult.Fail(ex.Message);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return OntologyConfigLoadResult.Fail(ex.Message);
-        }
-    }
-
     internal static OntologyConfig Merge(OntologyConfig defaults, OntologyYamlSection? section)
     {
         if (section is null)

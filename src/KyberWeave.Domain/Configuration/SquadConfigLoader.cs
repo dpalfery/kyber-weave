@@ -7,16 +7,6 @@ namespace KyberWeave.Core.Configuration;
 /// <summary>Loads, merges, and validates the <c>squad:</c> host configuration section.</summary>
 public static partial class SquadConfigLoader
 {
-    /// <summary>Loads Squad configuration from a combined Kyber-Weave YAML file.</summary>
-    public static SquadConfig LoadMerged(SquadConfig defaults, string yamlPath)
-    {
-        ArgumentNullException.ThrowIfNull(defaults);
-        ArgumentException.ThrowIfNullOrWhiteSpace(yamlPath);
-
-        KyberWeaveYamlDocument document = KyberWeaveYamlFile.ParseFile(yamlPath);
-        return Merge(defaults, document.Squad);
-    }
-
     /// <summary>
     /// Resolves the CLI's normalized semantic version and rejects a different host pin.
     /// </summary>

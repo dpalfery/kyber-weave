@@ -107,7 +107,7 @@ public sealed class SquadConfigurationTests : IDisposable
               translation: best-effort
             """);
 
-        SquadConfig config = SquadConfigLoader.LoadMerged(defaults, path);
+        SquadConfig config = KyberWeaveYamlFile.LoadSquadMerged(defaults, path);
 
         Assert.Equal(defaults.Bundle, config.Bundle);
         Assert.Equal(defaults.Version, config.Version);
@@ -130,7 +130,7 @@ public sealed class SquadConfigurationTests : IDisposable
               exclusions: [kilo, warp]
             """);
 
-        SquadConfig config = SquadConfigLoader.LoadMerged(defaults, path);
+        SquadConfig config = KyberWeaveYamlFile.LoadSquadMerged(defaults, path);
 
         Assert.Equal([SquadTarget.Claude], config.Targets);
         Assert.Equal([SquadTarget.Kilo, SquadTarget.Warp], config.Exclusions);
@@ -150,7 +150,7 @@ public sealed class SquadConfigurationTests : IDisposable
               exclusions: []
             """);
 
-        SquadConfig config = SquadConfigLoader.LoadMerged(defaults, path);
+        SquadConfig config = KyberWeaveYamlFile.LoadSquadMerged(defaults, path);
 
         Assert.Empty(config.Targets);
         Assert.Empty(config.Exclusions);
