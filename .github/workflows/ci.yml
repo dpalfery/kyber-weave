@@ -176,6 +176,15 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
+      # A cold restore downloads every package on each run; the cache turns that into a
+      # version check. The key follows the project files, which is what pins a version.
+      - name: Cache NuGet packages
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', '**/Directory.Packages.props', '**/NuGet.config') }}
+          restore-keys: nuget-${{ runner.os }}-
+
       - name: Restore
         run: dotnet restore KyberWeave.sln
 
@@ -238,41 +247,27 @@ jobs:
           --report-trx-filename kyber-weave.trx
           --results-directory TestResults
 
-      # The repository-policy tests: scripts, workflows, gate configuration, docs and
-      # source scans. Their own project, so the product suite above measures product code.
-      - name: Test (repository policy)
-        run: >
-          dotnet test tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj
-          -c ${{ env.CONFIGURATION }}
-          --no-build
-          --report-trx
-          --report-trx-filename repo-policy.trx
-          --results-directory TestResults
-
-      # The prompt-content tests: assertions on the wording of skills, agents and instructions.
-      # Their own project, so the product suite above measures behaviour, not prose.
-      - name: Test (prompt content)
-        run: >
-          dotnet test tests/KyberWeave.PromptContent.Tests/KyberWeave.PromptContent.Tests.csproj
-          -c ${{ env.CONFIGURATION }}
-          --no-build
-          --report-trx
-          --report-trx-filename prompt-content.trx
-          --results-directory TestResults
-
-      # The layer projects: pure Domain tests, Application tests over fakes, the edit hook's
-      # entry-app tests, and the architecture test that pins the layering. They are fast, and a
-      # test moved into one of them must keep running here.
-      - name: Test (layers)
+      # The remaining projects: repository policy (scripts, workflows, gate configuration, docs and
+      # source scans), prompt content (the wording of skills, agents and instructions), and the
+      # layer projects with the architecture test that pins the layering. They are independent of
+      # each other and of the product suite, so they run at the same time rather than one after the
+      # next; each writes its own TRX, and one failure still fails the step.
+      - name: Test (policy, prose and layers)
         run: |
-          for project in Domain Application Hooks Architecture; do
-            dotnet test "tests/KyberWeave.${project}.Tests/KyberWeave.${project}.Tests.csproj" \
-              -c "${CONFIGURATION}" \
-              --no-build \
-              --report-trx \
-              --report-trx-filename "layers-${project}.trx" \
-              --results-directory TestResults
-          done
+          set -uo pipefail
+          status=0
+          run() {
+            dotnet test "$1" -c "${CONFIGURATION}" --no-build \
+              --report-trx --report-trx-filename "$2" --results-directory TestResults || status=1
+          }
+          run tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj repo-policy.trx &
+          run tests/KyberWeave.PromptContent.Tests/KyberWeave.PromptContent.Tests.csproj prompt-content.trx &
+          run tests/KyberWeave.Domain.Tests/KyberWeave.Domain.Tests.csproj layers-Domain.trx &
+          run tests/KyberWeave.Application.Tests/KyberWeave.Application.Tests.csproj layers-Application.trx &
+          run tests/KyberWeave.Hooks.Tests/KyberWeave.Hooks.Tests.csproj layers-Hooks.trx &
+          run tests/KyberWeave.Architecture.Tests/KyberWeave.Architecture.Tests.csproj layers-Architecture.trx &
+          wait
+          exit "$status"
 
       - name: Upload test results
         if: always()
@@ -399,6 +394,15 @@ jobs:
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # A cold restore downloads every package on each run; the cache turns that into a
+      # version check. The key follows the project files, which is what pins a version.
+      - name: Cache NuGet packages
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', '**/Directory.Packages.props', '**/NuGet.config') }}
+          restore-keys: nuget-${{ runner.os }}-
 
       - name: Restore
         run: dotnet restore KyberWeave.sln
