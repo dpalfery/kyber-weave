@@ -1,17 +1,9 @@
 using System.Reflection;
 using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Model;
 
 namespace KyberWeave.Core.Squad.Deployment;
-
-/// <summary>
-///     The result of ensuring a harness instance is installed and synchronized.
-/// </summary>
-/// <param name="InstanceRoot">The absolute filesystem path of the instance root directory.</param>
-/// <param name="Warnings">Any warnings generated during link synchronization or lifecycle operations.</param>
-public sealed record SquadInstanceEnsureResult(
-    string InstanceRoot,
-    IReadOnlyList<string> Warnings);
 
 /// <summary>
 ///     Manages deployment lifecycles, configuration redirection, and filesystem link synchronization
@@ -22,7 +14,7 @@ public sealed record SquadInstanceEnsureResult(
 ///     For <see cref="SquadInstanceKind.HomeReplace" /> targets, settings and history are linked safely
 ///     from the canonical harness home without overwriting user state.
 /// </remarks>
-public sealed partial class SquadInstanceService
+public sealed partial class SquadInstanceService : ISquadInstanceService
 {
     private const string ReceiptFileName = "squad.receipt.json";
     [GeneratedRegex("^[a-z0-9][a-z0-9-]{0,63}$")]

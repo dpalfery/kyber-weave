@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Release;
@@ -13,7 +14,7 @@ namespace KyberWeave.Core.Squad.Deployment;
 /// <summary>
 ///     Orchestrates install, update, and uninstall lifecycle operations for Kyber-Squad.
 /// </summary>
-public sealed class SquadLifecycleService
+public sealed class SquadLifecycleService : ISquadLifecycleService
 {
     private readonly ISquadGlobalRootResolver? _globalRoots;
     private readonly ISquadTransactionObserver? _observer;
