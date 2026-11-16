@@ -59,6 +59,11 @@ public static class ArbiterLedgerQueries
     /// The task files of the other unpaired <c>delegate</c> pre events — the
     /// in-flight paths a scope rule checks the dispatch against.
     /// </summary>
+    /// <remarks>
+    /// A dispatch whose return never arrives (a harness that crashed, or a background agent whose turn-end event
+    /// was not delivered) stops holding its files <see cref="UnreturnedDispatchHorizon"/> after it started,
+    /// measured against the dispatch being gated, or the newest event when that one is not recorded.
+    /// </remarks>
     /// <param name="events">The events a ledger read returned, in append order.</param>
     /// <param name="excludeEventId">The pre event being gated now, if it is already recorded.</param>
     /// <param name="session">When set, only dispatches from this session count.</param>
@@ -73,10 +78,12 @@ public static class ArbiterLedgerQueries
             .Where(e => e.Phase == ArbiterLedgerPhases.Post && e.PreId is not null)
             .Select(e => e.PreId!)
             .ToHashSet(StringComparer.Ordinal);
+        DateTimeOffset? now = (events.FirstOrDefault(e => e.Id == excludeEventId) ?? (events.Count > 0 ? events[^1] : null))?.At;
         return [.. events
             .Where(e => e.Phase == ArbiterLedgerPhases.Pre
                 && e.Id != excludeEventId
                 && !paired.Contains(e.Id)
+                && (now is null || now.Value - e.At <= UnreturnedDispatchHorizon)
                 && notDispatched?.Contains(e.Id) != true
                 && (session is null || string.Equals(e.Session, session, StringComparison.Ordinal))
                 && string.Equals(e.Trigger, "delegate", StringComparison.Ordinal))

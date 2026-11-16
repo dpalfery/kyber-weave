@@ -496,6 +496,13 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
             return !IsLocalDispatchTool(tool);
         }
 
+        if (string.Equals(eventName, "SubagentStop", StringComparison.Ordinal))
+        {
+            // VS Code loads the CLI hook file too. Its dispatch returns through PostToolUse, so the end of a
+            // subagent's turn has nothing to record there.
+            return true;
+        }
+
         if (!string.Equals(eventName, "PreToolUse", StringComparison.Ordinal))
         {
             // Unknown or missing event names are malformed, not pass-through: Handle

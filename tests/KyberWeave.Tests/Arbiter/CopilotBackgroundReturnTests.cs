@@ -225,6 +225,23 @@ public sealed class CopilotBackgroundReturnTests : IDisposable
         return ArbiterLedgerQueries.CompletedTasks([pre, post], Plan);
     }
 
+    [Fact]
+    public void ABackgroundDispatchWhoseTurnEndNeverArrives_HoldsItsFilesOnlyForTheUnreturnedHorizon()
+    {
+        DateTimeOffset at = new(2026, 11, 16, 14, 20, 0, TimeSpan.Zero);
+        ArbiterLedgerEvent lost = new("pre-1", at, ArbiterSources.Hook, "copilot-cli", null, ArbiterLedgerPhases.Pre)
+        {
+            Trigger = "delegate",
+            TaskFiles = ["src/T1.cs"],
+        };
+        ArbiterLedgerEvent Next(TimeSpan later) =>
+            new("pre-2", at + later, ArbiterSources.Hook, "copilot-cli", null, ArbiterLedgerPhases.Pre) { Trigger = "delegate" };
+
+        Assert.Equal(["src/T1.cs"], ArbiterLedgerQueries.InFlightPaths([lost, Next(TimeSpan.FromMinutes(30))], "pre-2"));
+        Assert.Empty(ArbiterLedgerQueries.InFlightPaths(
+            [lost, Next(ArbiterLedgerQueries.UnreturnedDispatchHorizon + TimeSpan.FromMinutes(1))], "pre-2"));
+    }
+
     private static string Prompt(string task) =>
         $"KYBER-ARBITER: true\nPLAN_FILE: {Plan}\nTASK: {task}\n\n{Body(task)}";
 

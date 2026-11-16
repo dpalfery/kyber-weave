@@ -487,6 +487,22 @@ public sealed class CopilotHookAdapterTests
     }
 
     [Fact]
+    public void Local_SubagentStop_PassesThroughWithoutLoadingConfig()
+    {
+        // VS Code loads the CLI hook file too, and names the event in its own schema.
+        const string Payload = """{"hook_event_name":"SubagentStop","session_id":"s1","cwd":"/repo","agent_id":"a1","agent_type":"csharp-dev"}""";
+        int loads = 0;
+
+        (int exit, string stdout, string log) = Run(
+            CopilotHookAdapter.CliToken, Payload, null, new ScriptedEngine(), _ => { loads++; return EnabledConfig(); });
+
+        Assert.Equal(0, exit);
+        Assert.Empty(stdout);
+        Assert.Equal(0, loads);
+        Assert.DoesNotContain(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Cli_SubagentStop_PassesThroughForAnEngineThatDoesNotFollowBackgroundDispatches()
     {
         ScriptedEngine engine = new();

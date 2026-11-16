@@ -219,7 +219,8 @@ because its headers were stripped before it ran. On each `delegate`, `ledger.com
 is the tasks of this plan whose report read `RESULT: PASS`, or whose completion digest read
 `TASK_GATE: PASS` under `STATUS: PASS` or `STATUS: READY_FOR_REVIEW` (and no `RESULT: FAIL`). Any other
 report leaves the task to the model's reading of the stored report. `ledger.in-flight.paths` is the
-files of this session's dispatches that have not returned. A refused dispatch holds no files.
+files of this session's dispatches that have not returned; a dispatch still unreturned four hours after it
+started stops holding its files. A refused dispatch holds no files.
 A task counts as complete on its worker's own report: no separate reviewer confirms it.
 
 ## The rules
