@@ -21,15 +21,15 @@ public class KyberStandardsTemplateShapeTests
     ];
 
     [Fact]
-    public void EveryShippedTechnologyHasItsFourFiles()
+    public void EveryShippedFolderHasItsFourFiles()
     {
-        foreach (string technology in KyberStandardsTemplates.All)
+        foreach (string folder in KyberStandardsTemplates.AllFolders)
         {
             foreach (KyberStandardsTemplates.Part part in Enum.GetValues<KyberStandardsTemplates.Part>())
             {
                 Assert.True(
-                    KyberStandardsTemplates.TryGetPart(technology, part, out string? template),
-                    $"{technology} has no template for {part}.");
+                    KyberStandardsTemplates.TryGetPart(folder, part, out string? template),
+                    $"{folder} has no template for {part}.");
                 Assert.False(string.IsNullOrWhiteSpace(template));
             }
         }
@@ -38,10 +38,10 @@ public class KyberStandardsTemplateShapeTests
     [Fact]
     public void EveryStandardCarriesTheSixHeadingsInOrder()
     {
-        foreach (string technology in KyberStandardsTemplates.All)
+        foreach (string folder in KyberStandardsTemplates.AllFolders)
         {
             KyberStandardsTemplates.TryGetPart(
-                technology, KyberStandardsTemplates.Part.Standard, out string? standard);
+                folder, KyberStandardsTemplates.Part.Standard, out string? standard);
             string[] headings = standard!
                 .Split('\n')
                 .Where(line => line.StartsWith("## ", StringComparison.Ordinal))
@@ -55,10 +55,10 @@ public class KyberStandardsTemplateShapeTests
     [Fact]
     public void EveryStandardHasATestingSection()
     {
-        foreach (string technology in KyberStandardsTemplates.All)
+        foreach (string folder in KyberStandardsTemplates.AllFolders)
         {
             KyberStandardsTemplates.TryGetPart(
-                technology, KyberStandardsTemplates.Part.Standard, out string? standard);
+                folder, KyberStandardsTemplates.Part.Standard, out string? standard);
 
             Assert.Contains("## Testing", standard, StringComparison.Ordinal);
         }
@@ -80,9 +80,66 @@ public class KyberStandardsTemplateShapeTests
     }
 
     [Fact]
+    public void EveryRoleTemplateIsScopedByRoleAndCarriesTheSixHeadings()
+    {
+        foreach (string role in KyberStandardsTemplates.Roles)
+        {
+            foreach (KyberStandardsTemplates.Part part in new[]
+                     {
+                         KyberStandardsTemplates.Part.Standard,
+                         KyberStandardsTemplates.Part.Rules,
+                         KyberStandardsTemplates.Part.Skills
+                     })
+            {
+                KyberStandardsTemplates.TryGetPart(role, part, out string? template);
+
+                Assert.Contains($"role: {role}", template, StringComparison.Ordinal);
+                Assert.DoesNotContain($"technology: {role}", template, StringComparison.Ordinal);
+            }
+        }
+    }
+
+    [Fact]
+    public void EveryPlatformTemplateIsScopedByTechnology()
+    {
+        foreach (string platform in KyberStandardsTemplates.Platforms)
+        {
+            foreach (KyberStandardsTemplates.Part part in new[]
+                     {
+                         KyberStandardsTemplates.Part.Rules,
+                         KyberStandardsTemplates.Part.Skills
+                     })
+            {
+                KyberStandardsTemplates.TryGetPart(platform, part, out string? template);
+
+                Assert.Contains($"technology: {platform}", template, StringComparison.Ordinal);
+            }
+        }
+    }
+
+    [Fact]
+    public void NoTestingRoleFolderShips()
+    {
+        Assert.DoesNotContain("test", KyberStandardsTemplates.Roles, StringComparer.Ordinal);
+    }
+
+    [Fact]
+    public void TheGithubTemplateStatesWhatTheGithubWorkStandardStates()
+    {
+        KyberStandardsTemplates.TryGetPart(
+            "github", KyberStandardsTemplates.Part.Standard, out string? standard);
+        KyberStandardsTemplates.TryGetPart(
+            "github", KyberStandardsTemplates.Part.Skills, out string? skills);
+
+        Assert.Contains("permissions", standard, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("pin", standard, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("gh ", skills, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AnEmptyArbiterRulesFileIsShippedForEveryTechnology()
     {
-        foreach (string technology in KyberStandardsTemplates.All)
+        foreach (string technology in KyberStandardsTemplates.AllFolders)
         {
             KyberStandardsTemplates.TryGetPart(
                 technology, KyberStandardsTemplates.Part.ArbiterRules, out string? rules);

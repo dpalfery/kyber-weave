@@ -64,12 +64,34 @@ public static class KyberStandardsTemplates
         "typescript"
     ];
 
+    /// <summary>Role templates: the same four files, scoped by <c>role</c>.</summary>
+    private static readonly string[] CanonicalRoles =
+        ["architect", "conductor", "devops", "reviewer"];
+
+    /// <summary>Delivery-platform templates: technology folders, scoped by <c>technology</c>.</summary>
+    private static readonly string[] CanonicalPlatforms =
+        ["azure-devops", "github", "gitlab", "jira"];
+
     private static readonly FrozenDictionary<string, string> Templates = LoadEmbeddedTemplates();
 
     /// <summary>
     /// Gets all canonical technology slugs with an embedded standard template.
     /// </summary>
     public static IReadOnlyList<string> All => CanonicalTechnologies;
+
+    /// <summary>The role folder templates that ship.</summary>
+    public static IReadOnlyList<string> Roles => CanonicalRoles;
+
+    /// <summary>The delivery-platform folder templates that ship.</summary>
+    public static IReadOnlyList<string> Platforms => CanonicalPlatforms;
+
+    /// <summary>Every folder template: technologies, roles and platforms.</summary>
+    public static IReadOnlyList<string> AllFolders =>
+        [.. CanonicalTechnologies, .. CanonicalRoles, .. CanonicalPlatforms];
+
+    /// <summary>The frontmatter key a folder's files are scoped by.</summary>
+    public static string ScopeKey(string name) =>
+        CanonicalRoles.Contains(name, StringComparer.Ordinal) ? "role" : "technology";
 
     /// <summary>The file suffix each part carries in a folder named after its scope.</summary>
     public static string FileName(string scope, Part part) => part switch
@@ -150,7 +172,7 @@ public static class KyberStandardsTemplates
 
         if (!TryRender(technology, owner, date, out string? rendered))
         {
-            string? nearest = StringDistance.Nearest(technology, CanonicalTechnologies);
+            string? nearest = StringDistance.Nearest(technology, AllFolders);
             string message = nearest is not null
                 ? $"Unknown technology '{technology}'. Did you mean '{nearest}'?"
                 : $"Unknown technology '{technology}'.";
@@ -195,7 +217,7 @@ public static class KyberStandardsTemplates
 
         if (!TryRenderPart(technology, part, owner, date, out string? rendered))
         {
-            string? nearest = StringDistance.Nearest(technology, CanonicalTechnologies);
+            string? nearest = StringDistance.Nearest(technology, AllFolders);
             string message = nearest is not null
                 ? $"Unknown technology '{technology}'. Did you mean '{nearest}'?"
                 : $"Unknown technology '{technology}'.";
@@ -254,7 +276,7 @@ public static class KyberStandardsTemplates
         Assembly assembly = typeof(KyberStandardsTemplates).Assembly;
         Dictionary<string, string> dictionary = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (string tech in CanonicalTechnologies)
+        foreach (string tech in AllFolders)
         {
             foreach (Part part in Enum.GetValues<Part>())
             {
