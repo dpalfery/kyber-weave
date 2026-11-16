@@ -28,7 +28,7 @@ namespace KyberWeave.Cli.Commands.Review;
 /// <see cref="VerdictEngine"/>, which stays the only judge.
 /// </para>
 /// </remarks>
-public sealed partial class ReviewVerdictCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, INotSeatedStore notSeatedStore, ISeverityOverrideSource severityOverrides, ICitedLineChecker citedLines, IWritableFileSystem files, ISeatFolder seatFolder) : Command<ReviewVerdictSettings>
+public sealed partial class ReviewVerdictCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, INotSeatedStore notSeatedStore, ISeverityOverrideSource severityOverrides, ICitedLineChecker citedLines, IWritableFileSystem files, ISeatFolder seatFolder, TimeProvider clock) : Command<ReviewVerdictSettings>
 {
     /// <summary>The command description shared by the real registration and the help tests.</summary>
     public const string Description = "Compute approve / request-changes from findings and gates.";
@@ -125,7 +125,7 @@ public sealed partial class ReviewVerdictCommand(IReviewWorkTreeService trees, I
             findings,
             gateResults,
             config.Review,
-            DateOnly.FromDateTime(DateTime.UtcNow),
+            DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime),
             gates?.Coverage);
         outcome = outcome with { Dropped = [.. dropped, .. outcome.Dropped] };
 
@@ -257,7 +257,7 @@ public sealed partial class ReviewVerdictCommand(IReviewWorkTreeService trees, I
             {
                 FindingsReport prior = ReviewJson.ReadFindings(files.ReadAllText(cycle.FindingsPath));
                 IReadOnlyList<GateResult> gates = cycle.Gates?.Gates ?? [];
-                ReviewOutcome outcome = VerdictEngine.Evaluate(prior.Findings, gates, config.Review, DateOnly.FromDateTime(DateTime.UtcNow));
+                ReviewOutcome outcome = VerdictEngine.Evaluate(prior.Findings, gates, config.Review, DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime));
                 counts.Add(FailedGates(gates).Count() + outcome.Accepted.Count(config.Review.Policy.FixRoundTakes));
             }
             catch (Exception ex) when (FileFailure.Is(ex) || ex is JsonException or InvalidOperationException)

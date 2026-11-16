@@ -272,6 +272,8 @@ internal static class SquadTestCommands
 
         public string TempDirectory => _real.TempDirectory;
 
+        public bool IsInputRedirected => _real.IsInputRedirected;
+
         public string? GetVariable(string name) => (reader ?? _real.GetVariable)(name);
     }
 }

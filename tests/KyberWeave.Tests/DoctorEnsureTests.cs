@@ -423,18 +423,14 @@ public sealed class DoctorEnsureTests : IDisposable
             throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'.");
         });
 
-        DoctorCommand command = new(DoctorServices.Doctor)
-        {
-            Executor = executor,
-            IsTerminal = () => false,
-            ReadEnvironment = _ => null,
-            McpExecutable = DoctorHarness.HealthyStub(_stubs.Path, Root)
-        };
+        string mcpExecutable = DoctorHarness.HealthyStub(_stubs.Path, Root);
+
+        DoctorCommand command = new(DoctorServices.Doctor, new DoctorTestEnvironment(false, _ => null), executor, mcpExecutable);
 
         DoctorReport report = RepositoryDoctor.Run(
             Root,
             DoctorMode.Ensure,
-            DoctorHarness.Options(command.McpExecutable),
+            DoctorHarness.Options(mcpExecutable),
             executor,
             _ => null);
 
@@ -489,18 +485,14 @@ public sealed class DoctorEnsureTests : IDisposable
             throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'.");
         });
 
-        DoctorCommand command = new(DoctorServices.Doctor)
-        {
-            Executor = executor,
-            IsTerminal = () => false,
-            ReadEnvironment = _ => null,
-            McpExecutable = DoctorHarness.HealthyStub(_stubs.Path, Root)
-        };
+        string mcpExecutable = DoctorHarness.HealthyStub(_stubs.Path, Root);
+
+        DoctorCommand command = new(DoctorServices.Doctor, new DoctorTestEnvironment(false, _ => null), executor, mcpExecutable);
 
         DoctorReport report = RepositoryDoctor.Run(
             Root,
             DoctorMode.Ensure,
-            DoctorHarness.Options(command.McpExecutable),
+            DoctorHarness.Options(mcpExecutable),
             executor,
             _ => null);
 
@@ -555,18 +547,14 @@ public sealed class DoctorEnsureTests : IDisposable
             throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'.");
         });
 
-        DoctorCommand command = new(DoctorServices.Doctor)
-        {
-            Executor = executor,
-            IsTerminal = () => false,
-            ReadEnvironment = _ => null,
-            McpExecutable = DoctorHarness.HealthyStub(_stubs.Path, Root)
-        };
+        string mcpExecutable = DoctorHarness.HealthyStub(_stubs.Path, Root);
+
+        DoctorCommand command = new(DoctorServices.Doctor, new DoctorTestEnvironment(false, _ => null), executor, mcpExecutable);
 
         DoctorReport report = RepositoryDoctor.Run(
             Root,
             DoctorMode.Ensure,
-            DoctorHarness.Options(command.McpExecutable),
+            DoctorHarness.Options(mcpExecutable),
             executor,
             _ => null);
 
@@ -669,13 +657,7 @@ public sealed class DoctorEnsureTests : IDisposable
     /// </summary>
     private int RunEnsure(ScriptedProcessExecutor executor)
     {
-        DoctorCommand command = new(DoctorServices.Doctor)
-        {
-            Executor = executor,
-            IsTerminal = () => false,
-            ReadEnvironment = _ => null,
-            McpExecutable = DoctorHarness.HealthyStub(_stubs.Path, Root)
-        };
+        DoctorCommand command = new(DoctorServices.Doctor, new DoctorTestEnvironment(false, _ => null), executor, DoctorHarness.HealthyStub(_stubs.Path, Root));
 
         return DoctorAppHarness.Run(command, "doctor", "--ensure", Root);
     }

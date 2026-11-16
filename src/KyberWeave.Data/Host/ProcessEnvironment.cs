@@ -15,5 +15,8 @@ public sealed class ProcessEnvironment : IProcessEnvironment
     public string TempDirectory => Path.GetTempPath();
 
     /// <inheritdoc />
+    public bool IsInputRedirected => Console.IsInputRedirected;
+
+    /// <inheritdoc />
     public string? GetVariable(string name) => Environment.GetEnvironmentVariable(name);
 }
