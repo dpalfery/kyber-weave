@@ -21,7 +21,7 @@ public sealed class RunStartBaseRecordTests : IDisposable
     [Fact]
     public void ARecordedBaseReadsBack()
     {
-        Assert.True(RunStartCommand.RecordBase(_temp.Path, "claude/fix/tighten-the-gate", "origin/main"));
+        Assert.True(RunStartCommand.RecordBase(RunBaseState.Store, _temp.Path, "claude/fix/tighten-the-gate", "origin/main"));
         Assert.True(
             RunBaseState.TryReadBaseRef(_temp.Path, "claude/fix/tighten-the-gate", out string? baseRef));
         Assert.Equal("origin/main", baseRef);
@@ -34,6 +34,6 @@ public sealed class RunStartBaseRecordTests : IDisposable
     [Fact]
     public void ABlankHomeSkipsTheRecord()
     {
-        Assert.False(RunStartCommand.RecordBase("  ", "claude/fix/tighten-the-gate", "origin/main"));
+        Assert.False(RunStartCommand.RecordBase(RunBaseState.Store, "  ", "claude/fix/tighten-the-gate", "origin/main"));
     }
 }

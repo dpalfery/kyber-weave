@@ -806,12 +806,6 @@
       "bound": "ProcessRunner.Run with the gate's timeout-seconds (review.gates; ReviewConfigLoader defaults it to 900 s and rejects values <= 0). The process tree is killed on expiry and the TimeoutException is reported as TimedOut. A concurrent gate's tree is also killed when a run given --stop-on-failure cancels it."
     },
     {
-      "file": "src/KyberWeave.Core/RunStart/RunStartRunner.cs",
-      "text": "ProcessStartInfo startInfo = new(executable)",
-      "count": 1,
-      "bound": "Builds only; nothing starts on this line. Every child runs through the injected IProcessExecutor, which kyber-weave run start binds to ProcessExecutor.WithTimeout(120 s) (RunStartCommand.ToolTimeout); ProcessRunner.Run kills the child tree on expiry. argv only, in the repository root, in a local checkout; the only network call is the one `git fetch origin --prune` the step exists for."
-    },
-    {
       "file": "src/KyberWeave.Core.Squad/Instances/SquadHarnessLauncher.cs",
       "text": "public static ProcessStartInfo BuildStartInfo(",
       "count": 2,
@@ -1290,6 +1284,18 @@
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, timeout, MaxOutputBytes, cancellationToken);",
       "count": 1,
       "bound": "ProcessRunner timeout is the rule timeout capped by the hook's remaining budget; stdout and stderr are capped at 4 MiB (MaxOutputBytes); the cancellation token kills the child process tree on expiry or cancel."
+    },
+    {
+      "file": "src/KyberWeave.Data/RunStart/ProcessGitCommandRunner.cs",
+      "text": "ProcessStartInfo startInfo = new(GitExecutable)",
+      "count": 1,
+      "bound": "Builds only; nothing starts on this line. Started by the ProcessRunner.Run call below, with the timeout the runner was built with (kyber-weave run start binds it to 120 s). argv only, in the repository root, in a local checkout; the only network call is the one `git fetch origin --prune` the step exists for."
+    },
+    {
+      "file": "src/KyberWeave.Data/RunStart/ProcessGitCommandRunner.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, timeout);",
+      "count": 1,
+      "bound": "ProcessRunner.Run with the runner's timeout (120 s for kyber-weave run start); the process tree is killed on expiry and the TimeoutException reaches the caller. argv only, in the repository root."
     }
   ]
 }

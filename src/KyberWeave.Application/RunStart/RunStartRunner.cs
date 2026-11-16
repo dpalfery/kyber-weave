@@ -1,47 +1,21 @@
-using System.Diagnostics;
 using System.Globalization;
-using KyberWeave.Cli.Commands.Squad.Infrastructure;
-using KyberWeave.Core.Processes;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Core.RunStart;
 
-namespace KyberWeave.Core.RunStart;
-
-/// <summary>What one git invocation wrote, and how it ended.</summary>
-/// <param name="ExitCode">The exit code git returned.</param>
-/// <param name="StandardOutput">Everything git wrote to standard output.</param>
-/// <param name="StandardError">Everything git wrote to standard error.</param>
-public readonly record struct GitOutcome(int ExitCode, string StandardOutput, string StandardError)
-{
-    /// <summary>Whether git exited zero.</summary>
-    public bool Succeeded => ExitCode == 0;
-
-    /// <summary>The first non-empty line of standard error, for a failure message.</summary>
-    public string FirstErrorLine
-    {
-        get
-        {
-            string? line = (StandardError + "\n" + StandardOutput)
-                .Split('\n')
-                .Select(part => part.Trim())
-                .FirstOrDefault(part => part.Length > 0);
-            return line ?? "no output";
-        }
-    }
-}
+namespace KyberWeave.Application.RunStart;
 
 /// <summary>
-///     Runs the git commands a run start needs, through <see cref="IProcessExecutor" />, so every child is
-///     bounded by that executor's timeout and no command in this step reaches the network beyond the one
+///     Runs the git commands a run start needs, through <see cref="IGitCommandRunner" />, so every child is
+///     bounded by that runner's timeout and no command in this step reaches the network beyond the one
 ///     <c>git fetch</c> the step is for.
 /// </summary>
 /// <remarks>
-///     <see cref="IProcessExecutor" /> is declared in Core but keeps the CLI's Squad namespace so existing
-///     references compile unchanged; that is why this file imports it. Every git call passes argv through
-///     <see cref="ProcessStartInfo.ArgumentList" />, never a concatenated string, and runs in the repository
+///     Every git call passes argv as separate arguments, never a concatenated string, and runs in the repository
 ///     root so a command started from a subdirectory still names the same repository.
 /// </remarks>
-public sealed class RunStartRunner
+public sealed class RunStartRunner : IRunStartRunner
 {
-    private const string GitExecutable = "git";
     private const string CodeGraphExecutable = "codegraph";
     private const string NoTrackOption = "--no-track";
     private const string TrackOption = "--track";
@@ -50,18 +24,26 @@ public sealed class RunStartRunner
     /// <summary>The highest numeric suffix tried for runs that start in the same second.</summary>
     private const int MaxWorktreeSuffix = 100;
 
-    private readonly IProcessExecutor _executor;
+    private readonly IGitCommandRunner _git;
+    private readonly IWritableFileSystem _files;
+    private readonly IProcessEnvironment _environment;
     private readonly string _repositoryRoot;
 
     /// <summary>Creates a runner over the checkout at <paramref name="repositoryRoot" />.</summary>
-    /// <param name="executor">The injected process seam, bounded by the caller's timeout.</param>
+    /// <param name="git">The git seam, bounded by its own timeout.</param>
+    /// <param name="files">The file system worktree folders and their claims live on.</param>
+    /// <param name="environment">The process state the CodeGraph lookup reads.</param>
     /// <param name="repositoryRoot">The repository root every git command runs in.</param>
-    public RunStartRunner(IProcessExecutor executor, string repositoryRoot)
+    public RunStartRunner(IGitCommandRunner git, IWritableFileSystem files, IProcessEnvironment environment, string repositoryRoot)
     {
-        ArgumentNullException.ThrowIfNull(executor);
+        ArgumentNullException.ThrowIfNull(git);
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(environment);
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
 
-        _executor = executor;
+        _git = git;
+        _files = files;
+        _environment = environment;
         _repositoryRoot = repositoryRoot;
     }
 
@@ -74,8 +56,7 @@ public sealed class RunStartRunner
     {
         ArgumentNullException.ThrowIfNull(arguments);
 
-        ProcessResult result = Run(GitExecutable, arguments);
-        return new GitOutcome(result.ExitCode, result.StandardOutput, result.StandardError);
+        return _git.Run(_repositoryRoot, arguments);
     }
 
     /// <summary>The repository root git reports for the current directory, or null outside a repository.</summary>
@@ -106,20 +87,11 @@ public sealed class RunStartRunner
         return Git("worktree", "list", "--porcelain");
     }
 
-    /// <summary>Whether git worktree porcelain output reports more than one worktree.</summary>
-    public static bool HasMultipleWorktrees(string porcelain)
-    {
-        ArgumentNullException.ThrowIfNull(porcelain);
-        return porcelain
-            .Split('\n')
-            .Count(line => line.StartsWith("worktree ", StringComparison.Ordinal)) > 1;
-    }
-
     /// <summary>Whether a second worktree is attached to this repository, or null when the probe failed.</summary>
     public bool? AnotherWorktreeIsAttached()
     {
         GitOutcome outcome = WorktreeList();
-        return outcome.Succeeded ? HasMultipleWorktrees(outcome.StandardOutput) : null;
+        return outcome.Succeeded ? GitWorktreePorcelain.HasMultiple(outcome.StandardOutput) : null;
     }
 
     /// <summary>
@@ -131,12 +103,12 @@ public sealed class RunStartRunner
     /// </remarks>
     public string? OriginHeadSymbolicRef()
     {
-        GitOutcome outcome = Git("rev-parse", "--abbrev-ref", RunStartPlanner.RemoteHead);
+        GitOutcome outcome = Git("rev-parse", "--abbrev-ref", RunStartNaming.RemoteHead);
         if (!outcome.Succeeded)
             return null;
 
         string resolved = outcome.StandardOutput.Trim();
-        return resolved.Length == 0 || string.Equals(resolved, RunStartPlanner.RemoteHead, StringComparison.Ordinal)
+        return resolved.Length == 0 || string.Equals(resolved, RunStartNaming.RemoteHead, StringComparison.Ordinal)
             ? null
             : resolved;
     }
@@ -159,7 +131,7 @@ public sealed class RunStartRunner
     /// <summary>Whether the remote has a branch of that name.</summary>
     public bool HasRemoteBranch(string branch)
     {
-        return Git("rev-parse", "--verify", "--quiet", "refs/remotes/" + RunStartPlanner.Remote + "/" + branch)
+        return Git("rev-parse", "--verify", "--quiet", "refs/remotes/" + RunStartNaming.Remote + "/" + branch)
             .Succeeded;
     }
 
@@ -229,7 +201,7 @@ public sealed class RunStartRunner
     /// <summary>The address <c>origin</c> points at, or null when there is no such remote.</summary>
     public string? OriginAddress()
     {
-        GitOutcome outcome = Git("remote", "get-url", RunStartPlanner.Remote);
+        GitOutcome outcome = Git("remote", "get-url", RunStartNaming.Remote);
         return outcome.Succeeded && outcome.StandardOutput.Trim().Length > 0
             ? outcome.StandardOutput.Trim()
             : null;
@@ -243,7 +215,7 @@ public sealed class RunStartRunner
     ///     "something broke", and only a binary that is not there at all has installing as its remedy. A
     ///     binary that is present and misbehaves is a tool failure, which is exit 1.
     /// </remarks>
-    public static bool CodeGraphBinaryIsAvailable()
+    public bool CodeGraphBinaryIsAvailable()
     {
         return ResolveOnPath(CodeGraphExecutable) is not null;
     }
@@ -251,7 +223,7 @@ public sealed class RunStartRunner
     /// <summary>Refreshes the remote-tracking refs, refusing to prompt.</summary>
     public GitOutcome Fetch()
     {
-        return Git("fetch", RunStartPlanner.Remote, "--prune");
+        return Git("fetch", RunStartNaming.Remote, "--prune");
     }
 
     /// <summary>
@@ -313,11 +285,11 @@ public sealed class RunStartRunner
 
     /// <summary>Removes the claim <see cref="WorktreePathFor" /> took, once git has made the folder or failed to.</summary>
     /// <param name="worktreePath">The path <see cref="WorktreePathFor" /> returned.</param>
-    public static void ReleaseWorktreeClaim(string worktreePath)
+    public void ReleaseWorktreeClaim(string worktreePath)
     {
         try
         {
-            File.Delete(ClaimPathFor(worktreePath));
+            _files.DeleteFile(ClaimPathFor(worktreePath));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -330,17 +302,15 @@ public sealed class RunStartRunner
     ///     second never pick the same folder. Checking that the folder is absent is not enough on its own: both
     ///     runs would see it absent before either created it.
     /// </summary>
-    private static bool TryClaim(string container, string candidate)
+    private bool TryClaim(string container, string candidate)
     {
-        if (Path.Exists(candidate))
+        if (_files.PathExists(candidate))
             return false;
 
         try
         {
-            Directory.CreateDirectory(container);
-            using (new FileStream(ClaimPathFor(candidate), FileMode.CreateNew, FileAccess.Write))
-            {
-            }
+            _files.CreateDirectory(container);
+            _files.CreateNewFile(ClaimPathFor(candidate));
         }
         catch (UnauthorizedAccessException)
         {
@@ -351,11 +321,11 @@ public sealed class RunStartRunner
         {
             // Only a claim another run holds means "taken". Any other I/O error (a full disk, a path too long)
             // would fail every suffix the same way, so it is left for git to report.
-            return !File.Exists(ClaimPathFor(candidate));
+            return !_files.FileExists(ClaimPathFor(candidate));
         }
 
         // A run that finished between the check above and the claim has made the folder and dropped its claim.
-        if (!Path.Exists(candidate))
+        if (!_files.PathExists(candidate))
             return true;
 
         ReleaseWorktreeClaim(candidate);
@@ -363,29 +333,6 @@ public sealed class RunStartRunner
     }
 
     private static string ClaimPathFor(string worktreePath) => worktreePath + ".claim";
-
-    /// <summary>The worktree that has <paramref name="branch" /> checked out, or null when none does.</summary>
-    /// <param name="porcelain">The output of <c>git worktree list --porcelain</c>.</param>
-    /// <param name="branch">The branch to look for.</param>
-    public static string? WorktreeHolding(string porcelain, string branch)
-    {
-        ArgumentNullException.ThrowIfNull(porcelain);
-        ArgumentException.ThrowIfNullOrWhiteSpace(branch);
-
-        const string WorktreePrefix = "worktree ";
-        string branchLine = "branch refs/heads/" + branch;
-        string? current = null;
-        foreach (string raw in porcelain.Split('\n'))
-        {
-            string line = raw.TrimEnd('\r');
-            if (line.StartsWith(WorktreePrefix, StringComparison.Ordinal))
-                current = line[WorktreePrefix.Length..];
-            else if (string.Equals(line, branchLine, StringComparison.Ordinal))
-                return current;
-        }
-
-        return null;
-    }
 
     /// <summary>
     ///     Creates <paramref name="branch" /> in a worktree at <paramref name="worktreePath" />, starting from
@@ -428,7 +375,7 @@ public sealed class RunStartRunner
     {
         string? parent = Path.GetDirectoryName(worktreePath);
         if (!string.IsNullOrEmpty(parent))
-            Directory.CreateDirectory(parent);
+            _files.CreateDirectory(parent);
 
         List<string> arguments = ["worktree", "add"];
         arguments.AddRange(branchOptions);
@@ -438,35 +385,18 @@ public sealed class RunStartRunner
         return Git([.. arguments]);
     }
 
-    private ProcessResult Run(string executable, string[] arguments)
-    {
-        ProcessStartInfo startInfo = new(executable)
-        {
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            WorkingDirectory = _repositoryRoot
-        };
-
-        foreach (string argument in arguments)
-            startInfo.ArgumentList.Add(argument);
-
-        return _executor.Run(startInfo, string.Empty);
-    }
-
     /// <summary>
     ///     The first file of that name on <c>PATH</c>, or null. Windows also tries the <c>PATHEXT</c>
     ///     extensions, so an installed <c>.cmd</c> shim counts as present.
     /// </summary>
-    private static string? ResolveOnPath(string name)
+    private string? ResolveOnPath(string name)
     {
-        string? path = Environment.GetEnvironmentVariable("PATH");
+        string? path = _environment.GetVariable("PATH");
         if (string.IsNullOrWhiteSpace(path))
             return null;
 
         string[] extensions = OperatingSystem.IsWindows()
-            ? (Environment.GetEnvironmentVariable("PATHEXT") ?? ".COM;.EXE;.BAT;.CMD")
+            ? (_environment.GetVariable("PATHEXT") ?? ".COM;.EXE;.BAT;.CMD")
             .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             : [string.Empty];
 
@@ -477,7 +407,7 @@ public sealed class RunStartRunner
             foreach (string extension in extensions)
             {
                 string candidate = Path.Combine(directory, name + extension);
-                if (File.Exists(candidate))
+                if (_files.FileExists(candidate))
                     return candidate;
             }
         }
