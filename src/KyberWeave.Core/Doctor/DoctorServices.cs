@@ -1,4 +1,5 @@
 using KyberWeave.Application.Doctor;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Data.Doctor;
@@ -20,7 +21,7 @@ internal static class DoctorServices
 {
     private static readonly IDoctorFileSystem Files = new PhysicalDoctorFileSystem();
 
-    private static readonly IRepositoryToolSettings Settings = new ConfigFileToolSettings();
+    private static readonly IRepositoryToolSettings Settings = new ConfigFileToolSettings(KyberWeaveConfigLoader.Repository);
 
     internal static ICodeGraphProvisioner Provisioner { get; } =
         new CodeGraphIndexProvisioner(Files, new FileCodeGraphIndexWorkspace());

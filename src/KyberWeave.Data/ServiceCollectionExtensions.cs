@@ -2,6 +2,7 @@ using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Data.Docs.FileSystem;
 using KyberWeave.Data.CodeGraph;
+using KyberWeave.Core.Doctor;
 using KyberWeave.Data.Configuration;
 using KyberWeave.Data.Docs.Mcp;
 using KyberWeave.Data.Arbiter;
@@ -68,6 +69,8 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<ICitedSourceFiles>(_ => new FileCitedSourceFiles());
         services.TryAddSingleton<IRepositoryTreeProbe>(_ => new FileRepositoryTreeProbe());
         services.TryAddSingleton<ITestClassSources>(_ => new FileTestClassSources());
+        services.TryAddSingleton<IKyberWeaveConfigRepository>(sp => new FileKyberWeaveConfigRepository(sp.GetRequiredService<IRepositoryTreeProbe>()));
+        services.TryAddSingleton<IRepositoryToolSettings>(sp => new ConfigFileToolSettings(sp.GetRequiredService<IKyberWeaveConfigRepository>()));
         _ = services.AddWeaveArbiterData();
         return services;
     }
