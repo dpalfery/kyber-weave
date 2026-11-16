@@ -168,4 +168,26 @@ public sealed class PlanTaskFileScopeTests : IDisposable
 
     private static string Describe(DiagnosticReport report) =>
         string.Join("; ", report.Items.Select(item => $"{item.Code} {item.Message}"));
+
+    [Theory]
+    [InlineData("../secrets.txt")]
+    [InlineData("src/../../secrets.txt")]
+    [InlineData("C:/foo/a.cs")]
+    [InlineData("src/./a.cs")]
+    public void APathThatLeavesTheRepositoryIsNotATaskFile(string entry)
+    {
+        (IReadOnlyList<string> kept, _, IReadOnlyList<string> dropped) = PlanFileScope.Filter([entry]);
+
+        Assert.Empty(kept);
+        Assert.Equal([entry], dropped);
+    }
+
+    [Theory]
+    [InlineData("./src/a.cs", "src/a.cs")]
+    [InlineData("src\\a.cs", "src/a.cs")]
+    [InlineData("src/dir/", "src/dir")]
+    public void AKeptPathIsWrittenInItsRepositoryRelativeForm(string entry, string expected)
+    {
+        Assert.Equal([expected], PlanFileScope.Filter([entry]).Kept);
+    }
 }

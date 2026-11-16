@@ -57,7 +57,7 @@ whatever the server does has to remain honest about both.
      While the file exists the refresh waits 1 second, then 5, then 30, looking again after each,
      and syncs as soon as a look finds none. A file still there at the fourth look fails the tools
      as decision 4 describes, without a `sync`; the reason names the file, its PID and whether
-     that process is running, and the fix is `codegraph unlock` for a process that is not running.
+     that process is running, and the fix is `codegraph unlock <root>` for a process that is not running.
      The failure is not kept for the refresh interval. The owner set this schedule.
    - **A `sync` that loses the race after the look is contention.** It is retried twice within
      about a second, and if the lock is still held the answer proceeds with a note of the same

@@ -29,7 +29,12 @@ internal static partial class PlanFileScope
         foreach (string entry in entries)
         {
             string? relative = AsRelativePath(entry);
-            (relative is null ? dropped : IsScratch(relative) ? scratch : kept).Add(entry);
+            if (relative is null)
+                dropped.Add(entry);
+            else if (IsScratch(relative))
+                scratch.Add(entry); // reported to the author, so in the author's own text
+            else
+                kept.Add(relative);
         }
 
         return (kept, scratch, dropped);
@@ -53,8 +58,15 @@ internal static partial class PlanFileScope
             relative = relative[2..];
         }
 
-        string firstSegment = relative.Split('/')[0];
-        return relative.Length == 0 || relative.StartsWith('/') || firstSegment.IndexOfAny(['*', '?']) >= 0 ? null : relative;
+        // A path that climbs out of the repository or starts at a drive is not a place inside it.
+        string[] segments = relative.Split('/');
+        if (relative.Length == 0 || relative.StartsWith('/') || DriveRegex().IsMatch(relative)
+            || segments.Any(segment => segment is ".." or "."))
+        {
+            return null;
+        }
+
+        return segments[0].IndexOfAny(['*', '?']) >= 0 ? null : relative;
     }
 
     // Case is ignored so the answer is the same on a file system that folds case and on one that does not.
@@ -64,4 +76,7 @@ internal static partial class PlanFileScope
 
     [GeneratedRegex(@"^[A-Za-z][A-Za-z0-9+.-]*:(?!\\|/)", RegexOptions.CultureInvariant)]
     private static partial Regex SchemeRegex();
+
+    [GeneratedRegex(@"^[A-Za-z]:", RegexOptions.CultureInvariant)]
+    private static partial Regex DriveRegex();
 }

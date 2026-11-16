@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
@@ -44,7 +45,16 @@ public sealed class ToolingCheckService(
             : DoctorOptions.Defaults with { McpExecutable = McpExecutable };
         IProcessExecutor executor = Executor ?? new BoundedExecutor(_process, options.IndexTimeout);
 
-        DoctorReport report = _doctor.Run(_repositoryRoot, DoctorMode.Ensure, options, executor, _environment.GetVariable);
+        DoctorReport report;
+        try
+        {
+            report = _doctor.Run(_repositoryRoot, DoctorMode.Ensure, options, executor, _environment.GetVariable);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or Win32Exception or TimeoutException)
+        {
+            // The check itself could not run: the caller still gets the shape it reads, with the reason and a stop.
+            return string.Join('\n', provenance, "result: failed", $"FAIL doctor: {exception.Message}", ToolFailureLine, "EXIT: 1");
+        }
 
         // The doctor has already applied stop-on-tool-failure to its exit code, so the code alone decides the token.
         bool stop = report.ExitCode != 0;

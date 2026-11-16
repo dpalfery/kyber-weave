@@ -168,16 +168,15 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
 
             try
             {
-                _last = Refresh(resolverFactory, out bool lockFileRemained);
+                _last = Refresh(resolverFactory, out bool lockWasHeld);
 
-                // A lock file that outlasted the waits is not a verdict to keep: the next call looks again.
-                _lastAttempt = lockFileRemained ? null : now;
+                // A verdict that only says another process held the index is not one to keep: the lock may be
+                // gone by the next call, so that call looks again.
+                _lastAttempt = lockWasHeld ? null : now;
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                KyberWeaveConfigLoadResult loaded = _config.TryLoad(_repositoryRoot);
-                bool stops = loaded is { Success: true, Config: not null } ? loaded.Config.StopsOnToolFailure : true;
-                _last = Failure(stops, exception.Message, null);
+                _last = Failure(StopsOnToolFailureOrDefault(), exception.Message, null);
                 _lastAttempt = now;
             }
 
@@ -189,9 +188,26 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
         }
     }
 
-    private CodeGraphGate Refresh(Func<ICodeGraphResolver> resolverFactory, out bool lockFileRemained)
+    /// <summary>
+    /// Whether a tool failure stops the call, read again for a failure that happened before the setting was known.
+    /// A setting that cannot be read stops, which is the default.
+    /// </summary>
+    private bool StopsOnToolFailureOrDefault()
     {
-        lockFileRemained = false;
+        try
+        {
+            KyberWeaveConfigLoadResult loaded = _config.TryLoad(_repositoryRoot);
+            return loaded is not { Success: true, Config: not null } || loaded.Config.StopsOnToolFailure;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            return true;
+        }
+    }
+
+    private CodeGraphGate Refresh(Func<ICodeGraphResolver> resolverFactory, out bool lockWasHeld)
+    {
+        lockWasHeld = false;
         KyberWeaveConfigLoadResult loaded = _config.TryLoad(_repositoryRoot);
         if (loaded is not { Success: true, Config: not null })
             return CodeGraphGate.Clear;
@@ -209,7 +225,7 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
 
         if (!WaitForNoIndexLockFile())
         {
-            lockFileRemained = true;
+            lockWasHeld = true;
             return IndexLockFileRemained(stops);
         }
 
@@ -219,11 +235,18 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
         if (!provisioned.Passed)
         {
             if (CodeGraphIndexRules.IsBusy(provisioned))
+            {
+                lockWasHeld = true;
                 return CodeGraphGate.Advisory(BusyNote);
+            }
 
-            return CodeGraphIndexRules.IsIndexLockHeld(provisioned)
-                ? CodeGraphGate.Advisory(IndexLockHeldNote)
-                : Failure(stops, provisioned.Reason, provisioned.Fix);
+            if (CodeGraphIndexRules.IsIndexLockHeld(provisioned))
+            {
+                lockWasHeld = true;
+                return CodeGraphGate.Advisory(IndexLockHeldNote);
+            }
+
+            return Failure(stops, provisioned.Reason, provisioned.Fix);
         }
 
         ICodeGraphResolver resolver = resolverFactory();
@@ -277,16 +300,23 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
             fix);
     }
 
+    private const int LockHolderReadBytes = 32;
+
     /// <summary>The process id the lock file records, or null when the file is gone, unreadable, or holds no number.</summary>
     private static int? ReadLockHolder(string lockFile)
     {
         try
         {
-            return int.TryParse(File.ReadAllText(lockFile).Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out int processId)
+            // A process id is a few digits: read no more than that, whatever the file holds.
+            using FileStream stream = new(lockFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            byte[] buffer = new byte[LockHolderReadBytes];
+            int read = stream.ReadAtLeast(buffer, buffer.Length, throwOnEndOfStream: false);
+            string text = System.Text.Encoding.ASCII.GetString(buffer, 0, read).Trim();
+            return int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out int processId)
                 ? processId
                 : null;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException or System.Security.SecurityException)
         {
             return null;
         }
@@ -294,14 +324,31 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
 
     private static bool IsRunning(int processId)
     {
+        Process process;
         try
         {
-            using Process process = Process.GetProcessById(processId);
-            return !process.HasExited;
+            process = Process.GetProcessById(processId);
         }
-        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or Win32Exception)
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
         {
             return false;
+        }
+
+        using (process)
+        {
+            try
+            {
+                return !process.HasExited;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+            catch (Exception exception) when (exception is Win32Exception or UnauthorizedAccessException or NotSupportedException)
+            {
+                // The process exists but this user may not ask about it: it is running, and unlocking under it is wrong.
+                return true;
+            }
         }
     }
 
