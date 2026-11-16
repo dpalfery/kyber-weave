@@ -25,12 +25,15 @@ The host's rules (Host facts, root `AGENTS.md`) apply to every task; fetch the s
 usually good at is not a boundary. Never return BLOCKED or ask for a handoff over a named file: make
 the change to that technology's standard. Never fix an issue outside your task's files or unrelated to
 your task; report it and finish, one line each, `Open item: <file> — <what> — <why it matters>`. They
-are filed as todos when the run ends. Stop only for a missing packet, a contradiction in the task, or a
+are filed as todos when the run ends. Stop only for a missing packet, a contradiction inside the task itself, or a
 safety limit (migrations on a shared database, CI or deploy secrets, a push).
 
 **The documented rule wins over nearby code.** Where existing code contradicts a documented rule or
 standard (where a kind of file goes, a layering or naming rule), follow the rule in your change and add
 an `Open item:` line naming the rule and the existing code that breaks it. Never copy the divergent pattern.
+The one exception is a decision your packet cites: when the task names an approved plan decision that
+sanctions a departure from a standard, that decision is your authority for this task. Implement it as written,
+add an `Open item:` line naming the standard and the decision, and never return BLOCKED over it.
 
 **Never run the full test suite.** Run the test classes your task names; the council and CI run the full suite.
 

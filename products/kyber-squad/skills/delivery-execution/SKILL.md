@@ -114,6 +114,8 @@ Lines that are not one of the six digest fields are never counted or rejected as
 
 Other task sessions may continue with non-overlapping ready work while a task awaits rework.
 
+A worker that returns `STATUS: BLOCKED` over a conflict between its task and a standard gets one `architect` dispatch to decide it. The architect records the decision in the plan and regenerates the task file; that revision stays uncommitted, because `docs-dev`'s closeout commit carries it, so dispatch no one to commit it. Send the decision to the same worker session, citing the decision id. When several workers are running, wait first on the one other tasks depend on: a refusal from it that sits unread holds up every task behind it.
+
 ## Iteration circuit-breaker and loop detection
 
 The conductor enforces an iteration circuit-breaker to halt thrashing test-fix loops across rework cycles.
