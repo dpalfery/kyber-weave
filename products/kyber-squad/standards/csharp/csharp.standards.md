@@ -13,7 +13,6 @@ last-reviewed: 2026-08-16
 How C# is written in this repository. Agents and skills resolve this document as
 `<csharp-coding-standard>`.
 
-## Authority & status
 
 When this standard is in `status: current`, it is the rule for this technology in this
 repository. Portable agents ship no built-in default to fall back on. While it is in
@@ -25,7 +24,9 @@ best available guidance and names the draft standard it relied on in one line of
 > copy Kyber-Weave's own `docs/standards/csharp/` — that file records one repository's
 > decisions, including ones a host may reasonably reverse.
 
-## Stack
+## Naming and layout
+
+### Stack
 
 - **Target:** ASP.NET Core on .NET 10, C# 13.
 - **HTTP surface:** MVC controllers (`ControllerBase`), not minimal APIs. Return
@@ -39,42 +40,7 @@ best available guidance and names the draft standard it relied on in one line of
 Application and API code consumes `IRepository<T>` (or an equivalent persistence
 abstraction). It does not open connections, write SQL, or author migrations.
 
-## The build is the first reviewer
-
-`.editorconfig` and the analyzers are authoritative for formatting and mechanical rules.
-`TreatWarningsAsErrors` is on with `AnalysisMode=all`. A warning is a failed build.
-Adding an id to `NoWarn` is a repository-wide decision and needs a reason you can state
-in the file.
-
-Do not merge code that fails the build, and do not restate analyzer rules here.
-
-## Style the analyzers already enforce
-
-`.editorconfig` is the source of truth. The choices worth stating because other .NET
-repositories disagree:
-
-- **Explicit types, never `var`** — including where the type is apparent.
-  Encode this in `csharp_style_var_*`.
-- **File-scoped namespaces.**
-- **Predefined type keywords** — `string`, `int`, `bool`, never `String` or `Int32`.
-- **Allman braces**, and a new line before `else`, `catch` and `finally`.
-
-## Types
-
-**Seal by default.** A public type is `sealed` unless something derives from it.
-Inheritance is a deliberate extension point, not the default shape of a class.
-
-**Records for values, classes for behaviour.** A record models a value the code passes
-around and compares. Something with dependencies or lifetime is a class. Request and
-response DTOs are `sealed record`.
-
-**Nullable is enabled.** A nullable annotation is a claim; do not answer a warning with
-`!` when the honest fix is a check or a different signature.
-
-One top-level type per file, named after the file. Align filename, namespace, and suffix
-with the classification below.
-
-## Model classification and placement
+### Model classification and placement
 
 Replace `<Solution>` with this repository's root namespace. A database key, a set of
 public auto-properties, a default initializer, an attribute, or a property count does
@@ -94,7 +60,55 @@ focused behaviour tests, not a convenience.
 
 Do not add getter/setter-only tests to pad coverage.
 
-## Async
+### Backend-for-frontend
+
+Applies when the host uses a backend-for-frontend (BFF) pattern in front of a YARP reverse
+proxy. Skip this section for a host with no BFF.
+
+- The browser never sees or stores access tokens; they are kept server-side in encrypted
+  cookies.
+- Validate incoming Host headers against an allowlist to prevent header injection.
+- CORS uses explicit frontend origins, never a wildcard.
+- The BFF serves a fallback route for client-side routing.
+- Do not bypass YARP for direct API calls from the BFF.
+- Forward Bearer tokens via YARP transforms on every proxied request.
+
+### Dependencies
+
+New dependencies need a reason: what it does, why the existing stack cannot, and who
+maintains it. This repository's data stack is ADO.NET plus FluentMigrator — do not
+import Dapper, Entity Framework, or a second migrator because a portable skill
+shipped with them.
+
+## Coding standards
+
+### Style the analyzers already enforce
+
+`.editorconfig` is the source of truth. The choices worth stating because other .NET
+repositories disagree:
+
+- **Explicit types, never `var`** — including where the type is apparent.
+  Encode this in `csharp_style_var_*`.
+- **File-scoped namespaces.**
+- **Predefined type keywords** — `string`, `int`, `bool`, never `String` or `Int32`.
+- **Allman braces**, and a new line before `else`, `catch` and `finally`.
+
+### Types
+
+**Seal by default.** A public type is `sealed` unless something derives from it.
+Inheritance is a deliberate extension point, not the default shape of a class.
+
+**Records for values, classes for behaviour.** A record models a value the code passes
+around and compares. Something with dependencies or lifetime is a class. Request and
+response DTOs are `sealed record`.
+
+**Nullable is enabled.** A nullable annotation is a claim; do not answer a warning with
+`!` when the honest fix is a check or a different signature.
+
+One top-level type per file, named after the file. Align filename, namespace, and suffix
+with the classification below.
+
+### Async
 
 - Methods that return a `Task` take the `Async` suffix.
 - Async all the way down. `.Result`, `.Wait()`, and `Thread.Sleep` in async code are
@@ -102,7 +116,7 @@ Do not add getter/setter-only tests to pad coverage.
 - Accept a `CancellationToken` on I/O — including controller actions — and pass it
   through. A call that cannot be cancelled is a hang waiting for a bad network.
 
-## Resources
+### Resources
 
 `IDisposable` values are owned. Dispose them with `using` / `await using`, or the type
 that holds them implements `IDisposable` and disposes them. A leaked `HttpClient`,
@@ -112,7 +126,7 @@ Reuse outbound HTTP through `IHttpClientFactory`. Configure retries, timeouts, a
 circuit breaking on the factory with Polly; do not new up `HttpClient` or wrap every
 call site in its own policy.
 
-## Errors
+### Errors
 
 - **Catch what you can name.** Operational failures are caught by type and translated
   into a diagnostic, a log line, an exit code, or RFC 7807 `ProblemDetails`. A bare
@@ -125,20 +139,7 @@ call site in its own policy.
 - Invalid input is `TypedResults.ValidationProblem` / `ProblemDetails`, not a bare
   string. Register `AddProblemDetails()` and `UseExceptionHandler()`.
 
-## Safety
-
-- Parameterized ADO.NET commands, always. String concatenation into SQL is an
-  injection, including in a migration.
-- Secrets come from User Secrets locally and Key Vault (or the equivalent store) in
-  deployed environments — never a literal, never a committed config file, never a
-  log line.
-- Log through `ILogger<T>` with structured properties and a correlation id.
-  `Console.WriteLine` is not production logging. Configure providers per environment.
-- HTTPS and HSTS are on. Authenticate, then authorize. CORS is explicit. CSRF
-  protection is on wherever cookie-authenticated browser clients can POST. Persist
-  Data Protection keys and rotate them.
-
-## HTTP pipeline
+### HTTP pipeline
 
 Middleware order is:
 
@@ -161,20 +162,7 @@ result is not a missing resource. Actions do not access HttpContext directly; us
 method parameters (`[FromRoute]`, `[FromQuery]`, `[FromBody]`, `CancellationToken`) instead,
 so the action stays testable without a fake `HttpContext`.
 
-## Backend-for-frontend
-
-Applies when the host uses a backend-for-frontend (BFF) pattern in front of a YARP reverse
-proxy. Skip this section for a host with no BFF.
-
-- The browser never sees or stores access tokens; they are kept server-side in encrypted
-  cookies.
-- Validate incoming Host headers against an allowlist to prevent header injection.
-- CORS uses explicit frontend origins, never a wildcard.
-- The BFF serves a fallback route for client-side routing.
-- Do not bypass YARP for direct API calls from the BFF.
-- Forward Bearer tokens via YARP transforms on every proxied request.
-
-## Performance
+### Performance
 
 - No database or remote call inside a loop. Batch it, or cache what is safe to reuse.
 - LINQ where it reads better; a plain loop where LINQ would allocate or enumerate twice on a
@@ -182,19 +170,42 @@ proxy. Skip this section for a host with no BFF.
 - Watch allocation on hot paths — short-lived objects and boxing are what drive GC pressure.
 - Choose the algorithm for the input size the code will actually see.
 
-## Dependencies
+## Testing
 
-New dependencies need a reason: what it does, why the existing stack cannot, and who
-maintains it. This repository's data stack is ADO.NET plus FluentMigrator — do not
-import Dapper, Entity Framework, or a second migrator because a portable skill
-shipped with them.
-
-## Tests
+### Tests
 
 Test authorship follows `<test-coding-standard>`. Language-level C# in test files
 follows this document. New behaviour ships with the test that would fail without it.
 
-## Completion
+## Commands
+
+### The build is the first reviewer
+
+`.editorconfig` and the analyzers are authoritative for formatting and mechanical rules.
+`TreatWarningsAsErrors` is on with `AnalysisMode=all`. A warning is a failed build.
+Adding an id to `NoWarn` is a repository-wide decision and needs a reason you can state
+in the file.
+
+Do not merge code that fails the build, and do not restate analyzer rules here.
+
+## Security and data handling
+
+### Safety
+
+- Parameterized ADO.NET commands, always. String concatenation into SQL is an
+  injection, including in a migration.
+- Secrets come from User Secrets locally and Key Vault (or the equivalent store) in
+  deployed environments — never a literal, never a committed config file, never a
+  log line.
+- Log through `ILogger<T>` with structured properties and a correlation id.
+  `Console.WriteLine` is not production logging. Configure providers per environment.
+- HTTPS and HSTS are on. Authenticate, then authorize. CORS is explicit. CSRF
+  protection is on wherever cookie-authenticated browser clients can POST. Persist
+  Data Protection keys and rotate them.
+
+## Done checklist
+
+### Completion
 
 A finishing worker proves its change with three commands: the build, the tests covering the
 change, and the formatter check. Build first — a format pass against a stale binary proves

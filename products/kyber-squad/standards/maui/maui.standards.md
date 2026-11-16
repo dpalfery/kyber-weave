@@ -14,7 +14,6 @@ How .NET MAUI is written in this repository. Agents and skills resolve this docu
 `<maui-coding-standard>`. Language-level C# decisions live in `<csharp-coding-standard>`;
 this file is the MAUI architecture and UI overlay.
 
-## Authority & status
 
 When this standard is in `status: current`, it is the rule for this technology in this
 repository. Portable agents ship no built-in default to fall back on. While it is in
@@ -25,7 +24,9 @@ best available guidance and names the draft standard it relied on in one line of
 > `status` to `current`. Every choice here is a guess about a repository this template has
 > never seen — reversing one is the point of the standard being project-specific.
 
-## Stack
+## Naming and layout
+
+### Stack
 
 - **Target:** .NET MAUI on .NET 10.
 - **Architecture:** MVVM with CommunityToolkit.Maui (`ObservableObject`,
@@ -34,7 +35,9 @@ best available guidance and names the draft standard it relied on in one line of
 - **Navigation:** Shell exclusively. No `NavigationPage` stacks beside it.
 - **Composition:** constructor DI, registered in `MauiProgram.cs`.
 
-## MVVM
+## Coding standards
+
+### MVVM
 
 Views are XAML with almost no code-behind. Every View sets `x:DataType` to its ViewModel
 so bindings compile.
@@ -53,7 +56,7 @@ A new page is a triad: `IPageService` (if the page needs a service), `PageViewMo
 `PageView`. Register the ViewModel and View as transient in `MauiProgram.cs` in the same
 change that adds the page.
 
-## Dependency injection
+### Dependency injection
 
 All dependencies are registered in `MauiProgram.cs`. ViewModels never `new` a service.
 
@@ -73,25 +76,39 @@ Typed `HttpClient` via `IHttpClientFactory` is the outbound HTTP pattern.
 `AddStandardResilienceHandler()` (Microsoft.Extensions.Http.Resilience) owns retries;
 do not wrap every call site in its own Polly policy.
 
-## Resilience and connectivity
+### Resilience and connectivity
 
 Remote calls check `Connectivity.Current.NetworkAccess` before they leave the device.
 Transient HTTP failures (408, 503) are the resilience handler's job.
 
 Cache-aside: consult the local cache or SQLite store before hitting the API.
 
-## Navigation
+### Navigation
 
 Shell only. An `INavigationService` wraps `Shell.Current.GoToAsync` so ViewModels stay
 testable. Register routes in `AppShell.xaml.cs`. Incoming navigation data arrives through
 `IQueryAttributable` or `[QueryProperty]`.
 
-## Settings
+### Settings
 
 `Preferences.Get` does not appear in a ViewModel. An `ISettingsService` wraps
 `Microsoft.Maui.Storage.Preferences`; the ViewModel takes the interface.
 
-## Authentication
+## Testing
+
+### Testability
+
+ViewModels take interfaces in the constructor. They never instantiate a service.
+Tests mock `INavigationService` and data services; this standard only requires that the
+code be mockable. Test ViewModels and services, not Views.
+
+## Commands
+
+_Nothing specific yet._
+
+## Security and data handling
+
+### Authentication
 
 OIDC/OAuth2 with PKCE. Entra ID is the primary identity provider, via
 Microsoft.Identity.Client (MSAL.NET) so the native broker is available.
@@ -100,13 +117,9 @@ Microsoft.Identity.Client (MSAL.NET) so the native broker is available.
 Tokens live in `ISecureStorage`, reached through `ISettingsService` — never in
 Preferences, never in a literal.
 
-## Testability
+## Done checklist
 
-ViewModels take interfaces in the constructor. They never instantiate a service.
-Tests mock `INavigationService` and data services; this standard only requires that the
-code be mockable. Test ViewModels and services, not Views.
-
-## Completion
+### Completion
 
 ```bash
 dotnet build -c Release                                 # the build, analyzers and XAML compilation included

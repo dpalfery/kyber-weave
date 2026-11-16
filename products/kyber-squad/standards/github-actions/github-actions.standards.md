@@ -13,7 +13,6 @@ last-reviewed: 2026-08-16
 How CI workflows are written in this repository. Agents and skills resolve this document as
 `<github-actions-coding-standard>`.
 
-## Authority & status
 
 When this standard is in `status: current`, it is the rule for this technology in this
 repository. Portable agents ship no built-in default to fall back on. While it is in
@@ -23,28 +22,9 @@ best available guidance and names the draft standard it relied on in one line of
 > Template. Set `owner` to a row in `catalog.md`, review the decisions below, and promote
 > `status` to `current`.
 
-## Supply chain
+## Naming and layout
 
-- **Third-party actions are pinned to a full commit SHA**, with the version in a trailing
-  comment. A tag is mutable: the action you reviewed is not necessarily the action that runs.
-  First-party `actions/*` may be pinned to a major tag if the repository says so here.
-- **`permissions:` is declared explicitly**, at the workflow and narrowed per job. Start from
-  `contents: read` and add what a job proves it needs.
-- **Untrusted input never reaches a shell.** A PR title, branch name, or issue body
-  interpolated into `run:` is a script injection — pass it through `env:` and quote the
-  variable.
-- `pull_request_target` and `workflow_run` run with the base repository's secrets. Do not
-  check out and execute fork code in them.
-
-## Secrets
-
-Secrets come from the secrets store, are passed by `env:`, and are never echoed, written to an
-artifact, or included in a step summary. A workflow that needs to print a secret to debug it
-needs a different debugging approach.
-
-Prefer OIDC federation to a long-lived cloud credential stored as a secret.
-
-## Structure
+### Structure
 
 - One workflow per concern — validate, release, publish — rather than one file with a matrix
   of conditionals.
@@ -55,12 +35,28 @@ Prefer OIDC federation to a long-lived cloud credential stored as a secret.
 - Independent jobs run in parallel; a `needs:` that is not a real dependency is wall-clock
   time spent for nothing.
 
-## Speed
+## Coding standards
+
+### Speed
 
 Cache dependencies with a key that includes the lockfile hash. A cache that never invalidates
 is worse than none — it hides a broken restore behind a stale hit.
 
-## Gates
+### Determinism
+
+Pin the runner image, the language version, and the tool versions. `latest` in CI means the
+build that passes today fails on a morning nobody changed anything.
+
+Jobs run on a Linux runner unless the job needs another OS — Windows for a MAUI publish, macOS
+for iOS signing — and say why when they do.
+
+## Testing
+
+_Nothing specific yet._
+
+## Commands
+
+### Gates
 
 The checks that must pass are required in branch protection, not merely present in the file. A
 gate that can be skipped by merging anyway is documentation, not a gate.
@@ -73,7 +69,7 @@ disabled test without a linked issue and a date.
 - An AI review bot's API key is a secret like any other, the bot runs without elevated
   privileges, and its output is structured (JSON) so a gate can read it.
 
-## Deployment
+### Deployment
 
 - **Build and deploy are separate jobs.** Build and test in one job; deploy depends on it and
   runs only when it passed. Every path from a push to production goes through a test gate.
@@ -90,15 +86,32 @@ disabled test without a linked issue and a date.
 - **Test results and build artifacts are uploaded** with an explicit `retention-days`; .NET test
   steps log with `--logger trx` so the results can be published.
 
-## Determinism
+## Security and data handling
 
-Pin the runner image, the language version, and the tool versions. `latest` in CI means the
-build that passes today fails on a morning nobody changed anything.
+### Supply chain
 
-Jobs run on a Linux runner unless the job needs another OS — Windows for a MAUI publish, macOS
-for iOS signing — and say why when they do.
+- **Third-party actions are pinned to a full commit SHA**, with the version in a trailing
+  comment. A tag is mutable: the action you reviewed is not necessarily the action that runs.
+  First-party `actions/*` may be pinned to a major tag if the repository says so here.
+- **`permissions:` is declared explicitly**, at the workflow and narrowed per job. Start from
+  `contents: read` and add what a job proves it needs.
+- **Untrusted input never reaches a shell.** A PR title, branch name, or issue body
+  interpolated into `run:` is a script injection — pass it through `env:` and quote the
+  variable.
+- `pull_request_target` and `workflow_run` run with the base repository's secrets. Do not
+  check out and execute fork code in them.
 
-## Completion
+### Secrets
+
+Secrets come from the secrets store, are passed by `env:`, and are never echoed, written to an
+artifact, or included in a step summary. A workflow that needs to print a secret to debug it
+needs a different debugging approach.
+
+Prefer OIDC federation to a long-lived cloud credential stored as a secret.
+
+## Done checklist
+
+### Completion
 
 A workflow is not proved by reading it. Three checks run before the change is reported done, and
 none of them is optional because the file is "only YAML":

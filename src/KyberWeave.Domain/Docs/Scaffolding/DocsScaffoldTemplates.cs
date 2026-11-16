@@ -200,8 +200,6 @@ public static class DocsScaffoldTemplates
         document as `<{technology}{ConfigRegConfig.CodingStandardSuffix}>` in the repository
         root `AGENTS.md`.
 
-        ## Authority & status
-
         When this standard is in `status: current`, it is how this technology is written in this
         repository and what reviewers grade against. Portable agents ship no built-in default to fall back on. While it is in
         `status: draft` it is a proposal, but a worker never stops for it: it uses the draft as
@@ -214,16 +212,70 @@ public static class DocsScaffoldTemplates
         working in {technology} reads this file; a statement that applies to every task and is
         never OK to break is a rule, and belongs in the root `AGENTS.md` or `rules/` instead.
 
-        ## Structure
+        ## Naming and layout
 
-        ## Naming
-
-        ## Error handling
+        ## Coding standards
 
         ## Testing
 
+        ## Commands
+
+        ## Security and data handling
+
+        ## Done checklist
+
         """;
     }
+
+    /// <summary>Builds the prose rules stub for a declared technology with no shipped template.</summary>
+    public static string TechnologyRules(string technology, string owner, string today)
+    {
+        string yamlOwner = HostConfigYaml.QuoteScalar(owner);
+        return $"""
+        ---
+        id: standards/{technology}/rules
+        title: "{technology} rules"
+        doc-type: rule
+        status: draft
+        technology: {technology}
+        owner: {yamlOwner}
+        last-reviewed: {today}
+        ---
+
+        # {technology} rules
+
+        Rules that apply to every task written in {technology}. Technology rules beat parent rules,
+        parent rules beat shared rules, and rules beat skills.
+        """;
+    }
+
+    /// <summary>Builds the skills stub for a declared technology with no shipped template.</summary>
+    public static string TechnologySkills(string technology, string owner, string today)
+    {
+        string yamlOwner = HostConfigYaml.QuoteScalar(owner);
+        return $"""
+        ---
+        id: standards/{technology}/skills
+        title: "{technology} skills"
+        doc-type: skill
+        status: draft
+        technology: {technology}
+        owner: {yamlOwner}
+        last-reviewed: {today}
+        ---
+
+        # {technology} skills
+
+        How to carry out the common work in {technology}: the commands, tool servers and query
+        patterns this repository uses.
+        """;
+    }
+
+    /// <summary>Builds the empty Arbiter rules file for a declared technology.</summary>
+    public static string TechnologyArbiterRules(string technology) =>
+        $"# Machine rules the Arbiter evaluates for the '{technology}' folder.\n" +
+        "# An empty list is valid: most folders declare none.\n" +
+        "rules: []\n";
 
     public static string DocumentationIndex(string docsRoot, string owner, string today)
     {

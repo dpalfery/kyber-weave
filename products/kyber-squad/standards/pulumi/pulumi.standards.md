@@ -14,7 +14,6 @@ How infrastructure-as-code is written in this repository. Agents and skills reso
 document as `<pulumi-coding-standard>`. Language-level C# decisions live in
 `<csharp-coding-standard>`; this file is the Pulumi and Azure IaC overlay.
 
-## Authority & status
 
 When this standard is in `status: current`, it is the rule for this technology in this
 repository. Portable agents ship no built-in default to fall back on. While it is in
@@ -25,7 +24,9 @@ best available guidance and names the draft standard it relied on in one line of
 > `status` to `current`. Every choice here is a guess about a repository this template has
 > never seen — reversing one is the point of the standard being project-specific.
 
-## Stack
+## Naming and layout
+
+### Stack
 
 - **Language:** C#. Programs use `await Deployment.RunAsync(() => { ... })` and strongly
   typed resource args.
@@ -37,7 +38,7 @@ best available guidance and names the draft standard it relied on in one line of
   cadence, ownership, RBAC, blast radius, or performance clearly differ.
 - **Cross-stack contracts:** `StackReference`. Keep the exported surface small and explicit.
 
-## Program shape
+### Program shape
 
 Prefer small helper methods and `ComponentResource` types over a large top-level program.
 A stack that is one flat file of two hundred resources has no unit anyone can reuse or
@@ -49,7 +50,21 @@ before writing a new one.
 
 Export stack outputs at the top level of the program, not from inside `Apply`.
 
-## Outputs and dependencies
+### Names
+
+Azure resource names are deterministic from app, environment, region, and purpose, and they
+follow the host's Azure naming standard (resolved through the `azure-naming` skill). A
+timestamp or an unmanaged random value produces a different name every run and therefore a
+replacement.
+
+Let Pulumi auto-name the *logical* resource only when nothing outside the stack depends on
+the Azure name. Where a name must be stable — a DNS label, a Key Vault, a storage account —
+set it explicitly and treat it as an interface. Changing it destroys and recreates the
+resource unless an alias records the rename.
+
+## Coding standards
+
+### Outputs and dependencies
 
 - **Pass an `Output<T>` straight into the next resource's input.** That is what tells Pulumi
   one resource depends on another.
@@ -60,7 +75,26 @@ Export stack outputs at the top level of the program, not from inside `Apply`.
   requires but no value expresses. Adding it where an output would do serializes work for
   no reason.
 
-## Configuration and secrets
+### Azure composition
+
+Start from resource groups, identities, networking, and compute as composable components.
+Apply consistent Azure tags — owner, environment, cost centre, system — through a stack
+transformation rather than by remembering at each call site.
+
+Resource sizes are chosen deliberately and stated. A default that happens to be expensive
+is still a decision.
+
+## Testing
+
+_Nothing specific yet._
+
+## Commands
+
+_Nothing specific yet._
+
+## Security and data handling
+
+### Configuration and secrets
 
 Environment-specific values live in stack config, not hardcoded constants. Region,
 subscription, and environment are explicit config, not compiled-in facts.
@@ -73,19 +107,7 @@ subscription, and environment are explicit config, not compiled-in facts.
   diagnostic — outputs land in state and in CI logs.
 - State lives in a remote backend with access control. It is never committed.
 
-## Names
-
-Azure resource names are deterministic from app, environment, region, and purpose, and they
-follow the host's Azure naming standard (resolved through the `azure-naming` skill). A
-timestamp or an unmanaged random value produces a different name every run and therefore a
-replacement.
-
-Let Pulumi auto-name the *logical* resource only when nothing outside the stack depends on
-the Azure name. Where a name must be stable — a DNS label, a Key Vault, a storage account —
-set it explicitly and treat it as an interface. Changing it destroys and recreates the
-resource unless an alias records the rename.
-
-## Resource safety and lifecycle
+### Resource safety and lifecycle
 
 - Use `Protect = true` for critical shared resources where accidental deletion would be
   costly.
@@ -97,16 +119,9 @@ resource unless an alias records the rename.
   replaces a stateful resource must be visible before it is approved, not discovered on
   apply.
 
-## Azure composition
+## Done checklist
 
-Start from resource groups, identities, networking, and compute as composable components.
-Apply consistent Azure tags — owner, environment, cost centre, system — through a stack
-transformation rather than by remembering at each call site.
-
-Resource sizes are chosen deliberately and stated. A default that happens to be expensive
-is still a decision.
-
-## Before merging
+### Before merging
 
 - `pulumi preview` output goes in the pull request.
 - Call out replacement risk, data-loss risk, and cross-stack impact in the same change.
@@ -116,7 +131,7 @@ is still a decision.
 - When a provider or API-version choice is non-obvious, cite the Pulumi docs or the
   `azure-native` registry page, pinned to the package version in use.
 
-## Completion
+### Completion
 
 ```bash
 dotnet build -c Release                                 # the build

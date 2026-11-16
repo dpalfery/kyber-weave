@@ -16,7 +16,6 @@ How tests are written in this repository. Agents and skills resolve this documen
 `<python-coding-standard>`, `<rust-coding-standard>`, `<go-coding-standard>`, and
 `<react-coding-standard>` the same way.
 
-## Authority & status
 
 When this standard is in `status: current`, it is the rule for this technology in this
 repository. Portable agents ship no built-in default to fall back on. While it is in
@@ -27,29 +26,9 @@ best available guidance and names the draft standard it relied on in one line of
 > `status` to `current`. Every choice here is a guess about a repository this template has
 > never seen — reversing one is the point of the standard being project-specific.
 
-## How tests work in this repository
+## Naming and layout
 
-A worker calls for this standard once, before it opens a test file, so this section must answer
-what it would otherwise spend dozens of lookups finding. Replace each placeholder with this
-repository's answer, and delete a heading that does not apply.
-
-- **Test projects and the task command.** Where each language's tests live, the task gate that
-  runs them (`review.task-gates`), and how it picks classes (`review.test-map`, or the
-  `<Stem>Tests` convention). `<fill in>`
-- **Fixtures and collections.** The shared fixtures, collection or group attributes, and which
-  tests must not run in parallel, with why. `<fill in>`
-- **How integration tests get a database.** The engine, how a test obtains a connection, how the
-  schema is created or migrated, how each run's database is named, and how it is cleaned up.
-  `<fill in>`
-- **Seeded reference data.** The rows or fixture files every test may rely on, named by key, and
-  which of them no test may change. Anything not listed is not safe to rely on. `<fill in>`
-- **Builders, fakes and helpers.** Where test-data builders and fakes live, and one existing test
-  class per layer to copy from. `<fill in>`
-- **Naming and placement.** File, class and method names per layer. `<fill in>`
-- **What parallel runs must not share.** Ports, folders, files and databases a test must scope to
-  its own run. `<fill in>`
-
-## Stack
+### Stack
 
 ### .NET (primary)
 
@@ -126,7 +105,35 @@ repository's answer, and delete a heading that does not apply.
 - **E2E:** Playwright. Coordinate scope with `react-dev` — do not duplicate their smoke
   tests.
 
-## Isolation
+## Coding standards
+
+_Nothing specific yet._
+
+## Testing
+
+### How tests work in this repository
+
+A worker calls for this standard once, before it opens a test file, so this section must answer
+what it would otherwise spend dozens of lookups finding. Replace each placeholder with this
+repository's answer, and delete a heading that does not apply.
+
+- **Test projects and the task command.** Where each language's tests live, the task gate that
+  runs them (`review.task-gates`), and how it picks classes (`review.test-map`, or the
+  `<Stem>Tests` convention). `<fill in>`
+- **Fixtures and collections.** The shared fixtures, collection or group attributes, and which
+  tests must not run in parallel, with why. `<fill in>`
+- **How integration tests get a database.** The engine, how a test obtains a connection, how the
+  schema is created or migrated, how each run's database is named, and how it is cleaned up.
+  `<fill in>`
+- **Seeded reference data.** The rows or fixture files every test may rely on, named by key, and
+  which of them no test may change. Anything not listed is not safe to rely on. `<fill in>`
+- **Builders, fakes and helpers.** Where test-data builders and fakes live, and one existing test
+  class per layer to copy from. `<fill in>`
+- **Naming and placement.** File, class and method names per layer. `<fill in>`
+- **What parallel runs must not share.** Ports, folders, files and databases a test must scope to
+  its own run. `<fill in>`
+
+### Isolation
 
 Tests run in any order and do not depend on each other. Each test arranges its own data.
 No shared mutable state between test methods.
@@ -135,7 +142,7 @@ Clean up test data in DisposeAsync or use a transaction-per-test pattern, so one
 never leak into the next. Use unique identifiers for test records to avoid conflicts with
 parallel runs — a GUID or a per-test prefix, not a fixed id another test might also claim.
 
-## What to assert
+### What to assert
 
 A test name is an assertion, not a number. New behaviour ships with the test that would
 fail without it. A bug fix ships with a regression test whose name encodes the scenario
@@ -151,7 +158,7 @@ that was broken (link to an issue id in a comment if one exists).
 Prefer builder classes over inline object creation for complex domain objects. Builders
 live next to the tests they serve.
 
-## Layer boundaries
+### Layer boundaries
 
 | Layer | Kind | Infrastructure |
 |---|---|---|
@@ -167,7 +174,17 @@ migrations break. Use a real SQL Server instance.
 Unit tests cover domain logic and service classes only — no infrastructure, no DB, no
 HTTP.
 
-## Completion
+## Commands
+
+_Nothing specific yet._
+
+## Security and data handling
+
+_Nothing specific yet._
+
+## Done checklist
+
+### Completion
 
 A finishing worker runs the build once, then the targeted test command for its stack, then the
 formatter check. Nothing wider: the whole-suite commands belong to the review council and CI, and

@@ -15,7 +15,6 @@ and libraries. Agents and skills resolve this document as `<typescript-coding-st
 React UI code (`.tsx`/`.jsx`, and the hooks and client state beside it) follows
 `<react-coding-standard>` instead.
 
-## Authority & status
 
 When this standard is in `status: current`, it is the rule for this technology in this
 repository. Portable agents ship no built-in default to fall back on. While it is in
@@ -26,7 +25,9 @@ best available guidance and names the draft standard it relied on in one line of
 > `status` to `current`. Every choice here is a guess about a repository this template has
 > never seen — reversing one is the point of the standard being project-specific.
 
-## Stack
+## Naming and layout
+
+### Stack
 
 - **Runtime:** the Node.js version named in `package.json` `engines.node`, which is an active
   LTS line. Raise it deliberately, in its own change.
@@ -44,19 +45,19 @@ Application code takes its collaborators — database handles, clocks, file-syst
 clients, loggers — as parameters, and does not construct them internally or read a module-level
 mutable for something a caller could pass.
 
-## The compiler and the linter are the first reviewers
+### Cross-platform
 
-`tsc` and ESLint (with `typescript-eslint`) are authoritative for type and mechanical rules. Do
-not restate those rules here, and do not merge code that fails them.
+The code runs on macOS, Linux, and Windows.
 
-- A suppression (`// eslint-disable-next-line <rule>`, `// @ts-expect-error`) names the rule and
-  says why on the same line. `@ts-ignore` and `@ts-nocheck` do not ship.
-- **Naming:** `camelCase` values and functions, `PascalCase` types and classes,
-  `SCREAMING_SNAKE_CASE` only for true compile-time constants. File names are `kebab-case.ts`.
-- Exported functions and types carry a doc comment saying what a caller cannot see from the
-  signature: units, ranges, and what an absent value means.
+- File-system paths use `node:path` (`join`, `resolve`), never string concatenation with `/`.
+  Paths derived from `import.meta.url` go through `fileURLToPath`.
+- Home and config directories come from `os.homedir()` and the platform conventions, not a
+  hard-coded `~` or `/Users`.
+- Line endings are normalized on read where content is compared or hashed.
 
-## Types
+## Coding standards
+
+### Types
 
 - No `any`. Data from outside the process — JSON, files, environment, HTTP bodies, rows from
   a store another program writes — enters as `unknown` and is narrowed by a validator or a
@@ -69,7 +70,7 @@ not restate those rules here, and do not merge code that fails them.
 - Exported functions declare their return types.
 - `noUncheckedIndexedAccess` is on, or index results are treated as possibly `undefined`.
 
-## Absent is not zero
+### Absent is not zero
 
 A value that was not measured, not reported, or not parsed is **absent**, and stays absent all
 the way to the surface that displays it.
@@ -84,7 +85,7 @@ the way to the surface that displays it.
 - A parse that fails returns an absent value or an error — never a default that looks like data.
 - Display layers render absence explicitly (`—`, "not reported"), not as `0`.
 
-## Data access
+### Data access
 
 - **Select the columns you use.** No `SELECT *` in application code. Large text and JSON
   columns are read only by the query that needs them.
@@ -98,7 +99,7 @@ the way to the surface that displays it.
   transaction.
 - One module owns each table's reads and writes; callers use its functions, not ad-hoc SQL.
 
-## Errors and async
+### Errors and async
 
 - Throw `Error` subclasses (or `new Error(message, { cause })`), never strings or plain
   objects. Callers branch on `instanceof` or a discriminant field, never on message text.
@@ -115,7 +116,31 @@ the way to the surface that displays it.
   by a timeout.
 - `process.exit` appears only in the CLI entry point.
 
-## Safety
+## Testing
+
+### Tests
+
+Test authorship follows `<test-coding-standard>`. This standard requires that the code be
+testable: dependencies passed in, no module-level mutable state, clocks injectable. Test files
+(`*.test.ts`, `*.spec.ts`) belong to `test-dev`.
+
+## Commands
+
+### The compiler and the linter are the first reviewers
+
+`tsc` and ESLint (with `typescript-eslint`) are authoritative for type and mechanical rules. Do
+not restate those rules here, and do not merge code that fails them.
+
+- A suppression (`// eslint-disable-next-line <rule>`, `// @ts-expect-error`) names the rule and
+  says why on the same line. `@ts-ignore` and `@ts-nocheck` do not ship.
+- **Naming:** `camelCase` values and functions, `PascalCase` types and classes,
+  `SCREAMING_SNAKE_CASE` only for true compile-time constants. File names are `kebab-case.ts`.
+- Exported functions and types carry a doc comment saying what a caller cannot see from the
+  signature: units, ranges, and what an absent value means.
+
+## Security and data handling
+
+### Safety
 
 - `child_process` uses `execFile`/`spawn` with an argument array. Interpolated input never
   reaches a shell (`exec`, `shell: true`).
@@ -123,23 +148,9 @@ the way to the surface that displays it.
 - Secrets come from the environment or a secret store, never a literal. Do not log them.
 - `npm audit --omit=dev` has no high or critical finding before a dependency upgrade merges.
 
-## Cross-platform
+## Done checklist
 
-The code runs on macOS, Linux, and Windows.
-
-- File-system paths use `node:path` (`join`, `resolve`), never string concatenation with `/`.
-  Paths derived from `import.meta.url` go through `fileURLToPath`.
-- Home and config directories come from `os.homedir()` and the platform conventions, not a
-  hard-coded `~` or `/Users`.
-- Line endings are normalized on read where content is compared or hashed.
-
-## Tests
-
-Test authorship follows `<test-coding-standard>`. This standard requires that the code be
-testable: dependencies passed in, no module-level mutable state, clocks injectable. Test files
-(`*.test.ts`, `*.spec.ts`) belong to `test-dev`.
-
-## Completion
+### Completion
 
 Run the scripts the package declares; these are the shape they usually take. The same on macOS,
 Linux, and Windows:

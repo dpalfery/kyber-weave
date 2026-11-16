@@ -16,7 +16,6 @@ document as `<data-access-layer-coding-standard>`. Language-level C# is in the p
 declared as **<csharp-coding-standard>**; SQL shape is in **<sql-coding-standard>**.
 Those three must not disagree. Where they would, this document yields to them.
 
-## Authority & status
 
 When this standard is in `status: current`, it is the rule for this technology in this
 repository. Portable agents ship no built-in default to fall back on. While it is in
@@ -26,7 +25,9 @@ best available guidance and names the draft standard it relied on in one line of
 > Template. Set `owner` to a row in `catalog.md`, replace `<Solution>` with the host's
 > root namespace, review the decisions below, and promote `status` to `current`.
 
-## Stack
+## Naming and layout
+
+### Stack
 
 - **Data access:** parameterized ADO.NET (`Microsoft.Data.SqlClient`). Dapper and Entity
   Framework are out of scope — no `QueryAsync`, no `DbContext`, no `DbSet`, no
@@ -39,7 +40,21 @@ best available guidance and names the draft standard it relied on in one line of
   `<Solution>.Persistence`. Persistence rows stay in Persistence and are mapped at the
   adapter boundary.
 
-## Hard rules
+### Placement
+
+| Kind | Where |
+|---|---|
+| Repository interface | `<Solution>.Contracts` |
+| Repository implementation | `<Solution>.Persistence` |
+| Persistence row | `<Solution>.Persistence` (private) |
+| FluentMigrator scripts | `<Solution>.Persistence` (or the host's migrations project) |
+
+Application and API code consumes `IRepository<T>`. It does not open connections or
+write SQL.
+
+## Coding standards
+
+### Hard rules
 
 - Parameterized `SqlCommand` / `SqlParameter` only. String concatenation into SQL is an
   injection, including in a migration.
@@ -55,19 +70,13 @@ best available guidance and names the draft standard it relied on in one line of
 - Structured logging on failures: operation, entity, id. Do not swallow database
   exceptions.
 
-## Placement
+## Testing
 
-| Kind | Where |
-|---|---|
-| Repository interface | `<Solution>.Contracts` |
-| Repository implementation | `<Solution>.Persistence` |
-| Persistence row | `<Solution>.Persistence` (private) |
-| FluentMigrator scripts | `<Solution>.Persistence` (or the host's migrations project) |
+_Nothing specific yet._
 
-Application and API code consumes `IRepository<T>`. It does not open connections or
-write SQL.
+## Commands
 
-## Migrations
+### Migrations
 
 - One migration per schema change: each schema change ships as its own versioned
   `[Migration(yyyyMMddHHmmss)]` class.
@@ -78,7 +87,13 @@ write SQL.
 - Down() is a host decision: implementing it is optional, and a production correction is
   always a forward migration, per **<sql-coding-standard>**.
 
-## Completion
+## Security and data handling
+
+_Nothing specific yet._
+
+## Done checklist
+
+### Completion
 
 ```bash
 dotnet build -c Release                                 # the build

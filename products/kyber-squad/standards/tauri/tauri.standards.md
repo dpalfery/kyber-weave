@@ -14,7 +14,6 @@ last-reviewed: 2026-09-27
 How the Rust core of a Tauri desktop app is written in this repository. Agents and skills
 resolve this document as `<tauri-coding-standard>`.
 
-## Authority & status
 
 When this standard is in `status: current`, it is the rule for this technology in this
 repository. Portable agents ship no built-in default to fall back on. While it is in
@@ -25,7 +24,9 @@ best available guidance and names the draft standard it relied on in one line of
 > `status` to `current`. Every choice here is a guess about a repository this template has
 > never seen — reversing one is the point of the standard being project-specific.
 
-## Stack
+## Naming and layout
+
+### Stack
 
 - **Framework:** Tauri v2, 2.10 or later. `tauri` and its plugin crates are pinned with
   semver and kept current; `tauri dev` / `tauri build` manage Cargo feature flags.
@@ -33,14 +34,16 @@ best available guidance and names the draft standard it relied on in one line of
 - **Frontend:** a React app owned by the frontend agent. The Rust core may ship the thin
   typed TypeScript `invoke` wrapper that expresses the IPC contract, and nothing more.
 
-## Layout
+### Layout
 
 - `src-tauri/src/lib.rs` holds the `Builder` and `run()`, with the mobile entry point behind
   `#[cfg_attr(mobile, tauri::mobile_entry_point)]`.
 - Commands live in a `commands/` module rather than in `lib.rs`, grouped by concern.
 - Error and state types are explicit, named types — not ad-hoc tuples or strings.
 
-## Errors
+## Coding standards
+
+### Errors
 
 - Fallible code returns `Result` and propagates with `?`. No `.unwrap()`, `.expect()`, or
   panic in a command path; a panic is reserved for an unrecoverable startup condition.
@@ -66,18 +69,13 @@ best available guidance and names the draft standard it relied on in one line of
   `map_err(|e| e.to_string())` is for a throwaway prototype only.
 - Log once, at the command boundary, not throughout the business logic.
 
-## Commands and IPC
+### Commands and IPC
 
 - Large binary payloads return through `tauri::ipc::Response` rather than JSON.
 - The IPC contract — command names, argument and return types, event names, channel payload
   shapes — is written down and versioned like an API.
 
-## Security configuration
-
-- The CSP in `tauri.conf.json` is tightened to what the app loads.
-- Sensitive apps use the Isolation Pattern for an extra IPC verification layer.
-
-## Python sidecar
+### Python sidecar
 
 Where the app ships a Python component:
 
@@ -87,7 +85,24 @@ Where the app ships a Python component:
 - If it runs as a long-lived local API server instead, it binds to localhost only and the
   Rust core proxies to it; the frontend never calls it directly.
 
-## Completion
+## Testing
+
+_Nothing specific yet._
+
+## Commands
+
+_Nothing specific yet._
+
+## Security and data handling
+
+### Security configuration
+
+- The CSP in `tauri.conf.json` is tightened to what the app loads.
+- Sensitive apps use the Isolation Pattern for an extra IPC verification layer.
+
+## Done checklist
+
+### Completion
 
 `cargo clippy` runs with warnings denied in CI.
 

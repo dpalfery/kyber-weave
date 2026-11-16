@@ -14,7 +14,6 @@ How Rust is written in this repository, outside a Tauri app's `src-tauri` core (
 `<tauri-coding-standard>`). Agents and skills resolve this document as
 `<rust-coding-standard>`.
 
-## Authority & status
 
 When this standard is in `status: current`, it is the rule for this technology in this
 repository. Portable agents ship no built-in default to fall back on. While it is in
@@ -25,7 +24,9 @@ best available guidance and names the draft standard it relied on in one line of
 > `status` to `current`. Every choice here is a guess about a repository this template has
 > never seen — reversing one is the point of the standard being project-specific.
 
-## Stack
+## Naming and layout
+
+### Stack
 
 - **Toolchain:** stable Rust, pinned in `rust-toolchain.toml` with the `rustfmt` and `clippy`
   components. Edition 2021 or later, set once in the workspace `Cargo.toml`. Raise the pin
@@ -40,52 +41,7 @@ Application code consumes collaborators through parameters or trait objects. It 
 construct clients, connections, or clocks internally, and it does not reach for a global for
 something a caller could pass.
 
-## The formatter and clippy are the first reviewers
-
-`rustfmt` and `clippy` are authoritative for formatting and mechanical rules. Do not restate
-those rules here, and do not merge code that fails them.
-
-- **Formatting:** default `rustfmt` settings. A `rustfmt.toml` exists only to state a choice
-  the default gets wrong for this repository.
-- **Lints:** `cargo clippy --workspace --all-targets --all-features -- -D warnings`. Every
-  warning fails the gate. An `#[allow(...)]` is scoped to the item and carries a comment saying
-  why — never a crate-level allow.
-- **Naming:** snake_case for functions, modules, and variables; UpperCamelCase for types and
-  traits; SCREAMING_SNAKE_CASE for constants and statics.
-
-## Errors
-
-- **Libraries** return a typed error: an `enum` deriving `thiserror::Error`, with `#[source]`
-  on wrapped errors so the chain survives. `anyhow::Error` never appears in a library's public
-  API.
-- **Binaries** (`main`, command handlers, top-level tasks) use `anyhow::Result` and add
-  `.context(...)` naming the operation and its input as errors propagate.
-- **No `unwrap()` or `expect()` in non-test code.** Propagate with `?`, or restructure so the
-  type proves the value exists. Enforce it with `clippy::unwrap_used` and
-  `clippy::expect_used` set to `deny` outside `#[cfg(test)]`. An `expect` on a genuine
-  invariant (a literal regex, a compile-time-checked value) is allowed with a message stating
-  the invariant and an `#[allow]` saying why.
-- **No silent failure.** `let _ = fallible();` discards an error; when that is intended, the
-  comment says so.
-
-## Async
-
-- Never block the runtime: blocking I/O and CPU-heavy work go through
-  `tokio::task::spawn_blocking`; `std::thread::sleep` does not appear in async code.
-- Never hold a `std::sync::Mutex` guard across an `.await`.
-- Every spawned task has an owner that awaits its `JoinHandle` or holds it in a `JoinSet`.
-  Long-lived tasks take a cancellation token and stop when it fires.
-- Services and daemons shut down gracefully on Ctrl+C and, on Unix, `SIGTERM`.
-
-## `unsafe`
-
-- No `unsafe` in application crates. Crates that need it (FFI, a measured hot path) put it
-  behind a safe API in one module, and the crate root carries `#![deny(unsafe_op_in_unsafe_fn)]`.
-- Every `unsafe` block has a `// SAFETY:` comment stating the invariant that makes it sound.
-  `clippy::undocumented_unsafe_blocks` is set to `deny`.
-- Crates with no `unsafe` declare `#![forbid(unsafe_code)]`.
-
-## Dependencies
+### Dependencies
 
 - Prefer crates.io releases. A git dependency is pinned with `rev = "<full commit SHA>"`, never
   `branch` or `tag`, and carries a comment saying why it is not from crates.io.
@@ -97,7 +53,7 @@ those rules here, and do not merge code that fails them.
 - A new dependency needs a reason in the change description. `cargo deny check` (licenses,
   advisories, duplicates) passes when the repository has a `deny.toml`.
 
-## Cross-platform
+### Cross-platform
 
 The shipped binaries build for:
 
@@ -112,13 +68,68 @@ The shipped binaries build for:
   one OS cannot hide a build break on another.
 - Release automation belongs to `github-devops`.
 
-## Tests
+## Coding standards
+
+### Errors
+
+- **Libraries** return a typed error: an `enum` deriving `thiserror::Error`, with `#[source]`
+  on wrapped errors so the chain survives. `anyhow::Error` never appears in a library's public
+  API.
+- **Binaries** (`main`, command handlers, top-level tasks) use `anyhow::Result` and add
+  `.context(...)` naming the operation and its input as errors propagate.
+- **No `unwrap()` or `expect()` in non-test code.** Propagate with `?`, or restructure so the
+  type proves the value exists. Enforce it with `clippy::unwrap_used` and
+  `clippy::expect_used` set to `deny` outside `#[cfg(test)]`. An `expect` on a genuine
+  invariant (a literal regex, a compile-time-checked value) is allowed with a message stating
+  the invariant and an `#[allow]` saying why.
+- **No silent failure.** `let _ = fallible();` discards an error; when that is intended, the
+  comment says so.
+
+### Async
+
+- Never block the runtime: blocking I/O and CPU-heavy work go through
+  `tokio::task::spawn_blocking`; `std::thread::sleep` does not appear in async code.
+- Never hold a `std::sync::Mutex` guard across an `.await`.
+- Every spawned task has an owner that awaits its `JoinHandle` or holds it in a `JoinSet`.
+  Long-lived tasks take a cancellation token and stop when it fires.
+- Services and daemons shut down gracefully on Ctrl+C and, on Unix, `SIGTERM`.
+
+## Testing
+
+### Tests
 
 Test authorship follows `<test-coding-standard>`. This standard requires that the code be
 testable: dependencies passed in, behaviour behind traits where a test must substitute it, no
 global state. Test authorship belongs to `test-dev`.
 
-## Completion
+## Commands
+
+### The formatter and clippy are the first reviewers
+
+`rustfmt` and `clippy` are authoritative for formatting and mechanical rules. Do not restate
+those rules here, and do not merge code that fails them.
+
+- **Formatting:** default `rustfmt` settings. A `rustfmt.toml` exists only to state a choice
+  the default gets wrong for this repository.
+- **Lints:** `cargo clippy --workspace --all-targets --all-features -- -D warnings`. Every
+  warning fails the gate. An `#[allow(...)]` is scoped to the item and carries a comment saying
+  why — never a crate-level allow.
+- **Naming:** snake_case for functions, modules, and variables; UpperCamelCase for types and
+  traits; SCREAMING_SNAKE_CASE for constants and statics.
+
+## Security and data handling
+
+### `unsafe`
+
+- No `unsafe` in application crates. Crates that need it (FFI, a measured hot path) put it
+  behind a safe API in one module, and the crate root carries `#![deny(unsafe_op_in_unsafe_fn)]`.
+- Every `unsafe` block has a `// SAFETY:` comment stating the invariant that makes it sound.
+  `clippy::undocumented_unsafe_blocks` is set to `deny`.
+- Crates with no `unsafe` declare `#![forbid(unsafe_code)]`.
+
+## Done checklist
+
+### Completion
 
 The same on macOS, Linux, and Windows (PowerShell):
 

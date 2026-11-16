@@ -13,7 +13,6 @@ last-reviewed: 2026-08-16
 How Python is written in this repository. Agents and skills resolve this document as
 `<python-coding-standard>`.
 
-## Authority & status
 
 When this standard is in `status: current`, it is the rule for this technology in this
 repository. Portable agents ship no built-in default to fall back on. While it is in
@@ -24,7 +23,9 @@ best available guidance and names the draft standard it relied on in one line of
 > `status` to `current`. Every choice here is a guess about a repository this template has
 > never seen — reversing one is the point of the standard being project-specific.
 
-## Stack
+## Naming and layout
+
+### Stack
 
 - **Language:** Python 3.12 or later. New modules target the version pinned in
   `.python-version` / `requires-python` in `pyproject.toml` — those two must agree.
@@ -41,23 +42,16 @@ Application code consumes collaborators through constructors or function paramet
 does not create clients, connections, or clocks internally, and it does not read a
 global singleton for something a caller could pass.
 
-## The formatter is the first reviewer
+### Images
 
-Ruff (or Black plus isort) and the type checker are authoritative for formatting and
-mechanical rules. Do not restate those rules here, and do not merge code that fails them.
+`github-devops` owns Dockerfiles. When this service is containerized, the image is
+multi-stage, runs as a non-root user, and puts the apt (or equivalent) layer before the
+application layer so dependency changes do not bust the runtime cache. Say so when handing
+the image need off; do not write the Dockerfile here.
 
-The two settings worth stating because tools disagree about them:
+## Coding standards
 
-- **Line length is 88** — the Black and Ruff default. PEP 8's 79 is also defensible; pick
-  one in `pyproject.toml` and let the formatter apply it.
-- **Imports are sorted and grouped** by Ruff or isort: standard library, third party,
-  local. Prefer `from X import Y` for names used more than once; do not hide a module
-  behind a star import.
-
-snake_case for functions and variables, PascalCase for classes, SCREAMING_SNAKE_CASE for
-constants.
-
-## Types and documentation
+### Types and documentation
 
 - **Public functions are annotated.** Use built-in generics and `X | None` (PEP 604), not
   `typing.List` and `Optional`. New module-level names are annotated too; a bare `x = []`
@@ -69,7 +63,7 @@ constants.
 - A type checker in CI (`mypy --strict`, or Ruff's type rules at the equivalent strictness)
   is worth more than either. Public-API type coverage is 100%; a warning is a failed check.
 
-## Shape
+### Shape
 
 - **One clear purpose per function or class.** A function that needs a comment to explain
   its middle is two functions.
@@ -86,7 +80,7 @@ closed. A repository abstraction owns data access; a strategy abstraction owns a
 algorithm the caller might swap. Do not introduce either pattern where a function would
 do.
 
-## Correctness
+### Correctness
 
 - **Never a mutable default argument.** `def f(x: list | None = None)` and build inside.
 - **Prefer the right structure** — a set for membership, a dict for lookup, a generator
@@ -96,7 +90,7 @@ do.
 - Concurrent I/O uses `asyncio.gather` (or `TaskGroup`) rather than a sequential loop of
   awaits. Do not mix blocking I/O into an async function.
 
-## Errors
+### Errors
 
 - **No bare `except:`.** Catch the exception you can name and handle.
 - **Log with `logger.exception`** inside a handler, so the traceback survives. A silent
@@ -107,7 +101,35 @@ do.
 - Production services log structured events (not `print`), expose a health check for the
   dependencies they need, and fail closed rather than returning a guessed value.
 
-## Safety
+## Testing
+
+### Tests
+
+Test authorship follows `<test-coding-standard>`. This standard requires that the code
+be testable: dependency injection, mockable interfaces, no global state. Test
+authorship belongs to `test-dev`.
+
+## Commands
+
+### The formatter is the first reviewer
+
+Ruff (or Black plus isort) and the type checker are authoritative for formatting and
+mechanical rules. Do not restate those rules here, and do not merge code that fails them.
+
+The two settings worth stating because tools disagree about them:
+
+- **Line length is 88** — the Black and Ruff default. PEP 8's 79 is also defensible; pick
+  one in `pyproject.toml` and let the formatter apply it.
+- **Imports are sorted and grouped** by Ruff or isort: standard library, third party,
+  local. Prefer `from X import Y` for names used more than once; do not hide a module
+  behind a star import.
+
+snake_case for functions and variables, PascalCase for classes, SCREAMING_SNAKE_CASE for
+constants.
+
+## Security and data handling
+
+### Safety
 
 - No `eval`, no `exec`, and no `pickle` on data you did not produce. `yaml.safe_load`,
   never `yaml.load`.
@@ -119,20 +141,9 @@ do.
 - Validate and sanitize untrusted input at the boundary; do not trust a return value you
   have not typed.
 
-## Images
+## Done checklist
 
-`github-devops` owns Dockerfiles. When this service is containerized, the image is
-multi-stage, runs as a non-root user, and puts the apt (or equivalent) layer before the
-application layer so dependency changes do not bust the runtime cache. Say so when handing
-the image need off; do not write the Dockerfile here.
-
-## Tests
-
-Test authorship follows `<test-coding-standard>`. This standard requires that the code
-be testable: dependency injection, mockable interfaces, no global state. Test
-authorship belongs to `test-dev`.
-
-## Completion
+### Completion
 
 ```bash
 python -m venv .venv

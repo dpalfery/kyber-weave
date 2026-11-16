@@ -138,12 +138,22 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
 
         foreach (string technology in ontology.Technologies)
         {
-            string standardContent = kyberStandards && KyberStandardsTemplates.TryRender(technology, resolvedOwner, Today, out string? rendered)
-                ? rendered
-                : DocsScaffoldTemplates.TechnologyStandard(technology, resolvedOwner, Today);
+            // A technology folder holds four files. A shipped template supplies all four; a
+            // declared technology with no template gets four stubs, so the folder check has
+            // the same shape to grade either way.
+            foreach (KyberStandardsTemplates.Part part in Enum.GetValues<KyberStandardsTemplates.Part>())
+            {
+                string path =
+                    $"{resolvedDocsRoot}/{DocsLayout.Standards}/{technology}/{KyberStandardsTemplates.FileName(technology, part)}";
+                string content =
+                    kyberStandards
+                    && KyberStandardsTemplates.TryRenderPart(
+                        technology, part, resolvedOwner, Today, out string? rendered)
+                        ? rendered
+                        : TechnologyStub(technology, part, resolvedOwner);
 
-            files.Add(Write(root, DocsLayout.TechnologyStandard(resolvedDocsRoot, technology),
-                standardContent, force));
+                files.Add(Write(root, path, content, force));
+            }
         }
 
         ConfigRegConfig configReg = (loadedConfig.Config ?? KyberWeaveConfig.ProductDefaults).ConfigReg;
@@ -154,6 +164,23 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
             ReviewGates = BuildReviewOutcome(root, reviewPlan, hadReviewSection, loadedConfig.Config?.Review)
         };
     }
+
+    /// <summary>The stub written for a folder part a shipped template does not supply.</summary>
+    private string TechnologyStub(
+        string technology,
+        KyberStandardsTemplates.Part part,
+        string owner) => part switch
+    {
+        KyberStandardsTemplates.Part.Standard =>
+            DocsScaffoldTemplates.TechnologyStandard(technology, owner, Today),
+        KyberStandardsTemplates.Part.Rules =>
+            DocsScaffoldTemplates.TechnologyRules(technology, owner, Today),
+        KyberStandardsTemplates.Part.Skills =>
+            DocsScaffoldTemplates.TechnologySkills(technology, owner, Today),
+        KyberStandardsTemplates.Part.ArbiterRules =>
+            DocsScaffoldTemplates.TechnologyArbiterRules(technology),
+        _ => throw new ArgumentOutOfRangeException(nameof(part))
+    };
 
     /// <summary>The rendered block to write, or null when there is nothing to write.</summary>
     private RenderedReviewBlock? ReviewBlockFor(ReviewGatesPlan? reviewPlan) =>

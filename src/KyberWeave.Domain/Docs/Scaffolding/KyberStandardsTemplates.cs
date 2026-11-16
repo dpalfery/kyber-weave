@@ -27,7 +27,22 @@ namespace KyberWeave.Core.Docs.Scaffolding;
 public static class KyberStandardsTemplates
 {
     private const string ResourcePrefix = "Standards.";
-    private const string ResourceSuffix = ".md";
+
+    /// <summary>The parts a shipped technology, role or platform folder holds.</summary>
+    public enum Part
+    {
+        /// <summary>The standard, six headings.</summary>
+        Standard,
+
+        /// <summary>Prose rules a model reads.</summary>
+        Rules,
+
+        /// <summary>How to do the work.</summary>
+        Skills,
+
+        /// <summary>Machine rules the Arbiter evaluates; may declare none.</summary>
+        ArbiterRules
+    }
 
     private static readonly string[] CanonicalTechnologies =
     [
@@ -54,13 +69,30 @@ public static class KyberStandardsTemplates
     /// </summary>
     public static IReadOnlyList<string> All => CanonicalTechnologies;
 
+    /// <summary>The file suffix each part carries in a folder named after its scope.</summary>
+    public static string FileName(string scope, Part part) => part switch
+    {
+        Part.Standard => $"{scope}.standards.md",
+        Part.Rules => $"{scope}.rules.md",
+        Part.Skills => $"{scope}.skills.md",
+        Part.ArbiterRules => $"{scope}.arbiter-rules.yml",
+        _ => throw new ArgumentOutOfRangeException(nameof(part))
+    };
+
     /// <summary>
     /// Attempts to retrieve the raw embedded template markdown for the given technology.
     /// </summary>
     /// <param name="technology">The technology slug (e.g. <c>csharp</c>, <c>test</c>).</param>
     /// <param name="template">The raw template content if found; otherwise, <see langword="null"/>.</param>
     /// <returns><see langword="true"/> if a template exists for the technology; otherwise, <see langword="false"/>.</returns>
-    public static bool TryGet(string? technology, [NotNullWhen(true)] out string? template)
+    public static bool TryGet(string? technology, [NotNullWhen(true)] out string? template) =>
+        TryGetPart(technology, Part.Standard, out template);
+
+    /// <summary>Attempts to retrieve one file of a technology's embedded template.</summary>
+    public static bool TryGetPart(
+        string? technology,
+        Part part,
+        [NotNullWhen(true)] out string? template)
     {
         if (technology is null)
         {
@@ -68,7 +100,7 @@ public static class KyberStandardsTemplates
             return false;
         }
 
-        return Templates.TryGetValue(technology, out template);
+        return Templates.TryGetValue(ResourceName(technology, part), out template);
     }
 
     /// <summary>
@@ -115,6 +147,51 @@ public static class KyberStandardsTemplates
         ArgumentNullException.ThrowIfNull(date);
 
         if (!TryRender(technology, owner, date, out string? rendered))
+        {
+            string? nearest = StringDistance.Nearest(technology, CanonicalTechnologies);
+            string message = nearest is not null
+                ? $"Unknown technology '{technology}'. Did you mean '{nearest}'?"
+                : $"Unknown technology '{technology}'.";
+
+            throw new ArgumentException(message, nameof(technology));
+        }
+
+        return rendered;
+    }
+
+    /// <summary>
+    /// Attempts to render one file of a technology template, populating the frontmatter
+    /// <c>owner</c> and <c>last-reviewed</c> fields. The Arbiter rules file has no
+    /// frontmatter and is returned unchanged.
+    /// </summary>
+    public static bool TryRenderPart(
+        string? technology,
+        Part part,
+        string owner,
+        string date,
+        [NotNullWhen(true)] out string? rendered)
+    {
+        ArgumentNullException.ThrowIfNull(owner);
+        ArgumentNullException.ThrowIfNull(date);
+
+        if (technology is not null && TryGetPart(technology, part, out string? template))
+        {
+            rendered = part == Part.ArbiterRules
+                ? template
+                : InjectFrontmatter(template, owner, date);
+            return true;
+        }
+
+        rendered = null;
+        return false;
+    }
+
+    /// <summary>Renders one file of a technology template, or throws naming the nearest slug.</summary>
+    public static string RenderPart(string technology, Part part, string owner, string date)
+    {
+        ArgumentNullException.ThrowIfNull(technology);
+
+        if (!TryRenderPart(technology, part, owner, date, out string? rendered))
         {
             string? nearest = StringDistance.Nearest(technology, CanonicalTechnologies);
             string message = nearest is not null
@@ -177,17 +254,29 @@ public static class KyberStandardsTemplates
 
         foreach (string tech in CanonicalTechnologies)
         {
-            string resourceName = $"{ResourcePrefix}{tech}{ResourceSuffix}";
-            using Stream? stream = assembly.GetManifestResourceStream(resourceName);
-            if (stream is null)
+            foreach (Part part in Enum.GetValues<Part>())
             {
-                continue;
-            }
+                string resourceName = ResourceName(tech, part);
+                using Stream? stream = assembly.GetManifestResourceStream(resourceName);
+                if (stream is null)
+                {
+                    continue;
+                }
 
-            using StreamReader reader = new StreamReader(stream, Encoding.UTF8);
-            dictionary[tech] = reader.ReadToEnd();
+                using StreamReader reader = new StreamReader(stream, Encoding.UTF8);
+                dictionary[resourceName] = reader.ReadToEnd();
+            }
         }
 
         return dictionary.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
     }
+
+    private static string ResourceName(string technology, Part part) => part switch
+    {
+        Part.Standard => $"{ResourcePrefix}{technology}.standards.md",
+        Part.Rules => $"{ResourcePrefix}{technology}.rules.md",
+        Part.Skills => $"{ResourcePrefix}{technology}.skills.md",
+        Part.ArbiterRules => $"{ResourcePrefix}{technology}.arbiter-rules.yml",
+        _ => throw new ArgumentOutOfRangeException(nameof(part))
+    };
 }

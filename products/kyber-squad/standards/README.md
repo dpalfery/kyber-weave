@@ -56,10 +56,10 @@ and **<python-coding-standard>**. `github-actions` and `sql` also carry the defa
 rewritten from the `test-dev` agent so runners,
 isolation, naming, and assertion policy live in the template — the agent only names
 **<test-coding-standard>**. Kyber-Weave's own
-[`docs/standards/csharp/`](../../../docs/standards/csharp/README.md) is not a substitute for
+[`docs/standards/csharp/`](../../../docs/standards/csharp/csharp.standards.md) is not a substitute for
 the `csharp` template here — it records this repository's decisions, including ones a host
 may reasonably reverse. The same is true of
-[`docs/standards/test/`](../../../docs/standards/test/README.md) versus the `test` template.
+[`docs/standards/test/`](../../../docs/standards/test/test.standards.md) versus the `test` template.
 
 **A template is a guess about a repository it has never seen.** Every one of these carries
 decisions a host may reasonably reverse — a line length, a state-management library, a naming
