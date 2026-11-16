@@ -64,6 +64,11 @@ reason to expect it to try.
    - **The restore never touches a file that was already dirty.** The set of dirty tracked files
      is recorded before the index work starts; reverting the operator's own edits would be
      unrecoverable data loss disguised as housekeeping.
+   - **A held CodeGraph lock is busy, not broken.** A `sync` that fails only because CodeGraph's
+     own lock is held is retried briefly, then passes with a `warning:` message and no repair, and
+     the proofs run against the index on disk. No repair runs while that lock is held, because
+     `codegraph index` against a held lock leaves the database empty. *Amended 2026-11-16:* the
+     repair used to run on a merely busy index.
    - **`index` is the repair step, never the routine one.** `--provision` changes from always
      indexing to `sync` when an index exists, because a full rebuild on every provision pays for
      new information it does not produce.

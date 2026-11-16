@@ -110,6 +110,8 @@ also runs, with `projectPath` required. It writes only what that command writes:
   `STATUS: TOOL_FAILURE` above `EXIT:`. The doctor has already applied `stop-on-tool-failure`, so the
   tool never reads that setting itself.
 - **It skips the CodeGraph gate**, because it is the repair for that gate.
+- **A held CodeGraph lock is a passing warning, never a rebuild.** The doctor retries the sync
+  briefly, then reports `PASS codegraph.index warning: …` and proves the index on disk.
 - **Its children never reach stdout.** git and CodeGraph run through the bounded process executor,
   which captures both streams; tests replace it and the server executable the check starts.
 

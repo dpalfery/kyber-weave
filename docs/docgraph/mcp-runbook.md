@@ -1590,7 +1590,9 @@ The response is, in order:
 
 The tool reads `stop-on-tool-failure` the way the command does, because the doctor applies it: under
 `stop-on-tool-failure: false` a failed check is a `PASS <check id> warning: …` line and the exit is
-`0`, except a missing CodeGraph binary, which stays `3`. The check ids are the
+`0`, except a missing CodeGraph binary, which stays `3`. A `sync` that finds CodeGraph's own lock
+held through three attempts is also a `PASS codegraph.index warning: …` line under either setting:
+the index is healthy and busy, so it is proved as it stands and never rebuilt. The check ids are the
 [`doctor` check ids](#the-live-check-doctor---check). A missing `projectPath` is `result: refused`,
 and a path outside this repository is a `projectPath was refused:` line; neither runs a check. The
 tool does not go through the CodeGraph refresh gate below, because it is the repair for it.
@@ -1768,6 +1770,12 @@ usable rather than only reporting on it ([ADR 0061](../adr/0061-code-editing-run
 5. **One repair and one retry.** A failed step runs `codegraph index .` once and retries once.
    One repair covers the transient damage this exists for; a loop would turn a genuinely broken
    CodeGraph into a slow hang instead of a stop.
+6. **A held CodeGraph lock is not a failed step.** A `sync` that fails only because CodeGraph's
+   own lock (`.codegraph/codegraph.lock`) is held — by its server, its file watcher or another
+   sync — is retried twice, after 0.3 and 0.7 seconds. Still held, the line is
+   `PASS codegraph.index warning: …`, the exit code is unaffected, and steps 3 and 4 run
+   against the index on disk. No repair runs while another live process holds that lock:
+   `codegraph index` against a held lock exits 1 and leaves the database empty.
 
 Exit codes are the `doctor` contract below plus one behaviour: `--ensure` **reads
 `stop-on-tool-failure` itself** and applies it, so no agent judges a degraded result. Under the

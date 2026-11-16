@@ -47,6 +47,22 @@ public static class CodeGraphIndexRules
     public static bool IsBusy(DoctorCheck check) =>
         check.Reason?.StartsWith("codegraph.index busy", StringComparison.Ordinal) == true;
 
+    /// <summary>The file CodeGraph keeps its own lock in, inside <see cref="IndexDirectoryName"/>.</summary>
+    public const string IndexLockFileName = "codegraph.lock";
+
+    /// <summary>
+    ///     The pauses before the second and third <c>codegraph sync</c> when the first finds CodeGraph's own index
+    ///     lock held.
+    /// </summary>
+    /// <remarks>
+    ///     Measured against CodeGraph 1.6.2: a sync that finds the lock held returns in about 0.15 seconds, and a
+    ///     sync with nothing to do holds the lock for about 0.3 seconds. Three attempts one second apart in total
+    ///     outlast that and the short syncs a file watcher runs, and cost the caller at most about 1.5 seconds. A
+    ///     longer hold is an index rebuild, which no wait an interactive call can afford would outlast.
+    /// </remarks>
+    public static IReadOnlyList<TimeSpan> HeldLockRetryPauses { get; } =
+        [TimeSpan.FromMilliseconds(300), TimeSpan.FromMilliseconds(700)];
+
     /// <summary>
     ///     Whether a failed check reports that <c>codegraph sync</c> found CodeGraph's own index lock held by another
     ///     process: its server, its file watcher, or another sync. The index on disk is then usable, only busy.

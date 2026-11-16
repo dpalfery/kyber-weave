@@ -603,7 +603,9 @@ Mode rule:
 - `--ensure` is the one command a worker runs first, in the tree it will work in. It runs
   `sync` (or `init`), restores any tracked file that preparation rewrote — never a file that was
   already dirty — proves the index with one `codegraph explore` call and the docs server with one
-  call, and repairs **once** with `codegraph index .` and retries once when a step fails. It
+  call, and repairs **once** with `codegraph index .` and retries once when a step fails. A
+  `sync` that fails only because CodeGraph's own lock is held is retried briefly and then passes
+  with a `warning:` message and no repair. It
   reads `stop-on-tool-failure` itself: under the default a failed check exits `1`; under
   `stop-on-tool-failure: false` the same checks are reported as warnings and the exit is `0`,
   except a missing binary, which stays `3`. Its steps and check ids are in the

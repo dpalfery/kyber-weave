@@ -216,6 +216,13 @@ than in each caller's shell script:
   is not a shell alias: initialization rewrites tracked files, and reverting the operator's own
   edits would be unrecoverable. The set of dirty tracked files is recorded before the index
   work starts, so only what the index itself wrote is reverted.
+- **A held CodeGraph lock is never repaired.** A `sync` that fails only because CodeGraph's own
+  lock (`.codegraph/codegraph.lock`) is held is retried twice, after 0.3 and 0.7 seconds. If
+  the lock is still held, `codegraph.index` passes with a `warning:` message, the exit code is
+  not changed by it, and the `explore` and docs-server proofs still run against the index on
+  disk. No repair runs while another live process holds that lock, whatever failed:
+  `codegraph index` against a held lock exits 1 and leaves the database empty (measured on
+  CodeGraph 1.6.2), so the repair would break a healthy index.
 - **Never delete, never install.** A corrupt or unwritable `.codegraph/` is reported with a
   remedy a human applies; callers of the CLI are told to install CodeGraph rather than it being
   installed for them. The binary's absence is exit `3`, not a failure to route around.

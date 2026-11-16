@@ -32,7 +32,7 @@ namespace KyberWeave.Mcp;
 /// <para>
 /// CodeGraph keeps a lock of its own, which its server, its file watcher and any other sync take.
 /// A sync that finds it held is the same condition one layer down, so it gets the same answer: a
-/// few short retries (<see cref="HeldLockRetryPauses"/>), then a note, never a failure. Every other
+/// few short retries (<see cref="CodeGraphIndexRules.HeldLockRetryPauses"/>), then a note, never a failure. Every other
 /// sync failure still fails the tool.
 /// </para>
 /// <para>
@@ -81,19 +81,6 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
     private const string IndexLockHeldNote =
         "note: codegraph refresh skipped — CodeGraph's own index lock is held by another process "
         + "(its server, its file watcher, or another sync); this answer uses the index as it stands.";
-
-    /// <summary>
-    /// The pauses before the second and third sync when CodeGraph's own lock is held.
-    /// </summary>
-    /// <remarks>
-    /// Measured against CodeGraph 1.6.2: a sync that finds the lock held returns in about 0.15
-    /// seconds, and a sync with nothing to do holds the lock for about 0.3 seconds. Three attempts
-    /// one second apart in total outlast that and the short syncs a file watcher runs, and cost a
-    /// tool call at most about 1.5 seconds. A longer hold is an index rebuild, which no wait a tool
-    /// call can afford would outlast.
-    /// </remarks>
-    private static readonly TimeSpan[] HeldLockRetryPauses =
-        [TimeSpan.FromMilliseconds(300), TimeSpan.FromMilliseconds(700)];
 
     private readonly string _repositoryRoot;
     private readonly bool _refreshEnabled;
@@ -228,13 +215,13 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
     }
 
     /// <summary>
-    /// Provisions once, and again after each of <see cref="HeldLockRetryPauses"/> while the only
+    /// Provisions once, and again after each of <see cref="DoctorOptions.HeldLockRetryPauses"/> while the only
     /// thing wrong is that CodeGraph's own index lock is held. Any other result is returned at once.
     /// </summary>
     private DoctorCheck ProvisionPastAHeldIndexLock(DoctorOptions options, string lockDirectory)
     {
         DoctorCheck provisioned = Provision(options, lockDirectory);
-        foreach (TimeSpan pause in HeldLockRetryPauses)
+        foreach (TimeSpan pause in options.HeldLockRetryPauses)
         {
             if (!CodeGraphIndexRules.IsIndexLockHeld(provisioned))
                 break;
