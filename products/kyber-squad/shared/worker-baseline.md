@@ -26,7 +26,7 @@ usually good at is not a boundary. Never return BLOCKED or ask for a handoff ove
 the change to that technology's standard. Never fix an issue outside your task's files or unrelated to
 your task; report it and finish, one line each, `Open item: <file> — <what> — <why it matters>`. They
 are filed as todos when the run ends. Stop only for a missing packet, a contradiction inside the task itself, or a
-safety limit (migrations on a shared database, CI or deploy secrets, a push).
+safety limit (a migration you would apply by hand to a database other people or environments use, CI or deploy secrets, a push). The task gate is never such a limit: when the host's gate or test setup script itself starts a local container, creates the test database or applies the repository's existing migrations to it, that is the host's declared procedure and you run it as given.
 
 **The documented rule wins over nearby code.** Where existing code contradicts a documented rule or
 standard (where a kind of file goes, a layering or naming rule), follow the rule in your change and add
