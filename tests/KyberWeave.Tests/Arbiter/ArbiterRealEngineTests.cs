@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using System.Text.Json;
 using KyberWeave.Arbiter;
 using KyberWeave.Arbiter.Hooks;
@@ -111,14 +112,16 @@ public sealed class ArbiterRealEngineTests : IDisposable
         IArbiterProvider provider,
         IArbiterGitFacts? gitFacts = null,
         Func<ICredentialStore>? credentialStoreFactory = null,
-        Func<string, string?>? environment = null)
+        Func<string, string?>? environment = null,
+        Func<IServiceProvider>? services = null)
     {
         ArbiterHookDecisionEngine engine = new(
             providerFactory: _ => provider,
             gitFactsFactory: gitFacts is null ? null : _ => gitFacts,
             homeDirectory: () => _home.Path,
             credentialStoreFactory: credentialStoreFactory,
-            environment: environment);
+            environment: environment,
+            services: services);
         return new HookCommand(
             HarnessAdapterRegistry.CreateDefault(engine),
             Composition.LoadHostConfig,
@@ -289,6 +292,23 @@ public sealed class ArbiterRealEngineTests : IDisposable
         Assert.Contains(HookCommand.FailClosedCode, note, StringComparison.Ordinal);
         Assert.Contains("git facts exploded", note, StringComparison.Ordinal);
         Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RealEngine_ContainerFault_AllowsWithHookCodeAndStdoutCarriesOnlyTheDecision()
+    {
+        WriteConfig(DisabledShippedRules());
+        HookCommand command = CreateCommand(
+            new FakeProvider(),
+            services: () => throw new NotSupportedException("container exploded"));
+
+        (int exit, string stdout, string log) = Run(command, Payload("PreToolUse", "csharp-dev", Prompt));
+
+        Assert.Equal(0, exit);
+        using JsonDocument doc = JsonDocument.Parse(stdout);
+        Assert.Equal("allow", doc.RootElement.GetProperty("hookSpecificOutput").GetProperty("permissionDecision").GetString());
+        Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
+        Assert.Contains("container exploded", log, StringComparison.Ordinal);
     }
 
     /// <summary>

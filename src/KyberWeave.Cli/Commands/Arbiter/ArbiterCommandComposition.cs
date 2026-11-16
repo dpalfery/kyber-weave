@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Services;
 using KyberWeave.Data.Arbiter;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Contracts.Repositories;
@@ -112,8 +113,17 @@ public static class ArbiterCommandComposition
 
     private static Func<IProcessExecutor> DefaultArbiterProbeExecutor { get; } = () => ProcessExecutor.Instance;
 
+    /// <summary>Creates the HTTP decision-model providers. The CLI's one composition point for them.</summary>
+    public static IArbiterProviderFactory Providers { get; } = new SystemOneProviderFactory();
+
+    /// <summary>Opens the Arbiter's ledger, decision log and run stores. The CLI's one composition point for them.</summary>
+    public static IArbiterStateFactory State { get; } = new FileArbiterStateFactory();
+
     /// <summary>Reads the per-user Arbiter provider override. The CLI's one composition point for it.</summary>
     public static IArbiterUserSettings UserSettings { get; } = new FileArbiterUserSettings(new PhysicalFileSystem());
+
+    /// <summary>Reads the Claude hook sources a repository and its user declare. The CLI's one composition point for it.</summary>
+    public static IClaudeHookCoverage ClaudeHooks { get; } = new ClaudeHookCoverage();
 
     /// <summary>Creates the OS credential store for the Arbiter key.</summary>
     public static ICredentialStore CreateCredentialStore()
@@ -619,7 +629,7 @@ public static class ArbiterCommandComposition
         }
 
         Func<Uri, string?> captured = keyResolver;
-        return SystemOneClient.CreateForProduct(
+        return Providers.CreateSystemOne(
             HttpHandler(),
             endpoint,
             config.Arbiter.Provider.Model,
@@ -642,25 +652,25 @@ public static class ArbiterCommandComposition
         string repositoryRoot,
         string? providerOverride,
         DiagnosticReport report,
-        IArbiterModelTargetsReader modelTargets)
+        IArbiterEvaluatorFactory evaluators,
+        IPlanFacts planFacts)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(report);
-        ArgumentNullException.ThrowIfNull(modelTargets);
+        ArgumentNullException.ThrowIfNull(evaluators);
+        ArgumentNullException.ThrowIfNull(planFacts);
 
         IArbiterProvider? provider = CreateProvider(config, providerOverride, report, out Func<Uri, string?> keyResolver);
         if (provider is null)
             return null;
 
         string arbiterDirectory = Path.Combine(repositoryRoot, "artifacts", "arbiter");
-        ArbiterEvaluator evaluator = new(
+        IArbiterEvaluator evaluator = evaluators.Create(
             provider,
             keyResolver,
-            new InFlightLedger(arbiterDirectory),
-            new DecisionLog(arbiterDirectory),
+            arbiterDirectory,
             new ArbiterCliGitFacts(),
-            new ArbiterCliPlanReader(repositoryRoot),
-            modelTargets,
+            new ArbiterCliPlanReader(planFacts, repositoryRoot),
             Clock());
         return new ArbiterEvaluatorSession(evaluator, provider as IDisposable);
     }
@@ -725,10 +735,10 @@ public static class ArbiterCommandComposition
     /// rule proved against a stand-in reader is not a proof about the reader that
     /// ships.
     /// </remarks>
-    internal sealed class ArbiterCliPlanReader(string repositoryRoot) : IArbiterPlanReader
+    internal sealed class ArbiterCliPlanReader(IPlanFacts planFacts, string repositoryRoot) : IArbiterPlanReader
     {
         public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification) =>
-            PlanFacts.Enrich(facts, classification, repositoryRoot);
+            planFacts.Enrich(facts, classification, repositoryRoot);
     }
 }
 
@@ -742,7 +752,7 @@ public sealed class ArbiterEvaluatorSession : IDisposable
     private bool _disposed;
 
     /// <summary>Creates a session over an evaluator and its optionally owned transport.</summary>
-    public ArbiterEvaluatorSession(ArbiterEvaluator evaluator, IDisposable? owned)
+    public ArbiterEvaluatorSession(IArbiterEvaluator evaluator, IDisposable? owned)
     {
         ArgumentNullException.ThrowIfNull(evaluator);
         Evaluator = evaluator;
@@ -750,7 +760,7 @@ public sealed class ArbiterEvaluatorSession : IDisposable
     }
 
     /// <summary>The evaluator to run the dry run through.</summary>
-    public ArbiterEvaluator Evaluator { get; }
+    public IArbiterEvaluator Evaluator { get; }
 
     /// <inheritdoc />
     public void Dispose()

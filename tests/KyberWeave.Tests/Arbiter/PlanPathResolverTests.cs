@@ -1,3 +1,8 @@
+using KyberWeave.Contracts.Services;
+using KyberWeave.Tests.Arbiter;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Core.Arbiter;
@@ -77,7 +82,7 @@ public sealed class PlanPathResolverTests : IDisposable
     [Fact]
     public void ARelativePlanPathResolvesInsideTheRepository()
     {
-        string? resolved = PlanPathResolver.Resolve("docs/plans/plan.md", _root);
+        string? resolved = new PlanPathResolver().Resolve("docs/plans/plan.md", _root);
 
         Assert.NotNull(resolved);
         Assert.True(File.Exists(resolved));
@@ -91,7 +96,7 @@ public sealed class PlanPathResolverTests : IDisposable
     [InlineData("../../../../../../../../etc/passwd")]
     public void APathOutsideTheRepositoryIsRejected(string hostile)
     {
-        Assert.Null(PlanPathResolver.Resolve(hostile, _root));
+        Assert.Null(new PlanPathResolver().Resolve(hostile, _root));
     }
 
     [Theory]
@@ -101,7 +106,7 @@ public sealed class PlanPathResolverTests : IDisposable
     [InlineData("./docs/../secret.md")]
     public void ADetourThatStaysInsideTheRepositoryResolves(string relative)
     {
-        string? resolved = PlanPathResolver.Resolve(relative, _root);
+        string? resolved = new PlanPathResolver().Resolve(relative, _root);
 
         Assert.NotNull(resolved);
         Assert.Equal(Path.GetFullPath(Path.Combine(_root, "secret.md")), resolved);
@@ -110,7 +115,7 @@ public sealed class PlanPathResolverTests : IDisposable
     [Fact]
     public void ARootedPathInsideTheRepositoryIsAccepted()
     {
-        string? resolved = PlanPathResolver.Resolve(Path.Combine(_root, "docs", "plans", "plan.md"), _root);
+        string? resolved = new PlanPathResolver().Resolve(Path.Combine(_root, "docs", "plans", "plan.md"), _root);
 
         Assert.NotNull(resolved);
     }
@@ -123,7 +128,7 @@ public sealed class PlanPathResolverTests : IDisposable
         Directory.CreateDirectory(sibling);
         try
         {
-            Assert.Null(PlanPathResolver.Resolve(Path.Combine(sibling, "secret.md"), _root));
+            Assert.Null(new PlanPathResolver().Resolve(Path.Combine(sibling, "secret.md"), _root));
         }
         finally
         {
@@ -137,7 +142,7 @@ public sealed class PlanPathResolverTests : IDisposable
     [InlineData("   ")]
     public void AnEmptyPlanFileResolvesToNothing(string? empty)
     {
-        Assert.Null(PlanPathResolver.Resolve(empty, _root));
+        Assert.Null(new PlanPathResolver().Resolve(empty, _root));
     }
 
     /// <summary>
@@ -154,7 +159,7 @@ public sealed class PlanPathResolverTests : IDisposable
         {
             Link(link, outside, directory: false);
 
-            Assert.Null(PlanPathResolver.Resolve("docs/plans/linked.md", _root));
+            Assert.Null(new PlanPathResolver().Resolve("docs/plans/linked.md", _root));
         }
         finally
         {
@@ -185,7 +190,7 @@ public sealed class PlanPathResolverTests : IDisposable
         {
             Link(link, outsideDirectory, directory: true);
 
-            Assert.Null(PlanPathResolver.Resolve("docs/linked/stolen.md", _root));
+            Assert.Null(new PlanPathResolver().Resolve("docs/linked/stolen.md", _root));
         }
         finally
         {
@@ -209,7 +214,7 @@ public sealed class PlanPathResolverTests : IDisposable
         {
             Link(link, Path.Combine(_root, "docs", "plans", "plan.md"), directory: false);
 
-            string? resolved = PlanPathResolver.Resolve("docs/plans/alias.md", _root);
+            string? resolved = new PlanPathResolver().Resolve("docs/plans/alias.md", _root);
 
             Assert.NotNull(resolved);
             Assert.True(File.Exists(resolved));
@@ -237,7 +242,7 @@ public sealed class PlanPathResolverTests : IDisposable
         Link(alias, _root, directory: true);
         try
         {
-            string? resolved = PlanPathResolver.Resolve(
+            string? resolved = new PlanPathResolver().Resolve(
                 Path.Combine(alias, "docs", "plans", "plan.md"), alias);
 
             Assert.NotNull(resolved);
@@ -278,8 +283,8 @@ public sealed class PlanPathResolverTests : IDisposable
 
     private static IArbiterPlanReader Reader(string reader, string repositoryRoot) =>
         reader == "hook"
-            ? new HookPlanReader(repositoryRoot)
-            : new ArbiterCommandComposition.ArbiterCliPlanReader(repositoryRoot);
+            ? new HookPlanReader(new KyberWeave.Core.Arbiter.Plans.PlanFacts(new PlanPathResolver()), repositoryRoot)
+            : new ArbiterCommandComposition.ArbiterCliPlanReader(ArbiterTestServices.Get<IPlanFacts>(), repositoryRoot);
 
     [Theory]
     [MemberData(nameof(Readers))]

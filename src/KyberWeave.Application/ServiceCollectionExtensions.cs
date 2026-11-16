@@ -1,4 +1,5 @@
 using KyberWeave.Application.Doctor;
+using KyberWeave.Application.Arbiter;
 using KyberWeave.Application.Hooks;
 using KyberWeave.Contracts.Docs;
 using KyberWeave.Contracts.Repositories;
@@ -67,6 +68,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IGateRunService, GateRunService>();
         services.TryAddSingleton<ICitedLineChecker, CitedLineChecker>();
         services.TryAddSingleton<IDuplicateDetectionService, DuplicateDetectionService>();
+        _ = services.AddWeaveArbiterApplication();
         return services;
     }
 }

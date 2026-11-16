@@ -1,3 +1,6 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Core.Arbiter.Plans;
 using System.Text;
 using KyberWeave.Core.Arbiter.Facts;
 using Xunit;
@@ -28,7 +31,7 @@ public sealed class ArbiterUntrackedSymlinkTests : IDisposable
         Write("notes/Comment.cs", "// only a comment\n");
         CreateLinkOrSkip("src/Link.cs", Path.Combine("..", "notes", "Comment.cs"));
 
-        ChangeSet? change = GitFacts.GetChangeSet(_probe.Root, baseRef);
+        ChangeSet? change = new GitFacts().GetChangeSet(_probe.Root, baseRef);
 
         Assert.Null(change);
     }
@@ -44,7 +47,7 @@ public sealed class ArbiterUntrackedSymlinkTests : IDisposable
         string baseRef = Head();
         Write("notes/Comment.cs", "// only a comment\n");
 
-        ChangeSet? change = GitFacts.GetChangeSet(_probe.Root, baseRef);
+        ChangeSet? change = new GitFacts().GetChangeSet(_probe.Root, baseRef);
 
         Assert.NotNull(change);
         Assert.Contains(change.Hunks, measured => measured.Hunk.Path == "notes/Comment.cs");
@@ -65,7 +68,7 @@ public sealed class ArbiterUntrackedSymlinkTests : IDisposable
     }
 
     private string Head() =>
-        GitFacts.GetHead(_probe.Root) ?? throw new InvalidOperationException("the probe repository has no HEAD.");
+        new GitFacts().GetHead(_probe.Root) ?? throw new InvalidOperationException("the probe repository has no HEAD.");
 
     private void CommitFile(string relative, string text)
     {

@@ -1,0 +1,211 @@
+using KyberWeave.Core.Arbiter.ModelTargets;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Review;
+
+namespace KyberWeave.Core.Arbiter.Facts;
+
+/// <summary>
+/// Supplies the model-targeting facts the <c>delegate.model</c> rules read: <c>plan.task.file-kinds</c>,
+/// <c>ledger.task.prior-attempt</c> and <c>model-targeting.ladder.next</c>. Each fact is filled only when the
+/// trigger declared it, so the other triggers' bags keep their shape.
+/// </summary>
+/// <remarks>
+/// The test-file patterns are read from the shipped defaults rather than the host configuration: they are
+/// the one definition of "test file" the Arbiter uses, and a host may not redefine it per trigger. A prior attempt is the latest earlier pass or fail for the same plan and task. Its profile is
+/// the decision's delivered model block when there is one, because that is what the harness ran, and the
+/// ledger's pre event otherwise.
+/// </remarks>
+internal static class ModelTargetFacts
+{
+    private const string FileKinds = "plan.task.file-kinds";
+    private const string PriorAttempt = "ledger.task.prior-attempt";
+    internal const string PriorResult = ModelTargetResolver.PriorResultFact;
+    private const string PriorProfile = "model-targeting.prior-profile";
+    private const string LadderNext = "model-targeting.ladder.next";
+    private const string BudgetExceeded = "BUDGET_EXCEEDED";
+
+    private static readonly IReadOnlyList<string> TestPatterns = ArbiterConfig.ProductDefaults.TestFilePatterns;
+
+    /// <summary>Fills the model-targeting facts the bag declares.</summary>
+    /// <param name="facts">The bag, carrying <c>plan.task.files</c> and the delegation facts.</param>
+    /// <param name="ledger">The in-flight ledger the prior attempt is read from.</param>
+    /// <param name="decisions">The decision log the delivered model block is read from.</param>
+    /// <param name="ledgerId">The current event's ledger id, excluded from the prior attempt.</param>
+    /// <param name="targeting">The model-targeting block, whose ladder the next rung comes from.</param>
+    public static ArbiterFactSet Enrich(
+        ArbiterFactSet facts,
+        IArbiterLedger ledger,
+        IArbiterDecisionLog decisions,
+        string ledgerId,
+        ArbiterModelTargetingConfig targeting)
+    {
+        ArgumentNullException.ThrowIfNull(facts);
+        ArgumentNullException.ThrowIfNull(ledger);
+        ArgumentNullException.ThrowIfNull(decisions);
+        ArgumentNullException.ThrowIfNull(ledgerId);
+        ArgumentNullException.ThrowIfNull(targeting);
+
+        if (facts.Contains(FileKinds))
+        {
+            facts = facts.With(FileKinds, FileKindsOf(facts), ArbiterFactLabel.Derived);
+        }
+
+        if (!facts.Contains(PriorAttempt) && !facts.Contains(PriorResult) && !facts.Contains(PriorProfile)
+            && !facts.Contains(LadderNext))
+        {
+            return facts;
+        }
+
+        ArbiterPriorAttempt? prior = PriorAttemptOf(facts, ledger, decisions, ledgerId);
+        if (facts.Contains(PriorAttempt))
+        {
+            facts = facts.With(PriorAttempt, prior, ArbiterFactLabel.Derived);
+        }
+
+        // A rule can test a fact's presence or equality but not reach into a record's fields, so the
+        // result and the profile are also published as facts of their own for the ladder rule to read.
+        if (facts.Contains(PriorResult))
+        {
+            facts = facts.With(PriorResult, prior?.Result, ArbiterFactLabel.Derived);
+        }
+
+        if (facts.Contains(PriorProfile))
+        {
+            facts = facts.With(PriorProfile, prior?.Profile, ArbiterFactLabel.Derived);
+        }
+
+        if (facts.Contains(LadderNext))
+        {
+            facts = facts.With(LadderNext, NextRung(prior?.Profile, targeting.Ladder), ArbiterFactLabel.Derived);
+        }
+
+        return facts;
+    }
+
+    private static List<ArbiterFileKind>? FileKindsOf(ArbiterFactSet facts)
+    {
+        if (!facts.TryGet("plan.task.files", out ArbiterFact? files) || files.Value is not IEnumerable<string> paths)
+        {
+            return null;
+        }
+
+        HashSet<ArbiterFileKind> distinct = [];
+        List<ArbiterFileKind> kinds = [];
+        foreach (string path in paths)
+        {
+            ArbiterFileKind kind = new(Path.GetExtension(path), IsTest(path) ? "test" : "source");
+            if (distinct.Add(kind))
+            {
+                kinds.Add(kind);
+            }
+        }
+
+        return kinds;
+    }
+
+    private static bool IsTest(string path) =>
+        TestPatterns.Any(pattern => PathGlob.IsMatch(pattern, path));
+
+    private static ArbiterPriorAttempt? PriorAttemptOf(
+        ArbiterFactSet facts,
+        IArbiterLedger ledger,
+        IArbiterDecisionLog decisions,
+        string ledgerId)
+    {
+        string? task = Text(facts, "plan.task") ?? Text(facts, "delegation.task");
+        if (task is null)
+        {
+            return null;
+        }
+
+        string? planFile = Text(facts, "delegation.plan-file");
+        IReadOnlyList<ArbiterLedgerEvent> events = ledger.ReadAll();
+        Dictionary<string, ArbiterLedgerEvent> pres = new(StringComparer.Ordinal);
+        foreach (ArbiterLedgerEvent entry in events)
+        {
+            if (entry.Phase == ArbiterLedgerPhases.Pre)
+            {
+                pres[entry.Id] = entry;
+            }
+        }
+
+        // The decision log is read only when an earlier attempt matches, and then once: most first attempts need no read.
+        Dictionary<string, ArbiterModelBlock>? delivered = null;
+        ArbiterPriorAttempt? latest = null;
+        foreach (ArbiterLedgerEvent post in events)
+        {
+            string? result = ResultOf(post.Returns);
+            if (post.Phase != ArbiterLedgerPhases.Post || post.PreId is null || post.PreId == ledgerId
+                || result is not ("PASS" or "FAIL")
+                || !pres.TryGetValue(post.PreId, out ArbiterLedgerEvent? pre)
+                || !string.Equals(pre.Headers?.Task, task, StringComparison.Ordinal)
+                || (planFile is not null && !string.Equals(pre.Headers?.PlanFile, planFile, StringComparison.Ordinal)))
+            {
+                continue;
+            }
+
+            delivered ??= DeliveredBlocksByLedgerId(decisions.ReadAll());
+            (string? profile, string? token) = RanOn(pre, delivered);
+            latest = new ArbiterPriorAttempt(
+                string.Equals(result, "PASS", StringComparison.Ordinal) ? "pass" : "fail",
+                profile,
+                token);
+        }
+
+        return latest;
+    }
+
+    /// <summary>
+    /// The attempt's result: its task-review marker, or <c>FAIL</c> when the worker returned
+    /// <c>STATUS: BUDGET_EXCEEDED</c> after the worker guard stopped it, so its rework climbs one rung.
+    /// </summary>
+    private static string? ResultOf(ArbiterReturnMarkers? returns) =>
+        returns?.TaskReview
+        ?? (string.Equals(returns?.PlannerStatus, BudgetExceeded, StringComparison.Ordinal) ? "FAIL" : null);
+
+    /// <summary>
+    /// The delivered model block of each ledger event, the first one logged for an event winning. Built once per
+    /// evaluation, so the attempts are matched by lookup rather than by a scan of the whole log for each.
+    /// </summary>
+    private static Dictionary<string, ArbiterModelBlock> DeliveredBlocksByLedgerId(IReadOnlyList<ArbiterDecisionRecord> records)
+    {
+        Dictionary<string, ArbiterModelBlock> delivered = new(StringComparer.Ordinal);
+        foreach (ArbiterDecisionRecord record in records)
+        {
+            if (record.Model is { Delivered: true } block)
+            {
+                delivered.TryAdd(record.LedgerId, block);
+            }
+        }
+
+        return delivered;
+    }
+
+    /// <summary>The profile and token the attempt ran on: the delivered model block when there is one, else the pre event.</summary>
+    private static (string? Profile, string? Token) RanOn(ArbiterLedgerEvent pre, IReadOnlyDictionary<string, ArbiterModelBlock> delivered) =>
+        delivered.TryGetValue(pre.Id, out ArbiterModelBlock? block)
+            ? (block.Profile, block.Token)
+            : (pre.ModelProfile, pre.ModelToken);
+
+    /// <summary>The ladder entry one rung above <paramref name="profile"/>, or null at the top or when the profile is off the ladder.</summary>
+    private static string? NextRung(string? profile, IReadOnlyList<string> ladder)
+    {
+        if (profile is null)
+        {
+            return null;
+        }
+
+        for (int index = 0; index + 1 < ladder.Count; index++)
+        {
+            if (string.Equals(ladder[index], profile, StringComparison.Ordinal))
+            {
+                return ladder[index + 1];
+            }
+        }
+
+        return null;
+    }
+
+    private static string? Text(ArbiterFactSet facts, string name) =>
+        facts.TryGet(name, out ArbiterFact? fact) && fact.Value is string { Length: > 0 } value ? value : null;
+}

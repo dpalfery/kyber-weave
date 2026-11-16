@@ -1,3 +1,6 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Arbiter.Facts;
 using Xunit;
 
@@ -53,7 +56,7 @@ public sealed class ReviewGatesFailingRunProofTests : IDisposable
         File.SetLastWriteTimeUtc(pass, File.GetLastWriteTimeUtc(red).AddSeconds(1));
 
         string digest = $"TASK_GATE: PASS — agent=csharp-dev gates=1 failed=none skipped=0 report={pass} runs=2";
-        Assert.True(GateReportFacts.FailingRunFirst(digest, _root));
+        Assert.True(new GateReportFacts().FailingRunFirst(digest, _root));
     }
 
     private (int ExitCode, string Output) Run(string[] paths, params string[] options)

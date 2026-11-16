@@ -1,3 +1,6 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Core.Arbiter.Plans;
 using System.Text;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Arbiter;
@@ -166,6 +169,6 @@ public sealed class HookGitFactsBaseStateTests : IDisposable
 
         TriggerClassification classification = TriggerClassifier.ClassifySingle(ev, "review-lens", prompt);
         ArbiterFactSet facts = TriggerFactBuilder.Build(classification, prompt, KyberWeaveConfig.ProductDefaults);
-        return new HookGitFacts(_probe.Root, _home.Path).Enrich(facts, classification, ev);
+        return new HookGitFacts(new GitFacts(), new PlanPathResolver(), _probe.Root, _home.Path).Enrich(facts, classification, ev);
     }
 }

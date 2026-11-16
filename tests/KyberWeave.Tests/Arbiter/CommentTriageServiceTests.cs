@@ -1,3 +1,8 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Tests.Arbiter;
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
@@ -73,7 +78,7 @@ public sealed class CommentTriageServiceTests : IDisposable
     }
 
     private CommentTriageService Service(IArbiterProvider provider) =>
-        new(provider, Root, ArbiterDirectory, new FixedClock(Now));
+        new(provider, Root, ArbiterDirectory, new FixedClock(Now), ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<IArbiterStateFactory>());
 
     private static CommentTriageRequest Request() =>
         new(CitedPath, 12, "Rename this variable to something clearer.", null);

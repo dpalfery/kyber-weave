@@ -1,3 +1,8 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Tests.Arbiter;
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Core.Arbiter.Plans;
 using System.Text.Json;
 using KyberWeave.Arbiter;
 using KyberWeave.Arbiter.Hooks;
@@ -94,7 +99,7 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
         ArbiterConfig.ProductDefaults.Rules.Where(rule => rule.Id != CommentRule).ToList();
 
     private CommentTriageService Service(IArbiterProvider provider, IReadOnlyList<ArbiterRule> rules, IReadOnlyList<string>? botLogins = null) =>
-        new(provider, Root, ArbiterDirectory, new FixedClock(Now), botLogins: botLogins, rules: rules);
+        new(provider, Root, ArbiterDirectory, new FixedClock(Now), ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<IArbiterStateFactory>(), botLogins: botLogins, rules: rules);
 
     private static CommentTriageRequest Request() => new(CitedPath, 12, "Rename this.", null);
 
@@ -227,7 +232,7 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
     {
         WriteCitedFile();
         WriteHostConfig("arbiter:\n  enabled: true\n  rules:\n    - id: " + CommentRule + "\n      enabled: false\n");
-        ArbiterCommentCommand disabledCommand = new() { ProviderFactory = (_, _) => new CountingProvider() };
+        ArbiterCommentCommand disabledCommand = new(ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<ICommentTriageFactory>()) { ProviderFactory = (_, _) => new CountingProvider() };
         CommandExecution disabled = Capture(() => disabledCommand.Execute(
             null!,
             new ArbiterCommentSettings { Root = Root, Path = CitedPath, Line = 12, Body = "Rename this." }));
@@ -237,7 +242,7 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
         Assert.Contains("status not-evaluated", disabled.Output, StringComparison.Ordinal);
 
         File.Delete(Path.Combine(Root, ".kyber-weave", "kyber-weave.yml"));
-        ArbiterCommentCommand answeredCommand = new() { ProviderFactory = (_, _) => new CountingProvider(Real, 0.95) };
+        ArbiterCommentCommand answeredCommand = new(ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<ICommentTriageFactory>()) { ProviderFactory = (_, _) => new CountingProvider(Real, 0.95) };
         CommandExecution answered = Capture(() => answeredCommand.Execute(
             null!,
             new ArbiterCommentSettings { Root = Root, Path = CitedPath, Line = 12, Body = "Rename this." }));

@@ -1,3 +1,9 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Tests.Arbiter;
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Core.Arbiter.Plans;
 using System.Text.Json;
 using KyberWeave.Arbiter;
 using KyberWeave.Arbiter.Hooks;
@@ -67,7 +73,7 @@ public sealed class ArbiterKiloLeadsTests : IDisposable
         string full = await WriteCitedFileAsync("src/Locked.cs");
         using FileStream holder = LockAgainstReads(full);
 
-        FileExcerpt? excerpt = FileTextFacts.ReadExcerpt(_sandbox.Path, "src/Locked.cs", 12);
+        FileExcerpt? excerpt = new FileTextFacts().ReadExcerpt(_sandbox.Path, "src/Locked.cs", 12);
 
         Assert.Null(excerpt);
     }
@@ -80,7 +86,7 @@ public sealed class ArbiterKiloLeadsTests : IDisposable
         string full = await WriteCitedFileAsync("src/Locked.cs");
         using FileStream holder = LockAgainstReads(full);
         CountingNitpickProvider provider = new();
-        CommentTriageService service = new(provider, _sandbox.Path, Path.Combine(_sandbox.Path, "artifacts", "arbiter"), new FixedClock(Now));
+        CommentTriageService service = new(provider, _sandbox.Path, Path.Combine(_sandbox.Path, "artifacts", "arbiter"), new FixedClock(Now), ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<IArbiterStateFactory>());
 
         CommentTriageResult result = await service.ClassifyAsync(new CommentTriageRequest("src/Locked.cs", 12, "Rename this.", null));
 

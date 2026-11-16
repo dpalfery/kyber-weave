@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
@@ -96,8 +97,8 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
         }
 
         string arbiterDirectory = ArbiterCommandComposition.ResolveArbiterDirectory(settings.Path);
-        InFlightLedger ledger = new(arbiterDirectory);
-        DecisionLog decisions = new(arbiterDirectory);
+        IArbiterLedger ledger = ArbiterCommandComposition.State.OpenLedger(arbiterDirectory);
+        IArbiterDecisionLog decisions = ArbiterCommandComposition.State.OpenDecisionLog(arbiterDirectory);
 
         IReadOnlyList<ArbiterLedgerEvent> events;
         IReadOnlyList<ArbiterDecisionRecord> records;
@@ -375,7 +376,7 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
     private static void CheckUnpaired(
         ArbiterLedgerEvent ev,
         IReadOnlyList<ArbiterLedgerEvent> events,
-        InFlightLedger ledger,
+        IArbiterLedger ledger,
         DiagnosticReport report,
         ref int reported)
     {

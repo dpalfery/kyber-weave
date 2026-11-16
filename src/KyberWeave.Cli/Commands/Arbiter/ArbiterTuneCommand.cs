@@ -59,8 +59,8 @@ public sealed class ArbiterTuneCommand : Command<ArbiterSettings>
         string? truncationNote;
         try
         {
-            ArbiterLogRead<ArbiterDecisionRecord> decisionRead = new DecisionLog(arbiterDirectory).ReadAllWithDiagnostics();
-            ArbiterLogRead<ArbiterLedgerEvent> ledgerRead = new InFlightLedger(arbiterDirectory).ReadAllWithDiagnostics();
+            ArbiterLogRead<ArbiterDecisionRecord> decisionRead = ArbiterCommandComposition.State.OpenDecisionLog(arbiterDirectory).ReadAllWithDiagnostics();
+            ArbiterLogRead<ArbiterLedgerEvent> ledgerRead = ArbiterCommandComposition.State.OpenLedger(arbiterDirectory).ReadAllWithDiagnostics();
             records = decisionRead.Records;
             events = ledgerRead.Records;
             if (ArbiterLogProblems.Unreadable(ledgerRead, decisionRead) is { } unreadable)

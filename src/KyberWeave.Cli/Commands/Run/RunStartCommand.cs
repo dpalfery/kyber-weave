@@ -374,7 +374,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         // the base — so a missing home degrades to the hook's default base rather than
         // failing a run that is otherwise ready.
         // Where the run works is recorded with it, so the dispatch guard can tell a started run from none.
-        string? repository = GitFacts.GetCommonDirectory(repositoryRoot);
+        string? repository = new GitFacts().GetCommonDirectory(repositoryRoot);
         RecordBase(
             _state,
             _environment.HomeDirectory,

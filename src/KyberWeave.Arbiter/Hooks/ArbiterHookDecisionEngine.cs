@@ -1,4 +1,5 @@
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Arbiter.Facts;
@@ -68,12 +69,12 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         Func<string, string?>? environment = null,
         Func<IServiceProvider>? services = null)
     {
-        _services = new Lazy<IServiceProvider>(services ?? ArbiterServices.Create);
+        _services = new Lazy<IServiceProvider>(services ?? (() => ArbiterServices.Shared));
         _homeDirectory = homeDirectory ?? (() => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
         Func<string> home = _homeDirectory;
         _providerFactory = providerFactory ?? (config => CreateProvider(ApplyUserProvider(config, home)));
         _gitFactsFactory = gitFactsFactory;
-        _planReaderFactory = planReaderFactory ?? (root => new HookPlanReader(root));
+        _planReaderFactory = planReaderFactory ?? (root => new HookPlanReader(_services.Value.GetRequiredService<IPlanFacts>(), root));
         _clock = clock ?? TimeProvider.System;
         _credentialStoreFactory = credentialStoreFactory ?? (() => _services.Value.GetRequiredService<ICredentialStore>());
         _environment = environment ?? Environment.GetEnvironmentVariable;
@@ -202,7 +203,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
             // The plan, its task file and the git facts are read in the worktree that holds the plan, which in a
             // conductor run is often not the checkout the hook runs in. The ledger stays with the hook's directory
             // so a dispatch and its return still pair.
-            string evaluationRoot = PlanRootResolver.Resolve(repoRoot, prompt);
+            string evaluationRoot = _services.Value.GetRequiredService<IPlanRootResolver>().Resolve(repoRoot, prompt);
             if (!string.Equals(evaluationRoot, repoRoot, StringComparison.Ordinal))
             {
                 context.Log.WriteLine($"Arbiter: evaluating against worktree '{evaluationRoot}', which holds the dispatch's plan.");
@@ -210,15 +211,18 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
 
             IArbiterGitFacts gitFacts = _gitFactsFactory is not null
                 ? _gitFactsFactory(evaluationRoot)
-                : new HookGitFacts(evaluationRoot, _homeDirectory(), arbiterDirectory);
-            ArbiterEvaluator evaluator = new(
+                : new HookGitFacts(
+                    _services.Value.GetRequiredService<IGitRepositoryFacts>(),
+                    _services.Value.GetRequiredService<IPlanFileResolver>(),
+                    evaluationRoot,
+                    _homeDirectory(),
+                    arbiterDirectory);
+            IArbiterEvaluator evaluator = _services.Value.GetRequiredService<IArbiterEvaluatorFactory>().Create(
                 provider,
                 KeyResolverFor(effective),
-                new InFlightLedger(arbiterDirectory),
-                new DecisionLog(arbiterDirectory),
+                arbiterDirectory,
                 gitFacts,
                 _planReaderFactory(evaluationRoot),
-                _services.Value.GetRequiredService<IArbiterModelTargetsReader>(),
                 _clock);
             ArbiterEvent ev = new()
             {
@@ -262,7 +266,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         }
     }
 
-    private static HookOutcome MapResult(
+    private HookOutcome MapResult(
         ArbiterEvaluationResult result,
         string harness,
         string? caller,
@@ -282,7 +286,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         // One read of the decision log serves every lookup below, so the mapping never reads it twice for one event.
         IReadOnlyList<ArbiterDecisionRecord> decisions = string.IsNullOrEmpty(result.LedgerId)
             ? []
-            : new DecisionLog(arbiterDirectory).ReadAll();
+            : _services.Value.GetRequiredService<IArbiterStateFactory>().OpenDecisionLog(arbiterDirectory).ReadAll();
 
         if (string.Equals(result.Outcome, RuleEffects.Allow, StringComparison.Ordinal)
             || string.Equals(result.Outcome, RuleEffects.Applies, StringComparison.Ordinal)
@@ -673,7 +677,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         }
 
         Func<Uri, string?> keyResolver = KeyResolverFor(config);
-        return SystemOneClient.CreateForProduct(
+        return _services.Value.GetRequiredService<IArbiterProviderFactory>().CreateSystemOne(
             new HttpClientHandler(),
             endpoint,
             config.Arbiter.Provider.Model,

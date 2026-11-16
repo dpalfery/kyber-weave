@@ -1,3 +1,6 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Core.Arbiter.Plans;
 using System.Diagnostics;
 using System.Text.Json;
 using KyberWeave.Arbiter.Hooks;
@@ -289,7 +292,7 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
         };
         TriggerClassification classification = TriggerClassifier.ClassifySingle(ev, target, ev.Prompt);
         ArbiterFactSet facts = TriggerFactBuilder.Build(classification, ev.Prompt, KyberWeaveConfig.ProductDefaults);
-        facts = new HookGitFacts(_repo, _home.Path).Enrich(facts, classification, ev);
+        facts = new HookGitFacts(new GitFacts(), new PlanPathResolver(), _repo, _home.Path).Enrich(facts, classification, ev);
         return facts.TryGet("run.started", out ArbiterFact? fact) ? fact.Value : null;
     }
 
@@ -317,7 +320,7 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
     private void Record(string worktree) =>
         RunBaseState.Write(_home.Path, Branch, "origin/main", new RunStartPlace(CommonDir(), worktree, DateTimeOffset.UtcNow));
 
-    private string CommonDir() => GitFacts.GetCommonDirectory(_repo) ?? throw new InvalidOperationException("no git dir");
+    private string CommonDir() => new GitFacts().GetCommonDirectory(_repo) ?? throw new InvalidOperationException("no git dir");
 
     private static void Git(string workingDirectory, params string[] args)
     {

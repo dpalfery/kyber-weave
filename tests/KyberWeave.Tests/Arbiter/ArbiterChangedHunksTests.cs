@@ -1,3 +1,6 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Core.Arbiter.Plans;
 using System.Text;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Arbiter;
@@ -55,7 +58,7 @@ public sealed class ArbiterChangedHunksTests : IDisposable
         string baseRef = Head();
         Write("src/Service.cs", Edit(NumberedLines(10), (3, "changed 3"), (7, "changed 7"), (8, "changed 8")));
 
-        IReadOnlyList<ChangedHunk>? hunks = GitFacts.GetChangedHunks(_probe.Root, baseRef);
+        IReadOnlyList<ChangedHunk>? hunks = new GitFacts().GetChangedHunks(_probe.Root, baseRef);
 
         Assert.NotNull(hunks);
         Assert.Equal(
@@ -80,7 +83,7 @@ public sealed class ArbiterChangedHunksTests : IDisposable
         Write("src/Delete.cs", NumberedLines(10).Replace("line 5\n", string.Empty, StringComparison.Ordinal));
         Write("src/Append.cs", NumberedLines(10) + "line 11\n");
 
-        IReadOnlyList<ChangedHunk>? hunks = GitFacts.GetChangedHunks(_probe.Root, baseRef);
+        IReadOnlyList<ChangedHunk>? hunks = new GitFacts().GetChangedHunks(_probe.Root, baseRef);
 
         Assert.NotNull(hunks);
         Assert.Equal(
@@ -106,7 +109,7 @@ public sealed class ArbiterChangedHunksTests : IDisposable
         CommitFile("src/a.cs", NumberedLines(5).Replace("line 2\n", "committed 2\n", StringComparison.Ordinal));
         Write("src/b.cs", NumberedLines(5).Replace("line 1\n", "dirty 1\n", StringComparison.Ordinal));
 
-        IReadOnlyList<ChangedHunk>? hunks = GitFacts.GetChangedHunks(_probe.Root, baseRef);
+        IReadOnlyList<ChangedHunk>? hunks = new GitFacts().GetChangedHunks(_probe.Root, baseRef);
 
         Assert.NotNull(hunks);
         Assert.Equal(
@@ -129,7 +132,7 @@ public sealed class ArbiterChangedHunksTests : IDisposable
         string baseRef = Head();
         Write("docs/New.md", "first\nsecond\nthird\n");
 
-        IReadOnlyList<ChangedHunk>? hunks = GitFacts.GetChangedHunks(_probe.Root, baseRef);
+        IReadOnlyList<ChangedHunk>? hunks = new GitFacts().GetChangedHunks(_probe.Root, baseRef);
 
         Assert.NotNull(hunks);
         Assert.Equal(new[] { new ChangedHunk("docs/New.md", 0, 0, 1, 3) }, hunks);
@@ -148,7 +151,7 @@ public sealed class ArbiterChangedHunksTests : IDisposable
             "src/Many.cs",
             string.Concat(Enumerable.Range(1, 80).Select(i => i % 2 == 1 ? $"edited {i}\n" : $"line {i}\n")));
 
-        IReadOnlyList<ChangedHunk>? hunks = GitFacts.GetChangedHunks(_probe.Root, baseRef);
+        IReadOnlyList<ChangedHunk>? hunks = new GitFacts().GetChangedHunks(_probe.Root, baseRef);
 
         Assert.NotNull(hunks);
         Assert.Equal(40, hunks.Count);
@@ -165,7 +168,7 @@ public sealed class ArbiterChangedHunksTests : IDisposable
         CommitFile("src/Service.cs", NumberedLines(3));
         Write("src/Service.cs", NumberedLines(3) + "line 4\n");
 
-        IReadOnlyList<ChangedHunk>? hunks = GitFacts.GetChangedHunks(_probe.Root, "refs/heads/no-such-base");
+        IReadOnlyList<ChangedHunk>? hunks = new GitFacts().GetChangedHunks(_probe.Root, "refs/heads/no-such-base");
 
         Assert.Null(hunks);
     }
@@ -179,7 +182,7 @@ public sealed class ArbiterChangedHunksTests : IDisposable
     {
         CommitFile("src/Service.cs", NumberedLines(3));
 
-        IReadOnlyList<ChangedHunk>? hunks = GitFacts.GetChangedHunks(_probe.Root, Head());
+        IReadOnlyList<ChangedHunk>? hunks = new GitFacts().GetChangedHunks(_probe.Root, Head());
 
         Assert.Null(hunks);
     }
@@ -383,7 +386,7 @@ public sealed class ArbiterChangedHunksTests : IDisposable
             new FileInfo(Path.Combine(_probe.Root, "data", "large.txt")).Length > 1024 * 1024,
             "the fixture must exceed the one-mebibyte untracked-file cap.");
 
-        IReadOnlyList<ChangedHunk>? hunks = GitFacts.GetChangedHunks(_probe.Root, baseRef);
+        IReadOnlyList<ChangedHunk>? hunks = new GitFacts().GetChangedHunks(_probe.Root, baseRef);
 
         Assert.Null(hunks);
     }
@@ -400,7 +403,7 @@ public sealed class ArbiterChangedHunksTests : IDisposable
         Write("src/Service.cs", Edit(NumberedLines(3), (2, "changed 2")));
         WriteBytes("assets/logo.dat", [0x89, 0x50, 0x00, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
 
-        IReadOnlyList<ChangedHunk>? hunks = GitFacts.GetChangedHunks(_probe.Root, baseRef);
+        IReadOnlyList<ChangedHunk>? hunks = new GitFacts().GetChangedHunks(_probe.Root, baseRef);
 
         Assert.Null(hunks);
     }
@@ -420,7 +423,7 @@ public sealed class ArbiterChangedHunksTests : IDisposable
             Path.Combine(_probe.Root, "src", "Dangling.cs"),
             Path.Combine(_probe.Root, "src", "missing-target.cs"));
 
-        IReadOnlyList<ChangedHunk>? hunks = GitFacts.GetChangedHunks(_probe.Root, baseRef);
+        IReadOnlyList<ChangedHunk>? hunks = new GitFacts().GetChangedHunks(_probe.Root, baseRef);
 
         Assert.Null(hunks);
     }
@@ -444,7 +447,7 @@ public sealed class ArbiterChangedHunksTests : IDisposable
             Cwd = root,
             IsDispatch = false,
         };
-        return new HookGitFacts(root, _home.Path, _arbiter.Path).Enrich(facts, classification, ev);
+        return new HookGitFacts(new GitFacts(), new PlanPathResolver(), root, _home.Path, _arbiter.Path).Enrich(facts, classification, ev);
     }
 
     private static ArbiterFactSet Declare(params string[] names)
@@ -481,7 +484,7 @@ public sealed class ArbiterChangedHunksTests : IDisposable
     }
 
     private string Head() =>
-        GitFacts.GetHead(_probe.Root) ?? throw new InvalidOperationException("the probe repository has no HEAD.");
+        new GitFacts().GetHead(_probe.Root) ?? throw new InvalidOperationException("the probe repository has no HEAD.");
 
     private void SetOriginHead(string sha) =>
         _probe.Git("update-ref", "refs/remotes/origin/HEAD", sha);

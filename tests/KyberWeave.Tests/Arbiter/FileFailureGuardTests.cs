@@ -1,3 +1,6 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Core.Arbiter.Plans;
 using System.Runtime.Versioning;
 using System.Security;
 using KyberWeave.Core.Arbiter;
@@ -114,7 +117,7 @@ public sealed class FileFailureGuardTests : IDisposable
     [InlineData("agent.md")]
     public void AHookSourceWhoseReadIsRefusedDoesNotFire(string name)
     {
-        bool fires = ClaudeHookCoverage.Fires(
+        bool fires = new ClaudeHookCoverage().Fires(
             Path.Combine(_temp.Path, name), "PreToolUse", "Bash", _ => throw new SecurityException("denied"));
 
         Assert.False(fires);

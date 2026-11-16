@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
@@ -45,6 +46,8 @@ namespace KyberWeave.Arbiter.Hooks;
 /// </para>
 /// </remarks>
 internal sealed class HookGitFacts(
+    IGitRepositoryFacts git,
+    IPlanFileResolver planPaths,
     string workingDirectory,
     string? homeDirectory = null,
     string? arbiterDirectory = null) : IArbiterGitFacts
@@ -97,7 +100,7 @@ internal sealed class HookGitFacts(
 
         if (isPreWithReturn)
         {
-            GitSnapshot? preSnapshot = GitFacts.CaptureSnapshot(cwd);
+            GitSnapshot? preSnapshot = git.CaptureSnapshot(cwd);
             if (preSnapshot is not null)
             {
                 RecordPreSnapshot(ResolveArbiterDirectory(cwd), SnapshotFileName, classification.Target, ev, preSnapshot);
@@ -113,7 +116,7 @@ internal sealed class HookGitFacts(
             return facts;
         }
 
-        string? head = GitFacts.GetHead(cwd);
+        string? head = git.GetHead(cwd);
         if (head is null)
         {
             return facts;
@@ -124,7 +127,7 @@ internal sealed class HookGitFacts(
             GitSnapshot? baseline = FindPreSnapshot(ResolveArbiterDirectory(cwd), SnapshotFileName, classification.Target, ev);
             if (baseline is not null)
             {
-                IReadOnlyList<string> sinceDispatch = [.. GitFacts.GetChangedPathsSinceSnapshot(cwd, baseline)];
+                IReadOnlyList<string> sinceDispatch = [.. git.GetChangedPathsSinceSnapshot(cwd, baseline)];
                 facts = facts.With("git.changed-paths.since-dispatch", sinceDispatch, ArbiterFactLabel.Derived);
             }
         }
@@ -135,11 +138,11 @@ internal sealed class HookGitFacts(
 
         if (needsReviewChangedPaths && baseRef is not null)
         {
-            IReadOnlyList<string> changed = [.. GitFacts.GetChangedPathsSinceBase(cwd, baseRef)];
+            IReadOnlyList<string> changed = [.. git.GetChangedPathsSinceBase(cwd, baseRef)];
             facts = facts.With("review.changed-paths", changed, ArbiterFactLabel.Derived);
             facts = facts.With("review.base-ref", baseRef, ArbiterFactLabel.Derived);
             if (facts.Contains("review.diff-summary")
-                && GitFacts.GetDiffSummary(cwd, baseRef, changed) is { } summary)
+                && git.GetDiffSummary(cwd, baseRef, changed) is { } summary)
             {
                 facts = facts.With("review.diff-summary", summary, ArbiterFactLabel.Derived);
             }
@@ -147,7 +150,7 @@ internal sealed class HookGitFacts(
 
         if (needsChangeSet && baseRef is not null)
         {
-            facts = WithChangeFacts(facts, GitFacts.GetChangeSet(cwd, baseRef));
+            facts = WithChangeFacts(facts, git.GetChangeSet(cwd, baseRef));
         }
 
         return facts;
@@ -186,7 +189,7 @@ internal sealed class HookGitFacts(
             return;
         }
 
-        GitSnapshot? snapshot = GitFacts.CaptureSnapshot(canonical);
+        GitSnapshot? snapshot = git.CaptureSnapshot(canonical);
         if (snapshot is not null)
         {
             RecordPreSnapshot(ResolveArbiterDirectory(cwd), CanonicalSnapshotFileName, classification.Target, ev, snapshot);
@@ -203,7 +206,7 @@ internal sealed class HookGitFacts(
         if (!facts.Contains(StrayPathsFact)
             || !string.Equals(ev.Phase, "post", StringComparison.OrdinalIgnoreCase)
             || !IsRunBranchWriter(facts)
-            || GitFacts.GetCommonDirectory(cwd) is not { } repository
+            || git.GetCommonDirectory(cwd) is not { } repository
             || RunCheckout.CanonicalCheckoutOf(repository) is not { } canonical)
         {
             return facts;
@@ -218,9 +221,9 @@ internal sealed class HookGitFacts(
         // Only what the dispatch left behind counts: a path it changed and then restored, or a stray file a
         // clean-up dispatch put back, is no longer dirty. A commit on the canonical branch keeps every path it
         // moved. The agent scratchpad is working state, not a change to the checkout.
-        IReadOnlySet<string> changed = GitFacts.GetChangedPathsSinceSnapshot(canonical, baseline);
-        bool headMoved = !string.Equals(GitFacts.GetHead(canonical), baseline.Head, StringComparison.Ordinal);
-        IReadOnlyDictionary<string, string> dirty = GitFacts.GetDirtyStatuses(canonical);
+        IReadOnlySet<string> changed = git.GetChangedPathsSinceSnapshot(canonical, baseline);
+        bool headMoved = !string.Equals(git.GetHead(canonical), baseline.Head, StringComparison.Ordinal);
+        IReadOnlyDictionary<string, string> dirty = git.GetDirtyStatuses(canonical);
         List<string> stray = [.. changed
             .Where(path => (headMoved || dirty.ContainsKey(path)) && !IsScratchpad(path))
             .Order(StringComparer.Ordinal)];
@@ -239,7 +242,7 @@ internal sealed class HookGitFacts(
     private string? CanonicalCheckoutWithSeparateRun(string cwd)
     {
         string home = homeDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return GitFacts.GetCommonDirectory(cwd) is { } repository
+        return git.GetCommonDirectory(cwd) is { } repository
                && RunCheckout.CanonicalCheckoutOf(repository) is { } canonical
                && RunCheckout.LiveSeparateRuns(home, canonical) is { Count: > 0 }
             ? canonical
@@ -355,7 +358,7 @@ internal sealed class HookGitFacts(
         return facts.With(FindingChangedLinesFact, lines, ArbiterFactLabel.Derived);
     }
 
-    private static ArbiterFactSet WithSurroundings(ArbiterFactSet facts, string cwd)
+    private ArbiterFactSet WithSurroundings(ArbiterFactSet facts, string cwd)
     {
         if (!facts.Contains("file.surroundings")
             || !facts.TryGet("finding.file", out ArbiterFact? file)
@@ -367,7 +370,7 @@ internal sealed class HookGitFacts(
             return facts;
         }
 
-        string? resolved = PlanPathResolver.Resolve(path, cwd);
+        string? resolved = planPaths.Resolve(path, cwd);
         if (resolved is null || !File.Exists(resolved))
         {
             return facts;
@@ -676,11 +679,11 @@ internal sealed class HookGitFacts(
     private string ResolveBase(string workingDirectory)
     {
         string home = homeDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        string? branch = GitFacts.GetCurrentBranch(workingDirectory);
+        string? branch = git.GetCurrentBranch(workingDirectory);
         if (branch is not null &&
             RunBaseState.TryReadBaseRef(home, branch, out string? recorded) &&
             !string.IsNullOrWhiteSpace(recorded) &&
-            GitFacts.RefExists(workingDirectory, recorded))
+            git.RefExists(workingDirectory, recorded))
         {
             return recorded;
         }

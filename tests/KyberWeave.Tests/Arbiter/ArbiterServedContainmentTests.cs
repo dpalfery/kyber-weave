@@ -1,3 +1,8 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Tests.Arbiter;
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Core.Arbiter.Plans;
 using System.Text.Json;
 using KyberWeave.Arbiter;
 using KyberWeave.Arbiter.Hooks;
@@ -115,7 +120,7 @@ public sealed class ArbiterServedContainmentTests : IDisposable
     [Fact]
     public void TheCommentCommandRefusesAFileOutsideTheRoot()
     {
-        ArbiterCommentCommand command = new();
+        ArbiterCommentCommand command = new(ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<ICommentTriageFactory>());
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
             new ArbiterCommentSettings

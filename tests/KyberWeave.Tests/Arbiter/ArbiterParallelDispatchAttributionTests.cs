@@ -1,3 +1,5 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Data.Arbiter;
 using KyberWeave.Data.Hooks;
 using System.Diagnostics;
@@ -66,7 +68,7 @@ public sealed class ArbiterParallelDispatchAttributionTests : IDisposable
             "claude/feat/widget",
             "main",
             new RunStartPlace(
-                GitFacts.GetCommonDirectory(_repo.Path) ?? throw new InvalidOperationException("no git dir"),
+                new GitFacts().GetCommonDirectory(_repo.Path) ?? throw new InvalidOperationException("no git dir"),
                 _repo.Path,
                 DateTimeOffset.UtcNow));
     }
@@ -239,9 +241,11 @@ public sealed class ArbiterParallelDispatchAttributionTests : IDisposable
         _ => null,
         new InFlightLedger(_arbiter),
         new DecisionLog(_arbiter),
-        new HookGitFacts(_repo.Path, _home.Path, _arbiter),
+        new HookGitFacts(new GitFacts(), new PlanPathResolver(), _repo.Path, _home.Path, _arbiter),
         new RealPlanReader(_repo.Path),
         new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
+            new GateReportFacts(),
+            new FileArbiterStateFactory(),
         TimeProvider.System);
 
     private Task<ArbiterEvaluationResult> Dispatch(ArbiterEvaluator evaluator, string phase, string task, string callId) =>
@@ -321,7 +325,7 @@ public sealed class ArbiterParallelDispatchAttributionTests : IDisposable
     private sealed class RealPlanReader(string root) : IArbiterPlanReader
     {
         public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification) =>
-            Core.Arbiter.Plans.PlanFacts.Enrich(facts, classification, root);
+            new KyberWeave.Core.Arbiter.Plans.PlanFacts(new PlanPathResolver()).Enrich(facts, classification, root);
     }
 
     /// <summary>The live misfire: the model confidently calls any file the task does not name outside it.</summary>
