@@ -1,10 +1,10 @@
-namespace KyberWeave.Contracts.Repositories;
+namespace KyberWeave.Kernel.FileSystem;
 
 /// <summary>The file system reads a doctor probe needs to prove what is installed on the machine.</summary>
 /// <remarks>
-/// Separate from <see cref="IFileSystem"/> because a probe also lists one level of a directory while
-/// skipping links, and reads the tail of a log a live process holds open. A seam only for reading
-/// keeps a probe from being able to change what it inspects.
+/// Separate from the hook's file-system contract because a probe also lists one level of a directory while
+/// skipping links, and reads the tail of a log a live process holds open. A seam only for reading keeps a
+/// probe from being able to change what it inspects.
 /// </remarks>
 public interface IDoctorFileSystem
 {

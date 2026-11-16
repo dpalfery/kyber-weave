@@ -1,10 +1,8 @@
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
-using KyberWeave.Contracts.Repositories;
 using KyberWeave.Domain.CopilotPrompt;
-using KyberWeave.Domain.Doctor;
-
-namespace KyberWeave.Core.Doctor;
+using KyberWeave.Kernel.FileSystem;
+namespace KyberWeave.Domain.Doctor;
 
 /// <summary>
 /// Doctor checks for the Copilot system-prompt override: whether the prompt file is installed and
@@ -38,12 +36,13 @@ public static partial class CopilotPromptProbe
         string homeDirectory,
         string? appDataDirectory,
         OSPlatform platform,
-        string? xdgConfigHome = null,
-        IDoctorFileSystem? fileSystem = null)
+        IDoctorFileSystem fileSystem,
+        string? xdgConfigHome = null)
     {
         ArgumentNullException.ThrowIfNull(homeDirectory);
+        ArgumentNullException.ThrowIfNull(fileSystem);
 
-        IDoctorFileSystem files = fileSystem ?? DoctorFileSystem.Default;
+        IDoctorFileSystem files = fileSystem;
 
         string promptPath = CopilotPromptFile.InstalledPath(homeDirectory);
         if (!files.FileExists(promptPath))
