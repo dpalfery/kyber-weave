@@ -370,7 +370,7 @@ review:
     "src/KyberWeave.Core/Configuration/ReviewConfigLoader.cs":
       - KyberWeave.Tests.ReviewTaskGatesConfigTests
       - KyberWeave.Tests.ReviewGateKeysConfigTests
-    "src/KyberWeave.Core/Review/SuppressionScan.cs":
+    "src/KyberWeave.Domain/Review/SuppressionScan.cs":
       - KyberWeave.Tests.ReviewSuppressionsCommandTests
     "src/KyberWeave.Core/Review/TestClassMapping.cs":
       - KyberWeave.Tests.TaskGateSelectionTests

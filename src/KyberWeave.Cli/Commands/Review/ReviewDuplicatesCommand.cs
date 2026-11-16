@@ -1,4 +1,5 @@
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -18,7 +19,7 @@ namespace KyberWeave.Cli.Commands.Review;
 /// council's question, not this command's. A failed <c>--out</c> write is different — the
 /// evidence was not produced — and fails the process.
 /// </remarks>
-public sealed class ReviewDuplicatesCommand : Command<ReviewDuplicatesSettings>
+public sealed class ReviewDuplicatesCommand(IDuplicateDetectionService detector) : Command<ReviewDuplicatesSettings>
 {
     private const string ReportWriteFailed = "KW-REVIEW-025";
 
@@ -38,7 +39,7 @@ public sealed class ReviewDuplicatesCommand : Command<ReviewDuplicatesSettings>
 
         ReviewDuplicates options = config.Review.Duplicates;
         CodeGraphPorts graph = CodeGraphResolvers.ForRepository(root);
-        DuplicateReport duplicates = Analyze(root, graph.Resolver, graph.Enumerator, options);
+        DuplicateReport duplicates = Analyze(detector, root, graph.Resolver, graph.Enumerator, options);
 
         if (!duplicates.IndexAvailable)
         {
@@ -95,6 +96,7 @@ public sealed class ReviewDuplicatesCommand : Command<ReviewDuplicatesSettings>
     /// symbol enumerator is consumed as a port and a fake can stand in for it.
     /// </summary>
     internal static DuplicateReport Analyze(
+        IDuplicateDetectionService duplicates,
         string root,
         ICodeGraphResolver graph,
         ICodeGraphSymbolEnumerator symbols,
@@ -119,7 +121,7 @@ public sealed class ReviewDuplicatesCommand : Command<ReviewDuplicatesSettings>
             ? File.GetLastWriteTimeUtc(graph.DatabasePath)
             : null;
 
-        return DuplicateDetector.Detect(root, comparable, options, graph.DatabasePath, modified);
+        return duplicates.Detect(root, comparable, options, graph.DatabasePath, modified);
     }
 }
 

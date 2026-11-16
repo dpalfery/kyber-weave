@@ -1,6 +1,8 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using KyberWeave.Cli.Rendering;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Review;
@@ -26,7 +28,7 @@ namespace KyberWeave.Cli.Commands.Review;
 /// <see cref="VerdictEngine"/>, which stays the only judge.
 /// </para>
 /// </remarks>
-public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings>
+public sealed partial class ReviewVerdictCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, INotSeatedStore notSeatedStore, ISeverityOverrideSource severityOverrides, ICitedLineChecker citedLines) : Command<ReviewVerdictSettings>
 {
     /// <summary>The command description shared by the real registration and the help tests.</summary>
     public const string Description = "Compute approve / request-changes from findings and gates.";
@@ -105,7 +107,7 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
 
         // A host severity override sets the severity everything after this reads: the nitpick drop, the verdict rules,
         // the fix-level routing and the fix counts the loop compares.
-        SeverityOverrides overrides = SeverityOverrides.Load(root, config);
+        SeverityOverrides overrides = severityOverrides.Load(root, config.ConfigReg);
         List<Diagnostic> overrideNotes = [];
         findings = [.. overrides.ApplyCited(findings, overrideNotes)];
         report.AddRange(overrideNotes);
@@ -232,7 +234,7 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
     /// The count of findings to fix after each earlier cycle of this change, oldest first, each recomputed from the
     /// cycle's own findings and gates; empty without <c>--prior</c>. A cycle that cannot be read is left out.
     /// </summary>
-    private static List<int> PriorFixCounts(string root, ReviewVerdictSettings settings, KyberWeaveConfig config)
+    private List<int> PriorFixCounts(string root, ReviewVerdictSettings settings, KyberWeaveConfig config)
     {
         List<int> counts = [];
         if (settings.Prior is null)
@@ -241,8 +243,8 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
         IReadOnlyList<ReviewCycleRecord> history;
         try
         {
-            history = ReviewWorkTree.Prior(
-                ReviewWorkTree.Of(root), settings.BaseRef, ReviewCycles.ReadThrough(settings.Prior), CurrentCycleFolder(settings)).Valid;
+            history = trees.Prior(
+                trees.Containing(root), settings.BaseRef, cycles.ReadThrough(settings.Prior), CurrentCycleFolder(settings)).Valid;
         }
         catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException)
         {
@@ -272,7 +274,7 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
     /// run keeps the result of the cycle that last ran it, unless a file changed since that cycle matches the gate's
     /// inputs or the gate had not passed: then the cycle is refused, because dropping the gate would read as a pass.
     /// </summary>
-    private static IReadOnlyList<GateResult> WithCarriedGates(
+    private IReadOnlyList<GateResult> WithCarriedGates(
         string root,
         KyberWeaveConfig config,
         ReviewVerdictSettings settings,
@@ -289,16 +291,16 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
                                                  && !given.Any(result => string.Equals(result.Id, gate.Id, StringComparison.Ordinal)))
         ];
         IReadOnlyList<ReviewCycleRecord> history =
-            ReviewWorkTree.Prior(ReviewWorkTree.Of(root), settings.BaseRef, ReviewCycles.ReadThrough(settings.Prior), CurrentCycleFolder(settings)).Valid;
+            trees.Prior(trees.Containing(root), settings.BaseRef, cycles.ReadThrough(settings.Prior), CurrentCycleFolder(settings)).Valid;
         if (absent.Length == 0 || history.Count == 0)
             return given;
 
         List<GateResult> effective = [.. given];
-        List<GateCycleDecision> decisions = [.. ReviewCycles.DecideGates(
+        List<GateCycleDecision> decisions = [.. ReviewCyclePlanning.DecideGates(
             history,
             absent,
             OperatingSystem.IsWindows() ? "windows" : "unix",
-            commit => TryChangedSince(ReviewWorkTree.Of(root), commit))];
+            commit => TryChangedSince(trees.Containing(root), commit))];
         string[] outstanding =
             [.. decisions.Where(decision => decision is { Action: GateCycleAction.Rerun, FromCycle: not null }).Select(decision => decision.GateId)];
         string command = ReviewCycleView.GatesCommand(root, Path.GetFullPath(settings.Gates!), settings.BaseRef);
@@ -333,13 +335,13 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
     /// Refuses a <c>--prior</c> folder that belongs to another change: carrying its gate results and lens coverage
     /// would let a stale folder from an earlier run stand in for this change's review.
     /// </summary>
-    private static bool PriorBelongsToThisChange(string root, ReviewVerdictSettings settings, DiagnosticReport report)
+    private bool PriorBelongsToThisChange(string root, ReviewVerdictSettings settings, DiagnosticReport report)
     {
-        IReadOnlyList<ReviewCycleRecord> history = ReviewCycles.ReadThrough(settings.Prior!);
+        IReadOnlyList<ReviewCycleRecord> history = cycles.ReadThrough(settings.Prior!);
         if (history.Count == 0)
             return true;
 
-        IgnoredCycle? named = ReviewWorkTree.Prior(ReviewWorkTree.Of(root), settings.BaseRef, history, CurrentCycleFolder(settings)).Ignored
+        IgnoredCycle? named = trees.Prior(trees.Containing(root), settings.BaseRef, history, CurrentCycleFolder(settings)).Ignored
             .FirstOrDefault(cycle => cycle.Record.Number == history[^1].Number && cycle.Record.Folder == history[^1].Folder);
         if (named is null)
             return true;
@@ -354,11 +356,11 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
     }
 
     /// <summary>The folder of the cycle this verdict belongs to: the one <c>--out</c> or <c>--gates</c> sits in, when it records its change.</summary>
-    private static string? CurrentCycleFolder(ReviewVerdictSettings settings)
+    private string? CurrentCycleFolder(ReviewVerdictSettings settings)
     {
         foreach (string? path in new[] { settings.Out, settings.Gates })
         {
-            if (path is not null && Path.GetDirectoryName(Path.GetFullPath(path)) is { } folder && ReviewCycles.HasIdentity(folder))
+            if (path is not null && Path.GetDirectoryName(Path.GetFullPath(path)) is { } folder && cycles.HasIdentity(folder))
                 return folder;
         }
 
@@ -369,18 +371,18 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
     /// When the findings document is written into a cycle folder that records no change yet, records the branch, base
     /// and head the verdict was computed on, so the next cycle can tell the folder belongs to this change.
     /// </summary>
-    private static void RecordCycleIdentity(string root, ReviewVerdictSettings settings)
+    private void RecordCycleIdentity(string root, ReviewVerdictSettings settings)
     {
         if (settings.Out is null || !ReviewCycleView.TryFromOutPath(settings.Out, out _, out _))
             return;
 
         string folder = Path.GetDirectoryName(Path.GetFullPath(settings.Out))!;
-        if (ReviewCycles.HasIdentity(folder) || ReviewWorkTree.IdentityOf(ReviewWorkTree.Of(root), settings.BaseRef) is not { } identity)
+        if (cycles.HasIdentity(folder) || trees.IdentityOf(trees.Containing(root), settings.BaseRef) is not { } identity)
             return;
 
         try
         {
-            ReviewCycles.WriteIdentity(folder, identity);
+            cycles.WriteIdentity(folder, identity);
         }
         catch (Exception ex) when (FileFailure.Is(ex))
         {
@@ -388,11 +390,11 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
         }
     }
 
-    private static IReadOnlyList<string>? TryChangedSince(string root, string commit)
+    private IReadOnlyList<string>? TryChangedSince(string root, string commit)
     {
         try
         {
-            return ChangedFiles.ResolveSince(root, commit);
+            return git.ResolveSince(root, commit);
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception
                                        or TimeoutException)
@@ -460,7 +462,7 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
     /// The findings the verdict is computed from: the seat folder, or the deprecated findings document. A seat
     /// folder's report has no changed-path facts, because the seats do not measure the change.
     /// </summary>
-    private static bool TryReadInput(
+    private bool TryReadInput(
         ReviewVerdictSettings settings, ReviewPolicy policy, DiagnosticReport report, out FindingsReport? input)
     {
         input = null;
@@ -505,7 +507,7 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
 
         // The cycle's recorded decisions first; a reason typed on the command line wins over the recorded one.
         Dictionary<string, string> notSeated = new(
-            NotSeatedRecord.Read(Path.GetDirectoryName(Path.GetFullPath(settings.Seats).TrimEnd(Path.DirectorySeparatorChar))!),
+            notSeatedStore.Read(Path.GetDirectoryName(Path.GetFullPath(settings.Seats).TrimEnd(Path.DirectorySeparatorChar))!),
             StringComparer.Ordinal);
         foreach ((string lens, string reason) in ParseNotSeated(settings.NotSeated, report))
             notSeated[lens] = reason;
@@ -870,14 +872,14 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
         return kept;
     }
 
-    private static List<ReviewFinding> CheckCitedLines(
+    private List<ReviewFinding> CheckCitedLines(
         string root,
         List<ReviewFinding> findings,
         DiagnosticReport report,
         List<DroppedFinding> dropped)
     {
         List<ReviewFinding> kept = new(findings.Count);
-        IReadOnlyList<CitedLineResult> results = CitedLineCheck.Check(root, findings);
+        IReadOnlyList<CitedLineResult> results = citedLines.Check(root, findings);
         foreach (CitedLineResult result in results)
         {
             ReviewFinding finding = result.Finding;
@@ -933,15 +935,15 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
     /// when the gate run wrote one, its <c>findings.json</c> as <c>--out</c> for a verdict run, and the cycle before it
     /// as <c>--prior</c> when that one wrote its findings. An option given explicitly is kept.
     /// </summary>
-    private static bool UseCurrentCycle(string root, ReviewVerdictSettings settings, DiagnosticReport report)
+    private bool UseCurrentCycle(string root, ReviewVerdictSettings settings, DiagnosticReport report)
     {
-        string tree = ReviewWorkTree.Of(root);
+        string tree = trees.Containing(root);
         string scratchpad = ReviewWorkTree.Scratchpad(tree);
         string? cycle = null;
         string? problem = null;
-        if (ReviewCycleView.TryChooseTask(tree, scratchpad, settings.Task, out string task, out _, out problem))
+        if (ReviewCycleView.TryChooseTask(cycles, git, tree, scratchpad, settings.Task, out string task, out _, out problem))
         {
-            cycle = NotSeatedRecord.LatestCycle(Path.Combine(scratchpad, task, "review"));
+            cycle = notSeatedStore.LatestCycle(Path.Combine(scratchpad, task, "review"));
             problem = cycle is null ? $"no cycle folder with seats under {Path.Combine(scratchpad, task, "review")}" : null;
         }
 
@@ -966,7 +968,7 @@ public sealed partial class ReviewVerdictCommand : Command<ReviewVerdictSettings
         // folder left by another change is never taken.
         if (settings.Prior is null
             && ReviewCycleView.TryFromOutPath(Path.Combine(cycle, PriorFindingsFile), out string reviewFolder, out int number)
-            && ReviewWorkTree.Prior(tree, settings.BaseRef, ReviewCycles.ReadFinished(reviewFolder)).Valid
+            && trees.Prior(tree, settings.BaseRef, cycles.ReadFinished(reviewFolder)).Valid
                 .Where(record => record.Number < number && File.Exists(record.FindingsPath))
                 .MaxBy(record => record.Number) is { } prior)
         {

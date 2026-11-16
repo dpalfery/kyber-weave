@@ -770,40 +770,16 @@
       "bound": "Builds only; nothing starts on this line. The copy is started by Process.Start at ProcessRunner.cs:59."
     },
     {
-      "file": "src/KyberWeave.Core/Review/Catalogue/ProjectRootDetector.cs",
-      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "file": "src/KyberWeave.Data/Review/ProcessProgramRunner.cs",
+      "text": "ProcessStartInfo startInfo = new(program)",
       "count": 1,
-      "bound": "Builds only; nothing starts on this line. Started at ProjectRootDetector.cs:252 with GitTimeout = 60 s."
+      "bound": "Builds only; nothing starts on this line. Started by the ProcessRunner.Run call below it."
     },
     {
-      "file": "src/KyberWeave.Core/Review/Catalogue/ProjectRootDetector.cs",
-      "text": "result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);",
+      "file": "src/KyberWeave.Data/Review/ProcessProgramRunner.cs",
+      "text": "return ProcessRunner.Run(startInfo, string.Empty, timeout, maxOutputBytes, cancellationToken);",
       "count": 1,
-      "bound": "ProcessRunner.Run with GitTimeout = 60 s (ProjectRootDetector.cs:33); the process tree is killed on expiry."
-    },
-    {
-      "file": "src/KyberWeave.Core/Review/ChangedFiles.cs",
-      "text": "ProcessStartInfo startInfo = new(\"git\")",
-      "count": 1,
-      "bound": "Builds only; nothing starts on this line. Started at ChangedFiles.cs:204 with GitTimeout = 60 s."
-    },
-    {
-      "file": "src/KyberWeave.Core/Review/ChangedFiles.cs",
-      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);",
-      "count": 1,
-      "bound": "ProcessRunner.Run with GitTimeout = 60 s (ChangedFiles.cs:29); the process tree is killed on expiry."
-    },
-    {
-      "file": "src/KyberWeave.Core/Review/GateRunner.cs",
-      "text": "ProcessStartInfo startInfo = new(argv[0])",
-      "count": 1,
-      "bound": "Builds only; nothing starts on this line. Started at GateRunner.cs:171 with the gate's timeout-seconds."
-    },
-    {
-      "file": "src/KyberWeave.Core/Review/GateRunner.cs",
-      "text": "ProcessResult process = ProcessRunner.Run(startInfo, string.Empty, timeout, cancellationToken: stop);",
-      "count": 1,
-      "bound": "ProcessRunner.Run with the gate's timeout-seconds (review.gates; ReviewConfigLoader defaults it to 900 s and rejects values <= 0). The process tree is killed on expiry and the TimeoutException is reported as TimedOut. A concurrent gate's tree is also killed when a run given --stop-on-failure cancels it."
+      "bound": "ProcessRunner.Run with the caller's timeout: the process tree is killed on expiry or when the caller's token is cancelled, and maxOutputBytes caps what is buffered. Callers: git reads in GitChangeReader, SuppressionScanService (10 MB output cap) and FileRepositoryFileLister, each 60 s; every review gate through GateRunService with the gate's timeout-seconds (review.gates; ReviewConfigLoader defaults it to 900 s and rejects values <= 0), where the TimeoutException is reported as TimedOut and a concurrent gate's tree is also killed when a run given --stop-on-failure cancels it; git argv only, never a shell."
     },
     {
       "file": "src/KyberWeave.Data/Squad/Instances/SquadHarnessLauncher.cs",
@@ -1098,18 +1074,6 @@
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
       "count": 1,
       "bound": "60 s timeout kills the child tree on expiry. Receives stdin then EOF immediately, drains both redirected streams through ProcessRunner, and is the only start site in the run-start suites; every child is the local kyber-weave host or a local git repository under a TempDirectory."
-    },
-    {
-      "file": "src/KyberWeave.Core/Review/SuppressionScan.cs",
-      "text": "ProcessStartInfo startInfo = new(\"git\")",
-      "count": 1,
-      "bound": "Started by the RunGit call at line 343: ProcessRunner timeout GitTimeout (60 s) kills the child tree on expiry. git argv only, never a shell, reading the diff of the caller's repository; a missing git, a timeout and a non-zero exit all return 'the change was not read' rather than blocking."
-    },
-    {
-      "file": "src/KyberWeave.Core/Review/SuppressionScan.cs",
-      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout, maxOutputBytes);",
-      "count": 1,
-      "bound": "ProcessRunner timeout GitTimeout (60 s) kills the child tree on expiry; output capped at maxOutputBytes to prevent memory exhaustion; git argv only (`diff`, `ls-files`), with stdin closed by ProcessRunner so the child exits at EOF."
     },
     {
       "file": "tests/KyberWeave.Tests/PostCheckoutGitFixture.cs",

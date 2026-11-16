@@ -1,5 +1,4 @@
 using KyberWeave.Core.Configuration;
-using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Review;
 
@@ -18,73 +17,10 @@ namespace KyberWeave.Core.Review;
 /// </remarks>
 public static class CitedLineCheck
 {
-    /// <summary>Checks one finding against the working tree.</summary>
-    /// <param name="repositoryRoot">The absolute repository root the finding's path is relative to.</param>
-    /// <param name="finding">The finding to check.</param>
-    public static CitedLineResult Check(string repositoryRoot, ReviewFinding finding)
-    {
-        ArgumentNullException.ThrowIfNull(finding);
-        return Check(repositoryRoot, [finding])[0];
-    }
-
-    /// <summary>Checks every finding against the working tree, reading each cited file once.</summary>
-    /// <param name="repositoryRoot">The absolute repository root the findings' paths are relative to.</param>
-    /// <param name="findings">The findings to check.</param>
-    /// <returns>One result per finding, in the order given.</returns>
-    public static IReadOnlyList<CitedLineResult> Check(string repositoryRoot, IReadOnlyList<ReviewFinding> findings)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
-        ArgumentNullException.ThrowIfNull(findings);
-
-        Dictionary<string, FileLines> files = new(StringComparer.Ordinal);
-        List<CitedLineResult> results = new(findings.Count);
-        foreach (ReviewFinding finding in findings)
-        {
-            if (!files.TryGetValue(finding.File, out FileLines? file))
-            {
-                file = ReadFile(repositoryRoot, finding.File);
-                files[finding.File] = file;
-            }
-
-            results.Add(file.Lines is { } lines
-                ? CheckLine(finding, lines)
-                : CitedLineResult.Unverified(finding, file.Problem ?? "the cited file could not be read"));
-        }
-
-        return results;
-    }
-
-    /// <summary>
-    /// The cited file's lines, or why they were not read. The path comes from a seat's text, so only a file inside
-    /// the repository, reached without a symbolic link, is read.
-    /// </summary>
-    private static FileLines ReadFile(string repositoryRoot, string path)
-    {
-        if (!IsRepositoryRelative(path))
-            return new FileLines(null, $"{path} is not a path inside the repository, so it was not read");
-
-        try
-        {
-            if (!DocsRootPath.IsContainedFile(repositoryRoot, path, []))
-                return new FileLines(null, $"{path} is not a file in the repository, or is reached through a link");
-
-            string full = Path.Combine(repositoryRoot, path);
-            return new FileLines(BoundedFileReader.ReadAllLines(full, ReviewSeatInput.MaxFileBytes), null);
-        }
-        catch (InvalidDataException)
-        {
-            return new FileLines(null, $"{path} is larger than {ReviewSeatInput.MaxFileBytes} bytes, so it was not read");
-        }
-        // A seat can write a path holding a character no file system accepts, such as a NUL from a quoted "\0", or
-        // name a root the process may not look in; the one shared filter says which failures are answers.
-        catch (Exception ex) when (ReviewSeatInput.IsFileFailure(ex))
-        {
-            // The exception message can carry the absolute path, which does not belong in a review report.
-            return new FileLines(null, $"{path} could not be read ({ex.GetType().Name})");
-        }
-    }
-
-    private static CitedLineResult CheckLine(ReviewFinding finding, string[] lines)
+    /// <summary>Judges one finding against the lines of its cited file.</summary>
+    /// <param name="finding">The finding.</param>
+    /// <param name="lines">The cited file's lines.</param>
+    public static CitedLineResult Judge(ReviewFinding finding, string[] lines)
     {
         // Line 0 or a negative line can no more exist than one past the end, so it is repaired the same way.
         if (finding.Line >= 1 && finding.Line <= lines.Length)
@@ -115,9 +51,9 @@ public static class CitedLineCheck
                     : $"{matches.Length} lines hold the excerpt, so which one it means cannot be told"));
     }
 
-    private sealed record FileLines(string[]? Lines, string? Problem);
-
-    private static bool IsRepositoryRelative(string path) =>
+    /// <summary>Whether a seat-written path names a place inside the repository.</summary>
+    /// <param name="path">The path.</param>
+    public static bool IsRepositoryRelative(string path) =>
         !string.IsNullOrWhiteSpace(path)
         && !Path.IsPathRooted(path)
         && !path.Split(['/', '\\']).Contains("..", StringComparer.Ordinal);

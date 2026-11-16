@@ -1,18 +1,21 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Processes;
+using KyberWeave.Core.Review;
 
-namespace KyberWeave.Core.Review;
+namespace KyberWeave.Application.Review;
 
 /// <summary>Runs the deterministic gates a host declares and normalizes what they reported.</summary>
 /// <remarks>
 /// <para>
 /// This is the only place a reviewer executes anything. Everything it can run comes from
 /// <see cref="ReviewConfig.Gates"/>, already split into argv by the configuration loader, and
-/// goes to <see cref="ProcessRunner"/>, which refuses a shell. There is no path by which a
+/// goes to <see cref="IProgramRunner"/>, which refuses a shell. There is no path by which a
 /// value in a diff, a finding, or a lens prompt becomes part of a command line.
 /// </para>
 /// <para>
@@ -21,7 +24,11 @@ namespace KyberWeave.Core.Review;
 /// another claim needing corroboration.
 /// </para>
 /// </remarks>
-public static class GateRunner
+public sealed class GateRunService(
+    IProgramRunner programs,
+    ICoverageReportSource coverage,
+    IWritableFileSystem fileSystem,
+    TimeProvider clock) : IGateRunService
 {
     private const string DeadlineKey = "review.council-deadline-seconds";
 
@@ -56,7 +63,7 @@ public static class GateRunner
     /// timeout and the time left; every gate still running at the deadline, and every gate not yet started, is reported as
     /// <see cref="GateOutcome.DeadlinePassed"/>. Only <c>review gates --deadline</c> passes one.
     /// </param>
-    public static GateReport Run(
+    public GateReport Run(
         ReviewConfig config,
         string workingDirectory,
         bool stopOnBlockingFailure = false,
@@ -67,13 +74,13 @@ public static class GateRunner
         ArgumentNullException.ThrowIfNull(config);
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
 
-        if (!Directory.Exists(workingDirectory))
+        if (!fileSystem.DirectoryExists(workingDirectory))
             throw new DirectoryNotFoundException($"Gate working directory not found: {workingDirectory}");
 
         IReadOnlyList<ReviewGate> gates = config.Gates;
         GateResult?[] results = new GateResult?[gates.Count];
         List<(int Index, Task<GateResult?> Run)> alongside = [];
-        DateTime startedUtc = DateTime.UtcNow;
+        DateTime startedUtc = clock.GetUtcNow().UtcDateTime;
         long started = Stopwatch.GetTimestamp();
         bool stopped = false;
 
@@ -125,8 +132,8 @@ public static class GateRunner
         return new GateReport(
             GateReport.CurrentSchema,
             results.OfType<GateResult>().ToList(),
-            CoverageCollector.ReadNewest(workingDirectory, startedUtc),
-            CoverageCollector.ReadAll(workingDirectory, startedUtc),
+            coverage.ReadNewest(workingDirectory, startedUtc),
+            coverage.ReadAll(workingDirectory, startedUtc),
             baseRef);
     }
 
@@ -168,12 +175,12 @@ public static class GateRunner
     /// requested, runs before its verify command; a fix that does not succeed is reported beside the
     /// run and never decides the gate on its own, because the verify command is what the change must pass.
     /// </summary>
-    /// <param name="gates">The gates that will start, already expanded by <see cref="TaskGateSelection.Plan"/>.</param>
+    /// <param name="gates">The gates that will start, already expanded by <c>TaskGateSelection.Plan</c>.</param>
     /// <param name="workingDirectory">The repository root the gates run against.</param>
     /// <param name="fix">Whether to run each gate's fix command before its verify command.</param>
     /// <param name="stopOnBlockingFailure">Whether to skip the remaining gates once a blocking one fails.</param>
     /// <param name="observer">Sees each verify command's output and result, and may skip a later gate, for a caller that classifies them.</param>
-    public static TaskGateRun RunTaskGates(
+    public TaskGateRun RunTaskGates(
         IReadOnlyList<PlannedTaskGate> gates,
         string workingDirectory,
         bool fix,
@@ -183,12 +190,12 @@ public static class GateRunner
         ArgumentNullException.ThrowIfNull(gates);
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
 
-        if (!Directory.Exists(workingDirectory))
+        if (!fileSystem.DirectoryExists(workingDirectory))
             throw new DirectoryNotFoundException($"Gate working directory not found: {workingDirectory}");
 
         List<GateResult> results = new(gates.Count);
         List<GateResult> fixFailures = [];
-        DateTime startedUtc = DateTime.UtcNow;
+        DateTime startedUtc = clock.GetUtcNow().UtcDateTime;
 
         foreach (PlannedTaskGate gate in gates)
         {
@@ -220,8 +227,8 @@ public static class GateRunner
         GateReport report = new(
             GateReport.CurrentSchema,
             results,
-            CoverageCollector.ReadNewest(workingDirectory, startedUtc),
-            CoverageCollector.ReadAll(workingDirectory, startedUtc));
+            coverage.ReadNewest(workingDirectory, startedUtc),
+            coverage.ReadAll(workingDirectory, startedUtc));
 
         return new TaskGateRun(report, fixFailures);
     }
@@ -234,7 +241,7 @@ public static class GateRunner
     /// so it is reported as not started rather than as a code failure, and it is never a pass. The summary names
     /// the path and how to provide it, because the install is the action that unblocks the run.
     /// </remarks>
-    private static GateResult? MissingRequirement(ReviewGate gate, string root)
+    private GateResult? MissingRequirement(ReviewGate gate, string root)
     {
         foreach (string path in gate.RequiresPaths)
         {
@@ -254,7 +261,7 @@ public static class GateRunner
                     Outcome: GateOutcome.NotStarted);
             }
 
-            if (Path.Exists(full))
+            if (fileSystem.PathExists(full))
                 continue;
 
             return new GateResult(
@@ -304,7 +311,7 @@ public static class GateRunner
     /// The time left on the deadline is taken once the slot is held, so a gate that waited for a slot is cut at the
     /// same deadline as one that did not, and a gate the deadline passed while it waited never starts.
     /// </remarks>
-    private static GateResult? RunInSlot(
+    private GateResult? RunInSlot(
         ReviewGate gate,
         string workingDirectory,
         TimeSpan? deadline,
@@ -340,7 +347,7 @@ public static class GateRunner
         }
     }
 
-    private static GateResult RunOne(ReviewGate gate, string workingDirectory, RunBudget? budget, CancellationToken stop)
+    private GateResult RunOne(ReviewGate gate, string workingDirectory, RunBudget? budget, CancellationToken stop)
     {
         string gateDirectory = ResolveWorkingDirectory(workingDirectory, gate.WorkingDirectory);
         return RunArgv(
@@ -362,7 +369,7 @@ public static class GateRunner
         return Path.GetFullPath(Path.Combine(root, repositoryRelative.Replace('/', Path.DirectorySeparatorChar)));
     }
 
-    private static GateResult RunArgv(
+    private GateResult RunArgv(
         string id,
         bool blocking,
         IReadOnlyList<string> argv,
@@ -373,7 +380,7 @@ public static class GateRunner
         Action<string, string>? captureOutput = null,
         CancellationToken stop = default)
     {
-        if (!Directory.Exists(workingDirectory))
+        if (!fileSystem.DirectoryExists(workingDirectory))
         {
             // Reported as not started, not as a failed check: the command was never given a place to run.
             return new GateResult(
@@ -385,26 +392,13 @@ public static class GateRunner
                 Outcome: GateOutcome.NotStarted);
         }
 
-        ProcessStartInfo startInfo = new(argv[0])
-        {
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-            WorkingDirectory = workingDirectory
-        };
-
-        foreach (string argument in argv.Skip(1))
-            startInfo.ArgumentList.Add(argument);
-
         long start = Stopwatch.GetTimestamp();
         TimeSpan ownTimeout = TimeSpan.FromSeconds(timeoutSeconds);
         bool deadlineFirst = budget?.TimeLeft is { } left && left <= ownTimeout;
         TimeSpan timeout = deadlineFirst && budget?.TimeLeft is { } remaining ? remaining : ownTimeout;
         try
         {
-            ProcessResult process = ProcessRunner.Run(startInfo, string.Empty, timeout, cancellationToken: stop);
+            ProcessResult process = programs.Run(argv[0], [.. argv.Skip(1)], workingDirectory, timeout, cancellationToken: stop);
             captureOutput?.Invoke(id, process.StandardOutput + "\n" + process.StandardError);
 
             // A tool that reports by listing (gofmt -l exits 0 on Go before 1.26 even when files differ) can
@@ -482,17 +476,4 @@ public static class GateRunner
             ? $"exit code {process.ExitCode}"
             : string.Join(" | ", lines.TakeLast(3).Select(line => line.Length <= MaxSummaryLineLength ? line : line[..ReviewSeatInput.CutIndex(line, MaxSummaryLineLength)] + "…"));
     }
-}
-
-/// <summary>What a caller sees while task gates run: each command's output and result, and a say in skipping later gates.</summary>
-public sealed class TaskGateObserver
-{
-    /// <summary>Receives a verify command's gate id and its standard output followed by standard error.</summary>
-    public Action<string, string>? Output { get; init; }
-
-    /// <summary>Called after a gate's verify command has run, with its result.</summary>
-    public Action<PlannedTaskGate, GateResult>? After { get; init; }
-
-    /// <summary>Called before a gate starts; a non-null reason skips it and is recorded as the gate's not-applicable reason.</summary>
-    public Func<PlannedTaskGate, string?>? SkipReason { get; init; }
 }

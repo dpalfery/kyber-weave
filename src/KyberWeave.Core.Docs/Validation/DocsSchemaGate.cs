@@ -37,7 +37,7 @@ public static class DocsSchemaGate
 
         report.AddRange(new DocSpecValidator(repoRoot, ontology).Validate(set).Items);
         report.AddRange(new ConfigRegValidator(repoRoot, config, LegacyPorts.Files).Validate().Items);
-        report.AddRange(SeverityOverrides.Validate(repoRoot, config).Items);
+        report.AddRange(SeverityOverrideFiles.Validate(repoRoot, config).Items);
         report.AddRange(new PlanInventoryValidator(config).Validate(set).Items);
         report.AddRange(new TodoInventoryValidator(config).Validate(set).Items);
         report.AddRange(new PlanTaskFileValidator(repoRoot, config, LegacyPorts.Files, LegacyPorts.Process).Validate(set).Items);

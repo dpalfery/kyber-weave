@@ -4,6 +4,7 @@ using KyberWeave.Contracts.Docs;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Docs.Mcp;
 using KyberWeave.Mcp;
+using KyberWeave.Application.Review;
 using KyberWeave.Application.RunStart;
 using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Validation;
@@ -60,6 +61,12 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<ICorpusProvenance>(sp => new CorpusProvenanceService(sp.GetRequiredService<IGitCheckoutProbe>()));
         services.TryAddSingleton<ISquadBriefService>(sp => new SquadBriefService(sp.GetRequiredService<IFileSystem>()));
         _ = services.AddWeaveSquadApplication();
+        services.TryAddSingleton<IReviewEvidenceService, ReviewEvidenceService>();
+        services.TryAddSingleton<IReviewWorkTreeService, ReviewWorkTreeService>();
+        services.TryAddSingleton<ISuppressionScanService, SuppressionScanService>();
+        services.TryAddSingleton<IGateRunService, GateRunService>();
+        services.TryAddSingleton<ICitedLineChecker, CitedLineChecker>();
+        services.TryAddSingleton<IDuplicateDetectionService, DuplicateDetectionService>();
         return services;
     }
 }

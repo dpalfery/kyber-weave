@@ -297,7 +297,7 @@ public sealed class GateRunnerDeadlineTests : IDisposable
         PlannedTaskGate slow = new("slow-gate", true, 1, [], ["sleep", "30"]);
         PlannedTaskGate later = new("later-gate", true, 30, [], ["git", "--version"]);
 
-        TaskGateRun run = GateRunner.RunTaskGates([slow, later], _repo, fix: false, stopOnBlockingFailure: true);
+        TaskGateRun run = ReviewTestServices.Gates.RunTaskGates([slow, later], _repo, fix: false, stopOnBlockingFailure: true);
 
         GateResult result = Assert.Single(run.Report.Gates);
         Assert.Equal(GateOutcome.TimedOut, result.Outcome);

@@ -676,13 +676,7 @@ public static partial class ReviewVerdictDecisions
     }
 
     /// <summary>A severity as seat files write it.</summary>
-    public static string SeverityName(ReviewSeverity severity) => severity switch
-    {
-        ReviewSeverity.Critical => "critical",
-        ReviewSeverity.Major => "major",
-        ReviewSeverity.Nitpick => "nitpick",
-        _ => "minor",
-    };
+    public static string SeverityName(ReviewSeverity severity) => SeverityOverrides.SeverityName(severity);
 
     private static string PairSubject(ReviewFinding a, ReviewFinding b) => $"{a.Id} ~ {b.Id}";
 

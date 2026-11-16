@@ -205,7 +205,7 @@ public sealed class ReviewGatePrerequisiteTests : IDisposable
             RequiresPaths = ["invalid\0path"]
         };
 
-        GateReport report = GateRunner.Run(new ReviewConfig { Gates = [gate] }, _repo);
+        GateReport report = ReviewTestServices.Gates.Run(new ReviewConfig { Gates = [gate] }, _repo);
         GateResult result = Assert.Single(report.Gates);
         Assert.Equal(GateOutcome.NotStarted, result.Outcome);
         Assert.False(result.Passed);

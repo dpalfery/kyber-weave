@@ -9,7 +9,7 @@ code-refs:
   - FullSuiteGate
   - FullSuiteSelection
   - FullSuiteRefusal
-  - GateRunner
+  - GateRunService
   - ReviewGate
 ---
 

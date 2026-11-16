@@ -1,8 +1,6 @@
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Arbiter;
-using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
-using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Review;
 
@@ -40,7 +38,7 @@ public sealed record SeverityOverrideRow(
 /// <para>
 /// Most repositories have no such section, so an absent file or section is zero rows. Rows inside an HTML comment or
 /// a code fence are not rows, so a commented example stays an example. A row that cannot be read is left out here and
-/// reported by <see cref="Validate"/> (<c>docs validate</c>), so a typo never fails a review.
+/// reported by <c>ISeverityOverrideSource.Validate</c> (<c>docs validate</c>), so a typo never fails a review.
 /// </para>
 /// <para>
 /// Delivery fails open: a technology whose files the technology map does not name by glob (or a change whose files
@@ -70,7 +68,8 @@ public sealed partial class SeverityOverrides
     /// <summary>The section heading the table sits under.</summary>
     public const string SectionTitle = "Severity overrides";
 
-    private const string DefaultGuidancePath = "REVIEW.md";
+    /// <summary>The guidance file read when the registry declares none.</summary>
+    public const string DefaultGuidancePath = "REVIEW.md";
     private const string Subject = "review-guidance";
 
     /// <summary>The technologies the product ships a review reference for; a host technology map can add more.</summary>
@@ -106,35 +105,6 @@ public sealed partial class SeverityOverrides
 
     /// <summary>What <c>docs validate</c> reports about the section; empty when it is valid or absent.</summary>
     public IReadOnlyList<Diagnostic> Problems => _problems;
-
-    /// <summary>The review guidance file the registry declares (default <c>REVIEW.md</c>), or null when it is missing.</summary>
-    public static string? GuidancePath(string root, KyberWeaveConfig config)
-    {
-        ArgumentNullException.ThrowIfNull(root);
-        ArgumentNullException.ThrowIfNull(config);
-        string declared = config.ConfigReg.Additions
-            .FirstOrDefault(entry => string.Equals(entry.Name, "review-guidance", StringComparison.Ordinal))?.Path
-            ?? DefaultGuidancePath;
-        string path = Path.GetFullPath(Path.Combine(root, declared));
-        return File.Exists(path) ? path : null;
-    }
-
-    /// <summary>The overrides of the declared guidance file; <see cref="None"/> when it is missing or unreadable.</summary>
-    public static SeverityOverrides Load(string root, KyberWeaveConfig config)
-    {
-        string? path = GuidancePath(root, config);
-        if (path is null)
-            return None;
-
-        try
-        {
-            return Parse(File.ReadAllText(path), Path.GetRelativePath(root, path).Replace('\\', '/'));
-        }
-        catch (Exception ex) when (FileFailure.Is(ex))
-        {
-            return None;
-        }
-    }
 
     /// <summary>Reads the <c>Severity overrides</c> section and the technology map from a guidance file's text.</summary>
     /// <param name="text">The guidance file's contents.</param>
@@ -256,14 +226,6 @@ public sealed partial class SeverityOverrides
         return new SeverityOverrides(rows, problems, globs);
     }
 
-    /// <summary>The problems in the declared guidance file's section, for <c>docs validate</c>; empty without a file.</summary>
-    public static DiagnosticReport Validate(string root, KyberWeaveConfig config)
-    {
-        DiagnosticReport report = new();
-        report.AddRange(Load(root, config).Problems);
-        return report;
-    }
-
     /// <summary>The row with this id, or null.</summary>
     public SeverityOverrideRow? Find(string id) =>
         _rows.Find(row => string.Equals(row.Id, id.Trim(), StringComparison.OrdinalIgnoreCase));
@@ -361,7 +323,13 @@ public sealed partial class SeverityOverrides
     }
 
     /// <summary>A severity as REVIEW.md and seat files write it.</summary>
-    public static string SeverityName(ReviewSeverity severity) => ReviewVerdictDecisions.SeverityName(severity);
+    public static string SeverityName(ReviewSeverity severity) => severity switch
+    {
+        ReviewSeverity.Critical => "critical",
+        ReviewSeverity.Major => "major",
+        ReviewSeverity.Nitpick => "nitpick",
+        _ => "minor",
+    };
 
     private static bool LensMatches(SeverityOverrideRow row, string lens) =>
         row.Lenses.Count == 0 || row.Lenses.Contains(lens, StringComparer.Ordinal);

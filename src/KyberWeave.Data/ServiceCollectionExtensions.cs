@@ -8,6 +8,7 @@ using KyberWeave.Data.Arbiter;
 using KyberWeave.Data.Doctor;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Host;
+using KyberWeave.Data.Review;
 using KyberWeave.Data.RunStart;
 using KyberWeave.Data.Utilities;
 using KyberWeave.Data.Squad;
@@ -52,6 +53,17 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IMcpConfigFiles>(_ => new PhysicalMcpConfigFiles());
         services.TryAddSingleton<ILaunchCommandResolverFactory>(_ => new KyberWeave.Core.Docs.Mcp.EnvironmentLaunchCommandResolverFactory());
         _ = services.AddWeaveSquadData();
+        services.TryAddSingleton<IProgramRunner>(_ => new ProcessProgramRunner());
+        services.TryAddSingleton<IGitChangeReader>(sp => new GitChangeReader(sp.GetRequiredService<IProgramRunner>()));
+        services.TryAddSingleton<IReviewCycleStore>(_ => new FileReviewCycleStore());
+        services.TryAddSingleton<INotSeatedStore>(_ => new FileNotSeatedStore());
+        services.TryAddSingleton<IReviewEvidenceStore>(_ => new FileReviewEvidenceStore());
+        services.TryAddSingleton<ISeverityOverrideSource>(_ => new FileSeverityOverrideSource());
+        services.TryAddSingleton<IProjectFileLocator>(_ => new FileProjectFileLocator());
+        services.TryAddSingleton<IRepositoryFileLister>(sp => new FileRepositoryFileLister(sp.GetRequiredService<IProgramRunner>()));
+        services.TryAddSingleton<ICoverageReportSource>(_ => new FileCoverageReportSource());
+        services.TryAddSingleton<IContainedFileReader>(_ => new FileContainedFileReader());
+        services.TryAddSingleton<IBoundedFileReader>(_ => new FileBoundedFileReader());
         _ = services.AddWeaveArbiterData();
         return services;
     }

@@ -160,7 +160,7 @@ public sealed class ReviewSeverityOverrideVerdictTests : IDisposable
 
     private static CommandApp CreateApp()
     {
-        CommandApp app = new();
+        CommandApp app = new(ReviewTestServices.Registrar());
         app.Configure(config =>
         {
             config.SetApplicationName("kyber-weave");

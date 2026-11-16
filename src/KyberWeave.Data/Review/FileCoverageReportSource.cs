@@ -1,19 +1,17 @@
-using System.Globalization;
 using System.Xml.Linq;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Review;
 
-namespace KyberWeave.Core.Review;
+namespace KyberWeave.Data.Review;
 
-/// <summary>Reads Coverlet Cobertura output produced by a test gate.</summary>
-internal static class CoverageCollector
+/// <summary>Reads Cobertura coverage reports from the file system.</summary>
+public sealed class FileCoverageReportSource : ICoverageReportSource
 {
-    // Coverlet's name, and the one Istanbul's cobertura reporter (vitest, jest, nyc) writes.
-    private static readonly string[] ReportNames = ["coverage.cobertura.xml", "cobertura-coverage.xml"];
-
     /// <summary>
     /// Returns the newest Cobertura report written at or after <paramref name="notBeforeUtc"/>,
     /// or null when the test gate produced none.
     /// </summary>
-    public static CoverageResult? ReadNewest(string workingDirectory, DateTime notBeforeUtc)
+    public CoverageResult? ReadNewest(string workingDirectory, DateTime notBeforeUtc)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
 
@@ -26,14 +24,14 @@ internal static class CoverageCollector
         string? newest = roots
             .Where(Directory.Exists)
             .SelectMany(root => Directory.EnumerateFiles(root, "*.xml", SearchOption.AllDirectories))
-            .Where(IsReportName)
+            .Where(CoberturaReport.IsReportName)
             .Select(path => new FileInfo(path))
             .Where(info => info.LastWriteTimeUtc >= notBeforeUtc.AddSeconds(-1))
             .OrderByDescending(info => info.LastWriteTimeUtc)
             .Select(info => info.FullName)
             .FirstOrDefault();
 
-        return newest is null ? null : ReadCobertura(newest);
+        return newest is null ? null : ReadFile(newest);
     }
 
     /// <summary>
@@ -46,7 +44,7 @@ internal static class CoverageCollector
     /// tools such as vitest name <c>cobertura-coverage.xml</c>; without this list the review
     /// has no way to see it. Reports older than the run are left out, as they are there.
     /// </remarks>
-    public static IReadOnlyList<CoverageReport> ReadAll(string workingDirectory, DateTime notBeforeUtc)
+    public IReadOnlyList<CoverageReport> ReadAll(string workingDirectory, DateTime notBeforeUtc)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
 
@@ -60,11 +58,11 @@ internal static class CoverageCollector
         foreach (FileInfo info in roots
             .Where(Directory.Exists)
             .SelectMany(root => Directory.EnumerateFiles(root, "*.xml", SearchOption.AllDirectories))
-            .Where(IsReportName)
+            .Where(CoberturaReport.IsReportName)
             .Select(path => new FileInfo(path))
             .Where(info => info.LastWriteTimeUtc >= notBeforeUtc.AddSeconds(-1)))
         {
-            CoverageResult? coverage = ReadCobertura(info.FullName);
+            CoverageResult? coverage = ReadFile(info.FullName);
             if (coverage is null)
                 continue;
 
@@ -75,52 +73,18 @@ internal static class CoverageCollector
         return reports.OrderBy(report => report.Path, StringComparer.Ordinal).ToArray();
     }
 
-    internal static CoverageResult? ReadCobertura(string path)
+    /// <inheritdoc />
+    public CoverageResult? ReadFile(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
         try
         {
-            XDocument document = XDocument.Load(path);
-            XElement? coverage = document.Root;
-            if (coverage is null || !string.Equals(coverage.Name.LocalName, "coverage", StringComparison.Ordinal))
-                return null;
-
-            double file = Percent(coverage.Attribute("line-rate")?.Value);
-            XElement[] classes = coverage.Descendants().Where(e => e.Name.LocalName == "class").ToArray();
-            double classPercent = classes.Length == 0
-                ? file
-                : classes.Average(c => Percent(c.Attribute("line-rate")?.Value));
-
-            return new CoverageResult(file, classPercent);
+            return CoberturaReport.Parse(XDocument.Load(path));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException)
         {
             return null;
         }
-    }
-
-    private static double Percent(string? rate) =>
-        double.TryParse(rate, NumberStyles.Float, CultureInfo.InvariantCulture, out double value)
-            ? value * 100
-            : 0;
-
-    private static bool IsReportName(string path)
-    {
-        string fileName = Path.GetFileName(path);
-        if (ReportNames.Contains(fileName, StringComparer.Ordinal))
-            return true;
-
-        // coverlet.MTP adds a run timestamp to avoid overwriting reports in the same output directory.
-        const string prefix = "coverage.cobertura.";
-        const string extension = ".xml";
-        if (!fileName.StartsWith(prefix, StringComparison.Ordinal) ||
-            !fileName.EndsWith(extension, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        string timestamp = fileName[prefix.Length..^extension.Length];
-        return timestamp.Length > 0 && timestamp.All(char.IsAsciiDigit);
     }
 }

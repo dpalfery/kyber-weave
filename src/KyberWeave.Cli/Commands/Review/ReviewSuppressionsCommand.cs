@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Review;
 using Spectre.Console.Cli;
@@ -21,7 +22,7 @@ namespace KyberWeave.Cli.Commands.Review;
 ///     gate that cannot see the change has no evidence either way.
 /// </para>
 /// </remarks>
-public sealed class ReviewSuppressionsCommand : Command<ReviewSuppressionsSettings>
+public sealed class ReviewSuppressionsCommand(ISuppressionScanService scanner) : Command<ReviewSuppressionsSettings>
 {
     /// <summary>A suppression the change added without stating a reason.</summary>
     public const string UnreasonedSuppression = "KW-REVIEW-036";
@@ -60,13 +61,13 @@ public sealed class ReviewSuppressionsCommand : Command<ReviewSuppressionsSettin
         }
 
         string baseRef = settings.BaseRef ?? SuppressionScan.DefaultBase;
-        if (ChangedFiles.ValidateBase(baseRef) is { } baseProblem)
+        if (GitChangeParsing.ValidateBase(baseRef) is { } baseProblem)
         {
             WriteClientInputError($"{InvalidInput}: {baseProblem}");
             return ClientInputExitCode;
         }
 
-        SuppressionScanResult result = SuppressionScan.Scan(root, baseRef);
+        SuppressionScanResult result = scanner.Scan(root, baseRef);
 
         if (result.Failure is { } failure)
         {
