@@ -45,7 +45,7 @@ public static class ArbiterHookWiring
     private const string EnforcedGlobalReason = "enforced-global";
     private const string PartialReason = "partial";
     private const string DispatchUnconfirmedReason = "dispatch-unconfirmed";
-    internal const string HooksDisabledByHarnessReason = "hooks-disabled-by-harness";
+    public const string HooksDisabledByHarnessReason = "hooks-disabled-by-harness";
     private const string CommandName = "kyber-weave-arbiter";
 
     private static readonly HashSet<string> KnownReasonCodes = new(StringComparer.Ordinal)
@@ -78,7 +78,7 @@ public static class ArbiterHookWiring
         new(StringComparer.Ordinal) { "worker", "publishing-worker" };
 
     /// <summary>The capability profile of the architect agent; a test pins it to <c>ArbiterSquadCatalog.ArchitectCapabilityProfile</c>.</summary>
-    internal const string ArchitectCapabilityProfile = "architect";
+    public const string ArchitectCapabilityProfile = "architect";
 
     /// <summary>The capability profiles whose agents' Bash and PowerShell calls the architect shell guard checks.</summary>
     private static readonly HashSet<string> ShellGuardedCapabilityProfiles =
@@ -395,7 +395,7 @@ public static class ArbiterHookWiring
     /// membership alone decides the record kind; the public overload always passes the
     /// declared target data.
     /// </remarks>
-    internal static IReadOnlyList<SquadDegradationRecord> TargetDegradations(
+    public static IReadOnlyList<SquadDegradationRecord> TargetDegradations(
         IEnumerable<SquadTarget> targets,
         SquadDeploymentScope scope,
         IReadOnlySet<string> hookedTargets,
@@ -423,7 +423,7 @@ public static class ArbiterHookWiring
         return records;
     }
 
-    internal static string? DegradationReason(
+    public static string? DegradationReason(
         string token,
         SquadDeploymentScope scope,
         IReadOnlySet<string> hookedTargets,

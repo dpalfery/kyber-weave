@@ -79,7 +79,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 ///         no block. Rendering the block is still not enough to splice it: when the user keeps
 ///         hooks under the <c>hooks</c> key of <c>.factory/settings.json</c> and
 ///         <c>.factory/hooks.json</c> is absent, creating one would silently disable them, so
-///         <see cref="FactoryHooksShadowing"/> has the lifecycle drop the block and record
+///         <c>FactoryHooksShadowing</c> has the lifecycle drop the block and record
 ///         <c>arbiter-not-enforced</c> (§10.8, R18).
 ///     </para>
 ///     <para>
@@ -244,7 +244,7 @@ public sealed class FactoryRenderer : SquadHarnessRenderer
     ///     Factory's droid frontmatter accepts only <c>low | medium | high</c> (docs.factory.ai,
     ///     subagents), so any other level throws <see cref="SquadRenderValidationException" />.
     /// </summary>
-    internal static (string BareModel, string? ReasoningEffort) ParseReasoningEffortSuffix(string modelValue) =>
+    public static (string BareModel, string? ReasoningEffort) ParseReasoningEffortSuffix(string modelValue) =>
         SquadHarnessLowering.ParseReasoningEffortSuffix(modelValue, AllowedReasoningEfforts, HarnessSpec.DisplayName);
 
     /// <summary>
@@ -295,7 +295,7 @@ public sealed class FactoryRenderer : SquadHarnessRenderer
     ///     missing or non-object <c>mcpServers</c> yields no names, so a malformed declaration
     ///     fails closed instead of inheriting the parent session.
     /// </remarks>
-    internal static IReadOnlyList<string> DeclaredMcpServerNames(SquadSource source)
+    public static IReadOnlyList<string> DeclaredMcpServerNames(SquadSource source)
     {
         if (!source.McpConfiguration.TryGetProperty("mcpServers", out JsonElement servers) ||
             servers.ValueKind != JsonValueKind.Object)

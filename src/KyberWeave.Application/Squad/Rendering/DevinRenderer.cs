@@ -38,7 +38,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <c>.claude/commands/</c>, and <c>.github/skills/</c> — and <c>.agents/</c> is where
 /// <see cref="AntigravityRenderer"/> writes. Squad's own Claude, Copilot, and Antigravity
 /// output is therefore visible to Devin too, so a repository carrying both would load each
-/// Squad identity twice; <see cref="DevinImportOverlap"/> reports that from
+/// Squad identity twice; <c>DevinImportOverlap</c> reports that from
 /// <c>squad doctor</c> rather than this renderer writing Devin's configuration to prevent it.
 /// </para>
 /// <para>

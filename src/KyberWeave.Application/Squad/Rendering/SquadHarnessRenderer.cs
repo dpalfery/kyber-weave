@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Text;
 using System.Text.Json.Nodes;
 using KyberWeave.Core.Squad.Deployment;
@@ -54,7 +55,7 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
     public IReadOnlyCollection<SquadTarget> SupportedTargets { get; }
 
     /// <summary>The harness facts this renderer runs on; the shared contract suite reads them too.</summary>
-    internal SquadHarnessSpec Spec { get; }
+    public SquadHarnessSpec Spec { get; }
 
     /// <inheritdoc />
     public Task<SquadRenderResult> RenderAsync(
@@ -316,7 +317,7 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
 /// One render in progress: the request and loaded source, the output being accumulated, and the
 /// steps every harness shares.
 /// </summary>
-internal sealed class SquadHarnessRenderContext
+public sealed class SquadHarnessRenderContext
 {
     private HashSet<string>? _sharedIdentities;
     private HashSet<string>? _suppressedSkillIdentities;
@@ -341,13 +342,13 @@ internal sealed class SquadHarnessRenderContext
 
     public string Token => Spec.Token;
 
-    public List<SquadDeploymentFile> Files { get; } = [];
+    public Collection<SquadDeploymentFile> Files { get; } = [];
 
-    public List<SquadDegradationRecord> Degradations { get; } = [];
+    public Collection<SquadDegradationRecord> Degradations { get; } = [];
 
-    public List<SquadRenderedBlock> Blocks { get; } = [];
+    public Collection<SquadRenderedBlock> Blocks { get; } = [];
 
-    public List<SquadRenderWarning> Warnings { get; } = [];
+    public Collection<SquadRenderWarning> Warnings { get; } = [];
 
     public IReadOnlyDictionary<string, SquadCapabilityProfile> CapabilityProfiles =>
         Source.CapabilityProfiles.Profiles;
@@ -834,7 +835,7 @@ internal sealed class SquadHarnessRenderContext
 }
 
 /// <summary>How a primary-invocation agent projects where the harness has no primary-agent primitive.</summary>
-internal enum SquadPrimaryLowering
+public enum SquadPrimaryLowering
 {
     /// <summary><c>no-primary-agent: skill</c>: the agent body renders as its own entry-point skill.</summary>
     EntryPointSkill,
@@ -854,7 +855,7 @@ internal enum SquadPrimaryLowering
 /// YamlDotNet does not document <see cref="ISerializer"/> as thread-safe, and the registry may
 /// dispatch renderers concurrently, so every serialization takes this emitter's lock.
 /// </remarks>
-internal sealed class SquadYamlEmitter
+public sealed class SquadYamlEmitter
 {
     private readonly ISerializer _serializer;
     private readonly Lock _gate = new();

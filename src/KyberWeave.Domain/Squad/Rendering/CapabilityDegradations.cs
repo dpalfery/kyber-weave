@@ -40,7 +40,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// See ADR 0050 decision 4.
 /// </para>
 /// </remarks>
-internal static class CapabilityDegradations
+public static class CapabilityDegradations
 {
     /// <summary>
     /// The MCP server every agent needs: granted on the file-read entitlement alone, the pure
@@ -438,7 +438,7 @@ internal static class CapabilityDegradations
     /// <see cref="SquadPermissionDecision.Deny"/> the same way an absent permission entry
     /// behaves elsewhere in this pipeline.
     /// </summary>
-    internal static string DescribeCapabilityDecisions(
+    public static string DescribeCapabilityDecisions(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
         IReadOnlyList<string> capabilityVocabulary)

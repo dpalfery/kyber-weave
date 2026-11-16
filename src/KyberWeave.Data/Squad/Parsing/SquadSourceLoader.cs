@@ -44,7 +44,7 @@ public static class SquadSourceLoader
         FallbackProfilesSchemaDocument
     ];
 
-    internal static readonly HashSet<string> ModelProfileFields = new(StringComparer.Ordinal)
+    public static readonly HashSet<string> ModelProfileFields = new(StringComparer.Ordinal)
     {
         "default", "codex", "cursor", "claude", "copilot", "opencode", "kilo",
         "antigravity", "warp", "factory", "pi", "zcode", "devin", "commandcode"
@@ -57,7 +57,7 @@ public static class SquadSourceLoader
     /// <c>IReadOnlyList&lt;string&gt;</c> keeps the widened field from remaining a
     /// mutable array another assembly can reorder.
     /// </remarks>
-    internal static readonly IReadOnlyList<string> TargetScopedProfileTargets = ["copilot", "devin"];
+    public static readonly IReadOnlyList<string> TargetScopedProfileTargets = ["copilot", "devin"];
 
     /// <summary>Loads the default bundle from a canonical product source root.</summary>
     public static SquadSource Load(string root)
@@ -249,7 +249,7 @@ public static class SquadSourceLoader
     }
 
     /// <summary>Parses and validates a Squad model preset.</summary>
-    internal static SquadModelPreset ParseModelPreset(string path, ReadOnlyMemory<byte> bytes)
+    public static SquadModelPreset ParseModelPreset(string path, ReadOnlyMemory<byte> bytes)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
@@ -393,7 +393,7 @@ public static class SquadSourceLoader
     }
 
     /// <summary>Parses and validates a Squad model preset from raw byte array.</summary>
-    internal static SquadModelPreset ParseModelPreset(string path, byte[] bytes)
+    public static SquadModelPreset ParseModelPreset(string path, byte[] bytes)
     {
         ArgumentNullException.ThrowIfNull(bytes);
         return ParseModelPreset(path, (ReadOnlyMemory<byte>)bytes);

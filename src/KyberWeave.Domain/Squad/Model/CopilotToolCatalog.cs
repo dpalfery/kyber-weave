@@ -9,13 +9,13 @@ namespace KyberWeave.Core.Squad.Model;
 /// remains an upper bound: every governed tool names the capability that must be explicitly
 /// allowed before source loads, without widening the shared cross-harness profile.
 /// </remarks>
-internal static class CopilotToolCatalog
+public static class CopilotToolCatalog
 {
     // Shared tools lead so every agent's tools list shares the longest possible prefix
     // (prompt-cache friendly). Order: vscode, read, todo, MCP, search, execute, edit, web, agent.
     // The coarse tool-set names at the end remain valid for agents not yet narrowed to
     // explicit tools; they sort after every explicit entry.
-    internal static IReadOnlyList<string> OrderedTools { get; } =
+    public static IReadOnlyList<string> OrderedTools { get; } =
     [
         "vscode/runCommand",
         "vscode/toolSearch",
@@ -53,7 +53,7 @@ internal static class CopilotToolCatalog
         "edit"
     ];
 
-    internal static IReadOnlyDictionary<string, string?> RequiredCapabilities { get; } =
+    public static IReadOnlyDictionary<string, string?> RequiredCapabilities { get; } =
         new Dictionary<string, string?>(StringComparer.Ordinal)
         {
             ["vscode"] = null,
@@ -95,7 +95,7 @@ internal static class CopilotToolCatalog
             ["read/getTaskOutput"] = "filesystem.read"
         };
 
-    internal static IReadOnlyList<string> Normalize(IEnumerable<string> tools)
+    public static IReadOnlyList<string> Normalize(IEnumerable<string> tools)
     {
         HashSet<string> membership = tools.ToHashSet(StringComparer.Ordinal);
         return OrderedTools.Where(membership.Contains).ToArray();

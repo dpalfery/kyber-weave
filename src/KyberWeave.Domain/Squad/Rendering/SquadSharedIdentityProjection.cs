@@ -30,10 +30,10 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// dangling.
 /// </para>
 /// </remarks>
-internal static class SquadSharedIdentityProjection
+public static class SquadSharedIdentityProjection
 {
     /// <summary>The shared identities whose same-name agent is a primary-invocation wrapper.</summary>
-    internal static HashSet<string> PrimaryIdentities(
+    public static HashSet<string> PrimaryIdentities(
         SquadSource source,
         IReadOnlySet<string> sharedIdentities) =>
         source.Agents
@@ -47,7 +47,7 @@ internal static class SquadSharedIdentityProjection
     /// agent file already carries the identical body. A primary shared identity is never
     /// suppressed: its skill is the entry point.
     /// </summary>
-    internal static HashSet<string> SuppressedSkillIdentities(
+    public static HashSet<string> SuppressedSkillIdentities(
         SquadSource source,
         IReadOnlySet<string> sharedIdentities) =>
         sharedIdentities
@@ -58,7 +58,7 @@ internal static class SquadSharedIdentityProjection
     /// True when <paramref name="identity"/> is both declared as a shared identity and carried
     /// by a primary-invocation agent, i.e. the canonical skill is the entry point.
     /// </summary>
-    internal static bool IsPrimarySharedIdentity(SquadSource source, string identity)
+    public static bool IsPrimarySharedIdentity(SquadSource source, string identity)
     {
         bool shared = source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)

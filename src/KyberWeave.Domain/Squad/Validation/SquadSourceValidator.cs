@@ -278,7 +278,7 @@ public static class SquadSourceValidator
     }
 
     [DoesNotReturn]
-    internal static void Throw(
+    public static void Throw(
         string message,
         string subject,
         string filePath,

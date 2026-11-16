@@ -1,0 +1,8 @@
+<Project>
+
+  <ItemGroup>
+    <!-- The moved Squad renderers read and write YAML front matter. -->
+    <PackageReference Include="YamlDotNet" Version="18.1.0" />
+  </ItemGroup>
+
+</Project>

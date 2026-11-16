@@ -182,7 +182,7 @@ public sealed class CommandCodeRenderer : SquadHarnessRenderer
     /// Command Code's agent frontmatter accepts <c>off | low | medium | high | xhigh | max</c>
     /// (<c>command-code</c> 1.84.0), so any other level throws <see cref="SquadRenderValidationException"/>.
     /// </summary>
-    internal static (string BareModel, string? ReasoningEffort) ParseReasoningEffortSuffix(string modelValue) =>
+    public static (string BareModel, string? ReasoningEffort) ParseReasoningEffortSuffix(string modelValue) =>
         SquadHarnessLowering.ParseReasoningEffortSuffix(modelValue, AllowedReasoningEfforts, HarnessSpec.DisplayName);
 
     /// <summary>

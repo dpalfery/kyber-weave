@@ -28,7 +28,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// lives on <see cref="SquadTargetCatalog.GetAgentProjection"/>, where the registry's validation
 /// reads it for every renderer, including ones that do not use this pipeline.
 /// </remarks>
-internal sealed record SquadHarnessSpec(
+public sealed record SquadHarnessSpec(
     SquadTarget Target,
     string DisplayName,
     string ProjectRoot,
@@ -53,7 +53,7 @@ internal sealed record SquadHarnessSpec(
 /// Every member omits a profile <c>default</c> of <c>inherit</c>, so the harness picks its own
 /// default. They differ only in how they treat the harness-specific entry.
 /// </remarks>
-internal enum SquadModelPolicy
+public enum SquadModelPolicy
 {
     /// <summary>The harness has no model key; nothing is resolved.</summary>
     NotRendered,
@@ -74,7 +74,7 @@ internal enum SquadModelPolicy
 /// produces only from an escaped <c>\r</c> in a double-quoted scalar. Both are kept so moving a
 /// renderer onto the pipeline cannot change a byte; unifying them is a behaviour change.
 /// </remarks>
-internal enum SquadLineBreaks
+public enum SquadLineBreaks
 {
     /// <summary>Split on either <c>\r</c> or <c>\n</c>.</summary>
     CarriageReturnOrLineFeed,
@@ -87,7 +87,7 @@ internal enum SquadLineBreaks
 }
 
 /// <summary>Model and scalar lowering shared by every harness spec.</summary>
-internal static class SquadHarnessLowering
+public static class SquadHarnessLowering
 {
     private const string Inherit = "inherit";
 
@@ -206,7 +206,7 @@ internal static class SquadHarnessLowering
 /// everything" would turn a source error into silent widening. Only <c>allow</c> grants a tool;
 /// what <c>ask</c> lowers to is the harness's own degradation decision, not this map's.
 /// </remarks>
-internal sealed class SquadToolMap
+public sealed class SquadToolMap
 {
     private readonly (string Capability, string[] Tools)[] _capabilityTools;
     private readonly string[] _ungoverned;

@@ -17,12 +17,12 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// target before opening it, and reads at most <see cref="MaxConfigBytes"/> bytes. A symlink is followed; its
 /// target must itself be a regular file.
 /// </remarks>
-internal static class CopilotMcpServerProbe
+public static class CopilotMcpServerProbe
 {
-    internal const string McpConfigFileName = "mcp-config.json";
+    public const string McpConfigFileName = "mcp-config.json";
 
     /// <summary>Upper bound on the config size the probe will read. Real MCP configs are a few kilobytes.</summary>
-    internal const long MaxConfigBytes = 1024 * 1024;
+    public const long MaxConfigBytes = 1024 * 1024;
 
     private static readonly byte[] Utf8Bom = [0xEF, 0xBB, 0xBF];
 
@@ -31,7 +31,7 @@ internal static class CopilotMcpServerProbe
     /// regular file holding valid JSON whose <c>mcpServers</c> object contains <paramref name="serverName"/>
     /// as an exact key.
     /// </summary>
-    internal static bool HasServer(string copilotRoot, string serverName)
+    public static bool HasServer(string copilotRoot, string serverName)
     {
         string path = Path.Combine(copilotRoot, McpConfigFileName);
         try

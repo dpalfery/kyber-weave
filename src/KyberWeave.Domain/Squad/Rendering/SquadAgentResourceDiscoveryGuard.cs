@@ -30,13 +30,13 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// path, so the render throws rather than merging them.
 /// </para>
 /// </remarks>
-internal static class SquadAgentResourceDiscoveryGuard
+public static class SquadAgentResourceDiscoveryGuard
 {
     /// <summary>
     /// Maps an authored resource path to its deployed path: an ordinal <c>.md</c> suffix
     /// becomes <c>.markdown</c>; anything else projects verbatim.
     /// </summary>
-    internal static string MapResourcePath(string relativePath)
+    public static string MapResourcePath(string relativePath)
     {
         return relativePath.EndsWith(".md", StringComparison.Ordinal)
             ? string.Concat(relativePath[..^".md".Length], ".markdown")
@@ -48,7 +48,7 @@ internal static class SquadAgentResourceDiscoveryGuard
     /// A resource-less agent has no closure to drive the rewrite, so its body passes
     /// through untouched.
     /// </summary>
-    internal static string RewriteBody(SquadAgent agent)
+    public static string RewriteBody(SquadAgent agent)
     {
         if (agent.Resources.Count == 0)
         {
@@ -71,12 +71,12 @@ internal static class SquadAgentResourceDiscoveryGuard
     /// degradation. Fails closed when the closure aliases two authored paths onto one
     /// deployed path.
     /// </summary>
-    internal static void Append(
-        List<SquadDeploymentFile> files,
+    public static void Append(
+        IList<SquadDeploymentFile> files,
         SquadAgent agent,
         SquadDeploymentFile principal,
         IReadOnlyList<SquadResource> resources,
-        List<SquadDegradationRecord> degradations,
+        IList<SquadDegradationRecord> degradations,
         string targetToken,
         string scannerQuote)
     {

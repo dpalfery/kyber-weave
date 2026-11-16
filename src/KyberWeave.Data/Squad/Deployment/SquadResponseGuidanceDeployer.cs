@@ -47,7 +47,7 @@ namespace KyberWeave.Core.Squad.Deployment;
 ///         defaults.
 ///     </para>
 /// </remarks>
-internal sealed class SquadResponseGuidanceDeployer
+public sealed class SquadResponseGuidanceDeployer
 {
     /// <summary>The file name Squad owns beneath the home state root.</summary>
     public const string FileName = "response-guidance.md";
@@ -73,7 +73,7 @@ internal sealed class SquadResponseGuidanceDeployer
     ///     that shipped without its default — without putting a resource-loading seam in the path that
     ///     ships.
     /// </param>
-    internal SquadResponseGuidanceDeployer(string homeStateRoot, Func<byte[]>? readDefault)
+    public SquadResponseGuidanceDeployer(string homeStateRoot, Func<byte[]>? readDefault)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(homeStateRoot);
         if (!Path.IsPathFullyQualified(homeStateRoot))
@@ -100,7 +100,7 @@ internal sealed class SquadResponseGuidanceDeployer
     ///         turning that into a warning an operator cannot act on is how a defect survives.
     ///     </para>
     /// </remarks>
-    internal static bool IsDegradableFailure(Exception exception)
+    public static bool IsDegradableFailure(Exception exception)
     {
         ArgumentNullException.ThrowIfNull(exception);
         return exception is IOException or UnauthorizedAccessException or NotSupportedException

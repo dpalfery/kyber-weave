@@ -441,7 +441,7 @@ public sealed class ZCodeRenderer : SquadHarnessRenderer
     private static string RewriteResourceLinks(
         SquadAgent agent,
         IReadOnlySet<string> skillIdentities,
-        List<SquadDegradationRecord> degradations,
+        IList<SquadDegradationRecord> degradations,
         out bool rewritten)
     {
         rewritten = false;

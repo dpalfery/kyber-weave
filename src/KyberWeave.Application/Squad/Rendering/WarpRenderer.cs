@@ -9,7 +9,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Warp is a fallback target in <see cref="SquadRendererRegistry"/>: every agent
+/// Warp is a fallback target in <c>SquadRendererRegistry</c>: every agent
 /// lowers to a skill in <c>.warp/skills/</c>, profile-declared shared identities
 /// reuse their canonical skill, and distinct-body collisions emit both the canonical
 /// skill and a <c>role-</c>-prefixed skill. Unoccupied identities, including

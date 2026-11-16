@@ -615,35 +615,3 @@ public sealed class SquadRendererRegistry : ISquadRenderer
             : name;
     }
 }
-
-/// <summary>Projects a validated resource closure beside its rendered principal.</summary>
-internal static class SquadResourceProjection
-{
-    internal static void Append(
-        List<SquadDeploymentFile> files,
-        SquadDeploymentFile principal,
-        IReadOnlyList<SquadResource> resources)
-    {
-        Append(files, principal.RelativePath, resources, principal.Target);
-    }
-
-    internal static void Append(
-        List<SquadDeploymentFile> files,
-        string principalRelativePath,
-        IReadOnlyList<SquadResource> resources,
-        string target)
-    {
-        int separator = principalRelativePath.LastIndexOf('/');
-        string principalDirectory = separator < 0 ? string.Empty : principalRelativePath[..separator];
-        foreach (SquadResource resource in resources)
-        {
-            string relativePath = principalDirectory.Length == 0
-                ? resource.RelativePath
-                : $"{principalDirectory}/{resource.RelativePath}";
-            files.Add(new SquadDeploymentFile(
-                relativePath,
-                Encoding.UTF8.GetBytes(resource.Content),
-                target));
-        }
-    }
-}

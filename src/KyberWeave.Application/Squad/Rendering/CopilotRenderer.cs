@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -31,7 +32,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// which is what makes a <c>deny</c> in the capability profile enforced rather than merely
 /// declared. Omitting the key means "all available tools", so an unset <c>tools</c> is a
 /// silent grant of everything — precisely the permission widening
-/// <see cref="SquadRendererRegistry"/> exists to catch.
+/// <c>SquadRendererRegistry</c> exists to catch.
 /// </para>
 /// <para>
 /// The lattice is three-state and the allow-list is binary, so only <c>allow</c> grants a
@@ -73,7 +74,7 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
     private static readonly string[] GuardedConductorTools = ["search", "execute", "edit", "web"];
 
     /// <summary>The warning code for an agent body over the Copilot cap. Install and update show it only when the operator channel overlay was applied.</summary>
-    internal const string AgentBodyTooLongCode = "agent-body-too-long";
+    public const string AgentBodyTooLongCode = "agent-body-too-long";
 
     private static readonly SquadYamlEmitter Yaml = new(new SerializerBuilder()
         .WithTypeConverter(new CopilotToolsFlowSequenceConverter())
@@ -149,7 +150,7 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
     private static string RewriteResourceLinks(
         SquadAgent agent,
         string globalAgentsRoot,
-        List<SquadDegradationRecord> degradations)
+        IList<SquadDegradationRecord> degradations)
     {
         if (agent.Resources.Count == 0)
         {
@@ -491,7 +492,7 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
         {
             SquadRenderRequest request = context.Request;
             SquadSource source = context.Source;
-            List<SquadRenderWarning> warnings = context.Warnings;
+            Collection<SquadRenderWarning> warnings = context.Warnings;
             string? copilotGlobalRoot = ResolveCopilotGlobalRoot(request);
             string? globalAgentsRoot = ResolveGlobalAgentsRoot(copilotGlobalRoot);
 

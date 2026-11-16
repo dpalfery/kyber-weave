@@ -52,7 +52,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// Skills carry <c>name</c>, <c>description</c>, and <c>license: MIT</c>. Multi-line
 /// descriptions collapse to a single line. Profile-declared shared identities suppress
 /// their skill projections per the native single-projection rule enforced by
-/// <see cref="SquadRendererRegistry"/>.
+/// <c>SquadRendererRegistry</c>.
 /// </para>
 /// <para>
 /// <strong>Primary-agent entry point:</strong> A primary agent with a fallback profile

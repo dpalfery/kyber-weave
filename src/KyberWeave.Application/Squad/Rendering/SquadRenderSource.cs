@@ -12,7 +12,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// ensuring all 13 renderers receive the effectively configured model profiles consistently
 /// without mutating on-disk canonical files or re-implementing preset merge logic.
 /// </remarks>
-internal static class SquadRenderSource
+public static class SquadRenderSource
 {
     /// <summary>
     /// Loads canonical Squad source and applies the model preset for <paramref name="target"/> if present.
