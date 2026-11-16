@@ -1,7 +1,7 @@
 {
   "schema-version": 1,
   "plan": "docs/specs/role-based-worker-agents/tasks.md",
-  "execution-digest": "03dd602ec6d048ca0a2a0aa5baafd9b956dbbca46cb8f6838ab614525e8e4aac",
+  "execution-digest": "919615f7d973487ac2b7e906525244194094488f47af3c5a49e2e5bd149d9097",
   "tasks": [
     {
       "id": "1.1",
@@ -11,16 +11,14 @@
       ],
       "files": [
         "src/KyberWeave.Domain/Configuration/DocsLayout.cs",
-        "src/KyberWeave.Domain/Configuration/*.standards.md",
-        "src/KyberWeave.Domain/Configuration/*.rules.md",
-        "src/KyberWeave.Domain/Configuration/*.skills.md",
-        "src/KyberWeave.Domain/Configuration/*.arbiter-rules.yml",
         "src/KyberWeave.Domain/Configuration/OntologyConfig.cs",
         "src/KyberWeave.Domain/Docs/Validation/DocSpecValidator.cs",
         "tests/KyberWeave.Tests/StandardsFolderShapeTests.cs"
       ],
       "session": "1.1",
-      "prompt": "Task 1.1: Name and check the four folder files\nWorktree: {worktree}\n\n- **Objective:** Make a technology or role folder hold four files that start with the folder's name, and report a folder or standard that is incomplete.\n  - **Files:**\n    - `src/KyberWeave.Domain/Configuration/DocsLayout.cs`: paths for `<name>.standards.md`, `<name>.rules.md`, `<name>.skills.md`, `<name>.arbiter-rules.yml`\n    - `src/KyberWeave.Domain/Configuration/OntologyConfig.cs`: a `roles` list beside `technologies`\n    - `src/KyberWeave.Domain/Docs/Validation/DocSpecValidator.cs`: the four-file check and the six-heading check, each with a new `KW-DOC-SPEC-*` id\n    - `tests/KyberWeave.Tests/StandardsFolderShapeTests.cs` (new): `KyberWeave.Tests.StandardsFolderShapeTests`\n  - **Acceptance criteria:** A folder that still holds its standard as `README.md` is read and raises a warning that names the migrate command, not an error; otherwise a folder missing one of the four files is an error naming the folder and the file; a standard missing one of the six headings, or holding them out of order, is an error naming the heading; an Arbiter rules file that declares no rule is valid; a role declared in `ontology.roles` is checked the same way.\n  - **Capabilities:** C# validation rules and configuration parsing in the documentation engine, with xUnit tests\n  - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter \"FullyQualifiedName~StandardsFolderShapeTests\"`\n  - **Depends on:** 1.11\n  - _Requirements: 5.1, 5.2, 5.8, 5.9, 5.11_\n\nReference content for this task, quoted exactly from its source document and complete as given:\n\n#### Test contract row for 1.1\n| Task | Test project or file | Runner | Observable behaviour | Failing run's expected reason | Passing acceptance |\n|---|---|---|---|---|---|\n| 1.1 | `tests/KyberWeave.Tests`: `StandardsFolderShapeTests` | task's Command | Incomplete folder or standard is reported | The checks do not exist | New class passes |\n\nResults of the tasks this one follows, as their workers reported them:\n{prior_results}\n"
+      "prompt": "Task 1.1: Name and check the four folder files\nWorktree: {worktree}\n\n- **Objective:** Make a technology or role folder hold four files that start with the folder's name, and report a folder or standard that is incomplete.\n  - **Files:**\n    - `src/KyberWeave.Domain/Configuration/DocsLayout.cs`: paths for the four folder files, named after the folder with the suffixes .standards.md, .rules.md, .skills.md and .arbiter-rules.yml\n    - `src/KyberWeave.Domain/Configuration/OntologyConfig.cs`: a `roles` list beside `technologies`\n    - `src/KyberWeave.Domain/Docs/Validation/DocSpecValidator.cs`: the four-file check and the six-heading check, each with a new `KW-DOC-SPEC-*` id\n    - `tests/KyberWeave.Tests/StandardsFolderShapeTests.cs` (new): `KyberWeave.Tests.StandardsFolderShapeTests`\n  - **Acceptance criteria:** A folder that still holds its standard as `README.md` is read and raises a warning that names the migrate command, not an error; otherwise a folder missing one of the four files is an error naming the folder and the file; a standard missing one of the six headings, or holding them out of order, is an error naming the heading; an Arbiter rules file that declares no rule is valid; a role declared in `ontology.roles` is checked the same way.\n  - **Capabilities:** C# validation rules and configuration parsing in the documentation engine, with xUnit tests\n  - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter \"FullyQualifiedName~StandardsFolderShapeTests\"`\n  - **Depends on:** 1.11\n  - _Requirements: 5.1, 5.2, 5.8, 5.9, 5.11_\n\nReference content for this task, quoted exactly from its source document and complete as given:\n\n#### Test contract row for 1.1\n| Task | Test project or file | Runner | Observable behaviour | Failing run's expected reason | Passing acceptance |\n|---|---|---|---|---|---|\n| 1.1 | `tests/KyberWeave.Tests`: `StandardsFolderShapeTests` | task's Command | Incomplete folder or standard is reported | The checks do not exist | New class passes |\n\nResults of the tasks this one follows, as their workers reported them:\n{prior_results}\n",
+      "agent": "csharp-dev",
+      "agent-confidence": 0.97
     },
     {
       "id": "1.2",
@@ -59,9 +57,6 @@
       ],
       "files": [
         "products/kyber-squad/standards/**",
-        "sql-server/**",
-        "aws/**",
-        "azure/**",
         "products/kyber-squad/standards/shared-rules.md",
         "docs/kyber-squad/agent-rule-inventory.md",
         "tests/KyberWeave.Tests/KyberStandardsTemplateShapeTests.cs"
@@ -79,14 +74,6 @@
       ],
       "files": [
         "products/kyber-squad/standards/**",
-        "conductor/**",
-        "architect/**",
-        "reviewer/**",
-        "devops/**",
-        "github/**",
-        "azure-devops/**",
-        "gitlab/**",
-        "jira/**",
         "src/KyberWeave.Domain/Docs/Scaffolding/KyberStandardsTemplates.cs",
         "tests/KyberWeave.Tests/KyberStandardsTemplateShapeTests.cs"
       ],
@@ -658,9 +645,6 @@
         "src/KyberWeave.Domain/Arbiter/Rules/default-rules.yml",
         "src/KyberWeave.Domain/Arbiter/ArbiterConfigLoader.cs",
         "src/KyberWeave.Domain/Areas/Arbiter.props",
-        "products/kyber-squad/standards/conductor/**",
-        "architect/**",
-        "reviewer/**",
         "tests/KyberWeave.Tests/ArbiterRuleFolderSplitTests.cs"
       ],
       "session": "4.1",
@@ -709,10 +693,8 @@
       ],
       "files": [
         "src/KyberWeave.Domain/Arbiter/Hooks/WorkerGuardRules.cs",
-        "src/KyberWeave.Domain/Arbiter/Hooks/worker.command",
         "src/KyberWeave.Domain/Arbiter/Rules/RuleValidator.cs",
         "products/kyber-squad/standards/azure/**",
-        "aws/**",
         "tests/KyberWeave.Tests/ArbiterCommandAllowListTests.cs",
         "docs/kyber-arbiter/architecture.md"
       ],

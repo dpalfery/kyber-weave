@@ -70,7 +70,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
 - [ ] 1.1 Name and check the four folder files
   - **Objective:** Make a technology or role folder hold four files that start with the folder's name, and report a folder or standard that is incomplete.
   - **Files:**
-    - `src/KyberWeave.Domain/Configuration/DocsLayout.cs`: paths for `<name>.standards.md`, `<name>.rules.md`, `<name>.skills.md`, `<name>.arbiter-rules.yml`
+    - `src/KyberWeave.Domain/Configuration/DocsLayout.cs`: paths for the four folder files, named after the folder with the suffixes .standards.md, .rules.md, .skills.md and .arbiter-rules.yml
     - `src/KyberWeave.Domain/Configuration/OntologyConfig.cs`: a `roles` list beside `technologies`
     - `src/KyberWeave.Domain/Docs/Validation/DocSpecValidator.cs`: the four-file check and the six-heading check, each with a new `KW-DOC-SPEC-*` id
     - `tests/KyberWeave.Tests/StandardsFolderShapeTests.cs` (new): `KyberWeave.Tests.StandardsFolderShapeTests`
@@ -515,7 +515,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Files:**
     - `src/KyberWeave.Domain/Arbiter/Rules/default-rules.yml`: split into three files
     - `src/KyberWeave.Domain/Arbiter/ArbiterConfigLoader.cs`, `src/KyberWeave.Domain/Areas/Arbiter.props`: load the three
-    - `products/kyber-squad/standards/conductor/`, `architect/`, `reviewer/`: the role templates' rules files
+    - `products/kyber-squad/standards/conductor/**`, `products/kyber-squad/standards/architect/**`, `products/kyber-squad/standards/reviewer/**`: the role templates' rules files
     - `tests/KyberWeave.Tests/ArbiterRuleFolderSplitTests.cs` (new): `KyberWeave.Tests.ArbiterRuleFolderSplitTests`
   - **Acceptance criteria:** The loaded rule set equals the set before the split, rule for rule: same ids, questions, answers, effects and shadow flags; each rule is in exactly one file; the counts are 21, 2 and 13.
   - **Capabilities:** C# work on rule loading in the Arbiter, YAML editing, and xUnit tests
@@ -552,7 +552,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Files:**
     - `src/KyberWeave.Domain/Arbiter/Hooks/WorkerGuardRules.cs`: raise a `worker.command` trigger
     - `src/KyberWeave.Domain/Arbiter/Rules/RuleValidator.cs`: the trigger and its facts
-    - `products/kyber-squad/standards/azure/`, `aws/`: allowed read forms
+    - `products/kyber-squad/standards/azure/**`, `products/kyber-squad/standards/aws/**`: allowed read forms
     - `tests/KyberWeave.Tests/ArbiterCommandAllowListTests.cs` (new): `KyberWeave.Tests.ArbiterCommandAllowListTests`
     - `docs/kyber-arbiter/architecture.md`: where it is enforced and where it is an instruction
   - **Acceptance criteria:** With Azure's list, `az vm list` is allowed and `az vm delete` is refused on Claude and Copilot CLI; a technology with no list refuses nothing; on a harness with no worker guard nothing is refused and the list appears in the prompt's rules part.
@@ -720,9 +720,9 @@ Phase 1 has no outside dependency. The standards plan first drafted on
 ## Dependency graph
 
 - Phase 1: 1.11 first; 1.1 after it; 1.2, 1.6 and 1.10 after 1.1; 1.12 after 1.11 and 1.6; 1.13 after 1.1 and 1.12; 1.14 after 1.10 and 1.13; 1.3, 1.5 and 1.8 after 1.2; 1.4 after 1.3; 1.7 after 1.2 and 1.5; 1.9 last.
-- Phase 2: 2.1 and 2.2 in parallel; 2.3, 2.4 and 2.5 after 2.2; 2.6 after 2.2; 2.7 after 2.6; 2.8 after 2.7; 2.9 after 2.1 and 2.7; 2.10 after 2.8 and 2.9; 2.11 after 2.4; 2.12 last.
-- Phase 3: 3.1, 3.2 and 3.3 in parallel; 3.4 after 3.1 and 3.2; 3.5 after 3.1 and 3.3; 3.6 after 3.4 and 3.5; 3.7 after 3.6; 3.8 after 3.4 and 3.5; 3.9 last.
-- Phase 4: 4.1 first; 4.2, 4.3 and 4.5 after it; 4.4 after 4.2; 4.6 last.
+- Phase 2: 2.1 and 2.2 in parallel; 2.3, 2.4 and 2.5 after 2.2; 2.6 after 2.2 and 1.6; 2.7 after 2.2, 2.6, 1.2 and 1.13; 2.8 after 2.7; 2.9 after 2.1 and 2.7; 2.10 after 2.8 and 2.9; 2.11 after 2.4; 2.12 last.
+- Phase 3: 3.1, 3.2 and 3.3 in parallel; 3.4 after 3.1 and 3.2; 3.5 after 3.1 and 3.3; 3.6 after 3.4, 3.5 and 2.8; 3.7 after 3.6; 3.8 after 3.4 and 3.5; 3.9 last.
+- Phase 4: 4.1 first, after 1.5; 4.2 after 4.1 and 2.2; 4.3 after 4.1; 4.4 after 4.2 and 3.5; 4.5 after 4.1 and 3.6; 4.6 last.
 - Phase 5: 5.1, then 5.2; 5.3 and 5.4 in parallel; 5.5 after both; 5.6 last.
 - 6.1 after 5.6.
 
