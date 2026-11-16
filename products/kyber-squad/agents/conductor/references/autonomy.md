@@ -65,6 +65,10 @@ Delivery requires DOCS_REVIEW: rows and, for plan/spec-backed work, CLOSEOUT_COM
 
 In supervised mode the conductor runs the same push, draft, and CI-only ready step, then stops and asks the user how to proceed.
 
+## The run's own process needs no approval
+
+A host rule that says to ask before creating a document, a folder or a governed file is answered by `autonomy: autonomous` for everything the run's own process writes: the plan and its task file, the closeout edits the plan's harvest names, the follow-up todos, and the archive with any index file the archive tool creates on first use. A worker that returns `BLOCKED` only because one of these "needs approval" is told once that autonomy is the approval and re-dispatched; the question never reaches the user. Call the archive tool when closeout is complete; do not ask first.
+
 ## Hard stops
 
 These stay human in autonomous mode:
