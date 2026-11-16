@@ -1,6 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using KyberWeave.Core.Arbiter;
+using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Configuration;
 
 namespace KyberWeave.Arbiter.Hooks;
@@ -76,6 +78,99 @@ internal static partial class ConductorGuardRules
             || (segments[..^1].Any(segment => ContractDirectories.Contains(segment, StringComparer.OrdinalIgnoreCase))
                 && ContractExtensions.Contains(Path.GetExtension(relative), StringComparer.OrdinalIgnoreCase))
             || planningDirectories.Any(directory => relative.StartsWith(directory, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// The specialist a <c>task</c> call dispatches to when it writes project files and is not the run-start dispatch itself,
+    /// so a run must be live for it (<c>KW-ARB-RUN-001</c>); null when no run-start check applies to the call.
+    /// </summary>
+    internal static string? RunStartTargetOf(ToolCall call)
+    {
+        if (!string.Equals(call.Name, "task", StringComparison.Ordinal)
+            || call.Arguments is not { } arguments
+            || !TryGetText(arguments, "agent_type", out string? target)
+            || !ArbiterSquadCatalog.LoadEmbedded().Agents.TryGetValue(target, out ArbiterSquadAgent? agent)
+            || !RunWriterProfiles.IsWriter(agent.CapabilityProfile))
+        {
+            return null;
+        }
+
+        string prompt = TryGetText(arguments, "prompt", out string? text) ? text : string.Empty;
+        return string.Equals(
+                TriggerClassifier.PlannerMarkerFor(prompt, HeaderBlock.Parse(prompt).Headers),
+                "RUN-START",
+                StringComparison.Ordinal)
+            ? null
+            : target;
+    }
+
+    /// <summary>
+    /// Answers the event when no file, git or configuration read can change the answer: an event with no tool, a worker's
+    /// call, and calls decided by name or by the conductor's one shell grammar. A <c>view</c> of a path and a dispatch of a
+    /// file-writing specialist need a read, so they are left to the guard.
+    /// </summary>
+    /// <param name="stdin">The hook event as JSON.</param>
+    /// <param name="allowedMcpServer">An MCP server whose tools the conductor may call, or null.</param>
+    /// <param name="answer">The document to write, or null to write nothing.</param>
+    /// <returns>True when <paramref name="answer"/> is the whole decision; false when the guard must read, and when the event is unreadable, so the guard reports it.</returns>
+    internal static bool TryDecideWithoutReads(string stdin, string? allowedMcpServer, out string? answer)
+    {
+        answer = null;
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(stdin);
+            JsonElement root = document.RootElement;
+            List<ToolCall> calls = ReadCalls(root);
+            if (calls.Count == 0)
+            {
+                answer = TryGetText(root, "transformedPrompt", out string? prompt)
+                    ? new JsonObject { ["modifiedTransformedPrompt"] = $"{prompt}\n\n{WorkflowReminder}" }.ToJsonString()
+                    : Deny("The conductor guard found no tool name in this event, so it was denied.");
+                return true;
+            }
+
+            if (IsWorkerCall(root))
+            {
+                return true;
+            }
+
+            foreach (ToolCall call in calls)
+            {
+                if (IsPermittedByName(call, allowedMcpServer))
+                {
+                    continue;
+                }
+
+                if (call.Arguments is not { } arguments)
+                {
+                    answer = Deny($"{DenyReason} Blocked tool: {call.Name}.");
+                    return true;
+                }
+
+                switch (call.Name)
+                {
+                    case "view":
+                        return false;
+                    case "bash" or "powershell":
+                        if (TryGetText(arguments, "command", out string? command) && RunStartCommand().IsMatch(command))
+                        {
+                            continue;
+                        }
+
+                        break;
+                }
+
+                answer = Deny($"{DenyReason} Blocked tool: {call.Name}.");
+                return true;
+            }
+
+            return !calls.Any(call => RunStartTargetOf(call) is not null);
+        }
+        catch (Exception)
+        {
+            answer = null;
+            return false;
+        }
     }
 
     internal static string DirectoryPrefix(string directory) => $"{Normalize(Path.GetFullPath(directory)).TrimEnd('/')}/";

@@ -118,6 +118,13 @@ public static class Composition
                 }
             }
 
+            string? allowedMcpServer = OptionValue(args, "--allow-mcp");
+            if (ConductorGuard.TryAnswer(stdinText, stdout, stderr, allowedMcpServer, out int answered))
+            {
+                // Decided from the event alone: no container is built for it.
+                return answered;
+            }
+
             IConductorGuard guard;
             try
             {
@@ -133,7 +140,7 @@ public static class Composition
                 return 0;
             }
 
-            return guard.Run(stdinText, stdout, stderr, OptionValue(args, "--allow-mcp"));
+            return guard.Run(stdinText, stdout, stderr, allowedMcpServer);
         }
 
         if (args.Length > 0 && string.Equals(args[0], "worker-guard", StringComparison.Ordinal))

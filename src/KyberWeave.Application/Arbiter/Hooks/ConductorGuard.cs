@@ -71,6 +71,36 @@ public sealed class ConductorGuard(
             TryLog(log, $"conductor guard could not read the event: {ex.Message}");
         }
 
+        return Respond(answer, stdout, log);
+    }
+
+    /// <summary>
+    /// Answers the event when no file, git or configuration read can change the answer, so a process builds no container
+    /// for it. Returns false when the guard must read, and when the event is unreadable, so the guard reports it.
+    /// </summary>
+    /// <param name="stdin">The hook event as JSON.</param>
+    /// <param name="stdout">Receives the decision document, and nothing else.</param>
+    /// <param name="log">Receives diagnostics.</param>
+    /// <param name="allowedMcpServer">An MCP server whose tools the conductor may call, or null.</param>
+    /// <param name="exitCode">The process exit code when the event was answered.</param>
+    /// <returns>True when the event was answered.</returns>
+    public static bool TryAnswer(string stdin, TextWriter stdout, TextWriter log, string? allowedMcpServer, out int exitCode)
+    {
+        ArgumentNullException.ThrowIfNull(stdin);
+        ArgumentNullException.ThrowIfNull(stdout);
+        ArgumentNullException.ThrowIfNull(log);
+        if (!ConductorGuardRules.TryDecideWithoutReads(stdin, allowedMcpServer, out string? answer))
+        {
+            exitCode = 0;
+            return false;
+        }
+
+        exitCode = Respond(answer, stdout, log);
+        return true;
+    }
+
+    private static int Respond(string? answer, TextWriter stdout, TextWriter log)
+    {
         if (answer is not null)
         {
             try
@@ -140,20 +170,7 @@ public sealed class ConductorGuard(
     /// </summary>
     private string? RunStartRefusal(ConductorGuardRules.ToolCall call, string? cwd, string home, TextWriter log)
     {
-        if (!string.Equals(call.Name, "task", StringComparison.Ordinal)
-            || call.Arguments is not { } arguments
-            || !ConductorGuardRules.TryGetText(arguments, "agent_type", out string? target)
-            || !ArbiterSquadCatalog.LoadEmbedded().Agents.TryGetValue(target, out ArbiterSquadAgent? agent)
-            || !RunWriterProfiles.IsWriter(agent.CapabilityProfile))
-        {
-            return null;
-        }
-
-        string prompt = ConductorGuardRules.TryGetText(arguments, "prompt", out string? text) ? text : string.Empty;
-        if (string.Equals(
-                TriggerClassifier.PlannerMarkerFor(prompt, HeaderBlock.Parse(prompt).Headers),
-                "RUN-START",
-                StringComparison.Ordinal))
+        if (ConductorGuardRules.RunStartTargetOf(call) is not { } target)
         {
             return null;
         }
