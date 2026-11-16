@@ -31,6 +31,7 @@ public static class ArbiterApplicationServiceCollectionExtensions
         services.TryAddSingleton<IArbiterTuneService, ArbiterTuneService>();
         services.TryAddSingleton<IArbiterAuditService, ArbiterAuditService>();
         services.TryAddSingleton<IArbiterDoctorService, ArbiterDoctorService>();
+        services.TryAddSingleton<IArbiterInstallService, ArbiterInstallService>();
         services.TryAddSingleton<IArbiterRepositoryLocator, Core.Arbiter.ArbiterRepositoryLocator>();
         services.TryAddSingleton<IArbiterUninstaller, Cli.Commands.Arbiter.ArbiterUninstaller>();
         services.TryAddSingleton<IArbiterHarnessGating, Cli.Commands.Arbiter.ArbiterHarnessGating>();

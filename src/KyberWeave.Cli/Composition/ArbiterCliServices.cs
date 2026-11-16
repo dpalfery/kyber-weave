@@ -1,6 +1,7 @@
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Processes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -19,6 +20,7 @@ internal static class ArbiterCliServices
         services.TryAddSingleton<IProcessExecutor>(_ => ProcessExecutor.Instance);
         services.TryAddSingleton(sp => new ArbiterProcessProbe(sp.GetRequiredService<IProcessExecutor>()));
         services.TryAddSingleton<IArbiterBinaryProbe>(sp => sp.GetRequiredService<ArbiterProcessProbe>());
+        services.TryAddSingleton<IDocsScaffoldProvisioner, LegacyDocsScaffoldProvisioner>();
         return services;
     }
 }
