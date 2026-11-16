@@ -8,7 +8,7 @@ source-root: src/KyberWeave.Domain/Agents
 owner: dpalfery
 last-reviewed: 2026-10-16
 code-refs:
-  - AgentLoader
+  - AgentFileReader
   - AgentSpecValidator
   - AgentPromptScanner
   - AgentSyncLinter
@@ -37,12 +37,12 @@ Agent definitions are discovered as `<harness>/agents` beneath the project root:
 | `.opencode` | OpenCode |
 | `.kilo` | Kilo |
 
-The table is the six named `AgentLoader` mappings. `DiscoverHarnessAgentDirs` still scans
+The table is the six named `AgentHarnessFilter` mappings. `AgentFileReader.DiscoverHarnessAgentDirs` still scans
 every dot-prefixed `*/agents` directory; unmapped folders, including `.factory` and `.pi`,
 load as `HarnessKind.Custom`. Kyber-Squad renderer output is a deployment surface, not this
 inventory.
 
-Formats differ — Markdown with YAML frontmatter, TOML — so `AgentLoader` normalises each
+Formats differ — Markdown with YAML frontmatter, TOML — so `AgentFileReader` normalises each
 into one `AgentModel` before anything compares them. Every command accepts `--harness` to
 narrow to one.
 

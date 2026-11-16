@@ -81,7 +81,7 @@ public class HarnessProfileConfigTests
         }
 
         AgentSet agentSet = repo.LoadAgentSet();
-        DiagnosticReport report = AgentSyncLinter.LintSet(agentSet, repo.Root, config);
+        DiagnosticReport report = AgentSyncLinter.LintSet(agentSet, repo.Root, config, File.Exists);
 
         List<Diagnostic> conductorMissing = report.Items
             .Where(i => i is { Code: AgentSyncLinter.RuleUnsatisfiedRole, Subject: "conductor" })
@@ -187,7 +187,7 @@ public class HarnessProfileConfigTests
             .WithAgent(HarnessKind.Kilo, "conductor"))
         {
             HarnessProfileConfig config = KyberWeaveYamlFile.LoadHarness(repo.WriteHostProfile(hostYaml));
-            DiagnosticReport report = AgentSyncLinter.LintSet(repo.LoadAgentSet(), repo.Root, config);
+            DiagnosticReport report = AgentSyncLinter.LintSet(repo.LoadAgentSet(), repo.Root, config, File.Exists);
 
             List<Diagnostic> conductorMissing = report.Items
                 .Where(i => i is { Code: AgentSyncLinter.RuleUnsatisfiedRole, Subject: "conductor" })
@@ -207,7 +207,7 @@ public class HarnessProfileConfigTests
             .WithAgent(HarnessKind.Kilo, "conductor"))
         {
             HarnessProfileConfig config = KyberWeaveYamlFile.LoadHarness(repo.WriteHostProfile(hostYaml));
-            DiagnosticReport report = AgentSyncLinter.LintSet(repo.LoadAgentSet(), repo.Root, config);
+            DiagnosticReport report = AgentSyncLinter.LintSet(repo.LoadAgentSet(), repo.Root, config, File.Exists);
 
             List<Diagnostic> conductorMissing = report.Items
                 .Where(i => i is { Code: AgentSyncLinter.RuleUnsatisfiedRole, Subject: "conductor" })
@@ -232,7 +232,7 @@ public class HarnessProfileConfigTests
             .WithAgent(HarnessKind.Kilo, "architect");
 
         AgentSet agentSet = repo.LoadAgentSet();
-        DiagnosticReport report = AgentSyncLinter.LintSet(agentSet, repo.Root, HarnessProfileConfig.ProductDefaults);
+        DiagnosticReport report = AgentSyncLinter.LintSet(agentSet, repo.Root, HarnessProfileConfig.ProductDefaults, File.Exists);
 
         Assert.Contains(
             report.Items,
@@ -293,7 +293,7 @@ public class HarnessProfileConfigTests
         public string WriteHostProfile(string yaml) =>
             WriteTempYaml(yaml);
 
-        public AgentSet LoadAgentSet() => AgentLoader.LoadAll(Root);
+        public AgentSet LoadAgentSet() => GovernanceTestFiles.Agents.LoadAll(Root);
 
         public void Dispose()
         {

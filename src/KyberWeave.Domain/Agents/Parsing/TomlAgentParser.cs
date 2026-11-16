@@ -11,9 +11,8 @@ public sealed partial class TomlAgentParser : IAgentParser
 {
     public bool CanParse(string filePath) => filePath.EndsWith(".toml", StringComparison.OrdinalIgnoreCase);
 
-    public AgentModel Parse(string filePath, HarnessKind harness)
+    public AgentModel Parse(string content, string filePath, HarnessKind harness)
     {
-        string content = File.ReadAllText(filePath);
         string dirName = Path.GetDirectoryName(Path.GetFullPath(filePath))!;
         string fileName = Path.GetFileNameWithoutExtension(filePath);
 

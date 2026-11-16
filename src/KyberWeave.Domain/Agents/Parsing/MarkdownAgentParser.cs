@@ -24,9 +24,9 @@ public sealed partial class MarkdownAgentParser : IAgentParser
         filePath.EndsWith(".md", StringComparison.OrdinalIgnoreCase) ||
         filePath.EndsWith(".agent.md", StringComparison.OrdinalIgnoreCase);
 
-    public AgentModel Parse(string filePath, HarnessKind harness)
+    public AgentModel Parse(string content, string filePath, HarnessKind harness)
     {
-        string raw = File.ReadAllText(filePath);
+        string raw = content;
         string dirName = Path.GetDirectoryName(Path.GetFullPath(filePath))!;
         string fileName = Path.GetFileName(filePath);
 

@@ -17,16 +17,32 @@ public static class AgentSyncLinter
     public const string RuleLowRoutingScore = "KW-AGENT-LINT-001";
     public const string RuleMissingTriggerPhrasing = "KW-AGENT-LINT-002";
 
-    public static DiagnosticReport LintSet(AgentSet agentSet, string rootDirectoryPath) =>
-        LintSet(agentSet, rootDirectoryPath, HarnessProfileConfig.ProductDefaults);
-
+    /// <summary>Lints an agent set against the product's default harness profiles.</summary>
+    /// <param name="agentSet">The agents to lint.</param>
+    /// <param name="rootDirectoryPath">The project root the mapped skill folders are resolved under.</param>
+    /// <param name="skillFileExists">Probes whether a mapped skill folder holds its own SKILL.md, as the caller observed on disk.</param>
+    /// <returns>One diagnostic per finding.</returns>
     public static DiagnosticReport LintSet(
         AgentSet agentSet,
         string rootDirectoryPath,
-        HarnessProfileConfig harnessConfig)
+        Func<string, bool> skillFileExists) =>
+        LintSet(agentSet, rootDirectoryPath, HarnessProfileConfig.ProductDefaults, skillFileExists);
+
+    /// <summary>Lints an agent set against the given harness profiles.</summary>
+    /// <param name="agentSet">The agents to lint.</param>
+    /// <param name="rootDirectoryPath">The project root the mapped skill folders are resolved under.</param>
+    /// <param name="harnessConfig">The harness profiles that map roles to skill folders.</param>
+    /// <param name="skillFileExists">Probes whether a mapped skill folder holds its own SKILL.md, as the caller observed on disk.</param>
+    /// <returns>One diagnostic per finding.</returns>
+    public static DiagnosticReport LintSet(
+        AgentSet agentSet,
+        string rootDirectoryPath,
+        HarnessProfileConfig harnessConfig,
+        Func<string, bool> skillFileExists)
     {
         ArgumentNullException.ThrowIfNull(agentSet);
         ArgumentNullException.ThrowIfNull(harnessConfig);
+        ArgumentNullException.ThrowIfNull(skillFileExists);
         ArgumentException.ThrowIfNullOrWhiteSpace(rootDirectoryPath);
 
         DiagnosticReport report = new DiagnosticReport();
@@ -52,7 +68,7 @@ public static class AgentSyncLinter
                         string skillDir = Path.Combine(rootDirectoryPath, ".agents", "skills", skillName);
                         // Require the canonical SKILL.md inside the mapped skill folder —
                         // a root-level SKILL.md must not falsely satisfy the role.
-                        if (File.Exists(Path.Combine(skillDir, "SKILL.md")))
+                        if (skillFileExists(Path.Combine(skillDir, "SKILL.md")))
                         {
                             satisfied = true; // Role is satisfied via mapped skill
                         }
