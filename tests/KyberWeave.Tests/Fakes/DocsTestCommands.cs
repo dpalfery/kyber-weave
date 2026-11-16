@@ -52,7 +52,11 @@ internal static class DocsTestCommands
     public static DocsPacketCommand Packet(IServiceProvider? services = null)
     {
         IServiceProvider provider = services ?? Services();
-        return new DocsPacketCommand(provider.GetRequiredService<IPlanTaskService>(), provider.GetRequiredService<IPacketHostFacts>());
+        return new DocsPacketCommand(
+            provider.GetRequiredService<IPlanTaskService>(),
+            provider.GetRequiredService<IPacketHostFacts>(),
+            provider.GetRequiredService<IFileSystem>(),
+            provider.GetRequiredService<IProcessEnvironment>());
     }
 
     public static DocsTasksCommand Tasks(IServiceProvider? services = null)
@@ -69,6 +73,9 @@ internal static class DocsTestCommands
         return new RepositoryDocsAnalysisCommandService(
             factories, provider.GetRequiredService<IManagedGlossaryFactory>(), provider.GetRequiredService<IDocumentSourceFactory>());
     }
+
+    public static DocsReviewImportCommand ReviewImport(IDocsAnalysisCommandService service) =>
+        new(service, Services().GetRequiredService<IFileSystem>());
 
     public static DocsExportGraphCommand ExportGraph() => new(Services().GetRequiredService<IManagedGlossaryFactory>());
 

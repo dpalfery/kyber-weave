@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Rendering;
@@ -15,7 +16,7 @@ namespace KyberWeave.Cli.Commands.Docs;
 /// Prints one task's packet for the worker that was dispatched for it, so a conductor passes a task id and nothing
 /// else, and a worker, which may not open a plan, still gets the whole brief.
 /// </summary>
-public sealed class DocsPacketCommand(IPlanTaskService tasks, IPacketHostFacts hostFacts) : Command<DocsPacketSettings>
+public sealed class DocsPacketCommand(IPlanTaskService tasks, IPacketHostFacts hostFacts, IFileSystem files, IProcessEnvironment environment) : Command<DocsPacketSettings>
 {
     /// <summary>The plan could not be chosen: none is Ready or In progress, or several are.</summary>
     public const string PlanNotChosen = "KW-DOC-TASKS-CLI-002";
@@ -40,7 +41,7 @@ public sealed class DocsPacketCommand(IPlanTaskService tasks, IPacketHostFacts h
     public override int Execute(CommandContext context, DocsPacketSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new();
-        string current = Path.GetFullPath(settings.WorkingDirectory ?? Directory.GetCurrentDirectory());
+        string current = Path.GetFullPath(settings.WorkingDirectory ?? environment.CurrentDirectory);
         string root = settings.Plan is null ? ArbiterRepoRoot.Find(current) : PlanArguments.RepositoryRootFor(settings.Plan, current);
         if (!CommandHelpers.TryLoadConfig(root, settings.Config, report, out KyberWeaveConfig config))
         {
@@ -91,7 +92,7 @@ public sealed class DocsPacketCommand(IPlanTaskService tasks, IPacketHostFacts h
         {
             try
             {
-                prior = File.ReadAllText(Path.GetFullPath(settings.PriorResults, current));
+                prior = files.ReadAllText(Path.GetFullPath(settings.PriorResults, current));
             }
             catch (Exception ex) when (FileFailure.Is(ex))
             {
@@ -159,7 +160,7 @@ public sealed class DocsPacketCommand(IPlanTaskService tasks, IPacketHostFacts h
         foreach (string worktree in (settings.ListWorktrees ?? (dir => new GitFacts().ListWorktrees(dir)))(root))
         {
             string other = Path.TrimEndingDirectorySeparator(Path.GetFullPath(worktree));
-            if (string.Equals(other, here, StringComparison.Ordinal) || !Directory.Exists(other))
+            if (string.Equals(other, here, StringComparison.Ordinal) || !files.DirectoryExists(other))
             {
                 continue;
             }

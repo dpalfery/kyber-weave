@@ -215,7 +215,7 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
             "export" => new DocsReviewExportCommand(service).Execute(
                 null!,
                 new DocsReviewExportSettings { Path = _temp.Path, OutputPath = output, Format = "json" }),
-            "import" => new DocsReviewImportCommand(service).Execute(
+            "import" => DocsTestCommands.ReviewImport(service).Execute(
                 null!,
                 new DocsReviewImportSettings { Path = _temp.Path, InputPath = input, Format = "json" }),
             "glossary" => new DocsGlossaryCommand(service).Execute(

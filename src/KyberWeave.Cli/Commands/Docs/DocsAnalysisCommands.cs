@@ -1,4 +1,5 @@
 using KyberWeave.Cli.Rendering;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Core.Docs.Analysis.Glossary;
@@ -104,16 +105,20 @@ public sealed class DocsReviewExportCommand : Command<DocsReviewExportSettings>
 public sealed class DocsReviewImportCommand : Command<DocsReviewImportSettings>
 {
     private readonly IDocsAnalysisCommandService _service;
+    private readonly IFileSystem _files;
 
-    public DocsReviewImportCommand(IDocsAnalysisCommandService service) =>
+    public DocsReviewImportCommand(IDocsAnalysisCommandService service, IFileSystem files)
+    {
         _service = service ?? throw new ArgumentNullException(nameof(service));
+        _files = files ?? throw new ArgumentNullException(nameof(files));
+    }
 
     public override int Execute(CommandContext context, DocsReviewImportSettings settings, CancellationToken cancellationToken)
     {
         try
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(settings.InputPath);
-            ReviewImportResult result = _service.ImportReview(settings, File.ReadAllText(settings.InputPath));
+            ReviewImportResult result = _service.ImportReview(settings, _files.ReadAllText(settings.InputPath));
             CommandHelpers.Finish(result.Diagnostics, settings, "docs review import", "Candidate");
             return result.Success ? 0 : 1;
         }
