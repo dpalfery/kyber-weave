@@ -617,13 +617,13 @@
       "file": "tests/KyberWeave.Tests/UtilitiesCliCommandTests.cs",
       "text": "ProcessStartInfo startInfo = new(CliHostPath())",
       "count": 1,
-      "bound": "Started by the Run at line 589: CliTimeout (60 s) kills the tree; the built CLI host with an isolated HOME."
+      "bound": "Started by Execute through the single ProcessRunner.Run site: CliTimeout (60 s) kills the tree; the built CLI host with an isolated HOME, used by the one real-host smoke case."
     },
     {
       "file": "tests/KyberWeave.Tests/UtilitiesCliCommandTests.cs",
-      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, CliTimeout);",
+      "text": "return ProcessRunner.Run(startInfo, string.Empty, CliTimeout);",
       "count": 1,
-      "bound": "CliTimeout (60 s) kills the tree; the built CLI host with an isolated HOME."
+      "bound": "CliTimeout (60 s) kills the tree. The single start site of the suite: the one real-host smoke case (isolated HOME) and the harness version probe doctor runs against the case's stub PATH go through it."
     },
     {
       "file": "tests/KyberWeave.Tests/UtilitiesStatusLineArtifactTests.cs",
@@ -804,12 +804,6 @@
       "text": "ProcessResult process = ProcessRunner.Run(startInfo, string.Empty, timeout, cancellationToken: stop);",
       "count": 1,
       "bound": "ProcessRunner.Run with the gate's timeout-seconds (review.gates; ReviewConfigLoader defaults it to 900 s and rejects values <= 0). The process tree is killed on expiry and the TimeoutException is reported as TimedOut. A concurrent gate's tree is also killed when a run given --stop-on-failure cancels it."
-    },
-    {
-      "file": "src/KyberWeave.Core/RunStart/RunStartRunner.cs",
-      "text": "ProcessStartInfo startInfo = new(executable)",
-      "count": 1,
-      "bound": "Builds only; nothing starts on this line. Every child runs through the injected IProcessExecutor, which kyber-weave run start binds to ProcessExecutor.WithTimeout(120 s) (RunStartCommand.ToolTimeout); ProcessRunner.Run kills the child tree on expiry. argv only, in the repository root, in a local checkout; the only network call is the one `git fetch origin --prune` the step exists for."
     },
     {
       "file": "src/KyberWeave.Core.Squad/Instances/SquadHarnessLauncher.cs",
@@ -1290,6 +1284,18 @@
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, timeout, MaxOutputBytes, cancellationToken);",
       "count": 1,
       "bound": "ProcessRunner timeout is the rule timeout capped by the hook's remaining budget; stdout and stderr are capped at 4 MiB (MaxOutputBytes); the cancellation token kills the child process tree on expiry or cancel."
+    },
+    {
+      "file": "src/KyberWeave.Data/RunStart/ProcessGitCommandRunner.cs",
+      "text": "ProcessStartInfo startInfo = new(GitExecutable)",
+      "count": 1,
+      "bound": "Builds only; nothing starts on this line. Started by the ProcessRunner.Run call below, with the timeout the runner was built with (kyber-weave run start binds it to 120 s). argv only, in the repository root, in a local checkout; the only network call is the one `git fetch origin --prune` the step exists for."
+    },
+    {
+      "file": "src/KyberWeave.Data/RunStart/ProcessGitCommandRunner.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, timeout);",
+      "count": 1,
+      "bound": "ProcessRunner.Run with the runner's timeout (120 s for kyber-weave run start); the process tree is killed on expiry and the TimeoutException reaches the caller. argv only, in the repository root."
     }
   ]
 }

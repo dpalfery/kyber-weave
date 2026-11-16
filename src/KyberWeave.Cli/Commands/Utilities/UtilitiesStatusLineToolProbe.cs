@@ -12,7 +12,7 @@ namespace KyberWeave.Cli.Commands.Utilities;
 /// </remarks>
 /// <param name="startInfo">The process to start, with all three streams redirected.</param>
 /// <param name="standardInput">The complete standard input; empty for a version probe.</param>
-internal delegate ProcessResult UtilitiesStatusLineProcessRunner(ProcessStartInfo startInfo, string standardInput);
+public delegate ProcessResult UtilitiesStatusLineProcessRunner(ProcessStartInfo startInfo, string standardInput);
 
 /// <summary>Decides whether an executable is reachable on <c>PATH</c>.</summary>
 /// <remarks>

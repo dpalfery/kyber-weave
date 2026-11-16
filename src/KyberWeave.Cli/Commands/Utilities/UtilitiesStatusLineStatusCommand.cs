@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Utilities.StatusLine;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -14,17 +15,15 @@ namespace KyberWeave.Cli.Commands.Utilities;
 /// </remarks>
 public sealed class UtilitiesStatusLineStatusCommand : Command<UtilitiesStatusLineSettings>
 {
-    private readonly StatusLineTargetRoots? _roots;
+    private readonly IProcessEnvironment _environment;
 
-    /// <summary>Creates a status command using the default per-user roots.</summary>
-    public UtilitiesStatusLineStatusCommand()
+    /// <summary>Creates the command over the process environment its per-user roots are read from.</summary>
+    /// <param name="environment">The process state the roots are read from.</param>
+    public UtilitiesStatusLineStatusCommand(IProcessEnvironment environment)
     {
-    }
+        ArgumentNullException.ThrowIfNull(environment);
 
-    /// <summary>Creates a status command using injectable roots.</summary>
-    internal UtilitiesStatusLineStatusCommand(StatusLineTargetRoots? roots = null)
-    {
-        _roots = roots;
+        _environment = environment;
     }
 
     /// <inheritdoc />
@@ -35,7 +34,7 @@ public sealed class UtilitiesStatusLineStatusCommand : Command<UtilitiesStatusLi
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        StatusLineTargetRoots roots = _roots ?? UtilitiesStatusLineCommandComposition.ResolveRoots();
+        StatusLineTargetRoots roots = UtilitiesStatusLineCommandComposition.ResolveRoots(_environment);
 
         AnsiConsole.MarkupLine("[bold]Kyber Utilities status line — status[/]");
 

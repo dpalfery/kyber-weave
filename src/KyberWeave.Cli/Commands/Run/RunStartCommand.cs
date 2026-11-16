@@ -2,6 +2,8 @@ using System.Globalization;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Doctor;
 using System.Text.Json.Nodes;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Cli.Commands.Squad.Brief;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Arbiter.Facts;
@@ -51,12 +53,6 @@ public sealed class RunStartCommand : Command<RunStartSettings>
 
     private const string CommandName = "kyber-weave run start";
 
-    /// <summary>
-    ///     The bound on one child. A fetch that reaches a slow remote is the only one expected to take real
-    ///     time; a hung child must not hold the run open, which is why no call here is unbounded.
-    /// </summary>
-    private static readonly TimeSpan ToolTimeout = TimeSpan.FromSeconds(120);
-
     /// <summary>The bound on the CodeGraph index run, the same default <c>doctor --ensure</c> uses.</summary>
     private static readonly TimeSpan IndexTimeout = TimeSpan.FromSeconds(DoctorSettings.DefaultIndexTimeoutSeconds);
 
@@ -64,18 +60,39 @@ public sealed class RunStartCommand : Command<RunStartSettings>
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
+    private readonly IRunStartRunnerFactory _runners;
+    private readonly IRunStateStore _state;
+    private readonly IWritableFileSystem _files;
+    private readonly IProcessEnvironment _environment;
+    private readonly TimeProvider _clock;
     private readonly IProcessExecutor? _executor;
 
-    /// <summary>Creates the command with the production process executor.</summary>
-    public RunStartCommand()
+    /// <summary>Creates the command over the services it reads and writes through.</summary>
+    /// <param name="runners">Opens the git runner for the repository the run starts in.</param>
+    /// <param name="state">Where the base the branch was created from is recorded.</param>
+    /// <param name="files">The file system worktree folders are checked on.</param>
+    /// <param name="environment">The current directory, home directory and temporary directory.</param>
+    /// <param name="clock">The clock that stamps the worktree folder and the run record.</param>
+    /// <param name="executor">The executor the CodeGraph index run goes through; the bounded production executor when none is registered.</param>
+    public RunStartCommand(
+        IRunStartRunnerFactory runners,
+        IRunStateStore state,
+        IWritableFileSystem files,
+        IProcessEnvironment environment,
+        TimeProvider clock,
+        IProcessExecutor? executor = null)
     {
-    }
+        ArgumentNullException.ThrowIfNull(runners);
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(clock);
 
-    /// <summary>Creates the command with an injected process seam, for a caller that supplies its own.</summary>
-    /// <param name="executor">The executor every git and CodeGraph child runs through.</param>
-    internal RunStartCommand(IProcessExecutor executor)
-    {
-        ArgumentNullException.ThrowIfNull(executor);
+        _runners = runners;
+        _state = state;
+        _files = files;
+        _environment = environment;
+        _clock = clock;
         _executor = executor;
     }
 
@@ -107,17 +124,16 @@ public sealed class RunStartCommand : Command<RunStartSettings>
             return Refuse(briefRefusal);
         }
 
-        IProcessExecutor executor = _executor ?? ProcessExecutor.WithTimeout(ToolTimeout);
-
-        string? repositoryRoot = new RunStartRunner(executor, Environment.CurrentDirectory).DetectRepositoryRoot();
+        string currentDirectory = _environment.CurrentDirectory;
+        string? repositoryRoot = _runners.Open(currentDirectory).DetectRepositoryRoot();
         if (repositoryRoot is null)
         {
             return Fail(
-                $"'{Environment.CurrentDirectory}' is not inside a git repository, so there is no checkout " +
+                $"'{currentDirectory}' is not inside a git repository, so there is no checkout " +
                 "to fetch into or to create the branch in.");
         }
 
-        RunStartRunner runner = new(executor, repositoryRoot);
+        IRunStartRunner runner = _runners.Open(repositoryRoot);
 
         DiagnosticReport report = new();
         if (!CommandHelpers.TryLoadConfig(repositoryRoot, null, report, out KyberWeaveConfig config, out string? configPath))
@@ -134,7 +150,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
             return StopForOnboarding(config, configPath, repositoryRoot);
         }
 
-        if (!RunStartRunner.CodeGraphBinaryIsAvailable())
+        if (!runner.CodeGraphBinaryIsAvailable())
         {
             AnsiConsole.MarkupLine(
                 $"[red]{Markup.Escape(CommandName)}: error:[/] 'codegraph' is not on PATH, so the tools a " +
@@ -276,7 +292,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
             return Fail($"git worktree list failed: {worktrees.FirstErrorLine}");
         }
 
-        bool anotherWorktreeIsAttached = RunStartRunner.HasMultipleWorktrees(worktrees.StandardOutput);
+        bool anotherWorktreeIsAttached = GitWorktreePorcelain.HasMultiple(worktrees.StandardOutput);
 
         RunStartLocation location = RunStartPlanner.DecideLocation(
             status.StandardOutput.Trim().Length == 0,
@@ -295,8 +311,8 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         {
             string? held = resumeTarget is null
                 ? null
-                : RunStartRunner.WorktreeHolding(worktrees.StandardOutput, resumeTarget);
-            if (held is not null && Directory.Exists(held))
+                : GitWorktreePorcelain.Holding(worktrees.StandardOutput, resumeTarget);
+            if (held is not null && _files.DirectoryExists(held))
             {
                 // Git allows a branch in one worktree only, so a resume continues in the one that holds it.
                 worktreePath = held;
@@ -317,7 +333,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
                     }
                 }
 
-                worktreePath = runner.WorktreePathFor(target, DateTimeOffset.UtcNow);
+                worktreePath = runner.WorktreePathFor(target, _clock.GetUtcNow());
                 try
                 {
                     created = resumeTarget is null
@@ -327,7 +343,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
                 finally
                 {
                     // Released whether git succeeded, failed, or threw, so no claim outlives its run.
-                    RunStartRunner.ReleaseWorktreeClaim(worktreePath);
+                    runner.ReleaseWorktreeClaim(worktreePath);
                 }
             }
         }
@@ -350,10 +366,11 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         // Where the run works is recorded with it, so the dispatch guard can tell a started run from none.
         string? repository = GitFacts.GetCommonDirectory(repositoryRoot);
         RecordBase(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            _state,
+            _environment.HomeDirectory,
             target,
             startRef,
-            repository is null ? null : new RunStartPlace(repository, worktreePath ?? repositoryRoot, DateTimeOffset.UtcNow));
+            repository is null ? null : new RunStartPlace(repository, worktreePath ?? repositoryRoot, _clock.GetUtcNow()));
 
         // A new worktree has no index of its own, so the index goes where the run works. A failure here does not
         // undo the branch: the operator repairs the index and the run continues in that tree.
@@ -367,7 +384,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
                 DoctorCommand.CodeGraphExecutable,
                 DoctorCommand.DefaultMcpExecutable),
             indexExecutor,
-            Path.GetTempPath());
+            _environment.TempDirectory);
         string indexLabel = IndexLabel(index);
 
         if (index.StopsRun)
@@ -554,7 +571,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
     /// hook can read it. Best effort: false when there is nowhere to record (or the record
     /// cannot be written), in which case the hook falls back to its default base.
     /// </summary>
-    internal static bool RecordBase(string homeDirectory, string branch, string baseRef, RunStartPlace? place = null)
+    internal static bool RecordBase(IRunStateStore state, string homeDirectory, string branch, string baseRef, RunStartPlace? place = null)
     {
         if (string.IsNullOrWhiteSpace(homeDirectory))
         {
@@ -563,7 +580,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
 
         try
         {
-            RunBaseState.Write(homeDirectory, branch, baseRef, place);
+            state.Write(homeDirectory, branch, baseRef, place);
             return true;
         }
         catch (Exception exception) when (FileFailure.Is(exception))
@@ -634,7 +651,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
     ///     local branch of that name as a last resort so a repository without remote-tracking refs still has
     ///     somewhere to start.
     /// </summary>
-    private static string? ResolveStartRef(RunStartRunner runner, string baseRef, string? originHead)
+    private static string? ResolveStartRef(IRunStartRunner runner, string baseRef, string? originHead)
     {
         foreach (string candidate in StartRefCandidates(baseRef, originHead))
         {

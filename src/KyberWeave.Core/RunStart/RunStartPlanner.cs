@@ -1,51 +1,34 @@
-using System.Text.RegularExpressions;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
-using KyberWeave.Core.Text;
 
 namespace KyberWeave.Core.RunStart;
-
-/// <summary>Where a run creates the branch its work belongs on.</summary>
-public enum RunStartLocation
-{
-    /// <summary>The checkout the run was started in, which is clean and which no other worktree shares.</summary>
-    InPlace,
-
-    /// <summary>A worktree of its own, because that checkout is dirty or another worktree shares it.</summary>
-    InWorktree
-}
-
-/// <summary>
-///     The decisions a <c>kyber-weave run start</c> reaches before it touches git: the branch to name, the
-///     base to start it from, and whether it may take the operator's checkout.
-/// </summary>
-public sealed record RunStartPlan(
-    string Branch,
-    string BaseBranch,
-    string BaseRef,
-    bool Resumed,
-    RunStartLocation Location);
 
 /// <summary>
 ///     The run-start decisions, with no process, clock or file system behind them, so the rules can be
 ///     read and reasoned about without a repository.
 /// </summary>
 /// <remarks>
-///     The branch shape is <c>[&lt;owner&gt;.&lt;agent&gt;.]&lt;harness&gt;/&lt;type&gt;/&lt;slug&gt;</c>, the same
-///     shape <c>scripts/check-pr-name.sh</c> holds a pull request to. The two deliberately share one
-///     vocabulary: a branch the naming check rejects is a branch whose pull request cannot reach the
-///     default branch, so creating one only moves the discovery to the end of the work.
+///     <para>
+///         The branch shape is <c>[&lt;owner&gt;.&lt;agent&gt;.]&lt;harness&gt;/&lt;type&gt;/&lt;slug&gt;</c>, the same
+///         shape <c>scripts/check-pr-name.sh</c> holds a pull request to. The two deliberately share one
+///         vocabulary: a branch the naming check rejects is a branch whose pull request cannot reach the
+///         default branch, so creating one only moves the discovery to the end of the work.
+///     </para>
+///     <para>
+///         The rules that need neither the squad catalogue nor the configuration live in
+///         <see cref="RunStartNaming" /> in the domain layer; this type forwards to them and keeps the rest.
+///     </para>
 /// </remarks>
-public static partial class RunStartPlanner
+public static class RunStartPlanner
 {
     /// <summary>The harness token for work named after no harness.</summary>
-    public const string ManualHarness = "manual";
+    public const string ManualHarness = RunStartNaming.ManualHarness;
 
     /// <summary>The remote every run starts from.</summary>
-    public const string Remote = "origin";
+    public const string Remote = RunStartNaming.Remote;
 
     /// <summary>The remote-tracking ref that names the remote's default branch.</summary>
-    public const string RemoteHead = Remote + "/HEAD";
+    public const string RemoteHead = RunStartNaming.RemoteHead;
 
     /// <summary>
     ///     The skill that answers the onboarding question: it walks the repository's technologies and their
@@ -53,23 +36,8 @@ public static partial class RunStartPlanner
     /// </summary>
     public const string OnboardingSkill = "kyber-docs-onboarding-and-assessment";
 
-    /// <summary>
-    ///     The conventional-commit types a branch may name, in the order the naming check lists them.
-    /// </summary>
-    public static IReadOnlyList<string> ConventionalTypes { get; } =
-    [
-        "build",
-        "chore",
-        "ci",
-        "docs",
-        "feat",
-        "fix",
-        "perf",
-        "refactor",
-        "revert",
-        "style",
-        "test"
-    ];
+    /// <summary>The conventional-commit types a branch may name, in the order the naming check lists them.</summary>
+    public static IReadOnlyList<string> ConventionalTypes => RunStartNaming.ConventionalTypes;
 
     /// <summary>
     ///     Every harness token a run may be started for: the thirteen catalogue tokens followed by
@@ -106,43 +74,6 @@ public static partial class RunStartPlanner
     }
 
     /// <summary>
-    ///     The refusal for a type that is not a conventional-commit type: the valid types, the closest one when
-    ///     the value looks like a typo of it, and the defaults, because a run is named for what it commits.
-    /// </summary>
-    private static string TypeRefusal(string? type)
-    {
-        string given = type?.Trim() ?? string.Empty;
-        string? closest = given.Length == 0
-            ? null
-            : ConventionalTypes
-                .Select(candidate => (candidate, distance: StringDistance.Levenshtein(given, candidate, ignoreCase: true)))
-                .Where(pair => pair.distance <= 2
-                               || given.StartsWith(pair.candidate, StringComparison.OrdinalIgnoreCase))
-                .OrderBy(pair => pair.distance)
-                .Select(pair => pair.candidate)
-                .FirstOrDefault();
-        string suggestion = closest is null ? string.Empty : $" Did you mean '{closest}'?";
-        return $"Type '{type}' is not a conventional-commit type. Use one of: {string.Join(", ", ConventionalTypes)}." +
-               $"{suggestion} A feature is 'feat' and a defect is 'fix'.";
-    }
-
-    /// <summary>Whether <paramref name="type" /> is a conventional-commit type.</summary>
-    public static bool IsConventionalType(string? type)
-    {
-        if (string.IsNullOrWhiteSpace(type))
-            return false;
-
-        string trimmed = type.Trim();
-        return ConventionalTypes.Contains(trimmed, StringComparer.Ordinal);
-    }
-
-    /// <summary>Whether <paramref name="slug" /> is lowercase, hyphen-separated words.</summary>
-    public static bool IsSlug(string? slug)
-    {
-        return !string.IsNullOrWhiteSpace(slug) && SlugPattern().IsMatch(slug.Trim());
-    }
-
-    /// <summary>
     ///     Composes the branch name the three arguments name, or reports why it cannot.
     /// </summary>
     /// <param name="harness">The harness token as the operator wrote it.</param>
@@ -171,7 +102,7 @@ public static partial class RunStartPlanner
 
         if (!IsConventionalType(type))
         {
-            refusal = TypeRefusal(type);
+            refusal = RunStartNaming.TypeRefusal(type);
             return false;
         }
 
@@ -187,25 +118,23 @@ public static partial class RunStartPlanner
         return true;
     }
 
-    /// <summary>
-    ///     Chooses where the new branch is created: in the operator's checkout, or in a worktree of its own.
-    /// </summary>
+    /// <summary>Whether <paramref name="type" /> is a conventional-commit type.</summary>
+    public static bool IsConventionalType(string? type) => RunStartNaming.IsConventionalType(type);
+
+    /// <summary>Whether <paramref name="slug" /> is lowercase, hyphen-separated words.</summary>
+    public static bool IsSlug(string? slug) => RunStartNaming.IsSlug(slug);
+
+    /// <summary>Chooses where the new branch is created: in the operator's checkout, or in a worktree of its own.</summary>
     /// <param name="checkoutIsClean">Whether the checkout has no uncommitted change.</param>
     /// <param name="anotherWorktreeIsAttached">Whether the repository already has a second worktree.</param>
-    /// <remarks>
-    ///     Switching branches under uncommitted work either fails or carries the edits onto a branch they
-    ///     were not made for, so a dirty checkout keeps its edits and the run gets a worktree beside it.
-    ///     A second worktree attached to the same repository means another worker is standing in this
-    ///     repository: taking the checkout would move the branch under them, so that case is treated the
-    ///     same way. Creation is also why the caller reports the path rather than assuming the operator's
-    ///     directory.
-    /// </remarks>
-    public static RunStartLocation DecideLocation(bool checkoutIsClean, bool anotherWorktreeIsAttached)
-    {
-        return checkoutIsClean && !anotherWorktreeIsAttached
-            ? RunStartLocation.InPlace
-            : RunStartLocation.InWorktree;
-    }
+    public static RunStartLocation DecideLocation(bool checkoutIsClean, bool anotherWorktreeIsAttached) =>
+        RunStartNaming.DecideLocation(checkoutIsClean, anotherWorktreeIsAttached);
+
+    /// <summary>The branch name a run reports its base under, resolved from the ref it actually starts at.</summary>
+    /// <param name="baseRef">The remote-tracking ref, as <see cref="BaseRefFor" /> returned it.</param>
+    /// <param name="originHeadSymbolicRef">What <c>origin/HEAD</c> points at, or null when git could not say.</param>
+    public static string BaseBranchName(string baseRef, string? originHeadSymbolicRef) =>
+        RunStartNaming.BaseBranchName(baseRef, originHeadSymbolicRef);
 
     /// <summary>
     ///     The remote-tracking ref a run starts from: the configured base, qualified by the remote.
@@ -226,31 +155,6 @@ public static partial class RunStartPlanner
         return configured.StartsWith(Remote + "/", StringComparison.Ordinal)
             ? configured
             : Remote + "/" + configured;
-    }
-
-    /// <summary>
-    ///     The branch name a run reports its base under, resolved from the ref it actually starts at.
-    /// </summary>
-    /// <param name="baseRef">The remote-tracking ref, as <see cref="BaseRefFor" /> returned it.</param>
-    /// <param name="originHeadSymbolicRef">
-    ///     What <c>origin/HEAD</c> points at (for example <c>origin/main</c>), or null when git could not
-    ///     say. Only read when <paramref name="baseRef" /> is <c>origin/HEAD</c>, which names no branch on
-    ///     its own.
-    /// </param>
-    public static string BaseBranchName(string baseRef, string? originHeadSymbolicRef)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(baseRef);
-
-        string resolved = baseRef;
-        if (string.Equals(baseRef, RemoteHead, StringComparison.Ordinal) &&
-            !string.IsNullOrWhiteSpace(originHeadSymbolicRef))
-        {
-            resolved = originHeadSymbolicRef.Trim();
-        }
-
-        return resolved.StartsWith(Remote + "/", StringComparison.Ordinal)
-            ? resolved[(Remote.Length + 1)..]
-            : resolved;
     }
 
     /// <summary>
@@ -288,7 +192,4 @@ public static partial class RunStartPlanner
         ArgumentNullException.ThrowIfNull(config);
         return repositoryIsConfigured && string.IsNullOrWhiteSpace(config.ConfigReg.Onboarding);
     }
-
-    [GeneratedRegex("^[a-z0-9]+(?:-[a-z0-9]+)*$", RegexOptions.CultureInvariant)]
-    private static partial Regex SlugPattern();
 }

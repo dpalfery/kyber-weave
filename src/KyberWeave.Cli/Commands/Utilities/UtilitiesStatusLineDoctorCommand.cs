@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Utilities.StatusLine;
 using Spectre.Console;
@@ -18,23 +19,19 @@ namespace KyberWeave.Cli.Commands.Utilities;
 /// </remarks>
 public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLineSettings>
 {
+    private readonly IProcessEnvironment _environment;
     private readonly UtilitiesStatusLineProcessRunner? _processRunner;
-    private readonly StatusLineTargetRoots? _roots;
-    private readonly UtilitiesStatusLineToolProbe? _toolProbe;
 
-    /// <summary>Creates a doctor command using the default roots, tool probe, and process runner.</summary>
-    public UtilitiesStatusLineDoctorCommand()
-    {
-    }
-
-    /// <summary>Creates a doctor command using injectable dependencies.</summary>
-    internal UtilitiesStatusLineDoctorCommand(
-        StatusLineTargetRoots? roots = null,
-        UtilitiesStatusLineToolProbe? toolProbe = null,
+    /// <summary>Creates a doctor command over the process environment.</summary>
+    /// <param name="environment">The process state the per-user roots and <c>PATH</c> are read from.</param>
+    /// <param name="processRunner">Runs the harness version probe; the bounded production runner when none is registered.</param>
+    public UtilitiesStatusLineDoctorCommand(
+        IProcessEnvironment environment,
         UtilitiesStatusLineProcessRunner? processRunner = null)
     {
-        _roots = roots;
-        _toolProbe = toolProbe;
+        ArgumentNullException.ThrowIfNull(environment);
+
+        _environment = environment;
         _processRunner = processRunner;
     }
 
@@ -46,8 +43,8 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        StatusLineTargetRoots roots = _roots ?? UtilitiesStatusLineCommandComposition.ResolveRoots();
-        UtilitiesStatusLineToolProbe toolProbe = _toolProbe ?? UtilitiesStatusLineCommandComposition.ResolveToolProbe();
+        StatusLineTargetRoots roots = UtilitiesStatusLineCommandComposition.ResolveRoots(_environment);
+        UtilitiesStatusLineToolProbe toolProbe = UtilitiesStatusLineCommandComposition.ResolveToolProbe(_environment);
         UtilitiesStatusLineProcessRunner processRunner =
             _processRunner ?? UtilitiesStatusLineCommandComposition.ResolveProcessRunner();
 

@@ -108,29 +108,3 @@ internal sealed class UtilitiesStatusLineProductArtifactSource : IUtilitiesStatu
         }
     }
 }
-
-/// <summary>Locates the canonical status-line artifact tree inside a repository checkout.</summary>
-/// <remarks>
-///     Mirrors <c>SquadPackSourceLocator</c>: it looks only in the immediate working directory, requires
-///     the solution marker beside the product tree, and never climbs to a parent or falls back to an
-///     embedded copy. A deploy run from anywhere else is refused with a hint naming the required
-///     directory rather than silently reading a different tree.
-/// </remarks>
-internal static class UtilitiesStatusLineProductLocator
-{
-    private const string SolutionFileName = "KyberWeave.sln";
-    private const string ProductRelativePath = "products/kyber-utilities/statusline";
-
-    /// <summary>The absolute artifact root, or <see langword="null" /> when the markers are absent.</summary>
-    public static string? Resolve(string workingDirectory)
-    {
-        if (string.IsNullOrWhiteSpace(workingDirectory) || !Directory.Exists(workingDirectory)) return null;
-
-        string root = Path.GetFullPath(workingDirectory);
-        string solutionPath = Path.Combine(root, SolutionFileName);
-        string productPath = Path.Combine(root, ProductRelativePath.Replace('/', Path.DirectorySeparatorChar));
-        return File.Exists(solutionPath) && Directory.Exists(productPath)
-            ? Path.GetFullPath(productPath)
-            : null;
-    }
-}

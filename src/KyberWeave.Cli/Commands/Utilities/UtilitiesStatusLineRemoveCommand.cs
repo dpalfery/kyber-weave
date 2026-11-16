@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Utilities.StatusLine;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -15,17 +16,15 @@ namespace KyberWeave.Cli.Commands.Utilities;
 /// </remarks>
 public sealed class UtilitiesStatusLineRemoveCommand : Command<UtilitiesStatusLineSettings>
 {
-    private readonly StatusLineTargetRoots? _roots;
+    private readonly IProcessEnvironment _environment;
 
-    /// <summary>Creates a remove command using the default per-user roots.</summary>
-    public UtilitiesStatusLineRemoveCommand()
+    /// <summary>Creates the command over the process environment its per-user roots are read from.</summary>
+    /// <param name="environment">The process state the roots are read from.</param>
+    public UtilitiesStatusLineRemoveCommand(IProcessEnvironment environment)
     {
-    }
+        ArgumentNullException.ThrowIfNull(environment);
 
-    /// <summary>Creates a remove command using injectable roots.</summary>
-    internal UtilitiesStatusLineRemoveCommand(StatusLineTargetRoots? roots = null)
-    {
-        _roots = roots;
+        _environment = environment;
     }
 
     /// <inheritdoc />
@@ -39,7 +38,7 @@ public sealed class UtilitiesStatusLineRemoveCommand : Command<UtilitiesStatusLi
         StatusLineTargetRoots roots;
         try
         {
-            roots = _roots ?? UtilitiesStatusLineCommandComposition.ResolveRoots();
+            roots = UtilitiesStatusLineCommandComposition.ResolveRoots(_environment);
             foreach (StatusLineTarget target in UtilitiesStatusLineTargetCatalog.All)
             {
                 _ = roots.ResolveStagingRoot(target);
