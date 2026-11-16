@@ -716,7 +716,7 @@ public sealed class ReviewGatesService(
         {
             PlannedTaskGate? plannedGate = planned.FirstOrDefault(candidate => string.Equals(candidate.Id, gate.Id, StringComparison.Ordinal));
             if (plannedGate is null || !outputs.TryGetValue(gate.Id, out string? output)
-                || (gate.Passed && !RedClassifier.IsTestCommand(string.Join(' ', plannedGate.Run))))
+                || (gate.Passed && !RedClassifier.IsTestGate(gate.Id, string.Join(' ', plannedGate.Run))))
                 continue;
 
             string? log = taskSlug is null ? null : $".agent_scratchpad/{taskSlug}/logs/{gate.Id}{(red ? "-red" : string.Empty)}.log";

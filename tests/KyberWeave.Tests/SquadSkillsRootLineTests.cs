@@ -58,7 +58,8 @@ public sealed class SquadSkillsRootLineTests
 
         if (scope == SquadDeploymentScope.Global)
         {
-            Assert.StartsWith("~/", line.Groups["root"].Value, StringComparison.Ordinal);
+            Assert.DoesNotContain("~", line.Groups["root"].Value, StringComparison.Ordinal);
+            Assert.True(Path.IsPathRooted(line.Groups["root"].Value), "A global skills root is written absolute.");
         }
     }
 
@@ -137,9 +138,7 @@ public sealed class SquadSkillsRootLineTests
             return relativeRoot;
         }
 
-        string absolute = Path.Combine(roots.ResolveGlobalRoot(target), relativeRoot).Replace('\\', '/');
-        string home = roots.HomeDirectory!.Replace('\\', '/').TrimEnd('/');
-        return absolute.StartsWith(home + "/", StringComparison.Ordinal) ? "~" + absolute[home.Length..] : absolute;
+        return Path.Combine(roots.ResolveGlobalRoot(target), relativeRoot).Replace('\\', '/');
     }
 
     private static string CarrierBody(SquadRenderResult result)
