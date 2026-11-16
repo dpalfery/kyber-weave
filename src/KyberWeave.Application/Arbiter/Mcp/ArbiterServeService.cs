@@ -30,7 +30,7 @@ namespace KyberWeave.Arbiter.Mcp;
 /// <c>serve</c> token; the classifier treats that token as project-wide, the same as any
 /// harness that does not fire per-agent hooks.
 /// </remarks>
-public sealed class ArbiterServeService(ArbiterServeContext context, IFileTextFacts files, ICommentTriageFactory triage) : IArbiterServeService
+public sealed class ArbiterServeService(ArbiterServeContext context, IFileTextFacts files, ICommentTriageFactory triage, TimeProvider clock) : IArbiterServeService
 {
     private const string Harness = "serve";
     private const string UnidentifiedCaller = "unidentified";
@@ -160,7 +160,7 @@ public sealed class ArbiterServeService(ArbiterServeContext context, IFileTextFa
             pending.Add(new PendingEvaluation(classification.Caller ?? UnidentifiedCaller, target, prompt, unit.Refute));
         }
 
-        HookContext hookContext = new(context.RepoRoot, () => ArbiterRecordId.New(DateTimeOffset.UtcNow), context.Log);
+        HookContext hookContext = new(context.RepoRoot, () => ArbiterRecordId.New(clock.GetUtcNow()), context.Log);
         ArbiterModelBlock? retarget = null;
         foreach (PendingEvaluation item in pending)
         {
