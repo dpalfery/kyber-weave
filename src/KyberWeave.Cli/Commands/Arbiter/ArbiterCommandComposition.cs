@@ -113,6 +113,12 @@ public static class ArbiterCommandComposition
 
     private static Func<IProcessExecutor> DefaultArbiterProbeExecutor { get; } = () => ProcessExecutor.Instance;
 
+    /// <summary>Creates the HTTP decision-model providers. The CLI's one composition point for them.</summary>
+    public static IArbiterProviderFactory Providers { get; } = new SystemOneProviderFactory();
+
+    /// <summary>Opens the Arbiter's ledger, decision log and run stores. The CLI's one composition point for them.</summary>
+    public static IArbiterStateFactory State { get; } = new FileArbiterStateFactory();
+
     /// <summary>Reads the per-user Arbiter provider override. The CLI's one composition point for it.</summary>
     public static IArbiterUserSettings UserSettings { get; } = new FileArbiterUserSettings(new PhysicalFileSystem());
 
@@ -623,7 +629,7 @@ public static class ArbiterCommandComposition
         }
 
         Func<Uri, string?> captured = keyResolver;
-        return SystemOneClient.CreateForProduct(
+        return Providers.CreateSystemOne(
             HttpHandler(),
             endpoint,
             config.Arbiter.Provider.Model,

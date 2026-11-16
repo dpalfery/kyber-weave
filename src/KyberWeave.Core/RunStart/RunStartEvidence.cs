@@ -12,9 +12,7 @@ namespace KyberWeave.Core.RunStart;
 public static class RunStartEvidence
 {
     /// <summary>The fix a refused dispatch names.</summary>
-    public const string Remedy =
-        "start the run first: kyber-weave run start --harness <harness> --type <type> --slug <slug> " +
-        "(or dispatch github-devops with RUN-START: true and that command), then send this dispatch again.";
+    public const string Remedy = ArbiterRunStartRemedy.Text;
 
     private static readonly HashSet<string> WriterProfiles = new(StringComparer.Ordinal)
     {

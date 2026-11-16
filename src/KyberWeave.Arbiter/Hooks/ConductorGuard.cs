@@ -350,12 +350,25 @@ public static partial class ConductorGuard
 
         // Started only for a path outside the working directory: git names the repository's other worktrees, so a
         // directory that merely looks like one is never trusted. The deepest match wins, for a nested worktree.
-        string? worktree = ArbiterServices.Shared.GetRequiredService<IGitRepositoryFacts>().ListWorktrees(cwd)
+        string? worktree = ListWorktreesOrNone(cwd)
             .Select(DirectoryPrefix)
             .Where(root => fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(root => root.Length)
             .FirstOrDefault();
         return worktree is not null && IsContractUnder(worktree, fullPath);
+    }
+
+    /// <summary>The repository's worktrees, or none when git or the container cannot answer: the guard then trusts only the working directory.</summary>
+    private static IReadOnlyList<string> ListWorktreesOrNone(string cwd)
+    {
+        try
+        {
+            return ArbiterServices.Shared.GetRequiredService<IGitRepositoryFacts>().ListWorktrees(cwd);
+        }
+        catch (Exception)
+        {
+            return [];
+        }
     }
 
     /// <summary>Whether <paramref name="fullPath"/>, inside the worktree <paramref name="root"/>, is a contract file there.</summary>

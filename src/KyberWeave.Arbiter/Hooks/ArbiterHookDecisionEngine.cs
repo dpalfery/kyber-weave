@@ -677,7 +677,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         }
 
         Func<Uri, string?> keyResolver = KeyResolverFor(config);
-        return SystemOneClient.CreateForProduct(
+        return _services.Value.GetRequiredService<IArbiterProviderFactory>().CreateSystemOne(
             new HttpClientHandler(),
             endpoint,
             config.Arbiter.Provider.Model,
