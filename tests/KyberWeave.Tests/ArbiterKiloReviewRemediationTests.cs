@@ -360,7 +360,7 @@ public sealed class ArbiterKiloReviewRemediationTests
 
         Func<string, string?> env = name => name == "HOME" ? home : null;
         List<string> log = [];
-        ArbiterHookRefresher refresher = new(new FileUserHostConfigStore(), log.Add, env);
+        ArbiterHookRefresher refresher = UpdateTestServices.Refresher(env, log.Add);
 
         ArbiterHookRefreshResult refreshResult = refresher.Refresh([]);
         Assert.Equal(5, refreshResult.Refreshed);

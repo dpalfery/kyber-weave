@@ -1,4 +1,3 @@
-using KyberWeave.Cli.Composition;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -7,6 +6,7 @@ using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Arbiter;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Mcp;
 using KyberWeave.Core.FileSystem;
@@ -20,29 +20,23 @@ namespace KyberWeave.Cli.Update;
 /// update path, in-process. A project whose deployment is missing or unreadable is skipped with a
 /// warning; the update that already committed its binaries keeps its exit code.
 /// </summary>
-internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
+internal sealed class ArbiterHookRefresher(
+    IProcessEnvironment environment,
+    IUserHostConfigStore userConfig,
+    IKyberWeaveConfigRepository configs,
+    ISquadLifecycleService lifecycle,
+    ISquadStateStore state,
+    IFileSystem files,
+    IMcpWiringService wiring,
+    Action<string>? log = null) : IArbiterHookRefresher
 {
-    private readonly Action<string>? _log;
-    private readonly Func<string, string?>? _environmentReader;
-    private readonly IUserHostConfigStore _userConfig;
-
-    internal ArbiterHookRefresher(
-        IUserHostConfigStore userConfig,
-        Action<string>? log = null,
-        Func<string, string?>? environmentReader = null)
-    {
-        _userConfig = userConfig;
-        _log = log;
-        _environmentReader = environmentReader;
-    }
+    private readonly Func<string, string?> _environmentReader = environment.GetVariable;
 
     /// <inheritdoc />
     public ArbiterHookRefreshResult Refresh(IReadOnlyList<string> projectRoots)
     {
         ArgumentNullException.ThrowIfNull(projectRoots);
 
-        SquadLifecycleService lifecycle =
-            SquadHostDefaults.CreateLifecycleService(environmentReader: _environmentReader);
         int refreshed = 0;
         int failed = 0;
         foreach (string root in projectRoots)
@@ -53,11 +47,11 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
             KyberWeaveConfigLoadResult loaded;
             try
             {
-                loaded = KyberWeaveConfigLoader.TryLoad(root);
+                loaded = configs.TryLoad(root);
             }
             catch (Exception ex) when (FileFailure.Is(ex))
             {
-                _log?.Invoke($"warning: skipping arbiter hook refresh for '{root}': {ex.Message}");
+                log?.Invoke($"warning: skipping arbiter hook refresh for '{root}': {ex.Message}");
                 failed++;
                 continue;
             }
@@ -73,7 +67,7 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
 
             try
             {
-                SquadArbiterWiring wiring = SquadCommandComposition.ResolveArbiterWiring(loaded.Config.Arbiter);
+                SquadArbiterWiring wiring = Wiring(loaded.Config.Arbiter);
                 SquadUpdateRequest request = new(root, SquadDeploymentScope.Project, Arbiter: wiring);
                 SquadLifecycleResult result = lifecycle.UpdateAsync(request).GetAwaiter().GetResult();
                 if (!result.Success)
@@ -81,7 +75,7 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
                     string reason = result.Errors is { Count: > 0 }
                         ? string.Join(Environment.NewLine, result.Errors)
                         : "the Squad update reported failure.";
-                    _log?.Invoke($"warning: arbiter hook refresh for '{root}' failed: {reason}");
+                    log?.Invoke($"warning: arbiter hook refresh for '{root}' failed: {reason}");
                     failed++;
                 }
                 else
@@ -91,7 +85,7 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
             }
             catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or HttpRequestException or TimeoutException or OperationCanceledException or InvalidDataException)
             {
-                _log?.Invoke($"warning: arbiter hook refresh for '{root}' failed: {ex.Message}");
+                log?.Invoke($"warning: arbiter hook refresh for '{root}' failed: {ex.Message}");
                 failed++;
             }
         }
@@ -102,17 +96,14 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
         if (!string.IsNullOrWhiteSpace(home))
         {
             int globalTimeout = ResolveGlobalTimeout(home);
-            SquadStateStore stateStore = SquadHostDefaults.ResolveStateStore(
-                new SquadHostDefaults.CliSquadUserPaths(home, Path.Combine(home, ".config")),
-                _environmentReader);
             SquadReceipt? receipt = null;
             try
             {
-                receipt = stateStore.ReadReceipt(home, SquadDeploymentScope.Global);
+                receipt = state.ReadReceipt(home, SquadDeploymentScope.Global);
             }
             catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException)
             {
-                _log?.Invoke($"warning: could not read global squad receipt: {ex.Message}");
+                log?.Invoke($"warning: could not read global squad receipt: {ex.Message}");
             }
 
             bool receiptChanged = false;
@@ -124,7 +115,7 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
                 if (string.IsNullOrWhiteSpace(hookPath))
                     continue;
 
-                if (!File.Exists(hookPath))
+                if (!files.FileExists(hookPath))
                     continue;
 
                 try
@@ -164,7 +155,7 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
                 }
                 catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or JsonException)
                 {
-                    _log?.Invoke($"warning: arbiter global hook refresh for '{targetToken}' failed: {ex.Message}");
+                    log?.Invoke($"warning: arbiter global hook refresh for '{targetToken}' failed: {ex.Message}");
                     globalFailed++;
                 }
             }
@@ -178,13 +169,13 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
                         Files = updatedFiles ?? receipt.Files,
                         Blocks = updatedBlocks ?? receipt.Blocks
                     };
-                    string receiptPath = stateStore.ResolveReceiptPath(home, SquadDeploymentScope.Global);
-                    string serialized = stateStore.SerializeReceipt(updatedReceipt);
+                    string receiptPath = state.ResolveReceiptPath(home, SquadDeploymentScope.Global);
+                    string serialized = state.SerializeReceipt(updatedReceipt);
                     AtomicFile.WriteAllText(receiptPath, serialized);
                 }
                 catch (Exception ex) when (FileFailure.Is(ex) || ex is JsonException)
                 {
-                    _log?.Invoke($"warning: updating global squad receipt failed: {ex.Message}");
+                    log?.Invoke($"warning: updating global squad receipt failed: {ex.Message}");
                 }
             }
         }
@@ -194,23 +185,26 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
 
     private string? ResolveHome()
     {
-        string? home = _environmentReader?.Invoke("HOME");
+        string? home = _environmentReader("HOME");
         if (string.IsNullOrWhiteSpace(home))
-            home = _environmentReader?.Invoke("USERPROFILE");
+            home = _environmentReader("USERPROFILE");
         if (string.IsNullOrWhiteSpace(home))
-            home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            home = environment.HomeDirectory;
 
         return string.IsNullOrWhiteSpace(home) ? null : home;
     }
 
-    private static int ResolveGlobalTimeout(string home)
+    private static SquadArbiterWiring Wiring(ArbiterConfig arbiter) =>
+        new(arbiter.Enabled, ArbiterHookTimeout.SecondsFor(arbiter.Provider.TimeoutMs));
+
+    private int ResolveGlobalTimeout(string home)
     {
         try
         {
-            KyberWeaveConfigLoadResult userConfig = KyberWeaveConfigLoader.TryLoadUserConfig(home);
+            KyberWeaveConfigLoadResult userConfig = configs.TryLoadUserConfig(home);
             if (userConfig.Success && userConfig.Config?.Arbiter is { } arbiter)
             {
-                return SquadCommandComposition.ResolveArbiterWiring(arbiter).HookTimeoutSeconds;
+                return Wiring(arbiter).HookTimeoutSeconds;
             }
         }
         catch
@@ -218,12 +212,12 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
             // Fall back to default.
         }
 
-        return SquadCommandComposition.ResolveArbiterWiring(ArbiterConfig.ProductDefaults).HookTimeoutSeconds;
+        return Wiring(ArbiterConfig.ProductDefaults).HookTimeoutSeconds;
     }
 
     private IEnumerable<(string TargetToken, string HookPath)> ResolveGlobalHookTargets(string home)
     {
-        foreach (string token in _userConfig.ReadGlobalTargets(home))
+        foreach (string token in userConfig.ReadGlobalTargets(home))
         {
             if (string.IsNullOrWhiteSpace(token))
                 continue;
@@ -237,7 +231,7 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
         }
     }
 
-    private static bool RefreshGlobalHook(
+    private bool RefreshGlobalHook(
         string hookPath,
         string? targetToken,
         int timeoutSeconds,
@@ -268,7 +262,7 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
             if (string.IsNullOrEmpty(rendered))
                 return false;
 
-            string before = File.Exists(hookPath) ? File.ReadAllText(hookPath) : string.Empty;
+            string before = files.FileExists(hookPath) ? files.ReadAllText(hookPath) : string.Empty;
             if (string.Equals(before, rendered, StringComparison.Ordinal))
                 return false;
 
@@ -280,7 +274,7 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
         if (!TryBuildGlobalHookEntries(target, timeoutSeconds, out SquadHookBlockFormat format, out JsonNode[] preToolUse, out JsonNode[] postToolUse))
             return false;
 
-        string existing = File.Exists(hookPath) ? File.ReadAllText(hookPath) : string.Empty;
+        string existing = files.FileExists(hookPath) ? files.ReadAllText(hookPath) : string.Empty;
         if (string.IsNullOrWhiteSpace(existing))
             return false;
 
@@ -445,13 +439,13 @@ internal sealed class ArbiterHookRefresher : IArbiterHookRefresher
     {
         IReadOnlyList<McpRenameChange> leftovers =
         [
-            .. LegacyMcpWiring.Service.Scan(root, null)
+            .. wiring.Scan(root, null)
                 .Where(change => string.Equals(change.Code, McpServerRenamer.RenameCode, StringComparison.Ordinal))
         ];
 
         foreach (McpRenameChange leftover in leftovers)
         {
-            _log?.Invoke(
+            log?.Invoke(
                 $"warning: '{root}' still holds the retired MCP server key '{leftover.OldKey}' "
                 + $"({leftover.Path}): {McpServerRenamer.RenameCode}; run {McpServerRenamer.MigrateCommand} "
                 + $"--target {leftover.Harness} to rename it to '{leftover.NewKey}'.");

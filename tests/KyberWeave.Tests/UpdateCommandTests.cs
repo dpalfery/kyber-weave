@@ -970,7 +970,7 @@ public sealed class UpdateCommandTests : IDisposable
             _ => null,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
-            arbiterTargets: new CliArbiterRefreshTargets(_ => null, new FileUserHostConfigStore()));
+            arbiterTargets: UpdateTestServices.NoProjects);
         using SelfUpdater updater = new(
             handler,
             host,
@@ -978,7 +978,7 @@ public sealed class UpdateCommandTests : IDisposable
             _ => null,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
-            arbiterTargets: new CliArbiterRefreshTargets(_ => null, new FileUserHostConfigStore()),
+            arbiterTargets: UpdateTestServices.NoProjects,
             finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
@@ -1005,7 +1005,7 @@ public sealed class UpdateCommandTests : IDisposable
             _ => null,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
-            arbiterTargets: new CliArbiterRefreshTargets(_ => null, new FileUserHostConfigStore()));
+            arbiterTargets: UpdateTestServices.NoProjects);
         using SelfUpdater updater = new(
             handler,
             host,
@@ -1013,7 +1013,7 @@ public sealed class UpdateCommandTests : IDisposable
             _ => null,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
-            arbiterTargets: new CliArbiterRefreshTargets(_ => null, new FileUserHostConfigStore()),
+            arbiterTargets: UpdateTestServices.NoProjects,
             finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 

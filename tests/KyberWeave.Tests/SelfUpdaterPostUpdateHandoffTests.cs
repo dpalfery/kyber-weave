@@ -524,7 +524,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
             new SelfUpdateOptions("0.2.0", false, false, FinishUpdate: true),
             record,
             environment: environment,
-            refresher: new ArbiterHookRefresher(new FileUserHostConfigStore(), record.Log.Add, environment));
+            refresher: UpdateTestServices.Refresher(environment, record.Log.Add));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Contains(
@@ -668,7 +668,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
             spawn,
             captureProcess: capture,
             arbiterHookRefresher: arbiter,
-            arbiterTargets: new CliArbiterRefreshTargets(readEnvironment, new FileUserHostConfigStore()));
+            arbiterTargets: UpdateTestServices.Targets(readEnvironment));
         Func<string, IReadOnlyList<string>, bool, int> loopbackSeam = loopback.Invoke;
         SeamProbe probe = new(record, handOff ?? loopbackSeam);
 
@@ -680,7 +680,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
             spawn,
             captureProcess: capture,
             arbiterHookRefresher: arbiter,
-            arbiterTargets: new CliArbiterRefreshTargets(readEnvironment, new FileUserHostConfigStore()),
+            arbiterTargets: UpdateTestServices.Targets(readEnvironment),
             finishingProcess: probe.Invoke);
         return updater.Run(options);
     }
