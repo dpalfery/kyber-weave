@@ -48,7 +48,7 @@ public sealed class PlanTaskPacketTests
     private static (PlanTaskFile? File, DiagnosticReport Report) Build(string markdown, string? repoRoot = null)
     {
         DiagnosticReport report = new();
-        PlanTaskFile? file = PlanTaskFileGenerator.Build(Plan, markdown, ["docs/plans"], report, repoRoot);
+        PlanTaskFile? file = PlanTaskFileGenerator.Build(Plan, markdown, ["docs/plans"], report, repoRoot, DocsPorts.Files, DocsPorts.Process);
         return (file, report);
     }
 

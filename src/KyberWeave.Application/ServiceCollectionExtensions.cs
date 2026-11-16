@@ -1,5 +1,8 @@
 using KyberWeave.Application.Hooks;
 using KyberWeave.Application.RunStart;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Docs.Analysis.Glossary;
+using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Core.Squad.Briefs;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Data;
@@ -28,6 +31,10 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IEditHookService, EditHookService>();
         services.TryAddSingleton<IRunStartRunnerFactory, RunStartRunnerFactory>();
         services.TryAddSingleton<ISquadBriefService, SquadBriefService>();
+        services.TryAddSingleton<IManagedGlossaryFactory>(sp => new ManagedGlossaryFactory(
+            sp.GetRequiredService<IRepositoryFileStore>(), sp.GetRequiredService<TimeProvider>()));
+        services.TryAddSingleton<IPlanTaskService>(sp => new PlanTaskService(
+            sp.GetRequiredService<IRepositoryFileStore>(), sp.GetRequiredService<IBoundedProcessExecutor>()));
         return services;
     }
 }

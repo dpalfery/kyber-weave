@@ -1,12 +1,13 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Closeout;
 using KyberWeave.Core.Docs.Model;
-using KyberWeave.Core.Processes;
 using KyberWeave.Core.FileSystem;
+using static KyberWeave.Core.Docs.Validation.PlanTaskFileRules;
 
 namespace KyberWeave.Core.Docs.Validation;
 
@@ -40,73 +41,28 @@ namespace KyberWeave.Core.Docs.Validation;
 /// </remarks>
 public sealed partial class PlanTaskFileValidator
 {
-    /// <summary>The file is not JSON this build reads, or declares a schema version it does not read.</summary>
-    public const string Malformed = "KW-DOC-TASKS-001";
-
-    /// <summary>The file's plan, tasks, files or dependencies disagree with the plan's.</summary>
-    public const string DiffersFromPlan = "KW-DOC-TASKS-002";
-
-    /// <summary>The file's execution digest is stale: the plan moved after the file was written.</summary>
-    public const string StaleDigest = "KW-DOC-TASKS-003";
-
-    /// <summary>A prompt carries no command, or no acceptance criteria.</summary>
-    public const string IncompletePrompt = "KW-DOC-TASKS-004";
-
-    /// <summary>A prompt tells the worker to open a plan, which no prompt may do.</summary>
-    public const string PromptsAPlanRead = "KW-DOC-TASKS-005";
-
-    /// <summary>A Ready plan has no task file beside it. Advisory: it never fails a merge.</summary>
-    public const string MissingTaskFile = "KW-DOC-TASKS-006";
-
-    /// <summary>How much of a candidate sidecar is read to see whether it holds the task file schema.</summary>
-    private const int SniffLength = 65536;
-
-    /// <summary>A copy of a task file left beside it under another name, such as <c>&lt;plan&gt;.tasks.json.new</c>.</summary>
-    public const string SidecarTaskFile = "KW-DOC-TASKS-007";
-
-    /// <summary>A task cites a decision or test contract row the plan does not have, or cites more than its packet can carry. A warning.</summary>
-    public const string UnresolvedReference = "KW-DOC-TASKS-008";
-
-    /// <summary>A task points at plan content without saying which ("see above", "as described in the plan"). A warning.</summary>
-    public const string VagueReference = "KW-DOC-TASKS-009";
-
-    // KW-DOC-TASKS-010 (a test task ordered before the code its tests name) is retired: a test-first task's one
-    // worker writes the tests and the code together, so no task's tests wait on another task. The id is not reused.
-
-    /// <summary>Info: text a task listed as files that is not a repository path was left out of its file scope.</summary>
-    public const string NotARepositoryPath = "KW-DOC-TASKS-012";
-
-    /// <summary>A model that read only a task's packet says a developer could not do the task from it. A warning.</summary>
-    public const string PacketNotSelfContained = "KW-DOC-TASKS-011";
-
-    /// <summary>The schema version this build reads.</summary>
-    internal const int SchemaVersion = 1;
-
-    private const string PlanExtension = ".md";
-    private const string TaskFileSuffix = ".tasks.json";
-
-    /// <summary>A specification's task list is the file named <c>tasks.md</c>; its task file is <c>tasks.json</c> beside it.</summary>
-    private const string SpecTaskListFileName = "tasks.md";
-    private const string SpecTaskFileName = "tasks.json";
-
-    private const string PlanKind = "plan";
-    private const string SpecTaskListKind = "specification task list";
-
-    private static readonly char[] WhitespaceSeparators = [' ', '\t', '\n', '\r'];
 
     private readonly string _repoRoot;
-    private readonly KyberWeaveConfig _config;
+    private readonly IDocsEngineConfig _config;
+    private readonly IRepositoryFileStore _files;
+    private readonly IBoundedProcessExecutor _process;
 
     /// <summary>Creates the validator over a repository root and its registry and ontology.</summary>
     /// <param name="repoRoot">The absolute repository root the plan paths are relative to.</param>
     /// <param name="config">The effective host configuration, with its ontology applied.</param>
-    public PlanTaskFileValidator(string repoRoot, KyberWeaveConfig config)
+    /// <param name="files">Reads the task files and walks the plans folder.</param>
+    /// <param name="process">Runs git for the file-scope check.</param>
+    public PlanTaskFileValidator(string repoRoot, IDocsEngineConfig config, IRepositoryFileStore files, IBoundedProcessExecutor process)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(process);
 
         _repoRoot = repoRoot;
         _config = config;
+        _files = files;
+        _process = process;
     }
 
     /// <summary>
@@ -133,17 +89,6 @@ public sealed partial class PlanTaskFileValidator
 
         return report;
     }
-
-    /// <summary>Whether the document is a specification's <c>tasks.md</c>, the task list its <c>tasks.json</c> is checked against.</summary>
-    private static bool IsSpecTaskList(DocumentModel document) =>
-        document.DocType == DocType.Spec
-        && string.Equals(FileNameOf(document.RelativePath), SpecTaskListFileName, StringComparison.OrdinalIgnoreCase);
-
-    private static string KindOf(DocumentModel artifact) =>
-        IsSpecTaskList(artifact) ? SpecTaskListKind : PlanKind;
-
-    private static string FileNameOf(string relativePath) =>
-        relativePath[(relativePath.LastIndexOfAny(['/', '\\']) + 1)..];
 
     /// <summary>
     /// Reports each file in the plans folder whose name is a copy of the task file, such as
@@ -175,7 +120,7 @@ public sealed partial class PlanTaskFileValidator
         string start = Path.Combine(_repoRoot, planFolder.Replace('/', Path.DirectorySeparatorChar));
         // A resolved folder that does not exist holds no sidecars, so a clean result is true here;
         // KW-CONFIG-REG-001 already reports a registry index path that points at nothing.
-        if (Directory.Exists(start))
+        if (_files.DirectoryExists(start))
         {
             WalkForSidecars(start, planFolder, report);
         }
@@ -191,12 +136,10 @@ public sealed partial class PlanTaskFileValidator
     /// </remarks>
     private void WalkForSidecars(string directory, string relativeDirectory, DiagnosticReport report)
     {
-        List<FileSystemInfo> entries;
+        List<RepositoryEntry> entries;
         try
         {
-            entries = [.. new DirectoryInfo(directory).EnumerateFileSystemInfos(
-                "*",
-                new EnumerationOptions { IgnoreInaccessible = false, AttributesToSkip = 0 })];
+            entries = [.. _files.EnumerateEntries(directory)];
         }
         catch (Exception exception) when (FileFailure.Is(exception))
         {
@@ -212,30 +155,30 @@ public sealed partial class PlanTaskFileValidator
             return;
         }
 
-        foreach (FileSystemInfo entry in entries.OrderBy(e => e.Name, StringComparer.Ordinal))
+        foreach (RepositoryEntry entry in entries.OrderBy(e => Path.GetFileName(e.Path), StringComparer.Ordinal))
         {
-            if (entry.LinkTarget is not null)
+            if (entry.IsLink)
             {
                 continue;
             }
 
-            string relative = relativeDirectory + "/" + entry.Name;
-            if (entry is DirectoryInfo subdirectory)
+            string relative = relativeDirectory + "/" + Path.GetFileName(entry.Path);
+            if (entry.IsDirectory)
             {
                 if (!InventoryReachability.IsArchived(relative))
                 {
-                    WalkForSidecars(subdirectory.FullName, relative, report);
+                    WalkForSidecars(entry.Path, relative, report);
                 }
             }
             else
             {
-                ReportIfSidecar(entry.FullName, relative, report);
+                ReportIfSidecar(entry.Path, relative, report);
             }
         }
     }
 
     /// <summary>Reports <paramref name="file"/> when it is a copy of a task file.</summary>
-    private static void ReportIfSidecar(string file, string relative, DiagnosticReport report)
+    private void ReportIfSidecar(string file, string relative, DiagnosticReport report)
     {
         // A name that ends in the task file's suffix is the task file itself, or a file
         // KW-DOC-LIFECYCLE-005 already reports; this rule takes only what that one leaves.
@@ -269,11 +212,11 @@ public sealed partial class PlanTaskFileValidator
     /// A file that cannot be read is reported, because it cannot be shown to be unrelated; one that
     /// has been deleted since the listing is not, because there is nothing left to report.
     /// </remarks>
-    private static bool LooksLikeTaskFile(string file)
+    private bool LooksLikeTaskFile(string file)
     {
         try
         {
-            using FileStream stream = File.OpenRead(file);
+            using Stream stream = _files.OpenRead(file);
             byte[] head = new byte[SniffLength];
             int read = stream.Read(head, 0, head.Length);
             return HasSchemaKey(head.AsSpan(0, read));
@@ -325,52 +268,6 @@ public sealed partial class PlanTaskFileValidator
     }
 
     /// <summary>
-    /// The repository-relative directories holding plans and specifications: the folders of the
-    /// three planning indexes.
-    /// </summary>
-    /// <remarks>
-    /// Read from the registry rather than hard-coded, so a host that moves its plans is checked
-    /// against the folder it actually uses. These are the same directories the Arbiter publishes
-    /// as <c>config.planning-dirs</c>, which is what lets one detector answer both rules.
-    /// </remarks>
-    internal static IReadOnlyList<string> PlanningDirectories(IReadOnlyList<ConfigRegEntry> registry)
-    {
-        string[] properties =
-        [
-            ConfigRegConfig.PlanIndexProperty,
-            ConfigRegConfig.SpecificationIndexProperty,
-            ConfigRegConfig.TodoIndexProperty
-        ];
-
-        List<string> directories = [];
-        foreach (string property in properties)
-        {
-            if (FolderOf(registry, property) is { } directory)
-            {
-                directories.Add(directory);
-            }
-        }
-
-        return directories;
-    }
-
-    /// <summary>The folder of a registry property's index file, or null when the property is unset.</summary>
-    private static string? FolderOf(IReadOnlyList<ConfigRegEntry> registry, string property)
-    {
-        string? indexPath = registry
-            .FirstOrDefault(entry => string.Equals(entry.Name, property, StringComparison.Ordinal))
-            ?.Path;
-        if (string.IsNullOrWhiteSpace(indexPath))
-        {
-            return null;
-        }
-
-        string normalized = indexPath.Replace('\\', '/');
-        int separator = normalized.LastIndexOf('/');
-        return separator > 0 ? normalized[..separator] : null;
-    }
-
-    /// <summary>
     /// Checks one plan or specification task list against the task file beside it. <paramref name="kind"/>
     /// names the artifact in messages: <c>plan</c>, or <c>specification task list</c>.
     /// </summary>
@@ -383,7 +280,7 @@ public sealed partial class PlanTaskFileValidator
         PlanDocument parsed = PlanDocumentParser.Parse(artifact.RawMarkdown);
         string taskFile = TaskFilePath(artifact);
 
-        if (!DocsRootPath.IsContainedFile(_repoRoot, taskFile, _config.Ontology.DocsRoots))
+        if (!_files.IsContainedFile(_repoRoot, taskFile, _config.Ontology.DocsRoots))
         {
             if (IsReady(artifact))
             {
@@ -461,7 +358,7 @@ public sealed partial class PlanTaskFileValidator
         file = null;
         try
         {
-            string json = BoundedFile.ReadAllText(FullPath(taskFile));
+            string json = _files.ReadAllTextBounded(FullPath(taskFile));
             file = JsonSerializer.Deserialize<PlanTaskFile>(json, PlanTaskFileJson.ReadOptions);
         }
         catch (JsonException exception)
@@ -556,7 +453,7 @@ public sealed partial class PlanTaskFileValidator
                 Hint: $"The plan is the authority. Run {fix} to drop the entry, or add the task to the plan first and then run it."));
         }
 
-        PlanFileScope fileScope = new(_repoRoot);
+        PlanFileScope fileScope = new(_repoRoot, _files, _process);
         foreach ((string id, PlanTaskFileEntry entry) in declared)
         {
             if (!byId.TryGetValue(id, out PlanTask? task))
@@ -703,83 +600,6 @@ public sealed partial class PlanTaskFileValidator
     }
 
     /// <summary>
-    /// True when the prompt runs something: a backticked span or a fenced block holding a program
-    /// and at least one argument.
-    /// </summary>
-    /// <remarks>
-    /// The narrow reading is deliberate. A single backticked token is a name — a path, a class, a
-    /// setting — and prose that mentions tests does not run them; this repository shipped prompts
-    /// whose runner matched no test class, which is the failure a bare mention hides.
-    /// </remarks>
-    internal static bool HasCommand(string prompt)
-    {
-        foreach (Match match in FencedBlockRegex().Matches(prompt))
-        {
-            if (LooksLikeCommand(match.Groups["body"].Value))
-            {
-                return true;
-            }
-        }
-
-        foreach (Match match in InlineSpanRegex().Matches(prompt))
-        {
-            if (LooksLikeCommand(match.Groups["body"].Value))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static bool LooksLikeCommand(string value) =>
-        value.Split(WhitespaceSeparators, StringSplitOptions.RemoveEmptyEntries).Length >= 2;
-
-    /// <summary>
-    /// True when the prompt states acceptance criteria: text after an <c>Acceptance criteria</c>
-    /// or <c>Acceptance</c> label, on its line or in the indented block below it.
-    /// </summary>
-    internal static bool HasAcceptanceCriteria(string prompt)
-    {
-        string[] lines = prompt.Split('\n');
-        for (int index = 0; index < lines.Length; index++)
-        {
-            Match match = AcceptanceLabelRegex().Match(lines[index]);
-            if (!match.Success)
-            {
-                continue;
-            }
-
-            if (!string.IsNullOrWhiteSpace(match.Groups["text"].Value))
-            {
-                return true;
-            }
-
-            // A label on its own line takes the criteria below it, but only an indented or
-            // bulleted block: the next paragraph is the next thought, not the criteria.
-            for (int next = index + 1; next < lines.Length; next++)
-            {
-                if (string.IsNullOrWhiteSpace(lines[next]))
-                {
-                    continue;
-                }
-
-                string trimmed = lines[next].TrimStart();
-                if (trimmed.Length != lines[next].Length
-                    || trimmed.StartsWith("- ", StringComparison.Ordinal)
-                    || trimmed.StartsWith("* ", StringComparison.Ordinal))
-                {
-                    return true;
-                }
-
-                break;
-            }
-        }
-
-        return false;
-    }
-
-    /// <summary>
     /// True when the plan or specification <c>tasks.md</c> declares itself Ready, which is the state its
     /// task file is written in.
     /// </summary>
@@ -790,35 +610,6 @@ public sealed partial class PlanTaskFileValidator
     /// with the colon inside the bold label. <see cref="ReadyStatusRegex"/> accepts both forms.
     /// </remarks>
     private static bool IsReady(DocumentModel artifact) => ReadyStatusRegex().IsMatch(artifact.Body);
-
-    /// <summary>
-    /// The task file beside an artifact: <c>&lt;plan&gt;.tasks.json</c> for a plan, and the folder's
-    /// <c>tasks.json</c> beside a specification's <c>tasks.md</c>.
-    /// </summary>
-    private static string TaskFilePath(DocumentModel artifact) =>
-        TaskFilePathFor(artifact.RelativePath, IsSpecTaskList(artifact));
-
-    /// <summary>
-    /// The task file's repository-relative path for a plan or specification task list at
-    /// <paramref name="artifactPath"/>.
-    /// </summary>
-    /// <param name="artifactPath">The plan, or the specification's <c>tasks.md</c>, repository-relative.</param>
-    /// <param name="isSpecTaskList">True when the path is a specification's task list.</param>
-    internal static string TaskFilePathFor(string artifactPath, bool isSpecTaskList)
-    {
-        if (isSpecTaskList)
-        {
-            return artifactPath[..(artifactPath.LastIndexOf('/') + 1)] + SpecTaskFileName;
-        }
-
-        return artifactPath.EndsWith(PlanExtension, StringComparison.OrdinalIgnoreCase)
-            ? artifactPath[..^PlanExtension.Length] + TaskFileSuffix
-            : artifactPath + TaskFileSuffix;
-    }
-
-    /// <summary>Whether a path names a specification's task list, by its file name.</summary>
-    internal static bool IsSpecTaskListPath(string relativePath) =>
-        string.Equals(FileNameOf(relativePath), SpecTaskListFileName, StringComparison.OrdinalIgnoreCase);
 
     private string FullPath(string relativePath) =>
         Path.Combine(_repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
@@ -850,17 +641,6 @@ public sealed partial class PlanTaskFileValidator
 
     private static string Describe(IReadOnlyList<string> values) =>
         values.Count == 0 ? "none" : string.Join(", ", values);
-
-    [GeneratedRegex(@"```[^\n]*\n(?<body>.*?)```", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
-    private static partial Regex FencedBlockRegex();
-
-    [GeneratedRegex(@"`(?<body>[^`\n]+)`", RegexOptions.CultureInvariant)]
-    private static partial Regex InlineSpanRegex();
-
-    [GeneratedRegex(
-        @"^[ \t]*(?:[-*+][ \t]+)?\**acceptance(?:[ \t]+criteria)?\**\s*:[ \t]*(?<text>.*)$",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex AcceptanceLabelRegex();
 
     // The plan form puts the colon inside the bold, `**Status: Ready**`; the spec form closes the
     // bold after the colon, `**Status:** Ready`. Both name the same state.

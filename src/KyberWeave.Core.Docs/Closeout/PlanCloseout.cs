@@ -74,7 +74,7 @@ public sealed partial class PlanCloseout
         _repoRoot = Path.GetFullPath(repoRoot);
         _config = config;
         _loaderFactory = loaderFactory;
-        _files = new ActivePlanFiles(_repoRoot, config);
+        _files = new ActivePlanFiles(_repoRoot, config, LegacyPorts.Files, LegacyPorts.Process);
     }
 
     /// <summary>Checks the plan's closeout evidence and, with <paramref name="archive"/>, archives it.</summary>

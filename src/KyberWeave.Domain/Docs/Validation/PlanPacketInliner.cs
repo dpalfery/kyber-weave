@@ -42,7 +42,7 @@ internal static partial class PlanPacketInliner
         else if (ContractWordRegex().IsMatch(body))
         {
             findings.Add(Finding(
-                PlanTaskFileValidator.UnresolvedReference,
+                PlanTaskFileRules.UnresolvedReference,
                 $"Task '{task.Id}' refers to the test contract, but the plan's test contract has no row for '{task.Id}', so the packet cannot carry one.",
                 task.Id,
                 artifactPath,
@@ -60,7 +60,7 @@ internal static partial class PlanPacketInliner
             else
             {
                 findings.Add(Finding(
-                    PlanTaskFileValidator.UnresolvedReference,
+                    PlanTaskFileRules.UnresolvedReference,
                     $"Task '{task.Id}' cites decision {id}, but the plan's Decisions table has no row for {id}, so the packet cannot carry it.",
                     task.Id,
                     artifactPath,
@@ -86,7 +86,7 @@ internal static partial class PlanPacketInliner
         foreach (string phrase in VagueReferences(body, decisions.Count > 0 || resolvedHeadings.Count > 0))
         {
             findings.Add(Finding(
-                PlanTaskFileValidator.VagueReference,
+                PlanTaskFileRules.VagueReference,
                 $"Task '{task.Id}' says \"{phrase}\", but names no decision, test contract row or plan section the packet can carry, and a worker cannot open the plan.",
                 task.Id,
                 artifactPath,
@@ -126,7 +126,7 @@ internal static partial class PlanPacketInliner
             text.Append("\nLeft out because the packet is limited to ").Append(Budget).Append(" characters of plan content: ")
                 .Append(string.Join("; ", leftOut)).Append(". Report it as blocked rather than guessing.\n");
             findings.Add(Finding(
-                PlanTaskFileValidator.UnresolvedReference,
+                PlanTaskFileRules.UnresolvedReference,
                 $"Task '{task.Id}' cites more plan content than one packet carries ({Budget} characters); left out: {string.Join("; ", leftOut)}.",
                 task.Id,
                 artifactPath,

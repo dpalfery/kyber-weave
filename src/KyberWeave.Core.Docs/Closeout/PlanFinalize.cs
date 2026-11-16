@@ -99,7 +99,7 @@ public sealed partial class PlanFinalize
         _repoRoot = Path.GetFullPath(repoRoot);
         _config = config;
         _loaderFactory = loaderFactory;
-        _files = new ActivePlanFiles(_repoRoot, config);
+        _files = new ActivePlanFiles(_repoRoot, config, LegacyPorts.Files, LegacyPorts.Process);
         _picker = picker;
     }
 
@@ -182,7 +182,7 @@ public sealed partial class PlanFinalize
         if (withApproval is null)
             return Refused();
 
-        PlanTaskFileGenerator generator = new(_repoRoot, _config, _picker);
+        PlanTaskFileGenerator generator = new(_repoRoot, _config, LegacyPorts.Files, LegacyPorts.Process, _picker);
         PlanTaskFileOutcome preview = generator.Run(plan, PlanTaskFileMode.Preview);
         if (preview.Report.HasErrors)
         {
@@ -281,7 +281,7 @@ public sealed partial class PlanFinalize
 
     private PlanFinalizeOutcome AlreadyReady(string plan, DiagnosticReport report, string taskFile)
     {
-        PlanTaskFileOutcome check = new PlanTaskFileGenerator(_repoRoot, _config).Run(plan, PlanTaskFileMode.Check);
+        PlanTaskFileOutcome check = new PlanTaskFileGenerator(_repoRoot, _config, LegacyPorts.Files, LegacyPorts.Process).Run(plan, PlanTaskFileMode.Check);
         if (check.Report.HasErrors)
         {
             report.AddRange(check.Report.Items);
@@ -367,7 +367,7 @@ public sealed partial class PlanFinalize
         try
         {
             PlanTaskFile? file = JsonSerializer.Deserialize<PlanTaskFile>(taskFileText, PlanTaskFileJson.ReadOptions);
-            if (file is not { Tasks: { } tasks } || file.SchemaVersion != PlanTaskFileValidator.SchemaVersion || tasks.Any(task => task is null))
+            if (file is not { Tasks: { } tasks } || file.SchemaVersion != PlanTaskFileRules.SchemaVersion || tasks.Any(task => task is null))
                 return null;
             return tasks.Count > 0 ? PlanTaskPacket.ReadyQueue(tasks) : "(no tasks)";
         }

@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.FileSystem;
 
@@ -18,12 +19,24 @@ internal sealed partial class PlanFileScope
     private static readonly string[] SkippedDirectories = [".git", "node_modules", "bin", "obj", ".agent_scratchpad"];
 
     private readonly string? _root;
+    private readonly IRepositoryFileStore _files;
+    private readonly IBoundedProcessExecutor _process;
     private readonly Lazy<HashSet<string>?> _extensions;
 
     /// <summary>Creates the scope for one repository.</summary>
     /// <param name="repositoryRoot">The repository root, or null when unknown; without it only entries that cannot be paths are dropped.</param>
-    public PlanFileScope(string? repositoryRoot)
+    /// <param name="files">Probes the repository's files and folders.</param>
+    /// <param name="process">Runs <c>git ls-files</c> to read the extensions the repository tracks.</param>
+    public PlanFileScope(string? repositoryRoot, IRepositoryFileStore? files, IBoundedProcessExecutor? process)
     {
+        if (!string.IsNullOrWhiteSpace(repositoryRoot))
+        {
+            ArgumentNullException.ThrowIfNull(files);
+            ArgumentNullException.ThrowIfNull(process);
+        }
+
+        _files = files!;
+        _process = process!;
         _root = string.IsNullOrWhiteSpace(repositoryRoot) ? null : Path.GetFullPath(repositoryRoot);
         _extensions = new Lazy<HashSet<string>?>(ReadExtensions);
     }
@@ -67,17 +80,17 @@ internal sealed partial class PlanFileScope
         string full = Path.Combine(_root, literal.Replace('/', Path.DirectorySeparatorChar));
         if (glob >= 0)
         {
-            return literal.Length > 0 && Directory.Exists(full);
+            return literal.Length > 0 && _files.DirectoryExists(full);
         }
 
-        if (File.Exists(full) || Directory.Exists(full))
+        if (_files.FileExists(full) || _files.DirectoryExists(full))
         {
             return true;
         }
 
         string firstSegment = relative.Split('/')[0];
         string extension = Path.GetExtension(relative);
-        bool topLevelExists = Directory.Exists(Path.Combine(_root, firstSegment)) || (!relative.Contains('/', StringComparison.Ordinal) && File.Exists(Path.Combine(_root, firstSegment)));
+        bool topLevelExists = _files.DirectoryExists(Path.Combine(_root, firstSegment)) || (!relative.Contains('/', StringComparison.Ordinal) && _files.FileExists(Path.Combine(_root, firstSegment)));
         return extension.Length > 1
                && (relative.Contains('/', StringComparison.Ordinal) ? topLevelExists : true)
                && _extensions.Value?.Contains(extension) != false;
@@ -99,7 +112,7 @@ internal sealed partial class PlanFileScope
                 start.ArgumentList.Add(argument);
             }
 
-            ProcessResult result = ProcessRunner.Run(start, string.Empty, TimeSpan.FromSeconds(20));
+            ProcessResult result = _process.Run(start, string.Empty, TimeSpan.FromSeconds(20));
             if (result.ExitCode == 0 && result.StandardOutput.Length > 0)
             {
                 foreach (string path in result.StandardOutput.Split('\0', StringSplitOptions.RemoveEmptyEntries))
@@ -132,7 +145,7 @@ internal sealed partial class PlanFileScope
         }
     }
 
-    private static IEnumerable<string> EnumerateFiles(string directory, int depth)
+    private IEnumerable<string> EnumerateFiles(string directory, int depth)
     {
         if (depth > 8)
         {
@@ -143,8 +156,8 @@ internal sealed partial class PlanFileScope
         string[] directories;
         try
         {
-            files = Directory.GetFiles(directory);
-            directories = Directory.GetDirectories(directory);
+            files = _files.GetFiles(directory);
+            directories = _files.GetDirectories(directory);
         }
         catch (Exception ex) when (FileFailure.Is(ex))
         {

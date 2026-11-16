@@ -1,3 +1,4 @@
+using KyberWeave.Domain.FileSystem;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -43,9 +44,9 @@ public sealed partial class PlanInventoryValidator
     /// </summary>
     public const string StaleOpenEntry = "KW-DOC-LIFECYCLE-006";
 
-    private readonly KyberWeaveConfig _config;
+    private readonly IDocsEngineConfig _config;
 
-    public PlanInventoryValidator(KyberWeaveConfig config)
+    public PlanInventoryValidator(IDocsEngineConfig config)
     {
         ArgumentNullException.ThrowIfNull(config);
         _config = config;

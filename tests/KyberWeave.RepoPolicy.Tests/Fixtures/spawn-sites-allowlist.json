@@ -740,16 +740,16 @@
       "bound": "Builds only; nothing starts on this line. Started by ProcessRunner.Run at CodeGraphResolverAdapter.cs:203 with SqliteReadTimeout = 60 s."
     },
     {
-      "file": "src/KyberWeave.Core.Docs/Validation/PlanFileScope.cs",
+      "file": "src/KyberWeave.Application/Docs/Validation/PlanFileScope.cs",
       "text": "ProcessStartInfo start = new(\"git\") { RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true, UseShellExecute = false, WorkingDirectory = _root };",
       "count": 1,
-      "bound": "Builds only; nothing starts on this line. Started by ProcessRunner.Run in PlanFileScope.ReadExtensions with a 20 s timeout."
+      "bound": "Builds only; nothing starts on this line. Started through IBoundedProcessExecutor in PlanFileScope.ReadExtensions with a 20 s timeout."
     },
     {
-      "file": "src/KyberWeave.Core.Docs/Validation/PlanFileScope.cs",
-      "text": "ProcessResult result = ProcessRunner.Run(start, string.Empty, TimeSpan.FromSeconds(20));",
+      "file": "src/KyberWeave.Data/Docs/FileSystem/KernelBoundedProcessExecutor.cs",
+      "text": "ProcessRunner.Run(startInfo, standardInput, timeout);",
       "count": 1,
-      "bound": "ProcessRunner.Run with a 20 s timeout; the tree is killed on expiry. git ls-files reads the index and writes nothing."
+      "bound": "The kernel's deadlock-safe runner with the caller's timeout, which kills the process tree on expiry. Callers: the plan lifecycle's git add, diff, status and commit (60 s, never push) and PlanFileScope's git ls-files (20 s)."
     },
     {
       "file": "src/KyberWeave.Data/Docs/Analysis/Persistence/AnalysisCacheSafety.cs",
@@ -1226,16 +1226,10 @@
       "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temporary repository."
     },
     {
-      "file": "src/KyberWeave.Core.Docs/Closeout/ActivePlanFiles.cs",
+      "file": "src/KyberWeave.Application/Docs/Closeout/ActivePlanFiles.cs",
       "text": "ProcessStartInfo startInfo = new(\"git\")",
       "count": 1,
-      "bound": "Builds only; started by the ProcessRunner.Run below with GitTimeout = 60 s."
-    },
-    {
-      "file": "src/KyberWeave.Core.Docs/Closeout/ActivePlanFiles.cs",
-      "text": "return ProcessRunner.Run(startInfo, string.Empty, GitTimeout);",
-      "count": 1,
-      "bound": "ProcessRunner.Run with GitTimeout = 60 s; the process tree is killed on expiry. git argv only (add, diff --cached, status, commit) for the paths the closeout or finalize touched; never push."
+      "bound": "Builds only; started through IBoundedProcessExecutor (KernelBoundedProcessExecutor) with GitTimeout = 60 s."
     },
     {
       "file": "src/KyberWeave.Core.Docs/Delivery/RunDelivery.cs",

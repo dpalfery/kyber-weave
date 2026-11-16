@@ -51,7 +51,7 @@ public sealed class OpenWorkValidatorTests
 
     /// <summary>Runs the validator over the fixture with the product-default registry.</summary>
     private static DiagnosticReport Validate(DocFixture fixture) =>
-        new OpenWorkValidator(KyberWeaveConfig.ProductDefaults).Validate(fixture.Load());
+        new OpenWorkValidator(KyberWeaveConfig.ProductDefaults, DocsPorts.Files).Validate(fixture.Load());
 
     /// <summary>Lists each finding's code and file, for assertion messages.</summary>
     private static string Describe(DiagnosticReport report) =>
@@ -142,7 +142,7 @@ public sealed class OpenWorkValidatorTests
             .Write("6-Docs/guide.md", Work("guide", "reference"))
             .Write("6-Docs/2026-09-14-kilo.md", Work("2026-09-14-kilo", "plan"));
 
-        DiagnosticReport report = new OpenWorkValidator(rootPlanIndex).Validate(fixture.Load());
+        DiagnosticReport report = new OpenWorkValidator(rootPlanIndex, DocsPorts.Files).Validate(fixture.Load());
 
         Diagnostic finding = Assert.Single(report.Items);
         Assert.Equal("6-Docs/2026-09-14-kilo.md", finding.FilePath);
@@ -274,7 +274,7 @@ public sealed class OpenWorkValidatorTests
             Ontology = OntologyConfig.ProductDefaults.WithDocsRoots(["6-Docs", "secondary"])
         };
 
-        DiagnosticReport report = new OpenWorkValidator(config, fixture.Root).Validate(fixture.Load());
+        DiagnosticReport report = new OpenWorkValidator(config, DocsPorts.Files, fixture.Root).Validate(fixture.Load());
 
         Assert.True(
             report.Items.Any(i => i.Code == LeftoverTaskFile && i.FilePath == "secondary/plans/2026-09-14-kilo.tasks.json"),

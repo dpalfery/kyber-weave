@@ -13,7 +13,7 @@ namespace KyberWeave.Tests;
 public sealed class PlanTaskFileGeneratorReadTests
 {
     private static PlanTaskFileOutcome Check(DocFixture fixture) =>
-        new PlanTaskFileGenerator(fixture.Root, KyberWeaveConfig.ProductDefaults).Run(PlanTaskFileProbe.PlanPath, PlanTaskFileMode.Check);
+        new PlanTaskFileGenerator(fixture.Root, KyberWeaveConfig.ProductDefaults, DocsPorts.Files, DocsPorts.Process).Run(PlanTaskFileProbe.PlanPath, PlanTaskFileMode.Check);
 
     [Fact]
     public void ATaskFileThatCannotBeReadIsOneMalformedFindingNotAnException()
@@ -24,7 +24,7 @@ public sealed class PlanTaskFileGeneratorReadTests
         PlanTaskFileOutcome outcome = Check(fixture);
 
         Diagnostic finding = Assert.Single(outcome.Report.Items, item => item.Severity == Severity.Error);
-        Assert.Equal(PlanTaskFileValidator.Malformed, finding.Code);
+        Assert.Equal(PlanTaskFileRules.Malformed, finding.Code);
         Assert.Contains("cannot be read", finding.Message, StringComparison.Ordinal);
     }
 
@@ -73,6 +73,6 @@ public sealed class PlanTaskFileGeneratorReadTests
         PlanTaskFileOutcome outcome = Check(fixture);
 
         Diagnostic finding = Assert.Single(outcome.Report.Items, item => item.Severity == Severity.Error);
-        Assert.Equal(PlanTaskFileValidator.MissingTaskFile, finding.Code);
+        Assert.Equal(PlanTaskFileRules.MissingTaskFile, finding.Code);
     }
 }

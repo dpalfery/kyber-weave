@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Services;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Arbiter;
@@ -14,7 +15,7 @@ namespace KyberWeave.Cli.Commands.Docs;
 /// Derives a plan's, or a specification's, task file from the plan and writes or checks it, so no one writes the
 /// machine format, or its execution digest, by hand.
 /// </summary>
-public sealed class DocsTasksCommand : Command<DocsTasksSettings>
+public sealed class DocsTasksCommand(IPlanTaskService tasks) : Command<DocsTasksSettings>
 {
     /// <summary>Both <c>--write</c> and <c>--check</c> were given; they ask for opposite things.</summary>
     public const string ConflictingModes = "KW-DOC-TASKS-CLI-001";
@@ -87,7 +88,7 @@ public sealed class DocsTasksCommand : Command<DocsTasksSettings>
 
         // Only a write may ask the decision model to pick each task's agent; check and preview keep the picks on disk.
         using PlanTaskAgentPick? picker = mode == PlanTaskFileMode.Write ? PlanTaskAgentPick.ForConfig(effective) : null;
-        PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(root, effective, picker).Run(relative, mode);
+        PlanTaskFileOutcome outcome = tasks.Run(root, effective, relative, mode, picker);
         report.AddRange(outcome.Report.Items);
 
         if (outcome.ExecutionDigest is not null)
@@ -161,7 +162,7 @@ public sealed class DocsTasksCommand : Command<DocsTasksSettings>
         if (provider is null)
         {
             report.Add(new Diagnostic(
-                PlanTaskFileValidator.PacketNotSelfContained,
+                PlanTaskFileRules.PacketNotSelfContained,
                 Severity.Info,
                 "Packet self-containment check skipped: no model provider with a key is configured.",
                 "docs tasks",
