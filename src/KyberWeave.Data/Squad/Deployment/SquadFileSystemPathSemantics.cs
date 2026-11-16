@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Contracts.Repositories;
 
 namespace KyberWeave.Core.Squad.Deployment;
 
@@ -6,16 +7,45 @@ namespace KyberWeave.Core.Squad.Deployment;
 /// Centralizes deployment-path identity and containment using the spelling and aliases exposed by
 /// the containing filesystem rather than an operating-system-wide case rule.
 /// </summary>
-public static class SquadFileSystemPathSemantics
+public sealed class SquadFileSystemPathSemantics : IFileSystemPathSemantics
 {
-    public static bool AreSame(string first, string second)
+    /// <summary>The stateless filesystem answer, shared by the adapters that need one.</summary>
+    public static SquadFileSystemPathSemantics Instance { get; } = new();
+
+    /// <summary>The canonical physical path of an existing deployment root.</summary>
+    /// <param name="targetRoot">The directory a deployment is bound to.</param>
+    /// <returns>The canonical spelling of the directory.</returns>
+    /// <exception cref="SquadDeploymentConflictException">
+    ///     The root is not an existing directory, or it changed while its physical path was resolved.
+    /// </exception>
+    public string ResolvePhysicalRoot(string targetRoot)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
+        string fullPath = Path.GetFullPath(targetRoot);
+        if (!Directory.Exists(fullPath))
+        {
+            throw new SquadDeploymentConflictException(
+                $"Squad target root '{targetRoot}' must be an existing directory.");
+        }
+
+        string physicalPath = Canonicalize(fullPath);
+        if (!Directory.Exists(physicalPath))
+        {
+            throw new SquadDeploymentConflictException(
+                $"Squad target root '{targetRoot}' changed during physical resolution.");
+        }
+
+        return physicalPath;
+    }
+
+    public bool AreSame(string first, string second)
     {
         string normalizedFirst = NormalizeLexical(first);
         string normalizedSecond = NormalizeLexical(second);
         return string.Equals(normalizedFirst, normalizedSecond, StringComparison.Ordinal);
     }
 
-    public static bool IsWithin(string root, string candidate)
+    public bool IsWithin(string root, string candidate)
     {
         string normalizedRoot = NormalizeLexical(root);
         string normalizedCandidate = NormalizeLexical(candidate);
@@ -35,7 +65,7 @@ public static class SquadFileSystemPathSemantics
         return HasPathPrefix(canonicalRoot, canonicalCandidate);
     }
 
-    public static string Canonicalize(string path)
+    public string Canonicalize(string path)
     {
         string fullPath = Path.GetFullPath(path);
         string filesystemRoot = Path.GetPathRoot(fullPath)

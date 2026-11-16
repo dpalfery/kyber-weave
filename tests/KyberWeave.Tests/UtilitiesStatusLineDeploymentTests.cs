@@ -46,7 +46,7 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
 {
-    private static readonly IStatusLineDeploymentService Plans = new StatusLineDeploymentService(new FileStatusLineFiles());
+    private static readonly IStatusLineDeploymentService Plans = new StatusLineDeploymentService(new FileStatusLineFiles(), SquadFileSystemPathSemantics.Instance);
 
     private const string ClaudeConfigDirectoryVariable = "CLAUDE_CONFIG_DIR";
     private const string PiCodingAgentDirectoryVariable = "PI_CODING_AGENT_DIR";
@@ -915,12 +915,12 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
     /// </remarks>
     private static bool IsWithin(string root, string candidate)
     {
-        return IsContainable(candidate) && SquadFileSystemPathSemantics.IsWithin(root, candidate);
+        return IsContainable(candidate) && SquadFileSystemPathSemantics.Instance.IsWithin(root, candidate);
     }
 
     private static bool IsSame(string first, string second)
     {
-        return IsContainable(first) && IsContainable(second) && SquadFileSystemPathSemantics.AreSame(first, second);
+        return IsContainable(first) && IsContainable(second) && SquadFileSystemPathSemantics.Instance.AreSame(first, second);
     }
 
     private static bool IsContainable(string path)

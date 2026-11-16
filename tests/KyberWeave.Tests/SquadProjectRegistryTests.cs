@@ -36,8 +36,8 @@ public sealed class SquadProjectRegistryTests
         new SquadTransaction(store).Execute(Install(root, SquadDeploymentScope.Project));
 
         SquadProjectRegistryEntry entry = Assert.Single(store.ListProjects());
-        Assert.Equal(SquadPhysicalRootIdentity.Resolve(root).PhysicalPath, entry.Path);
-        Assert.Equal(SquadPhysicalRootIdentity.Resolve(root).Key, entry.RootKey);
+        Assert.Equal(SquadPhysicalRootIdentity.Resolve(root, SquadFileSystemPathSemantics.Instance).PhysicalPath, entry.Path);
+        Assert.Equal(SquadPhysicalRootIdentity.Resolve(root, SquadFileSystemPathSemantics.Instance).Key, entry.RootKey);
         Assert.Equal(InstalledAt, entry.LastUpdatedUtc);
         Assert.Equal(ExpectedTargets, entry.Targets.Order(StringComparer.Ordinal));
         Assert.False(entry.Stale);
@@ -129,7 +129,7 @@ public sealed class SquadProjectRegistryTests
         Directory.CreateDirectory(root);
         SquadStateStore store = StoreFor(home);
         new SquadTransaction(store).Execute(Install(root, SquadDeploymentScope.Project));
-        string key = SquadPhysicalRootIdentity.Resolve(root).Key;
+        string key = SquadPhysicalRootIdentity.Resolve(root, SquadFileSystemPathSemantics.Instance).Key;
         string registry = File.ReadAllText(RegistryPath(home), Encoding.UTF8);
         File.WriteAllText(
             RegistryPath(home),
@@ -186,8 +186,8 @@ public sealed class SquadProjectRegistryTests
         Assert.Equal(
             new[]
             {
-                SquadPhysicalRootIdentity.Resolve(firstRoot).PhysicalPath,
-                SquadPhysicalRootIdentity.Resolve(secondRoot).PhysicalPath
+                SquadPhysicalRootIdentity.Resolve(firstRoot, SquadFileSystemPathSemantics.Instance).PhysicalPath,
+                SquadPhysicalRootIdentity.Resolve(secondRoot, SquadFileSystemPathSemantics.Instance).PhysicalPath
             }.Order(StringComparer.Ordinal),
             entries.Select(entry => entry.Path).Order(StringComparer.Ordinal));
     }
@@ -305,7 +305,7 @@ public sealed class SquadProjectRegistryTests
         SquadProjectRegistryEntry? entry = store.FindProject(root);
 
         Assert.NotNull(entry);
-        Assert.Equal(SquadPhysicalRootIdentity.Resolve(root).Key, entry.RootKey);
+        Assert.Equal(SquadPhysicalRootIdentity.Resolve(root, SquadFileSystemPathSemantics.Instance).Key, entry.RootKey);
         Assert.False(File.Exists(RegistryPath(home)), "A lookup must not recreate the registry it read from.");
     }
 
@@ -330,7 +330,7 @@ public sealed class SquadProjectRegistryTests
 
         SquadProjectRegistryEntry entry = Assert.Single(store.ListProjects());
 
-        Assert.Equal(SquadPhysicalRootIdentity.Resolve(healthyRoot).PhysicalPath, entry.Path);
+        Assert.Equal(SquadPhysicalRootIdentity.Resolve(healthyRoot, SquadFileSystemPathSemantics.Instance).PhysicalPath, entry.Path);
         Assert.Null(store.FindProject(corruptRoot));
     }
 
@@ -356,7 +356,7 @@ public sealed class SquadProjectRegistryTests
         InvalidDataException failure = Assert.Throws<InvalidDataException>(() => store.ListProjects());
 
         Assert.Contains("lastUpdatedUtc", failure.Message, StringComparison.Ordinal);
-        Assert.Contains(SquadPhysicalRootIdentity.Resolve(root).Key, failure.Message, StringComparison.Ordinal);
+        Assert.Contains(SquadPhysicalRootIdentity.Resolve(root, SquadFileSystemPathSemantics.Instance).Key, failure.Message, StringComparison.Ordinal);
     }
 
     private static string CreateHome(TempDirectory fixture, string name = "home")
@@ -370,7 +370,7 @@ public sealed class SquadProjectRegistryTests
         Path.Combine(SquadDirectoryOf(home), "registry.json");
 
     private static string SquadDirectoryOf(string home) =>
-        Path.Combine(SquadPhysicalRootIdentity.Resolve(home).PhysicalPath, ".kyber-weave", "squad");
+        Path.Combine(SquadPhysicalRootIdentity.Resolve(home, SquadFileSystemPathSemantics.Instance).PhysicalPath, ".kyber-weave", "squad");
 
     private static string[] EntriesOf(string directory) =>
         Directory.EnumerateFileSystemEntries(directory)

@@ -17,26 +17,31 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
     private readonly ISquadStateMigration _migration;
     private readonly ISquadGlobalRootResolver _globalRoots;
     private readonly ISquadModelPresetStore _presetStore;
+    private readonly IFileSystemPathSemantics _pathSemantics;
 
     /// <summary>Creates the status command over the Squad services the host registers.</summary>
     /// <param name="stateStore">Reads the deployment state.</param>
     /// <param name="migration">Moves legacy state into the home layout before status reads it.</param>
     /// <param name="globalRoots">Resolves each target's global root.</param>
     /// <param name="presetStore">Loads the presets the lock names.</param>
+    /// <param name="pathSemantics">The filesystem's containment and canonical spelling rules.</param>
     public SquadStatusCommand(
         ISquadStateStore stateStore,
         ISquadStateMigration migration,
         ISquadGlobalRootResolver globalRoots,
-        ISquadModelPresetStore presetStore)
+        ISquadModelPresetStore presetStore,
+        IFileSystemPathSemantics pathSemantics)
     {
         ArgumentNullException.ThrowIfNull(stateStore);
         ArgumentNullException.ThrowIfNull(migration);
         ArgumentNullException.ThrowIfNull(globalRoots);
         ArgumentNullException.ThrowIfNull(presetStore);
+        ArgumentNullException.ThrowIfNull(pathSemantics);
         _stateStore = stateStore;
         _migration = migration;
         _globalRoots = globalRoots;
         _presetStore = presetStore;
+        _pathSemantics = pathSemantics;
     }
 
     /// <inheritdoc />
@@ -128,7 +133,7 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
                 // beneath the recorded root for a legacy single-root receipt — see
                 // ResolveOwnedFilePath). Joining targetRoot directly would check a global
                 // deployment against the project directory and report every file missing.
-                fullPath = SquadDeploymentPlan.ResolveOwnedFilePath(receipt, targetRoot, globalRoots, file);
+                fullPath = SquadDeploymentPlan.ResolveOwnedFilePath(receipt, targetRoot, globalRoots, file, _pathSemantics);
             }
             catch (Exception)
             {
@@ -201,7 +206,7 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
     /// shape are read from the receipt, so reporting never depends on a render that may no
     /// longer exist and never needs a scope of its own to say where a global block lives.
     /// </remarks>
-    private static void ReportOwnedBlock(
+    private void ReportOwnedBlock(
         SquadOwnedBlock block,
         SquadReceipt receipt,
         string targetRoot,
@@ -224,7 +229,7 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
                 receipt,
                 targetRoot,
                 globalRoots,
-                new SquadOwnedFile(block.RelativePath, new string('0', 64), block.Target, false));
+                new SquadOwnedFile(block.RelativePath, new string('0', 64), block.Target, false), _pathSemantics);
         }
         catch (Exception)
         {

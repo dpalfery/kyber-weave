@@ -20,6 +20,7 @@ using KyberWeave.Application.Utilities;
 using KyberWeave.Application.Squad;
 using KyberWeave.Core.Squad.Briefs;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Data;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -83,8 +84,14 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IProcessEnvironment>(),
             sp.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton<IRunDeliveryRunner, RunDeliveryRunner>();
-        services.TryAddSingleton<IStatusLineDeploymentService, StatusLineDeploymentService>();
-        services.TryAddSingleton<IStatusLineHostService, StatusLineHostService>();
+        services.TryAddSingleton<IStatusLineDeploymentService>(sp => new StatusLineDeploymentService(
+            sp.GetRequiredService<IStatusLineFiles>(),
+            sp.GetRequiredService<IFileSystemPathSemantics>()));
+        services.TryAddSingleton<IStatusLineHostService>(sp => new StatusLineHostService(
+            sp.GetRequiredService<IStatusLineFiles>(),
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IProductRootLocator>(),
+            sp.GetRequiredService<IFileSystemPathSemantics>()));
         services.TryAddSingleton<ISkillGovernanceService, SkillGovernanceService>();
         services.TryAddSingleton<IAgentGovernanceService, AgentGovernanceService>();
         services.TryAddSingleton<ICodeGraphProvisioner, CodeGraphIndexProvisioner>();

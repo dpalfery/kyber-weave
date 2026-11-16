@@ -74,7 +74,7 @@ public sealed class SquadHomeStateStoreTests
         Directory.CreateSymbolicLink(symlinkAlias, root);
         string lexicalAlias = Path.Combine(root, "..", "project");
         SquadStateStore store = StoreFor(home);
-        string key = SquadPhysicalRootIdentity.Resolve(root).Key;
+        string key = SquadPhysicalRootIdentity.Resolve(root, SquadFileSystemPathSemantics.Instance).Key;
         string projectState = Path.Combine(
             PhysicalPathOf(home),
             ".kyber-weave",
@@ -361,7 +361,7 @@ public sealed class SquadHomeStateStoreTests
     }
 
     private static string PhysicalPathOf(string path) =>
-        SquadPhysicalRootIdentity.Resolve(path).PhysicalPath;
+        SquadPhysicalRootIdentity.Resolve(path, SquadFileSystemPathSemantics.Instance).PhysicalPath;
 
     private static SquadStateStore StoreFor(string home) =>
         new(new HomeOnlyUserPaths(home));

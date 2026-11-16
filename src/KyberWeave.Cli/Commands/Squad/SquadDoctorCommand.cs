@@ -39,6 +39,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     private readonly IDevinImportOverlapInspector _devinOverlap;
     private readonly IZCodeMcpInspector _zcodeMcp;
     private readonly SquadDoctorOptions _options;
+    private readonly IFileSystemPathSemantics _pathSemantics;
 
     /// <summary>Creates the doctor command over the Squad services the host registers.</summary>
     /// <param name="stateStore">Reads the deployment state.</param>
@@ -55,6 +56,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     /// <param name="devinOverlap">Finds identities Devin would load twice.</param>
     /// <param name="zcodeMcp">Reads the MCP servers a ZCode installation declares.</param>
     /// <param name="options">The process executor and working directory; the defaults use the real ones.</param>
+    /// <param name="pathSemantics">The filesystem's containment and canonical spelling rules.</param>
     public SquadDoctorCommand(
         ISquadStateStore stateStore,
         ISquadStateMigration migration,
@@ -69,7 +71,8 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         ISquadSkillShadowing skillShadowing,
         IDevinImportOverlapInspector devinOverlap,
         IZCodeMcpInspector zcodeMcp,
-        SquadDoctorOptions options)
+        SquadDoctorOptions options,
+        IFileSystemPathSemantics pathSemantics)
     {
         ArgumentNullException.ThrowIfNull(stateStore);
         ArgumentNullException.ThrowIfNull(migration);
@@ -85,6 +88,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         ArgumentNullException.ThrowIfNull(devinOverlap);
         ArgumentNullException.ThrowIfNull(zcodeMcp);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(pathSemantics);
         _stateStore = stateStore;
         _migration = migration;
         _globalRoots = globalRoots;
@@ -99,6 +103,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         _devinOverlap = devinOverlap;
         _zcodeMcp = zcodeMcp;
         _options = options;
+        _pathSemantics = pathSemantics;
     }
 
     /// <inheritdoc />
@@ -545,7 +550,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 string fullPath;
                 try
                 {
-                    fullPath = SquadDeploymentPlan.ResolveOwnedFilePath(receipt, workingDirectory, globalRoots, file);
+                    fullPath = SquadDeploymentPlan.ResolveOwnedFilePath(receipt, workingDirectory, globalRoots, file, _pathSemantics);
                 }
                 catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
                 {
@@ -918,7 +923,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                     receipt,
                     workingDirectory,
                     globalRoots,
-                    new SquadOwnedFile(block.RelativePath, new string('0', 64), block.Target, false));
+                    new SquadOwnedFile(block.RelativePath, new string('0', 64), block.Target, false), _pathSemantics);
             }
             catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
             {

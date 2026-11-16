@@ -5,9 +5,15 @@ namespace KyberWeave.Core.Squad.Deployment;
 /// <summary>Resolves portable paths while enforcing both lexical and physical containment.</summary>
 public static class SquadPathPolicy
 {
-    public static string ResolveFile(string rootPath, string relativePath)
+    /// <summary>Resolves one portable relative path beneath a root, refusing anything that escapes it.</summary>
+    /// <param name="rootPath">The directory the file must stay under.</param>
+    /// <param name="relativePath">The portable relative path from the source tree.</param>
+    /// <param name="semantics">The filesystem's containment rules.</param>
+    /// <returns>The absolute path the file resolves to.</returns>
+    public static string ResolveFile(string rootPath, string relativePath, IFileSystemPathSemantics semantics)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
+        ArgumentNullException.ThrowIfNull(semantics);
 
         string portablePath = NormalizeRelativePath(relativePath);
         string root = Path.GetFullPath(rootPath);
@@ -15,8 +21,8 @@ public static class SquadPathPolicy
             root,
             portablePath.Replace('/', Path.DirectorySeparatorChar)));
 
-        if (!SquadFileSystemPathSemantics.IsWithin(root, candidate) ||
-            SquadFileSystemPathSemantics.AreSame(root, candidate))
+        if (!semantics.IsWithin(root, candidate) ||
+            semantics.AreSame(root, candidate))
             throw OutsideRoot(relativePath);
 
         return candidate;

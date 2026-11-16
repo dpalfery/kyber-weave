@@ -20,6 +20,8 @@ namespace KyberWeave.Core.Squad.Deployment;
 /// </remarks>
 public sealed class SquadStateMigration : ISquadStateMigration
 {
+    private static readonly SquadFileSystemPathSemantics Semantics = SquadFileSystemPathSemantics.Instance;
+
     private const string ReceiptFileName = "squad.receipt.json";
     private const string LockFileName = "squad.lock.yml";
     private const string TargetRootProperty = "targetRoot";
@@ -188,7 +190,7 @@ public sealed class SquadStateMigration : ISquadStateMigration
 
         List<string> imported = [];
         List<string> warnings = [];
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(root);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(root, Semantics);
         string projectDirectory = _stateStore.ResolveStateDirectory(identity.PhysicalPath, SquadDeploymentScope.Project);
         string inRepoDirectory = Path.Combine(identity.PhysicalPath, InRepoStateDirectoryName);
         string inRepoReceiptPath = Path.Combine(inRepoDirectory, ReceiptFileName);
@@ -529,7 +531,7 @@ public sealed class SquadStateMigration : ISquadStateMigration
     {
         try
         {
-            physical = SquadPhysicalRootIdentity.Resolve(path).PhysicalPath;
+            physical = SquadPhysicalRootIdentity.Resolve(path, Semantics).PhysicalPath;
             return true;
         }
         catch (Exception exception) when (

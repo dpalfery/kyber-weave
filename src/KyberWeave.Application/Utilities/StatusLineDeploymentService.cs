@@ -13,7 +13,9 @@ namespace KyberWeave.Application.Utilities;
 /// status line on the user's behalf (A3, C1). Building a plan is the dry run: it reads the receipt and the target
 /// paths and writes nothing, not even a directory.
 /// </remarks>
-public sealed class StatusLineDeploymentService(IStatusLineFiles files) : IStatusLineDeploymentService
+public sealed class StatusLineDeploymentService(
+    IStatusLineFiles files,
+    IFileSystemPathSemantics pathSemantics) : IStatusLineDeploymentService
 {
     /// <summary>Preflights a deployment without changing the filesystem.</summary>
     /// <param name="target">The harness to deploy the artifacts for.</param>
@@ -51,7 +53,7 @@ public sealed class StatusLineDeploymentService(IStatusLineFiles files) : IStatu
                 nameof(files));
         }
 
-        StatusLineReceiptFormat format = new(roots, target);
+        StatusLineReceiptFormat format = new(roots, target, pathSemantics);
         StatusLineReceipt? existing = Read(format);
         Dictionary<string, StatusLineOwnedFile> ownedByPath = OwnedByPath(existing);
 
@@ -68,7 +70,7 @@ public sealed class StatusLineDeploymentService(IStatusLineFiles files) : IStatu
                     $"The status-line deployment for '{target}' lists '{relativePath}' more than once.");
             }
 
-            string physicalPath = SquadPathPolicy.ResolveFile(stagingRoot, relativePath);
+            string physicalPath = SquadPathPolicy.ResolveFile(stagingRoot, relativePath, pathSemantics);
             EnsureNoSymlinks(roots.ResolveHarnessRoot(target), physicalPath);
             EnsureOutsideReservedLocations(target, roots, physicalPath, $"'{relativePath}'");
             string digest = Digest(file.Content.Span);
@@ -113,7 +115,7 @@ public sealed class StatusLineDeploymentService(IStatusLineFiles files) : IStatu
         ArgumentNullException.ThrowIfNull(roots);
 
         string stagingRoot = roots.ResolveStagingRoot(target);
-        StatusLineReceiptFormat format = new(roots, target);
+        StatusLineReceiptFormat format = new(roots, target, pathSemantics);
         StatusLineReceipt? existing = Read(format);
         List<StatusLinePendingChange> changes = [];
         List<StatusLineOwnedFile> retained = [];
@@ -149,7 +151,7 @@ public sealed class StatusLineDeploymentService(IStatusLineFiles files) : IStatu
     public StatusLineReceipt? ReadReceipt(StatusLineTarget target, StatusLineTargetRoots roots)
     {
         ArgumentNullException.ThrowIfNull(roots);
-        return Read(new StatusLineReceiptFormat(roots, target));
+        return Read(new StatusLineReceiptFormat(roots, target, pathSemantics));
     }
 
     /// <summary>Applies the plan, writing or deleting exactly the paths it planned.</summary>
@@ -235,7 +237,7 @@ public sealed class StatusLineDeploymentService(IStatusLineFiles files) : IStatu
     /// asserted at the point of mutation, where a future change to a root rule cannot quietly break
     /// it.
     /// </remarks>
-    private static void EnsureOutsideReservedLocations(
+    private void EnsureOutsideReservedLocations(
         StatusLineTarget target,
         StatusLineTargetRoots roots,
         string physicalPath,
@@ -286,8 +288,8 @@ public sealed class StatusLineDeploymentService(IStatusLineFiles files) : IStatu
         {
             string directory = candidate;
             while (files.DirectoryExists(directory) &&
-                   !SquadFileSystemPathSemantics.AreSame(plan.StagingRoot, directory) &&
-                   SquadFileSystemPathSemantics.IsWithin(plan.StagingRoot, directory) &&
+                   !pathSemantics.AreSame(plan.StagingRoot, directory) &&
+                   pathSemantics.IsWithin(plan.StagingRoot, directory) &&
                    files.IsDirectoryEmpty(directory))
             {
                 files.DeleteDirectory(directory);
@@ -310,7 +312,7 @@ public sealed class StatusLineDeploymentService(IStatusLineFiles files) : IStatu
         string physicalPath;
         try
         {
-            physicalPath = SquadPathPolicy.ResolveFile(stagingRoot, relativePath);
+            physicalPath = SquadPathPolicy.ResolveFile(stagingRoot, relativePath, pathSemantics);
         }
         catch (Exception exception) when (
             exception is SquadPathContainmentException or SquadDeploymentConflictException)
@@ -398,10 +400,10 @@ public sealed class StatusLineDeploymentService(IStatusLineFiles files) : IStatu
         }
     }
 
-    private static bool IsSameOrWithin(string root, string candidate)
+    private bool IsSameOrWithin(string root, string candidate)
     {
-        return SquadFileSystemPathSemantics.AreSame(root, candidate) ||
-               SquadFileSystemPathSemantics.IsWithin(root, candidate);
+        return pathSemantics.AreSame(root, candidate) ||
+               pathSemantics.IsWithin(root, candidate);
     }
 
     private static string RequireParentDirectory(string path)

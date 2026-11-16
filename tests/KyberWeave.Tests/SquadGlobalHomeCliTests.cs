@@ -343,7 +343,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
             ".kyber-weave",
             "squad",
             "projects",
-            SquadPhysicalRootIdentity.Resolve(importable).Key);
+            SquadPhysicalRootIdentity.Resolve(importable, SquadFileSystemPathSemantics.Instance).Key);
         byte[]? receiptBefore = Snapshot(inRepoReceipt);
         byte[]? lockBefore = Snapshot(inRepoLock);
         byte[]? globalLockBefore = Snapshot(GlobalLockPath(h));
@@ -1549,7 +1549,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         List<SquadDeploymentFile> deployed = active.Files
             .Select(file => new SquadDeploymentFile(
                 file.RelativePath,
-                File.ReadAllBytes(SquadDeploymentPlan.ResolveOwnedFilePath(active, h.Home, h.GlobalRoots, file)),
+                File.ReadAllBytes(SquadDeploymentPlan.ResolveOwnedFilePath(active, h.Home, h.GlobalRoots, file, SquadFileSystemPathSemantics.Instance)),
                 file.Target))
             .ToList();
 
@@ -1658,8 +1658,8 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
             [SquadTarget.Codex],
             Version: InstalledVersion));
         Assert.True(result.Success, DescribeFailure(result));
-        string physical = SquadPhysicalRootIdentity.Resolve(root).PhysicalPath;
-        string key = SquadPhysicalRootIdentity.Resolve(root).Key;
+        string physical = SquadPhysicalRootIdentity.Resolve(root, SquadFileSystemPathSemantics.Instance).PhysicalPath;
+        string key = SquadPhysicalRootIdentity.Resolve(root, SquadFileSystemPathSemantics.Instance).Key;
         string stateDirectory = Path.Combine(h.Home, ".kyber-weave", "squad", "projects", key);
         return new Project(root, physical, stateDirectory);
     }
@@ -1771,7 +1771,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
             "KyberWeave",
             "squad",
             "roots",
-            SquadPhysicalRootIdentity.Resolve(anchor).Key);
+            SquadPhysicalRootIdentity.Resolve(anchor, SquadFileSystemPathSemantics.Instance).Key);
         Directory.CreateDirectory(legacyDirectory);
         File.Move(GlobalReceiptPath(h), Path.Combine(legacyDirectory, "squad.receipt.json"));
         File.Move(GlobalLockPath(h), Path.Combine(legacyDirectory, "squad.lock.yml"));

@@ -1,5 +1,6 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Domain.StatusLine;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -21,15 +22,18 @@ public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLi
     private readonly IProcessEnvironment _environment;
     private readonly IStatusLineHostService _host;
     private readonly IStatusLineDeploymentService _plans;
+    private readonly IFileSystemPathSemantics _semantics;
 
     /// <summary>Creates a deploy command over the process environment and the host service.</summary>
     /// <param name="environment">The process state the per-user roots are read from.</param>
     /// <param name="host">Opens the artifact tree of the checkout and marks the deployed commands executable.</param>
     /// <param name="plans">Plans and applies the deployment.</param>
+    /// <param name="semantics">The filesystem's containment rules.</param>
     public UtilitiesStatusLineDeployCommand(
         IProcessEnvironment environment,
         IStatusLineHostService host,
-        IStatusLineDeploymentService plans)
+        IStatusLineDeploymentService plans,
+        IFileSystemPathSemantics semantics)
     {
         ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(host);
@@ -38,6 +42,7 @@ public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLi
         _environment = environment;
         _host = host;
         _plans = plans;
+        _semantics = semantics;
     }
 
     /// <inheritdoc />
@@ -150,7 +155,7 @@ public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLi
                 $"{Markup.Escape(plan.StagingRoot)}");
         }
 
-        string? commandPath = UtilitiesStatusLineOutput.ResolvePrimaryCommandPath(target, plan.StagingRoot, files);
+        string? commandPath = UtilitiesStatusLineOutput.ResolvePrimaryCommandPath(target, plan.StagingRoot, files, _semantics);
         if (commandPath is null)
         {
             AnsiConsole.MarkupLine(

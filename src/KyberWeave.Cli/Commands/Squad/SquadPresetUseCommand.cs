@@ -22,6 +22,7 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
     private readonly ISquadCanonicalProfileResolver _canonicalProfiles;
     private readonly ISquadDeploymentPlanner _planner;
     private readonly ISquadTransactionFactory _transactions;
+    private readonly IFileSystemPathSemantics _pathSemantics;
 
     /// <summary>Creates the command over the Squad services the host registers.</summary>
     /// <param name="stateStore">Reads the deployment state.</param>
@@ -38,7 +39,8 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
         ISquadModelPresetSelectionStore selectionStore,
         ISquadCanonicalProfileResolver canonicalProfiles,
         ISquadDeploymentPlanner planner,
-        ISquadTransactionFactory transactions)
+        ISquadTransactionFactory transactions,
+        IFileSystemPathSemantics pathSemantics)
     {
         ArgumentNullException.ThrowIfNull(stateStore);
         ArgumentNullException.ThrowIfNull(globalRoots);
@@ -47,6 +49,7 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
         ArgumentNullException.ThrowIfNull(canonicalProfiles);
         ArgumentNullException.ThrowIfNull(planner);
         ArgumentNullException.ThrowIfNull(transactions);
+        ArgumentNullException.ThrowIfNull(pathSemantics);
         _stateStore = stateStore;
         _globalRoots = globalRoots;
         _presetStore = presetStore;
@@ -54,6 +57,7 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
         _canonicalProfiles = canonicalProfiles;
         _planner = planner;
         _transactions = transactions;
+        _pathSemantics = pathSemantics;
     }
 
     /// <inheritdoc />
@@ -290,7 +294,7 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
             file =>
             {
                 string physicalPath = scope == SquadDeploymentScope.Global
-                    ? SquadDeploymentPlan.ResolveOwnedFilePath(activeReceipt, anchorRoot, effectiveGlobalRoots, file)
+                    ? SquadDeploymentPlan.ResolveOwnedFilePath(activeReceipt, anchorRoot, effectiveGlobalRoots, file, _pathSemantics)
                     : Path.Combine(anchorRoot, file.RelativePath);
                 return File.Exists(physicalPath) ? File.ReadAllBytes(physicalPath) : null;
             },

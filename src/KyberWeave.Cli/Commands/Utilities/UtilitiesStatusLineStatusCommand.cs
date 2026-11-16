@@ -1,5 +1,6 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Domain.StatusLine;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -19,15 +20,18 @@ public sealed class UtilitiesStatusLineStatusCommand : Command<UtilitiesStatusLi
     private readonly IProcessEnvironment _environment;
     private readonly IStatusLineDeploymentService _plans;
     private readonly IStatusLineHostService _host;
+    private readonly IFileSystemPathSemantics _semantics;
 
     /// <summary>Creates the command over the process environment its per-user roots are read from.</summary>
     /// <param name="environment">The process state the roots are read from.</param>
     /// <param name="plans">Reads the receipts.</param>
     /// <param name="host">Compares each owned file with its recorded digest.</param>
+    /// <param name="semantics">The filesystem's containment rules.</param>
     public UtilitiesStatusLineStatusCommand(
         IProcessEnvironment environment,
         IStatusLineDeploymentService plans,
-        IStatusLineHostService host)
+        IStatusLineHostService host,
+        IFileSystemPathSemantics semantics)
     {
         ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(plans);
@@ -36,6 +40,7 @@ public sealed class UtilitiesStatusLineStatusCommand : Command<UtilitiesStatusLi
         _environment = environment;
         _plans = plans;
         _host = host;
+        _semantics = semantics;
     }
 
     /// <inheritdoc />
@@ -110,7 +115,8 @@ public sealed class UtilitiesStatusLineStatusCommand : Command<UtilitiesStatusLi
         {
             physicalPath = UtilitiesStatusLineCommandComposition.ResolveOwnedPhysicalPath(
                 stagingRoot,
-                file.RelativePath);
+                file.RelativePath,
+                _semantics);
         }
         catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
         {

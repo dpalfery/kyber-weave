@@ -29,8 +29,15 @@ internal static class UtilitiesStatusLineCommandComposition
     }
 
     /// <summary>The physical path of a receipt-owned file beneath the staging root.</summary>
-    public static string ResolveOwnedPhysicalPath(string stagingRoot, string relativePath)
+    /// <param name="stagingRoot">The harness staging root the receipt was deployed under.</param>
+    /// <param name="relativePath">The portable relative path the receipt records.</param>
+    /// <param name="semantics">The filesystem's containment rules.</param>
+    /// <returns>The absolute path the file resolves to.</returns>
+    public static string ResolveOwnedPhysicalPath(
+        string stagingRoot,
+        string relativePath,
+        IFileSystemPathSemantics semantics)
     {
-        return SquadPathPolicy.ResolveFile(stagingRoot, relativePath);
+        return SquadPathPolicy.ResolveFile(stagingRoot, relativePath, semantics);
     }
 }

@@ -12,6 +12,8 @@ namespace KyberWeave.Core.Squad.Deployment;
 /// <summary>Reads and writes the portable lock and ownership receipt for Squad deployments.</summary>
 public sealed class SquadStateStore : ISquadStateStore
 {
+    private static readonly SquadFileSystemPathSemantics Semantics = SquadFileSystemPathSemantics.Instance;
+
     private const string LockFileName = "squad.lock.yml";
     private const string ReceiptFileName = "squad.receipt.json";
     private const string TransactionDirectoryName = ".squad-transaction";
@@ -196,7 +198,7 @@ public sealed class SquadStateStore : ISquadStateStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
 
-        string key = SquadPhysicalRootIdentity.KeyOf(SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(root));
+        string key = SquadPhysicalRootIdentity.KeyOf(SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(root, Semantics));
         return ListProjectsWithoutRebuild()
             .FirstOrDefault(entry => string.Equals(entry.RootKey, key, StringComparison.Ordinal));
     }
@@ -263,7 +265,7 @@ public sealed class SquadStateStore : ISquadStateStore
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentNullException.ThrowIfNull(targets);
 
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(root);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(root, Semantics);
         Dictionary<string, RegistryRecord> registry = ReadRegistry();
         registry[identity.Key] = new RegistryRecord(
             identity.PhysicalPath,
@@ -280,7 +282,7 @@ public sealed class SquadStateStore : ISquadStateStore
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
 
         string key = SquadPhysicalRootIdentity.KeyOf(
-            SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(root));
+            SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(root, Semantics));
         Dictionary<string, RegistryRecord> registry = ReadRegistry();
         if (!registry.Remove(key))
             return false;
@@ -684,12 +686,12 @@ public sealed class SquadStateStore : ISquadStateStore
         return scope switch
         {
             SquadDeploymentScope.Project => SquadPathPolicy.ResolveFile(
-                SquadPhysicalRootIdentity.Resolve(targetRoot).PhysicalPath,
-                JournalRelativePath),
-            SquadDeploymentScope.Global => SquadPathPolicy.ResolveFile(ResolveHomeStateRoot(), JournalRelativePath),
+                SquadPhysicalRootIdentity.Resolve(targetRoot, Semantics).PhysicalPath,
+                JournalRelativePath, Semantics),
+            SquadDeploymentScope.Global => SquadPathPolicy.ResolveFile(ResolveHomeStateRoot(), JournalRelativePath, Semantics),
             SquadDeploymentScope.Instance => SquadPathPolicy.ResolveFile(
                 ResolveInstanceStateDirectory(targetRoot),
-                TransactionDirectoryName),
+                TransactionDirectoryName, Semantics),
             _ => throw new ArgumentOutOfRangeException(nameof(scope), scope, "Unknown Squad scope.")
         };
     }
@@ -734,7 +736,7 @@ public sealed class SquadStateStore : ISquadStateStore
         return scope switch
         {
             SquadDeploymentScope.Project =>
-                SquadPhysicalRootIdentity.Resolve(targetRoot).PhysicalPath,
+                SquadPhysicalRootIdentity.Resolve(targetRoot, Semantics).PhysicalPath,
             SquadDeploymentScope.Global => ResolveHomeCreationBoundary(),
             SquadDeploymentScope.Instance =>
                 ResolveInstanceAuthorityRoot(targetRoot),
@@ -753,7 +755,7 @@ public sealed class SquadStateStore : ISquadStateStore
     {
         return scope switch
         {
-            SquadDeploymentScope.Project => SquadPhysicalRootIdentity.Resolve(targetRoot).Key,
+            SquadDeploymentScope.Project => SquadPhysicalRootIdentity.Resolve(targetRoot, Semantics).Key,
             SquadDeploymentScope.Global => SquadPhysicalRootIdentity.KeyOf(ResolveHomeRoot()),
             SquadDeploymentScope.Instance => ResolveInstanceLeaseIdentity(targetRoot),
             _ => throw new ArgumentOutOfRangeException(nameof(scope), scope, "Unknown Squad scope.")
@@ -767,7 +769,7 @@ public sealed class SquadStateStore : ISquadStateStore
     public string ResolveHomeRoot()
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(UserPaths.HomeDirectory);
-        return SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(UserPaths.HomeDirectory);
+        return SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(UserPaths.HomeDirectory, Semantics);
     }
 
     /// <summary>
@@ -795,7 +797,7 @@ public sealed class SquadStateStore : ISquadStateStore
 
     private string ResolveProjectStateDirectory(string targetRoot)
     {
-        string key = SquadPhysicalRootIdentity.Resolve(targetRoot).Key;
+        string key = SquadPhysicalRootIdentity.Resolve(targetRoot, Semantics).Key;
         return ResolveDirectoryUnder(ResolveHomeRoot(), $"{ProjectsRelativeDirectory}/{key}");
     }
 
@@ -865,22 +867,22 @@ public sealed class SquadStateStore : ISquadStateStore
     {
         ValidateInstanceRoot(targetRoot);
         return Directory.Exists(targetRoot)
-            ? SquadPhysicalRootIdentity.Resolve(targetRoot).PhysicalPath
-            : SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(targetRoot);
+            ? SquadPhysicalRootIdentity.Resolve(targetRoot, Semantics).PhysicalPath
+            : SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(targetRoot, Semantics);
     }
 
     private string ResolveInstanceLeaseIdentity(string targetRoot)
     {
         ValidateInstanceRoot(targetRoot);
         string canonical = Directory.Exists(targetRoot)
-            ? SquadPhysicalRootIdentity.Resolve(targetRoot).PhysicalPath
-            : SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(targetRoot);
+            ? SquadPhysicalRootIdentity.Resolve(targetRoot, Semantics).PhysicalPath
+            : SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(targetRoot, Semantics);
         return SquadPhysicalRootIdentity.KeyOf(canonical);
     }
 
     private static string ResolveDirectoryUnder(string root, string relativeDirectory)
     {
-        string sentinel = SquadPathPolicy.ResolveFile(root, $"{relativeDirectory}/.state-sentinel");
+        string sentinel = SquadPathPolicy.ResolveFile(root, $"{relativeDirectory}/.state-sentinel", Semantics);
         return Path.GetDirectoryName(sentinel)
                ?? throw new InvalidOperationException("Could not resolve a Squad state directory.");
     }
@@ -894,13 +896,13 @@ public sealed class SquadStateStore : ISquadStateStore
         {
             SquadDeploymentScope.Project => SquadPathPolicy.ResolveFile(
                 ResolveProjectStateDirectory(targetRoot),
-                fileName),
+                fileName, Semantics),
             SquadDeploymentScope.Global => SquadPathPolicy.ResolveFile(
                 ResolveGlobalStateDirectory(targetRoot),
-                fileName),
+                fileName, Semantics),
             SquadDeploymentScope.Instance => SquadPathPolicy.ResolveFile(
                 ResolveInstanceStateDirectory(targetRoot),
-                fileName),
+                fileName, Semantics),
             _ => throw new ArgumentOutOfRangeException(nameof(scope), scope, "Unknown Squad scope.")
         };
     }
@@ -965,7 +967,7 @@ public sealed class SquadStateStore : ISquadStateStore
     {
         try
         {
-            return string.Equals(SquadPhysicalRootIdentity.Resolve(path).Key, key, StringComparison.Ordinal);
+            return string.Equals(SquadPhysicalRootIdentity.Resolve(path, Semantics).Key, key, StringComparison.Ordinal);
         }
         catch (SquadDeploymentConflictException)
         {

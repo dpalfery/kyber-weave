@@ -17,7 +17,8 @@ namespace KyberWeave.Application.Utilities;
 public sealed class StatusLineHostService(
     IStatusLineFiles files,
     IProcessEnvironment environment,
-    IProductRootLocator productRoots) : IStatusLineHostService
+    IProductRootLocator productRoots,
+    IFileSystemPathSemantics pathSemantics) : IStatusLineHostService
 {
     /// <summary>Where the status-line artifact tree sits in the checkout.</summary>
     internal const string ProductRelativePath = "products/kyber-utilities/statusline";
@@ -99,7 +100,7 @@ public sealed class StatusLineHostService(
         {
             if (!UtilitiesStatusLineArtifacts.RequiresExecutableBit(file.RelativePath)) continue;
 
-            string physicalPath = SquadPathPolicy.ResolveFile(stagingRoot, file.RelativePath);
+            string physicalPath = SquadPathPolicy.ResolveFile(stagingRoot, file.RelativePath, pathSemantics);
             if (!files.FileExists(physicalPath)) continue;
 
             files.MarkExecutable(physicalPath);

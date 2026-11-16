@@ -230,7 +230,7 @@ public sealed class SquadResponseGuidanceDeployerTests : IDisposable
     /// </summary>
     private string PhysicalHome()
     {
-        string home = Path.Combine(SquadFileSystemPathSemantics.Canonicalize(_temp.Path), "home");
+        string home = Path.Combine(SquadFileSystemPathSemantics.Instance.Canonicalize(_temp.Path), "home");
         Directory.CreateDirectory(home);
         return home;
     }

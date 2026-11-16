@@ -141,7 +141,8 @@ internal static class SquadTestCommands
             store,
             new SquadStateMigration(store, store.UserPaths),
             globalRoots ?? SquadHostDefaults.ResolveGlobalRoots(environmentReader),
-            new SquadModelPresetStore(store.UserPaths));
+            new SquadModelPresetStore(store.UserPaths),
+            SquadFileSystemPathSemantics.Instance);
     }
 
     public static SquadDoctorCommand Doctor(
@@ -168,7 +169,8 @@ internal static class SquadTestCommands
             new FileSquadSkillShadowing(),
             new FileDevinImportOverlapInspector(),
             new FileZCodeMcpInspector(),
-            new SquadDoctorOptions(executor, workingDirectory));
+            new SquadDoctorOptions(executor, workingDirectory),
+            SquadFileSystemPathSemantics.Instance);
     }
 
     public static SquadPresetUseCommand PresetUse(
@@ -185,7 +187,8 @@ internal static class SquadTestCommands
             new SquadModelPresetSelectionStore(store.UserPaths),
             Profiles(store, canonicalProfileResolver),
             new FileSquadDeploymentPlanner(),
-            new SquadTransactionFactory(store));
+            new SquadTransactionFactory(store),
+            SquadFileSystemPathSemantics.Instance);
     }
 
     public static SquadPresetClearCommand PresetClear(
@@ -202,7 +205,8 @@ internal static class SquadTestCommands
             new SquadModelPresetSelectionStore(store.UserPaths),
             Profiles(store, canonicalProfileResolver),
             new FileSquadDeploymentPlanner(),
-            new SquadTransactionFactory(store));
+            new SquadTransactionFactory(store),
+            SquadFileSystemPathSemantics.Instance);
     }
 
     public static SquadPresetShowCommand PresetShow(

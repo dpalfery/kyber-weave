@@ -6,23 +6,17 @@ namespace KyberWeave.Core.Squad.Deployment;
 /// <summary>Canonical physical identity shared by planning, state binding, and transactions.</summary>
 public sealed record SquadPhysicalRootIdentity(string PhysicalPath, string Key)
 {
-    public static SquadPhysicalRootIdentity Resolve(string targetRoot)
+    /// <summary>Resolves the physical identity of an existing deployment root.</summary>
+    /// <param name="targetRoot">The directory a deployment is bound to.</param>
+    /// <param name="semantics">The filesystem's canonical spelling and alias rules.</param>
+    /// <returns>The canonical physical path and the registry key derived from it.</returns>
+    /// <exception cref="SquadDeploymentConflictException">
+    ///     The root is not an existing directory, or it changed while its physical path was resolved.
+    /// </exception>
+    public static SquadPhysicalRootIdentity Resolve(string targetRoot, IFileSystemPathSemantics semantics)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
-        string fullPath = Path.GetFullPath(targetRoot);
-        if (!Directory.Exists(fullPath))
-        {
-            throw new SquadDeploymentConflictException(
-                $"Squad target root '{targetRoot}' must be an existing directory.");
-        }
-
-        string physicalPath = SquadFileSystemPathSemantics.Canonicalize(fullPath);
-        if (!Directory.Exists(physicalPath))
-        {
-            throw new SquadDeploymentConflictException(
-                $"Squad target root '{targetRoot}' changed during physical resolution.");
-        }
-
+        ArgumentNullException.ThrowIfNull(semantics);
+        string physicalPath = semantics.ResolvePhysicalRoot(targetRoot);
         return new SquadPhysicalRootIdentity(physicalPath, KeyOf(physicalPath));
     }
 
@@ -37,9 +31,13 @@ public sealed record SquadPhysicalRootIdentity(string PhysicalPath, string Key)
     /// Canonicalizes a path whose trailing segments may not exist yet. The home directory's
     /// <c>.kyber-weave</c> tree is created by the first transaction, so it cannot require existence.
     /// </summary>
-    public static string CanonicalizeAllowingMissing(string path)
+    /// <param name="path">The path to canonicalize.</param>
+    /// <param name="semantics">The filesystem's canonical spelling and alias rules.</param>
+    /// <returns>The canonical spelling of the path.</returns>
+    public static string CanonicalizeAllowingMissing(string path, IFileSystemPathSemantics semantics)
     {
+        ArgumentNullException.ThrowIfNull(semantics);
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        return SquadFileSystemPathSemantics.Canonicalize(path);
+        return semantics.Canonicalize(path);
     }
 }

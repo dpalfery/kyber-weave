@@ -93,6 +93,7 @@ public static class SquadServiceCollectionExtensions
             sp.GetRequiredService<ISquadFactoryHooksShadowing>(),
             sp.GetRequiredService<ISquadCanonicalProfileStore>(),
             sp.GetRequiredService<ISquadFileAccess>(),
+            sp.GetRequiredService<IFileSystemPathSemantics>(),
             sp.GetRequiredService<TimeProvider>(),
             sp.GetService<ISquadTransactionObserver>(),
             sp.GetRequiredService<ISquadGlobalRootResolver>(),

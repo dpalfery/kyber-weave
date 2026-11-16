@@ -17,6 +17,8 @@ namespace KyberWeave.Core.Squad.Model;
 /// </remarks>
 public sealed partial class SquadModelPresetSelectionStore : ISquadModelPresetSelectionStore
 {
+    private static readonly SquadFileSystemPathSemantics Semantics = SquadFileSystemPathSemantics.Instance;
+
     /// <summary>
     ///     The YAML schema version identifier for project model preset selections.
     /// </summary>
@@ -50,7 +52,7 @@ public sealed partial class SquadModelPresetSelectionStore : ISquadModelPresetSe
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
 
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(projectRoot);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(projectRoot, Semantics);
         string filePath = Path.Combine(_selectionsDirectory, $"{identity.Key}.yml");
         if (!File.Exists(filePath)) return null;
 
@@ -113,7 +115,7 @@ public sealed partial class SquadModelPresetSelectionStore : ISquadModelPresetSe
                 $"Invalid preset name '{presetName}'. Preset names must match '^[a-z0-9][a-z0-9-]{{0,63}}$'.",
                 nameof(presetName));
 
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(projectRoot);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(projectRoot, Semantics);
         SquadModelPresetSelection? existing = Read(projectRoot);
 
         Dictionary<SquadTarget, string> presets = existing is not null
@@ -138,7 +140,7 @@ public sealed partial class SquadModelPresetSelectionStore : ISquadModelPresetSe
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
 
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(projectRoot);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(projectRoot, Semantics);
         SquadModelPresetSelection? existing = Read(projectRoot);
         if (existing is null) return;
 
@@ -164,7 +166,7 @@ public sealed partial class SquadModelPresetSelectionStore : ISquadModelPresetSe
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
 
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(projectRoot);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(projectRoot, Semantics);
         string targetPath = Path.Combine(_selectionsDirectory, $"{identity.Key}.yml");
         if (File.Exists(targetPath)) File.Delete(targetPath);
     }

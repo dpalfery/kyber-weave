@@ -162,11 +162,14 @@ public sealed class SquadDeploymentPlan
     ///     <c>file.Target</c> combined with the relative path, unless this plan carries a legacy
     ///     single-root receipt, in which case it is <c>PhysicalRootPath</c> regardless.
     /// </summary>
-    public string ResolvePhysicalPath(SquadOwnedFile file)
+    /// <param name="file">The owned file to resolve.</param>
+    /// <param name="semantics">The filesystem's containment rules.</param>
+    /// <returns>The absolute path the file resolves to.</returns>
+    public string ResolvePhysicalPath(SquadOwnedFile file, IFileSystemPathSemantics semantics)
     {
         ArgumentNullException.ThrowIfNull(file);
 
-        return ResolvePhysicalPath(file.Target, file.RelativePath);
+        return ResolvePhysicalPath(file.Target, file.RelativePath, semantics);
     }
 
     /// <summary>
@@ -174,9 +177,13 @@ public sealed class SquadDeploymentPlan
     ///     callers such as <c>SquadTransaction</c> whose in-flight mutations carry a target
     ///     token rather than a full <see cref="SquadOwnedFile" />.
     /// </summary>
-    public string ResolvePhysicalPath(string target, string relativePath)
+    /// <param name="target">The target token the file belongs to.</param>
+    /// <param name="relativePath">The portable relative path from the source tree.</param>
+    /// <param name="semantics">The filesystem's containment rules.</param>
+    /// <returns>The absolute path the file resolves to.</returns>
+    public string ResolvePhysicalPath(string target, string relativePath, IFileSystemPathSemantics semantics)
     {
-        return SquadPathPolicy.ResolveFile(ResolvePhysicalRoot(target), relativePath);
+        return SquadPathPolicy.ResolveFile(ResolvePhysicalRoot(target), relativePath, semantics);
     }
 
     /// <summary>Resolves the physical root directory for a bare target token.</summary>
@@ -219,17 +226,27 @@ public sealed class SquadDeploymentPlan
         };
     }
 
+    /// <param name="scope">Whether the run is project, instance or global scope.</param>
+    /// <param name="physicalRootPath">The deployment's physical root.</param>
+    /// <param name="globalRoots">The per-target global root resolver, when the deployment has one.</param>
+    /// <param name="target">The target token the file belongs to.</param>
+    /// <param name="relativePath">The portable relative path from the source tree.</param>
+    /// <param name="isSingleRootLayout">Whether the receipt records the pre-#91 single-root layout.</param>
+    /// <param name="semantics">The filesystem's containment rules.</param>
+    /// <returns>The absolute path the file resolves to.</returns>
     public static string ResolvePhysicalPath(
         SquadDeploymentScope scope,
         string physicalRootPath,
         ISquadGlobalRootResolver? globalRoots,
         string target,
         string relativePath,
-        bool isSingleRootLayout)
+        bool isSingleRootLayout,
+        IFileSystemPathSemantics semantics)
     {
         return SquadPathPolicy.ResolveFile(
             ResolvePhysicalRoot(scope, physicalRootPath, globalRoots, target, isSingleRootLayout),
-            relativePath);
+            relativePath,
+            semantics);
     }
 
     /// <summary>
@@ -244,22 +261,31 @@ public sealed class SquadDeploymentPlan
     ///     rather than joining <paramref name="targetRoot" /> with the relative path directly, which
     ///     only holds for Project scope.
     /// </summary>
+    /// <param name="receipt">The receipt whose layout decides the root.</param>
+    /// <param name="targetRoot">The root the command is anchored at.</param>
+    /// <param name="globalRoots">The per-target global root resolver, when the deployment has one.</param>
+    /// <param name="file">The owned file to resolve.</param>
+    /// <param name="semantics">The filesystem's containment and canonical spelling rules.</param>
+    /// <returns>The absolute path the file resolves to.</returns>
     public static string ResolveOwnedFilePath(
         SquadReceipt receipt,
         string targetRoot,
         ISquadGlobalRootResolver? globalRoots,
-        SquadOwnedFile file)
+        SquadOwnedFile file,
+        IFileSystemPathSemantics semantics)
     {
         ArgumentNullException.ThrowIfNull(receipt);
         ArgumentNullException.ThrowIfNull(file);
+        ArgumentNullException.ThrowIfNull(semantics);
 
         return ResolvePhysicalPath(
             receipt.Scope,
-            SquadPhysicalRootIdentity.Resolve(targetRoot).PhysicalPath,
+            SquadPhysicalRootIdentity.Resolve(targetRoot, semantics).PhysicalPath,
             globalRoots,
             file.Target,
             file.RelativePath,
-            IsLegacySingleRootReceipt(receipt));
+            IsLegacySingleRootReceipt(receipt),
+            semantics);
     }
 
     /// <summary>

@@ -119,7 +119,8 @@ internal static class SquadHostDefaults
         ISquadGlobalRootResolver? globalRoots = null,
         SquadModelPresetStore? presetStore = null,
         SquadModelPresetSelectionStore? selectionStore = null,
-        Func<string, string?>? environmentReader = null) =>
+        Func<string, string?>? environmentReader = null,
+        IFileSystemPathSemantics? pathSemantics = null) =>
         new(
             releaseSource,
             renderer,
@@ -134,6 +135,7 @@ internal static class SquadHostDefaults
             new FileFactoryHooksShadowing(),
             new SquadCanonicalProfileStore(stateStore.UserPaths),
             new PhysicalSquadFileAccess(),
+            pathSemantics ?? SquadFileSystemPathSemantics.Instance,
             timeProvider,
             observer,
             globalRoots,

@@ -50,6 +50,8 @@ namespace KyberWeave.Core.Squad.Deployment;
 /// </remarks>
 public sealed class SquadResponseGuidanceDeployer : ISquadResponseGuidanceDeployer
 {
+    private static readonly SquadFileSystemPathSemantics Semantics = SquadFileSystemPathSemantics.Instance;
+
     /// <summary>The file name Squad owns beneath the home state root.</summary>
     public const string FileName = "response-guidance.md";
 
@@ -132,7 +134,7 @@ public sealed class SquadResponseGuidanceDeployer : ISquadResponseGuidanceDeploy
         string path;
         try
         {
-            path = SquadPathPolicy.ResolveFile(_homeStateRoot, FileName);
+            path = SquadPathPolicy.ResolveFile(_homeStateRoot, FileName, Semantics);
         }
         catch (Exception exception) when (IsDegradableFailure(exception))
         {

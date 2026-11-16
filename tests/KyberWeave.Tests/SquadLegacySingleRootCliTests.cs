@@ -125,7 +125,7 @@ public sealed class SquadLegacySingleRootCliTests : IDisposable
             "KyberWeave",
             "squad",
             "roots",
-            SquadPhysicalRootIdentity.Resolve(binding).Key);
+            SquadPhysicalRootIdentity.Resolve(binding, SquadFileSystemPathSemantics.Instance).Key);
         Directory.CreateDirectory(legacyDirectory);
         WriteText(Path.Combine(legacyDirectory, "squad.receipt.json"), f.Store.SerializeReceipt(LegacyReceipt()));
         WriteText(Path.Combine(legacyDirectory, "squad.lock.yml"), f.Store.SerializeLock(LegacyLock()));

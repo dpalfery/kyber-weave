@@ -21,6 +21,8 @@ namespace KyberWeave.Core.Squad.Deployment;
 /// </remarks>
 public static class SquadInstanceLinkSync
 {
+    private static readonly SquadFileSystemPathSemantics Semantics = SquadFileSystemPathSemantics.Instance;
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true,
@@ -36,7 +38,7 @@ public static class SquadInstanceLinkSync
     public static string GetMutexName(string instanceRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(instanceRoot);
-        string canonical = SquadFileSystemPathSemantics.Canonicalize(instanceRoot);
+        string canonical = Semantics.Canonicalize(instanceRoot);
         string rootKey = SquadPhysicalRootIdentity.KeyOf(canonical);
         return $"kyber-weave-squad-{rootKey}";
     }

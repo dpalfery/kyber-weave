@@ -10,6 +10,8 @@ namespace KyberWeave.Core.Squad.Deployment;
 /// <summary>Preflights install, update and uninstall operations against the deployment tree on disk.</summary>
 public static class SquadDeploymentPlanner
 {
+    private static readonly SquadFileSystemPathSemantics Semantics = SquadFileSystemPathSemantics.Instance;
+
     /// <summary>Preflights a new installation without changing the deployment tree.</summary>
     public static SquadDeploymentPlan CreateInstall(
         string targetRoot,
@@ -24,7 +26,7 @@ public static class SquadDeploymentPlanner
         IReadOnlyList<SquadRenderedBlock>? blocks = null)
     {
         ValidateCommon(targetRoot, squadLock, renderedFiles, degradations, timeProvider);
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot, Semantics);
         string root = identity.PhysicalPath;
         IReadOnlyList<NormalizedDeploymentFile> normalizedFiles = NormalizeRenderedFiles(
             root,
@@ -132,7 +134,7 @@ public static class SquadDeploymentPlanner
         if (globalRoots is not null && IsLegacySingleRootReceipt(previousReceipt))
             throw LegacySingleRootLayoutConflict();
 
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot, Semantics);
         string root = identity.PhysicalPath;
         IReadOnlyList<NormalizedDeploymentFile> normalizedFiles = NormalizeRenderedFiles(
             root,
@@ -252,7 +254,7 @@ public static class SquadDeploymentPlanner
             // single-root by the time this loop runs, so every remaining entry resolves through
             // the modern per-target path.
             string fullPath = ResolvePhysicalPath(
-                scope, root, globalRoots, previous.Target, previous.RelativePath, false);
+                scope, root, globalRoots, previous.Target, previous.RelativePath, false, Semantics);
 
             if (Directory.Exists(fullPath))
             {
@@ -366,7 +368,7 @@ public static class SquadDeploymentPlanner
         // root regardless of what a per-target resolver would answer.
         bool isSingleRootLayout = IsLegacySingleRootReceipt(receipt);
 
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot, Semantics);
         string root = identity.PhysicalPath;
         _ = ReceiptFilesByPath(root, receipt);
         RequireProjectScopeForBlocks(scope, receipt.Blocks.Count > 0, "uninstall");
@@ -386,7 +388,7 @@ public static class SquadDeploymentPlanner
             }
 
             string fullPath = ResolvePhysicalPath(
-                scope, root, globalRoots, owned.Target, owned.RelativePath, isSingleRootLayout);
+                scope, root, globalRoots, owned.Target, owned.RelativePath, isSingleRootLayout, Semantics);
 
             if (Directory.Exists(fullPath))
             {
@@ -497,7 +499,7 @@ public static class SquadDeploymentPlanner
         ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
         ArgumentNullException.ThrowIfNull(renderedFiles);
 
-        string root = SquadPhysicalRootIdentity.Resolve(targetRoot).PhysicalPath;
+        string root = SquadPhysicalRootIdentity.Resolve(targetRoot, Semantics).PhysicalPath;
         IReadOnlyList<NormalizedDeploymentFile> normalizedFiles = NormalizeRenderedFiles(
             root,
             scope,
@@ -585,7 +587,7 @@ public static class SquadDeploymentPlanner
             // A freshly rendered file is never legacy: every renderer has stripped its Global
             // prefix since #91, so this always resolves through the modern per-target path.
             string fullPath = ResolvePhysicalPath(
-                scope, root, globalRoots, rendered.Target, relativePath, false);
+                scope, root, globalRoots, rendered.Target, relativePath, false, Semantics);
             if (seenFullPaths.TryGetValue(fullPath, out string? existingPath))
                 throw new SquadDeploymentConflictException(
                     $"Rendered Squad output path '{rendered.RelativePath}' resolves to the same " +
@@ -608,7 +610,7 @@ public static class SquadDeploymentPlanner
         {
             ArgumentNullException.ThrowIfNull(owned);
             string normalizedPath = SquadPathPolicy.NormalizeRelativePath(owned.RelativePath);
-            _ = SquadPathPolicy.ResolveFile(root, normalizedPath);
+            _ = SquadPathPolicy.ResolveFile(root, normalizedPath, Semantics);
             if (!string.Equals(normalizedPath, owned.RelativePath, StringComparison.Ordinal))
                 throw new SquadPathContainmentException(
                     $"Receipt path '{owned.RelativePath}' is not a normalized portable path.");
@@ -736,7 +738,7 @@ public static class SquadDeploymentPlanner
             }
 
             string fullPath = ResolvePhysicalPath(
-                scope, root, globalRoots, block.Target, relativePath, isSingleRootLayout: false);
+                scope, root, globalRoots, block.Target, relativePath, isSingleRootLayout: false, Semantics);
             (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post, IReadOnlyList<JsonNode> subagentStop) = SplitBlockEntries(block);
 
             bool existsAsFile = File.Exists(fullPath);
@@ -824,7 +826,7 @@ public static class SquadDeploymentPlanner
 
             renderedIdentities.Add(identity);
             string fullPath = ResolvePhysicalPath(
-                scope, root, globalRoots, block.Target, relativePath, isSingleRootLayout: false);
+                scope, root, globalRoots, block.Target, relativePath, isSingleRootLayout: false, Semantics);
             (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post, IReadOnlyList<JsonNode> subagentStop) = SplitBlockEntries(block);
 
             if (!previousByIdentity.TryGetValue(identity, out SquadOwnedBlock? previous))
@@ -984,7 +986,7 @@ public static class SquadDeploymentPlanner
         List<SquadFilePrecondition> preconditions)
     {
         string fullPath = ResolvePhysicalPath(
-            scope, root, globalRoots, owned.Target, owned.RelativePath, isSingleRootLayout: false);
+            scope, root, globalRoots, owned.Target, owned.RelativePath, isSingleRootLayout: false, Semantics);
 
         if (Directory.Exists(fullPath))
             return true;

@@ -36,15 +36,22 @@ public sealed class StatusLineReceiptFormat
 
     private readonly StatusLineTargetRoots _roots;
     private readonly StatusLineTarget _target;
+    private readonly IFileSystemPathSemantics _semantics;
 
     /// <summary>Creates the format for one harness under the given roots.</summary>
     /// <param name="roots">The resolved per-user roots.</param>
     /// <param name="target">The harness the receipt belongs to.</param>
-    public StatusLineReceiptFormat(StatusLineTargetRoots roots, StatusLineTarget target)
+    /// <param name="semantics">The filesystem's identity rules, used to compare the recorded staging root.</param>
+    public StatusLineReceiptFormat(
+        StatusLineTargetRoots roots,
+        StatusLineTarget target,
+        IFileSystemPathSemantics semantics)
     {
         ArgumentNullException.ThrowIfNull(roots);
+        ArgumentNullException.ThrowIfNull(semantics);
         _roots = roots;
         _target = target;
+        _semantics = semantics;
         ReceiptPath = Path.Combine(
             roots.HomeDirectory,
             StateDirectoryRelativePath.Replace('/', Path.DirectorySeparatorChar),
@@ -125,7 +132,7 @@ public sealed class StatusLineReceiptFormat
 
             string recordedStagingRoot = RequireString(root, "stagingRoot");
             string currentStagingRoot = _roots.ResolveStagingRoot(_target);
-            if (!SquadFileSystemPathSemantics.AreSame(recordedStagingRoot, currentStagingRoot))
+            if (!_semantics.AreSame(recordedStagingRoot, currentStagingRoot))
             {
                 throw new StatusLineDeploymentConflictException(
                     $"The status-line receipt at '{ReceiptPath}' was deployed to staging root " +

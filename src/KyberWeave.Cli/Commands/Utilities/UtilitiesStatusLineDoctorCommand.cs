@@ -24,17 +24,20 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
     private readonly IStatusLineDeploymentService _plans;
     private readonly IStatusLineHostService _host;
     private readonly UtilitiesStatusLineProcessRunner _processRunner;
+    private readonly IFileSystemPathSemantics _semantics;
 
     /// <summary>Creates a doctor command over the process environment.</summary>
     /// <param name="environment">The process state the per-user roots and <c>PATH</c> are read from.</param>
     /// <param name="plans">Reads the receipts.</param>
     /// <param name="host">Probes <c>PATH</c>, the owned files' digests and their executable bits.</param>
     /// <param name="processRunner">Runs the harness version probe.</param>
+    /// <param name="semantics">The filesystem's containment rules.</param>
     public UtilitiesStatusLineDoctorCommand(
         IProcessEnvironment environment,
         IStatusLineDeploymentService plans,
         IStatusLineHostService host,
-        UtilitiesStatusLineProcessRunner processRunner)
+        UtilitiesStatusLineProcessRunner processRunner,
+        IFileSystemPathSemantics semantics)
     {
         ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(plans);
@@ -45,6 +48,7 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
         _plans = plans;
         _host = host;
         _processRunner = processRunner;
+        _semantics = semantics;
     }
 
     /// <inheritdoc />
@@ -125,7 +129,8 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
         string stagingRoot = roots.ResolveStagingRoot(target);
         string commandPath = SquadPathPolicy.ResolveFile(
             stagingRoot,
-            UtilitiesStatusLineArtifacts.PrimaryFileName(target));
+            UtilitiesStatusLineArtifacts.PrimaryFileName(target),
+            _semantics);
         UtilitiesStatusLineOutput.PrintActivationGuidance(target, commandPath);
 
         return healthy;
@@ -184,7 +189,8 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
             {
                 physicalPath = UtilitiesStatusLineCommandComposition.ResolveOwnedPhysicalPath(
                     stagingRoot,
-                    file.RelativePath);
+                    file.RelativePath,
+                    _semantics);
             }
             catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
             {

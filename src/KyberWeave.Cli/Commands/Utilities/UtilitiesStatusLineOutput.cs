@@ -28,17 +28,23 @@ internal static class UtilitiesStatusLineOutput
     ///     The absolute path of the artifact a harness's snippet names, or <see langword="null" /> when the
     ///     artifact set does not carry it.
     /// </summary>
+    /// <param name="target">The harness the artifact set belongs to.</param>
+    /// <param name="stagingRoot">The harness staging root the deployment writes beneath.</param>
+    /// <param name="files">The artifacts the deployment owns.</param>
+    /// <param name="semantics">The filesystem's containment rules.</param>
+    /// <returns>The absolute path, or null when the set does not carry the primary file.</returns>
     public static string? ResolvePrimaryCommandPath(
         StatusLineTarget target,
         string stagingRoot,
-        IReadOnlyList<StatusLineDeploymentFile> files)
+        IReadOnlyList<StatusLineDeploymentFile> files,
+        IFileSystemPathSemantics semantics)
     {
         ArgumentNullException.ThrowIfNull(files);
 
         string primaryFileName = UtilitiesStatusLineArtifacts.PrimaryFileName(target);
         foreach (StatusLineDeploymentFile file in files)
             if (string.Equals(Path.GetFileName(file.RelativePath), primaryFileName, StringComparison.Ordinal))
-                return SquadPathPolicy.ResolveFile(stagingRoot, file.RelativePath);
+                return SquadPathPolicy.ResolveFile(stagingRoot, file.RelativePath, semantics);
 
         return null;
     }

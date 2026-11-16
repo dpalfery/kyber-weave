@@ -26,6 +26,8 @@ namespace KyberWeave.Core.Squad.Deployment;
 /// </remarks>
 public sealed class SquadTransaction : ISquadTransaction
 {
+    private static readonly SquadFileSystemPathSemantics Semantics = SquadFileSystemPathSemantics.Instance;
+
     private const string IntentFileName = "intent.json";
     private const string IntentSchema = "kyber-squad.transaction/v1";
     private static readonly JsonSerializerOptions IntentJsonOptions = CreateIntentJsonOptions();
@@ -101,7 +103,7 @@ public sealed class SquadTransaction : ISquadTransaction
     {
         ArgumentNullException.ThrowIfNull(plan);
 
-        SquadPhysicalRootIdentity currentIdentity = SquadPhysicalRootIdentity.Resolve(plan.TargetRoot);
+        SquadPhysicalRootIdentity currentIdentity = SquadPhysicalRootIdentity.Resolve(plan.TargetRoot, Semantics);
         if (!string.Equals(currentIdentity.Key, plan.PhysicalRootKey, StringComparison.Ordinal))
             throw new SquadDeploymentConflictException(
                 "Squad target root changed physical identity after preflight. Recreate the plan before writing.");
@@ -111,7 +113,7 @@ public sealed class SquadTransaction : ISquadTransaction
         string root = plan.PhysicalRootPath;
         string journalDirectory = Physical(_stateStore.ResolveTransactionDirectory(root, plan.Scope));
         string workDirectory = Physical(_stateStore.ResolveFileWorkDirectory(root, plan.Scope));
-        bool sameTransactionDirectory = SquadFileSystemPathSemantics.AreSame(
+        bool sameTransactionDirectory = Semantics.AreSame(
             journalDirectory,
             workDirectory);
         string intentPath = Path.Combine(journalDirectory, IntentFileName);
@@ -349,7 +351,7 @@ public sealed class SquadTransaction : ISquadTransaction
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
 
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot, Semantics);
         using TransactionLease lease = AcquireLease(_stateStore.ResolveLeaseIdentity(identity.PhysicalPath, scope));
         string root = identity.PhysicalPath;
         string journalDirectory = Physical(_stateStore.ResolveTransactionDirectory(root, scope));
@@ -423,7 +425,7 @@ public sealed class SquadTransaction : ISquadTransaction
             .Select(mutation =>
             {
                 string physicalRoot = plan.ResolvePhysicalRoot(mutation.Target);
-                string fullPath = SquadPathPolicy.ResolveFile(physicalRoot, mutation.RelativePath);
+                string fullPath = SquadPathPolicy.ResolveFile(physicalRoot, mutation.RelativePath, Semantics);
 
                 return new IntentFile(
                     mutation.RelativePath,
@@ -520,7 +522,7 @@ public sealed class SquadTransaction : ISquadTransaction
         SquadDeploymentPlan plan,
         SquadFilePrecondition precondition)
     {
-        string fullPath = plan.ResolvePhysicalPath(precondition.Target, precondition.RelativePath);
+        string fullPath = plan.ResolvePhysicalPath(precondition.Target, precondition.RelativePath, Semantics);
         OriginalEntryKind kind = GetEntryKind(fullPath);
         if (precondition.Kind == SquadFilePreconditionKind.Missing)
         {
@@ -589,7 +591,7 @@ public sealed class SquadTransaction : ISquadTransaction
             if (original.OriginalKind == OriginalEntryKind.Missing)
                 continue;
 
-            string targetPath = SquadPathPolicy.ResolveFile(original.PhysicalRoot, mutation.RelativePath);
+            string targetPath = SquadPathPolicy.ResolveFile(original.PhysicalRoot, mutation.RelativePath, Semantics);
             string backupPath = TransactionFilePath(
                 workDirectory,
                 "backups",
@@ -739,7 +741,7 @@ public sealed class SquadTransaction : ISquadTransaction
                     intentPath,
                     lease,
                     ref intent);
-                string targetPath = SquadPathPolicy.ResolveFile(boundRoot, mutation.RelativePath);
+                string targetPath = SquadPathPolicy.ResolveFile(boundRoot, mutation.RelativePath, Semantics);
                 Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
                 PublishStageNoOverwrite(
                     intent,
@@ -770,7 +772,7 @@ public sealed class SquadTransaction : ISquadTransaction
             }
             else
             {
-                string deletedPath = SquadPathPolicy.ResolveFile(boundRoot, mutation.RelativePath);
+                string deletedPath = SquadPathPolicy.ResolveFile(boundRoot, mutation.RelativePath, Semantics);
                 VerifyAfterImage(
                     deletedPath,
                     OriginalEntryKind.Missing,
@@ -989,12 +991,12 @@ public sealed class SquadTransaction : ISquadTransaction
             Path.GetDirectoryName(targetPath)!,
             Path.GetFileName(targetPath),
             Path.GetFileName(targetPath),
-            SquadFileSystemPathSemantics.AreSame(
+            Semantics.AreSame(
                 workDirectory,
                 Path.GetDirectoryName(intentPath)!)
                 ? workDirectory
                 : Path.GetDirectoryName(intentPath)!,
-            SquadFileSystemPathSemantics.AreSame(
+            Semantics.AreSame(
                 workDirectory,
                 Path.GetDirectoryName(intentPath)!)
                 ? ArtifactArea.Work
@@ -1024,7 +1026,7 @@ public sealed class SquadTransaction : ISquadTransaction
         ref int checkpointSequence,
         ref IntentDocument intent)
     {
-        string targetPath = SquadPathPolicy.ResolveFile(boundRoot, relativePath);
+        string targetPath = SquadPathPolicy.ResolveFile(boundRoot, relativePath, Semantics);
         OriginalEntryKind currentKind = GetEntryKind(targetPath);
         if (currentKind == OriginalEntryKind.Missing)
         {
@@ -1034,7 +1036,7 @@ public sealed class SquadTransaction : ISquadTransaction
         }
 
         string claimRelativePath = ClaimRelativePath(intent.TransactionId, claimIdentity);
-        string claimPath = SquadPathPolicy.ResolveFile(claimRoot, claimRelativePath);
+        string claimPath = SquadPathPolicy.ResolveFile(claimRoot, claimRelativePath, Semantics);
         IntentArtifact artifact = CaptureNodeArtifact(
             intent.TransactionId,
             claimArea,
@@ -1059,8 +1061,8 @@ public sealed class SquadTransaction : ISquadTransaction
             SquadTransactionCheckpointKind.ActiveTransitionWritten,
             subject);
 
-        string checkedTarget = SquadPathPolicy.ResolveFile(boundRoot, relativePath);
-        if (!SquadFileSystemPathSemantics.AreSame(checkedTarget, targetPath))
+        string checkedTarget = SquadPathPolicy.ResolveFile(boundRoot, relativePath, Semantics);
+        if (!Semantics.AreSame(checkedTarget, targetPath))
             throw ClaimConflict(relativePath);
         MoveEntryNoOverwrite(targetPath, claimPath, currentKind);
         if (resolvedDirectoryLinkTarget is not null)
@@ -1160,8 +1162,8 @@ public sealed class SquadTransaction : ISquadTransaction
         string stagingPath,
         string targetPath)
     {
-        string checkedTarget = SquadPathPolicy.ResolveFile(boundRoot, relativePath);
-        if (!SquadFileSystemPathSemantics.AreSame(checkedTarget, targetPath))
+        string checkedTarget = SquadPathPolicy.ResolveFile(boundRoot, relativePath, Semantics);
+        if (!Semantics.AreSame(checkedTarget, targetPath))
             throw PreconditionConflict(relativePath);
 
         IntentArtifact[] artifacts = intent.Artifacts.Where(artifact =>
@@ -1216,7 +1218,7 @@ public sealed class SquadTransaction : ISquadTransaction
         // targets share a relative path under different Global-scope physical roots.
         foreach (IntentFile file in intent.Files.Reverse())
         {
-            string targetPath = SquadPathPolicy.ResolveFile(file.PhysicalRoot, file.RelativePath);
+            string targetPath = SquadPathPolicy.ResolveFile(file.PhysicalRoot, file.RelativePath, Semantics);
             string backupPath = TransactionFilePath(
                 workDirectory,
                 "backups",
@@ -1252,7 +1254,7 @@ public sealed class SquadTransaction : ISquadTransaction
                 if (!seenDirs.Add((file.PhysicalRoot, relativeDirectory)))
                     continue;
 
-                string directory = SquadPathPolicy.ResolveFile(file.PhysicalRoot, relativeDirectory);
+                string directory = SquadPathPolicy.ResolveFile(file.PhysicalRoot, relativeDirectory, Semantics);
                 DeleteEmptyDirectory(directory);
                 if (GetEntryKind(directory) != OriginalEntryKind.Missing)
                     conflicts.Add(relativeDirectory);
@@ -1310,7 +1312,7 @@ public sealed class SquadTransaction : ISquadTransaction
                         ClaimRelativePath(intent.TransactionId, FileKey(file.Target, file.RelativePath)),
                         StringComparison.Ordinal))
                 {
-                    targetPath = SquadPathPolicy.ResolveFile(file.PhysicalRoot, file.RelativePath);
+                    targetPath = SquadPathPolicy.ResolveFile(file.PhysicalRoot, file.RelativePath, Semantics);
                     break;
                 }
 
@@ -1825,8 +1827,8 @@ public sealed class SquadTransaction : ISquadTransaction
     {
         string? current = Path.GetDirectoryName(artifactPath);
         while (current is not null &&
-               !SquadFileSystemPathSemantics.AreSame(current, areaRoot) &&
-               SquadFileSystemPathSemantics.IsWithin(areaRoot, current))
+               !Semantics.AreSame(current, areaRoot) &&
+               Semantics.IsWithin(areaRoot, current))
         {
             DeleteEmptyDirectory(current);
             if (Directory.Exists(current))
@@ -2013,8 +2015,8 @@ public sealed class SquadTransaction : ISquadTransaction
         string boundary = Path.TrimEndingDirectorySeparator(Path.GetFullPath(boundaryPath));
         string current = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directoryPath));
         List<string> missing = new();
-        while (!SquadFileSystemPathSemantics.AreSame(current, boundary) &&
-               SquadFileSystemPathSemantics.IsWithin(boundary, current))
+        while (!Semantics.AreSame(current, boundary) &&
+               Semantics.IsWithin(boundary, current))
         {
             if (GetEntryKind(current) != OriginalEntryKind.Missing)
                 break;
@@ -2063,7 +2065,7 @@ public sealed class SquadTransaction : ISquadTransaction
     /// </summary>
     private static string Physical(string path)
     {
-        return SquadFileSystemPathSemantics.Canonicalize(path);
+        return Semantics.Canonicalize(path);
     }
 
     /// <summary>
@@ -2078,7 +2080,7 @@ public sealed class SquadTransaction : ISquadTransaction
 
     private static string RelativeAuthorityPath(string authorityRoot, string path)
     {
-        if (!SquadFileSystemPathSemantics.IsWithin(authorityRoot, path))
+        if (!Semantics.IsWithin(authorityRoot, path))
             throw new InvalidOperationException(
                 "Squad created-directory authority escaped its bound root.");
 
@@ -2086,8 +2088,8 @@ public sealed class SquadTransaction : ISquadTransaction
         // the same way the canonical spelling does. The recorded relative path is spelling-independent.
         return SquadPathPolicy.NormalizeRelativePath(
             Path.GetRelativePath(
-                    SquadFileSystemPathSemantics.Canonicalize(authorityRoot),
-                    SquadFileSystemPathSemantics.Canonicalize(path))
+                    Semantics.Canonicalize(authorityRoot),
+                    Semantics.Canonicalize(path))
                 .Replace(Path.DirectorySeparatorChar, '/'));
     }
 
@@ -2111,7 +2113,7 @@ public sealed class SquadTransaction : ISquadTransaction
                 CreatedDirectoryArea.Home => homeBoundary,
                 _ => stateAuthorityRoot
             };
-            DeleteEmptyDirectory(SquadPathPolicy.ResolveFile(root, authority.Path));
+            DeleteEmptyDirectory(SquadPathPolicy.ResolveFile(root, authority.Path, Semantics));
         }
     }
 
@@ -2222,7 +2224,7 @@ public sealed class SquadTransaction : ISquadTransaction
         string journalDirectory,
         string workDirectory)
     {
-        if (!SquadFileSystemPathSemantics.AreSame(journalDirectory, workDirectory) &&
+        if (!Semantics.AreSame(journalDirectory, workDirectory) &&
             Directory.Exists(workDirectory))
             DeleteDirectoryTree(workDirectory);
 
@@ -2268,8 +2270,8 @@ public sealed class SquadTransaction : ISquadTransaction
         ICollection<IntentArtifact> artifacts)
     {
         string normalizedPath = SquadPathPolicy.NormalizeRelativePath(relativePath);
-        string resolvedPath = SquadPathPolicy.ResolveFile(areaRoot, normalizedPath);
-        if (!SquadFileSystemPathSemantics.AreSame(resolvedPath, artifactPath))
+        string resolvedPath = SquadPathPolicy.ResolveFile(areaRoot, normalizedPath, Semantics);
+        if (!Semantics.AreSame(resolvedPath, artifactPath))
             throw new InvalidOperationException(
                 $"Squad transaction artifact '{relativePath}' resolved inconsistently.");
 
@@ -2657,7 +2659,7 @@ public sealed class SquadTransaction : ISquadTransaction
                 ArtifactRole.ClaimedOriginal,
                 ClaimRelativePath(intent.TransactionId, FileKey(file.Target, file.RelativePath))));
 
-        ArtifactArea stateClaimArea = SquadFileSystemPathSemantics.AreSame(
+        ArtifactArea stateClaimArea = Semantics.AreSame(
             journalDirectory,
             workDirectory)
             ? ArtifactArea.Work
@@ -2761,7 +2763,7 @@ public sealed class SquadTransaction : ISquadTransaction
             throw new InvalidDataException("Squad prepared transaction has no verified artifacts.");
 
         if (ContainsTemporaryArtifact(journalDirectory) ||
-            (!SquadFileSystemPathSemantics.AreSame(journalDirectory, workDirectory) &&
+            (!Semantics.AreSame(journalDirectory, workDirectory) &&
              ContainsTemporaryArtifact(workDirectory)))
             throw new InvalidDataException(
                 "Squad prepared transaction contains an unpublished temporary artifact.");
@@ -2921,7 +2923,7 @@ public sealed class SquadTransaction : ISquadTransaction
         string journalDirectory,
         string workDirectory)
     {
-        if (SquadFileSystemPathSemantics.AreSame(journalDirectory, workDirectory))
+        if (Semantics.AreSame(journalDirectory, workDirectory))
         {
             VerifyExactTransactionTreeArea(
                 workDirectory,
@@ -2969,17 +2971,17 @@ public sealed class SquadTransaction : ISquadTransaction
                 CreatedDirectoryArea.Home => homeBoundary,
                 _ => stateAuthorityRoot
             };
-            string directory = SquadPathPolicy.ResolveFile(authorityRoot, normalized);
+            string directory = SquadPathPolicy.ResolveFile(authorityRoot, normalized, Semantics);
             bool anchored = authority.Area == CreatedDirectoryArea.Home
                 // Home state directories are the ancestors of, or within, the home state tree. A
                 // journal is never under the home state tree, so it cannot be the anchor for these.
-                ? SquadFileSystemPathSemantics.AreSame(directory, homeStateDirectory) ||
-                  SquadFileSystemPathSemantics.IsWithin(directory, homeStateDirectory) ||
-                  SquadFileSystemPathSemantics.IsWithin(homeStateDirectory, directory)
-                : SquadFileSystemPathSemantics.AreSame(
+                ? Semantics.AreSame(directory, homeStateDirectory) ||
+                  Semantics.IsWithin(directory, homeStateDirectory) ||
+                  Semantics.IsWithin(homeStateDirectory, directory)
+                : Semantics.AreSame(
                       directory,
                       authority.Area == CreatedDirectoryArea.Target ? workDirectory : journalDirectory) ||
-                  SquadFileSystemPathSemantics.IsWithin(
+                  Semantics.IsWithin(
                       directory,
                       authority.Area == CreatedDirectoryArea.Target ? workDirectory : journalDirectory);
             if (!anchored)
@@ -3072,7 +3074,7 @@ public sealed class SquadTransaction : ISquadTransaction
             _ = SquadPathPolicy.ResolveFile(
                 areaRoot,
                 Path.Combine(parentRelativePath, ".authority-sentinel")
-                    .Replace(Path.DirectorySeparatorChar, '/'));
+                    .Replace(Path.DirectorySeparatorChar, '/'), Semantics);
 
         return fullPath;
     }
@@ -3112,7 +3114,7 @@ public sealed class SquadTransaction : ISquadTransaction
         string relativePath)
     {
         string categoryRoot = Path.Combine(workDirectory, category);
-        return SquadPathPolicy.ResolveFile(categoryRoot, relativePath);
+        return SquadPathPolicy.ResolveFile(categoryRoot, relativePath, Semantics);
     }
 
     /// <summary>

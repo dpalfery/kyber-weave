@@ -35,6 +35,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
     private readonly ISquadFactoryHooksShadowing _shadowing;
     private readonly ISquadCanonicalProfileStore _canonicalProfiles;
     private readonly ISquadFileAccess _files;
+    private readonly IFileSystemPathSemantics _pathSemantics;
 
     /// <summary>
     ///     Gets the state store associated with this lifecycle service.
@@ -55,6 +56,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
     /// <param name="shadowing">Decides whether Factory settings hooks shadow Squad's block.</param>
     /// <param name="canonicalProfiles">Keeps the canonical profile snapshot of each version.</param>
     /// <param name="files">Probes the release's extraction tree.</param>
+    /// <param name="pathSemantics">The filesystem's canonical spelling and containment rules.</param>
     /// <param name="timeProvider">The clock deployments are stamped with.</param>
     /// <param name="observer">Told of each transaction step, or null.</param>
     /// <param name="globalRoots">Resolves each target's global root, or null.</param>
@@ -73,6 +75,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
         ISquadFactoryHooksShadowing shadowing,
         ISquadCanonicalProfileStore canonicalProfiles,
         ISquadFileAccess files,
+        IFileSystemPathSemantics pathSemantics,
         TimeProvider? timeProvider = null,
         ISquadTransactionObserver? observer = null,
         ISquadGlobalRootResolver? globalRoots = null,
@@ -91,6 +94,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
         ArgumentNullException.ThrowIfNull(shadowing);
         ArgumentNullException.ThrowIfNull(canonicalProfiles);
         ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(pathSemantics);
         _releaseSource = releaseSource;
         _renderer = renderer;
         _stateStore = stateStore;
@@ -104,6 +108,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
         _shadowing = shadowing;
         _canonicalProfiles = canonicalProfiles;
         _files = files;
+        _pathSemantics = pathSemantics;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _observer = observer;
         _globalRoots = globalRoots;
@@ -126,7 +131,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
         if (request.Scope == SquadDeploymentScope.Instance && request.Targets.Count != 1)
             throw new ArgumentException("SquadDeploymentScope.Instance requires exactly one target.", nameof(request));
 
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(request.TargetRoot);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(request.TargetRoot, _pathSemantics);
         string targetRoot = identity.PhysicalPath;
 
         SquadReceipt? existingReceipt = _stateStore.ReadReceipt(targetRoot, request.Scope);
@@ -366,7 +371,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
     public IReadOnlyList<SquadTarget> EffectiveInstallTargets(SquadInstallRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        string root = SquadPhysicalRootIdentity.Resolve(request.TargetRoot).PhysicalPath;
+        string root = SquadPhysicalRootIdentity.Resolve(request.TargetRoot, _pathSemantics).PhysicalPath;
         return MergeAddedTargets(request, _stateStore.ReadReceipt(root, request.Scope));
     }
 
@@ -414,7 +419,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
         if (request.Scope == SquadDeploymentScope.Instance && (request.Targets is null || request.Targets.Count != 1))
             throw new ArgumentException("SquadDeploymentScope.Instance requires exactly one target.", nameof(request));
 
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(request.TargetRoot);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(request.TargetRoot, _pathSemantics);
         string targetRoot = identity.PhysicalPath;
 
         SquadReceipt previousReceipt = _stateStore.ReadReceipt(targetRoot, request.Scope)
@@ -655,7 +660,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.TargetRoot);
 
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(request.TargetRoot);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(request.TargetRoot, _pathSemantics);
         string targetRoot = identity.PhysicalPath;
 
         SquadReceipt? receipt = _stateStore.ReadReceipt(targetRoot, request.Scope);
@@ -854,7 +859,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
             if (!plan.Receipt.Files.Contains(previous))
                 continue;
 
-            string fullPath = plan.ResolvePhysicalPath(previous);
+            string fullPath = plan.ResolvePhysicalPath(previous, _pathSemantics);
             if (!_files.FileExists(fullPath))
                 continue;
 
