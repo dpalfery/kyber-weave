@@ -112,6 +112,10 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<ITaskGateSelectionService, TaskGateSelectionService>();
         services.TryAddSingleton<IConfigLoadService, ConfigLoadService>();
         services.TryAddSingleton<IReviewCycleSelector, ReviewCycleSelector>();
+        services.TryAddSingleton<IReviewCatalogueService>(sp => new ReviewCatalogueService(
+            sp.GetRequiredService<IConfigLoadService>(),
+            sp.GetRequiredService<IRepositoryFileLister>(),
+            sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<IReviewDuplicatesService>(sp => new ReviewDuplicatesService(
             sp.GetRequiredService<IDuplicateDetectionService>(),
             sp.GetRequiredService<ICodeGraphPortsFactory>(),

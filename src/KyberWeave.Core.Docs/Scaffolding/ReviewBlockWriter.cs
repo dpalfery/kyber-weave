@@ -1,6 +1,9 @@
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review.Catalogue;
+using KyberWeave.Application.Review;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Data.Review;
 using YamlDotNet.Core;
 
 namespace KyberWeave.Core.Docs.Scaffolding;
@@ -26,15 +29,6 @@ public sealed record ReviewGatesOutcome(
     IReadOnlyList<(string GateId, string Reason)> CommentedOutGates,
     IReadOnlyList<string> NoFamily,
     IReadOnlyList<string> MissingFromExisting);
-
-/// <summary>
-/// The rendered block <c>docs init</c> may write, and whether it may write it at all.
-/// </summary>
-/// <param name="Rendered">The catalogue render for the declared technologies.</param>
-/// <param name="ShouldWrite">
-/// False when no declared technology has a catalogue entry; there is then no block to write.
-/// </param>
-public sealed record ReviewGatesPlan(RenderedReviewBlock Rendered, bool ShouldWrite);
 
 /// <summary>
 /// Appends the rendered catalogue <c>review:</c> block to the host configuration, or reports
@@ -73,41 +67,21 @@ public static partial class ReviewBlockWriter
     /// rules. The test-runner choice (MTP versus VSTest) is read from the repository's
     /// <c>global.json</c> by the render itself.
     /// </summary>
+    /// <remarks>
+    /// The plan is <see cref="ReviewCataloguePlanner"/> in the domain layer; this answers over the real file system for
+    /// the callers that have no container.
+    /// </remarks>
     public static ReviewGatesPlan Plan(string repoRoot, IReadOnlyList<string> declaredTechnologies)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(declaredTechnologies);
 
-        IReadOnlyList<GateCatalogueFamily> families = GateCatalogue.LoadEmbedded();
-
-        // No declared technology maps to a family: there is nothing to detect and nothing to
-        // write, so the repository is never even walked. The render would be an empty block;
-        // the plan carries the no-family list instead.
-        HashSet<string> familyTechnologies = new(StringComparer.Ordinal);
-        foreach (GateCatalogueFamily family in families)
-        {
-            foreach (string technology in family.Technologies)
-            {
-                familyTechnologies.Add(technology);
-            }
-        }
-
-        if (!declaredTechnologies.Any(familyTechnologies.Contains))
-        {
-            RenderedReviewBlock empty = new(
-                string.Empty, [], [], [.. declaredTechnologies.Distinct(StringComparer.Ordinal)]);
-            return new ReviewGatesPlan(empty, false);
-        }
-
-        Dictionary<string, ProjectRootSet> rootsByFamily = new(StringComparer.Ordinal);
-        foreach (GateCatalogueFamily family in families)
-        {
-            rootsByFamily[family.Family] = ProjectRootDetector.Detect(
-                repoRoot, [.. family.Markers], family.Nesting, family.Pair, family.Fallback?.ToArray());
-        }
-
-        RenderedReviewBlock rendered = GateCatalogue.Render(declaredTechnologies, rootsByFamily, repoRoot);
-        return new ReviewGatesPlan(rendered, true);
+        PhysicalFileSystem physical = new();
+        return ReviewCataloguePlanner.Plan(
+            repoRoot,
+            declaredTechnologies,
+            new FileRepositoryFileLister(new ProcessProgramRunner()).List(repoRoot),
+            new GateCatalogueFacts(physical.FileExists, physical.ReadAllText));
     }
 
     /// <summary>
