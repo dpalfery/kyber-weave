@@ -32,3 +32,7 @@ RECOMMENDED: none — <why no option is safe to pick>
 ```
 
 Batch escalations in the usual group of up to four. Non-escalated open decisions are decided and recorded, never returned as `NEEDS_DECISION`.
+
+## Rules that say to ask first
+
+A host `AGENTS.md`, standard or ADR may say to ask the owner before an architectural decision, a new dependency, a new folder or a contract change. Under `autonomy: autonomous` the owner has already answered: the run's autonomy is their approval for whichever option you recommend. Treat such a rule as a reason to record the decision row with its source, not as a reason to ask. Return nothing that asks for approval or confirmation next to `PLAN_READY`: every decision is in the `## Decisions` table, and the pull request is where the owner reviews it.

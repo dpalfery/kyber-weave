@@ -50,6 +50,12 @@ public sealed record ArbiterEvent
     /// <summary>The harness tool-call id, where the payload carries one.</summary>
     public string? ToolCallId { get; init; }
 
+    /// <summary>
+    /// The ledger id of the pre event this return answers, when the harness adapter already knows it. Set for a
+    /// background sub-agent, whose every turn answers the one dispatch; null leaves pairing to the ledger.
+    /// </summary>
+    public string? PreId { get; init; }
+
     /// <summary>The payload's session id, when it has one.</summary>
     public string? Session { get; init; }
 

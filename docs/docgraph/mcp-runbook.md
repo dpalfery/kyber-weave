@@ -1146,7 +1146,7 @@ came from, which is what decides whether a code answer is about your branch.
 
 The server binds one root at startup, but agent runs work in linked worktrees created after it
 started, so an answer from the bound root can describe a different branch than the one being
-edited. Every tool therefore takes a `projectPath` (optional, except on the two plan lifecycle tools), the same name CodeGraph's
+edited. Every tool therefore takes a `projectPath` (optional, except on the two plan lifecycle tools, the deliver tool and the tooling-check tool), the same name CodeGraph's
 `codegraph_explore` uses: the absolute path of a worktree of this repository. Omit it and the
 call is answered from the server's root, as before.
 
@@ -1166,8 +1166,8 @@ call is answered from the server's root, as before.
 - **The index is the worktree's own.** The CodeGraph joins and the freshness refresh use the
   `.codegraph/` of the named worktree, never the server root's.
 
-All ten are declared `OpenWorld = false`, and all but the two plan lifecycle tools are declared
-`ReadOnly`; the SDK maps those to the protocol's `openWorldHint` and `readOnlyHint`. A client can act on an annotation; it cannot
+All twelve but the deliver tool are declared `OpenWorld = false`, and all but the two plan lifecycle tools,
+the deliver tool and the tooling-check tool are declared `ReadOnly`; the SDK maps those to the protocol's `openWorldHint` and `readOnlyHint`. A client can act on an annotation; it cannot
 act on a sentence claiming the same thing, which is why that claim is no longer prose.
 
 ### How the descriptions are written
@@ -1189,7 +1189,7 @@ logs` puts those nouns in permanently resident text held back only by a negation
 negation is the first thing to degrade when a model scans many tools at once. Read out of
 context it becomes a prohibition on reading tests. Only
 `docs_answer_question_from_repo_documentation` carries an exclusion, because it is the broadest of
-the ten; the narrower nine state their territory positively so no request falls between them.
+the twelve; the narrower eleven state their territory positively so no request falls between them.
 
 Where a constraint can live on a parameter it goes there instead — for example how
 `charBudget` caps **`docs_get_coding_standard_for_technology`** prose sits on that parameter,
@@ -1210,7 +1210,7 @@ builds from it. The tightest figures anyone reports are:
 These are the tightest figures any client reports, not a figure every vendor has verified — two of
 the three are not vendor documentation at all — so the names are chosen against the smallest of
 them rather than the one that happens to be written down. The current maxima sit inside them: the
-longest tool name is 47 characters (`docs_finalize_approved_plan_and_write_task_file`), the longest server-plus-tool pair is 55
+longest tool name is 48 characters (`docs_push_run_branch_and_open_draft_pull_request`), the longest server-plus-tool pair is 55
 (`kw-arbiter` with `arbiter_check_configuration_and_key_readiness`), and the longest qualified name
 is 62 (`mcp__kw-arbiter__arbiter_check_configuration_and_key_readiness`). A test pins all three
 bounds (`McpToolNameContractTests`), so a name that would break a client breaks the build instead.
@@ -1269,7 +1269,8 @@ configuration registry's property name for it (`csharp-coding-standard`,
 one surrounding `<>` pair and the literal suffix `-coding-standard`, then matches corpus
 documents whose `doc-type` is `coding-standard` by their declared `technology`. **The
 corpus decides, not the registry**: declaring a technology in `ontology.technologies`
-without a standard scaffolded at `docs/standards/<technology>/README.md` is still a miss.
+without a standard scaffolded at `docs/standards/<technology>/<technology>.standards.md`
+is still a miss.
 Only a *pair* of angle brackets is the registry's prose form — a half-typed `"<csharp"` is
 not quietly repaired into a hit.
 
@@ -1334,23 +1335,33 @@ A budget cut is normal rather than a defect — this repository's standards are 
 12,000-character default — so the expected-cut line is stated beside the marker, not deduced
 by the caller from two numbers.
 
-The response reads, in order:
+The reply is one **bundle** for the technology, stitched by
+`DocumentIndex.StandardsFor` from the files on disk at the moment it is asked for. It reads,
+in order:
 
 1. the provenance line
-2. a count line naming the technology asked for and the status that answered — `1 standard
-   for technology 'csharp' (status CURRENT).`
-3. a `###` heading with the standard's title, then the identity block — `path:`, `id:`,
-   `doc-type:`, `status:`, `component:` — and a `technology:` line echoing the corpus value
-   verbatim, not the caller's spelling. The declared value is what a later lookup is defined
-   against, so echoing the request would hide a standard that answers under a different
-   name. A standard declares no `component` by ontology design, so that field reads
-   `component: (none)`. The `doc-type:` is the ontology's own spelling rather than the enum
-   member's name, so a coding standard reads `doc-type: CODING-STANDARD` — the value a
-   reader can look up, not `CODINGSTANDARD`, which no document or rule id uses.
-4. the rule-id index
-5. the chosen sections, with the `[complete document]` marker when nothing was omitted
-6. nothing else — a coding standard declares no `code-refs` by ontology design, so the
-   response never carries code joins.
+2. `bundle: <technology>`
+3. the rule-id index: every `KW-*` id the standard states, in document order, capped with the
+   remainder counted. It comes first so that no budget can clip it.
+4. `## Shared rules`: the `shared-rules.md` file beside the folders, if the corpus has one.
+5. `## Parent rules (<technology>)` and `## Parent skills (<technology>)`: present only when
+   the standard's frontmatter names a parent with `builds-on`.
+6. `## <technology> rules` and `## <technology> skills`.
+7. `## <technology> standard`: a `###` heading with the standard's title, then the identity
+   block — `path:`, `id:`, `doc-type:`, `status:`, `component:` — and a `technology:` line
+   echoing the corpus value verbatim, not the caller's spelling. The declared value is what a
+   later lookup is defined against, so echoing the request would hide a standard that answers
+   under a different name. A standard declares no `component` by ontology design, so that
+   field reads `component: (none)`. The `doc-type:` is the ontology's own spelling rather than
+   the enum member's name, so a coding standard reads `doc-type: CODING-STANDARD` — the value a
+   reader can look up, not `CODINGSTANDARD`, which no document or rule id uses. Then the
+   chosen sections, with the `[complete document]` marker when nothing was omitted.
+8. `[left out for space: …]` when a skills part was cut, and the omission markers below when a
+   standard section was.
+
+Rules are never cut: an id or a hard rule the caller cannot see is worse than a section it
+can ask for again. Skills are cut before standard sections. A coding standard declares no
+`code-refs` by ontology design, so the response never carries code joins.
 
 **The rule-id index is emitted ahead of the prose.** It lists the `KW-*` ids the standard
 states, deduped: the ids its section headings and bodies cite, in document order — the order
@@ -1570,6 +1581,35 @@ A refusal carrying `KW-DELIVER-005` ends with a `next:` line to dispatch the del
 [rule reference](../ci-pipelines/rule-reference.md#run-delivery--run-deliver-and-docs_push_run_branch_and_open_draft_pull_request);
 the decision is [ADR 0081](../adr/0081-the-conductor-delivers-a-run-through-one-docs-tool.md).
 
+### `docs_run_tooling_check_and_repair_code_index(projectPath)`
+
+Runs the run-start tooling check for one checkout, through the same doctor as
+[`kyber-weave doctor --ensure`](#the-workers-first-command-doctor---ensure), so a caller with no
+shell can run it in one call. `projectPath` is required: the absolute path of the checkout or
+worktree to check, resolved like every other `projectPath`. It syncs or creates that tree's
+`.codegraph/` index, restores tracked files the index run rewrote, proves the index and the docs
+server with one call each, repairs once on a failure, and installs or refreshes the post-checkout
+hook block. It is declared not read-only, not destructive and idempotent.
+
+The response is, in order:
+
+1. the provenance line, then `result: passed` or `result: failed`;
+2. one line per check in the CLI's form: `PASS <check id> <message>` or `FAIL <check id> <message>`,
+   each `FAIL` followed by an indented `fix:` line with the exact command;
+3. the whole line `STATUS: TOOL_FAILURE`, only when the exit code is not `0`;
+4. a last line `EXIT: <code>` with the exit code `doctor --ensure` would return: `0`, `1`, `2` or `3`.
+
+The tool reads `stop-on-tool-failure` the way the command does, because the doctor applies it: under
+`stop-on-tool-failure: false` a failed check is a `PASS <check id> warning: …` line and the exit is
+`0`, except a missing CodeGraph binary, which stays `3`. A `sync` that finds CodeGraph's own lock
+held through three attempts is also a `PASS codegraph.index warning: …` line under either setting:
+the index is healthy and busy, so it is proved as it stands and never rebuilt. The check ids are the
+[`doctor` check ids](#the-live-check-doctor---check). A missing `projectPath` is `result: refused`,
+and a path outside this repository is a `projectPath was refused:` line; neither runs a check. The
+tool does not go through the CodeGraph refresh gate below, because it is the repair for it.
+A call can be slow: it uses the command's defaults, so one index run, and the wait for another
+process's index lock, are each bounded at 600 seconds, and the docs-server proof at 20.
+
 ## Reading a code join
 
 ```
@@ -1601,6 +1641,19 @@ with no shell is not served a stale index. The rules ([ADR 0061](../adr/0062-the
   worker's `doctor --ensure`, the CodeGraph daemon — the response carries one note line above
   its body saying the index is being refreshed by another process, and it answers from the
   index as it stands. Contention is never reported as a failure.
+- **CodeGraph's lock file is looked for before every sync.** CodeGraph's server, its file
+  watcher and any other `sync` create `.codegraph/codegraph.lock` while they write. If the file
+  exists the refresh waits 1 second and looks again, then 5 seconds, then 30, and syncs as soon
+  as a look finds no file. A file still there at the fourth look, 36 seconds in, fails the tool
+  without a sync: `STATUS: TOOL_FAILURE` (or the `warning:` line) whose reason names the file,
+  its PID and whether that process is running. The fix line is `codegraph unlock <root>` when
+  the process is not running, and otherwise says to wait for the process or stop it. The next
+  call looks again; this failure is not held for 60 seconds. A tool call can therefore take up
+  to 36 seconds longer, plus the 30-second sync bound.
+- **A sync that loses the race gets a short retry, then a note.** When the look found no file
+  but the `sync` itself reports the lock held, the refresh tries twice more, 0.3 and then 0.7
+  seconds later, and if it is still held answers from the index as it stands with one note
+  line. No `STATUS: TOOL_FAILURE` and no `warning:` line under either stop rule.
 - **A missing binary or a failed `sync` fails the tools.** Under the default stop rule the
   response is `STATUS: TOOL_FAILURE`, then `tool:`, `reason:` and `fix:` lines, and nothing
   else — a caller reading a degraded answer cannot tell it from a complete one. With
@@ -1610,7 +1663,8 @@ with no shell is not served a stale index. The rules ([ADR 0061](../adr/0062-the
   a failure can be diagnosed; and
   `docs_detect_drift_between_documents_and_code` still answers **with** the failure, because
   its verdict is the CodeGraph-failure report the caller asked for. The two plan lifecycle tools read
-  no code join and never consult the index. The other six tools return the failure block.
+  no code join and never consult the index, and `docs_run_tooling_check_and_repair_code_index` skips the
+  gate because it is the repair. The other six tools return the failure block.
 - **Nothing reaches stdout.** The refresh runs through the process runner, which captures both
   streams: stdout stays JSON-RPC.
 - **Only where the repository declares the server.** The refresh and the failure apply only
@@ -1735,6 +1789,12 @@ usable rather than only reporting on it ([ADR 0061](../adr/0061-code-editing-run
 5. **One repair and one retry.** A failed step runs `codegraph index .` once and retries once.
    One repair covers the transient damage this exists for; a loop would turn a genuinely broken
    CodeGraph into a slow hang instead of a stop.
+6. **A held CodeGraph lock is not a failed step.** A `sync` that fails only because CodeGraph's
+   own lock (`.codegraph/codegraph.lock`) is held — by its server, its file watcher or another
+   sync — is retried twice, after 0.3 and 0.7 seconds. Still held, the line is
+   `PASS codegraph.index warning: …`, the exit code is unaffected, and steps 3 and 4 run
+   against the index on disk. No repair runs while another live process holds that lock:
+   `codegraph index` against a held lock exits 1 and leaves the database empty.
 
 Exit codes are the `doctor` contract below plus one behaviour: `--ensure` **reads
 `stop-on-tool-failure` itself** and applies it, so no agent judges a degraded result. Under the
@@ -1947,11 +2007,11 @@ index of the root it is bound to, and nothing else.
 | Joins show `(unresolved)` | The symbol is in `code-refs` but not in the index — run [`docs drift`](governance.md) |
 | Analysis warns that the cache is unsafe | Run `docs init` to merge `.kyber-weave/.gitignore` with `cache/`; until then deterministic/lexical analysis continues and no document text is sent for embeddings |
 | `docs_look_up_glossary_term_definition` returns no senses | The configured glossary is absent, the term is not present, or its spelling differs; use `docs glossary .` to preview proposals |
-| `docs_get_coding_standard_for_technology` reports no standard for a technology | The key names no technology this corpus declares a standard for — check the Config Reg block of the repository root [`AGENTS.md`](../../AGENTS.md) and `ontology.technologies` in [`.kyber-weave/kyber-weave.yml`](../../.kyber-weave/kyber-weave.yml). Spelling alone cannot be it: the match is case-insensitive, so a miss means the technology is undeclared, or is declared with no standard scaffolded at `docs/standards/<technology>/README.md` |
+| `docs_get_coding_standard_for_technology` reports no standard for a technology | The key names no technology this corpus declares a standard for — check the Config Reg block of the repository root [`AGENTS.md`](../../AGENTS.md) and `ontology.technologies` in [`.kyber-weave/kyber-weave.yml`](../../.kyber-weave/kyber-weave.yml). Spelling alone cannot be it: the match is case-insensitive, so a miss means the technology is undeclared, or is declared with no standard scaffolded at `docs/standards/<technology>/<technology>.standards.md` |
 | Client reports a protocol error | Something wrote to stdout; check that you launched `kyber-weave-mcp`, not `kyber-weave` |
 | Answers look right but named files do not exist, or the document count is wrong | A same-named server is bound to a different checkout — compare the `provenance: repo=` line to `git rev-parse --git-common-dir`, call `docs_get_source_repository_and_revision`, and pin the server with `--expect-root`. A matching `repo=` with a different `root=` is another worktree of your own repository, not a foreign one |
 | A tool answers `STATUS: TOOL_FAILURE`, or carries a `warning: codegraph is unavailable` line | The repository declares `codegraph` under `mcp.required-servers` and the server could not read the index: the `fix:` line names the repair, usually `kyber-weave doctor --ensure .`. Under the default stop rule the tool refuses to answer with joins missing; `stop-on-tool-failure: false` turns the same detail into the warning. See [the refresh rules](#the-server-refreshes-codegraph-and-its-tools-fail-when-it-cannot) |
-| A tool carries `note: codegraph refresh skipped` | Another process holds the index lock and is refreshing it — a worker's `doctor --ensure`, or the CodeGraph daemon. Not a failure: the answer comes from the index as it stands, and the next call after the 60-second interval refreshes it |
+| A tool carries `note: codegraph refresh skipped` | Another process holds the index lock and is refreshing it — a worker's `doctor --ensure`, or the CodeGraph daemon — or took CodeGraph's own lock (`.codegraph/codegraph.lock`) just after the refresh looked for it, through three `sync` attempts. Not a failure: the answer comes from the index as it stands, and the next call after the 60-second interval refreshes it |
 | Piped requests exit 0 with nothing on stdout | A release up to `v0.1.7-rc.13` dropped replies once stdin closed — upgrade, or keep stdin open until the replies arrive. See [Closing stdin](#closing-stdin) |
 
 ## Related

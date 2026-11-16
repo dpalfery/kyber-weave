@@ -1,0 +1,3 @@
+# Machine rules the Arbiter evaluates for the 'github-actions' folder.
+# An empty list is valid: most folders declare none.
+rules: []

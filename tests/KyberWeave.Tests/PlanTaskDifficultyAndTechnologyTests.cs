@@ -88,8 +88,7 @@ public sealed class PlanTaskDifficultyAndTechnologyTests
         PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(
             fixture.Root,
             KyberWeaveConfig.ProductDefaults,
-            DocsPorts.Files,
-            DocsPorts.Process).Run(PlanTaskFileProbe.PlanPath, PlanTaskFileMode.Preview);
+            DocsPorts.Files).Run(PlanTaskFileProbe.PlanPath, PlanTaskFileMode.Preview);
 
         Assert.Null(outcome.Report.Items.FirstOrDefault(item => item.Severity == Core.Diagnostics.Severity.Error));
         PlanTaskFile file = Assert.IsType<PlanTaskFile>(outcome.File);

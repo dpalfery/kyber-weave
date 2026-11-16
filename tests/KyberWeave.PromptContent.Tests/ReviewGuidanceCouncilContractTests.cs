@@ -79,8 +79,8 @@ public sealed class ReviewGuidanceCouncilContractTests
     {
         string agentsText = ConfigRegBlock(
             File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "AGENTS.md")));
-        string declaration = $"- **<{technology}-coding-standard>**: `docs/standards/{technology}/README.md`";
-        string standardPath = Path.Combine(KyberWeaveTestPaths.ToolRoot, "docs", "standards", technology, "README.md");
+        string declaration = $"- **<{technology}-coding-standard>**: `docs/standards/{technology}/{technology}.standards.md`";
+        string standardPath = Path.Combine(KyberWeaveTestPaths.ToolRoot, "docs", "standards", technology, $"{technology}.standards.md");
         string checklistPath = Path.Combine(ChecklistRoot, $"{technology}.md");
 
         List<string> gaps = [];

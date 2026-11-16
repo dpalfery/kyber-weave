@@ -60,14 +60,21 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - docs: `dotnet run --project src/KyberWeave.Cli -- docs validate .` and `dotnet run --project src/KyberWeave.Cli -- docs drift .`
 - **A run that reports zero tests verified nothing.**
 - **Rule ids.** Every new `KW-*` id takes the next free number in its family; none is reused.
-- **Phase order.** A phase starts after the last task of the phase before it. Inside a phase, tasks
-  with no dependency between them and no shared file may run in parallel.
+- **Order.** A task may start when every task on its `Depends on` line is done. Two tracks have no
+  dependency on each other and may run at the same time, each in its own worktree and branch:
+  - **Track A:** all of phase 1 (1.1 to 1.14).
+  - **Track B:** 2.1, then 2.2, 2.3, 2.4, 2.5, 2.11, 3.1, 3.2, 3.3 in that order, one after another in
+    the track's one worktree: several of them change the same source files (the task-list source
+    files, and the Squad source validator in 3.1 and 3.2), and one order for the whole track needs no
+    merge inside it.
+  Every other task waits for the tasks it depends on. Both tracks merge into the specification's
+  branch, `claude/docs/role-based-worker-agents`.
 
 ## Tasks
 
 ### Phase 1: Technology folders
 
-- [ ] 1.1 Name and check the four folder files
+- [x] 1.1 Name and check the four folder files
   - **Objective:** Make a technology or role folder hold four files that start with the folder's name, and report a folder or standard that is incomplete.
   - **Files:**
     - `src/KyberWeave.Domain/Configuration/DocsLayout.cs`: paths for the four folder files, named after the folder with the suffixes .standards.md, .rules.md, .skills.md and .arbiter-rules.yml
@@ -80,7 +87,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Depends on:** 1.11
   - _Requirements: 5.1, 5.2, 5.8, 5.9, 5.11_
 
-- [ ] 1.2 Reshape the shipped templates
+- [x] 1.2 Reshape the shipped templates
   - **Objective:** Give every shipped technology template the four prefixed files and the six headings, with a Testing section in each standard.
   - **Files:**
     - `products/kyber-squad/standards/`: every technology folder
@@ -92,7 +99,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Depends on:** 1.1
   - _Requirements: 5.1, 5.2, 5.3, 6.1_
 
-- [ ] 1.3 Inventory what the agents know
+- [x] 1.3 Inventory what the agents know
   - **Objective:** List every technology-specific rule in the bodies of the eleven technology agents, `test-dev` and `azure-reader`, and map each to the template file and heading that states it, or mark it missing.
   - **Files:**
     - `docs/kyber-squad/agent-rule-inventory.md` (new)
@@ -103,10 +110,10 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Depends on:** 1.2
   - _Requirements: 5.5_
 
-- [ ] 1.4 Move the missing rules into the templates
+- [x] 1.4 Move the missing rules into the templates
   - **Objective:** Add every rule the inventory marks missing to its technology's template, add a SQL Server template and an AWS template, and put the cross-technology testing rules in the shared rules file.
   - **Files:**
-    - `products/kyber-squad/standards/`: the affected technology folders, new `sql-server/` and `aws/`, and `azure/`
+    - `products/kyber-squad/standards/`: the affected technology folders, the new sql-server and aws folders, and azure
     - `products/kyber-squad/standards/shared-rules.md`
     - `docs/kyber-squad/agent-rule-inventory.md`: every row resolved
     - `tests/KyberWeave.Tests/KyberStandardsTemplateShapeTests.cs`: the two new templates
@@ -116,10 +123,10 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Depends on:** 1.3
   - _Requirements: 5.3, 5.4, 5.6, 5.7, 8.2, 8.3_
 
-- [ ] 1.5 Add the role and platform folder templates
+- [x] 1.5 Add the role and platform folder templates
   - **Objective:** Ship template folders for the `conductor`, `architect`, `reviewer` and `devops` roles and for the GitHub, Azure DevOps, GitLab and Jira platforms.
   - **Files:**
-    - `products/kyber-squad/standards/`: `conductor/`, `architect/`, `reviewer/`, `devops/`, `github/`, `azure-devops/`, `gitlab/`, `jira/`
+    - `products/kyber-squad/standards/`: the conductor, architect, reviewer, devops, github, azure-devops, gitlab and jira folders
     - `src/KyberWeave.Domain/Docs/Scaffolding/KyberStandardsTemplates.cs`: register them
     - `tests/KyberWeave.Tests/KyberStandardsTemplateShapeTests.cs`: role and platform cases
   - **Acceptance criteria:** Each of the eight folders passes the checks of task 1.1; the GitHub template states what the `github-actions` standard and the `github-devops` skill state today; no folder for a testing role exists.
@@ -128,7 +135,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Depends on:** 1.2
   - _Requirements: 5.10, 6.6, 6.7_
 
-- [ ] 1.6 Let a template name one parent
+- [x] 1.6 Let a template name one parent
   - **Objective:** Accept a `builds-on` key in a standard's frontmatter that names one other declared technology.
   - **Files:**
     - `src/KyberWeave.Domain/Docs/Validation/DocSpecValidator.cs`: the key, with a new `KW-DOC-SPEC-*` id for an undeclared parent, a parent that names itself, or a chain longer than one
@@ -140,7 +147,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Depends on:** 1.1
   - _Requirements: 4.6_
 
-- [ ] 1.7 Install only the chosen templates
+- [x] 1.7 Install only the chosen templates
   - **Objective:** Make onboarding and `docs init` install the template folder for each technology, role and platform the user names, and leave any file the host already has untouched.
   - **Files:**
     - `src/KyberWeave.Cli/Commands/Docs/DocsInitCommand.cs`, `src/KyberWeave.Cli/Commands/Docs/DocsInitSettings.cs`: the choice
@@ -152,7 +159,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Depends on:** 1.2, 1.5
   - _Requirements: 5.17, 6.2, 6.3_
 
-- [ ] 1.8 Show how a host folder differs from its template
+- [x] 1.8 Show how a host folder differs from its template
   - **Objective:** Add `kyber-weave docs standards diff [name]`, which prints the difference between a host folder and the current template and writes nothing.
   - **Files:**
     - `src/KyberWeave.Cli/Commands/Docs/DocsStandardsDiffCommand.cs` (new), `src/KyberWeave.Cli/CliApplication.cs`: register it
@@ -165,7 +172,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Depends on:** 1.2
   - _Requirements: 6.4_
 
-- [ ] 1.9 Document phase 1 and how to contribute a template
+- [x] 1.9 Document phase 1 and how to contribute a template
   - **Objective:** Describe the folder layout, the six headings, installing by choice and the diff command, and write the contribution guide for a new technology template.
   - **Files:**
     - `docs/docgraph/onboarding.md`, `docs/configuration.md`, `docs/documentation-ontology.md`
@@ -177,7 +184,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Depends on:** 1.4, 1.5, 1.6, 1.7, 1.8, 1.10, 1.13, 1.14
   - _Requirements: 6.5_
 
-- [ ] 1.10 Migrate existing standards folders
+- [x] 1.10 Migrate existing standards folders
   - **Objective:** Add `kyber-weave docs standards migrate`, which renames a host's standards files to the prefixed names and adds the missing ones, and run it on this repository.
   - **Files:**
     - `src/KyberWeave.Cli/Commands/Docs/DocsStandardsMigrateCommand.cs` (new), `src/KyberWeave.Cli/CliApplication.cs`
@@ -192,7 +199,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Depends on:** 1.1
   - _Requirements: 5.12_
 
-- [ ] 1.11 Add the skill document type and folder scoping
+- [x] 1.11 Add the skill document type and folder scoping
   - **Objective:** Add a `skill` document type, and let a rules or skills document name a technology or a role only when it sits in that technology's or role's folder.
   - **Files:**
     - `src/KyberWeave.Domain/Docs/Model/DocType.cs`, `src/KyberWeave.Data/Docs/Parsing/DocumentLoader.cs`, `src/KyberWeave.Domain/Configuration/OntologyConfig.cs`: the type and its required key
@@ -205,7 +212,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Depends on:** none
   - _Requirements: 5.13_
 
-- [ ] 1.12 Look up the bundle and set its search weight
+- [x] 1.12 Look up the bundle and set its search weight
   - **Objective:** Add one index lookup that returns a technology's shared rules, parent rules and skills, rules, skills and standard, and rank standards, skills and technology rules below other current documents.
   - **Files:**
     - `src/KyberWeave.Application/Docs/Search/DocumentIndex.cs`: the bundle lookup and the `Authority` rows
@@ -217,7 +224,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Depends on:** 1.11, 1.6
   - _Requirements: 5.15, 5.16_
 
-- [ ] 1.13 Return the stitched bundle from the standards tool
+- [x] 1.13 Return the stitched bundle from the standards tool
   - **Objective:** Make `docs_get_coding_standard_for_technology` return one bundle in named parts: rule ids, shared rules, parent rules and skills, technology rules, skills, then the standard's sections.
   - **Files:**
     - `src/KyberWeave.Application/Docs/Mcp/DocsQueryService.cs`, `src/KyberWeave.Mcp/DocsTools.cs`, `src/KyberWeave.Mcp/DocsServerInstructions.cs`
@@ -229,7 +236,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Depends on:** 1.1, 1.12
   - _Requirements: 5.14, 5.15_
 
-- [ ] 1.14 Seed this repository's rules and skills files
+- [x] 1.14 Seed this repository's rules and skills files
   - **Objective:** Fill the rules and skills files of this repository's own standards folders and its shared rules file, moving each statement from where it lives today.
   - **Files:**
     - `docs/standards/shared-rules.md`
@@ -550,7 +557,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
 - [ ] 4.4 Enforce a technology's allowed commands
   - **Objective:** Let a technology's Arbiter rules file declare the command forms a research agent may run, and refuse any other command where the Arbiter sees a sub-agent's own tool calls.
   - **Files:**
-    - `src/KyberWeave.Domain/Arbiter/Hooks/WorkerGuardRules.cs`: raise a `worker.command` trigger
+    - `src/KyberWeave.Domain/Arbiter/Hooks/WorkerGuardRules.cs`: raise a trigger named worker.command
     - `src/KyberWeave.Domain/Arbiter/Rules/RuleValidator.cs`: the trigger and its facts
     - `products/kyber-squad/standards/azure/azure.arbiter-rules.yml`, `products/kyber-squad/standards/aws/aws.arbiter-rules.yml`: allowed read forms
     - `tests/KyberWeave.Tests/ArbiterCommandAllowListTests.cs` (new): `KyberWeave.Tests.ArbiterCommandAllowListTests`
@@ -720,8 +727,8 @@ Phase 1 has no outside dependency. The standards plan first drafted on
 ## Dependency graph
 
 - Phase 1: 1.11 first; 1.1 after it; 1.2, 1.6 and 1.10 after 1.1; 1.12 after 1.11 and 1.6; 1.13 after 1.1 and 1.12; 1.14 after 1.10 and 1.13; 1.3, 1.5 and 1.8 after 1.2; 1.4 after 1.3; 1.7 after 1.2 and 1.5; 1.9 last.
-- Phase 2: 2.1 and 2.2 in parallel; 2.3, 2.4 and 2.5 after 2.2; 2.6 after 2.2 and 1.6; 2.7 after 2.2, 2.6, 1.2 and 1.13; 2.8 after 2.7; 2.9 after 2.1 and 2.7; 2.10 after 2.8 and 2.9; 2.11 after 2.4; 2.12 last.
-- Phase 3: 3.1, 3.2 and 3.3 in parallel; 3.4 after 3.1 and 3.2; 3.5 after 3.1 and 3.3; 3.6 after 3.4, 3.5 and 2.8; 3.7 after 3.6; 3.8 after 3.4 and 3.5; 3.9 last.
+- Phase 2: 2.1 and 2.2 depend on nothing, and run in Track B's order; 2.3, 2.4 and 2.5 after 2.2; 2.6 after 2.2 and 1.6; 2.7 after 2.2, 2.6, 1.2 and 1.13; 2.8 after 2.7; 2.9 after 2.1 and 2.7; 2.10 after 2.8 and 2.9; 2.11 after 2.4; 2.12 last.
+- Phase 3: 3.1, 3.2 and 3.3 depend on nothing, and run in Track B's order; 3.4 after 3.1 and 3.2; 3.5 after 3.1 and 3.3; 3.6 after 3.4, 3.5 and 2.8; 3.7 after 3.6; 3.8 after 3.4 and 3.5; 3.9 last.
 - Phase 4: 4.1 first, after 1.5; 4.2 after 4.1 and 2.2; 4.3 after 4.1; 4.4 after 4.2 and 3.5; 4.5 after 4.1 and 3.6; 4.6 last.
 - Phase 5: 5.1, then 5.2; 5.3 and 5.4 in parallel; 5.5 after both; 5.6 last.
 - 6.1 after 5.6.

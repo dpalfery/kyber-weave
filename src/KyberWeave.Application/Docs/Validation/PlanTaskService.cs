@@ -9,14 +9,13 @@ namespace KyberWeave.Core.Docs.Validation;
 
 /// <summary>Runs the task-file generator over the checkout's file system and finds the plans in flight.</summary>
 /// <param name="files">Reads the plans and the task files.</param>
-/// <param name="process">Runs git for the file-scope check.</param>
-public sealed partial class PlanTaskService(IRepositoryFileStore files, IBoundedProcessExecutor process) : IPlanTaskService
+public sealed partial class PlanTaskService(IRepositoryFileStore files) : IPlanTaskService
 {
     private const string TaskList = "tasks.md";
 
     /// <inheritdoc />
     public PlanTaskFileOutcome Run(string repoRoot, IDocsEngineConfig config, string artifactPath, PlanTaskFileMode mode, IPlanTaskAgentPicker? picker = null) =>
-        new PlanTaskFileGenerator(repoRoot, config, files, process, picker).Run(artifactPath, mode);
+        new PlanTaskFileGenerator(repoRoot, config, files, picker).Run(artifactPath, mode);
 
     /// <inheritdoc />
     public IReadOnlyList<string> ActivePlans(string repoRoot, IDocsEngineConfig config)

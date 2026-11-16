@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using System.Text;
+
 namespace KyberWeave.Core.Arbiter.Facts;
 
 /// <summary>
@@ -56,26 +59,36 @@ public static class ArbiterLedgerQueries
     /// The task files of the other unpaired <c>delegate</c> pre events — the
     /// in-flight paths a scope rule checks the dispatch against.
     /// </summary>
+    /// <remarks>
+    /// A dispatch whose return never arrives (a harness that crashed, or a background agent whose turn-end event
+    /// was not delivered) stops holding its files <see cref="UnreturnedDispatchHorizon"/> after it started,
+    /// measured against the dispatch being gated, or the newest event when that one is not recorded.
+    /// </remarks>
     /// <param name="events">The events a ledger read returned, in append order.</param>
     /// <param name="excludeEventId">The pre event being gated now, if it is already recorded.</param>
     /// <param name="session">When set, only dispatches from this session count.</param>
     /// <param name="notDispatched">Pre events that were refused, so never ran.</param>
+    /// <param name="run">When set, only dispatches of this run count.</param>
     public static IReadOnlyList<string> InFlightPaths(
         IReadOnlyList<ArbiterLedgerEvent> events,
         string? excludeEventId = null,
         string? session = null,
-        IReadOnlySet<string>? notDispatched = null)
+        IReadOnlySet<string>? notDispatched = null,
+        ArbiterRunScope? run = null)
     {
         HashSet<string> paired = events
             .Where(e => e.Phase == ArbiterLedgerPhases.Post && e.PreId is not null)
             .Select(e => e.PreId!)
             .ToHashSet(StringComparer.Ordinal);
+        DateTimeOffset? now = (events.FirstOrDefault(e => e.Id == excludeEventId) ?? (events.Count > 0 ? events[^1] : null))?.At;
         return [.. events
             .Where(e => e.Phase == ArbiterLedgerPhases.Pre
                 && e.Id != excludeEventId
                 && !paired.Contains(e.Id)
+                && (now is null || now.Value - e.At <= UnreturnedDispatchHorizon)
                 && notDispatched?.Contains(e.Id) != true
                 && (session is null || string.Equals(e.Session, session, StringComparison.Ordinal))
+                && run?.Includes(e) != false
                 && string.Equals(e.Trigger, "delegate", StringComparison.Ordinal))
             .SelectMany(e => e.TaskFiles ?? [])
             .Distinct(StringComparer.Ordinal)
@@ -160,13 +173,16 @@ public static class ArbiterLedgerQueries
 
     /// <summary>
     /// The completed tasks: a returned worker output whose
-    /// <c>^RESULT:\s+(PASS|FAIL)\b</c> marker read <c>PASS</c>, or an
+    /// <c>^RESULT:\s+(PASS|FAIL)\b</c> marker read <c>PASS</c>, a worker digest whose
+    /// <c>TASK_GATE:</c> line read <c>PASS</c> under a finished <c>STATUS:</c>, or an
     /// attestation <c>&lt;task&gt;=complete</c> (D31).
     /// </summary>
     /// <param name="events">The events a ledger read returned, in append order.</param>
     /// <param name="planFile">When set, only returns for this plan count.</param>
-    public static IReadOnlyList<string> CompletedTasks(IReadOnlyList<ArbiterLedgerEvent> events, string? planFile = null) =>
-        [.. ReturnsFor(events, planFile)
+    /// <param name="run">When set, only returns of this run's dispatches count.</param>
+    public static IReadOnlyList<string> CompletedTasks(
+        IReadOnlyList<ArbiterLedgerEvent> events, string? planFile = null, ArbiterRunScope? run = null) =>
+        [.. ReturnsFor(events, planFile, run)
             .SelectMany(item => CompletedTasksOf(item.Post, item.Task))
             .Distinct(StringComparer.Ordinal)
             .OrderBy(task => task, StringComparer.Ordinal)];
@@ -175,7 +191,8 @@ public static class ArbiterLedgerQueries
     /// Each post event with the task it answers. A specialist's headers are stripped
     /// before it runs, so its post event names no task and the paired pre event supplies it.
     /// </summary>
-    private static List<(ArbiterLedgerEvent Post, string? Task)> ReturnsFor(IReadOnlyList<ArbiterLedgerEvent> events, string? planFile)
+    private static List<(ArbiterLedgerEvent Post, string? Task)> ReturnsFor(
+        IReadOnlyList<ArbiterLedgerEvent> events, string? planFile, ArbiterRunScope? run)
     {
         Dictionary<string, ArbiterLedgerEvent> pres = events
             .Where(e => e.Phase == ArbiterLedgerPhases.Pre)
@@ -186,9 +203,16 @@ public static class ArbiterLedgerQueries
         foreach (ArbiterLedgerEvent post in events.Where(e => e.Phase == ArbiterLedgerPhases.Post))
         {
             ArbiterLedgerHeaders? headers = post.Headers;
-            if (headers is null && post.PreId is not null && pres.TryGetValue(post.PreId, out ArbiterLedgerEvent? pre))
+            ArbiterLedgerEvent? pre = post.PreId is not null && pres.TryGetValue(post.PreId, out ArbiterLedgerEvent? found) ? found : null;
+            if (headers is null && pre is not null)
             {
                 headers = pre.Headers;
+            }
+
+            // A return belongs to the run of the dispatch it answers; one that paired with none is placed by itself.
+            if (run?.Includes(pre ?? post) == false)
+            {
+                continue;
             }
 
             if (planFile is null || (headers?.PlanFile is { } named && SamePlan(named, planFile)))
@@ -212,13 +236,43 @@ public static class ArbiterLedgerQueries
     private static IEnumerable<string> CompletedTasksOf(ArbiterLedgerEvent e, string? task)
     {
         List<string> tasks = [];
-        if (task is not null && string.Equals(e.Returns?.TaskReview, "PASS", StringComparison.Ordinal))
+        if (task is not null
+            && (string.Equals(e.Returns?.TaskReview, "PASS", StringComparison.Ordinal) || IsPassingDigest(e.Returns)))
         {
             tasks.Add(task);
         }
 
         tasks.AddRange(AttestedTasks(e, "complete"));
         return tasks;
+    }
+
+    private static readonly HashSet<string> FinishedStatuses = new(StringComparer.Ordinal) { "PASS", "READY_FOR_REVIEW" };
+
+    /// <summary>
+    /// Whether a worker's completion digest reports a finished task: its own task gate passed and its status is
+    /// one a finished worker writes. A <c>RESULT: FAIL</c> beside it still fails the report.
+    /// </summary>
+    private static bool IsPassingDigest(ArbiterReturnMarkers? returns) =>
+        returns is not null
+        && string.Equals(returns.TaskGate, "PASS", StringComparison.Ordinal)
+        && !string.Equals(returns.TaskReview, "FAIL", StringComparison.Ordinal)
+        && FinishedStatuses.Contains(returns.PlannerStatus ?? string.Empty);
+
+    /// <summary>
+    /// The digest that pairs a return with its dispatch when the harness has no call id: the target and the prompt
+    /// as finally executed, which is the prompt after its headers are stripped. Null when either is missing.
+    /// </summary>
+    /// <param name="target">The dispatch target.</param>
+    /// <param name="prompt">The dispatch prompt, with or without its header block.</param>
+    public static string? PairDigest(string? target, string? prompt)
+    {
+        if (string.IsNullOrWhiteSpace(target) || string.IsNullOrWhiteSpace(prompt))
+        {
+            return null;
+        }
+
+        string executed = HeaderBlock.Strip(prompt).Trim();
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(target + "\n" + executed)));
     }
 
     private static IEnumerable<string> AttestedTasks(ArbiterLedgerEvent e, string value)

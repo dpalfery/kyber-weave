@@ -129,7 +129,8 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
             ArbiterLedgerEvent ledgerEvent = BuildLedgerEvent(
                 ledgerId, now, effective.Source,
                 ev with { RenderedModelToken = RenderedTokenOf(ev, first.Target, table) },
-                first, TaskFilesFor(ev, first), table);
+                first, TaskFilesFor(ev, first), table) with
+            { Run = MapPhase(ev) == ArbiterLedgerPhases.Pre ? RunScopeOf(ev)?.Root : null };
             if (effective.DryRun)
             {
                 // Dry run reads and writes nothing: the reads below prove the
@@ -240,14 +241,15 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         facts = _gitFacts.Enrich(facts, classification, ev);
         facts = GovernedPathsFacts.Enrich(facts, config.Ontology.DocsRoots);
         facts = _planReader.Enrich(facts, classification);
-        facts = LedgerFacts.Enrich(facts, _ledger, _decisionLog, ev, ledgerId);
+        ArbiterRunScope? runScope = RunScopeOf(ev);
+        facts = LedgerFacts.Enrich(facts, _ledger, _decisionLog, ev, ledgerId, runScope);
         facts = AttributedChangeFacts.Enrich(facts, _ledger, _decisionLog, ledgerId);
         facts = ModelTargetFacts.Enrich(facts, _ledger, _decisionLog, ledgerId, config.Arbiter.ModelTargeting);
         // D29: a return's TASK_GATE: line is checked against the report it names. Absent
         // evidence answers absent, and the rule asks the model about the raw report instead;
         // an unexpected failure here reaches the catch in EvaluateAsync, which allows and logs.
         facts = _gateReports.Enrich(facts, ev);
-        facts = WithTaskReturns(facts, config);
+        facts = WithTaskReturns(facts, config, runScope);
 
         // The review's REVIEW_RUN names the store its findings sit in. A lens return's first finding is the
         // one the nitpick filter reads; a refutation reads whether the filter dropped the finding it refutes.
@@ -422,7 +424,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
             && _ledger.DispatchHeadersFor(ledgerId) is { PlanFile: { } returnPlan, Task: { } returnTask })
         {
             await ReviewStore(config)
-                .AppendReturnAsync(returnPlan, $"task: {returnTask}\ntarget: {classification.Target}\n{tail}", cancellationToken)
+                .AppendReturnAsync(ReturnsKey(returnPlan, runScope), $"task: {returnTask}\ntarget: {classification.Target}\n{tail}", cancellationToken)
                 .ConfigureAwait(false);
         }
 
@@ -461,6 +463,16 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         return new ArbiterDispatchEvaluation(trigger, dispatchOutcome) { Secondary = secondaryResults };
     }
 
+    /// <summary>The run the event's dispatch belongs to, when the git facts can read the run records; null outside any run.</summary>
+    private ArbiterRunScope? RunScopeOf(ArbiterEvent ev) => (_gitFacts as IArbiterRunScopeSource)?.RunScopeOf(ev.Cwd);
+
+    /// <summary>
+    /// The key a plan's stored report tails are kept under. Inside a run it names the run too, so a later run of
+    /// a plan at the same path never reads an earlier run's reports as its own.
+    /// </summary>
+    private static string ReturnsKey(string planFile, ArbiterRunScope? run) =>
+        run is null ? planFile : $"{planFile}\n{run.Root}\n{run.StartedAt:O}";
+
     /// <summary>The longest report tail one stored return keeps.</summary>
     private const int ReturnTailChars = 2000;
 
@@ -472,7 +484,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
     /// depends on, newest last. The model reads them to judge whether a dependency finished or failing tests exist
     /// when the parsed markers alone do not say. Absent when the trigger does not declare it or the plan is unknown.
     /// </summary>
-    private ArbiterFactSet WithTaskReturns(ArbiterFactSet facts, KyberWeaveConfig config)
+    private ArbiterFactSet WithTaskReturns(ArbiterFactSet facts, KyberWeaveConfig config, ArbiterRunScope? run)
     {
         if (!facts.Contains("ledger.task-returns")
             || !facts.TryGet("delegation.plan-file", out ArbiterFact? planFact)
@@ -492,7 +504,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
             tasks.UnionWith(dependencies);
         }
 
-        List<string> returns = [.. ReviewStore(config).ReadReturns(planFile)
+        List<string> returns = [.. ReviewStore(config).ReadReturns(ReturnsKey(planFile, run))
             .Where(item => tasks.Contains(StoredTaskOf(item)))
             .TakeLast(MaxTaskReturns)];
         return facts.With("ledger.task-returns", returns, ArbiterFactLabel.Derived);
@@ -1345,7 +1357,8 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
             Caller = first.Caller,
             CallerSource = first.CallerSource,
             Headers = BuildHeaders(first),
-            PairDigest = PairDigestOf(ev),
+            PairDigest = ArbiterLedgerQueries.PairDigest(ev.Target, ev.Prompt),
+            PreId = phase == ArbiterLedgerPhases.Post ? ev.PreId : null,
             TaskFiles = taskFiles,
             ModelProfile = modelProfile,
             ModelToken = modelToken,
@@ -1444,21 +1457,6 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
                 ? found
                 : null;
         return (agent?.Profile, agent?.Token, source);
-    }
-
-    /// <summary>
-    /// Pairs a return with its dispatch when the harness has no call id: the target and
-    /// the prompt as finally executed, which is the prompt after its headers are stripped.
-    /// </summary>
-    private static string? PairDigestOf(ArbiterEvent ev)
-    {
-        if (string.IsNullOrWhiteSpace(ev.Target) || string.IsNullOrWhiteSpace(ev.Prompt))
-        {
-            return null;
-        }
-
-        string executed = HeaderBlock.Strip(ev.Prompt).Trim();
-        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(ev.Target + "\n" + executed)));
     }
 
     private static ArbiterLedgerHeaders? BuildHeaders(TriggerClassification classification)

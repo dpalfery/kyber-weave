@@ -269,7 +269,7 @@ themselves are not done here. The G2 cleanup sentence is read only in the skill,
 T52 found a test that required the full-suite ban in `agents/bug-crusher-investigator.md` while
 another forbade it in any agent body; the investigator is `invocation: subagent`, so the baseline
 reaches it on every render. Both phrase tests were deleted on 2026-11-13 with the other prose
-pins ([test standard](../standards/test/README.md#prose-rules)); the rule reaches the investigator
+pins ([test standard](../standards/test/test.standards.md#prose-rules)); the rule reaches the investigator
 through the injected baseline and is graded as catalog rule `C1`.
 
 **One conflict outside the text, still open.**

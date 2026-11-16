@@ -50,7 +50,7 @@ its modes; `--full` and `--scoped` reach the `test` gate, so they are not for de
 Run the tests that cover your change, plus build/lint of the touched projects, and check each
 run reports a non-zero test count. The commands for each area:
 
-- .NET: [`docs/standards/test/README.md`](docs/standards/test/README.md#completion)
+- .NET: [`docs/standards/test/test.standards.md`](docs/standards/test/test.standards.md#completion)
 - Repository policy (scripts, workflows, gate configuration, docs prose, source scans):
   [`tests/KyberWeave.RepoPolicy.Tests/AGENTS.md`](tests/KyberWeave.RepoPolicy.Tests/AGENTS.md)
 - Wording of skills, agents and instructions (scheduled to become eval-style):
@@ -165,7 +165,7 @@ Core dependency policy (Markdig, YamlDotNet, sqlite3 CLI for CodeGraph): see
 
 | Working on | Read |
 |---|---|
-| Writing C# anywhere in this repository | [`docs/standards/csharp/README.md`](docs/standards/csharp/README.md), the path declared as **<csharp-coding-standard>** below |
+| Writing C# anywhere in this repository | [`docs/standards/csharp/csharp.standards.md`](docs/standards/csharp/csharp.standards.md), the path declared as **<csharp-coding-standard>** below |
 | The engine — `KyberWeave.Core`, `KyberWeave.Core.Docs` and `KyberWeave.Core.Squad` | [`src/KyberWeave.Core/AGENTS.md`](src/KyberWeave.Core/AGENTS.md) |
 | CLI commands and output | [`src/KyberWeave.Cli/AGENTS.md`](src/KyberWeave.Cli/AGENTS.md) |
 | Installing, updating, or configuring Kyber-Weave or KyberDash | [`docs/cli-command-surface.md`](docs/cli-command-surface.md) — every verb and flag, the exit-code contract, and the canonical flows |
@@ -203,13 +203,13 @@ references that belong to this repository.
 - **<documentation-ontology>**: `docs/documentation-ontology.md`
 - **<component-catalog>**: `docs/catalog.md`
 - **<standards-root>**: `docs/standards`
-- **<csharp-coding-standard>**: `docs/standards/csharp/README.md`
-- **<test-coding-standard>**: `docs/standards/test/README.md`
-- **<typescript-coding-standard>**: `docs/standards/typescript/README.md`
-- **<rust-coding-standard>**: `docs/standards/rust/README.md`
-- **<tauri-coding-standard>**: `docs/standards/tauri/README.md`
-- **<go-coding-standard>**: `docs/standards/go/README.md`
-- **<github-actions-coding-standard>**: `docs/standards/github-actions/README.md`
+- **<csharp-coding-standard>**: `docs/standards/csharp/csharp.standards.md`
+- **<test-coding-standard>**: `docs/standards/test/test.standards.md`
+- **<typescript-coding-standard>**: `docs/standards/typescript/typescript.standards.md`
+- **<rust-coding-standard>**: `docs/standards/rust/rust.standards.md`
+- **<tauri-coding-standard>**: `docs/standards/tauri/tauri.standards.md`
+- **<go-coding-standard>**: `docs/standards/go/go.standards.md`
+- **<github-actions-coding-standard>**: `docs/standards/github-actions/github-actions.standards.md`
 - **<plan-index>**: `docs/plans/README.md`
 - **<specification-index>**: `docs/specs/README.md`
 - **<todo-index>**: `docs/todo/README.md`

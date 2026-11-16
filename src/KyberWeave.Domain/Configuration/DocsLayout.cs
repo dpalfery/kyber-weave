@@ -41,5 +41,55 @@ public static class DocsLayout
     /// should be able to read it in one step.
     /// </summary>
     public static string TechnologyStandard(string docsRoot, string technology) =>
-        $"{docsRoot}/{Standards}/{technology}/README.md";
+        StandardFile(docsRoot, technology);
+
+    /// <summary>The standard's file name inside a technology, role or platform folder.</summary>
+    public const string StandardsSuffix = ".standards.md";
+
+    /// <summary>The prose rules file's name inside a technology, role or platform folder.</summary>
+    public const string RulesSuffix = ".rules.md";
+
+    /// <summary>The skills file's name inside a technology, role or platform folder.</summary>
+    public const string SkillsSuffix = ".skills.md";
+
+    /// <summary>The Arbiter's machine rules file inside a technology, role or platform folder.</summary>
+    public const string ArbiterRulesSuffix = ".arbiter-rules.yml";
+
+    /// <summary>
+    /// The six `<c>##</c>` headings every standard carries, in the order it carries them.
+    /// </summary>
+    public static IReadOnlyList<string> StandardHeadings { get; } =
+    [
+        "Naming and layout",
+        "Coding standards",
+        "Testing",
+        "Commands",
+        "Security and data handling",
+        "Done checklist"
+    ];
+
+    /// <summary>The standard file of a scope folder, named after the folder.</summary>
+    public static string StandardFile(string docsRoot, string name) =>
+        $"{docsRoot}/{Standards}/{name}/{name}{StandardsSuffix}";
+
+    /// <summary>The prose rules file of a scope folder, named after the folder.</summary>
+    public static string RulesFile(string docsRoot, string name) =>
+        $"{docsRoot}/{Standards}/{name}/{name}{RulesSuffix}";
+
+    /// <summary>The skills file of a scope folder, named after the folder.</summary>
+    public static string SkillsFile(string docsRoot, string name) =>
+        $"{docsRoot}/{Standards}/{name}/{name}{SkillsSuffix}";
+
+    /// <summary>The Arbiter machine rules file of a scope folder, named after the folder.</summary>
+    public static string ArbiterRulesFile(string docsRoot, string name) =>
+        $"{docsRoot}/{Standards}/{name}/{name}{ArbiterRulesSuffix}";
+
+    /// <summary>The four files a complete technology, role or platform folder holds.</summary>
+    public static IReadOnlyList<string> ScopeFolderFiles(string docsRoot, string name) =>
+    [
+        StandardFile(docsRoot, name),
+        RulesFile(docsRoot, name),
+        SkillsFile(docsRoot, name),
+        ArbiterRulesFile(docsRoot, name)
+    ];
 }

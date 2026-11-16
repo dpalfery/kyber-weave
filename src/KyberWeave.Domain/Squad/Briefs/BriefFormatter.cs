@@ -9,6 +9,12 @@ public static class BriefFormatter
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
+    /// <summary>The header line an autonomous run's brief carries, for every agent.</summary>
+    public const string AutonomousLine =
+        "BRIEF autonomy | autonomous run: ask the user for no approval, confirmation or choice. Decide and record. "
+        + "The conductor approves each gate itself, the plan's approve-and-execute by calling the finalize tool right "
+        + "after PLAN_READY. Only a hard block with RECOMMENDED: none reaches the user.";
+
     /// <summary>
     /// The text form: a one-line header naming the facts used and the sections left out, a diagnostics line
     /// only when something is unmapped, missing or unlisted, then each included file under a rule line.
@@ -26,6 +32,13 @@ public static class BriefFormatter
         if (diagnostics.Length > 0)
         {
             text.Append("BRIEF diagnostics | ").Append(diagnostics).Append('\n');
+        }
+
+        // An autonomous run that stops to ask for approval has failed at the one thing the mode is for, and the
+        // rule sat deep in a reference file a model read once. The header states it where every agent reads first.
+        if (string.Equals(result.Facts.Autonomy, "autonomous", StringComparison.Ordinal))
+        {
+            text.Append(AutonomousLine).Append('\n');
         }
 
         foreach (BriefPart part in result.Parts.Where(part => part.WholeFileLeftOut is null))

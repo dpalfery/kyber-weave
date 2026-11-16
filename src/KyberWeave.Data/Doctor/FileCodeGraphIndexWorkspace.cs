@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Globalization;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Domain.Doctor;
 
@@ -69,6 +71,27 @@ public sealed class FileCodeGraphIndexWorkspace : ICodeGraphIndexWorkspace
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            return false;
+        }
+    }
+
+    /// <inheritdoc />
+    public bool IsCodeGraphLockHeld(string indexDirectory)
+    {
+        string lockFile = Path.Combine(indexDirectory, CodeGraphIndexRules.IndexLockFileName);
+        try
+        {
+            if (!File.Exists(lockFile)
+                || !int.TryParse(File.ReadAllText(lockFile).Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out int processId))
+                return false;
+
+            using Process holder = Process.GetProcessById(processId);
+            return !holder.HasExited;
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or IOException
+                                       or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        {
+            // No such process, or a lock file that vanished or cannot be read: CodeGraph treats both as not held.
             return false;
         }
     }

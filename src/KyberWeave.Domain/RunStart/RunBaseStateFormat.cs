@@ -101,7 +101,7 @@ public static class RunBaseStateFormat
 
         if (document is { Repository: { Length: > 0 } repository, Branch: { Length: > 0 } branch, Worktree: { Length: > 0 } worktree })
         {
-            record = new RunRecord(repository, branch, worktree);
+            record = new RunRecord(repository, branch, worktree, document.StartedAt);
             return true;
         }
 

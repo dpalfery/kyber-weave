@@ -934,11 +934,11 @@ public sealed class DocsScaffolderTests : IDisposable
 
         DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
 
-        string standard = Read("docs/standards/github-actions/README.md");
+        string standard = Read("docs/standards/github-actions/github-actions.standards.md");
         Assert.Contains("doc-type: coding-standard", standard, StringComparison.Ordinal);
         Assert.Contains("technology: github-actions", standard, StringComparison.Ordinal);
         Assert.Contains(
-            "- **<github-actions-coding-standard>**: `docs/standards/github-actions/README.md`",
+            "- **<github-actions-coding-standard>**: `docs/standards/github-actions/github-actions.standards.md`",
             Read("AGENTS.md"),
             StringComparison.Ordinal);
 
@@ -974,18 +974,22 @@ public sealed class DocsScaffolderTests : IDisposable
 
         ScaffoldResult result = DocsTestCommands.Scaffolding.Scaffold(_temp.Path, kyberStandards: true);
 
-        // All 11 standards under <docs-root>/standards/<tech>/README.md are created
+        // All 11 standards under <docs-root>/standards/<tech>/ are created with their four files
         Assert.Equal(KyberStandardsTemplates.All.Count, KyberStandardsTemplates.All.Count(tech =>
-            result.Files.Any(f => f.RelativePath == $"{result.DocsRoot}/standards/{tech}/README.md"
+            result.Files.Any(f => f.RelativePath == $"{result.DocsRoot}/standards/{tech}/{tech}.standards.md"
                 && f is { Outcome: ScaffoldOutcome.Created, Written: true })));
 
-        // Contents match KyberStandardsTemplates.Render(tech, owner, date)
+        // Contents match the rendered template for each part
         foreach (string tech in KyberStandardsTemplates.All)
         {
-            string relativePath = $"{result.DocsRoot}/standards/{tech}/README.md";
-            string content = Read(relativePath);
-            string expected = KyberStandardsTemplates.Render(tech, "unassigned", today);
-            Assert.Equal(expected, content);
+            foreach (KyberStandardsTemplates.Part part in Enum.GetValues<KyberStandardsTemplates.Part>())
+            {
+                string relativePath =
+                    $"{result.DocsRoot}/standards/{tech}/{KyberStandardsTemplates.FileName(tech, part)}";
+                string content = Read(relativePath);
+                string expected = KyberStandardsTemplates.RenderPart(tech, part, "unassigned", today);
+                Assert.Equal(expected, content);
+            }
         }
 
         // .kyber-weave/kyber-weave.yml contains all 11 technologies under ontology.technologies
@@ -1006,7 +1010,7 @@ public sealed class DocsScaffolderTests : IDisposable
         foreach (string tech in KyberStandardsTemplates.All)
         {
             Assert.Contains(
-                $"- **<{tech}-coding-standard>**: `{result.DocsRoot}/standards/{tech}/README.md`",
+                $"- **<{tech}-coding-standard>**: `{result.DocsRoot}/standards/{tech}/{tech}.standards.md`",
                 agents,
                 StringComparison.Ordinal);
         }
@@ -1015,7 +1019,7 @@ public sealed class DocsScaffolderTests : IDisposable
         DocumentSet set = new DocumentLoader(_temp.Path, config.Ontology).Load();
         DiagnosticReport report = new DocSpecValidator(_temp.Path, config.Ontology).Validate(set);
         Assert.False(report.HasErrors, string.Join("; ", report.Items.Select(i => $"{i.Code} {i.Message}")));
-        Assert.Equal(3 + DocsLayout.Folders.Count + KyberStandardsTemplates.All.Count, set.Documents.Count);
+        Assert.Equal(3 + DocsLayout.Folders.Count + (KyberStandardsTemplates.All.Count * 3) + 1, set.Documents.Count);
     }
 
     /// <summary>
@@ -1042,21 +1046,21 @@ public sealed class DocsScaffolderTests : IDisposable
             # Custom C# coding standard
             Custom rules that must not be overwritten without --force.
             """;
-        File.WriteAllText(Path.Combine(_temp.Path, "docs", "standards", "csharp", "README.md"), customText);
+        File.WriteAllText(Path.Combine(_temp.Path, "docs", "standards", "csharp", "csharp.standards.md"), customText);
 
         // Run without force -> Skipped, file untouched
         ScaffoldResult result1 = DocsTestCommands.Scaffolding.Scaffold(_temp.Path, kyberStandards: true, force: false);
-        ScaffoldedFile csharpFile1 = result1.Files.Single(f => f.RelativePath == "docs/standards/csharp/README.md");
+        ScaffoldedFile csharpFile1 = result1.Files.Single(f => f.RelativePath == "docs/standards/csharp/csharp.standards.md");
         Assert.Equal(ScaffoldOutcome.Skipped, csharpFile1.Outcome);
         Assert.False(csharpFile1.Written);
-        Assert.Equal(customText, Read("docs/standards/csharp/README.md"));
+        Assert.Equal(customText, Read("docs/standards/csharp/csharp.standards.md"));
 
         // Run with force -> Updated, file overwritten with rich template
         ScaffoldResult result2 = DocsTestCommands.Scaffolding.Scaffold(_temp.Path, kyberStandards: true, force: true);
-        ScaffoldedFile csharpFile2 = result2.Files.Single(f => f.RelativePath == "docs/standards/csharp/README.md");
+        ScaffoldedFile csharpFile2 = result2.Files.Single(f => f.RelativePath == "docs/standards/csharp/csharp.standards.md");
         Assert.Equal(ScaffoldOutcome.Updated, csharpFile2.Outcome);
         Assert.True(csharpFile2.Written);
-        string overwrittenText = Read("docs/standards/csharp/README.md");
+        string overwrittenText = Read("docs/standards/csharp/csharp.standards.md");
         Assert.NotEqual(customText, overwrittenText);
         Assert.Equal(KyberStandardsTemplates.Render("csharp", "unassigned", today), overwrittenText);
     }

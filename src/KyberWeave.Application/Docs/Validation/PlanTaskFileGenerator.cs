@@ -47,26 +47,22 @@ public sealed partial class PlanTaskFileGenerator
     private readonly string _repoRoot;
     private readonly IDocsEngineConfig _config;
     private readonly IRepositoryFileStore _files;
-    private readonly IBoundedProcessExecutor _process;
     private readonly IPlanTaskAgentPicker? _picker;
 
     /// <summary>Creates the generator with a picker that chooses each unassigned task's agent when the file is written.</summary>
     /// <param name="repoRoot">The absolute repository root the artifact path is relative to.</param>
     /// <param name="config">The effective host configuration, with its ontology applied.</param>
     /// <param name="files">Reads the plan and the task file and writes the task file.</param>
-    /// <param name="process">Runs git for the file-scope check.</param>
     /// <param name="picker">The agent picker, or null when no decision model is configured.</param>
-    public PlanTaskFileGenerator(string repoRoot, IDocsEngineConfig config, IRepositoryFileStore files, IBoundedProcessExecutor process, IPlanTaskAgentPicker? picker = null)
+    public PlanTaskFileGenerator(string repoRoot, IDocsEngineConfig config, IRepositoryFileStore files, IPlanTaskAgentPicker? picker = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(files);
-        ArgumentNullException.ThrowIfNull(process);
 
         _repoRoot = repoRoot;
         _config = config;
         _files = files;
-        _process = process;
         _picker = picker;
     }
 
@@ -98,7 +94,7 @@ public sealed partial class PlanTaskFileGenerator
 
         IReadOnlyList<string> planningDirectories = PlanTaskFileRules.PlanningDirectories(
             _config.ConfigReg.Resolve(_config.Ontology));
-        PlanTaskFile? file = Build(artifact, markdown, planningDirectories, report, _repoRoot, _files, _process);
+        PlanTaskFile? file = Build(artifact, markdown, planningDirectories, report);
         if (file is null)
         {
             return new PlanTaskFileOutcome(report, taskFile, null, null, 0, false);
@@ -134,17 +130,11 @@ public sealed partial class PlanTaskFileGenerator
     /// <param name="markdown">The plan, or specification task list, as authored.</param>
     /// <param name="planningDirectories">The folders holding plans, which no prompt may send a worker into.</param>
     /// <param name="report">Receives every gap found; all of them are reported in one run.</param>
-    /// <param name="repoRoot">The repository root, to tell repository paths in a task's files from other text; null when unknown.</param>
-    /// <param name="files">Probes the repository's files; required when <paramref name="repoRoot"/> is given.</param>
-    /// <param name="process">Runs git for the file-scope check; required when <paramref name="repoRoot"/> is given.</param>
     public static PlanTaskFile? Build(
         string artifactPath,
         string markdown,
         IReadOnlyList<string> planningDirectories,
-        DiagnosticReport report,
-        string? repoRoot = null,
-        IRepositoryFileStore? files = null,
-        IBoundedProcessExecutor? process = null)
+        DiagnosticReport report)
     {
         ArgumentNullException.ThrowIfNull(markdown);
         ArgumentNullException.ThrowIfNull(planningDirectories);
@@ -178,13 +168,12 @@ public sealed partial class PlanTaskFileGenerator
         }
 
         PlanPacketContext context = PlanPacketContext.Parse(markdown);
-        PlanFileScope fileScope = new(repoRoot, files, process);
         List<PlanTaskFileEntry> entries = [];
         foreach (PlanTask task in parsed.Tasks)
         {
             PlanContractRow? row = parsed.ContractRows.FirstOrDefault(
                 candidate => string.Equals(candidate.TaskId, task.Id, StringComparison.Ordinal));
-            PlanTaskFileEntry? entry = BuildEntry(task, row, context, fileScope, artifactPath, planningDirectories, report);
+            PlanTaskFileEntry? entry = BuildEntry(task, row, context, artifactPath, planningDirectories, report);
             if (entry is null)
             {
                 gaps = true;
@@ -208,7 +197,6 @@ public sealed partial class PlanTaskFileGenerator
         PlanTask task,
         PlanContractRow? row,
         PlanPacketContext context,
-        PlanFileScope fileScope,
         string artifactPath,
         IReadOnlyList<string> planningDirectories,
         DiagnosticReport report)
@@ -301,7 +289,22 @@ public sealed partial class PlanTaskFileGenerator
             gap = true;
         }
 
-        (IReadOnlyList<string> keptFiles, IReadOnlyList<string> droppedFiles) = fileScope.Filter(task.Files);
+        (IReadOnlyList<string> keptFiles, IReadOnlyList<string> scratchFiles, IReadOnlyList<string> droppedFiles) = PlanFileScope.Filter(task.Files);
+        if (scratchFiles.Count > 0)
+        {
+            report.Add(new Diagnostic(
+                PlanTaskFileRules.ScratchPathInFiles,
+                Severity.Error,
+                $"Task '{task.Id}' lists scratch paths as its files: {string.Join(", ", scratchFiles)}. The scratch folder is " +
+                "git-ignored and every worker may write there, so it is never part of a task's file scope.",
+                task.Id,
+                artifactPath,
+                Hint: $"Take those entries out of the Files list of task '{task.Id}' in the plan. If the worker must write " +
+                "there, say so in the task text, outside the Files list, then run " +
+                $"{TaskFileCommand.Write(artifactPath)} again."));
+            gap = true;
+        }
+
         if (droppedFiles.Count > 0)
         {
             report.Add(new Diagnostic(
@@ -310,8 +313,8 @@ public sealed partial class PlanTaskFileGenerator
                 $"Task '{task.Id}': left out of its files because they are not repository paths: {string.Join(", ", droppedFiles)}.",
                 task.Id,
                 artifactPath,
-                Hint: "A file is kept when it exists, or when its top-level folder exists and its extension is one the repository tracks. "
-                      + "List a file the task creates as its repository-relative path in the task's Files line."));
+                Hint: "An entry is kept when its text is a repository-relative path: no scheme, call, quote or space, no leading slash, "
+                      + "and a folder name before any wildcard. Whether the path exists yet makes no difference."));
         }
 
         return gap

@@ -212,13 +212,26 @@ below its floor is still recorded, beside the `undecidable` it produced. Entries
 the answer could not be read, and `probabilities` is null unless every option has a value.
 
 A worker's return reaches the rules through the ledger. The post event records the report's
-`RESULT:` and `STATUS:` lines, and only a planner return may record
-`ATTESTED:`. It pairs with its dispatch by call id, or by a digest of the target and the
+`RESULT:` and `STATUS:` lines and the result its `TASK_GATE:` line claims, and only a planner return
+may record `ATTESTED:`. It pairs with its dispatch by call id, or by a digest of the target and the
 prompt with its headers removed, and a specialist's return takes its `TASK` from that dispatch
 because its headers were stripped before it ran. On each `delegate`, `ledger.completed-tasks`
-is the tasks of this plan whose report read `RESULT: PASS`, and `ledger.in-flight.paths` is the
-files of this session's dispatches that have not returned. A refused dispatch holds no files.
+is the tasks of this plan whose report read `RESULT: PASS`, or whose completion digest read
+`TASK_GATE: PASS` under `STATUS: PASS` or `STATUS: READY_FOR_REVIEW` (and no `RESULT: FAIL`). Any other
+report leaves the task to the model's reading of the stored report. `ledger.in-flight.paths` is the
+files of this session's dispatches that have not returned; a dispatch still unreturned four hours after it
+started stops holding its files. A refused dispatch holds no files.
 A task counts as complete on its worker's own report: no separate reviewer confirms it.
+
+One project ledger serves every run of a repository, and two runs can use the same plan path, task ids
+and files. Completed tasks, in-flight files and the stored reports are therefore counted for one run
+only. The run is the record `kyber-weave run start` wrote for the directory the dispatch is evaluated
+in: a dispatch belongs to it when its pre event was recorded after that record's `StartedAt` and names
+the same directory in its `run` field (an event with no `run` field is placed by its time alone). The
+start time is the boundary because it is the one fact that exists for every run and changes with each:
+a session id can outlive a run, a branch name and a worktree path can be reused, and a plan's digest
+changes when the plan is revised inside one run. A dispatch evaluated where no run is recorded is
+counted as before, against the whole ledger.
 
 ## The rules
 
@@ -343,7 +356,7 @@ runs on every Copilot CLI and Claude tool call from the user-level hook file or 
 places those harnesses report a subagent's calls with its id and type, and it acts only on a call from inside
 a Squad subagent. It denies a write into the canonical checkout while a live run works in its own worktree
 (`KW-ARB-CHECKOUT-001`, the same id as the return rule) and every call of a developer or `docs-dev` dispatch
-past `arbiter.dispatch-budget` (`KW-ARB-BUDGET-001`), and denies once the call after one that ran past
+whose current turn is past `arbiter.dispatch-budget` (`KW-ARB-BUDGET-001`), and denies once the call after one that ran past
 `dispatch-budget.call-minutes`, measured as the gap between the dispatch's consecutive calls. It reads the run records, the checkout's git files and
 one append-only counter file per subagent under `~/.kyber-weave/arbiter/budgets/`, starts no process, calls no
 model, and allows anything it cannot read. A shell command that writes a file is not seen by it; the return
@@ -827,7 +840,7 @@ The degradation records these outcomes produce are listed once, in the
 |---|---|---|---|---|---|---|
 | Claude | 1 | `hooks` in each dispatching agent's `.claude/agents/<agent>.md` frontmatter and the `/conductor` entry-point skill | `Agent`, matched exactly so task-list tools do not match | `agent_type` inside sub-agents, rendered `--caller` otherwise | `subagent_type`, `prompt` | Supported: `model` on the `Agent` input; aliases `sonnet`, `opus`, `haiku`, `fable` [CC-SUB], [CC-HOOK] |
 | Copilot in VS Code | 1 | `hooks` in each `.github/agents/<agent>.agent.md` (Preview, Local harness) | `runSubagent` | Rendered `--caller`; the payload carries no caller field | `agentName` (absent means the calling agent), `prompt` | Unsupported (unverified): the custom-agent `model` is agent-level only [GH-HOOK], [GH-AGENT] |
-| Copilot CLI | 1 | `.github/hooks/kyber-arbiter.json`, its own file | `task` | The top-level `agentType` inside a subagent; a root agent's payload names no caller, so header inference (the conductor's agent-scoped guard makes the run-start check there) | `agent_type`, `prompt` | Unsupported (unverified): the custom-agent `model` is agent-level only [GH-HOOK], [GH-AGENT] |
+| Copilot CLI | 1 | `.github/hooks/kyber-arbiter.json`, its own file (`preToolUse` and `postToolUse` on `task`, and `subagentStop` with no matcher for background returns) | `task` | The top-level `agentType` inside a subagent; a root agent's payload names no caller, so header inference (the conductor's agent-scoped guard makes the run-start check there) | `agent_type`, `prompt` | Unsupported (unverified): the custom-agent `model` is agent-level only [GH-HOOK], [GH-AGENT] |
 | OpenCode | 1 | `.opencode/plugins/kyber-arbiter.ts` shim speaking the plugin envelope | `task` (before 2.2) or `subagent` (2.2.5) | Header inference from the marker | `args.subagent_type` or `args.agent`, `args.prompt` | Unsupported: the task tool documents no per-call model; model is agent config [OC-AGENT] |
 | Pi | 2 | Owned extension file `.pi/extensions/kyber-arbiter.ts` speaking the plugin envelope (`before`/`after`, tool `Agent`) | `Agent` | Header inference from the marker | `args.subagent_type`, `args.prompt` | Unsupported (unverified): no core subagent tool or model field is documented [PI-EXT] |
 | Codex | 2 | Owned block in the shared `.codex/hooks.json` (`PreToolUse`/`PostToolUse` matcher groups) | `spawn_agent` (also matched as `Agent`, under any namespace prefix) | Header inference from the marker | `tool_input.agent_type`, `tool_input.message`; returns pair by `tool_use_id` | Unsupported (unverified): no `spawn_agent` model parameter is documented [CX-HOOK], [CX-SUB] |
@@ -852,6 +865,28 @@ time — see the [runbook](runbook.md) and [Squad onboarding](../kyber-squad/onb
 On the Copilot CLI target post-dispatch outcomes are advisory only: `Deny`,
 `PostBlock` and `PostAnnotation` all render as `additionalContext`, so a post-dispatch
 finding is surfaced as context rather than enforced. Pre-dispatch denies still block.
+
+Copilot CLI runs a `task` in the background when the dispatch asks for `mode: "background"`, and it can
+move a synchronous one there while the agent is still working. Either way the tool returns at once with
+only the agent's id ("Agent started in background with agent_id: …", "Agent moved to background
+(agent_id: …)"). That result is not the worker's return, so `postToolUse` records nothing for it: the
+hook stores the agent id beside the dispatch's pre event under the arbiter directory's `background/`
+folder, with the dispatch prompt as executed, for a week. The return is the `subagentStop` event Copilot
+fires at the end of each of the agent's turns, which carries the agent id and the full final response.
+The hook file registers it with no matcher, since the event has no tool. The hook records that response
+as the post event paired to the stored pre event and runs the return rules on it, exactly as for a
+synchronous return. A later turn of the same agent (a rework the conductor sends with `write_agent`)
+fires `subagentStop` again and records a new return for the same task; the same response delivered twice
+is recorded once. A synchronous dispatch also fires `subagentStop`, before its `postToolUse`: its agent
+was never stored, so the event records nothing and `postToolUse` stays the one source of that return.
+Copilot runs no hook for the `read_agent` call that delivers a background result to the conductor, so
+that call cannot be the return.
+
+A note or escalation on a background return reaches the conductor two ways. The `subagentStop` answer
+sets `modifiedResponse` to the agent's response with the note appended, which Copilot documents as
+replacing the response the parent reads; this delivery has not been confirmed on a live run. The note is
+therefore also kept, and the dispatching agent's next `task` `postToolUse` in the same session carries
+it once as `additionalContext`.
 
 ### Dispatch delivery path
 

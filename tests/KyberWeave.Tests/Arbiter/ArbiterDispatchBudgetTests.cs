@@ -86,6 +86,50 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
     }
 
     [Fact]
+    public void Budget_AllowsATurnResumedAfterALongIdleGap_BecauseTheBudgetMeasuresOneTurn()
+    {
+        // A live run: the first turn worked 14:20:25-14:26:01, the agent sat idle, and a rework sent to it at
+        // 14:40:12 was denied on its first command for being 19 minutes after the first dispatch.
+        ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 150, CallMinutes: 15);
+
+        Assert.Empty(Guard("copilot-cli", Copilot("csharp-dev", "agent-1"), Start, budget));
+        Assert.Empty(Guard("copilot-cli", Copilot("csharp-dev", "agent-1"), Start.AddMinutes(5), budget));
+        Assert.Empty(Guard("copilot-cli", TurnEnd("csharp-dev", "agent-1"), Start.AddMinutes(6), budget));
+
+        Assert.Empty(Guard("copilot-cli", Copilot("csharp-dev", "agent-1"), Start.AddMinutes(20), budget));
+        Assert.Empty(Guard("copilot-cli", Copilot("csharp-dev", "agent-1"), Start.AddMinutes(30), budget));
+    }
+
+    [Fact]
+    public void Budget_StillDeniesASingleTurnThatRunsPastTheTimeLimit()
+    {
+        ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 150, CallMinutes: 15);
+
+        Assert.Empty(Guard("copilot-cli", Copilot("csharp-dev", "agent-1"), Start, budget));
+        Assert.Empty(Guard("copilot-cli", TurnEnd("csharp-dev", "agent-1"), Start.AddMinutes(1), budget));
+        Assert.Empty(Guard("copilot-cli", Copilot("csharp-dev", "agent-1"), Start.AddMinutes(20), budget));
+        Assert.Empty(Guard("copilot-cli", Copilot("csharp-dev", "agent-1"), Start.AddMinutes(30), budget));
+
+        string answer = Guard("copilot-cli", Copilot("csharp-dev", "agent-1"), Start.AddMinutes(36), budget);
+
+        using JsonDocument document = JsonDocument.Parse(answer);
+        Assert.Equal("deny", document.RootElement.GetProperty("permissionDecision").GetString());
+        Assert.Contains(WorkerGuard.BudgetExceededStatus, document.RootElement.GetProperty("permissionDecisionReason").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TurnEnd_OfOneAgent_LeavesAnotherAgentsBudgetAlone()
+    {
+        ArbiterDispatchBudgetConfig budget = new(Minutes: 60, ToolCalls: 1);
+
+        Assert.Empty(Guard("copilot-cli", Copilot("dal-dev", "agent-1"), Start, budget));
+        Assert.Empty(Guard("copilot-cli", TurnEnd("csharp-dev", "agent-2"), Start.AddSeconds(1), budget));
+
+        Assert.NotEmpty(Guard("copilot-cli", Copilot("dal-dev", "agent-1"), Start.AddSeconds(2), budget));
+        Assert.True(WorkerGuard.NeedsDecision("copilot-cli", TurnEnd("csharp-dev", "agent-2")));
+    }
+
+    [Fact]
     public void StalledCall_DeniesTheNextCallOnce_AndAllowsTheRetry()
     {
         ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 1000, CallMinutes: 5);
@@ -262,6 +306,20 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
         agentType,
         toolName = "bash",
         toolArgs = JsonSerializer.Serialize(new { command = "dotnet test" }),
+    });
+
+    /// <summary>A Copilot CLI <c>subagentStop</c> event, trimmed from a live run: it ends one turn of the agent.</summary>
+    private string TurnEnd(string agentType, string agentId) => JsonSerializer.Serialize(new
+    {
+        sessionId = "c232d9cc-6701-4a48-a2e9-03bfd9f8ccf2",
+        cwd = _home.Path,
+        agentId,
+        agentType,
+        agentName = agentType,
+        response = "STATUS: PASS",
+        stopReason = "end_turn",
+        stop_hook_active = false,
+        parentAgentId = "c232d9cc-6701-4a48-a2e9-03bfd9f8ccf2",
     });
 
     private string Claude(string agentType, string agentId) => JsonSerializer.Serialize(new

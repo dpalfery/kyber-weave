@@ -96,6 +96,25 @@ with `gh`. Its only local write is a commit of plan files the archive left stage
 calls go through an `IProcessExecutor` that tests replace (`DeliveryExecutor`), so no test contacts
 GitHub ([ADR 0081](../../docs/adr/0081-the-conductor-delivers-a-run-through-one-docs-tool.md)).
 
+## One tool runs the doctor
+
+`docs_run_tooling_check_and_repair_code_index` (`DocsTools.ToolingCheck.cs`) is the run-start tooling check for a
+caller with no shell. It has the same shape as the writing tools: a thin wrapper
+(`ToolingCheckService`) over `IRepositoryDoctor` in ensure mode, which `kyber-weave doctor --ensure`
+also runs, with `projectPath` required. It writes only what that command writes: the checkout's
+`.codegraph/` index, tracked files the index run rewrote (restored), and the post-checkout hook block.
+
+- **The response is the CLI's.** After the provenance line and `result: passed | failed`, the check
+  lines come from `DoctorReportLines`, which the CLI's renderer also prints, then `EXIT: <code>` last.
+- **The exit code alone decides the failure token.** Any non-zero code adds the whole line
+  `STATUS: TOOL_FAILURE` above `EXIT:`. The doctor has already applied `stop-on-tool-failure`, so the
+  tool never reads that setting itself.
+- **It skips the CodeGraph gate**, because it is the repair for that gate.
+- **A held CodeGraph lock is a passing warning, never a rebuild.** The doctor retries the sync
+  briefly, then reports `PASS codegraph.index warning: …` and proves the index on disk.
+- **Its children never reach stdout.** git and CodeGraph run through the bounded process executor,
+  which captures both streams; tests replace it and the server executable the check starts.
+
 ## Staleness is handled for you
 
 `DocumentIndexHost.Current()` rebuilds whichever half has gone stale on each call. Do not
@@ -112,6 +131,14 @@ so a tool call never blocks on the provisioner's 600-second index timeout.
 - **A busy lock is a note, not a failure.** Another process refreshing means a worker's
   `doctor --ensure` or the CodeGraph daemon got there first: one `note:` line above the body, and
   the answer proceeds.
+- **No sync before a look for CodeGraph's lock file.** While `.codegraph/codegraph.lock` exists
+  the refresh waits 1, 5, then 30 seconds (`CodeGraphIndexRules.LockFileWaits`), looking again
+  after each. Still there after 36 seconds: no sync, and the failure block names the file, its
+  PID and the fix. That verdict is not cached. This is the owner's rule; do not shorten it.
+- **A sync that loses the race is busy.** A `sync` that fails only because the lock was taken
+  after the look (`CodeGraphIndexRules.IsIndexLockHeld`) is retried twice, 0.3 and 0.7 seconds
+  apart, then answered with a `note:` line. CodeGraph gives no exit code for it, so the rule
+  matches the message; re-check it when CodeGraph is upgraded.
 - **A real failure fails the tool.** `CodeGraphGate.Blocking` returns `STATUS: TOOL_FAILURE` with
   `tool:`, `reason:` and `fix:` lines, and nothing else, under the default stop rule; under
   `stop-on-tool-failure: false` the same detail arrives as the `warning:` advisory instead. The
@@ -119,7 +146,7 @@ so a tool call never blocks on the provisioner's 600-second index timeout.
 - **Two tools answer anyway, deliberately.** `docs_get_source_repository_and_revision` always
   answers so a failure can be diagnosed, and `docs_detect_drift_between_documents_and_code` answers
   with the failure because its verdict is the failure report. The two plan lifecycle tools read no
-  code join and skip the gate. The other six go through `CheckCodeGraph` and return the block.
+  code join and skip the gate, and the tooling-check tool skips it because it is the repair. The other six go through `CheckCodeGraph` and return the block.
 - **Where it applies.** Only where the bound repository lists `codegraph` under
   `mcp.required-servers` (`McpConfig.DeclaresCodeGraph`). A host that never declared it takes no
   lock and reports nothing. Settings are read at each refresh, so an edit needs no restart.

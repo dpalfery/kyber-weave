@@ -21,8 +21,9 @@ public static class DocsServerInstructions
         appropriate.
 
         Also available: docs_find_documents_citing_code_symbol (which documents describe a code symbol, before changing
-        it), docs_get_coding_standard_for_technology (how this repository writes code in a named technology, and
-        the rule ids that standard states, before writing or reviewing code in it),
+        it), docs_get_coding_standard_for_technology (one bundle for a technology: the rule ids, the shared rules,
+        the parent's rules and skills, the technology's rules and skills, and the standard's sections,
+        before writing or reviewing code in it),
         docs_look_up_glossary_term_definition (what a term means here), docs_find_duplicates_conflicts_ambiguous_terms (duplicated or
         contradictory documentation), docs_validate_governed_document_schema and docs_detect_drift_between_documents_and_code (the same schema and drift
         gates as kyber-weave docs validate and docs drift, without a shell), and docs_get_source_repository_and_revision
@@ -35,6 +36,11 @@ public static class DocsServerInstructions
         pushes the run branch and opens or updates its draft pull request on GitHub. All three need
         projectPath and refuse, changing nothing, when their checks fail.
 
+        One tool checks and repairs the tooling of a checkout: docs_run_tooling_check_and_repair_code_index
+        runs the same check as kyber-weave doctor --ensure for the projectPath it is given, without
+        a shell. It returns one PASS or FAIL line per check, a fix: line under each failure, and a
+        last line EXIT: <code>. Call it at the start of a run, in the tree the run will work in.
+
         Every response starts with a provenance line naming the repository root, its branch, its
         git directory, the short revision, whether the working tree is dirty, and the document
         count. Two answers with the same git directory are the same repository, even when their
@@ -42,7 +48,8 @@ public static class DocsServerInstructions
 
         Responses also report a broken code index rather than guessing around it. If a response
         carries the line STATUS: TOOL_FAILURE, the tool could not read the CodeGraph index its
-        code joins come from: stop and fix that instead of answering without it. A repository that
+        code joins come from, or the tooling check exited non-zero: stop and fix that instead of
+        answering without it. A repository that
         sets stop-on-tool-failure: false gets a warning line instead, and the answer still comes
         back.
         """;

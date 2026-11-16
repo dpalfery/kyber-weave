@@ -60,7 +60,9 @@ code-refs:
 | `status` | Currency of the document, from the closed set below. |
 | `component` | The unit of the system this document covers. Must exist in [catalog.md](catalog.md). |
 | `source-root` | Repository-relative path to that component's source. Must exist on disk. |
-| `technology` | The stack a coding standard governs. Declared in configuration, and equal to the folder the standard sits in. Rejected on any other doc-type. |
+| `technology` | The stack a coding standard, rule or skill governs. Declared in configuration, and equal to the folder the document sits in. Rejected on any other doc-type. |
+| `role` | The role a standard, rule or skill governs (`conductor`, `architect`, `reviewer`, `devops`). Declared in `ontology.roles`, and equal to the folder the document sits in. Rejected on any other doc-type. |
+| `builds-on` | The one declared technology this standard builds on. A task in this technology also receives the parent's rules and skills. One level only. |
 | `owner` | Who answers for it. Must exist in [catalog.md](catalog.md). |
 | `last-reviewed` | ISO `yyyy-MM-dd`. Any other format is an error, not a warning. |
 | `keywords` | Domain synonyms, acronyms, or search aliases that route natural-language and specialized queries to this document. Optional. `aliases` is accepted as an internal synonym for the same list; retrieval reads the unified `Keywords` view. Empty items fail `KW-DOC-SPEC-002`. |
@@ -78,7 +80,7 @@ open vocabulary is not a vocabulary — it is a text field that drifts until two
 of the same kind carry different labels and neither can be found by the other's name.
 
 **Doc types** — `architecture`, `onboarding`, `requirements`, `adr`, `plan`, `spec`, `todo`,
-`runbook`, `reference`, `rule`, `governance`, `index`, `coding-standard`
+`runbook`, `reference`, `rule`, `governance`, `index`, `coding-standard`, `skill`
 
 **Statuses** — `current`, `draft`, `needs-review`, `superseded`
 
@@ -87,9 +89,13 @@ which stacks it writes code in. That one list creates each standard's folder, pu
 property in the [configuration registry](../AGENTS.md), and legalizes the value here, so the
 three cannot disagree.
 
+**Roles** — whatever `ontology.roles` declares. Empty until a repository installs a role
+folder. A role names the work a folder shapes rather than a stack, and is the second legal
+scope for a rules or skills document.
+
 A `coding-standard` is how one technology's code is written *in this repository*; a `rule`
-governs every task regardless of language. Which statement goes where is
-[Rules and standards](#rules-and-standards).
+governs every task regardless of language; a `skill` is how to carry out work in one
+technology or role. Which statement goes where is [Rules and standards](#rules-and-standards).
 
 Adding a member is a change to the ontology, made in
 [`.kyber-weave/kyber-weave.yml`](../.kyber-weave/kyber-weave.yml) — not an authoring

@@ -468,6 +468,11 @@ public static partial class PlanDocumentParser
     /// Skills-family label; the plan heading's <c>(agent)</c> suffix is added by the caller.
     /// Capabilities are the rest of the first Capabilities-family label's line.
     /// </summary>
+    /// <summary>Whether a Depends value opens with the word "none", alone or followed by an explanation.</summary>
+    private static bool StartsWithNone(string region) =>
+        region.StartsWith("none", StringComparison.OrdinalIgnoreCase)
+        && (region.Length == 4 || !(char.IsLetterOrDigit(region[4]) || region[4] is '_' or '-'));
+
     private static (List<string> Files, List<string> DependsTokens, List<string> Skills, string? Capabilities, string? Difficulty, string? Technology) ParseTaskBody(string sectionText, bool isSpec)
     {
         (string plain, List<int> boldStarts) = StripEmphasis(sectionText);
@@ -503,7 +508,9 @@ public static partial class PlanDocumentParser
                     DoubleNewlineIndex(plain, dependsLabel.ValueStart)),
                 SiblingBulletIndex(plain, dependsLabel.ValueStart, LineIndent(plain, dependsLabel.Start))));
             string region = plain[dependsLabel.ValueStart..end].Trim().TrimEnd('.');
-            if (!region.Equals("none", StringComparison.OrdinalIgnoreCase))
+            // "none" answers the label even when prose follows it: "none (consumes the contract, not T1's
+            // code)" names T1 to say it is not a dependency, so a task id after a leading "none" is not one.
+            if (!StartsWithNone(region))
             {
                 IEnumerable<string> tokens = isSpec
                     ? SpecDependencyTokenRegex().Matches(region).Select(match => match.Groups["id"].Value)

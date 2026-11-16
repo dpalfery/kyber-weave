@@ -655,6 +655,109 @@ public sealed class DoctorEnsureTests : IDisposable
     /// Runs <c>doctor --ensure &lt;root&gt;</c> through the real CLI parser with the scripted child
     /// executor, and returns its exit code.
     /// </summary>
+    /// <summary>
+    /// A sync that finds CodeGraph's own lock held on every attempt is not repaired: the run passes
+    /// with a warning, exits 0, and still proves the index on disk with one explore.
+    /// </summary>
+    /// <remarks>
+    /// The lock is held by CodeGraph's server, its watcher or another sync, so the index is healthy.
+    /// <c>codegraph index</c> run against a held lock exits 1 and leaves the database empty, so a
+    /// repair here would break a working index.
+    /// </remarks>
+    [Fact]
+    public void EnsureDoesNotRepairAnIndexWhoseLockIsHeldAndPassesWithAWarning()
+    {
+        Directory.CreateDirectory(IndexDirectory);
+        ScriptedProcessExecutor executor = DoctorHarness.Executor(
+            Root,
+            arguments => arguments.Contains("sync", StringComparer.Ordinal) ? HeldIndexLock : DoctorHarness.Ok());
+
+        DoctorReport report = RunEnsureWithoutWaiting(executor);
+
+        DoctorHarness.AssertNoCall(executor, "index");
+        Assert.Equal(3, CodeGraphCalls(executor, "sync"));
+        Assert.Equal(1, CodeGraphCalls(executor, "explore"));
+        DoctorCheck index = Assert.Single(report.Checks, check => check.Id == "codegraph.index");
+        Assert.True(index.Passed);
+        Assert.StartsWith("warning: ", index.Reason, StringComparison.Ordinal);
+        Assert.Contains("lock held", index.Reason, StringComparison.Ordinal);
+        Assert.Equal(0, report.ExitCode);
+    }
+
+    /// <summary>
+    /// A sync that finds the lock held once and free on the retry is an ordinary pass: no repair and
+    /// no warning.
+    /// </summary>
+    [Fact]
+    public void EnsureRetriesASyncThatFoundTheLockHeldAndPassesNormally()
+    {
+        Directory.CreateDirectory(IndexDirectory);
+        int syncCalls = 0;
+        ScriptedProcessExecutor executor = DoctorHarness.Executor(
+            Root,
+            arguments => arguments.Contains("sync", StringComparer.Ordinal) && ++syncCalls == 1
+                ? HeldIndexLock
+                : DoctorHarness.Ok());
+
+        DoctorReport report = RunEnsureWithoutWaiting(executor);
+
+        DoctorHarness.AssertNoCall(executor, "index");
+        Assert.Equal(2, CodeGraphCalls(executor, "sync"));
+        DoctorCheck index = Assert.Single(report.Checks, check => check.Id == "codegraph.index");
+        Assert.Equal("codegraph sync completed", index.Reason);
+        Assert.Equal(0, report.ExitCode);
+    }
+
+    /// <summary>
+    /// With the lock held, a failed explore proof is a real failure and is still not answered with a
+    /// rebuild while another live process holds CodeGraph's lock file.
+    /// </summary>
+    [Fact]
+    public void EnsureNeverRebuildsWhileAnotherLiveProcessHoldsTheCodeGraphLock()
+    {
+        Directory.CreateDirectory(IndexDirectory);
+        File.WriteAllText(
+            Path.Combine(IndexDirectory, "codegraph.lock"),
+            Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        ScriptedProcessExecutor executor = DoctorHarness.Executor(
+            Root,
+            arguments => arguments.Contains("sync", StringComparer.Ordinal) ? HeldIndexLock
+                : arguments.Contains("explore", StringComparer.Ordinal) ? new ProcessResult(1, string.Empty, "no answer")
+                : DoctorHarness.Ok());
+
+        DoctorReport report = RunEnsureWithoutWaiting(executor);
+
+        DoctorHarness.AssertNoCall(executor, "index");
+        Assert.Contains(report.Checks, check => check.Id == "codegraph.explore" && !check.Passed);
+        Assert.Equal(1, report.ExitCode);
+    }
+
+    /// <summary>
+    /// What CodeGraph 1.6.2 answers, captured from a real run, when <c>codegraph sync .</c> finds
+    /// <c>.codegraph/codegraph.lock</c> held by a live process.
+    /// </summary>
+    private static readonly ProcessResult HeldIndexLock = new(
+        1,
+        "┌  Syncing CodeGraph\n│\n",
+        "✗ Failed to sync: Sync could not acquire the file lock; retry when the index is available. "
+        + "CodeGraph database is locked by another process (PID 91106). If this is stale, run "
+        + "'codegraph unlock' or delete /repo/.codegraph/codegraph.lock\n");
+
+    private static int CodeGraphCalls(ScriptedProcessExecutor executor, string verb) =>
+        executor.CallsTo("codegraph").Count(call => call.ArgumentList.Contains(verb, StringComparer.Ordinal));
+
+    /// <summary>Runs the ensure doctor with the pauses between sync attempts set to nothing.</summary>
+    private DoctorReport RunEnsureWithoutWaiting(ScriptedProcessExecutor executor) =>
+        RepositoryDoctor.Run(
+            Root,
+            DoctorMode.Ensure,
+            DoctorHarness.Options(DoctorHarness.HealthyStub(_stubs.Path, Root)) with
+            {
+                HeldLockRetryPauses = [TimeSpan.Zero, TimeSpan.Zero]
+            },
+            executor,
+            _ => null);
+
     private int RunEnsure(ScriptedProcessExecutor executor)
     {
         DoctorCommand command = new(DoctorServices.Doctor, new DoctorTestEnvironment(false, _ => null), executor, DoctorHarness.HealthyStub(_stubs.Path, Root));

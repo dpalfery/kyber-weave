@@ -27,10 +27,26 @@ namespace KyberWeave.Core.Docs.Scaffolding;
 public static class KyberStandardsTemplates
 {
     private const string ResourcePrefix = "Standards.";
-    private const string ResourceSuffix = ".md";
+
+    /// <summary>The parts a shipped technology, role or platform folder holds.</summary>
+    public enum Part
+    {
+        /// <summary>The standard, six headings.</summary>
+        Standard,
+
+        /// <summary>Prose rules a model reads.</summary>
+        Rules,
+
+        /// <summary>How to do the work.</summary>
+        Skills,
+
+        /// <summary>Machine rules the Arbiter evaluates; may declare none.</summary>
+        ArbiterRules
+    }
 
     private static readonly string[] CanonicalTechnologies =
     [
+        "aws",
         "azure",
         "csharp",
         "data-access-layer",
@@ -42,10 +58,19 @@ public static class KyberStandardsTemplates
         "react",
         "rust",
         "sql",
+        "sql-server",
         "tauri",
         "test",
         "typescript"
     ];
+
+    /// <summary>Role templates: the same four files, scoped by <c>role</c>.</summary>
+    private static readonly string[] CanonicalRoles =
+        ["architect", "conductor", "devops", "reviewer"];
+
+    /// <summary>Delivery-platform templates: technology folders, scoped by <c>technology</c>.</summary>
+    private static readonly string[] CanonicalPlatforms =
+        ["azure-devops", "github", "gitlab", "jira"];
 
     private static readonly FrozenDictionary<string, string> Templates = LoadEmbeddedTemplates();
 
@@ -54,13 +79,44 @@ public static class KyberStandardsTemplates
     /// </summary>
     public static IReadOnlyList<string> All => CanonicalTechnologies;
 
+    /// <summary>The role folder templates that ship.</summary>
+    public static IReadOnlyList<string> Roles => CanonicalRoles;
+
+    /// <summary>The delivery-platform folder templates that ship.</summary>
+    public static IReadOnlyList<string> Platforms => CanonicalPlatforms;
+
+    /// <summary>Every folder template: technologies, roles and platforms.</summary>
+    public static IReadOnlyList<string> AllFolders =>
+        [.. CanonicalTechnologies, .. CanonicalRoles, .. CanonicalPlatforms];
+
+    /// <summary>The frontmatter key a folder's files are scoped by.</summary>
+    public static string ScopeKey(string name) =>
+        CanonicalRoles.Contains(name, StringComparer.Ordinal) ? "role" : "technology";
+
+    /// <summary>The file suffix each part carries in a folder named after its scope.</summary>
+    public static string FileName(string scope, Part part) => part switch
+    {
+        Part.Standard => $"{scope}.standards.md",
+        Part.Rules => $"{scope}.rules.md",
+        Part.Skills => $"{scope}.skills.md",
+        Part.ArbiterRules => $"{scope}.arbiter-rules.yml",
+        _ => throw new ArgumentOutOfRangeException(nameof(part))
+    };
+
     /// <summary>
     /// Attempts to retrieve the raw embedded template markdown for the given technology.
     /// </summary>
     /// <param name="technology">The technology slug (e.g. <c>csharp</c>, <c>test</c>).</param>
     /// <param name="template">The raw template content if found; otherwise, <see langword="null"/>.</param>
     /// <returns><see langword="true"/> if a template exists for the technology; otherwise, <see langword="false"/>.</returns>
-    public static bool TryGet(string? technology, [NotNullWhen(true)] out string? template)
+    public static bool TryGet(string? technology, [NotNullWhen(true)] out string? template) =>
+        TryGetPart(technology, Part.Standard, out template);
+
+    /// <summary>Attempts to retrieve one file of a technology's embedded template.</summary>
+    public static bool TryGetPart(
+        string? technology,
+        Part part,
+        [NotNullWhen(true)] out string? template)
     {
         if (technology is null)
         {
@@ -68,7 +124,7 @@ public static class KyberStandardsTemplates
             return false;
         }
 
-        return Templates.TryGetValue(technology, out template);
+        return Templates.TryGetValue(ResourceName(technology, part), out template);
     }
 
     /// <summary>
@@ -116,7 +172,7 @@ public static class KyberStandardsTemplates
 
         if (!TryRender(technology, owner, date, out string? rendered))
         {
-            string? nearest = StringDistance.Nearest(technology, CanonicalTechnologies);
+            string? nearest = StringDistance.Nearest(technology, AllFolders);
             string message = nearest is not null
                 ? $"Unknown technology '{technology}'. Did you mean '{nearest}'?"
                 : $"Unknown technology '{technology}'.";
@@ -125,6 +181,75 @@ public static class KyberStandardsTemplates
         }
 
         return rendered;
+    }
+
+    /// <summary>
+    /// Attempts to render one file of a technology template, populating the frontmatter
+    /// <c>owner</c> and <c>last-reviewed</c> fields. The Arbiter rules file has no
+    /// frontmatter and is returned unchanged.
+    /// </summary>
+    public static bool TryRenderPart(
+        string? technology,
+        Part part,
+        string owner,
+        string date,
+        [NotNullWhen(true)] out string? rendered)
+    {
+        ArgumentNullException.ThrowIfNull(owner);
+        ArgumentNullException.ThrowIfNull(date);
+
+        if (technology is not null && TryGetPart(technology, part, out string? template))
+        {
+            rendered = part == Part.ArbiterRules
+                ? template
+                : InjectFrontmatter(template, owner, date);
+            return true;
+        }
+
+        rendered = null;
+        return false;
+    }
+
+    /// <summary>Renders one file of a technology template, or throws naming the nearest slug.</summary>
+    public static string RenderPart(string technology, Part part, string owner, string date)
+    {
+        ArgumentNullException.ThrowIfNull(technology);
+
+        if (!TryRenderPart(technology, part, owner, date, out string? rendered))
+        {
+            string? nearest = StringDistance.Nearest(technology, AllFolders);
+            string message = nearest is not null
+                ? $"Unknown technology '{technology}'. Did you mean '{nearest}'?"
+                : $"Unknown technology '{technology}'.";
+
+            throw new ArgumentException(message, nameof(technology));
+        }
+
+        return rendered;
+    }
+
+    /// <summary>
+    /// Attempts to render the shared rules file that sits beside a host's standards folders.
+    /// </summary>
+    public static bool TryRenderSharedRules(
+        string owner,
+        string date,
+        [NotNullWhen(true)] out string? rendered)
+    {
+        ArgumentNullException.ThrowIfNull(owner);
+        ArgumentNullException.ThrowIfNull(date);
+
+        Assembly assembly = typeof(KyberStandardsTemplates).Assembly;
+        using Stream? stream = assembly.GetManifestResourceStream($"{ResourcePrefix}shared-rules.md");
+        if (stream is null)
+        {
+            rendered = null;
+            return false;
+        }
+
+        using StreamReader reader = new StreamReader(stream, Encoding.UTF8);
+        rendered = InjectFrontmatter(reader.ReadToEnd(), owner, date);
+        return true;
     }
 
     private static string InjectFrontmatter(string template, string owner, string date)
@@ -175,19 +300,31 @@ public static class KyberStandardsTemplates
         Assembly assembly = typeof(KyberStandardsTemplates).Assembly;
         Dictionary<string, string> dictionary = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (string tech in CanonicalTechnologies)
+        foreach (string tech in AllFolders)
         {
-            string resourceName = $"{ResourcePrefix}{tech}{ResourceSuffix}";
-            using Stream? stream = assembly.GetManifestResourceStream(resourceName);
-            if (stream is null)
+            foreach (Part part in Enum.GetValues<Part>())
             {
-                continue;
-            }
+                string resourceName = ResourceName(tech, part);
+                using Stream? stream = assembly.GetManifestResourceStream(resourceName);
+                if (stream is null)
+                {
+                    continue;
+                }
 
-            using StreamReader reader = new StreamReader(stream, Encoding.UTF8);
-            dictionary[tech] = reader.ReadToEnd();
+                using StreamReader reader = new StreamReader(stream, Encoding.UTF8);
+                dictionary[resourceName] = reader.ReadToEnd();
+            }
         }
 
         return dictionary.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
     }
+
+    private static string ResourceName(string technology, Part part) => part switch
+    {
+        Part.Standard => $"{ResourcePrefix}{technology}.standards.md",
+        Part.Rules => $"{ResourcePrefix}{technology}.rules.md",
+        Part.Skills => $"{ResourcePrefix}{technology}.skills.md",
+        Part.ArbiterRules => $"{ResourcePrefix}{technology}.arbiter-rules.yml",
+        _ => throw new ArgumentOutOfRangeException(nameof(part))
+    };
 }

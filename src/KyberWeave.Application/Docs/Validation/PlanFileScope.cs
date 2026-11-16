@@ -1,183 +1,82 @@
-using System.ComponentModel;
-using System.Diagnostics;
 using System.Text.RegularExpressions;
-using KyberWeave.Contracts.Repositories;
-using KyberWeave.Core.Processes;
-using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Docs.Validation;
 
 /// <summary>
-/// Keeps, from the entries a task's text yields as its files, only those that are repository paths. A plan's prose also
-/// holds routes, URLs, call expressions and namespaces in backticks, and a file list that carries them feeds wrong
-/// scopes into the in-flight overlap check and the diff attribution. The judgment is made from the repository, not from
-/// more patterns: an entry is a file when it exists, or when its top-level folder exists and its extension is one the
-/// repository already tracks (so a file the task creates, even in a new folder, still counts).
+/// Sorts the entries a task's text yields as its files into repository paths, scratch paths and other text. A plan's
+/// prose also holds routes, URLs and call expressions in backticks, and a file list that carries them feeds wrong
+/// scopes into the in-flight overlap check and the diff attribution.
 /// </summary>
-internal sealed partial class PlanFileScope
+/// <remarks>
+/// The judgment reads the entry's text and nothing else. The task file is compared with the plan again on every packet,
+/// so a rule that asked the working tree whether a path or its folder exists gave a different file list as soon as a
+/// worker created that folder, and the run stopped on a task file that no longer matched its unchanged plan.
+/// </remarks>
+internal static partial class PlanFileScope
 {
-    private static readonly string[] SkippedDirectories = [".git", "node_modules", "bin", "obj", ".agent_scratchpad"];
+    /// <summary>The run's scratch folder: git-ignored, never part of a diff, and open to every worker.</summary>
+    private const string ScratchFolder = ".agent_scratchpad";
 
-    private readonly string? _root;
-    private readonly IRepositoryFileStore _files;
-    private readonly IBoundedProcessExecutor _process;
-    private readonly Lazy<HashSet<string>?> _extensions;
-
-    /// <summary>Creates the scope for one repository.</summary>
-    /// <param name="repositoryRoot">The repository root, or null when unknown; without it only entries that cannot be paths are dropped.</param>
-    /// <param name="files">Probes the repository's files and folders.</param>
-    /// <param name="process">Runs <c>git ls-files</c> to read the extensions the repository tracks.</param>
-    public PlanFileScope(string? repositoryRoot, IRepositoryFileStore? files, IBoundedProcessExecutor? process)
-    {
-        if (!string.IsNullOrWhiteSpace(repositoryRoot))
-        {
-            ArgumentNullException.ThrowIfNull(files);
-            ArgumentNullException.ThrowIfNull(process);
-        }
-
-        _files = files!;
-        _process = process!;
-        _root = string.IsNullOrWhiteSpace(repositoryRoot) ? null : Path.GetFullPath(repositoryRoot);
-        _extensions = new Lazy<HashSet<string>?>(ReadExtensions);
-    }
-
-    /// <summary>Splits <paramref name="entries"/> into the kept files and the dropped text.</summary>
-    public (IReadOnlyList<string> Kept, IReadOnlyList<string> Dropped) Filter(IReadOnlyList<string> entries)
+    /// <summary>
+    /// Splits <paramref name="entries"/> into the kept repository paths, the scratch paths and the dropped text. Neither
+    /// the scratch paths nor the dropped text belong in a task file.
+    /// </summary>
+    public static (IReadOnlyList<string> Kept, IReadOnlyList<string> Scratch, IReadOnlyList<string> Dropped) Filter(IReadOnlyList<string> entries)
     {
         List<string> kept = [];
+        List<string> scratch = [];
         List<string> dropped = [];
         foreach (string entry in entries)
         {
-            (IsPath(entry) ? kept : dropped).Add(entry);
+            string? relative = AsRelativePath(entry);
+            if (relative is null)
+                dropped.Add(entry);
+            else if (IsScratch(relative))
+                scratch.Add(entry); // reported to the author, so in the author's own text
+            else
+                kept.Add(relative);
         }
 
-        return (kept, dropped);
+        return (kept, scratch, dropped);
     }
 
-    private bool IsPath(string entry)
+    /// <summary>The entry as a repository-relative path with forward slashes, or null when its text cannot be one.</summary>
+    private static string? AsRelativePath(string entry)
     {
         string text = entry.Trim();
         if (text.Length == 0 || text.Contains("://", StringComparison.Ordinal) || text.Contains('(', StringComparison.Ordinal)
             || text.Contains(')', StringComparison.Ordinal) || text.Any(char.IsWhiteSpace) || SchemeRegex().IsMatch(text)
             || text.Any(character => character is '\'' or '"' or '`' or '<' or '>' or '{' or '}' or '|' or '$'))
         {
-            return false;
+            return null;
         }
 
-        if (_root is null)
-        {
-            return true;
-        }
-
+        // A leading slash is a route such as /api/drivers, and a pattern with no literal folder before it names no place.
         string relative = text.TrimEnd('/').Replace('\\', '/');
-        if (relative.StartsWith('/') || relative.Length == 0)
+        while (relative.StartsWith("./", StringComparison.Ordinal))
         {
-            return false;
+            relative = relative[2..];
         }
 
-        int glob = relative.IndexOfAny(['*', '?']);
-        string literal = glob < 0 ? relative : relative[..Math.Max(0, relative.LastIndexOf('/', glob))];
-        string full = Path.Combine(_root, literal.Replace('/', Path.DirectorySeparatorChar));
-        if (glob >= 0)
-        {
-            return literal.Length > 0 && _files.DirectoryExists(full);
-        }
-
-        if (_files.FileExists(full) || _files.DirectoryExists(full))
-        {
-            return true;
-        }
-
-        string firstSegment = relative.Split('/')[0];
-        string extension = Path.GetExtension(relative);
-        bool topLevelExists = _files.DirectoryExists(Path.Combine(_root, firstSegment)) || (!relative.Contains('/', StringComparison.Ordinal) && _files.FileExists(Path.Combine(_root, firstSegment)));
-        return extension.Length > 1
-               && (relative.Contains('/', StringComparison.Ordinal) ? topLevelExists : true)
-               && _extensions.Value?.Contains(extension) != false;
-    }
-
-    private HashSet<string>? ReadExtensions()
-    {
-        if (_root is null)
+        // A path that climbs out of the repository or starts at a drive is not a place inside it.
+        string[] segments = relative.Split('/');
+        if (relative.Length == 0 || relative.StartsWith('/') || DriveRegex().IsMatch(relative)
+            || segments.Any(segment => segment is ".." or "."))
         {
             return null;
         }
 
-        HashSet<string> extensions = new(StringComparer.OrdinalIgnoreCase);
-        try
-        {
-            ProcessStartInfo start = new("git") { RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true, UseShellExecute = false, WorkingDirectory = _root };
-            foreach (string argument in new[] { "-C", _root, "ls-files", "-z" })
-            {
-                start.ArgumentList.Add(argument);
-            }
-
-            ProcessResult result = _process.Run(start, string.Empty, TimeSpan.FromSeconds(20));
-            if (result.ExitCode == 0 && result.StandardOutput.Length > 0)
-            {
-                foreach (string path in result.StandardOutput.Split('\0', StringSplitOptions.RemoveEmptyEntries))
-                {
-                    AddExtension(extensions, path);
-                }
-
-                return extensions;
-            }
-        }
-        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or TimeoutException or IOException)
-        {
-            // Not a git checkout, or git is absent: the files on disk say which extensions the repository has.
-        }
-
-        foreach (string path in EnumerateFiles(_root, 0))
-        {
-            AddExtension(extensions, path);
-        }
-
-        return extensions.Count > 0 ? extensions : null;
+        return segments[0].IndexOfAny(['*', '?']) >= 0 ? null : relative;
     }
 
-    private static void AddExtension(HashSet<string> extensions, string path)
-    {
-        string extension = Path.GetExtension(path);
-        if (extension.Length > 1)
-        {
-            extensions.Add(extension);
-        }
-    }
-
-    private IEnumerable<string> EnumerateFiles(string directory, int depth)
-    {
-        if (depth > 8)
-        {
-            yield break;
-        }
-
-        string[] files;
-        string[] directories;
-        try
-        {
-            files = _files.GetFiles(directory);
-            directories = _files.GetDirectories(directory);
-        }
-        catch (Exception ex) when (FileFailure.Is(ex))
-        {
-            yield break;
-        }
-
-        foreach (string file in files)
-        {
-            yield return file;
-        }
-
-        foreach (string child in directories.Where(child => !SkippedDirectories.Contains(Path.GetFileName(child), StringComparer.Ordinal)))
-        {
-            foreach (string file in EnumerateFiles(child, depth + 1))
-            {
-                yield return file;
-            }
-        }
-    }
+    // Case is ignored so the answer is the same on a file system that folds case and on one that does not.
+    private static bool IsScratch(string relative) =>
+        relative.Equals(ScratchFolder, StringComparison.OrdinalIgnoreCase)
+        || relative.StartsWith(ScratchFolder + "/", StringComparison.OrdinalIgnoreCase);
 
     [GeneratedRegex(@"^[A-Za-z][A-Za-z0-9+.-]*:(?!\\|/)", RegexOptions.CultureInvariant)]
     private static partial Regex SchemeRegex();
+
+    [GeneratedRegex(@"^[A-Za-z]:", RegexOptions.CultureInvariant)]
+    private static partial Regex DriveRegex();
 }

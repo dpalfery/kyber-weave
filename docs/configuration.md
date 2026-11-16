@@ -170,10 +170,13 @@ Declaring one and re-running `docs init`:
 2. publishes `<technology-coding-standard>` in the configuration registry;
 3. legalizes `technology: <technology>` in that standard's frontmatter.
 
-Passing `--kyber-standards` to `kyber-weave docs init` seeds all 14 Kyber Squad rich coding
-standards templates (`csharp`, `test`, `typescript`, `rust`, `tauri`, `go`, `react`, `python`,
-`pulumi`, `maui`, `data-access-layer`, `sql`, `azure`, `github-actions`), merges them into `ontology.technologies`, and registers
-their paths in Config Reg.
+Passing `--kyber-standards` to `kyber-weave docs init` seeds all 16 Kyber Squad technology
+templates (`aws`, `azure`, `csharp`, `data-access-layer`, `github-actions`, `go`, `maui`,
+`pulumi`, `python`, `react`, `rust`, `sql`, `sql-server`, `tauri`, `test`, `typescript`), merges
+them into `ontology.technologies`, and registers their paths in Config Reg. `--standards
+<name,name>` installs exactly the folders named, from the same 16 technologies plus the four
+role folders (`conductor`, `architect`, `reviewer`, `devops`) and four platform folders
+(`github`, `azure-devops`, `gitlab`, `jira`), and declares each role in `ontology.roles`.
 
 One list, so the three cannot disagree — a standard whose folder, registry property and
 frontmatter came from separate sources is one that drifts the first time a name changes. A
@@ -249,7 +252,8 @@ stop-on-tool-failure: false
 - **`false` warns and continues.** The failure is reported and the work proceeds, with code joins
   possibly missing.
 - **Who reads it.** `kyber-weave doctor --ensure` reads it and applies it to its own exit code, so
-  no agent has to judge a degraded result; the docs MCP server reads it at each refresh to decide
+  no agent has to judge a degraded result, and the docs MCP tool
+  `docs_run_tooling_check_and_repair_code_index` reports that same exit code; the docs MCP server reads it at each refresh to decide
   between `STATUS: TOOL_FAILURE` and a `warning:` line; the conductor and `bug-crusher` instructions
   route the exit code rather than interpreting it. `kyber-weave run start` reads it for the index of
   the tree it places the branch in.
@@ -618,7 +622,7 @@ arbiter:
 | `stores.max-item-bytes` | `16384` | 1 to 1048576 | `KW-ARB-CONFIG-015` |
 | `stores.retain-days` | `14` | At least 1 (values above 3650 are clamped to 3650 when swept) | `KW-ARB-CONFIG-015` |
 | `comment-triage.bot-logins` | `[]` | Non-blank login names | `KW-ARB-CONFIG-015` |
-| `dispatch-budget.minutes` / `tool-calls` | `15` / `150` | At least 1. One developer or docs dispatch may run this long, or make this many tool calls, before the worker guard denies its next call (`KW-ARB-BUDGET-001`) | `KW-ARB-CONFIG-015` |
+| `dispatch-budget.minutes` / `tool-calls` | `15` / `150` | At least 1. One turn of a developer or docs dispatch may run this long, or make this many tool calls, before the worker guard denies its next call (`KW-ARB-BUDGET-001`). Idle time between turns is not counted, and a rework sent to the same agent starts a fresh turn | `KW-ARB-CONFIG-015` |
 | `seat-budget.minutes` / `tool-calls` / `call-minutes` | `3` / `30` / `2` | At least 1. The same limits for one review council seat (`review-lens`, `review-triage`). Past them the guard denies every read and tells the seat to return what it has with a `Budget reached, not examined:` line; its seat-file write is still allowed (`KW-ARB-BUDGET-001`) | `KW-ARB-CONFIG-015` |
 | `dispatch-budget.call-minutes` | `5` | At least 1. A gap longer than this between two tool calls of one such dispatch means the earlier call hung: the guard denies the next call once, telling the worker to stop the process and record it as not verified (`KW-ARB-BUDGET-001`) | `KW-ARB-CONFIG-015` |
 | `rules[].shadow` | Per rule | `true` or `false`, on a step-1 shipped rule | `KW-ARB-CONFIG-014` on `KW-ARB-DIFFICULTY-001` and `KW-ARB-LADDER-001`, which take their state from `mode` |

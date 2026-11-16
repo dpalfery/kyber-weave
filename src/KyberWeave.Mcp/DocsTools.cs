@@ -7,7 +7,7 @@ namespace KyberWeave.Mcp;
 
 /// <summary>
 /// The documentation retrieval tools: a thin MCP adapter over <see cref="IDocsQueryService"/>,
-/// <see cref="IPlanLifecycleService"/> and <see cref="IRunDeliveryService"/>. It owns the tool names,
+/// <see cref="IPlanLifecycleService"/>, <see cref="IRunDeliveryService"/> and <see cref="IToolingCheckService"/>. It owns the tool names,
 /// descriptions and schemas, and the per-call <c>projectPath</c> routing; every answer is composed
 /// by the services.
 /// </summary>
@@ -17,22 +17,26 @@ public sealed partial class DocsTools
     private readonly IDocsQueryService _query;
     private readonly IPlanLifecycleService _planLifecycle;
     private readonly IRunDeliveryService _delivery;
+    private readonly IToolingCheckService _toolingCheck;
     private readonly DocsRootRegistry? _roots;
 
     /// <summary>Tools over <paramref name="query"/> that also answer for other worktrees through <paramref name="roots"/>.</summary>
     /// <param name="query">The documentation query service for the root this server was started with.</param>
     /// <param name="planLifecycle">The plan lifecycle service for that root.</param>
     /// <param name="delivery">The run delivery service for that root.</param>
+    /// <param name="toolingCheck">The tooling check service for that root.</param>
     /// <param name="roots">Resolves a per-call <c>projectPath</c>, or null when this host serves one root only.</param>
     public DocsTools(
         IDocsQueryService query,
         IPlanLifecycleService planLifecycle,
         IRunDeliveryService delivery,
+        IToolingCheckService toolingCheck,
         DocsRootRegistry? roots = null)
     {
         _query = query ?? throw new ArgumentNullException(nameof(query));
         _planLifecycle = planLifecycle ?? throw new ArgumentNullException(nameof(planLifecycle));
         _delivery = delivery ?? throw new ArgumentNullException(nameof(delivery));
+        _toolingCheck = toolingCheck ?? throw new ArgumentNullException(nameof(toolingCheck));
         _roots = roots;
     }
 
@@ -222,9 +226,11 @@ public sealed partial class DocsTools
         Use when you are about to write or review code in one of this repository's stacks and
         need the local answer rather than the one you shipped with: how C# is written here, how
         a test is written here, what a rule id in this repository means for the code in front of
-        you. Returns the standard that answers for the technology — its title, path, id, declared
-        technology, status, and the rule ids it states — with the sections that match the topic
-        you name. The ids come first, so a budget can never cut them away.
+        you. Returns one bundle for the technology: the rule ids it states, the shared rules, the
+        parent technology's rules and skills when the standard names a parent, the technology's
+        rules and skills, then the standard's sections that match the topic you name. The ids
+        come first, so a budget can never cut them away; rules are never cut, skills are cut
+        before standard sections, and anything cut is named in a closing note.
 
         Pass the technology ('csharp', 'test') or the property name the repository instructions
         use for it ('csharp-coding-standard'). A technology this repository declares no standard

@@ -149,8 +149,9 @@ public sealed class ConfigRegConfig
 
     /// <summary>
     /// Registry property per scaffolded folder. Each resolves to that folder's canonical
-    /// README rather than to the directory: a property an agent can read in one step is
-    /// worth more than one it has to list, and the README is the folder's own index.
+    /// README rather than to the directory, except a technology's standard, which resolves
+    /// to its own prefixed file: a property an agent can read in one step is worth more than
+    /// one it has to list, and the README is the folder's own index.
     /// <c>standards</c> is the exception, published as a root because the deferred standards
     /// skill enumerates it.
     /// </summary>

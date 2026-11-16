@@ -46,6 +46,23 @@ public sealed class DocSpecValidator
     /// <summary>A section keyword shares no words with that section's headings or text.</summary>
     public const string UngroundedSectionKeyword = "KW-DOC-SPEC-010";
 
+    /// <summary>A skills document names neither the technology nor the role it teaches.</summary>
+    public const string MissingScope = "KW-DOC-SPEC-011";
+
+    /// <summary>A technology or role folder is missing one of its four files.</summary>
+    public const string MissingFolderFile = "KW-DOC-SPEC-012";
+
+    /// <summary>
+    /// A standard's headings do not match the six the ontology requires, in order.
+    /// </summary>
+    public const string StandardHeadings = "KW-DOC-SPEC-013";
+
+    /// <summary>
+    /// A standard's <c>builds-on</c> key names an undeclared parent, itself, or a parent that
+    /// already builds on another technology.
+    /// </summary>
+    public const string InvalidBuildsOn = "KW-DOC-SPEC-014";
+
     /// <summary>
     /// The scalar keys the required-key matrix can demand beyond the base set.
     /// </summary>
@@ -54,7 +71,7 @@ public sealed class DocSpecValidator
     /// <c>ontology.required-keys</c> keeps being ignored: frontmatter tolerates unknown keys
     /// by design, and a value this type cannot read is one it cannot honestly say is missing.
     /// </remarks>
-    private static readonly string[] TypedKeys = ["component", "source-root", "technology"];
+    private static readonly string[] TypedKeys = ["component", "source-root", "technology", "role"];
 
     private readonly string _repoRoot;
     private readonly OntologyConfig _config;
@@ -109,6 +126,9 @@ public sealed class DocSpecValidator
         }
 
         ValidateLinkFragments(byPath, headingSlugsByPath, report);
+
+        ValidateStandardsFolders(byPath, report);
+        ValidateBuildsOn(set, report);
 
         return report;
     }
@@ -256,8 +276,8 @@ public sealed class DocSpecValidator
         // --- KW-DOC-SPEC-003: per-doc-type requirements ---------------------------------
         ValidateRequiredForType(doc, report);
 
-        // --- KW-DOC-SPEC-002 / -007: the technology declaration -------------------------
-        ValidateTechnology(doc, report);
+        // --- KW-DOC-SPEC-002 / -007: the technology or role declaration -------------------
+        ValidateScope(doc, report);
 
         // --- KW-DOC-SPEC-004: catalog vocabularies --------------------------------------
         if (!string.IsNullOrWhiteSpace(fm.Component) &&
@@ -378,60 +398,290 @@ public sealed class DocSpecValidator
     }
 
     /// <summary>
-    /// Checks the <c>technology</c> declaration against the three things that must agree
-    /// about it: the doc-type that takes the key, the closed vocabulary the host declared,
-    /// and the folder the document sits in.
+    /// Checks the <c>technology</c> and <c>role</c> declarations against the three things that
+    /// must agree about each: the doc-types that take the key, the closed vocabulary the host
+    /// declared, and the folder the document sits in.
     /// </summary>
     /// <remarks>
-    /// A missing declaration on a standard is left to the required-key matrix, which already
-    /// reports it as <c>KW-DOC-SPEC-003</c>. What is checked here is a declaration that
-    /// exists and disagrees with its surroundings — the case that produces a standard nothing
-    /// can resolve, because the registry publishes a property per declared technology and
-    /// points it at the folder of the same name.
+    /// A missing <c>technology</c> on a standard is left to the required-key matrix, which
+    /// already reports it as <c>KW-DOC-SPEC-003</c>. A skills document is the one type that
+    /// must carry one of the two keys, and it is checked here because the matrix can require
+    /// each key but cannot require either.
     /// </remarks>
-    private void ValidateTechnology(DocumentModel doc, DiagnosticReport report)
+    private void ValidateScope(DocumentModel doc, DiagnosticReport report)
     {
-        string? declared = doc.Frontmatter.Technology;
-        if (string.IsNullOrWhiteSpace(declared))
-            return;
+        string? technology = doc.Frontmatter.Technology?.Trim();
+        string? role = doc.Frontmatter.Role?.Trim();
 
-        string technology = declared.Trim();
-
-        if (doc.DocType != DocType.CodingStandard)
+        if (doc.DocType is DocType.Skill or DocType.CodingStandard
+            && string.IsNullOrWhiteSpace(technology)
+            && string.IsNullOrWhiteSpace(role))
         {
+            string kind = doc.DocType == DocType.Skill ? "skills document" : "standard";
             report.Add(new Diagnostic(
-                MisplacedTechnology, Severity.Error,
-                $"technology '{technology}' is declared on a '{doc.Frontmatter.DocType}' document.",
+                MissingScope, Severity.Error,
+                $"a {kind} names neither a technology nor a role.",
                 doc.Subject, doc.RelativePath,
-                "Only a coding-standard is scoped by technology. Drop the key, or make the " +
-                "document a coding-standard."));
+                "Add 'technology: <name>' or 'role: <name>', and put the document in the " +
+                "folder of that name under the standards root."));
             return;
         }
 
-        if (!_config.Technologies.Contains(technology, StringComparer.Ordinal))
+        if (!string.IsNullOrWhiteSpace(technology))
+        {
+            ValidateScopeKey(
+                doc, "technology", technology, _config.Technologies,
+                doc.DocType is DocType.CodingStandard or DocType.Rule or DocType.Skill,
+                "Only a coding-standard, a rule or a skill is scoped by technology.",
+                report);
+        }
+
+        if (!string.IsNullOrWhiteSpace(role))
+        {
+            ValidateScopeKey(
+                doc, "role", role, _config.Roles,
+                doc.DocType is DocType.CodingStandard or DocType.Rule or DocType.Skill,
+                "Only a coding-standard, a rule or a skill is scoped by role.",
+                report);
+        }
+
+        if (!string.IsNullOrWhiteSpace(doc.Frontmatter.BuildsOn)
+            && doc.DocType != DocType.CodingStandard)
         {
             report.Add(new Diagnostic(
-                InvalidVocabulary, Severity.Error,
-                $"technology '{technology}' is not declared by this repository.",
+                InvalidBuildsOn, Severity.Error,
+                $"builds-on is declared on a '{doc.Frontmatter.DocType}' document.",
                 doc.Subject, doc.RelativePath,
-                StringDistance.Nearest(technology, _config.Technologies) is { } near
-                    ? $"Closest declared technology: '{near}'."
-                    : "Add it to ontology.technologies in .kyber-weave/kyber-weave.yml and " +
-                      "re-run docs init, which creates its folder and publishes its registry property."));
+                "Only a coding-standard names the one technology it builds on."));
+        }
+    }
+
+    private void ValidateScopeKey(
+        DocumentModel doc,
+        string key,
+        string value,
+        IReadOnlyList<string> declaredValues,
+        bool allowedForType,
+        string typeHint,
+        DiagnosticReport report)
+    {
+        if (!allowedForType)
+        {
+            report.Add(new Diagnostic(
+                MisplacedTechnology, Severity.Error,
+                $"{key} '{value}' is declared on a '{doc.Frontmatter.DocType}' document.",
+                doc.Subject, doc.RelativePath,
+                $"{typeHint} Drop the key, or change the document's doc-type."));
+            return;
+        }
+
+        if (!declaredValues.Contains(value, StringComparer.Ordinal))
+        {
+            string setting = key == "role" ? "ontology.roles" : "ontology.technologies";
+            report.Add(new Diagnostic(
+                InvalidVocabulary, Severity.Error,
+                $"{key} '{value}' is not declared by this repository.",
+                doc.Subject, doc.RelativePath,
+                StringDistance.Nearest(value, declaredValues) is { } near
+                    ? $"Closest declared {key}: '{near}'."
+                    : $"Add it to {setting} in .kyber-weave/kyber-weave.yml and re-run docs init."));
             return;
         }
 
         string folder = ContainingFolder(doc.RelativePath);
-        if (!string.Equals(folder, technology, StringComparison.Ordinal))
+        if (!string.Equals(folder, value, StringComparison.Ordinal))
         {
             report.Add(new Diagnostic(
                 MisplacedTechnology, Severity.Error,
-                $"technology '{technology}' does not match the containing folder '{folder}'.",
+                $"{key} '{value}' does not match the containing folder '{folder}'.",
                 doc.Subject, doc.RelativePath,
-                $"A standard for '{technology}' lives in a folder of that name — the registry " +
-                "property points there."));
+                $"A document scoped to '{value}' lives in the standards folder named '{value}'."));
         }
     }
+
+    /// <summary>
+    /// Checks each declared technology and role folder that exists on disk for the four files
+    /// a complete scope folder holds, and for the six headings a standard carries.
+    /// </summary>
+    /// <remarks>
+    /// A host that still holds its standard as <c>README.md</c> gets one warning naming the
+    /// migration command and no further findings for that folder: it is the shape every host
+    /// had before this check existed, and it must keep validating for two minor releases.
+    /// A folder that does not exist is skipped — <c>docs init</c> creates it, and a technology
+    /// declared before its folder exists is a scaffolding concern, not a validation error.
+    /// </remarks>
+    private void ValidateStandardsFolders(
+        Dictionary<string, DocumentModel> byPath,
+        DiagnosticReport report)
+    {
+        HashSet<string> checkedFolders = new(StringComparer.Ordinal);
+        IEnumerable<string> scopes = _config.Technologies.Concat(_config.Roles);
+
+        foreach (string scope in scopes.Distinct(StringComparer.Ordinal))
+        {
+            foreach (string docsRoot in _config.DocsRoots)
+            {
+                string relativeFolder = $"{docsRoot}/{DocsLayout.Standards}/{scope}";
+                if (!checkedFolders.Add(relativeFolder)) continue;
+
+                string absoluteFolder = Combine(relativeFolder);
+                if (!Directory.Exists(absoluteFolder)) continue;
+
+                string standard = DocsLayout.StandardFile(docsRoot, scope);
+                string legacy = $"{relativeFolder}/README.md";
+
+                if (!File.Exists(Combine(standard)))
+                {
+                    if (File.Exists(Combine(legacy)))
+                    {
+                        report.Add(new Diagnostic(
+                            MissingFolderFile, Severity.Warning,
+                            $"the '{scope}' folder still holds its standard as README.md.",
+                            scope, legacy,
+                            "Run 'kyber-weave docs standards migrate' to rename it to " +
+                            $"'{scope}{DocsLayout.StandardsSuffix}' and add the missing folder files."));
+                    }
+                    else
+                    {
+                        report.Add(new Diagnostic(
+                            MissingFolderFile, Severity.Error,
+                            $"the '{scope}' folder is missing '{scope}{DocsLayout.StandardsSuffix}'.",
+                            scope, relativeFolder,
+                            "Run 'kyber-weave docs standards migrate' to add the missing folder files."));
+                    }
+
+                    continue;
+                }
+
+                if (byPath.TryGetValue(standard, out DocumentModel? document))
+                {
+                    ValidateStandardHeadings(document, scope, report);
+                }
+
+                foreach (string file in new[]
+                         {
+                             DocsLayout.RulesFile(docsRoot, scope),
+                             DocsLayout.SkillsFile(docsRoot, scope),
+                             DocsLayout.ArbiterRulesFile(docsRoot, scope)
+                         })
+                {
+                    if (File.Exists(Combine(file))) continue;
+
+                    report.Add(new Diagnostic(
+                        MissingFolderFile, Severity.Error,
+                        $"the '{scope}' folder is missing '{Path.GetFileName(file)}'.",
+                        scope, relativeFolder,
+                        "Run 'kyber-weave docs standards migrate' to add the missing folder files."));
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Checks each standard's <c>builds-on</c> key: the parent must be declared, must not be
+    /// the standard itself, and must not itself build on another technology. One level only,
+    /// because a chain would make the set of rules a task receives depend on how deep it
+    /// runs, and the budget is sized for one parent.
+    /// </summary>
+    private void ValidateBuildsOn(DocumentSet set, DiagnosticReport report)
+    {
+        Dictionary<string, string> declaredParents = new(StringComparer.Ordinal);
+        Dictionary<string, DocumentModel> owners = new(StringComparer.Ordinal);
+
+        foreach (DocumentModel doc in set.Documents)
+        {
+            if (doc.DocType != DocType.CodingStandard) continue;
+
+            string? parent = doc.Frontmatter.BuildsOn?.Trim();
+            string? technology = doc.Frontmatter.Technology?.Trim();
+            if (string.IsNullOrWhiteSpace(parent) || string.IsNullOrWhiteSpace(technology)) continue;
+
+            declaredParents[technology] = parent;
+            owners[technology] = doc;
+        }
+
+        foreach ((string technology, string parent) in declaredParents)
+        {
+            DocumentModel doc = owners[technology];
+
+            if (string.Equals(parent, technology, StringComparison.Ordinal))
+            {
+                report.Add(new Diagnostic(
+                    InvalidBuildsOn, Severity.Error,
+                    $"the '{technology}' standard builds on itself.",
+                    doc.Subject, doc.RelativePath,
+                    "Name a different declared technology, or drop builds-on."));
+                continue;
+            }
+
+            if (!_config.Technologies.Contains(parent, StringComparer.Ordinal))
+            {
+                report.Add(new Diagnostic(
+                    InvalidBuildsOn, Severity.Error,
+                    $"the '{technology}' standard builds on undeclared technology '{parent}'.",
+                    doc.Subject, doc.RelativePath,
+                    StringDistance.Nearest(parent, _config.Technologies) is { } near
+                        ? $"Closest declared technology: '{near}'."
+                        : "Add it to ontology.technologies, or name a declared technology."));
+                continue;
+            }
+
+            if (declaredParents.TryGetValue(parent, out string? grandParent))
+            {
+                report.Add(new Diagnostic(
+                    InvalidBuildsOn, Severity.Error,
+                    $"the '{technology}' standard builds on '{parent}', which itself builds on " +
+                    $"'{grandParent}'.",
+                    doc.Subject, doc.RelativePath,
+                    "A template names at most one parent, and that parent names none. Flatten " +
+                    "the rules the child needs into its own files."));
+            }
+        }
+    }
+
+    private static void ValidateStandardHeadings(
+        DocumentModel document,
+        string scope,
+        DiagnosticReport report)
+    {
+        IReadOnlyList<string> expected = DocsLayout.StandardHeadings;
+        IReadOnlyList<DocumentSection> sections = document.Sections
+            .Where(section => !string.IsNullOrEmpty(section.Heading))
+            .ToList();
+
+        for (int i = 0; i < expected.Count; i++)
+        {
+            string? actual = i < sections.Count ? sections[i].Heading.Trim() : null;
+            if (string.Equals(actual, expected[i], StringComparison.OrdinalIgnoreCase)) continue;
+
+            report.Add(new Diagnostic(
+                StandardHeadings, Severity.Error,
+                actual is null
+                    ? $"the '{scope}' standard is missing the heading '## {expected[i]}'."
+                    : $"the '{scope}' standard has '## {actual}' where '## {expected[i]}' belongs.",
+                document.Subject,
+                document.RelativePath,
+                $"Use these six headings in order: {string.Join("; ", expected.Select(h => $"## {h}"))}.",
+                i < sections.Count ? sections[i].LineNumber : null));
+            return;
+        }
+
+        if (sections.Count > expected.Count)
+        {
+            DocumentSection extra = sections[expected.Count];
+            report.Add(new Diagnostic(
+                StandardHeadings, Severity.Error,
+                $"the '{scope}' standard has an extra heading '## {extra.Heading.Trim()}'.",
+                document.Subject,
+                document.RelativePath,
+                "A standard holds exactly these six sections: " +
+                $"{string.Join("; ", expected.Select(h => $"## {h}"))}.",
+                extra.LineNumber));
+        }
+    }
+
+    private string Combine(string relativePath) =>
+        Path.Combine(_repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
 
     /// <summary>Name of the directory a repository-relative path sits in, or empty.</summary>
     private static string ContainingFolder(string relativePath)
@@ -466,6 +716,7 @@ public sealed class DocSpecValidator
             "component" => fm.Component,
             "source-root" => fm.SourceRoot,
             "technology" => fm.Technology,
+            "role" => fm.Role,
             _ => null
         };
     }

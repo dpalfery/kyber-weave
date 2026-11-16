@@ -148,7 +148,7 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
 
         string response = Ask(tools, "csharp");
 
-        Assert.Contains("1 standard for technology 'csharp' (status CURRENT).", response, StringComparison.Ordinal);
+        Assert.Contains("bundle: csharp", response, StringComparison.Ordinal);
         Assert.Contains("C# house rules", response, StringComparison.Ordinal);
         Assert.Contains("path: " + CsharpStandardPath, response, StringComparison.Ordinal);
         Assert.Contains("id: standards/csharp", response, StringComparison.Ordinal);
@@ -157,17 +157,17 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
         Assert.Contains("technology: csharp", response, StringComparison.Ordinal);
         Assert.Contains("[complete document]", response, StringComparison.Ordinal);
 
-        // The blocks come in this order: what was answered, which document answered it, the
-        // ids to work from, then the prose. The rule-id index sits ahead of the sections so
-        // that clipping the prose can never clip the ids (see the budget test below).
-        int count = response.IndexOf("1 standard for technology", StringComparison.Ordinal);
-        int identity = response.IndexOf("path: ", StringComparison.Ordinal);
+        // The blocks come in this order: the bundle, the ids to work from, the standard's
+        // identity, then its prose. The rule-id index sits ahead of everything prose-bearing so
+        // that clipping can never clip the ids.
+        int bundle = response.IndexOf("bundle: csharp", StringComparison.Ordinal);
         int ruleIds = response.IndexOf("rule ids:", StringComparison.Ordinal);
-        int sections = response.IndexOf("\n## ", StringComparison.Ordinal);
+        int identity = response.IndexOf("path: ", StringComparison.Ordinal);
+        int sections = response.IndexOf("\n## ", response.IndexOf("## csharp standard", StringComparison.Ordinal), StringComparison.Ordinal);
         int complete = response.IndexOf("[complete document]", StringComparison.Ordinal);
         Assert.True(
-            count < identity && identity < ruleIds && ruleIds < sections && sections < complete,
-            $"The hit must read count, identity, rule ids, sections, completeness; response was: {response}");
+            bundle < ruleIds && ruleIds < identity && identity < sections && sections < complete,
+            $"The hit must read bundle, rule ids, identity, sections, completeness; response was: {response}");
     }
 
     /// <summary>
@@ -511,7 +511,6 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
         string response = Ask(tools, "python");
 
         Assert.Contains("path: " + PythonStandardPath, response, StringComparison.Ordinal);
-        Assert.Contains("(status DRAFT)", response, StringComparison.OrdinalIgnoreCase);
 
         List<string> warnings = new();
         foreach (string line in response.Split('\n'))
@@ -550,8 +549,6 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
         // answer at all.
         Assert.Contains("path: " + PythonStandardPath, response, StringComparison.Ordinal);
         Assert.Contains("rule ids: KW-DOC-SPEC-007", response, StringComparison.Ordinal);
-
-        Assert.Contains("(status NEEDS-REVIEW)", response, StringComparison.OrdinalIgnoreCase);
 
         List<string> warnings = new();
         foreach (string line in response.Split('\n'))
@@ -706,7 +703,8 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
             // The note says what happened before the prose explains why it does not matter: a
             // reader who meets the sections first reads the miss note as a contradiction.
             string notice = AssertATopicMissIsNamed(response, unmatched);
-            int firstSection = response.IndexOf("\n## ", StringComparison.Ordinal);
+            int standardPart = response.IndexOf("## csharp standard", StringComparison.Ordinal);
+            int firstSection = response.IndexOf("\n## ", standardPart, StringComparison.Ordinal);
             Assert.True(
                 firstSection > response.IndexOf(notice, StringComparison.Ordinal),
                 $"The topic miss must be stated before the prose it introduces; response was: {response}");
@@ -756,7 +754,7 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
         // this pin fail for the rename rather than for a lost omission line. What must hold is that
         // every omitted section is named, whatever the headings are called today.
         string standard = File.ReadAllText(
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "docs", "standards", "test", "README.md"));
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "docs", "standards", "test", "test.standards.md"));
         int namesAt = omission.IndexOf(':', StringComparison.Ordinal);
         string named = namesAt >= 0 ? omission[(namesAt + 1)..] : omission;
         named = named.TrimEnd(']', '\r', '\n', ' ');
@@ -987,6 +985,22 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
             + "'[omitted for space, ask again with a larger charBudget: …]' marker and the "
             + "'not matching this topic' marker as they are, and say the cut is expected as well. "
             + $"Response was: {response}");
+    }
+
+    [Fact]
+    public void TheRepositoryBundleCarriesItsRulesAndSkillsForEveryInstalledTechnology()
+    {
+        string[] installed = ["csharp", "test", "typescript", "rust", "tauri", "go", "github-actions"];
+
+        foreach (string technology in installed)
+        {
+            string response = Ask(RepositorySurface.Value, technology);
+
+            Assert.Contains($"## {technology} rules", response, StringComparison.Ordinal);
+            Assert.Contains($"## {technology} skills", response, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("## Shared rules", Ask(RepositorySurface.Value, "csharp"), StringComparison.Ordinal);
     }
 
     /// <summary>

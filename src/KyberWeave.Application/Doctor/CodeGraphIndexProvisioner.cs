@@ -184,9 +184,19 @@ public sealed class CodeGraphIndexProvisioner(IDoctorFileSystem files, ICodeGrap
     ///     tracked edit the preparation wrote, then prove it answers with one <c>codegraph explore</c>.
     /// </summary>
     /// <remarks>
-    ///     A failed step is repaired once with <c>codegraph index</c> and retried once. One repair is enough for the
-    ///     transient index damage this exists for; a loop would turn a genuinely broken CodeGraph into a slow hang
-    ///     instead of a stop, and no retry at all would give up on an index left stale by an interrupted run.
+    ///     <para>
+    ///         A failed step is repaired once with <c>codegraph index</c> and retried once. One repair is enough for the
+    ///         transient index damage this exists for; a loop would turn a genuinely broken CodeGraph into a slow hang
+    ///         instead of a stop, and no retry at all would give up on an index left stale by an interrupted run.
+    ///     </para>
+    ///     <para>
+    ///         A sync that fails only because CodeGraph's own lock is held is not a failed step. The index is healthy
+    ///         and another process is writing it, so the sync is retried after each of
+    ///         <see cref="DoctorOptions.HeldLockRetryPauses"/> and, if the lock is still held, the check passes with a
+    ///         warning and the index on disk is proved as it stands. It is never repaired: <c>codegraph index</c> run
+    ///         against a held lock exits 1 and leaves the database empty (measured on CodeGraph 1.6.2). For the same
+    ///         reason no repair runs while the lock is held, whatever failed.
+    ///     </para>
     /// </remarks>
     private List<DoctorCheck> Ensure(
         string root,
@@ -221,18 +231,28 @@ public sealed class CodeGraphIndexProvisioner(IDoctorFileSystem files, ICodeGrap
         // Verb choice follows the directory as it stands inside the lock, for the same reason Provision re-derives it.
         string verb = files.DirectoryExists(indexDirectory) ? SyncVerb : InitVerb;
         ChildRun prepared = PrepareIndex(root, verb, options, executor);
-        bool initRan = prepared.Verb == InitVerb;
-        if (!prepared.Ok && !prepared.NotInitialised)
+        foreach (TimeSpan pause in options.HeldLockRetryPauses)
         {
-            ChildRun repair = RunChild(root, IndexVerb, options, executor, subject: ".");
+            if (!FoundIndexLockHeld(prepared, options))
+                break;
+
+            Thread.Sleep(pause);
+            prepared = PrepareIndex(root, verb, options, executor);
+        }
+
+        bool initRan = prepared.Verb == InitVerb;
+        if (!prepared.Ok && !prepared.NotInitialised && !FoundIndexLockHeld(prepared, options)
+            && Repair(root, indexDirectory, options, executor) is { } repair)
+        {
             prepared = repair.Ok
                 ? PrepareIndex(root, files.DirectoryExists(indexDirectory) ? SyncVerb : InitVerb, options, executor)
                 : repair;
             initRan |= prepared.Verb == InitVerb;
         }
 
+        bool lockHeld = FoundIndexLockHeld(prepared, options);
         initialised = prepared.Ok && prepared.Verb == InitVerb;
-        checks.Add(VerbCheck(prepared, options, IndexCheckId, EnsureFlag));
+        checks.Add(lockHeld ? IndexLockHeldWarning() : VerbCheck(prepared, options, IndexCheckId, EnsureFlag));
 
         // Only init rewrites tracked files, so only an init leaves something of this run's own to undo. After a sync
         // or a repair, passed or failed, a newly dirty file is someone else's edit in this tree, and restoring it
@@ -241,24 +261,45 @@ public sealed class CodeGraphIndexProvisioner(IDoctorFileSystem files, ICodeGrap
             checks.Add(restoreCheck);
 
         // A repair already ran, and one is the whole budget. Proving an index that could not be prepared would report
-        // the same breakage twice and pay a second child run for it.
-        if (!prepared.Ok)
+        // the same breakage twice and pay a second child run for it. A held lock is not breakage: the index on disk
+        // is the one to prove.
+        if (!prepared.Ok && !lockHeld)
             return checks;
 
         // D22: one explore call, not a retrieval loop. It proves the index answers; a second query would make every
         // worker start pay for another index read, which is the cost this command exists to reduce.
         ChildRun proof = RunChild(root, ExploreVerb, options, executor, subject: ExploreQuery);
-        if (!proof.Ok)
+        if (!proof.Ok && Repair(root, indexDirectory, options, executor) is { } proofRepair)
         {
-            ChildRun repair = RunChild(root, IndexVerb, options, executor, subject: ".");
-            proof = repair.Ok
+            proof = proofRepair.Ok
                 ? RunChild(root, ExploreVerb, options, executor, subject: ExploreQuery)
-                : repair;
+                : proofRepair;
         }
 
         checks.Add(VerbCheck(proof, options, ExploreCheckId, EnsureFlag));
         return checks;
     }
+
+    /// <summary>
+    ///     Rebuilds the index with <c>codegraph index</c>, unless CodeGraph's own lock is held.
+    /// </summary>
+    /// <returns>The rebuild's run, or null when it was not started because another live process holds the lock.</returns>
+    private ChildRun? Repair(string root, string indexDirectory, DoctorOptions options, IProcessExecutor executor) =>
+        workspace.IsCodeGraphLockHeld(indexDirectory)
+            ? null
+            : RunChild(root, IndexVerb, options, executor, subject: ".");
+
+    /// <summary>Whether a run is a sync that failed only because CodeGraph's own index lock is held.</summary>
+    private static bool FoundIndexLockHeld(ChildRun run, DoctorOptions options) =>
+        !run.Ok && CodeGraphIndexRules.IsIndexLockHeld(VerbCheck(run, options, IndexCheckId, EnsureFlag));
+
+    /// <summary>The passing <c>codegraph.index</c> check an ensure run reports when every sync found the lock held.</summary>
+    private static DoctorCheck IndexLockHeldWarning() => new(
+        IndexCheckId,
+        true,
+        "warning: codegraph sync found CodeGraph's own index lock held by another process (its server, its file "
+        + "watcher, or another sync); the index on disk is used as it stands and was not rebuilt",
+        null);
 
     /// <summary>
     ///     Detects the binary by running its version probe. A start failure means the file is not on PATH, which is

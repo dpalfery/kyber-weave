@@ -427,7 +427,9 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
     /// <remarks>
     /// The CLI discovers <c>.github/hooks/*.json</c> and expects Copilot hook format: a
     /// numeric <c>version</c>, camelCase events, and per-shell command fields ([F3]). The
-    /// dispatch matcher compiles to <c>^(?:task)$</c>, so only subagent dispatches reach the hook. The user-level
+    /// dispatch matcher compiles to <c>^(?:task)$</c>, so only subagent dispatches reach the hook. The
+    /// <c>subagentStop</c> entry has no matcher: it delivers the end of each subagent turn, which is the only
+    /// return a background dispatch has. The user-level
     /// file also carries the worker guard, whose matcher admits every tool.
     /// Every produced hook carries the same wiring timeout, so the first hook's value
     /// stands for the file.
@@ -456,6 +458,19 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
             writer.WriteStartArray("postToolUse");
             WriteCliHookEntry(writer, "task", ArbiterHookWiring.HookCommandLine(CliHarnessToken, scope), timeoutSeconds);
             writer.WriteEndArray();
+
+            // A background task returns at once with only the agent's id, so the agent's real return is the end
+            // of each of its turns. The event has no tool to match on.
+            writer.WriteStartArray("subagentStop");
+            WriteCliHookEntry(writer, matcher: null, ArbiterHookWiring.HookCommandLine(CliHarnessToken, scope), timeoutSeconds);
+            if (scope == SquadDeploymentScope.Global)
+            {
+                // The end of a turn closes the worker's budget window, so idle time and a later rework turn on the
+                // same agent are not charged to it.
+                WriteCliHookEntry(writer, matcher: null, ArbiterHookWiring.WorkerGuardCommandLine(CliHarnessToken), timeoutSeconds);
+            }
+
+            writer.WriteEndArray();
             writer.WriteEndObject();
             writer.WriteEndObject();
         }
@@ -463,11 +478,15 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
         return new SquadDeploymentFile(relativePath, stream.ToArray(), "copilot");
     }
 
-    private static void WriteCliHookEntry(Utf8JsonWriter writer, string matcher, string command, int timeoutSeconds)
+    private static void WriteCliHookEntry(Utf8JsonWriter writer, string? matcher, string command, int timeoutSeconds)
     {
         writer.WriteStartObject();
         writer.WriteString("type", "command");
-        writer.WriteString("matcher", matcher);
+        if (matcher is not null)
+        {
+            writer.WriteString("matcher", matcher);
+        }
+
         writer.WriteString("bash", command);
         writer.WriteString("powershell", command);
         writer.WriteNumber("timeoutSec", timeoutSeconds);

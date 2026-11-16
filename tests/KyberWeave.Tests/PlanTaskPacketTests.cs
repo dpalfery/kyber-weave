@@ -45,10 +45,10 @@ public sealed class PlanTaskPacketTests
         {tasks}
         """;
 
-    private static (PlanTaskFile? File, DiagnosticReport Report) Build(string markdown, string? repoRoot = null)
+    private static (PlanTaskFile? File, DiagnosticReport Report) Build(string markdown)
     {
         DiagnosticReport report = new();
-        PlanTaskFile? file = PlanTaskFileGenerator.Build(Plan, markdown, ["docs/plans"], report, repoRoot, DocsPorts.Files, DocsPorts.Process);
+        PlanTaskFile? file = PlanTaskFileGenerator.Build(Plan, markdown, ["docs/plans"], report);
         return (file, report);
     }
 
@@ -198,55 +198,40 @@ public sealed class PlanTaskPacketTests
             Acceptance criteria: the tests fail before the repository exists and pass after.
             """;
         string contract = "| T1 | `tests/Widget.Tests/WidgetTests.cs` | `dotnet test tests/Widget.Tests` | Reads widgets | Fails: no repository | Passes. |";
-        string root = Path.Combine(Path.GetTempPath(), "kw-packet-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        try
-        {
-            Assert.DoesNotContain(Build(Markdown(Decisions, contract, tasks), root).Report.Items, item => item.Code == "KW-DOC-TASKS-010");
-        }
-        finally
-        {
-            Directory.Delete(root, true);
-        }
+
+        Assert.DoesNotContain(Build(Markdown(Decisions, contract, tasks)).Report.Items, item => item.Code == "KW-DOC-TASKS-010");
     }
 
+    /// <summary>
+    /// The entry's text decides, never the working tree: a path in a folder that does not exist yet is kept, because the
+    /// same plan must give the same file list before and after a worker creates that folder. Text shaped like a path, such
+    /// as <c>tests/page.route</c> or a namespace after a folder, is therefore kept too.
+    /// </summary>
     [Fact]
     public void ProseThatIsNotARepositoryPathIsLeftOutOfAFileScopeAndReportedAtInfoLevel()
     {
-        string root = Path.Combine(Path.GetTempPath(), "kw-scope-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(Path.Combine(root, "src/Widget"));
-        Directory.CreateDirectory(Path.Combine(root, "tests/Widget.Tests"));
-        Directory.CreateDirectory(Path.Combine(root, "5-Test/tests/HotshotLogistics.Tests/Jobs"));
-        File.WriteAllText(Path.Combine(root, "src/Widget/Existing.cs"), "// x");
-        File.WriteAllText(Path.Combine(root, "tests/Widget.Tests/WidgetTests.cs"), "// x");
-        try
-        {
-            string tasks = """
-                ### T1: Widget
+        string tasks = """
+            ### T1: Widget
 
-                - **Files:** `src/Widget/Existing.cs`, `src/Widget/NewThing.cs`, `src/Widget/`, `tests/page.route`, `https://localhost:5001/api/job`, `/api/drivers`, `/api/billing/invoices/overdue`, `page.goto('/')`, `5-Test/tests/HotshotLogistics.Tests/Jobs/HotshotLogistics.Tests.Jobs`, `tests/Widget.Tests/*.cs`, `elsewhere/Brand.cs`
-                - **Depends on:** none
-                - **Required skills:** `csharp-dev`
+            - **Files:** `src/Widget/Existing.cs`, `src/Widget/NewThing.cs`, `src/Widget/`, `https://localhost:5001/api/job`, `/api/drivers`, `/api/billing/invoices/overdue`, `page.goto('/')`, `tests/Widget.Tests/*.cs`, `elsewhere/Brand.cs`, `*/Generated.cs`, `tests/page.route`, `5-Test/tests/HotshotLogistics.Tests/Jobs/HotshotLogistics.Tests.Jobs`
+            - **Depends on:** none
+            - **Required skills:** `csharp-dev`
 
-                Command: `dotnet build src`
-                Acceptance criteria: it builds.
-                """;
+            Command: `dotnet build src`
+            Acceptance criteria: it builds.
+            """;
 
-            (PlanTaskFile? file, DiagnosticReport report) = Build(Markdown(Decisions, "| T1 | `x` | `dotnet test x` | y | z | w |", tasks), root);
+        (PlanTaskFile? file, DiagnosticReport report) = Build(Markdown(Decisions, "| T1 | `x` | `dotnet test x` | y | z | w |", tasks));
 
-            Assert.Equal(
-                ["src/Widget/Existing.cs", "src/Widget/NewThing.cs", "src/Widget/**", "tests/Widget.Tests/*.cs"],
-                file!.Tasks![0].Files);
-            Diagnostic dropped = Assert.Single(report.Items, item => item.Code == "KW-DOC-TASKS-012");
-            Assert.Equal(Severity.Info, dropped.Severity);
-            foreach (string text in new[] { "tests/page.route", "https://localhost:5001/api/job", "/api/drivers", "/api/billing/invoices/overdue", "page.goto('/')", "HotshotLogistics.Tests.Jobs", "elsewhere/Brand.cs" })
-            {
-                Assert.Contains(text, dropped.Message, StringComparison.Ordinal);
-            }
-        }
-        finally
-        {
-            Directory.Delete(root, true);
-        }
+        Assert.Equal(
+            ["src/Widget/Existing.cs", "src/Widget/NewThing.cs", "src/Widget/**", "tests/Widget.Tests/*.cs", "elsewhere/Brand.cs",
+             "tests/page.route", "5-Test/tests/HotshotLogistics.Tests/Jobs/HotshotLogistics.Tests.Jobs"],
+            file!.Tasks![0].Files);
+        Diagnostic dropped = Assert.Single(report.Items, item => item.Code == "KW-DOC-TASKS-012");
+        Assert.Equal(Severity.Info, dropped.Severity);
+        string listed = dropped.Message[dropped.Message.IndexOf("not repository paths:", StringComparison.Ordinal)..];
+        Assert.Equal(
+            "not repository paths: https://localhost:5001/api/job, /api/drivers, /api/billing/invoices/overdue, page.goto('/'), */Generated.cs.",
+            listed);
     }
 }

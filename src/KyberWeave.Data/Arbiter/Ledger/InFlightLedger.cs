@@ -366,11 +366,13 @@ public sealed class InFlightLedger : IArbiterLedger
     /// <param name="excludeEventId">The pre event being gated now, if it is already recorded.</param>
     /// <param name="session">When set, only dispatches from this session count.</param>
     /// <param name="notDispatched">Pre events that were refused, so never ran.</param>
+    /// <param name="run">When set, only dispatches of this run count.</param>
     public IReadOnlyList<string> InFlightPaths(
         string? excludeEventId = null,
         string? session = null,
-        IReadOnlySet<string>? notDispatched = null) =>
-        ArbiterLedgerQueries.InFlightPaths(ReadAll(), excludeEventId, session, notDispatched);
+        IReadOnlySet<string>? notDispatched = null,
+        ArbiterRunScope? run = null) =>
+        ArbiterLedgerQueries.InFlightPaths(ReadAll(), excludeEventId, session, notDispatched, run);
 
     /// <summary>
     /// The writer dispatches that were in flight at any moment between <paramref name="preId"/> and
@@ -404,6 +406,7 @@ public sealed class InFlightLedger : IArbiterLedger
     /// or an attestation <c>&lt;task&gt;=complete</c> (D31).
     /// </summary>
     /// <param name="planFile">When set, only returns for this plan count.</param>
-    public IReadOnlyList<string> CompletedTasks(string? planFile = null) =>
-        ArbiterLedgerQueries.CompletedTasks(ReadAll(), planFile);
+    /// <param name="run">When set, only returns of this run's dispatches count.</param>
+    public IReadOnlyList<string> CompletedTasks(string? planFile = null, ArbiterRunScope? run = null) =>
+        ArbiterLedgerQueries.CompletedTasks(ReadAll(), planFile, run);
 }

@@ -28,6 +28,13 @@ public sealed class DocumentFrontmatter
     public string? Owner { get; init; }
     public string? LastReviewed { get; init; }
     public string? Technology { get; init; }
+
+    /// <summary>The role a rules or skills document governs, declared in <c>ontology.roles</c>.</summary>
+    public string? Role { get; init; }
+
+    /// <summary>The one technology this template builds on, whose rules and skills it also receives.</summary>
+    public string? BuildsOn { get; init; }
+
     public Collection<string>? CodeRefs { get; init; }
     public Collection<string>? ApiEndpoints { get; init; }
     public Collection<string>? DecidedBy { get; init; }
