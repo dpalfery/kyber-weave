@@ -702,7 +702,7 @@ risk. The three rules below mirror the contract in
 | Command kind | Non-zero on |
 |---|---|
 | `validate`, `lint`, `sync-check`, `drift` | any error |
-| `scan` | any critical, raised by `--fail-on warning\|error` |
+| `scan` | any critical, raised by `--fail-on warning\|error` (case-insensitive) |
 | `route` | accuracy below `--min-accuracy` |
 | `docs integrity-check` | a finding at or above `--fail-on` (default `none` gates nothing) |
 | `docs init` | `1` on a scaffold failure or a configuration failure (`KW-CONFIG-001`). MCP wiring findings — missing, differing, unlaunchable, undetectable, declined, or refused — never fail the run |
