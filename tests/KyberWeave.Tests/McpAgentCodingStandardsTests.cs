@@ -987,6 +987,22 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
             + $"Response was: {response}");
     }
 
+    [Fact]
+    public void TheRepositoryBundleCarriesItsRulesAndSkillsForEveryInstalledTechnology()
+    {
+        string[] installed = ["csharp", "test", "typescript", "rust", "tauri", "go", "github-actions"];
+
+        foreach (string technology in installed)
+        {
+            string response = Ask(RepositorySurface.Value, technology);
+
+            Assert.Contains($"## {technology} rules", response, StringComparison.Ordinal);
+            Assert.Contains($"## {technology} skills", response, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("## Shared rules", Ask(RepositorySurface.Value, "csharp"), StringComparison.Ordinal);
+    }
+
     /// <summary>
     /// The tool surface over this repository's own corpus. Built once, because the two callers
     /// both need the real documents and a second build would parse 192 of them again for the same

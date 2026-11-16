@@ -9,20 +9,28 @@ last-reviewed: 2026-11-08
 
 # Coding standards
 
-How code is written in this repository, one directory per technology. A standard is
+How code is written in this repository, one folder per technology. A standard is
 project-specific; the agents and skills that read it are not, which is why they resolve it
 through the configuration registry rather than carrying their own. Only standards with
 `status: current` outrank portable agent defaults; draft standards do not. What belongs in a
 standard rather than a rule is in
 [Rules and standards](../documentation-ontology.md#rules-and-standards).
 
-This repository declares [C#](csharp/README.md), [test](test/README.md),
-[TypeScript](typescript/README.md), [Rust](rust/README.md), and [Tauri](tauri/README.md)
-standards, a [Go](go/README.md) standard for Go code that does not exist yet, and a
-[GitHub Actions](github-actions/README.md) standard for the workflows under `.github/workflows/`.
-Rust and Tauri cover the KyberDash tray crate; Tauri covers only the Tauri layer and defers
-language rules to Rust. The authoritative list is the Config Reg block in the repository root
-[`AGENTS.md`](../../AGENTS.md), which is regenerated on every `docs init` run — this file is not.
+Each folder holds four files named after it: `<name>.standards.md` (the standard, six
+headings), `<name>.rules.md` (this repository's hard rules for the technology),
+`<name>.skills.md` (its procedures and commands) and `<name>.arbiter-rules.yml` (machine
+rules; empty when there are none). `shared-rules.md` beside the folders holds the rules that
+apply to every technology.
+
+This repository declares [C#](csharp/csharp.standards.md),
+[test](test/test.standards.md), [TypeScript](typescript/typescript.standards.md),
+[Rust](rust/rust.standards.md), and [Tauri](tauri/tauri.standards.md) standards, a
+[Go](go/go.standards.md) standard for Go code that does not exist yet, and a
+[GitHub Actions](github-actions/github-actions.standards.md) standard for the workflows under
+`.github/workflows/`. Rust and Tauri cover the KyberDash tray crate; Tauri covers only the
+Tauri layer and defers language rules to Rust. The authoritative list is the Config Reg block
+in the repository root [`AGENTS.md`](../../AGENTS.md), which is regenerated on every
+`docs init` run — this file is not.
 
 ## Declaring a technology
 
@@ -32,10 +40,13 @@ Add it to `ontology.technologies` in
 `<name-coding-standard>` property in the registry, and legalizes the `technology` value in the
 standard's frontmatter — so the three cannot disagree.
 
-To bootstrap a repository with the full suite of 14 Kyber Squad coding standards templates
-(`csharp`, `test`, `typescript`, `rust`, `tauri`, `go`, `react`, `python`, `pulumi`, `maui`,
-`data-access-layer`, `sql`, `azure`, `github-actions`), run `kyber-weave docs init . --kyber-standards`.
-Do not run that on this repository: it would declare the technologies this repository does not use.
+To bootstrap a repository with the full suite of 16 Kyber Squad technology templates
+(`aws`, `azure`, `csharp`, `data-access-layer`, `github-actions`, `go`, `maui`, `pulumi`,
+`python`, `react`, `rust`, `sql`, `sql-server`, `tauri`, `test`, `typescript`) plus the four
+role folders and four platform folders, name them with `--standards`:
+`kyber-weave docs init . --standards csharp,reviewer,github`. `--kyber-standards` installs
+every technology template. Do not run either on this repository: it would declare the
+technologies this repository does not use.
 
 A technology name is a slug: lowercase letters, digits and single hyphens.
 
@@ -49,12 +60,13 @@ the technology and, when it helps, the topic it is about to work on:
 docs_get_coding_standard_for_technology(technology: "csharp", topic: "error handling")
 ```
 
-The tool returns this repository's standard for that technology — its rule ids first, then the
-sections that answer the topic, inside a character budget. Reading
-`docs/standards/<technology>/README.md` directly is allowed **only when the tool is missing**.
-It is not the fallback for a cut answer: an excerpt trimmed to fit the budget says so and says
-the cut is expected, and asking again with a larger `charBudget` or a narrower topic is the
-move. Opening the file instead re-creates the whole cost the size limit and the tool exist to
+The tool returns this repository's bundle for that technology — the rule ids first, then the
+shared rules, the parent's rules and skills when the standard names a parent, the technology's
+rules, its skills, and the standard's sections that answer the topic, inside a character
+budget. Reading the folder's files directly is allowed **only when the tool is missing**.
+A cut answer is not the fallback: an excerpt trimmed to fit the budget says so and says the
+cut is expected, and asking again with a larger `charBudget` or a narrower topic is the move.
+Opening the files instead re-creates the whole cost the size limit and the tool exist to
 prevent, which is why the instruction sits in the same workflow step that names the tool, in
 the skill beside the agent as well as in the agent itself.
 
