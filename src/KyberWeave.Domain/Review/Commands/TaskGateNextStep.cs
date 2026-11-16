@@ -12,7 +12,7 @@ namespace KyberWeave.Cli.Commands.Review;
 ///     path. The test counts, the commit, the remote head and the number of runs are not known to one invocation and
 ///     stay as placeholders.
 /// </remarks>
-internal static class TaskGateNextStep
+public static class TaskGateNextStep
 {
     /// <summary>The prefix of the next-step line.</summary>
     public const string NextPrefix = "next: ";
@@ -119,4 +119,4 @@ internal static class TaskGateNextStep
 /// <summary>What the next step needs to know about one declared task gate.</summary>
 /// <param name="Id">The gate's id.</param>
 /// <param name="WholeProject">Whether its command checks the whole project rather than the changed files.</param>
-internal sealed record ReviewTaskGateView(string Id, bool WholeProject);
+public sealed record ReviewTaskGateView(string Id, bool WholeProject);
