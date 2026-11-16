@@ -25,3 +25,13 @@ public static class ReviewDuplicateOutcome
     /// <summary>The index disagrees with the working tree.</summary>
     public const string StaleIndex = "KW-REVIEW-032";
 }
+
+/// <summary>Rule identifiers for the suppression scan.</summary>
+public static class ReviewSuppressionOutcome
+{
+    /// <summary>A suppression the change added without stating a reason.</summary>
+    public const string NoReason = "KW-REVIEW-036";
+
+    /// <summary>The change could not be read, so no line was scanned.</summary>
+    public const string ChangeUnreadable = "KW-REVIEW-037";
+}

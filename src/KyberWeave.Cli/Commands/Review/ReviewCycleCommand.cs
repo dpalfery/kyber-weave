@@ -1,9 +1,5 @@
-using System.Text.Json;
-using System.Text.Json.Nodes;
-using KyberWeave.Contracts.Repositories;
+using KyberWeave.Cli.Rendering;
 using KyberWeave.Contracts.Services;
-using KyberWeave.Core.Configuration;
-using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Review;
 using Spectre.Console.Cli;
 
@@ -13,140 +9,41 @@ namespace KyberWeave.Cli.Commands.Review;
 ///     Answers which review cycle a run is in, from the cycle folders the council already wrote: the cycle number,
 ///     whether it is a full review or a verifier cycle, the prior findings to re-check, and the gates to run again.
 /// </summary>
-/// <remarks>
-///     Whether a cycle is a verifier cycle used to depend on how the conductor worded the dispatch. It is now a fact
-///     of the folders: a run with a finished cycle is in a verifier cycle. The command reads and writes nothing else.
-/// </remarks>
-public sealed class ReviewCycleCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IReviewCycleSelector selector)
-    : Command<ReviewCycleSettings>
+/// <remarks>The use case is <see cref="IReviewCycleService"/>; this command parses its options and prints what it returns.</remarks>
+public sealed class ReviewCycleCommand(IReviewCycleService service) : Command<ReviewCycleSettings>
 {
     /// <summary>The command description shared by the real registration and the help tests.</summary>
     public const string Description = "Report which review cycle a task is in, the prior findings to re-check and the gates to re-run.";
-
-    private const string UnreadableInput = "KW-REVIEW-023";
-    private const int ClientInputExitCode = 2;
 
     /// <inheritdoc />
     public override int Execute(CommandContext context, ReviewCycleSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        string root = Path.GetFullPath(settings.Path);
-        DiagnosticReport report = new();
-        if (!CommandHelpers.TryLoadConfig(root, settings.Config, report, out KyberWeaveConfig config))
+        ReviewCommandResult result = service.Run(
+            new ReviewCycleRequest(
+                settings.Path,
+                settings.Config,
+                settings.Task,
+                settings.BaseRef,
+                settings.ParsedFormat == OutputFormat.Json),
+            Console.Out,
+            cancellationToken);
+
+        if (result.ClientError is not null)
         {
-            CommandHelpers.Finish(report, settings, "review cycle", "Review");
-            return 1;
+            WriteClientInputError(result.ClientError);
+            return result.ExitCode;
         }
 
-        // The review folder belongs to the git work tree that contains the path the command was run against: a linked
-        // worktree has its own .agent_scratchpad, and the canonical checkout's is never read on its behalf.
-        string tree = trees.Containing(root);
-        string scratchpad = ReviewWorkTree.Scratchpad(tree);
-        ReviewTaskChoice choice = selector.ChooseTask(tree, scratchpad, settings.Task);
-        if (!choice.Chosen)
-        {
-            WriteClientInputError(choice.Error!);
-            return ClientInputExitCode;
-        }
+        if (result.Report is not null)
+            CommandHelpers.Finish(result.Report, settings, "review cycle", "Review");
 
-        string task = choice.Task;
-        string? chosen = choice.Note;
+        foreach (string line in result.Epilogue ?? [])
+            Console.WriteLine(line);
 
-        bool json = settings.ParsedFormat == KyberWeave.Cli.Rendering.OutputFormat.Json;
-        if (chosen is not null && !json)
-            Console.WriteLine(chosen);
-
-        string? liveRun = trees.LiveRunNote(tree, trees.HomeDirectory());
-        if (liveRun is not null && !json)
-            Console.WriteLine(liveRun);
-
-        string reviewFolder = Path.Combine(scratchpad, task, "review");
-        PriorCycles prior = trees.Prior(tree, settings.BaseRef, cycles.ReadFinished(reviewFolder));
-        ReviewCyclePlan plan = ReviewCyclePlanning.Plan(
-            prior.Valid,
-            config.Review.Gates,
-            OperatingSystem.IsWindows() ? "windows" : "unix",
-            commit => selector.ChangedSince(tree, commit));
-
-        IReadOnlyList<ReviewFinding> recheck = [];
-        if (plan.Prior is { } priorCycle)
-        {
-            (bool ok, IReadOnlyList<ReviewFinding> found) = selector.ReadRecheck(
-                priorCycle, config.Review.Policy, report, UnreadableInput, Severity.Error, "review cycle");
-            if (!ok)
-            {
-                CommandHelpers.Finish(report, settings, "review cycle", "Review");
-                return 1;
-            }
-
-            recheck = found;
-        }
-
-        string folder = Path.Combine(reviewFolder, $"cycle-{plan.Number}");
-        string command = ReviewCycleView.GatesCommand(root, Path.Combine(folder, "gates.json"), settings.BaseRef);
-        if (json)
-            Console.WriteLine(ToJson(tree, plan, folder, recheck, prior.Ignored, liveRun, command));
-        else
-            WriteLines(tree, plan, folder, recheck, prior.Ignored, command);
-
-        return 0;
+        return result.ExitCode;
     }
-
-    private static void WriteLines(string tree, ReviewCyclePlan plan, string folder, IReadOnlyList<ReviewFinding> recheck, IReadOnlyList<IgnoredCycle> ignored, string command)
-    {
-        Say($"cycle: {plan.Number}");
-        Say($"mode: {ReviewCycleView.Mode(plan)}");
-        Say($"folder: {folder}");
-        foreach (string line in ReviewCycleView.IgnoredLines(tree, ignored))
-            Say(line);
-
-        if (plan.Prior is null)
-            Say("gates: run every declared gate");
-        else
-        {
-            foreach (string line in ReviewCycleView.VerifierLines(plan, recheck))
-                Say(line);
-        }
-
-        Say($"run: {command}");
-    }
-
-    private static void Say(string line) => Console.WriteLine(line);
-
-    private static string ToJson(string tree, ReviewCyclePlan plan, string folder, IReadOnlyList<ReviewFinding> recheck, IReadOnlyList<IgnoredCycle> ignored, string? liveRun, string command)
-    {
-        JsonObject answer = new()
-        {
-            ["cycle"] = plan.Number,
-            ["mode"] = ReviewCycleView.Mode(plan),
-            ["folder"] = folder,
-            ["command"] = command,
-            ["ignored"] = new JsonArray([.. ignored.Select(cycle => (JsonNode?)new JsonObject
-            {
-                ["folder"] = ReviewCycleView.Relative(tree, cycle.Record.Folder),
-                ["reason"] = cycle.Reason
-            })])
-        };
-
-        if (liveRun is not null)
-            answer["worktree"] = liveRun;
-
-        if (plan.Prior is { } prior)
-        {
-            answer["prior"] = prior.Folder;
-            answer["priorHead"] = prior.Head;
-            answer["findings"] = prior.FindingsPath;
-            answer["recheck"] = new JsonArray([.. recheck.Select(finding => (JsonNode?)finding.Id)]);
-            answer["rerunGates"] = Ids(plan, GateCycleAction.Rerun);
-            answer["carryGates"] = Ids(plan, GateCycleAction.Carry);
-        }
-
-        return answer.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
-    }
-
-    private static JsonArray Ids(ReviewCyclePlan plan, GateCycleAction action) =>
-        new([.. plan.Gates.Where(gate => gate.Action == action).Select(gate => (JsonNode?)gate.GateId)]);
 
     private static void WriteClientInputError(string message)
     {

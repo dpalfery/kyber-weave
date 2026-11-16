@@ -203,7 +203,8 @@ public sealed class ReviewGatesService(
         // pre-push self-review reads the other gates as its evidence — so it keeps running them.
         if (request.All && fullSuite.Refused.Count > 0)
         {
-            TryWriteReport(
+            ReviewReportWriter.TryWrite(
+                files,
                 request.Out,
                 ReviewJson.Write(new GateReport(GateReport.CurrentSchema, [])),
                 ReviewGateReporting.ReportWriteFailed,
@@ -252,7 +253,7 @@ public sealed class ReviewGatesService(
         if (request.Deadline)
             report.AddMetric("not-run", gates.Gates.Count(VerdictEngine.IsStoppedForTime));
 
-        TryWriteReport(request.Out, ReviewJson.Write(written), ReviewGateReporting.ReportWriteFailed, report);
+        ReviewReportWriter.TryWrite(files, request.Out, ReviewJson.Write(written), ReviewGateReporting.ReportWriteFailed, report);
         string? evidence = cycle is { WritesIdentity: true } && request.Out is not null
             ? WriteEvidence(cycle, root, request, written, config, report)
             : null;
@@ -434,8 +435,8 @@ public sealed class ReviewGatesService(
     {
         CodeGraphPorts graph = graphs.ForRepository(root);
         DuplicateReport duplicates = duplicateDetection.Analyze(root, graph.Resolver, graph.Enumerator, config.Review.Duplicates);
-        TryWriteReport(
-            Path.Combine(cycle.Folder!, "duplicates.json"), ReviewJson.Write(duplicates), ReviewGateReporting.ReportWriteFailed, report);
+        ReviewReportWriter.TryWrite(
+            files, Path.Combine(cycle.Folder!, "duplicates.json"), ReviewJson.Write(duplicates), ReviewGateReporting.ReportWriteFailed, report);
         (IReadOnlyList<string>? changed, _) = ResolveCouncilChangedSet(root, request);
         IReadOnlyDictionary<string, string> skips = CouncilSeating.GateProvenSkips(written, duplicates, changed);
         try
@@ -575,7 +576,8 @@ public sealed class ReviewGatesService(
                 $"No task gates are declared for agent '{request.Agent}', so its change has no executed evidence behind it.",
                 "review.task-gates",
                 Hint: "Declare the agent's gates under review.task-gates in kyber-weave.yml."));
-            TryWriteReport(
+            ReviewReportWriter.TryWrite(
+                files,
                 outPath,
                 ReviewJson.Write(new GateReport(GateReport.CurrentSchema, [])),
                 ReviewGateReporting.ReportWriteFailed,
@@ -669,7 +671,7 @@ public sealed class ReviewGatesService(
         report.AddMetric("gates", finalReport.Gates.Count);
         report.AddMetric("failed", finalReport.Gates.Count(g => !g.Passed && !g.NotApplicable));
 
-        TryWriteReport(outPath, ReviewJson.Write(finalReport), ReviewGateReporting.ReportWriteFailed, report);
+        ReviewReportWriter.TryWrite(files, outPath, ReviewJson.Write(finalReport), ReviewGateReporting.ReportWriteFailed, report);
 
         // The run as it happened, not as --red re-judged it: an accepted compile failure is still a failed build to read.
         IReadOnlyList<string> digest = TestDigest(root, taskSlug, request.Red, plan.Gates, run.Report, outputs);
@@ -770,49 +772,6 @@ public sealed class ReviewGatesService(
         catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or TimeoutException)
         {
             return (null, ex.Message.Trim());
-        }
-    }
-
-    /// <summary>
-    /// Writes a report document to <paramref name="path"/>. A write failure is recorded as a diagnostic rather than
-    /// thrown: the analysis already ran, and losing its findings to a filesystem error is a worse outcome than losing
-    /// the file.
-    /// </summary>
-    private void TryWriteReport(string? path, string content, string code, DiagnosticReport report)
-    {
-        if (path is null)
-            return;
-
-        // An empty --out names no file; resolving it would throw rather than report.
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            report.Add(new Diagnostic(
-                code,
-                Severity.Error,
-                "--out was given an empty value, so the report was not written.",
-                "review",
-                Hint: "Name the file to write, or drop --out."));
-            return;
-        }
-
-        string full = Path.GetFullPath(path);
-        try
-        {
-            string? directory = Path.GetDirectoryName(full);
-            if (!string.IsNullOrEmpty(directory))
-                files.CreateDirectory(directory);
-
-            files.WriteAllText(full, content);
-        }
-        catch (Exception ex) when (FileFailure.Is(ex))
-        {
-            report.Add(new Diagnostic(
-                code,
-                Severity.Error,
-                $"Could not write the report to '{full}': {ex.Message}",
-                "review",
-                full,
-                Hint: "Check that the directory is writable, or drop --out."));
         }
     }
 
