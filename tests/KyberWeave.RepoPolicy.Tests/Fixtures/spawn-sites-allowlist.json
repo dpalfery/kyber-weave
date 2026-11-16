@@ -686,8 +686,8 @@
       "bound": "Builds only; nothing starts on this line. Started through IProcessExecutor.Run; every ProcessExecutor is bounded (DefaultTimeout 60 s, or the WithTimeout value) at IProcessExecutor.cs:45."
     },
     {
-      "file": "src/KyberWeave.Cli/Commands/Squad/SquadRunCommand.cs",
-      "text": "startInfo = SquadHarnessLauncher.BuildStartInfo(",
+      "file": "src/KyberWeave.Data/Squad/Instances/ProcessSquadHarnessLauncher.cs",
+      "text": "SquadHarnessLauncher.BuildStartInfo(row, instanceRoot, args, getEnv, findOnPath, isWindows);",
       "count": 1,
       "bound": "Builds only; nothing starts here. The default runner is ProcessRunner.RunInteractive (ProcessRunner.cs:177), unbounded by design (see that entry)."
     },
@@ -890,8 +890,8 @@
       "bound": "ProcessRunner timeout 120 s kills the child tree on expiry; one self-exiting kyber-weave CLI pack invocation in a temp directory."
     },
     {
-      "file": "src/KyberWeave.Cli/Commands/Squad/SquadRunCommand.cs",
-      "text": "Func<ProcessStartInfo, int> runner = _runner ?? ProcessRunner.RunInteractive;",
+      "file": "src/KyberWeave.Data/Squad/Instances/ProcessSquadHarnessLauncher.cs",
+      "text": "public int RunInteractive(ProcessStartInfo startInfo) => ProcessRunner.RunInteractive(startInfo);",
       "count": 1,
       "bound": "unbounded by design: user-attended interactive harness session (`squad run`); ends when the user ends it; a timeout would kill the live session; child inherits the console. This line only selects the delegate; the spawn happens at line 183 (runner(startInfo)), starting the harness built at line 161 from SquadHarnessLauncher.BuildStartInfo. An injected _runner replaces it in tests."
     },

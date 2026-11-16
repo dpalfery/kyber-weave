@@ -125,6 +125,8 @@ internal static class SquadTestCommands
                 : new LazyInstanceService(() => SquadHostDefaults.CreateInstanceService(paths)),
             selectionStore ?? new SquadModelPresetSelectionStore(paths),
             ensureOverride is not null ? new AnyPresetStore() : new SquadModelPresetStore(paths),
+            new ProcessSquadHarnessLauncher(),
+            new ProcessEnvironment(),
             new SquadRunOptions(runner, getEnv, findOnPath, workingDirectory));
     }
 
@@ -161,6 +163,11 @@ internal static class SquadTestCommands
             new FileSquadDeploymentPlanner(),
             new FileSquadResponseGuidanceStore(),
             new ReaderEnvironment(environmentReader),
+            new FileSquadSourceLocator(),
+            new FileSquadSourceLoader(),
+            new FileSquadSkillShadowing(),
+            new FileDevinImportOverlapInspector(),
+            new FileZCodeMcpInspector(),
             new SquadDoctorOptions(executor, workingDirectory));
     }
 

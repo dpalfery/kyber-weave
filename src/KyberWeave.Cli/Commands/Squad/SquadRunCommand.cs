@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
-using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using Spectre.Console;
@@ -22,6 +21,8 @@ internal sealed class SquadRunCommand : Command<SquadRunSettings>
     private readonly ISquadInstanceService _instances;
     private readonly ISquadModelPresetSelectionStore _selectionStore;
     private readonly ISquadModelPresetStore _presetStore;
+    private readonly ISquadHarnessLauncher _launcher;
+    private readonly IProcessEnvironment _environment;
     private readonly SquadRunOptions _options;
     private readonly Func<ProcessStartInfo, int>? _runner;
 
@@ -29,20 +30,28 @@ internal sealed class SquadRunCommand : Command<SquadRunSettings>
     /// <param name="instances">Ensures the instance the harness runs in.</param>
     /// <param name="selectionStore">Reads the preset the project selected.</param>
     /// <param name="presetStore">Loads the selected preset.</param>
+    /// <param name="launcher">Builds the harness start information and starts it on the console.</param>
+    /// <param name="environment">Reads the process environment and working directory.</param>
     /// <param name="options">How the harness process is found and started; the defaults use the real process.</param>
     public SquadRunCommand(
         ISquadInstanceService instances,
         ISquadModelPresetSelectionStore selectionStore,
         ISquadModelPresetStore presetStore,
+        ISquadHarnessLauncher launcher,
+        IProcessEnvironment environment,
         SquadRunOptions options)
     {
         ArgumentNullException.ThrowIfNull(instances);
         ArgumentNullException.ThrowIfNull(selectionStore);
         ArgumentNullException.ThrowIfNull(presetStore);
+        ArgumentNullException.ThrowIfNull(launcher);
+        ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(options);
         _instances = instances;
         _selectionStore = selectionStore;
         _presetStore = presetStore;
+        _launcher = launcher;
+        _environment = environment;
         _options = options;
         _runner = options.Runner;
     }
@@ -60,7 +69,7 @@ internal sealed class SquadRunCommand : Command<SquadRunSettings>
             return 2;
         }
 
-        string projectRoot = Path.GetFullPath(_options.WorkingDirectory ?? ".");
+        string projectRoot = Path.GetFullPath(_options.WorkingDirectory ?? _environment.CurrentDirectory);
 
         SquadTarget target;
         try
@@ -143,12 +152,12 @@ internal sealed class SquadRunCommand : Command<SquadRunSettings>
         ProcessStartInfo startInfo;
         try
         {
-            startInfo = SquadHarnessLauncher.BuildStartInfo(
+            startInfo = _launcher.PrepareLaunch(
                 row,
                 ensureResult.InstanceRoot,
                 settings.Args,
-                _options.GetEnv ?? Environment.GetEnvironmentVariable,
-                _options.FindOnPath ?? (name => SquadHarnessLauncher.FindOnPath(name, _options.GetEnv)),
+                _options.GetEnv ?? _environment.GetVariable,
+                _options.FindOnPath ?? (name => _launcher.FindOnPath(name, _options.GetEnv)),
                 OperatingSystem.IsWindows());
         }
         catch (FileNotFoundException ex)
@@ -164,7 +173,7 @@ internal sealed class SquadRunCommand : Command<SquadRunSettings>
 
         startInfo.WorkingDirectory = projectRoot;
 
-        Func<ProcessStartInfo, int> runner = _runner ?? ProcessRunner.RunInteractive;
+        Func<ProcessStartInfo, int> runner = _runner ?? _launcher.RunInteractive;
         return runner(startInfo);
     }
 }

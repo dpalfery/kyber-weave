@@ -33,6 +33,11 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     private readonly ISquadDeploymentPlanner _planner;
     private readonly ISquadResponseGuidanceStore _guidance;
     private readonly IProcessEnvironment _environment;
+    private readonly ISquadSourceLocator _sourceLocator;
+    private readonly ISquadSourceLoader _sourceLoader;
+    private readonly ISquadSkillShadowing _skillShadowing;
+    private readonly IDevinImportOverlapInspector _devinOverlap;
+    private readonly IZCodeMcpInspector _zcodeMcp;
     private readonly SquadDoctorOptions _options;
 
     /// <summary>Creates the doctor command over the Squad services the host registers.</summary>
@@ -44,6 +49,11 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     /// <param name="planner">Finds the unmanaged collisions a deployment would cause.</param>
     /// <param name="guidance">Reads the response guidance in effect.</param>
     /// <param name="environment">Reads the environment the render sees.</param>
+    /// <param name="sourceLocator">Finds the canonical Squad source in the working directory.</param>
+    /// <param name="sourceLoader">Loads and validates the Squad source.</param>
+    /// <param name="skillShadowing">Finds project skills that hide an installed squad skill.</param>
+    /// <param name="devinOverlap">Finds identities Devin would load twice.</param>
+    /// <param name="zcodeMcp">Reads the MCP servers a ZCode installation declares.</param>
     /// <param name="options">The process executor and working directory; the defaults use the real ones.</param>
     public SquadDoctorCommand(
         ISquadStateStore stateStore,
@@ -54,6 +64,11 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         ISquadDeploymentPlanner planner,
         ISquadResponseGuidanceStore guidance,
         IProcessEnvironment environment,
+        ISquadSourceLocator sourceLocator,
+        ISquadSourceLoader sourceLoader,
+        ISquadSkillShadowing skillShadowing,
+        IDevinImportOverlapInspector devinOverlap,
+        IZCodeMcpInspector zcodeMcp,
         SquadDoctorOptions options)
     {
         ArgumentNullException.ThrowIfNull(stateStore);
@@ -64,6 +79,11 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         ArgumentNullException.ThrowIfNull(planner);
         ArgumentNullException.ThrowIfNull(guidance);
         ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(sourceLocator);
+        ArgumentNullException.ThrowIfNull(sourceLoader);
+        ArgumentNullException.ThrowIfNull(skillShadowing);
+        ArgumentNullException.ThrowIfNull(devinOverlap);
+        ArgumentNullException.ThrowIfNull(zcodeMcp);
         ArgumentNullException.ThrowIfNull(options);
         _stateStore = stateStore;
         _migration = migration;
@@ -73,6 +93,11 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         _planner = planner;
         _guidance = guidance;
         _environment = environment;
+        _sourceLocator = sourceLocator;
+        _sourceLoader = sourceLoader;
+        _skillShadowing = skillShadowing;
+        _devinOverlap = devinOverlap;
+        _zcodeMcp = zcodeMcp;
         _options = options;
     }
 
@@ -163,12 +188,12 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         ReportRetiredMcpKeys(workingDirectory);
 
         // 4. Canonical Source (Maintainer check - only when inside repository root)
-        string? canonicalSourcePath = SquadPackSourceLocator.Resolve(workingDirectory);
+        string? canonicalSourcePath = _sourceLocator.Resolve(workingDirectory);
         bool canonicalSourceValid = false;
         if (canonicalSourcePath is not null)
             try
             {
-                SquadSource source = SquadSourceLoader.Load(canonicalSourcePath);
+                SquadSource source = _sourceLoader.Load(canonicalSourcePath);
                 AnsiConsole.MarkupLine(
                     $"  [green]ok[/] Canonical source: valid ([grey]{Markup.Escape(source.Manifest.Name)}[/], {source.Agents.Count} agents, {source.Skills.Count} skills)");
                 canonicalSourceValid = true;
@@ -395,7 +420,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             return true;
         }
 
-        ZCodeMcpConfigurationReport report = ZCodeMcpConfiguration.Inspect(
+        ZCodeMcpConfigurationReport report = _zcodeMcp.Inspect(
             required,
             zcodeRoot,
             workingDirectory,
@@ -456,7 +481,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             devinUserRoot = null;
         }
 
-        DevinImportOverlapReport report = DevinImportOverlap.Inspect(
+        DevinImportOverlapReport report = _devinOverlap.Inspect(
             workingDirectory,
             devinUserRoot,
             SquadCommandComposition.ReadFileTextOrNull);
@@ -539,7 +564,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             return;
         }
 
-        IReadOnlyList<SquadSkillShadow> shadows = SquadSkillShadowing.Find(workingDirectory, installed, managed);
+        IReadOnlyList<SquadSkillShadow> shadows = _skillShadowing.Find(workingDirectory, installed, managed);
         if (shadows.Count == 0)
         {
             AnsiConsole.MarkupLine("  [green]ok[/] Project skills shadowing the squad: none");
@@ -750,7 +775,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 }
             }
 
-            SquadSource sharedSource = SquadSourceLoader.Load(canonicalSourcePath);
+            SquadSource sharedSource = _sourceLoader.Load(canonicalSourcePath);
 
             foreach (SquadTarget target in renderer.SupportedTargets)
             {

@@ -41,6 +41,11 @@ public static class SquadServiceCollectionExtensions
         services.TryAddSingleton<ISquadFileAccess, PhysicalSquadFileAccess>();
         services.TryAddSingleton<ISelfUpdateSystem, SelfUpdateSystem>();
         services.TryAddSingleton<ISquadPackager, FileSquadPackager>();
+        services.TryAddSingleton<ISquadSkillShadowing, FileSquadSkillShadowing>();
+        services.TryAddSingleton<IDevinImportOverlapInspector, FileDevinImportOverlapInspector>();
+        services.TryAddSingleton<IZCodeMcpInspector, FileZCodeMcpInspector>();
+        services.TryAddSingleton<ISquadHookJsonFile, FileSquadHookJsonFile>();
+        services.TryAddSingleton<ISquadHarnessLauncher, ProcessSquadHarnessLauncher>();
         services.TryAddSingleton<ISquadSourceLocator, FileSquadSourceLocator>();
         services.TryAddSingleton<ISquadTargetResolver, FileSquadTargetResolver>();
         services.TryAddSingleton<ISquadStateMigration>(sp => new SquadStateMigration(
