@@ -87,10 +87,9 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
     {
         if (IsAgentLifecycle(payload))
         {
-            // Only a finished turn with text can be a return, and only an engine that follows
-            // background dispatches can record one.
-            return _engine is not IBackgroundDispatchEngine
-                || string.IsNullOrWhiteSpace(GetString(payload, "response"))
+            // Only a finished turn with text can be a return. The answer must come from the event alone: the
+            // hook process asks it through an adapter built over no engine, before it builds the real one.
+            return string.IsNullOrWhiteSpace(GetString(payload, "response"))
                 || string.IsNullOrWhiteSpace(GetString(payload, "sessionId"))
                 || string.IsNullOrWhiteSpace(GetString(payload, "stopReason"));
         }

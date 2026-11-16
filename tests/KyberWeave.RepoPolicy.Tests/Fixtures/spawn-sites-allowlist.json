@@ -926,6 +926,18 @@
       "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; the Arbiter serve process is expected to exit or fail fast."
     },
     {
+      "file": "tests/KyberWeave.Tests/Arbiter/CopilotBackgroundReturnHookProcessTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"dotnet\")",
+      "count": 1,
+      "bound": "Started by the ProcessRunner.Run in the same method: timeout 60 s kills the child tree on expiry."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/Arbiter/CopilotBackgroundReturnHookProcessTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, stdin, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry. The child is the kyber-weave-arbiter host answering one hook event read from stdin, with HOME pointed at a TempDirectory and the provider set to none, so it reaches no network and exits after one decision."
+    },
+    {
       "file": "tests/KyberWeave.Tests/ArbiterServeStdioTransportTests.cs",
       "text": "ProcessStartInfo startInfo = new ProcessStartInfo(\"dotnet\")",
       "count": 1,
