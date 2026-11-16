@@ -24,6 +24,8 @@ internal sealed class OntologyYamlSection
 
     public List<string>? Technologies { get; set; }
 
+    public List<string>? Roles { get; set; }
+
     /// <summary>
     /// The <c>intake:</c> opt-in. Nullable so an absent key is distinguishable from an
     /// explicit <c>false</c>: the merge replaces a setting the operator wrote, including the

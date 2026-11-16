@@ -46,6 +46,23 @@ public sealed class DocSpecValidator
     /// <summary>A section keyword shares no words with that section's headings or text.</summary>
     public const string UngroundedSectionKeyword = "KW-DOC-SPEC-010";
 
+    /// <summary>A skills document names neither the technology nor the role it teaches.</summary>
+    public const string MissingScope = "KW-DOC-SPEC-011";
+
+    /// <summary>A technology or role folder is missing one of its four files.</summary>
+    public const string MissingFolderFile = "KW-DOC-SPEC-012";
+
+    /// <summary>
+    /// A standard's headings do not match the six the ontology requires, in order.
+    /// </summary>
+    public const string StandardHeadings = "KW-DOC-SPEC-013";
+
+    /// <summary>
+    /// A standard's <c>builds-on</c> key names an undeclared parent, itself, or a parent that
+    /// already builds on another technology.
+    /// </summary>
+    public const string InvalidBuildsOn = "KW-DOC-SPEC-014";
+
     /// <summary>
     /// The scalar keys the required-key matrix can demand beyond the base set.
     /// </summary>
@@ -54,7 +71,7 @@ public sealed class DocSpecValidator
     /// <c>ontology.required-keys</c> keeps being ignored: frontmatter tolerates unknown keys
     /// by design, and a value this type cannot read is one it cannot honestly say is missing.
     /// </remarks>
-    private static readonly string[] TypedKeys = ["component", "source-root", "technology"];
+    private static readonly string[] TypedKeys = ["component", "source-root", "technology", "role"];
 
     private readonly string _repoRoot;
     private readonly OntologyConfig _config;
@@ -256,8 +273,8 @@ public sealed class DocSpecValidator
         // --- KW-DOC-SPEC-003: per-doc-type requirements ---------------------------------
         ValidateRequiredForType(doc, report);
 
-        // --- KW-DOC-SPEC-002 / -007: the technology declaration -------------------------
-        ValidateTechnology(doc, report);
+        // --- KW-DOC-SPEC-002 / -007: the technology or role declaration -------------------
+        ValidateScope(doc, report);
 
         // --- KW-DOC-SPEC-004: catalog vocabularies --------------------------------------
         if (!string.IsNullOrWhiteSpace(fm.Component) &&
@@ -378,58 +395,93 @@ public sealed class DocSpecValidator
     }
 
     /// <summary>
-    /// Checks the <c>technology</c> declaration against the three things that must agree
-    /// about it: the doc-type that takes the key, the closed vocabulary the host declared,
-    /// and the folder the document sits in.
+    /// Checks the <c>technology</c> and <c>role</c> declarations against the three things that
+    /// must agree about each: the doc-types that take the key, the closed vocabulary the host
+    /// declared, and the folder the document sits in.
     /// </summary>
     /// <remarks>
-    /// A missing declaration on a standard is left to the required-key matrix, which already
-    /// reports it as <c>KW-DOC-SPEC-003</c>. What is checked here is a declaration that
-    /// exists and disagrees with its surroundings — the case that produces a standard nothing
-    /// can resolve, because the registry publishes a property per declared technology and
-    /// points it at the folder of the same name.
+    /// A missing <c>technology</c> on a standard is left to the required-key matrix, which
+    /// already reports it as <c>KW-DOC-SPEC-003</c>. A skills document is the one type that
+    /// must carry one of the two keys, and it is checked here because the matrix can require
+    /// each key but cannot require either.
     /// </remarks>
-    private void ValidateTechnology(DocumentModel doc, DiagnosticReport report)
+    private void ValidateScope(DocumentModel doc, DiagnosticReport report)
     {
-        string? declared = doc.Frontmatter.Technology;
-        if (string.IsNullOrWhiteSpace(declared))
-            return;
+        string? technology = doc.Frontmatter.Technology?.Trim();
+        string? role = doc.Frontmatter.Role?.Trim();
 
-        string technology = declared.Trim();
-
-        if (doc.DocType != DocType.CodingStandard)
+        if (doc.DocType == DocType.Skill
+            && string.IsNullOrWhiteSpace(technology)
+            && string.IsNullOrWhiteSpace(role))
         {
             report.Add(new Diagnostic(
-                MisplacedTechnology, Severity.Error,
-                $"technology '{technology}' is declared on a '{doc.Frontmatter.DocType}' document.",
+                MissingScope, Severity.Error,
+                "a skills document names neither a technology nor a role.",
                 doc.Subject, doc.RelativePath,
-                "Only a coding-standard is scoped by technology. Drop the key, or make the " +
-                "document a coding-standard."));
+                "Add 'technology: <name>' or 'role: <name>', and put the document in the " +
+                "folder of that name under the standards root."));
             return;
         }
 
-        if (!_config.Technologies.Contains(technology, StringComparer.Ordinal))
+        if (!string.IsNullOrWhiteSpace(technology))
+        {
+            ValidateScopeKey(
+                doc, "technology", technology, _config.Technologies,
+                doc.DocType is DocType.CodingStandard or DocType.Rule or DocType.Skill,
+                "Only a coding-standard, a rule or a skill is scoped by technology.",
+                report);
+        }
+
+        if (!string.IsNullOrWhiteSpace(role))
+        {
+            ValidateScopeKey(
+                doc, "role", role, _config.Roles,
+                doc.DocType is DocType.Rule or DocType.Skill,
+                "Only a rule or a skill is scoped by role.",
+                report);
+        }
+    }
+
+    private void ValidateScopeKey(
+        DocumentModel doc,
+        string key,
+        string value,
+        IReadOnlyList<string> declaredValues,
+        bool allowedForType,
+        string typeHint,
+        DiagnosticReport report)
+    {
+        if (!allowedForType)
         {
             report.Add(new Diagnostic(
-                InvalidVocabulary, Severity.Error,
-                $"technology '{technology}' is not declared by this repository.",
+                MisplacedTechnology, Severity.Error,
+                $"{key} '{value}' is declared on a '{doc.Frontmatter.DocType}' document.",
                 doc.Subject, doc.RelativePath,
-                StringDistance.Nearest(technology, _config.Technologies) is { } near
-                    ? $"Closest declared technology: '{near}'."
-                    : "Add it to ontology.technologies in .kyber-weave/kyber-weave.yml and " +
-                      "re-run docs init, which creates its folder and publishes its registry property."));
+                $"{typeHint} Drop the key, or change the document's doc-type."));
+            return;
+        }
+
+        if (!declaredValues.Contains(value, StringComparer.Ordinal))
+        {
+            string setting = key == "role" ? "ontology.roles" : "ontology.technologies";
+            report.Add(new Diagnostic(
+                InvalidVocabulary, Severity.Error,
+                $"{key} '{value}' is not declared by this repository.",
+                doc.Subject, doc.RelativePath,
+                StringDistance.Nearest(value, declaredValues) is { } near
+                    ? $"Closest declared {key}: '{near}'."
+                    : $"Add it to {setting} in .kyber-weave/kyber-weave.yml and re-run docs init."));
             return;
         }
 
         string folder = ContainingFolder(doc.RelativePath);
-        if (!string.Equals(folder, technology, StringComparison.Ordinal))
+        if (!string.Equals(folder, value, StringComparison.Ordinal))
         {
             report.Add(new Diagnostic(
                 MisplacedTechnology, Severity.Error,
-                $"technology '{technology}' does not match the containing folder '{folder}'.",
+                $"{key} '{value}' does not match the containing folder '{folder}'.",
                 doc.Subject, doc.RelativePath,
-                $"A standard for '{technology}' lives in a folder of that name — the registry " +
-                "property points there."));
+                $"A document scoped to '{value}' lives in the standards folder named '{value}'."));
         }
     }
 
@@ -466,6 +518,7 @@ public sealed class DocSpecValidator
             "component" => fm.Component,
             "source-root" => fm.SourceRoot,
             "technology" => fm.Technology,
+            "role" => fm.Role,
             _ => null
         };
     }

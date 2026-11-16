@@ -84,6 +84,105 @@ internal sealed class DocFixture : IDisposable
 }
 
 /// <summary>
+/// A rules or skills document may name a technology or a role only when it sits in that
+/// scope's folder. A skills document is the one type that must name one of the two.
+/// </summary>
+public class SkillAndScopeTests
+{
+    private static readonly OntologyConfig Scoped =
+        new() { Technologies = ["dotnet"], Roles = ["reviewer"] };
+
+    private static string Document(string docType, string? technology, string? role) =>
+        $"""
+        ---
+        id: standards/scope
+        title: Scoped document
+        doc-type: {docType}
+        status: current
+        {(technology is null ? string.Empty : $"technology: {technology}")}
+        {(role is null ? string.Empty : $"role: {role}")}
+        owner: Maintainers
+        last-reviewed: 2026-07-21
+        ---
+
+        # Scoped document
+        """;
+
+    [Fact]
+    public void ASkillInItsTechnologysFolderIsValid()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write("6-Docs/standards/dotnet/dotnet.skills.md", Document("skill", "dotnet", null));
+
+        Assert.False(fixture.Validate(Scoped).HasErrors);
+    }
+
+    [Fact]
+    public void ASkillInItsRolesFolderIsValid()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write("6-Docs/standards/reviewer/reviewer.skills.md", Document("skill", null, "reviewer"));
+
+        Assert.False(fixture.Validate(Scoped).HasErrors);
+    }
+
+    [Fact]
+    public void ASkillNamingNeitherScopeIsSPEC011()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write("6-Docs/standards/dotnet/dotnet.skills.md", Document("skill", null, null));
+
+        DiagnosticReport report = fixture.Validate(Scoped);
+
+        Assert.Contains(report.Items, i => i.Code == DocSpecValidator.MissingScope);
+    }
+
+    [Fact]
+    public void ARuleNamingATechnologyInItsFolderIsValid()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write("6-Docs/standards/dotnet/dotnet.rules.md", Document("rule", "dotnet", null));
+
+        Assert.False(fixture.Validate(Scoped).HasErrors);
+    }
+
+    [Fact]
+    public void ARuleNamingATechnologyOutsideItsFolderIsSPEC007()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write("6-Docs/rules/backend.md", Document("rule", "dotnet", null));
+
+        DiagnosticReport report = fixture.Validate(Scoped);
+
+        Assert.Contains(report.Items, i => i.Code == DocSpecValidator.MisplacedTechnology);
+    }
+
+    [Fact]
+    public void ARoleOnAReferenceIsSPEC007()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write("6-Docs/reference/roles.md", Document("reference", null, "reviewer"));
+
+        DiagnosticReport report = fixture.Validate(Scoped);
+
+        Assert.Contains(report.Items, i => i.Code == DocSpecValidator.MisplacedTechnology);
+    }
+
+    [Fact]
+    public void AnUndeclaredRoleIsSPEC002()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write("6-Docs/standards/devops/devops.skills.md", Document("skill", null, "devops"));
+
+        DiagnosticReport report = fixture.Validate(Scoped);
+
+        Assert.Contains(report.Items, i =>
+            i.Code == DocSpecValidator.InvalidVocabulary
+            && i.Message.Contains("devops", StringComparison.Ordinal));
+    }
+}
+
+/// <summary>
 /// A standard's technology must agree with the vocabulary, the doc-type and the folder,
 /// because the configuration registry publishes one property per declared technology and
 /// points it at the folder of that name. Any disagreement produces a standard that

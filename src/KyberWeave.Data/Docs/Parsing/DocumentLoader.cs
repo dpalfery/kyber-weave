@@ -454,6 +454,7 @@ public sealed partial class DocumentLoader : IDocumentSource
             "governance" => DocType.Governance,
             "index" => DocType.Index,
             "coding-standard" => DocType.CodingStandard,
+            "skill" => DocType.Skill,
             _ => DocType.Unknown
         };
     }

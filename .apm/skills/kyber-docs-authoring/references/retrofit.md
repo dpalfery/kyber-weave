@@ -57,6 +57,9 @@ current guidance. Promote to `current` only when a human has confirmed that file
 | `plan`, `roadmap`, `proposal` | `plan` |
 | `spec`, `rfc` | `spec` |
 | `standards/<technology>/README.md` | `coding-standard` — the registry target; wins over the `standard` and directory-root `README.md` rows |
+| `standards/<scope>/<scope>.standards.md` | `coding-standard`, where `<scope>` is the folder's own name |
+| `standards/<scope>/<scope>.rules.md` | `rule`, scoped by `technology` or `role` to the folder's name |
+| `standards/<scope>/<scope>.skills.md` | `skill`, scoped by `technology` or `role` to the folder's name |
 | `todo/` | `todo` |
 | `policy`, `standard`, `convention` | `rule` or `governance`, except `standards/<technology>/README.md` |
 | `README.md` at a directory root | `index`, except `standards/<technology>/README.md` |

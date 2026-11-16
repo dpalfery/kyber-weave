@@ -17,7 +17,7 @@ public class OntologyConfigTests
     private static readonly string[] ExpectedDocTypes =
     [
         "architecture", "onboarding", "requirements", "adr", "plan", "spec", "todo",
-        "runbook", "reference", "rule", "governance", "index", "coding-standard"
+        "runbook", "reference", "rule", "governance", "index", "coding-standard", "skill"
     ];
 
     private static readonly string[] ExpectedStatuses =
@@ -78,6 +78,37 @@ public class OntologyConfigTests
         Assert.True(merged.IsRequired(DocType.Reference, "audience"));
         Assert.False(merged.IsRequired(DocType.Onboarding, "component"));
         Assert.False(merged.IsRequired(DocType.Onboarding, "source-root"));
+    }
+
+    [Fact]
+    public void OverrideYamlCanDeclareRolesBesideTechnologies()
+    {
+        string yamlPath = WriteTempYaml("""
+            ontology:
+              technologies:
+                - csharp
+              roles:
+                - conductor
+                - reviewer
+            """);
+
+        OntologyConfig merged = KyberWeaveYamlFile.LoadOntologyMerged(OntologyConfig.ProductDefaults, yamlPath);
+
+        Assert.Equal(["csharp"], merged.Technologies);
+        Assert.Equal(["conductor", "reviewer"], merged.Roles);
+    }
+
+    [Fact]
+    public void AnUndeclaredRoleYamlEntryIsRejected()
+    {
+        string yamlPath = WriteTempYaml("""
+            ontology:
+              roles:
+                - Reviewer Role
+            """);
+
+        Assert.Throws<YamlException>(() =>
+            KyberWeaveYamlFile.LoadOntologyMerged(OntologyConfig.ProductDefaults, yamlPath));
     }
 
     [Fact]
