@@ -199,7 +199,7 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
             KyberWeaveConfigLoadResult loaded = _config.TryLoad(_repositoryRoot);
             return loaded is not { Success: true, Config: not null } || loaded.Config.StopsOnToolFailure;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
             return true;
         }
@@ -332,6 +332,11 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
         {
             return false;
+        }
+        catch (Exception exception) when (exception is Win32Exception or UnauthorizedAccessException or NotSupportedException)
+        {
+            // The lookup was refused, not answered: treat the process as running, so unlocking under it is not advised.
+            return true;
         }
 
         using (process)

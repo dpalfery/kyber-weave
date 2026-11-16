@@ -50,10 +50,10 @@ public sealed class ToolingCheckService(
         {
             report = _doctor.Run(_repositoryRoot, DoctorMode.Ensure, options, executor, _environment.GetVariable);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or Win32Exception or TimeoutException)
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
             // The check itself could not run: the caller still gets the shape it reads, with the reason and a stop.
-            return string.Join('\n', provenance, "result: failed", $"FAIL doctor: {exception.Message}", ToolFailureLine, "EXIT: 1");
+            return string.Join('\n', provenance, "result: failed", $"FAIL doctor: {OneLine(exception.Message)}", ToolFailureLine, "EXIT: 1");
         }
 
         // The doctor has already applied stop-on-tool-failure to its exit code, so the code alone decides the token.
@@ -68,6 +68,10 @@ public sealed class ToolingCheckService(
         sb.Append(CultureInfo.InvariantCulture, $"EXIT: {report.ExitCode}");
         return sb.ToString();
     }
+
+    // The report is read line by line, so a message that spans lines is folded onto one.
+    private static string OneLine(string text) =>
+        string.Join(' ', text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
 
     private sealed class BoundedExecutor(IBoundedProcessExecutor process, TimeSpan timeout) : IProcessExecutor
     {
