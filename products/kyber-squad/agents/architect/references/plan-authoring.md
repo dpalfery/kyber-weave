@@ -10,6 +10,15 @@ The plan file is durable state. A live agent instance is disposable.
 4. Reconcile conductor-supplied answers against the decision ledger before more discovery.
 5. Save after every discovery batch and before every status handoff. Write each material choice into the Decisions section in the same save as the batch that settled it, and do not reopen a decided row unless new evidence contradicts it: a choice held only in your reasoning is argued again every turn and lost when context is compacted.
 
+## Working order
+
+A plan is written, not thought through and then typed. Reasoning you do not write into the plan is paid for again on every later turn and lost when context is compacted.
+
+1. Send one discovery batch: the code, standards and documents the request lets you name, together.
+2. Write the Draft next, from the skeleton below: frontmatter, problem and goal, and a Decisions row for every choice that batch settled. Never open another plan to copy its shape; the skeleton is the shape.
+3. Every later turn either sends a batch that answers named open questions or writes answers into the plan. Decide each choice once, in its Decisions row.
+4. Size the plan to the change. A Decisions cell is one or two sentences. A finding is a fact no task already states. A risk is one line with its mitigation. Cut any sentence a worker or reviewer would not act on.
+
 Open only active Draft, Ready, In progress, or Blocked plans. Draft supports planning only. Review required, Completed, Superseded, and archived artifacts are not implementation authority.
 
 ## Status vocabulary
@@ -30,7 +39,73 @@ Every plan contains:
 - a dependency graph;
 - risks, out-of-scope boundaries, verification gates, review, and `docs-dev` closeout.
 
-Each task carries a `Capabilities:` line: the abilities its work needs, in plain words (for example "React and TypeScript UI with Playwright tests" or "documentation"). Never name an agent or a skill for it: the conductor picks the agent whose description fits. Declare a dependency only when a task consumes another task's concrete output or their file scopes cannot safely overlap. Component labels and table order do not create scheduling barriers. Maximize parallel execution and err on the side of risk: prefer optimistic file scopes and add a dependency only for a real consumed output or a certain file overlap. Size each task for efficient execution by a single worker; do not split work further just to add parallelism. Four small file edits belong to one worker; changes of substantial size across independent projects belong to separate workers. Tasks needing different abilities can run at the same time. Split changes across several projects into separate tasks only if each project's change is large enough and decoupled enough to justify it. Respect `review.max-concurrent-workers` (default 4, host-configurable in `.kyber-weave/kyber-weave.yml`); the harness runs ready tasks up to that cap. (Q4 reversal, issue #386: this supersedes the 2026-10-14 "no max concurrency" directive.) Each developer task ends with the worker's own `task-gate` run, and a failing gate goes straight back to the same worker; no agent reviews a single task.
+### Plan skeleton
+
+Fill this in; keep the headings and the table columns exactly.
+
+````markdown
+---
+id: plans/<yyyy-MM-dd>-<slug>
+title: <title>
+doc-type: plan
+status: draft
+component: <catalog component>
+owner: <owner or unassigned>
+last-reviewed: <yyyy-MM-dd>
+development-mode: test-first
+documentation-impact: extends-component
+impact-components:
+  - <catalog component>
+---
+
+# <title>
+
+**Status: Draft.**
+
+## Problem and goal
+## Scale
+## Decisions
+
+| ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+|---|---|---|---|---|
+
+## Design harvest
+
+| Target component | Target doc type | Section | Content to harvest |
+|---|---|---|---|
+
+## Investigation findings
+## Test contract (development-mode: test-first)
+
+| Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+|---|---|---|---|---|---|
+
+## Tasks
+
+### T1: <name>
+
+- **Objective:** <one sentence>
+- **Capabilities:** <abilities in plain words>
+- **Session:** `<group>`
+- **Depends on:** none | T<n> (<the output it consumes>)
+- **Files:**
+  - `<path>`: <type or member>, <the change>
+- **Commands:**
+  - <exact command>
+- **Acceptance:**
+  - <checkable outcome>
+
+## Dependency graph
+## Risks
+## Out-of-scope boundaries
+## Verification gates
+## Review
+## docs-dev closeout
+````
+
+Where the host declares task gates, a task's **Commands** are the two gate runs only (`kyber-weave review gates . --agent <you> --task <id> --red`, then the same without `--red`): the gate runs the Test contract's runner command, so listing that command as a step of its own makes the worker run every test twice.
+
+Each task carries a `Capabilities:` line: the abilities its work needs, in plain words (for example "React and TypeScript UI with Playwright tests" or "documentation"). Never name an agent or a skill for it: the conductor picks the agent whose description fits. Declare a dependency only when a task consumes another task's concrete output or their file scopes cannot safely overlap. Component labels and table order do not create scheduling barriers. Maximize parallel execution and err on the side of risk: prefer optimistic file scopes and add a dependency only for a real consumed output or a certain file overlap. Size each task for efficient execution by a single worker; do not split work further just to add parallelism. A chain of small tasks in one technology, each consuming the one before (a repository method, then the service and endpoint that call it), is one task: every extra worker pays again to load context, and a dependent task cannot start until the first finishes. Four small file edits belong to one worker; changes of substantial size across independent projects belong to separate workers. Tasks needing different abilities can run at the same time. Split changes across several projects into separate tasks only if each project's change is large enough and decoupled enough to justify it. Respect `review.max-concurrent-workers` (default 4, host-configurable in `.kyber-weave/kyber-weave.yml`); the harness runs ready tasks up to that cap. (Q4 reversal, issue #386: this supersedes the 2026-10-14 "no max concurrency" directive.) Each developer task ends with the worker's own `task-gate` run, and a failing gate goes straight back to the same worker; no agent reviews a single task.
 
 A plan never carries the review command. The end-of-run council derives it from the `code-review` skill — measured against the change with `--base`, and admitted to the full-suite gates with `--council` — so a command copied into a plan, an index row or a task packet goes stale the moment the gate list or one of its flags moves, and the reviewer then runs something nobody validated. Say who reviews and which skill governs it; leave the argv to the reviewer.
 
