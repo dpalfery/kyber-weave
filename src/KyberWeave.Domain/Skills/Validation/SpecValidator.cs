@@ -21,7 +21,11 @@ public static partial class SpecValidator
     [GeneratedRegex("^[a-z0-9]+(?:-[a-z0-9]+)*$", RegexOptions.None, matchTimeoutMilliseconds: 2000)]
     private static partial Regex NamePattern();
 
-    public static IEnumerable<Diagnostic> Validate(Skill skill)
+    /// <summary>Validates a skill against the specification.</summary>
+    /// <param name="skill">The skill to validate.</param>
+    /// <param name="directoryExists">Whether the skill's directory exists on disk, as the caller observed; a skill parsed from memory skips the directory-name comparison.</param>
+    /// <returns>One diagnostic per violation.</returns>
+    public static IEnumerable<Diagnostic> Validate(Skill skill, bool directoryExists)
     {
         string? name = skill.Frontmatter.Name;
         string skillId = string.IsNullOrWhiteSpace(name) ? skill.DirectoryName : name;
@@ -46,7 +50,7 @@ public static partial class SpecValidator
                     skillId, file, "e.g. 'hr-leave-eligibility-triage'.");
 
             // name must match parent directory — the classic silent-load failure
-            if (Directory.Exists(skill.DirectoryPath) &&
+            if (directoryExists &&
                 !string.Equals(name, skill.DirectoryName, StringComparison.Ordinal))
             {
                 yield return new Diagnostic("KW-SKILL-SPEC-004", Severity.Error,

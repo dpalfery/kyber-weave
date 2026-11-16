@@ -50,11 +50,6 @@ public interface IRepositoryFileStore : IWritableFileSystem
     /// <returns>Absolute paths.</returns>
     string[] GetDirectories(string directory);
 
-    /// <summary>Lists the directories directly in a directory, lazily.</summary>
-    /// <param name="directory">The directory.</param>
-    /// <returns>Absolute paths.</returns>
-    IEnumerable<string> EnumerateDirectories(string directory);
-
     /// <summary>Lists the files and directories directly in a directory, lazily and in the platform's order.</summary>
     /// <param name="directory">The directory.</param>
     /// <returns>The entries, each with its name and whether it is a directory or a link.</returns>

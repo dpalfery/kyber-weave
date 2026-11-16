@@ -43,6 +43,9 @@ internal sealed class FakeFileSystem : IFileSystem
         files.Keys.Where(f =>
             (recursive ? f.StartsWith(directory, StringComparison.Ordinal) : Path.GetDirectoryName(f) == directory)
             && (searchPattern.StartsWith('*') ? f.EndsWith(searchPattern[1..], StringComparison.Ordinal) : Path.GetFileName(f) == searchPattern));
+
+    public IEnumerable<string> EnumerateDirectories(string directory) =>
+        directories.Where(d => Path.GetDirectoryName(d) == directory);
 }
 
 internal sealed class FakeConfigSource(HooksConfig? config, Exception? failure = null) : IHooksConfigSource

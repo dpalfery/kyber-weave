@@ -65,7 +65,7 @@ public sealed class SkillProvenanceTests
             skills.Root,
             path => path.Contains("broken", StringComparison.Ordinal)
                 ? throw new IOException("the file is locked")
-                : SkillParser.ParseFile(path));
+                : GovernanceTestFiles.Skills.ReadFile(path));
 
         Assert.Contains(
             issues,
@@ -104,7 +104,7 @@ public sealed class SkillProvenanceTests
     }
 
     private static IReadOnlyList<string> SkillProvenanceIssues(string skillsRoot) =>
-        SkillProvenanceIssues(skillsRoot, SkillParser.ParseFile);
+        SkillProvenanceIssues(skillsRoot, GovernanceTestFiles.Skills.ReadFile);
 
     private static IReadOnlyList<string> SkillProvenanceIssues(string skillsRoot, Func<string, Skill> parse)
     {
@@ -142,7 +142,7 @@ public sealed class SkillProvenanceTests
                 continue;
             }
 
-            foreach (Diagnostic diagnostic in scanner.Scan(skill))
+            foreach (Diagnostic diagnostic in scanner.Scan(skill, script => GovernanceTestFiles.Files.ReadAllText(script.AbsolutePath)))
             {
                 if (ProvenanceCodes.Contains(diagnostic.Code))
                 {

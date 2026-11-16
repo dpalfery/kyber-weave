@@ -15,6 +15,8 @@ public sealed class SkillGovernanceService(IWritableFileSystem files, ISkillArch
 {
     private const string ParseErrorCode = "KW-PARSE-000";
 
+    private readonly SkillFileReader _reader = new(files);
+
     /// <inheritdoc />
     public DiagnosticReport Validate(string path)
     {
@@ -22,7 +24,7 @@ public sealed class SkillGovernanceService(IWritableFileSystem files, ISkillArch
         SkillSet set = LoadOrReport(path, report);
 
         foreach (Skill skill in set.Skills)
-            report.AddRange(SpecValidator.Validate(skill));
+            report.AddRange(SpecValidator.Validate(skill, files.DirectoryExists(skill.DirectoryPath)));
 
         return report;
     }
@@ -50,13 +52,13 @@ public sealed class SkillGovernanceService(IWritableFileSystem files, ISkillArch
 
         SkillScanner scanner = new();
         foreach (Skill skill in set.Skills)
-            report.AddRange(scanner.Scan(skill));
+            report.AddRange(scanner.Scan(skill, ReadScript));
 
         return report;
     }
 
     /// <inheritdoc />
-    public SkillSet LoadSet(string path) => SkillLoader.LoadSet(path);
+    public SkillSet LoadSet(string path) => _reader.LoadSet(path);
 
     /// <inheritdoc />
     public RoutingEvalSummary? Evaluate(string evalFile, IRoutingStrategy strategy, SkillSet skills)
@@ -67,7 +69,7 @@ public sealed class SkillGovernanceService(IWritableFileSystem files, ISkillArch
         if (!files.FileExists(evalFile))
             return null;
 
-        RoutingEvalFile loaded = RoutingEvalFile.Load(evalFile);
+        RoutingEvalFile loaded = RoutingEvalFile.Parse(files.ReadAllText(evalFile));
         return new RoutingEvaluator(strategy).Evaluate(loaded, skills);
     }
 
@@ -79,11 +81,11 @@ public sealed class SkillGovernanceService(IWritableFileSystem files, ISkillArch
         if (!files.FileExists(skillFile))
             return new SkillPackResult(SkillPackStatus.NoSkillFile, string.Empty, string.Empty, 0, report);
 
-        Skill skill = SkillParser.ParseFile(skillFile);
+        Skill skill = _reader.ReadFile(skillFile);
 
         if (!skipValidation)
         {
-            report.AddRange(SpecValidator.Validate(skill));
+            report.AddRange(SpecValidator.Validate(skill, files.DirectoryExists(skill.DirectoryPath)));
             if (report.HasErrors)
                 return new SkillPackResult(SkillPackStatus.ValidationFailed, string.Empty, string.Empty, 0, report);
         }
@@ -124,9 +126,9 @@ public sealed class SkillGovernanceService(IWritableFileSystem files, ISkillArch
     }
 
     /// <summary>Loads the skills under a path, reporting every one that fails to parse as an error and keeping the rest.</summary>
-    private static SkillSet LoadOrReport(string path, DiagnosticReport report)
+    private SkillSet LoadOrReport(string path, DiagnosticReport report)
     {
-        IReadOnlyList<SkillLoadResult> results = SkillLoader.Load(path);
+        IReadOnlyList<SkillLoadResult> results = _reader.Load(path);
         List<Skill> skills = [];
 
         foreach (SkillLoadResult r in results)
@@ -143,5 +145,18 @@ public sealed class SkillGovernanceService(IWritableFileSystem files, ISkillArch
         }
 
         return new SkillSet(skills);
+    }
+
+    /// <summary>Reads one bundled script, treating an unreadable file as nothing to scan.</summary>
+    private string? ReadScript(SkillResource script)
+    {
+        try
+        {
+            return files.ReadAllText(script.AbsolutePath);
+        }
+        catch
+        {
+            return null;
+        }
     }
 }

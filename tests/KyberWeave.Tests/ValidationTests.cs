@@ -9,13 +9,13 @@ namespace KyberWeave.Tests;
 public class SpecValidatorTests
 {
     private static Skill Make(string content, string dir = "/tmp/skill-x") =>
-        SkillParser.Parse(content, $"{dir}/SKILL.md", dir);
+        GovernanceTestFiles.Skills.Read(content, $"{dir}/SKILL.md", dir);
 
     [Fact]
     public void FlagsMissingDescription()
     {
         Skill skill = Make("---\nname: skill-x\n---\nbody");
-        IEnumerable<string> codes = SpecValidator.Validate(skill).Select(d => d.Code);
+        IEnumerable<string> codes = SpecValidator.Validate(skill, Directory.Exists(skill.DirectoryPath)).Select(d => d.Code);
         Assert.Contains("KW-SKILL-SPEC-005", codes);
     }
 
@@ -23,7 +23,7 @@ public class SpecValidatorTests
     public void FlagsInvalidNameCharacters()
     {
         Skill skill = Make("---\nname: Bad_Name\ndescription: d\n---\nbody");
-        IEnumerable<string> codes = SpecValidator.Validate(skill).Select(d => d.Code);
+        IEnumerable<string> codes = SpecValidator.Validate(skill, Directory.Exists(skill.DirectoryPath)).Select(d => d.Code);
         Assert.Contains("KW-SKILL-SPEC-003", codes);
     }
 
@@ -31,7 +31,7 @@ public class SpecValidatorTests
     public void FlagsAngleBracketsInFrontmatter()
     {
         Skill skill = Make("---\nname: skill-x\ndescription: use <tool> now\n---\nbody");
-        IEnumerable<string> codes = SpecValidator.Validate(skill).Select(d => d.Code);
+        IEnumerable<string> codes = SpecValidator.Validate(skill, Directory.Exists(skill.DirectoryPath)).Select(d => d.Code);
         Assert.Contains("KW-SKILL-SPEC-008", codes);
     }
 
@@ -39,7 +39,7 @@ public class SpecValidatorTests
     public void ValidSkillHasNoErrors()
     {
         Skill skill = Make("---\nname: skill-x\ndescription: Use to do X. Use when Y. Do NOT use for Z.\n---\nbody");
-        List<Diagnostic> diags = SpecValidator.Validate(skill).ToList();
+        List<Diagnostic> diags = SpecValidator.Validate(skill, Directory.Exists(skill.DirectoryPath)).ToList();
         Assert.DoesNotContain(diags, d => d.Severity is Severity.Error or Severity.Critical);
     }
 }
@@ -49,7 +49,7 @@ public class RoutingLinterTests
     private static Skill Make(string name, string description, string dir)
     {
         string content = $"---\nname: {name}\ndescription: {description}\n---\n\n# {name}\nbody";
-        return SkillParser.Parse(content, $"{dir}/SKILL.md", dir);
+        return GovernanceTestFiles.Skills.Read(content, $"{dir}/SKILL.md", dir);
     }
 
     [Fact]
