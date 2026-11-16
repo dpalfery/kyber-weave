@@ -333,11 +333,13 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
     public void ASyncThatFindsTheIndexLockHeldOnceIsRetriedAndAnswersNormally()
     {
         ScriptedProcessExecutor executor = SyncAnswers(HeldIndexLock, SyncSucceeded);
-        DocsTools tools = ToolsWithAnIndex(Root, executor);
+        List<TimeSpan> pauses = [];
+        DocsTools tools = ToolsWithAnIndex(Root, executor, pauses);
 
         string response = tools.Explore("anything");
 
         Assert.Equal(2, executor.Calls.Count);
+        Assert.Single(pauses);
         Assert.DoesNotContain("STATUS: TOOL_FAILURE", response, StringComparison.Ordinal);
         Assert.DoesNotContain("note: codegraph refresh skipped", response, StringComparison.Ordinal);
         Assert.False(CodeGraphWarning.IsMatch(response), response);
@@ -358,11 +360,15 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
     public void ASyncThatAlwaysFindsTheIndexLockHeldAnswersWithANoteAndNoFailure(bool stopsOnToolFailure)
     {
         ScriptedProcessExecutor executor = SyncAnswers(HeldIndexLock);
-        DocsTools tools = ToolsWithAnIndex(Root, executor, stopsOnToolFailure);
+        List<TimeSpan> pauses = [];
+        DocsTools tools = ToolsWithAnIndex(Root, executor, pauses, stopsOnToolFailure);
 
         string response = tools.Explore("anything");
 
         Assert.Equal(3, executor.Calls.Count);
+        Assert.True(
+            pauses.Count == 2 && pauses.Sum(pause => pause.TotalSeconds) <= 1.5,
+            $"A held CodeGraph lock paused {string.Join(", ", pauses)}; a tool call may wait twice, 1.5 s in all.");
         Assert.DoesNotContain("STATUS: TOOL_FAILURE", response, StringComparison.Ordinal);
         Assert.False(CodeGraphWarning.IsMatch(response), response);
         Assert.Contains("note: codegraph refresh skipped", response, StringComparison.Ordinal);
@@ -384,11 +390,13 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
     public void ASyncThatFailsForAnotherReasonStillFailsTheToolWithoutARetry(string error, bool stopsOnToolFailure)
     {
         ScriptedProcessExecutor executor = SyncAnswers(new ProcessResult(1, SyncBanner, error + "\n"));
-        DocsTools tools = ToolsWithAnIndex(Root, executor, stopsOnToolFailure);
+        List<TimeSpan> pauses = [];
+        DocsTools tools = ToolsWithAnIndex(Root, executor, pauses, stopsOnToolFailure);
 
         string response = tools.Explore("anything");
 
         Assert.Single(executor.Calls);
+        Assert.Empty(pauses);
         Assert.DoesNotContain("note: codegraph refresh skipped", response, StringComparison.Ordinal);
         if (stopsOnToolFailure)
         {
@@ -441,9 +449,11 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
 
     /// <summary>
     /// Tools over a repository that requires CodeGraph and already has a <c>.codegraph/</c> folder, so
-    /// the refresh runs <c>sync</c> rather than <c>init</c>.
+    /// the refresh runs <c>sync</c> rather than <c>init</c>. The waits between sync attempts are
+    /// recorded in <paramref name="pauses"/> instead of being waited out.
     /// </summary>
-    private static DocsTools ToolsWithAnIndex(string root, IProcessExecutor executor, bool stopsOnToolFailure = true)
+    private static DocsTools ToolsWithAnIndex(
+        string root, IProcessExecutor executor, List<TimeSpan> pauses, bool stopsOnToolFailure = true)
     {
         DocsTestCommands.Scaffolding.Scaffold(root);
         McpDeclarationFixture.RequireCodeGraph(root);
@@ -455,7 +465,7 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
         }
 
         Directory.CreateDirectory(Path.Combine(root, ".codegraph"));
-        return ScaffoldedTools(root, () => FakeCodeGraphResolver.WithSymbols(), executor);
+        return ScaffoldedTools(root, () => FakeCodeGraphResolver.WithSymbols(), executor, pauses.Add);
     }
 
     private static string LockPath(string root) => CodeGraphProvisioner.LockPathFor(root, Path.GetTempPath());
@@ -491,7 +501,10 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
     /// depend on a CodeGraph binary being installed on the machine running the test.
     /// </remarks>
     private static DocsTools ScaffoldedTools(
-        string root, Func<ICodeGraphResolver> resolverFactory, IProcessExecutor? executor = null)
+        string root,
+        Func<ICodeGraphResolver> resolverFactory,
+        IProcessExecutor? executor = null,
+        Action<TimeSpan>? pause = null)
     {
         KyberWeaveConfig config = KyberWeaveConfigLoader.Load(root);
         DocumentIndexHost host = new(
@@ -504,7 +517,7 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
         return DocsToolsComposition.Create(
             host,
             null,
-            DocsTestCommands.Freshness(root, executor ?? ProvisionSucceeds()));
+            DocsTestCommands.Freshness(root, executor ?? ProvisionSucceeds(), pause: pause));
     }
 
     /// <summary>

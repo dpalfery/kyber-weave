@@ -101,6 +101,7 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
     private readonly IKyberWeaveConfigRepository _config;
     private readonly TimeProvider _time;
     private readonly IProcessExecutor _executor;
+    private readonly Action<TimeSpan> _pause;
     private readonly Lock _gate = new();
 
     private DateTimeOffset? _lastAttempt;
@@ -122,13 +123,18 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
     /// host that supplies its own runner — supplies the executor rather than being answered by
     /// whichever binary this machine happens to have installed.
     /// </param>
+    /// <param name="pause">
+    /// Waits between two sync attempts when CodeGraph's own lock is held, or null to block the
+    /// calling thread. A test supplies one so it does not wait in real time.
+    /// </param>
     public CodeGraphFreshness(
         string repositoryRoot,
         bool refreshEnabled,
         ICodeGraphProvisioner provisioner,
         IKyberWeaveConfigRepository config,
         TimeProvider time,
-        IProcessExecutor? executor = null)
+        IProcessExecutor? executor = null,
+        Action<TimeSpan>? pause = null)
     {
         ArgumentNullException.ThrowIfNull(provisioner);
         ArgumentNullException.ThrowIfNull(config);
@@ -139,6 +145,7 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
         _config = config;
         _time = time;
         _executor = executor ?? new BoundedExecutor(RefreshBound);
+        _pause = pause ?? Thread.Sleep;
     }
 
     /// <summary>
@@ -232,7 +239,7 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
             if (!CodeGraphIndexRules.IsIndexLockHeld(provisioned))
                 break;
 
-            Thread.Sleep(pause);
+            _pause(pause);
             provisioned = Provision(options, lockDirectory);
         }
 
