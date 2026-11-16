@@ -69,16 +69,7 @@ public sealed class ArbiterConfigResolver(
             ArbiterProviderConfig merged = userSettings.ApplyTo(repository, environment.HomeDirectory);
             if (!merged.Equals(repository))
             {
-                config = new KyberWeaveConfig
-                {
-                    Ontology = config.Ontology,
-                    Harness = config.Harness,
-                    DocsAnalysis = config.DocsAnalysis,
-                    Squad = config.Squad,
-                    ConfigReg = config.ConfigReg,
-                    Review = config.Review,
-                    Arbiter = config.Arbiter with { Provider = merged },
-                };
+                config = config.WithArbiter(config.Arbiter with { Provider = merged });
             }
         }
         catch (YamlException exception)

@@ -80,13 +80,9 @@ public sealed class ConfigLoadService(IKyberWeaveConfigRepository configs) : ICo
         try
         {
             ontology = loaded.WithDocsRoots(docsRoots);
-            config = new KyberWeaveConfig
-            {
-                Ontology = ontology,
-                Harness = config.Harness,
-                DocsAnalysis = config.DocsAnalysis.ResolveFor(ontology),
-                Squad = config.Squad
-            };
+            // Every other setting (review, arbiter, mcp, tool-failure and worktree-hook flags) must survive the
+            // docs-root override, so the copy goes through the config's own cloning.
+            config = config.WithOntology(ontology).WithDocsAnalysis(config.DocsAnalysis.ResolveFor(ontology));
             return true;
         }
         catch (ArgumentException ex)

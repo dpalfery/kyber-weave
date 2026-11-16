@@ -81,6 +81,12 @@ public sealed class KyberWeaveConfig : IDocsEngineConfig
         return Clone(configReg: configReg);
     }
 
+    public KyberWeaveConfig WithArbiter(ArbiterConfig arbiter)
+    {
+        ArgumentNullException.ThrowIfNull(arbiter);
+        return Clone(arbiter: arbiter);
+    }
+
     internal KyberWeaveConfig Clone(
         OntologyConfig? ontology = null,
         HarnessProfileConfig? harness = null,
