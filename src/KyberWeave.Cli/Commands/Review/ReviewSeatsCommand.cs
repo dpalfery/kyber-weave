@@ -19,7 +19,9 @@ namespace KyberWeave.Cli.Commands.Review;
 ///     cycle folder, writes the diff and the change half of the evidence, writes every packet and prints each seat's
 ///     dispatch block, the lenses a catalogue file pattern rules out, and the gate command to run alongside.
 /// </summary>
-public sealed class ReviewSeatsCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, IReviewEvidenceService evidenceWriter, INotSeatedStore notSeatedStore, ISeverityOverrideSource severityOverrides, IWorktreeIndexGuard worktreeIndex, IWritableFileSystem files, IProcessEnvironment environment, IProcessExecutor? indexExecutor = null) : Command<ReviewSeatsSettings>
+public sealed class ReviewSeatsCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, IReviewEvidenceService evidenceWriter, INotSeatedStore notSeatedStore, ISeverityOverrideSource severityOverrides, IWorktreeIndexGuard worktreeIndex, IWritableFileSystem files, IProcessEnvironment environment, IArbiterKeyService arbiterKeys,
+    IArbiterDryRunService arbiterDryRun,
+    IProcessExecutor? indexExecutor = null) : Command<ReviewSeatsSettings>
 {
     /// <summary>The command description shared by the real registration and the help tests.</summary>
     public const string Description =
@@ -89,7 +91,8 @@ public sealed class ReviewSeatsCommand(IReviewWorkTreeService trees, IReviewCycl
         IReadOnlyList<string>? changed = ChangedPaths(root, baseRef);
 
         string evidence;
-        ReviewDecisionModel model = ReviewDecisionModelFactory.Create(root, config, settings.NoDecisionModel, null);
+        ReviewDecisionModel model = ReviewDecisionModelFactory.Create(
+            root, config, settings.NoDecisionModel, null, arbiterKeys, arbiterDryRun);
         CouncilSeatPlan seats = plan.Prior is { } verified && !settings.Full
             ? VerifierSeats(tree, verified, recheck)
             : WithDecisionModel(root, baseRef, changed, CouncilSeating.Plan(changed), model, cancellationToken);

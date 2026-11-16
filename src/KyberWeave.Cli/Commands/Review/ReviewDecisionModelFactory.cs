@@ -1,4 +1,4 @@
-using KyberWeave.Cli.Commands.Arbiter;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Configuration;
@@ -25,7 +25,15 @@ internal static class ReviewDecisionModelFactory
     /// <param name="config">The loaded configuration.</param>
     /// <param name="switchedOff">Whether <c>--no-decision-model</c> was given.</param>
     /// <param name="cachePath">The cycle's answer file, reused across runs of one cycle; null keeps none.</param>
-    public static ReviewDecisionModel Create(string root, KyberWeaveConfig config, bool switchedOff, string? cachePath)
+    /// <param name="keys">Answers whether a key resolves for a remote endpoint.</param>
+    /// <param name="dryRun">Builds the provider the model asks.</param>
+    public static ReviewDecisionModel Create(
+        string root,
+        KyberWeaveConfig config,
+        bool switchedOff,
+        string? cachePath,
+        IArbiterKeyService keys,
+        IArbiterDryRunService dryRun)
     {
         if (switchedOff)
             return ReviewDecisionModel.Off;
@@ -41,11 +49,11 @@ internal static class ReviewDecisionModelFactory
         if (!Uri.TryCreate(provider.Endpoint, UriKind.Absolute, out Uri? endpoint))
             return new ReviewDecisionModel(null, [], null, TimeProvider.System, "arbiter.provider.endpoint is not an absolute URL");
 
-        if (!endpoint.IsLoopback && string.IsNullOrWhiteSpace(ArbiterCommandComposition.TryResolveKey(config, provider.Endpoint)))
+        if (!endpoint.IsLoopback && string.IsNullOrWhiteSpace(keys.TryResolveKey(config, provider.Endpoint)))
             return new ReviewDecisionModel(null, [], null, TimeProvider.System, $"no key for {endpoint.GetLeftPart(UriPartial.Authority)}");
 
         DiagnosticReport ignored = new();
-        IArbiterProvider? client = ArbiterCommandComposition.CreateProvider(config, null, ignored, out _);
+        IArbiterProvider? client = dryRun.CreateProvider(config, null, ignored, out _);
         return client is null
             ? new ReviewDecisionModel(null, [], null, TimeProvider.System, "the provider could not be built")
             : new ReviewDecisionModel(client, config.Arbiter.Rules, logDirectory, TimeProvider.System, cachePath: cachePath);

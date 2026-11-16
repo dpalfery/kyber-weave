@@ -12,6 +12,6 @@ internal static class TestAssemblyDefaults
     [ModuleInitializer]
     internal static void DisableLivePacketCheck()
     {
-        DocsTasksCommand.PacketProvider = _ => null;
+        DocsTasksCommand.PacketProviderOverride = _ => null;
     }
 }

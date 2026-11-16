@@ -28,7 +28,7 @@ namespace KyberWeave.Cli.Commands.Review;
 /// <see cref="VerdictEngine"/>, which stays the only judge.
 /// </para>
 /// </remarks>
-public sealed partial class ReviewVerdictCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, INotSeatedStore notSeatedStore, ISeverityOverrideSource severityOverrides, ICitedLineChecker citedLines, IWritableFileSystem files, ISeatFolder seatFolder, TimeProvider clock) : Command<ReviewVerdictSettings>
+public sealed partial class ReviewVerdictCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, INotSeatedStore notSeatedStore, ISeverityOverrideSource severityOverrides, ICitedLineChecker citedLines, IWritableFileSystem files, ISeatFolder seatFolder, TimeProvider clock, IArbiterKeyService arbiterKeys, IArbiterDryRunService arbiterDryRun) : Command<ReviewVerdictSettings>
 {
     /// <summary>The command description shared by the real registration and the help tests.</summary>
     public const string Description = "Compute approve / request-changes from findings and gates.";
@@ -113,7 +113,7 @@ public sealed partial class ReviewVerdictCommand(IReviewWorkTreeService trees, I
         report.AddRange(overrideNotes);
 
         ReviewDecisionModel model = ReviewDecisionModelFactory.Create(
-            root, config, settings.NoDecisionModel, DecisionCachePath(settings));
+            root, config, settings.NoDecisionModel, DecisionCachePath(settings), arbiterKeys, arbiterDryRun);
         List<string> modelEffects = [];
         findings = MatchOverrides(model, overrides, findings, report, modelEffects, cancellationToken);
         findings = DropNitpicksBelowTheFixLevel(findings, config.Review.Policy, report, dropped);

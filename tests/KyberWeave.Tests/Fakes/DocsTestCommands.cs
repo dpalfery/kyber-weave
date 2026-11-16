@@ -62,7 +62,11 @@ internal static class DocsTestCommands
     public static DocsTasksCommand Tasks(IServiceProvider? services = null)
     {
         IServiceProvider provider = services ?? Services();
-        return new DocsTasksCommand(provider.GetRequiredService<IPlanTaskService>(), provider.GetRequiredService<IPlanTaskAgentPickerFactory>());
+        return new DocsTasksCommand(
+            provider.GetRequiredService<IPlanTaskService>(),
+            provider.GetRequiredService<IPlanTaskAgentPickerFactory>(),
+            provider.GetRequiredService<IArbiterKeyService>(),
+            provider.GetRequiredService<IArbiterDryRunService>());
     }
 
     public static IDocsSchemaGate SchemaGate => Services().GetRequiredService<IDocsSchemaGate>();
