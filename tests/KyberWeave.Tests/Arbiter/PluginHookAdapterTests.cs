@@ -86,7 +86,7 @@ public sealed class PluginHookAdapterTests
         string stdin, string? caller, ScriptedEngine engine)
     {
         PluginHookAdapter adapter = new("opencode", "task", "subagent_type", "prompt", engine);
-        HookCommand command = new(
+        HookCommand command = ArbiterTestServices.Command(
             new HarnessAdapterRegistry([adapter]),
             _ => EnabledConfig(),
             () => "decision-test-1");
@@ -98,7 +98,7 @@ public sealed class PluginHookAdapterTests
 
     private static (int Exit, string Stdout) RunProduction(string harness, string stdin, ScriptedEngine engine)
     {
-        HookCommand command = new(
+        HookCommand command = ArbiterTestServices.Command(
             new HarnessAdapterRegistry(PluginHookAdapters.All(engine)),
             _ => EnabledConfig(),
             () => "decision-test-1");
@@ -265,7 +265,7 @@ public sealed class PluginHookAdapterTests
         int loads = 0;
         ScriptedEngine engine = new();
         PluginHookAdapter adapter = new("opencode", "task", "subagent_type", "prompt", engine);
-        HookCommand command = new(
+        HookCommand command = ArbiterTestServices.Command(
             new HarnessAdapterRegistry([adapter]),
             (string repoRoot) => { loads++; return EnabledConfig(); },
             () => "decision-test-1");
@@ -290,7 +290,7 @@ public sealed class PluginHookAdapterTests
         int loads = 0;
         ScriptedEngine engine = new();
         PluginHookAdapter adapter = new("opencode", "task", "subagent_type", "prompt", engine);
-        HookCommand command = new(
+        HookCommand command = ArbiterTestServices.Command(
             new HarnessAdapterRegistry([adapter]),
             (string repoRoot) => { loads++; return EnabledConfig(); },
             () => "decision-test-1");
@@ -335,7 +335,7 @@ public sealed class PluginHookAdapterTests
         Assert.IsType<PluginHookAdapter>(adapter);
 
         Assert.True(
-            HarnessAdapterRegistry.CreateDefault(engine).TryGet("opencode", out _),
+            ArbiterTestServices.Registry(engine).TryGet("opencode", out _),
             "The default registry must serve the opencode harness.");
     }
 }

@@ -1,13 +1,23 @@
 using KyberWeave.Application;
 using KyberWeave.Cli.Commands.Arbiter;
+using KyberWeave.Arbiter;
+using KyberWeave.Arbiter.Hooks;
+using KyberWeave.Arbiter.Hooks.Adapters;
+using KyberWeave.Arbiter.Mcp;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Arbiter;
+using KyberWeave.Core.Arbiter.Credentials;
+using KyberWeave.Core.Arbiter.Providers;
+using KyberWeave.Core.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace KyberWeave.Tests.Arbiter;
 
-/// <summary>Resolves the Arbiter's registered ports the way the entry apps do, for tests that build a command or evaluator directly.</summary>
+/// <summary>Resolves the Arbiter's registered ports the way the entry app does, for tests that build a command, an engine or a tool directly.</summary>
 internal static class ArbiterTestServices
 {
-    private static readonly Lazy<IServiceProvider> Provider = new(() => new ServiceCollection().AddWeaveApplication().BuildServiceProvider());
+    private static readonly Lazy<IServiceProvider> Provider = new(() => new ServiceCollection().AddArbiterHost().BuildServiceProvider());
 
     private static readonly Lazy<ArbiterTestHost> Host = new(() => ArbiterTestHost.Create());
 
@@ -28,8 +38,103 @@ internal static class ArbiterTestServices
     }
 
     /// <summary>Resolves <typeparamref name="T"/> from the application layer's registrations.</summary>
+    /// <summary>Resolves <typeparamref name="T"/> from the entry app's registrations.</summary>
     /// <typeparam name="T">The service type.</typeparam>
     internal static T Get<T>()
         where T : notnull =>
         Provider.Value.GetRequiredService<T>();
+
+    /// <summary>Loads the host configuration the way the project hook does.</summary>
+    internal static KyberWeaveConfig LoadHostConfig(string repoRoot) => Get<IArbiterHostConfig>().Load(repoRoot);
+
+    /// <summary>Loads the host configuration for the given hook scope and home.</summary>
+    internal static KyberWeaveConfig LoadHostConfig(string repoRoot, HookScope scope, string? homeDirectory) =>
+        Get<IArbiterHostConfig>().Load(repoRoot, scope, homeDirectory);
+
+    /// <summary>The production engine over the registered ports, with the test's replacements for the pieces it names.</summary>
+    internal static ArbiterHookDecisionEngine Engine(
+        Func<KyberWeaveConfig, IArbiterProvider>? providerFactory = null,
+        Func<string, IArbiterGitFacts>? gitFactsFactory = null,
+        Func<string, IArbiterPlanReader>? planReaderFactory = null,
+        Func<string>? homeDirectory = null,
+        TimeProvider? clock = null,
+        Func<ICredentialStore>? credentialStoreFactory = null,
+        Func<string, string?>? environment = null,
+        IPlanRootResolver? planRoots = null) =>
+        new(
+            Get<IArbiterEvaluatorFactory>(),
+            Get<IArbiterStateFactory>(),
+            Get<IArbiterProviderFactory>(),
+            Get<IArbiterUserSettings>(),
+            Get<IPlanFacts>(),
+            planRoots ?? Get<IPlanRootResolver>(),
+            Get<IHookGitFactsFactory>(),
+            Get<ICredentialStore>(),
+            Get<IArbiterHostConfig>(),
+            Get<IProcessEnvironment>(),
+            providerFactory,
+            gitFactsFactory,
+            planReaderFactory,
+            homeDirectory,
+            clock,
+            credentialStoreFactory,
+            environment);
+
+    /// <summary>The default registry over <paramref name="engine"/> and the real transcript reader.</summary>
+    internal static HarnessAdapterRegistry Registry(IHookDecisionEngine engine) =>
+        HarnessAdapterRegistry.CreateDefault(engine, Get<IFactoryTranscriptSource>());
+
+    /// <summary>The command adapters over <paramref name="engine"/> and the real transcript reader.</summary>
+    internal static IReadOnlyList<IHarnessHookAdapter> CommandAdapters(IHookDecisionEngine engine) =>
+        CommandHookAdapters.All(engine, Get<IFactoryTranscriptSource>());
+
+    /// <summary>The Factory adapter over <paramref name="engine"/> and the real transcript reader.</summary>
+    internal static FactoryHookAdapter FactoryAdapter(IHookDecisionEngine engine) =>
+        new(engine, Get<IFactoryTranscriptSource>());
+
+    /// <summary>The hook command over a registry and a project-scope configuration loader.</summary>
+    /// <param name="registry">The harness adapters.</param>
+    /// <param name="configLoader">Loads the project configuration; a test passes one that counts its calls.</param>
+    /// <param name="newDecisionId">Builds a decision id; a new GUID when null.</param>
+    internal static HookCommand Command(
+        HarnessAdapterRegistry registry,
+        Func<string, KyberWeaveConfig> configLoader,
+        Func<string>? newDecisionId = null) =>
+        new(
+            registry,
+            new DelegateHostConfig(configLoader, Get<IArbiterHostConfig>()),
+            Get<IDispatchClaimStore>(),
+            Get<IClaudeHookCoverage>(),
+            Get<IProcessEnvironment>(),
+            newDecisionId);
+
+    /// <summary>The git facts over the real adapters.</summary>
+    internal static HookGitFacts HookGitFacts(string workingDirectory, string? homeDirectory = null, string? arbiterDirectory = null) =>
+        new(
+            Get<IGitRepositoryFacts>(),
+            Get<IPlanFileResolver>(),
+            Get<IHookSnapshotStore>(),
+            Get<IHookFileWindowReader>(),
+            Get<IRunCheckout>(),
+            Get<IRunStateStore>(),
+            Get<IProcessEnvironment>(),
+            Get<TimeProvider>(),
+            workingDirectory,
+            homeDirectory,
+            arbiterDirectory);
+
+    /// <summary>The serve tools over a serve context and the real file and triage ports.</summary>
+    internal static ArbiterTools Tools(ArbiterServeContext context) =>
+        new(new ArbiterServeService(context, Get<IFileTextFacts>(), Get<ICommentTriageFactory>(), Get<TimeProvider>()));
+
+    /// <summary>The project-scope configuration comes from a test's loader; every other answer is the real one.</summary>
+    private sealed class DelegateHostConfig(Func<string, KyberWeaveConfig> loader, IArbiterHostConfig real) : IArbiterHostConfig
+    {
+        public KyberWeaveConfig Load(string repoRoot, HookScope scope = HookScope.Project, string? homeDirectory = null) =>
+            scope == HookScope.Project ? loader(repoRoot) : real.Load(repoRoot, scope, homeDirectory);
+
+        public KyberWeaveConfig? LoadProject(string repoRoot) => real.LoadProject(repoRoot);
+
+        public string ResolveHomeDirectory(string? homeDirectory) => real.ResolveHomeDirectory(homeDirectory);
+    }
 }

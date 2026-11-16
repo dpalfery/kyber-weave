@@ -76,10 +76,10 @@ public sealed class ArbiterSummaryCommentTriageToolTests : IDisposable
 
     private ArbiterTools Tools(IArbiterProvider provider, IReadOnlyList<string> botLogins)
     {
-        ArbiterHookDecisionEngine engine = new(
+        ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
             providerFactory: _ => provider,
             homeDirectory: () => _home.Path);
-        return new ArbiterTools(new ArbiterServeContext(
+        return ArbiterTestServices.Tools(new ArbiterServeContext(
             _repo.Path,
             engine,
             TextWriter.Null,

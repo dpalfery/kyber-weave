@@ -149,8 +149,8 @@ public sealed class FactoryHookAdapterTests
         IHookDecisionEngine engine,
         Func<string, KyberWeaveConfig>? loader = null)
     {
-        HookCommand command = new(
-            HarnessAdapterRegistry.CreateDefault(engine),
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
             loader ?? (_ => EnabledConfig()),
             () => "decision-test-1");
         using StringWriter stdout = new();
@@ -247,8 +247,8 @@ public sealed class FactoryHookAdapterTests
     {
         int loads = 0;
         ContextualEngine engine = new();
-        HookCommand command = new(
-            HarnessAdapterRegistry.CreateDefault(engine),
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
             (string repoRoot) => { loads++; return EnabledConfig(); },
             () => "decision-test-1");
         using StringWriter stdout = new();
@@ -269,8 +269,8 @@ public sealed class FactoryHookAdapterTests
     {
         int loads = 0;
         ContextualEngine engine = new();
-        HookCommand command = new(
-            HarnessAdapterRegistry.CreateDefault(engine),
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
             (string repoRoot) => { loads++; return EnabledConfig(); },
             () => "decision-test-1");
         using StringWriter stdout = new();
@@ -292,8 +292,8 @@ public sealed class FactoryHookAdapterTests
         ContextualEngine engine = new();
         string stdin = Fixture("pre-task-dispatch.json").Replace(
             "\"tool_name\": \"Task\"", "\"tool_name\": \"task\"", StringComparison.Ordinal);
-        HookCommand command = new(
-            HarnessAdapterRegistry.CreateDefault(engine),
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
             (string repoRoot) => { loads++; return EnabledConfig(); },
             () => "decision-test-1");
         using StringWriter stdout = new();
@@ -703,7 +703,7 @@ public sealed class FactoryHookAdapterTests
     public void Adapters_AreRegisteredForFactoryToken()
     {
         ScriptedEngine engine = new();
-        HarnessAdapterRegistry registry = HarnessAdapterRegistry.CreateDefault(engine);
+        HarnessAdapterRegistry registry = ArbiterTestServices.Registry(engine);
 
         Assert.True(registry.TryGet(FactoryHookAdapter.Token, out IHarnessHookAdapter? adapter));
         Assert.IsType<FactoryHookAdapter>(adapter);

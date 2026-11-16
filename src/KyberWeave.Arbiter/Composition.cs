@@ -1,20 +1,17 @@
 using System.Reflection;
 using KyberWeave.Arbiter.Hooks;
-using KyberWeave.Core.Arbiter;
-using KyberWeave.Core.Arbiter.Facts;
-using KyberWeave.Core.Configuration;
-using YamlDotNet.Core;
-using KyberWeave.Core.FileSystem;
+using KyberWeave.Contracts.Services;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace KyberWeave.Arbiter;
 
-/// <summary>The composition root: wires the hook host's adapters, configuration loading and versioning.</summary>
+/// <summary>The composition root: parses the hook host's arguments, builds its container on the path that needs one, and calls the use case.</summary>
 public static class Composition
 {
     /// <summary>Dispatches <c>--version</c> and <c>hook</c>. Streams are parameters so the host contract is testable.</summary>
     /// <remarks>
     /// The hook path fails open (ADR 0072): an exception in the stdin read or the host
-    /// construction logs <c>KW-ARB-HOOK-001</c> to <paramref name="stderr"/> and allows with
+    /// construction (the container included) logs <c>KW-ARB-HOOK-001</c> to <paramref name="stderr"/> and allows with
     /// exit 0. Stdout carries only the decision document.
     /// </remarks>
     public static async Task<int> DispatchAsync(
@@ -83,6 +80,12 @@ public static class Composition
             try
             {
                 string stdinText = await stdin.ReadToEndAsync().ConfigureAwait(false);
+                if (commandFactory is null && HookFastPath.IsPassThrough(harness, caller, stdinText))
+                {
+                    // Nothing to decide: no container, no configuration, no engine.
+                    return 0;
+                }
+
                 HookCommand command = (commandFactory ?? CreateDefault)(stderr);
                 return command.Run(harness, caller, stdinText, stdout, stderr, scope, home);
             }
@@ -115,7 +118,29 @@ public static class Composition
                 }
             }
 
-            return ConductorGuard.Run(stdinText, stdout, stderr, OptionValue(args, "--allow-mcp"));
+            string? allowedMcpServer = OptionValue(args, "--allow-mcp");
+            if (ConductorGuard.TryAnswer(stdinText, stdout, stderr, allowedMcpServer, out int answered))
+            {
+                // Decided from the event alone: no container is built for it.
+                return answered;
+            }
+
+            IConductorGuard guard;
+            try
+            {
+                guard = ArbiterContainer.CreateGuards().GetRequiredService<IConductorGuard>();
+            }
+            catch (Exception ex)
+            {
+                // The guard fails closed: a container that cannot be built answers with an explicit deny.
+                await WriteBestEffortAsync(
+                    stderr,
+                    $"{HookCommand.FailClosedCode}: conductor guard could not start: {OneLine(ex.Message)}").ConfigureAwait(false);
+                await stdout.WriteAsync(ConductorGuard.DenyDocument("The conductor guard could not start, so this tool call was denied.")).ConfigureAwait(false);
+                return 0;
+            }
+
+            return guard.Run(stdinText, stdout, stderr, allowedMcpServer);
         }
 
         if (args.Length > 0 && string.Equals(args[0], "worker-guard", StringComparison.Ordinal))
@@ -141,7 +166,27 @@ public static class Composition
                 return 0;
             }
 
-            return WorkerGuard.Run(harness, stdinText, stdout, stderr, OptionValue(args, "--home"));
+            if (!WorkerGuard.NeedsDecision(harness, stdinText))
+            {
+                // A root agent, an agent outside the Squad catalog or a call that writes no file is never refused.
+                return 0;
+            }
+
+            IWorkerGuard worker;
+            try
+            {
+                worker = ArbiterContainer.CreateGuards().GetRequiredService<IWorkerGuard>();
+            }
+            catch (Exception ex)
+            {
+                // The guard only refuses on a fact it read (ADR 0072): a container that cannot be built allows.
+                await WriteBestEffortAsync(
+                    stderr,
+                    $"{HookCommand.FailClosedCode}: worker guard could not start ({OneLine(ex.Message)}); the tool call continues.").ConfigureAwait(false);
+                return 0;
+            }
+
+            return worker.Run(harness, stdinText, stdout, stderr, OptionValue(args, "--home"));
         }
 
         await stderr.WriteLineAsync(
@@ -166,12 +211,7 @@ public static class Composition
         string? allow = null;
         try
         {
-            HarnessAdapterRegistry registry =
-                HarnessAdapterRegistry.CreateDefault(new ArbiterHookDecisionEngine());
-            if (registry.TryGet(harness, out IHarnessHookAdapter? adapter) && adapter is not null)
-            {
-                allow = adapter.DisabledAllowDocument;
-            }
+            allow = HarnessAdapterRegistry.DisabledAllowDocumentOf(harness);
         }
         catch (Exception)
         {
@@ -213,100 +253,23 @@ public static class Composition
     /// <summary>The <c>--version</c> line: <c>kyber-weave-arbiter &lt;semver&gt;</c>.</summary>
     public static string VersionLine() => $"kyber-weave-arbiter {GetVersion()}";
 
-    /// <summary>Builds the production hook host: default adapters, host configuration, stderr logging.</summary>
-    internal static HookCommand CreateDefault(TextWriter log) =>
-        new(
-            HarnessAdapterRegistry.CreateDefault(new ArbiterHookDecisionEngine()),
-            LoadHostConfig,
-            () => ArbiterRecordId.New(DateTimeOffset.UtcNow));
-
-    /// <summary>
-    /// Loads the host configuration for <paramref name="repoRoot"/>. A missing or
-    /// malformed <c>.kyber-weave/kyber-weave.yml</c> is an internal error carrying
-    /// <c>KW-ARB-HOOK-001</c>: the host fails closed on classified events.
-    /// </summary>
-    internal static KyberWeaveConfig LoadHostConfig(string repoRoot) =>
-        LoadHostConfig(repoRoot, HookScope.Project, null);
-
-    internal static KyberWeaveConfig LoadHostConfig(string repoRoot, HookScope scope = HookScope.Project, string? homeDirectory = null)
+    /// <summary>Builds the production hook host: a container over the application layer, resolved to the hook command.</summary>
+    internal static HookCommand CreateDefault(TextWriter log)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
-
-        if (scope == HookScope.Global)
-        {
-            KyberWeaveConfigLoadResult project = KyberWeaveConfigLoader.TryLoad(repoRoot);
-            if (!project.Success)
-            {
-                throw new InvalidOperationException(
-                    $"{HookCommand.FailClosedCode}: failed to load project config '{project.ConfigPath}': {OneLine(project.Error ?? "unknown error")}");
-            }
-
-            if (project.Config is not null && project.Config.Arbiter.Enabled)
-            {
-                return project.Config;
-            }
-
-            string effectiveHome = ResolveHomeDirectory(homeDirectory);
-            string userConfigPath = UserHostConfig.GetPath(effectiveHome);
-            if (!File.Exists(userConfigPath))
-            {
-                throw new InvalidOperationException(
-                    $"{HookCommand.FailClosedCode}: missing user config '{userConfigPath}' for global scope. " +
-                    $"Create '{UserHostConfig.GetPath(effectiveHome)}'.");
-            }
-
-            try
-            {
-                string yaml = File.ReadAllText(userConfigPath);
-                KyberWeaveConfig config = new() { Arbiter = ArbiterConfigLoader.LoadUserConfig(yaml) };
-                return config;
-            }
-            catch (Exception ex) when (FileFailure.Is(ex) || ex is YamlException or InvalidOperationException)
-            {
-                throw new InvalidOperationException(
-                    $"{HookCommand.FailClosedCode}: malformed user config '{userConfigPath}': {OneLine(ex.Message)}",
-                    ex);
-            }
-        }
-
-        // Mirrors the lookup in KyberWeaveConfigLoader: the default directory path,
-        // then the legacy root path. TryLoad alone cannot report "missing" because it
-        // answers ProductDefaults when no file exists.
-        string defaultPath = Path.Combine(repoRoot, ".kyber-weave", "kyber-weave.yml");
-        string legacyPath = Path.Combine(repoRoot, "kyber-weave.yml");
-        if (!File.Exists(defaultPath) && !File.Exists(legacyPath))
-        {
-            throw new InvalidOperationException(
-                $"{HookCommand.FailClosedCode}: no .kyber-weave/kyber-weave.yml found under " +
-                $"'{repoRoot}'. Run kyber-weave docs init to create host configuration.");
-        }
-
-        KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(repoRoot);
-        if (!loaded.Success || loaded.Config is null)
-        {
-            throw new InvalidOperationException(
-                $"{HookCommand.FailClosedCode}: failed to load " +
-                $"'{loaded.ConfigPath ?? defaultPath}': {loaded.Error ?? "unknown error"}.");
-        }
-
-        return loaded.Config;
+        ArgumentNullException.ThrowIfNull(log);
+        return ArbiterContainer.Create().GetRequiredService<HookCommand>();
     }
 
-    internal static string ResolveHomeDirectory(string? homeDirectory)
+    private static async Task WriteBestEffortAsync(TextWriter writer, string line)
     {
-        if (string.IsNullOrWhiteSpace(homeDirectory) || string.Equals(homeDirectory, "~", StringComparison.Ordinal))
+        try
         {
-            return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            await writer.WriteLineAsync(line).ConfigureAwait(false);
         }
-
-        if (homeDirectory.StartsWith("~/", StringComparison.Ordinal))
+        catch (Exception)
         {
-            return Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                homeDirectory[2..]);
+            // The log is best effort.
         }
-
-        return homeDirectory;
     }
 
     private static string? OptionValue(string[] args, string name)

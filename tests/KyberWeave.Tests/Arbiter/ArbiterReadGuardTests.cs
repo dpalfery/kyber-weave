@@ -288,8 +288,8 @@ public sealed class ArbiterReadGuardTests
             .Replace("\"agent_type\": \"csharp-dev\",", string.Empty, StringComparison.Ordinal);
         int loads = 0;
         KyberWeaveConfig config = new() { Arbiter = new ArbiterConfig { Enabled = true } };
-        HookCommand command = new(
-            HarnessAdapterRegistry.CreateDefault(new AllowEngine()),
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(new AllowEngine()),
             root => { loads++; return config; },
             () => "decision-test-1");
         using StringWriter stdout = new();

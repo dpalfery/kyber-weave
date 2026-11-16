@@ -104,7 +104,7 @@ public sealed class ArbiterKiloCouncilItem3Tests : IDisposable
         Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
     };
 
-    private ArbiterHookDecisionEngine Engine(IArbiterProvider provider) => new(
+    private ArbiterHookDecisionEngine Engine(IArbiterProvider provider) => ArbiterTestServices.Engine(
         providerFactory: _ => provider,
         gitFactsFactory: _ => new NoGitFacts(),
         planReaderFactory: _ => new PlanStub(),

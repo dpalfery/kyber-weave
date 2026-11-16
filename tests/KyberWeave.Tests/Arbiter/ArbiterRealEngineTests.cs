@@ -113,19 +113,25 @@ public sealed class ArbiterRealEngineTests : IDisposable
         IArbiterGitFacts? gitFacts = null,
         Func<ICredentialStore>? credentialStoreFactory = null,
         Func<string, string?>? environment = null,
-        Func<IServiceProvider>? services = null)
+        IPlanRootResolver? planRoots = null)
     {
-        ArbiterHookDecisionEngine engine = new(
+        ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
             providerFactory: _ => provider,
             gitFactsFactory: gitFacts is null ? null : _ => gitFacts,
             homeDirectory: () => _home.Path,
             credentialStoreFactory: credentialStoreFactory,
             environment: environment,
-            services: services);
-        return new HookCommand(
-            HarnessAdapterRegistry.CreateDefault(engine),
-            Composition.LoadHostConfig,
+            planRoots: planRoots);
+        return ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
+            ArbiterTestServices.LoadHostConfig,
             () => "decision-test-1");
+    }
+
+    /// <summary>A plan root resolver that faults, standing in for a collaborator the engine cannot build or reach.</summary>
+    private sealed class ThrowingPlanRoots : IPlanRootResolver
+    {
+        public string Resolve(string hookRoot, string prompt, Func<string, IReadOnlyList<string>>? listWorktrees = null) => throw new NotSupportedException("container exploded");
     }
 
     private string Payload(string hookEvent, string target, string prompt, string? status = null, string agentType = "conductor")
@@ -300,7 +306,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
         WriteConfig(DisabledShippedRules());
         HookCommand command = CreateCommand(
             new FakeProvider(),
-            services: () => throw new NotSupportedException("container exploded"));
+            planRoots: new ThrowingPlanRoots());
 
         (int exit, string stdout, string log) = Run(command, Payload("PreToolUse", "csharp-dev", Prompt));
 

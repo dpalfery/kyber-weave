@@ -241,7 +241,7 @@ public sealed class ArbiterParallelDispatchAttributionTests : IDisposable
         _ => null,
         new InFlightLedger(_arbiter),
         new DecisionLog(_arbiter),
-        new HookGitFacts(new GitFacts(), new PlanPathResolver(), _repo.Path, _home.Path, _arbiter),
+        ArbiterTestServices.HookGitFacts(_repo.Path, _home.Path, _arbiter),
         new RealPlanReader(_repo.Path),
         new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             new GateReportFacts(),

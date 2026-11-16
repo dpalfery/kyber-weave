@@ -22,11 +22,20 @@ with no useful detail.
 
 ## Composition root
 
-`Composition.cs` builds the production `HookCommand`: the default
-`HarnessAdapterRegistry` (command hooks plus plugin hooks), host configuration loading,
-and decision ids. Tests construct `HookCommand` directly with scripted engines and
-counting config loaders — that is how the fast path proves it never loads
-`.kyber-weave/kyber-weave.yml`.
+This project only parses arguments and wires services; the decisions live in the layers.
+`Composition.cs` dispatches `--version`, `hook`, `guard` and `worker-guard`, and builds a plain
+`ServiceCollection` (`ArbiterContainer`) inside each path's own fault handler. It is never a Host
+builder, and an event that passes through untouched builds no container at all
+(`HookFastPath.IsPassThrough`). The pieces:
+
+- `src/KyberWeave.Domain/Arbiter/Hooks/`: the harness adapters, `HarnessAdapterRegistry`,
+  `ReadGuard`, `ArchitectShellGuard`, `PluginEnvelope`, the outcome records and the guards' pure rules.
+- `src/KyberWeave.Application/Arbiter/Hooks/`: `HookCommand` (the hook host), the decision engine,
+  `ConductorGuard`, `WorkerGuard` and `HookGitFacts`, behind the `Contracts/Services` interfaces.
+- `src/KyberWeave.Data/Hooks/Arbiter/`: the claim, snapshot and budget files, the Factory transcript reader.
+
+Tests build `HookCommand` through `ArbiterTestServices` with scripted engines and counting config
+loaders: that is how the fast path proves it never loads `.kyber-weave/kyber-weave.yml`.
 
 ## Fail open (ADR 0072)
 

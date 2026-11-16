@@ -172,14 +172,14 @@ public sealed class ArbiterKiloLeadsTests : IDisposable
     public async Task AClassifyCallWithANullBodyReturnsAnErrorAnswer()
     {
         using TempDirectory home = new();
-        ArbiterHookDecisionEngine engine = new(
+        ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
             providerFactory: _ => new NullAnswerProvider(),
             homeDirectory: () => home.Path);
-        ArbiterTools tools = new(new ArbiterServeContext(
+        ArbiterTools tools = ArbiterTestServices.Tools(new ArbiterServeContext(
             _sandbox.Path,
             engine,
             TextWriter.Null,
-            Composition.LoadHostConfig,
+            ArbiterTestServices.LoadHostConfig,
             _ => true));
         await WriteCitedFileAsync("docs/guide.md");
 

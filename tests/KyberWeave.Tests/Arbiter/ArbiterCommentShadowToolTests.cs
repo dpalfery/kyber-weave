@@ -71,7 +71,7 @@ public sealed class ArbiterCommentShadowToolTests : IDisposable
     /// <summary>The served tools over a configuration. The default is the shipped rules with the bot login configured.</summary>
     private ArbiterTools Tools(IArbiterProvider provider, KyberWeaveConfig? config = null)
     {
-        ArbiterHookDecisionEngine engine = new(
+        ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
             providerFactory: _ => provider,
             homeDirectory: () => _home.Path);
         KyberWeaveConfig configured = config ?? new KyberWeaveConfig
@@ -82,7 +82,7 @@ public sealed class ArbiterCommentShadowToolTests : IDisposable
                 CommentTriage = new ArbiterCommentTriageConfig([BotLogin]),
             },
         };
-        return new ArbiterTools(new ArbiterServeContext(
+        return ArbiterTestServices.Tools(new ArbiterServeContext(
             _repo.Path,
             engine,
             TextWriter.Null,

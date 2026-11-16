@@ -1,9 +1,11 @@
+using KyberWeave.Arbiter.Hooks.Adapters;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Data.Arbiter.Credentials;
+using KyberWeave.Data.Hooks.Arbiter;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -33,6 +35,12 @@ internal static class ArbiterDataServiceCollectionExtensions
         services.TryAddSingleton<IArbiterHttpHandlers, SocketArbiterHttpHandlers>();
         services.TryAddSingleton<IFileStatReader, FileStatReader>();
         services.TryAddSingleton<IArbiterUserOverrideWriter>(sp => new FileArbiterUserOverrideWriter(sp.GetRequiredService<IWritableFileSystem>()));
+        services.TryAddSingleton<IDispatchClaimStore, FileDispatchClaimStore>();
+        services.TryAddSingleton<IHookSnapshotStore, FileHookSnapshotStore>();
+        services.TryAddSingleton<IHookFileWindowReader, FileHookFileWindowReader>();
+        services.TryAddSingleton<IWorkerBudgetStore, FileWorkerBudgetStore>();
+        services.TryAddSingleton<IFileLinkProbe, FileLinkProbe>();
+        services.TryAddSingleton<IFactoryTranscriptSource, FileFactoryTranscriptSource>();
         return services;
     }
 }

@@ -45,14 +45,14 @@ public sealed class ArbiterSectionsAndCommentToolTests : IDisposable
 
     private ArbiterTools Tools()
     {
-        ArbiterHookDecisionEngine engine = new(
+        ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
             providerFactory: _ => new NoProviderAnswers(),
             homeDirectory: () => _home.Path);
-        return new ArbiterTools(new ArbiterServeContext(
+        return ArbiterTestServices.Tools(new ArbiterServeContext(
             _repo.Path,
             engine,
             TextWriter.Null,
-            Composition.LoadHostConfig,
+            ArbiterTestServices.LoadHostConfig,
             _ => true));
     }
 

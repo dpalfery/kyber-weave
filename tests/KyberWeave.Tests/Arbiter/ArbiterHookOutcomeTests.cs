@@ -87,7 +87,7 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
 
     private static ArbiterRule Enforced(string id) => Shipped(id) with { Shadow = false };
 
-    private ArbiterHookDecisionEngine Engine(IArbiterProvider provider) => new(
+    private ArbiterHookDecisionEngine Engine(IArbiterProvider provider) => ArbiterTestServices.Engine(
         providerFactory: _ => provider,
         gitFactsFactory: _ => new PassThroughGitFacts(),
         planReaderFactory: _ => new PassThroughPlanReader(),

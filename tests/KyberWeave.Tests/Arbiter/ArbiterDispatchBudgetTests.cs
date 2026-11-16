@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Services;
 using System.Text.Json;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Arbiter;
@@ -241,7 +242,7 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
     private string SeatGuard(string json, DateTimeOffset now, ArbiterDispatchBudgetConfig seatBudget)
     {
         using StringWriter stdout = new();
-        WorkerGuard.Run(
+        ArbiterTestServices.Get<IWorkerGuard>().Run(
             "copilot-cli", json, stdout, TextWriter.Null, _home.Path, () => now, _ => ArbiterDispatchBudgetConfig.Defaults, _ => seatBudget);
         return stdout.ToString();
     }
@@ -249,7 +250,7 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
     private string Guard(string harness, string json, DateTimeOffset now, ArbiterDispatchBudgetConfig? budget)
     {
         using StringWriter stdout = new();
-        WorkerGuard.Run(harness, json, stdout, TextWriter.Null, _home.Path, () => now, _ => budget);
+        ArbiterTestServices.Get<IWorkerGuard>().Run(harness, json, stdout, TextWriter.Null, _home.Path, () => now, _ => budget);
         return stdout.ToString();
     }
 

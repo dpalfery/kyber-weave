@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Data.Arbiter;
 using KyberWeave.Data.Hooks;
@@ -165,7 +166,7 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
     public void Return_ListsThePathsADispatchLeftInTheCanonicalCheckout()
     {
         StartInWorktree();
-        HookGitFacts facts = new(new GitFacts(), new PlanPathResolver(), _repo, _home.Path);
+        HookGitFacts facts = ArbiterTestServices.HookGitFacts(_repo, _home.Path);
         Enrich(facts, "pre");
 
         File.WriteAllText(Path.Combine(_repo, "src", "Job.cs"), "class Job { int Id; }\n");
@@ -185,7 +186,7 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
     {
         StartInWorktree();
         File.WriteAllText(Path.Combine(_repo, "notes.txt"), "a person's edit before the dispatch\n");
-        HookGitFacts facts = new(new GitFacts(), new PlanPathResolver(), _repo, _home.Path);
+        HookGitFacts facts = ArbiterTestServices.HookGitFacts(_repo, _home.Path);
         Enrich(facts, "pre");
 
         File.WriteAllText(Path.Combine(_worktree, "src", "Job.cs"), "class Job { int Id; }\n");
@@ -198,7 +199,7 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
     [Fact]
     public void Return_LeavesTheFactAbsentWithNoRunInAWorktreeOfItsOwn()
     {
-        HookGitFacts facts = new(new GitFacts(), new PlanPathResolver(), _repo, _home.Path);
+        HookGitFacts facts = ArbiterTestServices.HookGitFacts(_repo, _home.Path);
         Enrich(facts, "pre");
         File.WriteAllText(Path.Combine(_repo, "src", "Job.cs"), "class Job { int Id; }\n");
 
@@ -213,7 +214,7 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
     {
         StartInWorktree();
         File.WriteAllText(Path.Combine(_repo, "src", "Job.cs"), "class Job { int Stray; }\n");
-        HookGitFacts facts = new(new GitFacts(), new PlanPathResolver(), _repo, _home.Path);
+        HookGitFacts facts = ArbiterTestServices.HookGitFacts(_repo, _home.Path);
         Enrich(facts, "pre");
 
         Git(_repo, "restore", "src/Job.cs");
@@ -227,7 +228,7 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
     public void Return_ACopilotRootConductorsUnnamedDispatchIsCheckedToo()
     {
         StartInWorktree();
-        HookGitFacts facts = new(new GitFacts(), new PlanPathResolver(), _repo, _home.Path);
+        HookGitFacts facts = ArbiterTestServices.HookGitFacts(_repo, _home.Path);
         ArbiterFactSet pre = Enrich(facts, "pre", harness: "copilot-cli", caller: null);
         Assert.True(pre.TryGet("delegation.target-profile", out _));
 
@@ -255,7 +256,7 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
             _ => null,
             new InFlightLedger(arbiterDirectory),
             new DecisionLog(arbiterDirectory),
-            new HookGitFacts(new GitFacts(), new PlanPathResolver(), _repo, _home.Path, arbiterDirectory),
+            ArbiterTestServices.HookGitFacts(_repo, _home.Path, arbiterDirectory),
             new ArbiterEvaluatorFixtures.PlanFacts(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             new GateReportFacts(),
@@ -344,7 +345,7 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
     private string Guard(string harness, string json)
     {
         using StringWriter stdout = new();
-        WorkerGuard.Run(harness, json, stdout, TextWriter.Null, _home.Path);
+        ArbiterTestServices.Get<IWorkerGuard>().Run(harness, json, stdout, TextWriter.Null, _home.Path);
         return stdout.ToString();
     }
 

@@ -29,4 +29,9 @@ public interface IFileTextFacts
     /// </summary>
     /// <returns>The full path, or null when the path leaves the root, crosses a link, or names no file.</returns>
     string? ResolveContainedFile(string repoRoot, string path);
+
+    /// <summary>The size of a file in bytes.</summary>
+    /// <param name="fullPath">The file's full path, as <see cref="ResolveContainedFile"/> returned it.</param>
+    /// <returns>The length in bytes.</returns>
+    long LengthOf(string fullPath);
 }

@@ -120,8 +120,8 @@ public sealed class ArbiterPlanWorktreeTests
             Path.Combine(probe.Root, ".kyber-weave", "kyber-weave.yml"),
             "ontology:\n  docs-root: docs\narbiter:\n  enabled: true\n  provider:\n    kind: none\n");
 
-        ArbiterHookDecisionEngine engine = new(providerFactory: _ => new NoneProvider(), homeDirectory: () => home.Path);
-        HookCommand command = new(HarnessAdapterRegistry.CreateDefault(engine), Composition.LoadHostConfig, () => "wt-1");
+        ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(providerFactory: _ => new NoneProvider(), homeDirectory: () => home.Path);
+        HookCommand command = ArbiterTestServices.Command(ArbiterTestServices.Registry(engine), ArbiterTestServices.LoadHostConfig, () => "wt-1");
         string toolInput = JsonSerializer.Serialize(new Dictionary<string, string>
         {
             ["description"] = "T7",
@@ -163,8 +163,8 @@ public sealed class ArbiterPlanWorktreeTests
             Path.Combine(probe.Root, ".kyber-weave", "kyber-weave.yml"),
             "ontology:\n  docs-root: docs\narbiter:\n  enabled: true\n  provider:\n    kind: none\n");
 
-        ArbiterHookDecisionEngine engine = new(providerFactory: _ => new NoneProvider(), homeDirectory: () => home.Path);
-        HookCommand command = new(HarnessAdapterRegistry.CreateDefault(engine), Composition.LoadHostConfig, () => "wt-2");
+        ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(providerFactory: _ => new NoneProvider(), homeDirectory: () => home.Path);
+        HookCommand command = ArbiterTestServices.Command(ArbiterTestServices.Registry(engine), ArbiterTestServices.LoadHostConfig, () => "wt-2");
         string prompt = $"TASK_ID: T7\nWORKTREE: {worktree}\n\nWrite the failing tests in tests/StatusCardsTests.cs.";
         string stdin = JsonSerializer.Serialize(new Dictionary<string, object>
         {

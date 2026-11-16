@@ -120,8 +120,8 @@ public sealed class CodexHookAdapterTests
         IHookDecisionEngine engine,
         Func<string, KyberWeaveConfig>? loader = null)
     {
-        HookCommand command = new(
-            HarnessAdapterRegistry.CreateDefault(engine),
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
             loader ?? (_ => EnabledConfig()),
             () => "decision-test-1");
         using StringWriter stdout = new();
@@ -227,8 +227,8 @@ public sealed class CodexHookAdapterTests
     {
         int loads = 0;
         ScriptedEngine engine = new();
-        HookCommand command = new(
-            HarnessAdapterRegistry.CreateDefault(engine),
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
             (string repoRoot) => { loads++; return EnabledConfig(); },
             () => "decision-test-1");
         using StringWriter stdout = new();
@@ -247,8 +247,8 @@ public sealed class CodexHookAdapterTests
     {
         int loads = 0;
         ScriptedEngine engine = new();
-        HookCommand command = new(
-            HarnessAdapterRegistry.CreateDefault(engine),
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(engine),
             (string repoRoot) => { loads++; return EnabledConfig(); },
             () => "decision-test-1");
         using StringWriter stdout = new();
@@ -335,7 +335,7 @@ public sealed class CodexHookAdapterTests
     public void Adapters_AreRegisteredForCodexToken()
     {
         ScriptedEngine engine = new();
-        HarnessAdapterRegistry registry = HarnessAdapterRegistry.CreateDefault(engine);
+        HarnessAdapterRegistry registry = ArbiterTestServices.Registry(engine);
 
         Assert.True(registry.TryGet(CodexHookAdapter.Token, out IHarnessHookAdapter? adapter));
         Assert.IsType<CodexHookAdapter>(adapter);

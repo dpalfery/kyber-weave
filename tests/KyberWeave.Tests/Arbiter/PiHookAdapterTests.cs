@@ -79,7 +79,7 @@ public sealed class PiHookAdapterTests
         string stdin, string? caller, ScriptedEngine engine)
     {
         PluginHookAdapter adapter = new("pi", "Agent", "subagent_type", "prompt", engine);
-        HookCommand command = new(
+        HookCommand command = ArbiterTestServices.Command(
             new HarnessAdapterRegistry([adapter]),
             _ => EnabledConfig(),
             () => "decision-test-1");
@@ -190,7 +190,7 @@ public sealed class PiHookAdapterTests
     {
         ScriptedEngine engine = new();
         PluginHookAdapter adapter = new("pi", "Agent", "subagent_type", "prompt", engine);
-        HookCommand command = new(
+        HookCommand command = ArbiterTestServices.Command(
             new HarnessAdapterRegistry([adapter]),
             _ => EnabledConfig(),
             () => "decision-test-1");
@@ -216,7 +216,7 @@ public sealed class PiHookAdapterTests
         Assert.IsType<PluginHookAdapter>(adapter);
 
         Assert.True(
-            HarnessAdapterRegistry.CreateDefault(engine).TryGet("pi", out _),
+            ArbiterTestServices.Registry(engine).TryGet("pi", out _),
             "The default registry must serve the pi harness.");
     }
 }

@@ -447,7 +447,7 @@ public sealed class ArbiterChangedHunksTests : IDisposable
             Cwd = root,
             IsDispatch = false,
         };
-        return new HookGitFacts(new GitFacts(), new PlanPathResolver(), root, _home.Path, _arbiter.Path).Enrich(facts, classification, ev);
+        return ArbiterTestServices.HookGitFacts(root, _home.Path, _arbiter.Path).Enrich(facts, classification, ev);
     }
 
     private static ArbiterFactSet Declare(params string[] names)

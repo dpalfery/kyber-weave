@@ -181,7 +181,7 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
 
     private static ArbiterTools Tools(IArbiterProvider provider, string root, TempDirectory home, IReadOnlyList<ArbiterRule> rules)
     {
-        ArbiterHookDecisionEngine engine = new(providerFactory: _ => provider, homeDirectory: () => home.Path);
+        ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(providerFactory: _ => provider, homeDirectory: () => home.Path);
         KyberWeaveConfig config = new()
         {
             Arbiter = ArbiterConfig.ProductDefaults with
@@ -191,7 +191,7 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
                 CommentTriage = new ArbiterCommentTriageConfig([BotLogin]),
             },
         };
-        return new ArbiterTools(new ArbiterServeContext(root, engine, TextWriter.Null, _ => config, _ => true));
+        return ArbiterTestServices.Tools(new ArbiterServeContext(root, engine, TextWriter.Null, _ => config, _ => true));
     }
 
     /// <summary>The tool's inline JSON for a disabled rule carries status not-evaluated, and an answered call carries answered.</summary>

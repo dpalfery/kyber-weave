@@ -206,6 +206,6 @@ public sealed class ArbiterStepOneFactsTests : IDisposable
 
         TriggerClassification classification = TriggerClassifier.ClassifySingle(ev, "review-lens", prompt);
         ArbiterFactSet facts = TriggerFactBuilder.Build(classification, prompt, KyberWeaveConfig.ProductDefaults);
-        return new HookGitFacts(new GitFacts(), new PlanPathResolver(), _probe.Root, _home.Path).Enrich(facts, classification, ev);
+        return ArbiterTestServices.HookGitFacts(_probe.Root, _home.Path).Enrich(facts, classification, ev);
     }
 }
