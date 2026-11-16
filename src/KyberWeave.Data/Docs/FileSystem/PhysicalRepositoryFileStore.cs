@@ -1,6 +1,7 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Closeout;
+using KyberWeave.Core.FileSystem;
 using KyberWeave.Data.Hooks;
 
 namespace KyberWeave.Data.Docs.FileSystem;
@@ -52,6 +53,9 @@ public sealed class PhysicalRepositoryFileStore : IRepositoryFileStore
 
     /// <inheritdoc />
     public string? ReadTextIfPresent(string path) => PresentFile.ReadIfPresent(path);
+
+    /// <inheritdoc />
+    public void WriteAllTextAtomic(string path, string contents) => AtomicFile.WriteAllText(path, contents);
 
     /// <inheritdoc />
     public Stream OpenRead(string path) => File.OpenRead(path);

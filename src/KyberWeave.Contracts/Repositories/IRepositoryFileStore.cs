@@ -25,6 +25,11 @@ public interface IRepositoryFileStore : IWritableFileSystem
     /// <exception cref="IOException">The file cannot be read, is a folder, or is larger than the bound.</exception>
     string? ReadTextIfPresent(string path);
 
+    /// <summary>Writes a whole text file so a reader never sees it half written.</summary>
+    /// <param name="path">The file.</param>
+    /// <param name="contents">The text.</param>
+    void WriteAllTextAtomic(string path, string contents);
+
     /// <summary>Opens a file for reading.</summary>
     /// <param name="path">The file.</param>
     /// <returns>A read stream the caller disposes.</returns>
