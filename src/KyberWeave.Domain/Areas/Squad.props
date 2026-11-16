@@ -6,6 +6,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Which parts of each agent's reference files apply to a run; read by `squad brief`. -->
+    <EmbeddedResource Include="Squad\Briefs\Resources\briefs.yml" LogicalName="Squad.briefs.yml" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!--
       The user-home response guidance a global `squad update` deploys to
       ~/.kyber-weave/response-guidance.md. The default text ships as a resource so an installed

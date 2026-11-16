@@ -20,7 +20,7 @@ public static class SquadReferenceLocator
     /// Each harness's project-scope root directory. The distribution test renders the squad for every harness
     /// and fails when a deployed reference file is not in a directory <see cref="Candidates"/> names.
     /// </summary>
-    internal static IReadOnlyDictionary<SquadTarget, string> ProjectRoots { get; } =
+    public static IReadOnlyDictionary<SquadTarget, string> ProjectRoots { get; } =
         new Dictionary<SquadTarget, string>
         {
             [SquadTarget.Claude] = ".claude",

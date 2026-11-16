@@ -812,19 +812,19 @@
       "bound": "Builds only; nothing starts on this line. Every child runs through the injected IProcessExecutor, which kyber-weave run start binds to ProcessExecutor.WithTimeout(120 s) (RunStartCommand.ToolTimeout); ProcessRunner.Run kills the child tree on expiry. argv only, in the repository root, in a local checkout; the only network call is the one `git fetch origin --prune` the step exists for."
     },
     {
-      "file": "src/KyberWeave.Core.Squad/Instances/SquadHarnessLauncher.cs",
+      "file": "src/KyberWeave.Data/Squad/Instances/SquadHarnessLauncher.cs",
       "text": "public static ProcessStartInfo BuildStartInfo(",
       "count": 2,
       "bound": "Method definitions (two overloads). They start nothing; they return a ProcessStartInfo."
     },
     {
-      "file": "src/KyberWeave.Core.Squad/Instances/SquadHarnessLauncher.cs",
+      "file": "src/KyberWeave.Data/Squad/Instances/SquadHarnessLauncher.cs",
       "text": "ProcessStartInfo startInfo = new()",
       "count": 1,
       "bound": "Builds only; nothing starts on this line. Started by RunInteractive (ProcessRunner.cs:177), unbounded by design (see that entry)."
     },
     {
-      "file": "src/KyberWeave.Core.Squad/Instances/SquadHarnessLauncher.cs",
+      "file": "src/KyberWeave.Data/Squad/Instances/SquadHarnessLauncher.cs",
       "text": "return BuildStartInfo(",
       "count": 1,
       "bound": "Delegating call to the six-argument overload. It builds a ProcessStartInfo and starts nothing."

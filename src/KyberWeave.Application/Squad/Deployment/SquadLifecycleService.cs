@@ -585,7 +585,7 @@ public sealed class SquadLifecycleService
     ///     newline that would split one warning into two log lines — are replaced, and the caller
     ///     single-quotes the result.
     /// </summary>
-    internal static string SanitizeTargetTokenForWarning(string token)
+    public static string SanitizeTargetTokenForWarning(string token)
     {
         ArgumentNullException.ThrowIfNull(token);
 

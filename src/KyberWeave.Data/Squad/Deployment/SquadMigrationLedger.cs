@@ -15,15 +15,15 @@ namespace KyberWeave.Core.Squad.Deployment;
 /// one. A ledger that does not parse, or does not match the schema, is read as empty; the caller reports it, and the
 /// next successful write replaces it with a valid ledger.
 /// </remarks>
-internal sealed record SquadMigrationLedger(
+public sealed record SquadMigrationLedger(
     IReadOnlyList<string> GlobalMigratedFrom,
     IReadOnlyList<string> ProjectsImported)
 {
     /// <summary>The schema identifier written into every ledger.</summary>
-    internal const string Schema = "kyber-squad.migration-ledger/v1";
+    public const string Schema = "kyber-squad.migration-ledger/v1";
 
     /// <summary>The file name, beside the home registry.</summary>
-    internal const string FileName = "migration-ledger.json";
+    public const string FileName = "migration-ledger.json";
 
     private const string GlobalProperty = "globalMigratedFrom";
     private const string ProjectsProperty = "projectsImported";
@@ -35,29 +35,29 @@ internal sealed record SquadMigrationLedger(
     };
 
     /// <summary>A ledger that records nothing.</summary>
-    internal static SquadMigrationLedger Empty { get; } = new([], []);
+    public static SquadMigrationLedger Empty { get; } = new([], []);
 
     /// <summary>Whether the legacy global root with this key has already been copied into the home.</summary>
-    internal bool HasGlobalMigration(string legacyKey) =>
+    public bool HasGlobalMigration(string legacyKey) =>
         GlobalMigratedFrom.Contains(legacyKey, StringComparer.Ordinal);
 
     /// <summary>Whether the in-repo state of the project with this root key has already been imported.</summary>
-    internal bool HasProjectImport(string rootKey) =>
+    public bool HasProjectImport(string rootKey) =>
         ProjectsImported.Contains(rootKey, StringComparer.Ordinal);
 
     /// <summary>Returns this ledger with one more global migration recorded.</summary>
-    internal SquadMigrationLedger WithGlobalMigration(string legacyKey) =>
+    public SquadMigrationLedger WithGlobalMigration(string legacyKey) =>
         this with { GlobalMigratedFrom = Record(GlobalMigratedFrom, legacyKey) };
 
     /// <summary>Returns this ledger with one more project import recorded.</summary>
-    internal SquadMigrationLedger WithProjectImport(string rootKey) =>
+    public SquadMigrationLedger WithProjectImport(string rootKey) =>
         this with { ProjectsImported = Record(ProjectsImported, rootKey) };
 
     /// <summary>
     /// Reads the ledger at <paramref name="path"/>. A missing file is an empty ledger. A file that cannot be read as a
     /// ledger is an empty ledger, and <paramref name="unreadableReason"/> says why.
     /// </summary>
-    internal static SquadMigrationLedger Read(string path, out string? unreadableReason)
+    public static SquadMigrationLedger Read(string path, out string? unreadableReason)
     {
         unreadableReason = null;
         if (!File.Exists(path))
@@ -79,7 +79,7 @@ internal sealed record SquadMigrationLedger(
     }
 
     /// <summary>The ledger as the bytes that are written. Keys are sorted, so one record always writes one file.</summary>
-    internal string Serialize()
+    public string Serialize()
     {
         JsonObject document = new()
         {

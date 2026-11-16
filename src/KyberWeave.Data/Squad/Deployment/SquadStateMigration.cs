@@ -444,7 +444,7 @@ public sealed class SquadStateMigration
         Justification = "The lease is acquired inside the try and disposed by the using statement that follows; a busy root returns before any lease exists.")]
     private static CopyOutcome WriteUnderLease(string leaseIdentity, string homeReceiptPath, Action write)
     {
-        SquadTransaction.TransactionLease lease;
+        TransactionLease lease;
         try
         {
             lease = SquadTransaction.AcquireLease(leaseIdentity);

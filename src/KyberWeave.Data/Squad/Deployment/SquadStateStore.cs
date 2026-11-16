@@ -16,16 +16,16 @@ public sealed class SquadStateStore
     private const string TransactionDirectoryName = ".squad-transaction";
 
     /// <summary>Schema identifier for Squad lock v1 (unmodified portable locks without model presets).</summary>
-    internal const string LockSchemaV1 = "kyber-squad.lock/v1";
+    public const string LockSchemaV1 = "kyber-squad.lock/v1";
 
     /// <summary>Schema identifier for Squad lock v2 (recording active model presets per target).</summary>
-    internal const string LockSchemaV2 = "kyber-squad.lock/v2";
+    public const string LockSchemaV2 = "kyber-squad.lock/v2";
 
     /// <summary>
     ///     The registry schema. Its entries are keyed by root key, so a registry rebuilt from
     ///     per-project state and one written by this code agree on identity.
     /// </summary>
-    internal const string RegistrySchema = "kyber-squad.registry/v1";
+    public const string RegistrySchema = "kyber-squad.registry/v1";
 
     private const string RegistryFileName = "registry.json";
     private const string RegistryProjectsProperty = "projects";
@@ -50,19 +50,19 @@ public sealed class SquadStateStore
     ///     receipts are anchored on the home, which only the store knows, so the planner writes this
     ///     portable marker and the transaction replaces it at write time. Legacy receipts carry it too.
     /// </summary>
-    internal const string UnanchoredTargetRoot = ".";
+    public const string UnanchoredTargetRoot = ".";
 
     /// <summary>
     ///     The one receipt schema source (#91 / A3): project receipts stay on this schema forever,
     ///     and it is also what a legacy Global receipt written before #91 carries.
     /// </summary>
-    internal const string ReceiptSchemaV1 = "kyber-squad.receipt/v1";
+    public const string ReceiptSchemaV1 = "kyber-squad.receipt/v1";
 
     /// <summary>
     ///     Written for Global receipts only, additive over v1 with a required <c>layout</c> field.
     ///     An older CLI that predates this schema refuses it outright rather than misreading it.
     /// </summary>
-    internal const string ReceiptSchemaV2 = "kyber-squad.receipt/v2";
+    public const string ReceiptSchemaV2 = "kyber-squad.receipt/v2";
 
     /// <summary>
     /// Written for project receipts that own at least one hook-file block, additive over the
@@ -70,7 +70,7 @@ public sealed class SquadStateStore
     /// stay byte-identical v1 or v2, as ADR 0024 requires. An older CLI that predates this
     /// schema refuses it outright rather than misreading it.
     /// </summary>
-    internal const string ReceiptSchemaV3 = "kyber-squad.receipt/v3";
+    public const string ReceiptSchemaV3 = "kyber-squad.receipt/v3";
 
     private static readonly JsonWriterOptions ReceiptWriterOptions = new()
     {
@@ -156,7 +156,7 @@ public sealed class SquadStateStore
     ///     layout detail behind <see cref="SquadReceipt.HomeFiles" />: a host asks the receipt what
     ///     Squad owns, not where the home happens to put it.
     /// </remarks>
-    internal string ResolveHomeOwnedFilesRoot()
+    public string ResolveHomeOwnedFilesRoot()
     {
         return Path.GetDirectoryName(ResolveHomeStateDirectory())
                ?? throw new InvalidOperationException(
@@ -204,7 +204,7 @@ public sealed class SquadStateStore
     ///     Lists the registry exactly as <see cref="ListProjects()" /> does, but never writes the rebuilt registry
     ///     back. A read-only caller, such as a migration dry run, must not change the home to answer a question.
     /// </summary>
-    internal IReadOnlyList<SquadProjectRegistryEntry> ListProjectsWithoutRebuild()
+    public IReadOnlyList<SquadProjectRegistryEntry> ListProjectsWithoutRebuild()
     {
         return ListProjects(false);
     }
@@ -662,7 +662,7 @@ public sealed class SquadStateStore
             : null;
     }
 
-    internal string ResolveLockPath(string targetRoot, SquadDeploymentScope scope)
+    public string ResolveLockPath(string targetRoot, SquadDeploymentScope scope)
     {
         return ResolveStateFile(targetRoot, scope, LockFileName);
     }
@@ -678,7 +678,7 @@ public sealed class SquadStateStore
     ///     address the transaction through this directory, which is why it is independent of the
     ///     state files' own location.
     /// </summary>
-    internal string ResolveTransactionDirectory(string targetRoot, SquadDeploymentScope scope)
+    public string ResolveTransactionDirectory(string targetRoot, SquadDeploymentScope scope)
     {
         return scope switch
         {
@@ -703,7 +703,7 @@ public sealed class SquadStateStore
     ///     stays free of transaction evidence. The home journal may sit on another volume from the target
     ///     root; a staged file is then moved across that boundary rather than renamed within it.
     /// </remarks>
-    internal string ResolveTransactionWorkDirectory(
+    public string ResolveTransactionWorkDirectory(
         string targetRoot,
         SquadDeploymentScope scope)
     {
@@ -714,7 +714,7 @@ public sealed class SquadStateStore
     ///     The directory that holds a transaction's staged and backed-up target files. Both scopes keep it in
     ///     the journal, see <see cref="ResolveTransactionWorkDirectory" />.
     /// </summary>
-    internal string ResolveFileWorkDirectory(
+    public string ResolveFileWorkDirectory(
         string targetRoot,
         SquadDeploymentScope scope)
     {
@@ -726,7 +726,7 @@ public sealed class SquadStateStore
     ///     A project's journal is beside its root, so the root is the authority. A global journal is
     ///     beside the home, so the home is the authority.
     /// </summary>
-    internal string ResolveStateAuthorityRoot(
+    public string ResolveStateAuthorityRoot(
         string targetRoot,
         SquadDeploymentScope scope)
     {
@@ -748,7 +748,7 @@ public sealed class SquadStateStore
     ///     root contend. A global transaction is leased on the home, which is also the global journal's
     ///     anchor, so a project installed at the home root contends with global state and any other root does not.
     /// </summary>
-    internal string ResolveLeaseIdentity(string targetRoot, SquadDeploymentScope scope)
+    public string ResolveLeaseIdentity(string targetRoot, SquadDeploymentScope scope)
     {
         return scope switch
         {
@@ -763,7 +763,7 @@ public sealed class SquadStateStore
     ///     The canonical physical home directory, which may not exist yet. It keys the global lease and is
     ///     the value a global receipt records, so two spellings of one home never diverge on identity.
     /// </summary>
-    internal string ResolveHomeRoot()
+    public string ResolveHomeRoot()
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(UserPaths.HomeDirectory);
         return SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(UserPaths.HomeDirectory);
@@ -786,7 +786,7 @@ public sealed class SquadStateStore
     ///     home's parent rather than the home, so a home that did not exist before the transaction is
     ///     created and then removed on rollback. Nothing above the home is ever recorded or removed.
     /// </summary>
-    internal string ResolveHomeCreationBoundary()
+    public string ResolveHomeCreationBoundary()
     {
         return Path.GetDirectoryName(ResolveHomeRoot())
                ?? throw new InvalidOperationException("The Squad home directory has no parent to anchor state on.");

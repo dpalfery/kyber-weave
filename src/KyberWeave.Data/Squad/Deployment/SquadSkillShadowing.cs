@@ -28,7 +28,7 @@ public sealed record SquadSkillShadow(string Name, string ProjectPath, string In
 /// output. Content is compared without the frontmatter and line-ending differences, because each
 /// harness renders its own frontmatter around the same skill; a copy equal to any installed copy is
 /// the same skill. Each project skill location is one a renderer writes to
-/// (<see cref="SquadRendererRegistry.ProjectSkillRoots"/>), so the list cannot drift from the renderers.
+/// (<see cref="SquadSkillOutputPaths.ProjectSkillRoots"/>), so the list cannot drift from the renderers.
 /// </para>
 /// </remarks>
 public static class SquadSkillShadowing
@@ -62,7 +62,7 @@ public static class SquadSkillShadowing
 
             if (copies.Count == 0) continue;
 
-            foreach (string location in SquadRendererRegistry.ProjectSkillRoots())
+            foreach (string location in SquadSkillOutputPaths.ProjectSkillRoots())
             {
                 string candidate = Path.GetFullPath(Path.Combine(
                     root, location.Replace('/', Path.DirectorySeparatorChar), skill.Key, SkillFileName));

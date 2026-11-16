@@ -3056,7 +3056,8 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         string sourcePath = Path.Combine(
             KyberWeaveTestPaths.ToolRoot,
             "src",
-            "KyberWeave.Core.Squad",
+            "KyberWeave.Data",
+            "Squad",
             "Deployment",
             "SquadTransaction.cs");
         string source = File.ReadAllText(sourcePath, Encoding.UTF8);
@@ -3569,7 +3570,8 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         string transactionSource = File.ReadAllText(Path.Combine(
             KyberWeaveTestPaths.ToolRoot,
             "src",
-            "KyberWeave.Core.Squad",
+            "KyberWeave.Data",
+            "Squad",
             "Deployment",
             "SquadTransaction.cs"), Encoding.UTF8);
 
@@ -4061,7 +4063,8 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         string transactionSource = File.ReadAllText(Path.Combine(
             KyberWeaveTestPaths.ToolRoot,
             "src",
-            "KyberWeave.Core.Squad",
+            "KyberWeave.Data",
+            "Squad",
             "Deployment",
             "SquadTransaction.cs"), Encoding.UTF8);
         string restoreIntent = ExtractMethod(transactionSource, "RestoreIntent");
@@ -4254,7 +4257,8 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         string source = File.ReadAllText(Path.Combine(
             KyberWeaveTestPaths.ToolRoot,
             "src",
-            "KyberWeave.Core.Squad",
+            "KyberWeave.Data",
+            "Squad",
             "Deployment",
             "SquadTransaction.cs"), Encoding.UTF8);
         string declaration = ExtractMethodDeclaration(source, "PublishStageNoOverwrite");
@@ -4353,7 +4357,8 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         string source = File.ReadAllText(Path.Combine(
             KyberWeaveTestPaths.ToolRoot,
             "src",
-            "KyberWeave.Core.Squad",
+            "KyberWeave.Data",
+            "Squad",
             "Deployment",
             "SquadTransaction.cs"), Encoding.UTF8);
         string capture = ExtractMethod(source, "CaptureVerifiedRestorePayload");

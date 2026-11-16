@@ -554,6 +554,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             Path.Combine(toolRoot, "src", "KyberWeave.Core", "KyberWeave.Core.csproj"),
             Path.Combine(toolRoot, "src", "KyberWeave.Core.Docs", "KyberWeave.Core.Docs.csproj"),
             Path.Combine(toolRoot, "src", "KyberWeave.Core.Squad", "KyberWeave.Core.Squad.csproj"),
+            Path.Combine(toolRoot, "src", "KyberWeave.Domain", "Areas", "Squad.props"),
             Path.Combine(toolRoot, "src", "KyberWeave.Mcp", "KyberWeave.Mcp.csproj")
         ];
 

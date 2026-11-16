@@ -113,13 +113,13 @@ public sealed class SquadWorktreeMcpContractTests
     [Fact]
     public void WorktreeMcpHelper_SplicesRepoRootAndPathToAbsoluteCanonicalPaths()
     {
-        Type? helperType = Type.GetType("KyberWeave.Core.Squad.Deployment.SquadWorktreeMcp, KyberWeave.Core.Squad")
+        Type? helperType = Type.GetType("KyberWeave.Core.Squad.Deployment.SquadWorktreeMcp, KyberWeave.Data")
                            ?? Type.GetType(
-                               "KyberWeave.Core.Squad.Deployment.SquadWorktreeMcpConfiguration, KyberWeave.Core.Squad");
+                               "KyberWeave.Core.Squad.Deployment.SquadWorktreeMcpConfiguration, KyberWeave.Data");
 
         Assert.True(
             helperType is not null,
-            "Worktree MCP helper 'KyberWeave.Core.Squad.Deployment.SquadWorktreeMcp' must be implemented in KyberWeave.Core.Squad.");
+            "Worktree MCP helper 'KyberWeave.Core.Squad.Deployment.SquadWorktreeMcp' must be implemented in KyberWeave.Data.");
 
         MethodInfo? spliceMethod = helperType.GetMethod(
             "SpliceArguments",

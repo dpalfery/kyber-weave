@@ -31,7 +31,7 @@ public interface ISquadTransactionObserver
     void AfterStep(SquadTransactionStep transactionStep);
 }
 
-internal enum SquadTransactionCheckpointKind
+public enum SquadTransactionCheckpointKind
 {
     Prepared,
     ActiveTransitionWritten,
@@ -39,12 +39,12 @@ internal enum SquadTransactionCheckpointKind
     AfterImagePublished
 }
 
-internal sealed record SquadTransactionCheckpoint(
+public sealed record SquadTransactionCheckpoint(
     int Sequence,
     SquadTransactionCheckpointKind Kind,
     string? RelativePath = null);
 
-internal interface ISquadTransactionCheckpointObserver : ISquadTransactionObserver
+public interface ISquadTransactionCheckpointObserver : ISquadTransactionObserver
 {
     void AfterCheckpoint(SquadTransactionCheckpoint checkpoint);
 }
@@ -70,7 +70,7 @@ public sealed class SquadTransaction
     private const string IntentSchema = "kyber-squad.transaction/v1";
     private static readonly JsonSerializerOptions IntentJsonOptions = CreateIntentJsonOptions();
 
-    private static readonly ConcurrentDictionary<string, byte> ActiveLeases =
+    internal static readonly ConcurrentDictionary<string, byte> ActiveLeases =
         new(StringComparer.Ordinal);
 
     private readonly ISquadTransactionObserver? _observer;
@@ -95,7 +95,7 @@ public sealed class SquadTransaction
     ///     <see langword="true" /> in production; the test assembly turns it off because a full
     ///     device flush costs milliseconds per file on macOS and the tests never power-cycle.
     /// </summary>
-    internal static bool SyncToDisk
+    public static bool SyncToDisk
     {
         get => SyncToDiskOverride.Value ?? _defaultSyncToDisk;
         set => _defaultSyncToDisk = value;
@@ -107,7 +107,7 @@ public sealed class SquadTransaction
     /// </summary>
     /// <param name="enabled">Whether disk synchronization should be enabled in the active scope.</param>
     /// <returns>An <see cref="IDisposable" /> that restores the prior sync override on disposal.</returns>
-    internal static IDisposable UseSyncToDiskScope(bool enabled)
+    public static IDisposable UseSyncToDiskScope(bool enabled)
     {
         bool? prior = SyncToDiskOverride.Value;
         SyncToDiskOverride.Value = enabled;
@@ -137,7 +137,7 @@ public sealed class SquadTransaction
     ///     The callback's own writes sit outside this transaction's rollback. It is for work the caller
     ///     can classify and verify itself, such as home-owned files a plan cannot carry as file mutations.
     /// </remarks>
-    internal void Execute(SquadDeploymentPlan plan, Action<SquadDeploymentPlan>? underLease)
+    public void Execute(SquadDeploymentPlan plan, Action<SquadDeploymentPlan>? underLease)
     {
         ArgumentNullException.ThrowIfNull(plan);
 
@@ -2213,7 +2213,7 @@ public sealed class SquadTransaction
         "Reliability",
         "CA2000:Dispose objects before losing scope",
         Justification = "A successful TransactionLease takes ownership of the mutex; the catch path disposes it.")]
-    internal static TransactionLease AcquireLease(string rootKey)
+    public static TransactionLease AcquireLease(string rootKey)
     {
         if (!ActiveLeases.TryAdd(rootKey, 0))
             throw new InvalidOperationException(
@@ -3386,39 +3386,6 @@ public sealed class SquadTransaction
         Target,
         State,
         Home
-    }
-
-    internal sealed class TransactionLease(string identity, Mutex mutex) : IDisposable
-    {
-        private bool _disposed;
-        private FileStream? _journal;
-
-        public void Dispose()
-        {
-            if (_disposed)
-                return;
-
-            ReleaseJournal();
-            mutex.ReleaseMutex();
-            mutex.Dispose();
-            ActiveLeases.TryRemove(identity, out _);
-            _disposed = true;
-        }
-
-        public void HoldJournal(string journalPath)
-        {
-            _journal = new FileStream(
-                journalPath,
-                FileMode.Open,
-                FileAccess.ReadWrite,
-                FileShare.Read);
-        }
-
-        public void ReleaseJournal()
-        {
-            _journal?.Dispose();
-            _journal = null;
-        }
     }
 
     private sealed class SyncToDiskScope(bool? prior) : IDisposable

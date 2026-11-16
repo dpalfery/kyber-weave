@@ -19,11 +19,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Which parts of each agent's reference files apply to a run; read by `squad brief`. -->
-    <EmbeddedResource Include="Briefs\Resources\briefs.yml" LogicalName="Squad.briefs.yml" />
-  </ItemGroup>
-
-  <ItemGroup>
     <!-- Compile-time only, as in KyberWeave.Core: see the note there. -->
     <PackageReference Include="JetBrains.Annotations" Version="2026.2.0" PrivateAssets="all" />
     <PackageReference Include="Markdig" Version="1.5.1" />

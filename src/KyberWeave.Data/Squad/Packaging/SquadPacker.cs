@@ -245,9 +245,9 @@ public static class SquadPacker
     /// and no partial zip. <paramref name="beforeEntry"/> runs before each entry is written; it exists so a test can fail
     /// a write part way through, as a full disk would.
     /// </summary>
-    internal static void WriteArchive(
+    public static void WriteArchive(
         string archivePath,
-        List<(string RelativePath, byte[] Content)> entries,
+        IList<(string RelativePath, byte[] Content)> entries,
         Action<string>? beforeEntry = null)
     {
         string temporaryPath = $"{archivePath}.{Guid.NewGuid():N}.tmp";
@@ -267,7 +267,7 @@ public static class SquadPacker
 
     private static void WriteDeterministicZip(
         string zipPath,
-        List<(string RelativePath, byte[] Content)> entries,
+        IList<(string RelativePath, byte[] Content)> entries,
         Action<string>? beforeEntry)
     {
         using FileStream fileStream = new(zipPath, FileMode.Create, FileAccess.Write, FileShare.None);
