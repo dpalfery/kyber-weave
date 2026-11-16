@@ -10,7 +10,7 @@ namespace KyberWeave.Cli.Commands.Utilities;
 ///     the snippet is applied to is one Kyber Utilities never writes or reads (A4, C2, D5), so printing
 ///     its location would invite the operator to hand it to the tool.
 /// </remarks>
-internal static class UtilitiesStatusLineActivationGuidance
+public static class UtilitiesStatusLineActivationGuidance
 {
     /// <summary>The one line every snippet ends with: activation is the operator's own edit.</summary>
     public const string ApplyYourselfLine =

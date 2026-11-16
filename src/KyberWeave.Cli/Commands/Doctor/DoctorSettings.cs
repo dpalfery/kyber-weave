@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using KyberWeave.Domain.Doctor;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Doctor;
@@ -7,10 +8,10 @@ namespace KyberWeave.Cli.Commands.Doctor;
 public sealed class DoctorSettings : CommandSettings
 {
     /// <summary>The default bound on one CodeGraph index run, in seconds. Other run-start and review commands reuse it.</summary>
-    public const int DefaultIndexTimeoutSeconds = 600;
+    public const int DefaultIndexTimeoutSeconds = DoctorOptions.DefaultIndexTimeoutSeconds;
 
     /// <summary>The default total budget of the live MCP session, in seconds.</summary>
-    public const int DefaultMcpTimeoutSeconds = 20;
+    public const int DefaultMcpTimeoutSeconds = DoctorOptions.DefaultMcpTimeoutSeconds;
 
     [CommandArgument(0, "[path]")]
     [Description("A directory inside the repository to check. Defaults to the current directory.")]

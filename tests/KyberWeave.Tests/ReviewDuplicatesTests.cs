@@ -300,8 +300,7 @@ public class ReviewDuplicatesTests : IDisposable
             Method("Total", "A.cs", 1, 7),
             Method("Sum", "B.cs", 1, 7));
 
-        DuplicateReport report = ReviewDuplicatesCommand.Analyze(
-            ReviewTestServices.Duplicates,
+        DuplicateReport report = ReviewTestServices.Duplicates.Analyze(
             _temp.Path, graph, graph, ReviewDuplicates.Default);
 
         Assert.True(report.IndexAvailable);
@@ -315,8 +314,7 @@ public class ReviewDuplicatesTests : IDisposable
         // duplicate-implementation lens skips on the first and reports clean on the second.
         UnavailableGraph graph = new();
 
-        DuplicateReport report = ReviewDuplicatesCommand.Analyze(
-            ReviewTestServices.Duplicates,
+        DuplicateReport report = ReviewTestServices.Duplicates.Analyze(
             _temp.Path, graph, graph, ReviewDuplicates.Default);
 
         Assert.False(report.IndexAvailable);

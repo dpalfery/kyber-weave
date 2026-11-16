@@ -56,6 +56,9 @@ internal sealed class FakeProcessEnvironment(Func<string> home, Func<string, str
     public string CurrentDirectory => Directory.GetCurrentDirectory();
 
     /// <inheritdoc />
+    public bool IsInputRedirected => true;
+
+    /// <inheritdoc />
     public string HomeDirectory => home();
 
     /// <inheritdoc />

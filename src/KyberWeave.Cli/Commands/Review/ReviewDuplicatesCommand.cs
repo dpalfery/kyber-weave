@@ -19,7 +19,7 @@ namespace KyberWeave.Cli.Commands.Review;
 /// council's question, not this command's. A failed <c>--out</c> write is different — the
 /// evidence was not produced — and fails the process.
 /// </remarks>
-public sealed class ReviewDuplicatesCommand(IDuplicateDetectionService detector) : Command<ReviewDuplicatesSettings>
+public sealed class ReviewDuplicatesCommand(IDuplicateDetectionService detector, ICodeGraphPortsFactory graphs) : Command<ReviewDuplicatesSettings>
 {
     private const string ReportWriteFailed = "KW-REVIEW-025";
 
@@ -38,8 +38,8 @@ public sealed class ReviewDuplicatesCommand(IDuplicateDetectionService detector)
         }
 
         ReviewDuplicates options = config.Review.Duplicates;
-        CodeGraphPorts graph = CodeGraphResolvers.ForRepository(root);
-        DuplicateReport duplicates = Analyze(detector, root, graph.Resolver, graph.Enumerator, options);
+        CodeGraphPorts graph = graphs.ForRepository(root);
+        DuplicateReport duplicates = detector.Analyze(root, graph.Resolver, graph.Enumerator, options);
 
         if (!duplicates.IndexAvailable)
         {
@@ -89,39 +89,6 @@ public sealed class ReviewDuplicatesCommand(IDuplicateDetectionService detector)
         // --out write is Error and must fail the process, or CI would treat a missing report
         // as a passed gate.
         return report.HasErrors ? 1 : 0;
-    }
-
-    /// <summary>
-    /// Takes the two CodeGraph ports separately rather than the concrete adapter, so the
-    /// symbol enumerator is consumed as a port and a fake can stand in for it.
-    /// </summary>
-    internal static DuplicateReport Analyze(
-        IDuplicateDetectionService duplicates,
-        string root,
-        ICodeGraphResolver graph,
-        ICodeGraphSymbolEnumerator symbols,
-        ReviewDuplicates options)
-    {
-        ArgumentNullException.ThrowIfNull(graph);
-        ArgumentNullException.ThrowIfNull(symbols);
-
-        if (!graph.IsAvailable)
-        {
-            return DuplicateDetector.Unavailable(
-                graph.DatabasePath,
-                graph.UnavailableReason ?? "The CodeGraph index could not be read.",
-                options);
-        }
-
-        List<CodeGraphNode> comparable = DuplicateDetector.ComparableKinds
-            .SelectMany(symbols.NodesOfKind)
-            .ToList();
-
-        DateTime? modified = File.Exists(graph.DatabasePath)
-            ? File.GetLastWriteTimeUtc(graph.DatabasePath)
-            : null;
-
-        return duplicates.Detect(root, comparable, options, graph.DatabasePath, modified);
     }
 }
 

@@ -56,4 +56,50 @@ public sealed class FileStatusLineFiles : IStatusLineFiles
             return false;
         }
     }
+
+    /// <inheritdoc />
+    public bool HasUserExecuteBit(string path) =>
+        OperatingSystem.IsWindows() || (File.GetUnixFileMode(path) & UnixFileMode.UserExecute) != 0;
+
+    /// <inheritdoc />
+    public void MarkExecutable(string path)
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        UnixFileMode mode = File.GetUnixFileMode(path);
+        File.SetUnixFileMode(
+            path,
+            mode | UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    ///     <see cref="SearchOption.AllDirectories" /> follows directory symbolic links, so a link inside the tree could
+    ///     make the walk read files outside it (C# coding standard, "Safe filesystem enumeration").
+    /// </remarks>
+    public IEnumerable<string> EnumerateRegularFiles(string directory)
+    {
+        Stack<string> pending = new();
+        pending.Push(directory);
+        while (pending.Count > 0)
+        {
+            string current = pending.Pop();
+            foreach (FileSystemInfo entry in new DirectoryInfo(current).EnumerateFileSystemInfos(
+                         "*",
+                         new EnumerationOptions { RecurseSubdirectories = false, AttributesToSkip = 0 }))
+            {
+                if (entry.LinkTarget is not null) continue;
+
+                switch (entry)
+                {
+                    case DirectoryInfo child:
+                        pending.Push(child.FullName);
+                        break;
+                    case FileInfo file:
+                        yield return file.FullName;
+                        break;
+                }
+            }
+        }
+    }
 }

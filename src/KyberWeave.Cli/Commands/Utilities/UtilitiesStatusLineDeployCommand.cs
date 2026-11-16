@@ -19,23 +19,24 @@ namespace KyberWeave.Cli.Commands.Utilities;
 public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLineDeploySettings>
 {
     private readonly IProcessEnvironment _environment;
-    private readonly IProductRootLocator _productRoots;
+    private readonly IStatusLineHostService _host;
     private readonly IStatusLineDeploymentService _plans;
 
-    /// <summary>Creates a deploy command over the process environment and the product-tree locator.</summary>
-    /// <param name="environment">The process state the per-user roots and the checkout are read from.</param>
-    /// <param name="productRoots">Finds the artifact tree in the checkout.</param>
+    /// <summary>Creates a deploy command over the process environment and the host service.</summary>
+    /// <param name="environment">The process state the per-user roots are read from.</param>
+    /// <param name="host">Opens the artifact tree of the checkout and marks the deployed commands executable.</param>
+    /// <param name="plans">Plans and applies the deployment.</param>
     public UtilitiesStatusLineDeployCommand(
         IProcessEnvironment environment,
-        IProductRootLocator productRoots,
+        IStatusLineHostService host,
         IStatusLineDeploymentService plans)
     {
         ArgumentNullException.ThrowIfNull(environment);
-        ArgumentNullException.ThrowIfNull(productRoots);
+        ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(plans);
 
         _environment = environment;
-        _productRoots = productRoots;
+        _host = host;
         _plans = plans;
     }
 
@@ -76,7 +77,7 @@ public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLi
         IUtilitiesStatusLineArtifactSource artifacts;
         try
         {
-            artifacts = UtilitiesStatusLineCommandComposition.ResolveArtifactSource(_environment, _productRoots);
+            artifacts = _host.ResolveArtifactSource();
         }
         catch (DirectoryNotFoundException ex)
         {
@@ -135,7 +136,7 @@ public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLi
             try
             {
                 _plans.Apply(plan);
-                UtilitiesStatusLineCommandComposition.ApplyExecutableBit(plan.StagingRoot, files);
+                _host.ApplyExecutableBit(plan.StagingRoot, files);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {

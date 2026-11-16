@@ -1,6 +1,6 @@
 using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Agents.Model;
-using KyberWeave.Core.Agents.Parsing;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using Spectre.Console;
@@ -8,7 +8,7 @@ using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Agents;
 
-public sealed class AgentCatalogCommand : Command<AgentCatalogSettings>
+public sealed class AgentCatalogCommand(IAgentGovernanceService agents) : Command<AgentCatalogSettings>
 {
     /// <inheritdoc />
     public override int Execute(CommandContext context, AgentCatalogSettings settings, CancellationToken cancellationToken)
@@ -20,8 +20,7 @@ public sealed class AgentCatalogCommand : Command<AgentCatalogSettings>
             return 1;
         }
 
-        AgentSet agentSet = AgentLoader.LoadAll(settings.Path);
-        IReadOnlyDictionary<string, Dictionary<HarnessKind, AgentModel>> matrix = agentSet.GetRoleHarnessMatrix();
+        IReadOnlyDictionary<string, Dictionary<HarnessKind, AgentModel>> matrix = agents.RoleMatrix(settings.Path);
         IReadOnlyDictionary<HarnessKind, HarnessCapabilityProfile> profiles = config.Harness.Profiles;
 
         Table table = new Table();

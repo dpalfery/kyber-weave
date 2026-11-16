@@ -74,6 +74,8 @@ public sealed class ServiceCollectionTypeRegistrarTests
 
         public string TempDirectory => "/tmp";
 
+        public bool IsInputRedirected => true;
+
         public string? GetVariable(string name) => null;
     }
 }

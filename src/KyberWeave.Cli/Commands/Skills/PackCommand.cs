@@ -1,9 +1,6 @@
 using System.ComponentModel;
-using System.IO.Compression;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Diagnostics;
-using KyberWeave.Core.Skills.Model;
-using KyberWeave.Core.Skills.Parsing;
-using KyberWeave.Core.Skills.Validation;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -24,52 +21,26 @@ public sealed class PackSettings : CommandSettings
     public bool SkipValidation { get; set; }
 }
 
-public sealed class PackCommand : Command<PackSettings>
+public sealed class PackCommand(ISkillGovernanceService skills) : Command<PackSettings>
 {
     /// <inheritdoc />
     public override int Execute(CommandContext context, PackSettings settings, CancellationToken cancellationToken)
     {
-        string skillFile = Path.Combine(settings.Path, "SKILL.md");
-        if (!File.Exists(skillFile))
-        {
-            AnsiConsole.MarkupLine($"[red]No SKILL.md in '{Markup.Escape(settings.Path)}'.[/]");
-            return 2;
-        }
+        SkillPackResult result = skills.Pack(settings.Path, settings.Output, settings.SkipValidation);
 
-        Skill skill = SkillParser.ParseFile(skillFile);
-
-        if (!settings.SkipValidation)
+        switch (result.Status)
         {
-            DiagnosticReport report = new DiagnosticReport();
-            report.AddRange(SpecValidator.Validate(skill));
-            if (report.HasErrors)
-            {
+            case SkillPackStatus.NoSkillFile:
+                AnsiConsole.MarkupLine($"[red]No SKILL.md in '{Markup.Escape(settings.Path)}'.[/]");
+                return 2;
+            case SkillPackStatus.ValidationFailed:
                 AnsiConsole.MarkupLine("[red]Refusing to pack: spec validation failed. Run 'kyber-weave skill validate' or pass --skip-validation.[/]");
-                ReportRenderer_RenderErrors(report);
+                ReportRenderer_RenderErrors(result.Report);
                 return 1;
-            }
+            default:
+                AnsiConsole.MarkupLine($"[green]Packed[/] [bold]{Markup.Escape(result.Name)}[/] → {Markup.Escape(result.Output)} ({result.BundledFiles} bundled file(s)).");
+                return 0;
         }
-
-        string name = skill.Frontmatter.Name ?? skill.DirectoryName;
-        string output = settings.Output ?? $"{name}.zip";
-        if (File.Exists(output))
-        {
-            File.Delete(output);
-        }
-
-        // Bundle the SKILL.md at the archive root plus scripts/, references/, assets/ — the
-        // shape Copilot Studio accepts for an uploaded Skill .zip.
-        using (ZipArchive zip = ZipFile.Open(output, ZipArchiveMode.Create))
-        {
-            zip.CreateEntryFromFile(skill.SkillFilePath, "SKILL.md");
-            foreach (SkillResource res in skill.Resources)
-            {
-                zip.CreateEntryFromFile(res.AbsolutePath, res.RelativePath);
-            }
-        }
-
-        AnsiConsole.MarkupLine($"[green]Packed[/] [bold]{Markup.Escape(name)}[/] → {Markup.Escape(output)} ({skill.Resources.Count} bundled file(s)).");
-        return 0;
     }
 
     /// <summary>Prints each error or critical diagnostic, code first.</summary>

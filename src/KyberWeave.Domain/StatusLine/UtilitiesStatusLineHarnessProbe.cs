@@ -8,49 +8,14 @@ namespace KyberWeave.Cli.Commands.Utilities;
 /// <remarks>
 ///     A delegate rather than <c>IProcessExecutor</c> so the harness version probe can cap its wait:
 ///     a harness binary that never answers <c>--version</c> must not hang doctor. Production binds this
-///     to <see cref="ProcessRunner.Run(ProcessStartInfo, string, TimeSpan?)" /> with a short timeout.
+///     to <c>ProcessRunner.Run</c> with a short timeout.
 /// </remarks>
 /// <param name="startInfo">The process to start, with all three streams redirected.</param>
 /// <param name="standardInput">The complete standard input; empty for a version probe.</param>
 public delegate ProcessResult UtilitiesStatusLineProcessRunner(ProcessStartInfo startInfo, string standardInput);
 
-/// <summary>Decides whether an executable is reachable on <c>PATH</c>.</summary>
-/// <remarks>
-///     Presence is answered by reading <c>PATH</c>, not by starting the tool: a prerequisite check must
-///     have no side effect, and a tool that is present but slow or interactive must still count as
-///     present. This slice is macOS and Linux only (D4), so there is no <c>PATHEXT</c> resolution to do.
-/// </remarks>
-internal sealed class UtilitiesStatusLineToolProbe
-{
-    private readonly Func<string, string?> _getEnvironmentVariable;
-
-    /// <param name="getEnvironmentVariable">Reads a process environment variable; injected for tests.</param>
-    public UtilitiesStatusLineToolProbe(Func<string, string?> getEnvironmentVariable)
-    {
-        ArgumentNullException.ThrowIfNull(getEnvironmentVariable);
-        _getEnvironmentVariable = getEnvironmentVariable;
-    }
-
-    /// <summary>Whether <paramref name="executable" /> names an existing file in a <c>PATH</c> directory.</summary>
-    public bool IsOnPath(string executable)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(executable);
-
-        string? path = _getEnvironmentVariable("PATH");
-        if (string.IsNullOrEmpty(path)) return false;
-
-        foreach (string directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
-        {
-            string candidate = Path.Combine(directory, executable);
-            if (File.Exists(candidate) && UtilitiesStatusLineCommandComposition.HasExecutableBit(candidate)) return true;
-        }
-
-        return false;
-    }
-}
-
 /// <summary>Best-effort version probe for a harness binary.</summary>
-internal static class UtilitiesStatusLineHarnessProbe
+public static class UtilitiesStatusLineHarnessProbe
 {
     private const int MaximumVersionLength = 120;
 

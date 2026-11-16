@@ -897,6 +897,8 @@ internal sealed class RunStartProbe : IDisposable
 
         public string TempDirectory => temp;
 
+        public bool IsInputRedirected => true;
+
         public string? GetVariable(string name) => name switch
         {
             "PATH" => path,

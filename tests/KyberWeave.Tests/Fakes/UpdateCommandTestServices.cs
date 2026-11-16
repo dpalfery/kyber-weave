@@ -41,6 +41,8 @@ internal static class UpdateCommandTestServices
 
     private sealed class EmptyEnvironment : IProcessEnvironment
     {
+        public bool IsInputRedirected => true;
+
         public string CurrentDirectory => Environment.CurrentDirectory;
 
         public string HomeDirectory => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);

@@ -28,7 +28,7 @@ namespace KyberWeave.Cli.Commands.Review;
 /// <see cref="VerdictEngine"/>, which stays the only judge.
 /// </para>
 /// </remarks>
-public sealed partial class ReviewVerdictCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, INotSeatedStore notSeatedStore, ISeverityOverrideSource severityOverrides, ICitedLineChecker citedLines) : Command<ReviewVerdictSettings>
+public sealed partial class ReviewVerdictCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, INotSeatedStore notSeatedStore, ISeverityOverrideSource severityOverrides, ICitedLineChecker citedLines, IWritableFileSystem files, ISeatFolder seatFolder, TimeProvider clock) : Command<ReviewVerdictSettings>
 {
     /// <summary>The command description shared by the real registration and the help tests.</summary>
     public const string Description = "Compute approve / request-changes from findings and gates.";
@@ -125,7 +125,7 @@ public sealed partial class ReviewVerdictCommand(IReviewWorkTreeService trees, I
             findings,
             gateResults,
             config.Review,
-            DateOnly.FromDateTime(DateTime.UtcNow),
+            DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime),
             gates?.Coverage);
         outcome = outcome with { Dropped = [.. dropped, .. outcome.Dropped] };
 
@@ -255,9 +255,9 @@ public sealed partial class ReviewVerdictCommand(IReviewWorkTreeService trees, I
         {
             try
             {
-                FindingsReport prior = ReviewJson.ReadFindings(File.ReadAllText(cycle.FindingsPath));
+                FindingsReport prior = ReviewJson.ReadFindings(files.ReadAllText(cycle.FindingsPath));
                 IReadOnlyList<GateResult> gates = cycle.Gates?.Gates ?? [];
-                ReviewOutcome outcome = VerdictEngine.Evaluate(prior.Findings, gates, config.Review, DateOnly.FromDateTime(DateTime.UtcNow));
+                ReviewOutcome outcome = VerdictEngine.Evaluate(prior.Findings, gates, config.Review, DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime));
                 counts.Add(FailedGates(gates).Count() + outcome.Accepted.Count(config.Review.Policy.FixRoundTakes));
             }
             catch (Exception ex) when (FileFailure.Is(ex) || ex is JsonException or InvalidOperationException)
@@ -533,11 +533,11 @@ public sealed partial class ReviewVerdictCommand(IReviewWorkTreeService trees, I
     /// Parses every <c>&lt;lens&gt;.md</c> in the seat folder. Every unreadable file is reported, not only the
     /// first, so one run tells the reviewer every seat to fix.
     /// </summary>
-    private static bool TryReadSeats(string folder, DiagnosticReport report, out List<SeatOutput> seats)
+    private bool TryReadSeats(string folder, DiagnosticReport report, out List<SeatOutput> seats)
     {
         seats = [];
         string full = Path.GetFullPath(folder);
-        if (!Directory.Exists(full))
+        if (!seatFolder.Exists(full))
         {
             report.Add(new Diagnostic(
                 UnreadableInput,
@@ -549,14 +549,12 @@ public sealed partial class ReviewVerdictCommand(IReviewWorkTreeService trees, I
             return false;
         }
 
-        // IgnoreInaccessible is off: a folder the process cannot list must be refused, not read as an empty folder
-        // whose every lens then looks unaccounted for, or whose seats silently vanish.
-        FileSystemInfo[] entries;
+        // The listing throws for a folder the process cannot read: that is refused, not read as an empty folder whose
+        // every lens then looks unaccounted for, or whose seats silently vanish.
+        IReadOnlyList<SeatFolderEntry> entries;
         try
         {
-            entries = new DirectoryInfo(full).GetFileSystemInfos(
-                "*.md",
-                new EnumerationOptions { RecurseSubdirectories = false, AttributesToSkip = 0, IgnoreInaccessible = false });
+            entries = seatFolder.ListMarkdown(full);
         }
         catch (Exception ex) when (FileFailure.Is(ex))
         {
@@ -570,12 +568,12 @@ public sealed partial class ReviewVerdictCommand(IReviewWorkTreeService trees, I
             return false;
         }
 
-        foreach (FileSystemInfo entry in entries.OrderBy(entry => entry.Name, StringComparer.Ordinal))
+        foreach (SeatFolderEntry entry in entries.OrderBy(entry => entry.Name, StringComparer.Ordinal))
         {
             // An entry that cannot be a seat (a directory, an empty or dotted stem, a name that is not a lens id)
             // is named and left out, never parsed: its name is not a lens to attribute findings to.
             string lens = Path.GetFileNameWithoutExtension(entry.Name);
-            string? notASeat = entry is not FileInfo ? "is a directory, not a seat file"
+            string? notASeat = !entry.IsFile ? "is a directory, not a seat file"
                 : !LensId().IsMatch(lens) ? "is not named <lens>.md with a lowercase lens id"
                 : null;
             if (notASeat is not null)
@@ -585,36 +583,35 @@ public sealed partial class ReviewVerdictCommand(IReviewWorkTreeService trees, I
                     Severity.Warning,
                     $"{entry.Name} {notASeat}; it was ignored.",
                     Subject,
-                    entry.FullName,
+                    entry.FullPath,
                     Hint: "Name each seat file after its lens, as listed by the code-review skill."));
                 continue;
             }
 
-            FileInfo file = (FileInfo)entry;
             if (!ReviewLensCatalogue.Names.Contains(lens, StringComparer.Ordinal)
                 && !string.Equals(lens, ReviewerSeat, StringComparison.Ordinal))
             {
                 report.Add(new Diagnostic(
                     LensCoverageCode,
                     Severity.Warning,
-                    $"{file.Name} names no catalogue lens; its findings are kept but it covers no lens.",
+                    $"{entry.Name} names no catalogue lens; its findings are kept but it covers no lens.",
                     lens,
-                    file.FullName,
+                    entry.FullPath,
                     Hint: "Name each seat file after its lens, as listed by the code-review skill."));
             }
 
             try
             {
-                seats.Add(SeatOutputParser.Parse(lens, File.ReadAllText(file.FullName)));
+                seats.Add(SeatOutputParser.Parse(lens, files.ReadAllText(entry.FullPath)));
             }
             catch (Exception ex) when (FileFailure.Is(ex) || ex is SeatOutputException)
             {
                 report.Add(new Diagnostic(
                     SeatUnreadable,
                     Severity.Error,
-                    $"{file.Name}: the seat output could not be read. {ex.Message}",
+                    $"{entry.Name}: the seat output could not be read. {ex.Message}",
                     lens,
-                    file.FullName,
+                    entry.FullPath,
                     Hint: "Fix the seat file so it is a YAML list of findings, or a 'NO FINDINGS:' or " +
                           "'SKIPPED:' line, then compute the verdict again."));
             }
@@ -960,7 +957,7 @@ public sealed partial class ReviewVerdictCommand(IReviewWorkTreeService trees, I
 
         settings.Seats = Path.Combine(cycle, "seats");
         string gates = Path.Combine(cycle, "gates.json");
-        if (settings.Gates is null && File.Exists(gates))
+        if (settings.Gates is null && files.FileExists(gates))
             settings.Gates = gates;
         if (!settings.Candidates)
             settings.Out ??= Path.Combine(cycle, PriorFindingsFile);
@@ -969,7 +966,7 @@ public sealed partial class ReviewVerdictCommand(IReviewWorkTreeService trees, I
         if (settings.Prior is null
             && ReviewCycleView.TryFromOutPath(Path.Combine(cycle, PriorFindingsFile), out string reviewFolder, out int number)
             && trees.Prior(tree, settings.BaseRef, cycles.ReadFinished(reviewFolder)).Valid
-                .Where(record => record.Number < number && File.Exists(record.FindingsPath))
+                .Where(record => record.Number < number && files.FileExists(record.FindingsPath))
                 .MaxBy(record => record.Number) is { } prior)
         {
             settings.Prior = prior.Folder;
@@ -1224,7 +1221,7 @@ public sealed partial class ReviewVerdictCommand(IReviewWorkTreeService trees, I
         return key.Length > 0 && reason.Length > 0;
     }
 
-    private static bool TryRead<T>(
+    private bool TryRead<T>(
         string? path,
         string option,
         Func<string, T> read,
@@ -1246,7 +1243,7 @@ public sealed partial class ReviewVerdictCommand(IReviewWorkTreeService trees, I
         }
 
         string full = Path.GetFullPath(path);
-        if (!File.Exists(full))
+        if (!files.FileExists(full))
         {
             report.Add(new Diagnostic(
                 UnreadableInput,
@@ -1259,7 +1256,7 @@ public sealed partial class ReviewVerdictCommand(IReviewWorkTreeService trees, I
 
         try
         {
-            value = read(File.ReadAllText(full));
+            value = read(files.ReadAllText(full));
             return true;
         }
         // An empty or malformed document can surface as a JSON error, an argument error (a blank document), or an

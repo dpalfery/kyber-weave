@@ -17,7 +17,7 @@ namespace KyberWeave.Cli.Commands.Review;
 ///     Whether a cycle is a verifier cycle used to depend on how the conductor worded the dispatch. It is now a fact
 ///     of the folders: a run with a finished cycle is in a verifier cycle. The command reads and writes nothing else.
 /// </remarks>
-public sealed class ReviewCycleCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git)
+public sealed class ReviewCycleCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, IFileSystem files)
     : Command<ReviewCycleSettings>
 {
     /// <summary>The command description shared by the real registration and the help tests.</summary>
@@ -66,7 +66,7 @@ public sealed class ReviewCycleCommand(IReviewWorkTreeService trees, IReviewCycl
             commit => ReviewCycleView.TryChangedSince(git, tree, commit));
 
         List<ReviewFinding> recheck = [];
-        if (plan.Prior is { } priorCycle && !ReviewCycleView.TryReadRecheck(priorCycle, config.Review.Policy, report, recheck, UnreadableInput, Severity.Error, "review cycle"))
+        if (plan.Prior is { } priorCycle && !ReviewCycleView.TryReadRecheck(files, priorCycle, config.Review.Policy, report, recheck, UnreadableInput, Severity.Error, "review cycle"))
         {
             CommandHelpers.Finish(report, settings, "review cycle", "Review");
             return 1;

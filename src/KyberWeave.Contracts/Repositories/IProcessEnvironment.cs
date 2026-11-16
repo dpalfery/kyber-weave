@@ -16,6 +16,9 @@ public interface IProcessEnvironment
     /// <summary>Gets the directory for temporary files.</summary>
     string TempDirectory { get; }
 
+    /// <summary>Whether standard input is redirected, so no person is typing at the other end of it.</summary>
+    bool IsInputRedirected { get; }
+
     /// <summary>Reads an environment variable.</summary>
     /// <param name="name">The variable name.</param>
     /// <returns>The value, or null when the variable is not set.</returns>

@@ -287,12 +287,16 @@ internal static class SquadTestCommands
 
         public string TempDirectory => _real.TempDirectory;
 
+        public bool IsInputRedirected => _real.IsInputRedirected;
+
         public string? GetVariable(string name) => (reader ?? _real.GetVariable)(name);
     }
 
     private sealed class WorkingDirectoryEnvironment(string? workingDirectory) : IProcessEnvironment
     {
         private readonly ProcessEnvironment _real = new();
+
+        public bool IsInputRedirected => _real.IsInputRedirected;
 
         public string CurrentDirectory => workingDirectory ?? _real.CurrentDirectory;
 

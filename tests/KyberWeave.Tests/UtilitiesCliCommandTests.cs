@@ -995,6 +995,8 @@ internal sealed class IsolatedEnvironment(string current, string home, Dictionar
 
     public string TempDirectory => Path.GetTempPath();
 
+    public bool IsInputRedirected => true;
+
     public string? GetVariable(string name) =>
         variables.TryGetValue(name, out string? value) ? value : Environment.GetEnvironmentVariable(name);
 }

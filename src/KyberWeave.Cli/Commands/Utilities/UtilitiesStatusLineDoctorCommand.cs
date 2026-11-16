@@ -22,22 +22,28 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
 {
     private readonly IProcessEnvironment _environment;
     private readonly IStatusLineDeploymentService _plans;
-    private readonly UtilitiesStatusLineProcessRunner? _processRunner;
+    private readonly IStatusLineHostService _host;
+    private readonly UtilitiesStatusLineProcessRunner _processRunner;
 
     /// <summary>Creates a doctor command over the process environment.</summary>
     /// <param name="environment">The process state the per-user roots and <c>PATH</c> are read from.</param>
     /// <param name="plans">Reads the receipts.</param>
-    /// <param name="processRunner">Runs the harness version probe; the bounded production runner when none is registered.</param>
+    /// <param name="host">Probes <c>PATH</c>, the owned files' digests and their executable bits.</param>
+    /// <param name="processRunner">Runs the harness version probe.</param>
     public UtilitiesStatusLineDoctorCommand(
         IProcessEnvironment environment,
         IStatusLineDeploymentService plans,
-        UtilitiesStatusLineProcessRunner? processRunner = null)
+        IStatusLineHostService host,
+        UtilitiesStatusLineProcessRunner processRunner)
     {
         ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(plans);
+        ArgumentNullException.ThrowIfNull(host);
+        ArgumentNullException.ThrowIfNull(processRunner);
 
         _environment = environment;
         _plans = plans;
+        _host = host;
         _processRunner = processRunner;
     }
 
@@ -50,16 +56,13 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
         ArgumentNullException.ThrowIfNull(settings);
 
         StatusLineTargetRoots roots = UtilitiesStatusLineCommandComposition.ResolveRoots(_environment);
-        UtilitiesStatusLineToolProbe toolProbe = UtilitiesStatusLineCommandComposition.ResolveToolProbe(_environment);
-        UtilitiesStatusLineProcessRunner processRunner =
-            _processRunner ?? UtilitiesStatusLineCommandComposition.ResolveProcessRunner();
 
         AnsiConsole.MarkupLine("[bold]Kyber Utilities status line — doctor[/]");
         AnsiConsole.WriteLine();
 
         bool hasIssues = false;
         foreach (StatusLineTarget target in UtilitiesStatusLineTargetCatalog.All)
-            if (!Diagnose(target, roots, toolProbe, processRunner))
+            if (!Diagnose(target, roots))
                 hasIssues = true;
 
         AnsiConsole.WriteLine();
@@ -82,13 +85,11 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
     /// <summary>Diagnoses one harness. Returns <see langword="false" /> when it has an actionable issue.</summary>
     private bool Diagnose(
         StatusLineTarget target,
-        StatusLineTargetRoots roots,
-        UtilitiesStatusLineToolProbe toolProbe,
-        UtilitiesStatusLineProcessRunner processRunner)
+        StatusLineTargetRoots roots)
     {
         string token = UtilitiesStatusLineTargetCatalog.GetToken(target);
         string harnessExecutable = UtilitiesStatusLinePrerequisites.HarnessExecutable(target);
-        if (!toolProbe.IsOnPath(harnessExecutable))
+        if (!_host.IsOnPath(harnessExecutable))
         {
             AnsiConsole.MarkupLine(
                 $"  [grey]skip[/] {Markup.Escape(token)}: '{Markup.Escape(harnessExecutable)}' " +
@@ -97,13 +98,13 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
         }
 
         bool healthy = true;
-        string? version = UtilitiesStatusLineHarnessProbe.TryVersion(processRunner, harnessExecutable);
+        string? version = UtilitiesStatusLineHarnessProbe.TryVersion(_processRunner, harnessExecutable);
         AnsiConsole.MarkupLine(
             $"  [green]ok[/] {Markup.Escape(token)}: harness '{Markup.Escape(harnessExecutable)}' " +
             $"({Markup.Escape(version ?? "version unknown")})");
 
         foreach (UtilitiesStatusLinePrerequisite prerequisite in UtilitiesStatusLinePrerequisites.For(target))
-            if (toolProbe.IsOnPath(prerequisite.Executable))
+            if (_host.IsOnPath(prerequisite.Executable))
             {
                 AnsiConsole.MarkupLine(
                     $"  [green]ok[/] {Markup.Escape(token)}: prerequisite '{Markup.Escape(prerequisite.Executable)}'");
@@ -117,7 +118,7 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
                 healthy = false;
             }
 
-        if (target == StatusLineTarget.Agy) healthy &= ReportKyberDash(toolProbe, token);
+        if (target == StatusLineTarget.Agy) healthy &= ReportKyberDash(token);
 
         healthy &= ReportOwnedFiles(target, roots, token);
 
@@ -134,9 +135,9 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
     ///     Reports the optional KyberDash recorder. Its absence is a warning, never a failure: the
     ///     <c>agy</c> hand-off is skipped silently when <c>kyberdash</c> is not on <c>PATH</c> (C8).
     /// </summary>
-    private static bool ReportKyberDash(UtilitiesStatusLineToolProbe toolProbe, string token)
+    private bool ReportKyberDash(string token)
     {
-        if (toolProbe.IsOnPath(UtilitiesStatusLinePrerequisites.KyberDashExecutable))
+        if (_host.IsOnPath(UtilitiesStatusLinePrerequisites.KyberDashExecutable))
         {
             AnsiConsole.MarkupLine(
                 $"  [green]ok[/] {Markup.Escape(token)}: optional recorder " +
@@ -194,7 +195,7 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
                 continue;
             }
 
-            UtilitiesStatusLineFileState state = UtilitiesStatusLineFileCheck.Evaluate(physicalPath, file.Sha256);
+            UtilitiesStatusLineFileState state = _host.EvaluateOwnedFile(physicalPath, file.Sha256);
             if (state != UtilitiesStatusLineFileState.Ok)
             {
                 AnsiConsole.MarkupLine(
@@ -205,7 +206,7 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
             }
 
             if (UtilitiesStatusLineArtifacts.RequiresExecutableBit(file.RelativePath) &&
-                !UtilitiesStatusLineCommandComposition.HasExecutableBit(physicalPath))
+                !_host.HasExecutableBit(physicalPath))
             {
                 AnsiConsole.MarkupLine(
                     $"  [red]fail[/] {Markup.Escape(token)}: {Markup.Escape(file.RelativePath)} " +

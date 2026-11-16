@@ -692,16 +692,16 @@
       "bound": "Builds only; nothing starts here. The default runner is ProcessRunner.RunInteractive (ProcessRunner.cs:177), unbounded by design (see that entry)."
     },
     {
-      "file": "src/KyberWeave.Cli/Commands/Utilities/UtilitiesStatusLineCommandComposition.cs",
+      "file": "src/KyberWeave.Data/Utilities/StatusLineVersionProbeRunner.cs",
       "text": "return static (startInfo, standardInput) => ProcessRunner.Run(startInfo, standardInput, VersionProbeTimeout);",
       "count": 1,
-      "bound": "ProcessRunner.Run with VersionProbeTimeout = 5 s (UtilitiesStatusLineCommandComposition.cs:15); the process tree is killed on expiry."
+      "bound": "ProcessRunner.Run with VersionProbeTimeout = 5 s (StatusLineVersionProbeRunner.cs:11); the process tree is killed on expiry."
     },
     {
-      "file": "src/KyberWeave.Cli/Commands/Utilities/UtilitiesStatusLineToolProbe.cs",
+      "file": "src/KyberWeave.Domain/StatusLine/UtilitiesStatusLineHarnessProbe.cs",
       "text": "ProcessStartInfo startInfo = new(executable)",
       "count": 1,
-      "bound": "Builds only; nothing starts on this line. It is started only through the injected UtilitiesStatusLineProcessRunner, which production binds to ResolveProcessRunner (5 s, UtilitiesStatusLineCommandComposition.cs:42)."
+      "bound": "Builds only; nothing starts on this line. It is started only through the injected UtilitiesStatusLineProcessRunner, which production binds to StatusLineVersionProbeRunner.Create (5 s, StatusLineVersionProbeRunner.cs:11)."
     },
     {
       "file": "src/KyberWeave.Data/Update/SelfUpdateSystem.cs",

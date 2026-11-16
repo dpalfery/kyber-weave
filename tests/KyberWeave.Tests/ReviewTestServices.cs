@@ -2,7 +2,9 @@ using KyberWeave.Application;
 using KyberWeave.Cli.Composition;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Doctor;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Tests;
@@ -10,7 +12,17 @@ namespace KyberWeave.Tests;
 /// <summary>The review services as the application registers them, for tests that drive them directly.</summary>
 internal static class ReviewTestServices
 {
-    private static readonly ServiceProvider Provider = new ServiceCollection().AddWeaveApplication().BuildServiceProvider();
+    private static readonly ServiceProvider Provider = BuildProvider();
+
+    private static ServiceProvider BuildProvider()
+    {
+        ServiceCollection services = new();
+        _ = services.AddWeaveApplication();
+
+        // The command line registers the repository settings reader over the configuration loader; the guard needs it.
+        services.TryAddSingleton<IRepositoryToolSettings, ConfigFileToolSettings>();
+        return services.BuildServiceProvider();
+    }
 
     /// <summary>Reads and writes review cycle folders.</summary>
     public static IReviewCycleStore Cycles { get; } = Provider.GetRequiredService<IReviewCycleStore>();
@@ -28,7 +40,13 @@ internal static class ReviewTestServices
     public static IReviewEvidenceService Evidence { get; } = Provider.GetRequiredService<IReviewEvidenceService>();
 
     /// <summary>A type registrar over the application's registered services, so commands that take services are built as they are on the command line.</summary>
-    public static ITypeRegistrar Registrar() => new ServiceCollectionTypeRegistrar(new ServiceCollection().AddWeaveApplication());
+    public static ITypeRegistrar Registrar()
+    {
+        ServiceCollection services = new();
+        _ = services.AddWeaveApplication();
+        services.TryAddSingleton<IRepositoryToolSettings, ConfigFileToolSettings>();
+        return new ServiceCollectionTypeRegistrar(services);
+    }
 
     /// <summary>Finds the project file a source file belongs to.</summary>
     public static IProjectFileLocator ProjectFiles { get; } = Provider.GetRequiredService<IProjectFileLocator>();
@@ -44,6 +62,18 @@ internal static class ReviewTestServices
 
     /// <summary>Reports the declarations whose bodies repeat verbatim.</summary>
     public static IDuplicateDetectionService Duplicates { get; } = Provider.GetRequiredService<IDuplicateDetectionService>();
+
+    /// <summary>Builds the CodeGraph ports over a repository's index.</summary>
+    public static ICodeGraphPortsFactory CodeGraphs { get; } = Provider.GetRequiredService<ICodeGraphPortsFactory>();
+
+    /// <summary>Makes sure the tree a review runs in has a CodeGraph index.</summary>
+    public static IWorktreeIndexGuard WorktreeIndex { get; } = Provider.GetRequiredService<IWorktreeIndexGuard>();
+
+    /// <summary>The file system the review commands write their evidence through.</summary>
+    public static IWritableFileSystem Files { get; } = Provider.GetRequiredService<IWritableFileSystem>();
+
+    /// <summary>The process state the review commands read the temporary directory from.</summary>
+    public static IProcessEnvironment Environment { get; } = Provider.GetRequiredService<IProcessEnvironment>();
 
     /// <summary>Builds a command the way the command line does, from the registered services.</summary>
     public static T Create<T>()

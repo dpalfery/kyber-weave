@@ -1,4 +1,5 @@
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Domain.Doctor;
 using Spectre.Console.Cli;
@@ -20,28 +21,35 @@ namespace KyberWeave.Cli.Commands.Doctor;
 ///         production defaults are the actual stdin and process environment.
 ///     </para>
 /// </remarks>
-public sealed class DoctorCommand(IRepositoryDoctor doctor) : Command<DoctorSettings>
+public sealed class DoctorCommand : Command<DoctorSettings>
 {
     /// <summary>The line a bare, non-interactive run prints so its user knows how to provision.</summary>
     internal const string NonInteractiveHint = "provisioning skipped: non-interactive; rerun with --provision";
 
-    /// <summary>The executable name, resolved through PATH. Tests replace it so they never spawn the real server.</summary>
-    internal const string DefaultMcpExecutable = "kyber-weave-mcp";
+    private readonly IRepositoryDoctor _doctor;
+    private readonly IProcessEnvironment _environment;
+    private readonly IProcessExecutor? _executor;
+    private readonly string _mcpExecutable;
 
-    /// <summary>The CodeGraph executable name, resolved through PATH.</summary>
-    internal const string CodeGraphExecutable = "codegraph";
+    /// <summary>Creates the command over the doctor and the process it reads its mode from.</summary>
+    /// <param name="doctor">Runs the checks.</param>
+    /// <param name="environment">Says whether stdin is a terminal and whether <c>CI</c> is set.</param>
+    /// <param name="executor">Runs the CodeGraph child; a process executor bounded by the index timeout when none is registered.</param>
+    /// <param name="mcpExecutable">The MCP executable; the one on <c>PATH</c> when none is given. Tests name a stub so they never spawn the real server.</param>
+    public DoctorCommand(
+        IRepositoryDoctor doctor,
+        IProcessEnvironment environment,
+        IProcessExecutor? executor = null,
+        string? mcpExecutable = null)
+    {
+        ArgumentNullException.ThrowIfNull(doctor);
+        ArgumentNullException.ThrowIfNull(environment);
 
-    /// <summary>Runs the CodeGraph child. Null uses a process executor bounded by the index timeout.</summary>
-    internal IProcessExecutor? Executor { get; init; }
-
-    /// <summary>Reports whether stdin is a terminal. Null uses the real stdin.</summary>
-    internal Func<bool>? IsTerminal { get; init; }
-
-    /// <summary>Reads one environment variable. Null uses the process environment.</summary>
-    internal Func<string, string?>? ReadEnvironment { get; init; }
-
-    /// <summary>The MCP executable. Null uses <see cref="DefaultMcpExecutable"/>.</summary>
-    internal string? McpExecutable { get; init; }
+        _doctor = doctor;
+        _environment = environment;
+        _executor = executor;
+        _mcpExecutable = mcpExecutable ?? DoctorOptions.DefaultMcpExecutableName;
+    }
 
     /// <summary>How many of the mutually exclusive mode options the caller gave: check, provision, ensure and the hook's post-checkout mode.</summary>
     private static int ModesRequested(DoctorSettings settings) =>
@@ -64,8 +72,8 @@ public sealed class DoctorCommand(IRepositoryDoctor doctor) : Command<DoctorSett
             return 2;
         }
 
-        Func<string, string?> environment = ReadEnvironment ?? Environment.GetEnvironmentVariable;
-        bool terminal = (IsTerminal ?? (() => !Console.IsInputRedirected))();
+        Func<string, string?> environment = _environment.GetVariable;
+        bool terminal = !_environment.IsInputRedirected;
         bool ci = !string.IsNullOrEmpty(environment("CI"));
 
         DoctorMode mode;
@@ -89,8 +97,8 @@ public sealed class DoctorCommand(IRepositoryDoctor doctor) : Command<DoctorSett
         DoctorOptions options = new(
             TimeSpan.FromSeconds(settings.IndexTimeoutSeconds),
             TimeSpan.FromSeconds(settings.McpTimeoutSeconds),
-            CodeGraphExecutable,
-            McpExecutable ?? DefaultMcpExecutable);
+            DoctorOptions.DefaultCodeGraphExecutable,
+            _mcpExecutable);
 
         string root;
         try
@@ -105,11 +113,11 @@ public sealed class DoctorCommand(IRepositoryDoctor doctor) : Command<DoctorSett
             return 2;
         }
 
-        IProcessExecutor executor = Executor ?? ProcessExecutor.WithTimeout(options.IndexTimeout);
+        IProcessExecutor executor = _executor ?? ProcessExecutor.WithTimeout(options.IndexTimeout);
         // The hook's own mode skips the MCP and Copilot probes and installs nothing, so it is routed apart from the doctor run.
         DoctorReport report = settings.PostCheckout
-            ? doctor.RunPostCheckout(root, options, executor)
-            : doctor.Run(root, mode, options, executor, environment);
+            ? _doctor.RunPostCheckout(root, options, executor)
+            : _doctor.Run(root, mode, options, executor, environment);
 
         if (hint && !settings.Json)
             Console.Out.WriteLine(NonInteractiveHint);

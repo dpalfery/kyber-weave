@@ -123,6 +123,7 @@ internal static class ReviewCycleView
     /// </summary>
     /// <returns>False, with a finding added to <paramref name="report"/>, when the findings cannot be read.</returns>
     public static bool TryReadRecheck(
+        IFileSystem files,
         ReviewCycleRecord prior,
         ReviewPolicy policy,
         DiagnosticReport report,
@@ -133,7 +134,7 @@ internal static class ReviewCycleView
     {
         try
         {
-            FindingsReport findings = ReviewJson.ReadFindings(File.ReadAllText(prior.FindingsPath));
+            FindingsReport findings = ReviewJson.ReadFindings(files.ReadAllText(prior.FindingsPath));
             recheck.AddRange(findings.Findings.Where(policy.FixRoundTakes));
             return true;
         }

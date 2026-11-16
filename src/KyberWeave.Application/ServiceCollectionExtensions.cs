@@ -12,6 +12,8 @@ using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Data.Arbiter;
 using KyberWeave.Core.Docs.Closeout;
 using KyberWeave.Core.Docs.Delivery;
+using KyberWeave.Application.Agents;
+using KyberWeave.Application.Skills;
 using KyberWeave.Application.Utilities;
 using KyberWeave.Application.Squad;
 using KyberWeave.Core.Squad.Briefs;
@@ -42,6 +44,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IEditHookService, EditHookService>();
         services.TryAddSingleton<IRunStartRunnerFactory, RunStartRunnerFactory>();
         services.TryAddSingleton<IRunStartEvidence, RunStartEvidenceService>();
+        services.TryAddSingleton<IRunStartService, RunStartService>();
         services.TryAddSingleton<ISquadBriefService, SquadBriefService>();
         services.TryAddSingleton<IManagedGlossaryFactory>(sp => new ManagedGlossaryFactory(
             sp.GetRequiredService<IRepositoryFileStore>(), sp.GetRequiredService<TimeProvider>()));
@@ -77,6 +80,9 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton<IRunDeliveryRunner, RunDeliveryRunner>();
         services.TryAddSingleton<IStatusLineDeploymentService, StatusLineDeploymentService>();
+        services.TryAddSingleton<IStatusLineHostService, StatusLineHostService>();
+        services.TryAddSingleton<ISkillGovernanceService, SkillGovernanceService>();
+        services.TryAddSingleton<IAgentGovernanceService, AgentGovernanceService>();
         services.TryAddSingleton<ICodeGraphProvisioner, CodeGraphIndexProvisioner>();
         services.TryAddSingleton<IWorktreeIndexGuard, WorktreeIndexEnsurer>();
         services.TryAddSingleton<McpServerLiveProbe>();

@@ -1,31 +1,18 @@
-using KyberWeave.Core.Agents.Model;
-using KyberWeave.Core.Agents.Parsing;
-using KyberWeave.Core.Agents.Validation;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Diagnostics;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Agents;
 
-public sealed class AgentValidateCommand : Command<AgentCommandSettings>
+public sealed class AgentValidateCommand(IAgentGovernanceService agents) : Command<AgentCommandSettings>
 {
     /// <inheritdoc />
     public override int Execute(CommandContext context, AgentCommandSettings settings, CancellationToken cancellationToken)
     {
-        DiagnosticReport report = new DiagnosticReport();
-
-        if (!AgentLoader.TryParseHarnessFilter(settings.Harness, out HarnessKind? harnessFilter, out string? error))
-        {
-            report.Add(new Diagnostic("KW-PARSE-000", Severity.Error, error!, "agent", settings.Path));
-            CommandHelpers.Finish(report, settings, "agent validate", "Agent");
-            return 1;
-        }
-
-        AgentSet agentSet = AgentLoader.LoadAll(settings.Path, harnessFilter);
-
-        foreach (AgentModel agent in agentSet.Agents)
-            report.AddRange(AgentSpecValidator.Validate(agent).Items);
+        AgentAnalysis analysis = agents.Validate(settings.Path, settings.Harness);
+        DiagnosticReport report = analysis.Report;
 
         CommandHelpers.Finish(report, settings, "agent validate", "Agent");
-        return report.HasErrors ? 1 : 0;
+        return analysis.FilterRefused || report.HasErrors ? 1 : 0;
     }
 }
