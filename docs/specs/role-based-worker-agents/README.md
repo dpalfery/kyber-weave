@@ -11,7 +11,7 @@ impact-components: [KyberSquad, ReviewCouncil, DocGraph, KyberArbiter]
 
 # Role-based worker agents specification
 
-**Status:** Draft awaiting final approval. Requirements, design and tasks are approved (owner, 2026-11-16). Nothing is built.
+**Status:** Ready. Requirements, design and tasks are approved and the owner gave final approval on 2026-11-16. No build has started; nothing is built.
 
 Replaces the eleven per-technology worker agents with three developer agents that differ only in
 model strength (`dev-easy`, `dev-medium`, `dev-hard`). Each task carries a difficulty and its
@@ -29,4 +29,4 @@ It absorbs the standards plan first drafted on
 |---|---|
 | [Requirements](requirements.md) | 13 requirements in EARS form. Approved. |
 | [Design](design.md) | Evidence from the code, where the evidence is against the idea, the roster, the developer agent's instructions, difficulty and the step-up, technology, role and platform folders, the task prompt tool and its budget, one technology per task, technology-resolved task gates, Arbiter rules by folder, five phases, 27 decisions and no open question. Approved. |
-| [Tasks](tasks.md) | 48 tasks in five shippable phases plus closeout, test-first. Approved; no machine task list generated. |
+| [Tasks](tasks.md) | 48 tasks in five shippable phases plus closeout, test-first. Approved; the machine task list is `tasks.json`. |

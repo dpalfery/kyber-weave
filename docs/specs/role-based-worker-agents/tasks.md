@@ -18,6 +18,8 @@ keywords:
 
 # Implementation Tasks
 
+**Status:** Ready
+
 **Phase status:** Approved
 
 Owner approved 2026-11-16 ('Approve tasks'), given directly in the authoring session. Amended 2026-11-16 per owner direction ('fold 625 into phase 1 and close 625'): tasks 1.11 to 1.14 carry the standards plan first drafted on pull request 625.
@@ -27,8 +29,9 @@ Owner approved 2026-11-16 ('Approve tasks'), given directly in the authoring ses
 **Autonomy:** autonomous
 
 Written 2026-11-16 against the draft [requirements](requirements.md) and [design](design.md). The
-owner approved all three on 2026-11-16. The specification awaits the final approve-and-execute
-decision; until then it is not Ready and no machine task list has been generated from this file.
+owner approved all three on 2026-11-16. The owner gave the final approval on 2026-11-16 ('Yes, mark Ready'), with
+the condition that no build starts yet. The machine task list `tasks.json` beside this file was
+generated from it; regenerate it after any edit here.
 
 These tasks deliver five phases. Each phase is its own pull request and leaves the product working
 with today's agents as the default, so any phase can ship without the next.
