@@ -68,6 +68,9 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IGateRunService, GateRunService>();
         services.TryAddSingleton<ICitedLineChecker, CitedLineChecker>();
         services.TryAddSingleton<IDuplicateDetectionService, DuplicateDetectionService>();
+        services.TryAddSingleton<IReviewDecisionSteps, ReviewDecisionSteps>();
+        services.TryAddSingleton<ITaskGateSelectionService, TaskGateSelectionService>();
+        services.TryAddSingleton<IReviewDecisionModelFactory, ReviewDecisionModelFactory>();
         _ = services.AddWeaveArbiterApplication();
         return services;
     }

@@ -504,13 +504,13 @@ public static class ReviewConfigLoader
         string normalized = string.Join('/', segments);
         string full = Path.GetFullPath(Path.Combine(root, normalized));
 
-        if (!TaskGateSelection.IsWithin(root, full))
+        if (!TaskGatePlanning.IsWithin(root, full))
         {
             throw new YamlException(
                 $"{where} '{declared}' leaves the repository root. Name a directory inside the repository.");
         }
 
-        if (TaskGateSelection.LeadsOutsideThroughSymlink(root, normalized))
+        if (new KyberWeave.Data.Review.FileRepositoryTreeProbe().LeadsOutsideThroughSymlink(root, normalized))
         {
             throw new YamlException(
                 $"{where} '{declared}' passes through a symbolic link that leads outside the repository root.");
