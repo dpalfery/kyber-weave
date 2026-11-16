@@ -157,6 +157,21 @@ public sealed class SquadResponsePreferencesInjectorTests
     }
 
     [Fact]
+    public void Inject_LeavesARolesStandardsFolderAlone_ItsFilesAreNotThatAgentsEntryFile()
+    {
+        const string standard = "# Conductor standards\n";
+        SquadRenderResult render = RenderResult(
+            ("agents/conductor.md", "<response-preferences>old</response-preferences>"),
+            ("standards/conductor/conductor.standards.md", standard),
+            ("standards/conductor/conductor.rules.md", "rules"));
+
+        SquadRenderResult injected = SquadResponsePreferencesInjector.Inject(render, "new");
+
+        Assert.Equal(standard, Encoding.UTF8.GetString(injected.Files[1].Content.ToArray()));
+        Assert.Equal("rules", Encoding.UTF8.GetString(injected.Files[2].Content.ToArray()));
+    }
+
+    [Fact]
     public void Inject_UsesDefaultTextForEmptyEffectiveText()
     {
         SquadRenderResult render = RenderResult(("skills/bug-crusher/SKILL.md", "<response-preferences>old</response-preferences>"));

@@ -200,17 +200,17 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
         string role,
         KyberStandardsTemplates.Part part,
         string owner) => part switch
-    {
-        KyberStandardsTemplates.Part.Standard =>
-            DocsScaffoldTemplates.RoleStandard(role, owner, Today),
-        KyberStandardsTemplates.Part.Rules =>
-            DocsScaffoldTemplates.RoleRules(role, owner, Today),
-        KyberStandardsTemplates.Part.Skills =>
-            DocsScaffoldTemplates.RoleSkills(role, owner, Today),
-        KyberStandardsTemplates.Part.ArbiterRules =>
-            DocsScaffoldTemplates.TechnologyArbiterRules(role),
-        _ => throw new ArgumentOutOfRangeException(nameof(part))
-    };
+        {
+            KyberStandardsTemplates.Part.Standard =>
+                DocsScaffoldTemplates.RoleStandard(role, owner, Today),
+            KyberStandardsTemplates.Part.Rules =>
+                DocsScaffoldTemplates.RoleRules(role, owner, Today),
+            KyberStandardsTemplates.Part.Skills =>
+                DocsScaffoldTemplates.RoleSkills(role, owner, Today),
+            KyberStandardsTemplates.Part.ArbiterRules =>
+                DocsScaffoldTemplates.TechnologyArbiterRules(role),
+            _ => throw new ArgumentOutOfRangeException(nameof(part))
+        };
 
     /// <summary>
     /// Declares exactly the folders the operator named: a technology or platform name joins
@@ -251,20 +251,20 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
     }
 
     /// <summary>The stub written for a folder part a shipped template does not supply.</summary>
-    private string TechnologyStub(        string technology,
+    private string TechnologyStub(string technology,
         KyberStandardsTemplates.Part part,
         string owner) => part switch
-    {
-        KyberStandardsTemplates.Part.Standard =>
-            DocsScaffoldTemplates.TechnologyStandard(technology, owner, Today),
-        KyberStandardsTemplates.Part.Rules =>
-            DocsScaffoldTemplates.TechnologyRules(technology, owner, Today),
-        KyberStandardsTemplates.Part.Skills =>
-            DocsScaffoldTemplates.TechnologySkills(technology, owner, Today),
-        KyberStandardsTemplates.Part.ArbiterRules =>
-            DocsScaffoldTemplates.TechnologyArbiterRules(technology),
-        _ => throw new ArgumentOutOfRangeException(nameof(part))
-    };
+        {
+            KyberStandardsTemplates.Part.Standard =>
+                DocsScaffoldTemplates.TechnologyStandard(technology, owner, Today),
+            KyberStandardsTemplates.Part.Rules =>
+                DocsScaffoldTemplates.TechnologyRules(technology, owner, Today),
+            KyberStandardsTemplates.Part.Skills =>
+                DocsScaffoldTemplates.TechnologySkills(technology, owner, Today),
+            KyberStandardsTemplates.Part.ArbiterRules =>
+                DocsScaffoldTemplates.TechnologyArbiterRules(technology),
+            _ => throw new ArgumentOutOfRangeException(nameof(part))
+        };
 
     /// <summary>The rendered block to write, or null when there is nothing to write.</summary>
     private RenderedReviewBlock? ReviewBlockFor(ReviewGatesPlan? reviewPlan) =>
