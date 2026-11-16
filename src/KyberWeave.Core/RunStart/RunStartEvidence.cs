@@ -1,47 +1,27 @@
-using KyberWeave.Core.Arbiter;
+using KyberWeave.Application.RunStart;
 using KyberWeave.Core.Arbiter.Facts;
 
 namespace KyberWeave.Core.RunStart;
 
 /// <summary>
-/// Whether a run has been started before an orchestrator hands a specialist work that writes files (code,
-/// docs, or a plan or specification). Read
-/// by <c>KW-ARB-RUN-001</c> and by the Copilot conductor guard, from machine facts only: the record
-/// <c>run start</c> wrote and git's answer for the repository and the run's worktree.
+/// Whether a run has been started before an orchestrator hands a specialist work that writes files, for the callers
+/// that have no container.
 /// </summary>
+/// <remarks>
+/// The rules are <see cref="RunStartEvidenceRules"/> in the domain layer and the answer is
+/// <see cref="RunStartEvidenceService"/> in the application layer behind <c>IRunStartEvidence</c>. This stays for the Arbiter
+/// hook host and the tests that call it statically.
+/// </remarks>
 public static class RunStartEvidence
 {
     /// <summary>The fix a refused dispatch names.</summary>
-    public const string Remedy = ArbiterRunStartRemedy.Text;
+    public const string Remedy = RunStartEvidenceRules.Remedy;
 
-    private static readonly HashSet<string> WriterProfiles = new(StringComparer.Ordinal)
-    {
-        "worker",
-        "documentation",
-        ArbiterSquadCatalog.ArchitectCapabilityProfile,
-        "product-planning",
-    };
+    private static readonly RunStartEvidenceService Service = new(new GitFacts(), RunBaseState.Store);
 
-    /// <summary>Whether a specialist with <paramref name="capabilityProfile" /> writes project files.</summary>
-    /// <remarks>
-    /// The planners (<c>architect</c>, <c>product-planning</c>) are writers here: their plan, specification and
-    /// task files belong on the run branch, so planning before run start would leave them in the canonical checkout.
-    /// <c>publishing-worker</c> (github-devops) is left out on purpose: it is the route that runs
-    /// <c>run start</c> for a harness with no shell, so gating it on a started run would refuse its own fix.
-    /// </remarks>
-    public static bool IsWriterProfile(string? capabilityProfile) =>
-        capabilityProfile is not null && WriterProfiles.Contains(capabilityProfile);
+    /// <inheritdoc cref="RunStartEvidenceRules.IsWriterProfile" />
+    public static bool IsWriterProfile(string? capabilityProfile) => RunStartEvidenceRules.IsWriterProfile(capabilityProfile);
 
-    /// <summary>Whether a run is live for the repository <paramref name="workingDirectory" /> belongs to.</summary>
-    /// <returns>True or false from the records; null when git cannot name the repository or the records cannot be read.</returns>
-    public static bool? Started(string workingDirectory, string homeDirectory)
-    {
-        if (string.IsNullOrWhiteSpace(workingDirectory) || string.IsNullOrWhiteSpace(homeDirectory))
-        {
-            return null;
-        }
-
-        string? repository = new GitFacts().GetCommonDirectory(workingDirectory);
-        return repository is null ? null : RunBaseState.HasLiveRun(homeDirectory, repository);
-    }
+    /// <inheritdoc cref="KyberWeave.Contracts.Services.IRunStartEvidence.Started" />
+    public static bool? Started(string workingDirectory, string homeDirectory) => Service.Started(workingDirectory, homeDirectory);
 }

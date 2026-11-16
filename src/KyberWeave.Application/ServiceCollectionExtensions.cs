@@ -38,6 +38,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<IEditHookService, EditHookService>();
         services.TryAddSingleton<IRunStartRunnerFactory, RunStartRunnerFactory>();
+        services.TryAddSingleton<IRunStartEvidence, RunStartEvidenceService>();
         services.TryAddSingleton<ISquadBriefService, SquadBriefService>();
         services.TryAddSingleton<IManagedGlossaryFactory>(sp => new ManagedGlossaryFactory(
             sp.GetRequiredService<IRepositoryFileStore>(), sp.GetRequiredService<TimeProvider>()));
@@ -68,6 +69,9 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IGateRunService, GateRunService>();
         services.TryAddSingleton<ICitedLineChecker, CitedLineChecker>();
         services.TryAddSingleton<IDuplicateDetectionService, DuplicateDetectionService>();
+        services.TryAddSingleton<IReviewDecisionSteps, ReviewDecisionSteps>();
+        services.TryAddSingleton<ITaskGateSelectionService, TaskGateSelectionService>();
+        services.TryAddSingleton<IReviewDecisionModelFactory, ReviewDecisionModelFactory>();
         _ = services.AddWeaveArbiterApplication();
         return services;
     }

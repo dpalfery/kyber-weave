@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using KyberWeave.Application.Doctor;
 using KyberWeave.Core.Doctor;
 using KyberWeave.Domain.Doctor;
 using KyberWeave.Core.Processes;
@@ -157,7 +158,7 @@ public sealed class PostCheckoutHookScriptTests : IDisposable
         _git.CommitAll(_git.Repository, "govern the repository");
         string ownMarker = Path.Combine(_git.Markers, "own-hook-ran");
         WriteHook($"#!/bin/sh -eu\necho own >> '{ownMarker}'\nexit 0\n");
-        PostCheckoutHook.Ensure(_git.Repository, _git.Executor());
+        DoctorTestServices.PostCheckout.Ensure(_git.Repository, _git.Executor());
         WriteStub(string.Empty);
         string worktree = Path.Combine(_git.Root, "owned");
 
@@ -176,7 +177,7 @@ public sealed class PostCheckoutHookScriptTests : IDisposable
     {
         _git.CreateGovernedRepository();
         _git.CommitAll(_git.Repository, "govern the repository");
-        PostCheckoutHook.Ensure(_git.Repository, _git.Executor());
+        DoctorTestServices.PostCheckout.Ensure(_git.Repository, _git.Executor());
     }
 
     /// <summary>

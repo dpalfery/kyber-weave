@@ -1,13 +1,18 @@
-using KyberWeave.Core.Arbiter;
-using YamlDotNet.Core;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Data.Configuration;
+using KyberWeave.Data.Review;
 
 namespace KyberWeave.Core.Configuration;
 
 /// <summary>
-/// Loads the combined Kyber-Weave configuration from YAML text or a repository root
-/// (<c>.kyber-weave/kyber-weave.yml</c>, falling back to a legacy root <c>kyber-weave.yml</c>,
-/// and optionally overridden by an explicit <c>--config</c> path).
+/// Loads the combined Kyber-Weave configuration from YAML text or a repository root, for the callers that have no
+/// container.
 /// </summary>
+/// <remarks>
+/// The reads are <see cref="FileKyberWeaveConfigRepository"/> in the data layer behind
+/// <see cref="IKyberWeaveConfigRepository"/>, and the parse and merge are <see cref="KyberWeaveConfigAssembler"/> in the
+/// domain layer. A caller that holds the container takes the repository from it instead.
+/// </remarks>
 public static class KyberWeaveConfigLoader
 {
     /// <summary>Stable rule code for invalid or unreadable <c>kyber-weave.yml</c>.</summary>
@@ -16,295 +21,27 @@ public static class KyberWeaveConfigLoader
     /// <summary>Stable rule code for a non-fatal problem in <c>kyber-weave.yml</c>, such as an unknown key.</summary>
     public const string ConfigWarningCode = "KW-CONFIG-002";
 
-    /// <summary>The repository setting a run reads to decide whether a broken tool stops it.</summary>
-    private const string StopOnToolFailureKey = "stop-on-tool-failure";
+    internal static IKyberWeaveConfigRepository Repository { get; } =
+        new FileKyberWeaveConfigRepository(new FileRepositoryTreeProbe());
 
-    /// <summary>The repository setting the git post-checkout hook reads to decide whether a new worktree is indexed.</summary>
-    private const string WorktreeIndexHookKey = "worktree-index-hook";
+    /// <inheritdoc cref="KyberWeaveConfigAssembler.FromYaml" />
+    public static KyberWeaveConfig LoadFromYaml(string yaml) => KyberWeaveConfigAssembler.FromYaml(yaml);
 
-    /// <summary>
-    /// Loads configuration from YAML text. There is no repository on disk, so a gate that sets
-    /// <c>working-directory</c> is refused; use <see cref="Load(string, string?)"/> for that.
-    /// </summary>
-    public static KyberWeaveConfig LoadFromYaml(string yaml)
-    {
-        ArgumentNullException.ThrowIfNull(yaml);
-        KyberWeaveYamlDocument document = KyberWeaveYamlParser.Parse(yaml);
-        return FromDocument(document, yaml, null);
-    }
+    /// <inheritdoc cref="IKyberWeaveConfigRepository.LoadUserConfig" />
+    public static KyberWeaveConfig LoadUserConfig(string homeDirectory, string? configPath = null) =>
+        Repository.LoadUserConfig(homeDirectory, configPath);
 
-    /// <summary>
-    /// Loads the per-user host config file under <c>~/.kyber-weave/kyber-weave.yml</c>, where
-    /// <c>arbiter.global.targets</c> is valid and must not be rejected as a project-scope error.
-    /// </summary>
-    public static KyberWeaveConfig LoadUserConfig(string homeDirectory, string? configPath = null)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
-        string root = Path.GetFullPath(homeDirectory);
-        string? path = ResolveUserConfigPath(root, configPath);
-        if (!string.IsNullOrWhiteSpace(configPath) && (path is null || !File.Exists(path)))
-        {
-            throw new FileNotFoundException(
-                $"Kyber-Weave config file not found: {path}",
-                path);
-        }
+    /// <inheritdoc cref="IKyberWeaveConfigRepository.TryLoadUserConfig" />
+    public static KyberWeaveConfigLoadResult TryLoadUserConfig(string homeDirectory, string? configPath = null) =>
+        Repository.TryLoadUserConfig(homeDirectory, configPath);
 
-        if (path is null || !File.Exists(path))
-            return KyberWeaveConfig.ProductDefaults;
+    /// <inheritdoc cref="IKyberWeaveConfigRepository.Load" />
+    public static KyberWeaveConfig Load(string repoRoot, string? configPath = null) => Repository.Load(repoRoot, configPath);
 
-        string yaml = File.ReadAllText(path);
-        return LoadUserConfigYaml(yaml);
-    }
+    /// <inheritdoc cref="IKyberWeaveConfigRepository.TryLoad" />
+    public static KyberWeaveConfigLoadResult TryLoad(string repoRoot, string? configPath = null) =>
+        Repository.TryLoad(repoRoot, configPath);
 
-    public static KyberWeaveConfigLoadResult TryLoadUserConfig(string homeDirectory, string? configPath = null)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
-        string root = Path.GetFullPath(homeDirectory);
-        string? path = ResolveUserConfigPath(root, configPath);
-        if (path is null)
-            return KyberWeaveConfigLoadResult.Ok(KyberWeaveConfig.ProductDefaults, path);
-
-        if (!string.IsNullOrWhiteSpace(configPath) && !File.Exists(path))
-        {
-            return KyberWeaveConfigLoadResult.Fail(
-                $"Kyber-Weave config file not found: {path}",
-                path);
-        }
-
-        if (!File.Exists(path))
-            return KyberWeaveConfigLoadResult.Ok(KyberWeaveConfig.ProductDefaults, path);
-
-        try
-        {
-            string yaml = File.ReadAllText(path);
-            return KyberWeaveConfigLoadResult.Ok(LoadUserConfigYaml(yaml), path);
-        }
-        catch (YamlException ex)
-        {
-            return KyberWeaveConfigLoadResult.Fail(ex.Message, path);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return KyberWeaveConfigLoadResult.Fail(ex.Message, path);
-        }
-    }
-
-    public static KyberWeaveConfig Load(string repoRoot, string? configPath = null)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
-        string root = Path.GetFullPath(repoRoot);
-
-        string? path = ResolveConfigPath(root, configPath);
-        if (path is null)
-            return KyberWeaveConfig.ProductDefaults;
-
-        return FromFile(path);
-    }
-
-    /// <summary>
-    /// Attempts to load host configuration. Invalid YAML and I/O failures become a failed
-    /// result rather than an uncaught exception so CLI entry points can emit a structured
-    /// <see cref="ConfigLoadErrorCode"/> diagnostic.
-    /// </summary>
-    public static KyberWeaveConfigLoadResult TryLoad(string repoRoot, string? configPath = null)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
-        string root = Path.GetFullPath(repoRoot);
-        string? path = null;
-
-        try
-        {
-            path = ResolveConfigPath(root, configPath);
-            if (path is null)
-                return KyberWeaveConfigLoadResult.Ok(KyberWeaveConfig.ProductDefaults, null);
-
-            return KyberWeaveConfigLoadResult.Ok(FromFile(path), path);
-        }
-        catch (YamlException ex)
-        {
-            return KyberWeaveConfigLoadResult.Fail(ex.Message, path ?? configPath);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FileNotFoundException)
-        {
-            return KyberWeaveConfigLoadResult.Fail(ex.Message, path ?? configPath);
-        }
-    }
-
-    /// <summary>
-    /// The host config file a repository root already has, or null when it has none.
-    /// </summary>
-    /// <remarks>
-    /// Exposed so that a writer — <c>docs init</c> — edits the same file every reader
-    /// resolves. Creating <c>.kyber-weave/kyber-weave.yml</c> in a repository configured
-    /// through the legacy root path would not overwrite that file, but would shadow it,
-    /// which loses the operator's settings just as thoroughly.
-    /// </remarks>
-    public static string? FindConfigPath(string repoRoot)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
-
-        string defaultPath = Path.Combine(
-            Path.GetFullPath(repoRoot),
-            KyberWeaveYamlParser.DefaultDirectoryName,
-            KyberWeaveYamlParser.DefaultFileName);
-        if (File.Exists(defaultPath))
-            return defaultPath;
-
-        // Legacy location: repo-root kyber-weave.yml, kept working for existing hosts.
-        string legacyPath = Path.Combine(Path.GetFullPath(repoRoot), KyberWeaveYamlParser.DefaultFileName);
-        return File.Exists(legacyPath) ? legacyPath : null;
-    }
-
-    private static string? ResolveConfigPath(string repoRoot, string? configPath)
-    {
-        if (string.IsNullOrWhiteSpace(configPath))
-            return FindConfigPath(repoRoot);
-
-        string explicitPath = Path.IsPathRooted(configPath)
-            ? configPath
-            : Path.Combine(repoRoot, configPath);
-        if (!File.Exists(explicitPath))
-        {
-            throw new FileNotFoundException(
-                $"Kyber-Weave config file not found: {explicitPath}",
-                explicitPath);
-        }
-
-        return explicitPath;
-    }
-
-    private static string? ResolveUserConfigPath(string homeDirectory, string? configPath)
-    {
-        if (!string.IsNullOrWhiteSpace(configPath))
-        {
-            return Path.IsPathRooted(configPath)
-                ? configPath
-                : Path.Combine(homeDirectory, configPath);
-        }
-
-        return UserHostConfig.GetPath(homeDirectory);
-    }
-
-    private static KyberWeaveConfig LoadUserConfigYaml(string yaml)
-    {
-        KyberWeaveYamlDocument document = KyberWeaveYamlParser.Parse(yaml);
-        OntologyConfig ontology = OntologyConfigLoader.Merge(OntologyConfig.ProductDefaults, document.Ontology);
-        return new KyberWeaveConfig
-        {
-            Ontology = ontology,
-            Harness = HarnessProfileConfigLoader.Merge(HarnessProfileConfig.ProductDefaults, document.Harness),
-            DocsAnalysis = DocsAnalysisConfigLoader.Merge(
-                DocsAnalysisConfig.ProductDefaults,
-                document.DocsAnalysis,
-                ontology),
-            Squad = SquadConfigLoader.Merge(SquadConfig.ProductDefaults, document.Squad),
-            ConfigReg = ConfigRegConfigLoader.Merge(
-                ConfigRegConfig.ProductDefaults,
-                document.ConfigReg,
-                document.Autonomy,
-                document.Run,
-                document.StopOnToolFailure,
-                document.Onboarding),
-            Review = ReviewConfigLoader.Merge(
-                ReviewConfig.ProductDefaults,
-                document.Review,
-                null,
-                ReviewConfigLoader.UnknownKeyWarnings(yaml)),
-            Arbiter = ArbiterConfigLoader.LoadUserConfig(yaml),
-            Mcp = McpConfigLoader.Merge(McpConfig.ProductDefaults, document.Mcp),
-            StopsOnToolFailure = ParseStopOnToolFailure(document.StopOnToolFailure)
-        };
-    }
-
-    /// <summary>
-    /// Reads a config file. Its repository root is the parent of the <c>.kyber-weave/</c> directory that
-    /// holds it; a legacy root-level file, or one outside such a directory, uses its own directory.
-    /// </summary>
-    private static KyberWeaveConfig FromFile(string path)
-    {
-        string yaml = File.ReadAllText(path);
-        string directory = Path.GetDirectoryName(Path.GetFullPath(path)) ?? Path.GetFullPath(path);
-        string root = Path.GetFileName(directory) == KyberWeaveYamlParser.DefaultDirectoryName
-            ? Path.GetDirectoryName(directory) ?? directory
-            : directory;
-
-        return FromDocument(KyberWeaveYamlParser.Parse(yaml), yaml, root);
-    }
-
-    private static KyberWeaveConfig FromDocument(KyberWeaveYamlDocument document, string yaml, string? repositoryRoot)
-    {
-        OntologyConfig ontology = OntologyConfigLoader.Merge(OntologyConfig.ProductDefaults, document.Ontology);
-        return new KyberWeaveConfig
-        {
-            Ontology = ontology,
-            Harness = HarnessProfileConfigLoader.Merge(HarnessProfileConfig.ProductDefaults, document.Harness),
-            DocsAnalysis = DocsAnalysisConfigLoader.Merge(
-                DocsAnalysisConfig.ProductDefaults,
-                document.DocsAnalysis,
-                ontology),
-            Squad = SquadConfigLoader.Merge(SquadConfig.ProductDefaults, document.Squad),
-            ConfigReg = ConfigRegConfigLoader.Merge(
-                ConfigRegConfig.ProductDefaults,
-                document.ConfigReg,
-                document.Autonomy,
-                document.Run,
-                document.StopOnToolFailure,
-                document.Onboarding),
-            Review = ReviewConfigLoader.Merge(
-                ReviewConfig.ProductDefaults,
-                document.Review,
-                repositoryRoot,
-                ReviewConfigLoader.UnknownKeyWarnings(yaml)),
-            Arbiter = ArbiterConfigLoader.Merge(ArbiterConfig.ProductDefaults, document.Arbiter),
-            Mcp = McpConfigLoader.Merge(McpConfig.ProductDefaults, document.Mcp),
-            StopsOnToolFailure = ParseStopOnToolFailure(document.StopOnToolFailure),
-            WorktreeIndexHook = ParseWorktreeIndexHook(document.WorktreeIndexHook)
-        };
-    }
-
-    /// <summary>
-    /// Reads the top-level <c>worktree-index-hook</c> setting. Absent means on, so a new worktree is indexed by default.
-    /// </summary>
-    /// <remarks>
-    /// Modelled on <see cref="ParseStopOnToolFailure"/>: the raw value is parsed here so a value outside the two booleans
-    /// is refused with the key and both accepted values named. The hook is shared by every worktree of the clone, so a
-    /// silent guess at an unclear value would change behaviour for all of them without the owner noticing.
-    /// </remarks>
-    /// <exception cref="YamlException">The value is present and is neither <c>true</c> nor <c>false</c>.</exception>
-    private static bool ParseWorktreeIndexHook(string? value)
-    {
-        if (value is null)
-            return true;
-
-        if (bool.TryParse(value, out bool enabled))
-            return enabled;
-
-        throw new YamlException(
-            $"{WorktreeIndexHookKey} '{value}' is not a boolean. Use 'true' to index a new worktree on its first " +
-            "checkout, or 'false' to leave the git hook alone, or remove the key; an absent setting is 'true'.");
-    }
-
-    /// <summary>
-    /// Reads the top-level <c>stop-on-tool-failure</c> setting. Absent means stop.
-    /// </summary>
-    /// <remarks>
-    /// The value is parsed here rather than bound as a <see cref="bool"/> on the YAML document, because a
-    /// binding failure reports the type it wanted — an operator who wrote <c>stop-on-tool-failure: strict</c>
-    /// is told to fix a type they cannot see. This is the same treatment <c>autonomy:</c> gets: the setting
-    /// is named, the two values it accepts are named, and the absent case is spelled out.
-    /// </remarks>
-    /// <exception cref="YamlException">The value is present and is neither <c>true</c> nor <c>false</c>.</exception>
-    private static bool ParseStopOnToolFailure(string? value)
-    {
-        if (value is null)
-            return true;
-
-        if (bool.TryParse(value, out bool stops))
-            return stops;
-
-        throw new YamlException(
-            $"{StopOnToolFailureKey} '{value}' is not a boolean. Use 'true' to stop a run when a " +
-            "required tool cannot be repaired, or 'false' to warn and carry on, or remove the key; " +
-            "a run treats an absent setting as 'true'.");
-    }
+    /// <inheritdoc cref="IKyberWeaveConfigRepository.FindConfigPath" />
+    public static string? FindConfigPath(string repoRoot) => Repository.FindConfigPath(repoRoot);
 }
