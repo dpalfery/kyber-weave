@@ -9,7 +9,7 @@ public static class FailOnPolicy
     /// <param name="report">The findings of the scan.</param>
     /// <param name="failOn">The <c>--fail-on</c> value.</param>
     /// <remarks>
-    ///     The value is lower-cased before it is compared with the lower-case names, so
+    ///     The value is compared case-insensitively with the lower-case names, so
     ///     <c>warning</c>, <c>error</c> and <c>critical</c> match in any letter case. An unknown value
     ///     falls back to the default (critical) threshold.
     /// </remarks>
@@ -18,11 +18,16 @@ public static class FailOnPolicy
         ArgumentNullException.ThrowIfNull(report);
         ArgumentNullException.ThrowIfNull(failOn);
 
-        return failOn.ToLowerInvariant() switch
+        if (string.Equals(failOn, "warning", StringComparison.OrdinalIgnoreCase))
         {
-            "warning" => report.Warnings > 0 || report.HasErrors ? 1 : 0,
-            "error" => report.HasErrors ? 1 : 0,
-            _ => report.HasCritical ? 1 : 0
-        };
+            return report.Warnings > 0 || report.HasErrors ? 1 : 0;
+        }
+
+        if (string.Equals(failOn, "error", StringComparison.OrdinalIgnoreCase))
+        {
+            return report.HasErrors ? 1 : 0;
+        }
+
+        return report.HasCritical ? 1 : 0;
     }
 }
