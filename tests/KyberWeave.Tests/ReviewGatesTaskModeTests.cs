@@ -1,3 +1,6 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Arbiter.Facts;
 using Xunit;
@@ -125,7 +128,7 @@ public sealed class ReviewGatesTaskModeTests : IDisposable
         string pass = Path.Combine(_fixture.Root, ".agent_scratchpad/t1/task-gate.json");
         File.SetLastWriteTimeUtc(pass, File.GetLastWriteTimeUtc(red).AddSeconds(1));
         string digest = $"TASK_GATE: PASS — agent=csharp-dev gates=1 failed=none skipped=0 report={pass} runs=2";
-        Assert.True(GateReportFacts.FailingRunFirst(digest, _fixture.Root));
+        Assert.True(new GateReportFacts().FailingRunFirst(digest, _fixture.Root));
     }
 
     [Fact]

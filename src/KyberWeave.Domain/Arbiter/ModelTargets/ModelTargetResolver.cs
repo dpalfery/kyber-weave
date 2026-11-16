@@ -48,6 +48,9 @@ internal static class ModelTargetResolver
 
     private const string ModeEnforce = "enforce";
     private const string ModeShadow = "shadow";
+    /// <summary>The fact holding the result of the most recent earlier attempt at the same plan task.</summary>
+    internal const string PriorResultFact = "model-targeting.prior-result";
+
     private const string LadderNextFact = "model-targeting.ladder.next";
     private const string SourceLadder = "ladder";
     private const string SourceDifficulty = "difficulty";
@@ -101,7 +104,7 @@ internal static class ModelTargetResolver
         }
 
         // A failed retry is never sent cheaper by difficulty: the difficulty answer applies to a first attempt or a prior pass only.
-        if (facts.TryGet(ModelTargetFacts.PriorResult, out ArbiterFact? prior)
+        if (facts.TryGet(PriorResultFact, out ArbiterFact? prior)
             && string.Equals(prior.Value as string, PriorFail, StringComparison.Ordinal))
         {
             return (null, null);

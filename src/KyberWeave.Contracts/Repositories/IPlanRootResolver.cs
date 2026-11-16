@@ -1,0 +1,16 @@
+
+
+namespace KyberWeave.Contracts.Repositories;
+
+/// <summary>Finds the working tree a dispatch's plan lives in.</summary>
+public interface IPlanRootResolver
+{
+    /// <summary>
+    /// The root to evaluate <paramref name="prompt"/> against: <paramref name="hookRoot"/> when the plan exists
+    /// there or nothing better resolves, otherwise the one worktree that holds the plan.
+    /// </summary>
+    /// <param name="hookRoot">The repository root the hook resolved from its working directory.</param>
+    /// <param name="prompt">The dispatch prompt, headers included when it still has them.</param>
+    /// <param name="listWorktrees">Lists the repository's worktrees; <c>GitFacts.ListWorktrees</c> in production.</param>
+    string Resolve(string hookRoot, string prompt, Func<string, IReadOnlyList<string>>? listWorktrees = null);
+}

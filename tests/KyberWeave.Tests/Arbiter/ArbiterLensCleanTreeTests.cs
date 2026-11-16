@@ -1,3 +1,6 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Core.Arbiter.Plans;
 using System.Text;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Arbiter;
@@ -83,7 +86,7 @@ public sealed class ArbiterLensCleanTreeTests : IDisposable
         Assert.Equal("lens.spawn", classification.Trigger);
 
         ArbiterFactSet facts = TriggerFactBuilder.Build(classification, prompt, KyberWeaveConfig.ProductDefaults);
-        return new HookGitFacts(_probe.Root).Enrich(facts, classification, ev);
+        return new HookGitFacts(new GitFacts(), new PlanPathResolver(), _probe.Root).Enrich(facts, classification, ev);
     }
 
     /// <summary>

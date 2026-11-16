@@ -1,3 +1,8 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Tests.Arbiter;
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
@@ -64,7 +69,7 @@ public sealed class ArbiterCommentShadowCliTests : IDisposable
     }
 
     private ArbiterCommentCommand Command(IArbiterProvider provider) =>
-        new() { ProviderFactory = (_, _) => provider };
+        new(ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<ICommentTriageFactory>()) { ProviderFactory = (_, _) => provider };
 
     private static CommandExecution Capture(Func<int> execute)
     {

@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.FileSystem;
 
@@ -13,7 +14,7 @@ namespace KyberWeave.Core.Arbiter.Plans;
 /// dispatch text is read only to pick among several worktrees that all hold the plan, and to place a return whose
 /// headers were stripped. When nothing resolves, the hook's directory stands and the rules decide on the absence.
 /// </remarks>
-public static class PlanRootResolver
+public sealed class PlanRootResolver(IGitRepositoryFacts git, IPlanFileResolver planPaths) : IPlanRootResolver
 {
     /// <summary>
     /// The root to evaluate <paramref name="prompt"/> against: <paramref name="hookRoot"/> when the plan exists
@@ -21,12 +22,12 @@ public static class PlanRootResolver
     /// </summary>
     /// <param name="hookRoot">The repository root the hook resolved from its working directory.</param>
     /// <param name="prompt">The dispatch prompt, headers included when it still has them.</param>
-    /// <param name="listWorktrees">Lists the repository's worktrees; <see cref="GitFacts.ListWorktrees"/> in production.</param>
-    public static string Resolve(string hookRoot, string prompt, Func<string, IReadOnlyList<string>>? listWorktrees = null)
+    /// <param name="listWorktrees">Lists the repository's worktrees; the git adapter in production.</param>
+    public string Resolve(string hookRoot, string prompt, Func<string, IReadOnlyList<string>>? listWorktrees = null)
     {
         ArgumentNullException.ThrowIfNull(hookRoot);
         ArgumentNullException.ThrowIfNull(prompt);
-        listWorktrees ??= root => GitFacts.ListWorktrees(root);
+        listWorktrees ??= root => git.ListWorktrees(root);
 
         HeaderBlock block = HeaderBlock.Parse(prompt);
         string? planFile = block.Headers.TryGetValue("PLAN_FILE", out string? valid)
@@ -75,15 +76,15 @@ public static class PlanRootResolver
         }
 
         return holding
-            .OrderByDescending(worktree => File.GetLastWriteTimeUtc(PlanPathResolver.Resolve(planFile, worktree)!))
+            .OrderByDescending(worktree => File.GetLastWriteTimeUtc(planPaths.Resolve(planFile, worktree)!))
             .First();
     }
 
-    private static bool Holds(string root, string planFile)
+    private bool Holds(string root, string planFile)
     {
         try
         {
-            return PlanPathResolver.Resolve(planFile, root) is { } path && File.Exists(path);
+            return planPaths.Resolve(planFile, root) is { } path && File.Exists(path);
         }
         catch (ArgumentException)
         {

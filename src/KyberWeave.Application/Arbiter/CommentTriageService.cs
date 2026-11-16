@@ -1,54 +1,10 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 
 namespace KyberWeave.Core.Arbiter;
-
-/// <summary>One bot review comment to classify.</summary>
-/// <param name="Path">The repository-relative path the comment cites.</param>
-/// <param name="Line">The 1-based line the comment cites.</param>
-/// <param name="Body">The comment text.</param>
-/// <param name="CommitSha">The commit the comment was made on, when known; recorded with the decision as evidence.</param>
-public sealed record CommentTriageRequest(string Path, int Line, string Body, string? CommitSha);
-
-/// <summary>The class of one bot review comment and the decision it came from.</summary>
-/// <param name="Class">The class the caller acts on: <c>real</c>, <c>nitpick</c> or <c>already-fixed</c>. Always <c>real</c> while the rule is in shadow.</param>
-/// <param name="Confidence">The provider's confidence in the class, when it reported one.</param>
-/// <param name="DecisionId">The id of the decision record written for this classification.</param>
-/// <param name="Shadow">Whether the rule is in shadow, so <paramref name="Class"/> is log-only and not the model's answer.</param>
-/// <param name="WouldClass">In shadow, the class the model would have delivered without shadow; null when not in shadow or when the model gave no class.</param>
-/// <param name="Status">The provider status the decision carries: <c>answered</c>, or <c>not-evaluated</c> when no question was asked (a disabled or absent rule, or no provider).</param>
-public sealed record CommentTriageResult(string Class, double? Confidence, string DecisionId, bool Shadow, string? WouldClass, string Status);
-
-/// <summary>A bot's PR-level summary comment to classify row by row.</summary>
-/// <param name="Body">The summary text, which may carry a findings table.</param>
-/// <param name="Author">The login that posted the summary, when known; an absent author is never assumed to be a bot.</param>
-public sealed record CommentSummaryRequest(string Body, string? Author);
-
-/// <summary>One row of a summary's findings table and the class it was given.</summary>
-/// <param name="Path">The path the row cites.</param>
-/// <param name="Line">The start line the row cites.</param>
-/// <param name="Issue">The issue text the row states.</param>
-/// <param name="Class">One of <c>real</c>, <c>nitpick</c> or <c>already-fixed</c>.</param>
-/// <param name="Confidence">The provider's confidence, when the row was sent to it and it reported one.</param>
-/// <param name="DecisionId">The decision record the row was classified under; empty when the row was never sent.</param>
-/// <param name="Shadow">Whether the rule is in shadow, so <paramref name="Class"/> is log-only; reported for every row, sent or not.</param>
-/// <param name="WouldClass">In shadow, the class the model would have delivered for the row; null when the row was not answered.</param>
-/// <param name="Status">The provider status of the row's decision; <c>not-evaluated</c> when the row was never asked.</param>
-public sealed record CommentSummaryItem(
-    string Path,
-    int Line,
-    string Issue,
-    string Class,
-    double? Confidence,
-    string DecisionId,
-    bool Shadow,
-    string? WouldClass,
-    string Status);
-
-/// <summary>The classified rows of one summary comment, in table order.</summary>
-/// <param name="Items">One item per table row; empty when the comment has no table or a row was malformed.</param>
-public sealed record CommentSummaryResult(IReadOnlyList<CommentSummaryItem> Items);
 
 /// <summary>
 /// Classifies one bot review comment against the code as it is now, through <c>KW-ARB-COMMENT-001</c>. Every call
@@ -66,6 +22,8 @@ public sealed record CommentSummaryResult(IReadOnlyList<CommentSummaryItem> Item
 /// <param name="repoRoot">The repository root the cited path is read under.</param>
 /// <param name="arbiterDirectory">The directory the decision log is written to.</param>
 /// <param name="clock">Stamps the decision record and allocates its id.</param>
+/// <param name="fileText">Reads the window of the cited file the comment is judged against.</param>
+/// <param name="state">Opens the decision log the decision is written to.</param>
 /// <param name="ruleSet">The rule-set hash the decision records, when the caller has one; empty otherwise.</param>
 /// <param name="botLogins">The logins of review bots whose summaries are classified. Empty means no summary is classified.</param>
 /// <param name="rules">
@@ -78,9 +36,11 @@ public sealed class CommentTriageService(
     string repoRoot,
     string arbiterDirectory,
     TimeProvider clock,
+    IFileTextFacts fileText,
+    IArbiterStateFactory state,
     string? ruleSet = null,
     IReadOnlyList<string>? botLogins = null,
-    IReadOnlyList<ArbiterRule>? rules = null)
+    IReadOnlyList<ArbiterRule>? rules = null) : ICommentTriage
 {
     /// <summary>The shipped rule that classifies a comment.</summary>
     public const string CommentRuleId = "KW-ARB-COMMENT-001";
@@ -109,7 +69,7 @@ public sealed class CommentTriageService(
         DateTimeOffset now = clock.GetUtcNow();
         string decisionId = ArbiterRecordId.New(now);
         ArbiterRule? rule = CommentRule();
-        FileExcerpt? excerpt = FileTextFacts.ReadExcerpt(repoRoot, request.Path, request.Line);
+        FileExcerpt? excerpt = fileText.ReadExcerpt(repoRoot, request.Path, request.Line);
 
         ArbiterStep1BatchResult? batch = null;
         string status = ArbiterProviderStatuses.NotEvaluated;
@@ -293,6 +253,6 @@ public sealed class CommentTriageService(
             answer,
             0,
             0);
-        await new DecisionLog(arbiterDirectory).AppendAsync(record, ct).ConfigureAwait(false);
+        await state.OpenDecisionLog(arbiterDirectory).AppendAsync(record, ct).ConfigureAwait(false);
     }
 }

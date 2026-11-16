@@ -1,3 +1,9 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Tests.Arbiter;
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Core.Arbiter.Plans;
+using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Cli.Commands.Arbiter;
 using Xunit;
 
@@ -30,7 +36,7 @@ public sealed class ArbiterCommentBodyLimitCliTests : IDisposable
     public void Comment_BodyOverTheTextLimit_IsRefused(bool summary)
     {
         WriteDocument();
-        ArbiterCommentCommand command = new();
+        ArbiterCommentCommand command = new(ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<ICommentTriageFactory>());
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterCommentSettings

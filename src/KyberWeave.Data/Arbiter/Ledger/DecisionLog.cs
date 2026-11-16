@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using System.Text.Json;
 using KyberWeave.Core.Arbiter.Rules;
 
@@ -15,7 +16,7 @@ namespace KyberWeave.Core.Arbiter.Facts;
 /// directory is passed in because the hook resolves the repository root with
 /// <c>git rev-parse --show-toplevel</c> from the payload's <c>cwd</c>.
 /// </remarks>
-public sealed class DecisionLog
+public sealed class DecisionLog : IArbiterDecisionLog
 {
     /// <summary>The decision log file name, relative to the arbiter directory.</summary>
     public const string FileName = "decisions.jsonl";
@@ -109,14 +110,6 @@ public sealed class DecisionLog
     public int Repeat(string ruleId, string? planFile, string? planDigest, string? task, string? session = null)
     {
         ArgumentNullException.ThrowIfNull(ruleId);
-        return 1 + ReadAll().Count(decision =>
-            string.Equals(decision.Outcome, RuleEffects.Escalate, StringComparison.Ordinal)
-            && decision.Rules.Any(rule => string.Equals(rule.Id, ruleId, StringComparison.Ordinal))
-            && string.Equals(decision.PlanFile, planFile, StringComparison.Ordinal)
-            && string.Equals(decision.PlanDigest, planDigest, StringComparison.Ordinal)
-            && string.Equals(decision.Task, task, StringComparison.Ordinal)
-            && (planFile is not null
-                || (!string.IsNullOrWhiteSpace(session)
-                    && string.Equals(decision.Session, session, StringComparison.Ordinal))));
+        return ArbiterDecisionQueries.Repeat(ReadAll(), ruleId, planFile, planDigest, task, session);
     }
 }

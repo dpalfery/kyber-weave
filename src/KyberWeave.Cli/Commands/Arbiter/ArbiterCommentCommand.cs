@@ -1,3 +1,5 @@
+using KyberWeave.Contracts.Services;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
@@ -14,7 +16,7 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 /// the decision. Without a loadable configuration the comment is classed real. While the comment rule is in shadow the
 /// class printed is real, and a line after it says what the model would have given.
 /// </summary>
-public sealed class ArbiterCommentCommand : Command<ArbiterCommentSettings>
+public sealed class ArbiterCommentCommand(IFileTextFacts fileText, ICommentTriageFactory triageFactory) : Command<ArbiterCommentSettings>
 {
     /// <summary>
     /// Builds the provider for a repository root. The command uses the root's configuration; a test substitutes one that
@@ -46,7 +48,7 @@ public sealed class ArbiterCommentCommand : Command<ArbiterCommentSettings>
         string root = System.IO.Path.GetFullPath(settings.Root);
         // The same containment the served tool applies: a cited path that leaves the root is refused, not read. The check
         // and the triage read use one root, the --root the settings name, so a path cannot pass one and fail the other.
-        if (!settings.Summary && FileTextFacts.ResolveWithinRoot(root, settings.Path) is null)
+        if (!settings.Summary && fileText.ResolveWithinRoot(root, settings.Path) is null)
         {
             AnsiConsole.MarkupLine($"[red]The document '{Markup.Escape(settings.Path)}' was not found under the repository root.[/]");
             return 1;
@@ -67,11 +69,10 @@ public sealed class ArbiterCommentCommand : Command<ArbiterCommentSettings>
         using IDisposable? owner = provider as IDisposable;
         if (settings.Summary)
         {
-            CommentSummaryResult summary = new CommentTriageService(
+            CommentSummaryResult summary = triageFactory.Create(
                     provider,
                     root,
                     System.IO.Path.Combine(root, "artifacts", "arbiter"),
-                    TimeProvider.System,
                     null,
                     BotLoginsFor(root),
                     RulesFor(root))
@@ -90,11 +91,10 @@ public sealed class ArbiterCommentCommand : Command<ArbiterCommentSettings>
             return 0;
         }
 
-        CommentTriageResult result = new CommentTriageService(
+        CommentTriageResult result = triageFactory.Create(
                 provider,
                 root,
                 System.IO.Path.Combine(root, "artifacts", "arbiter"),
-                TimeProvider.System,
                 rules: RulesFor(root))
             .ClassifyAsync(new CommentTriageRequest(settings.Path, settings.Line, settings.Body, settings.CommitSha), cancellationToken)
             .GetAwaiter()

@@ -1,3 +1,8 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Tests.Arbiter;
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Core.Arbiter.Plans;
 using System.Text;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Arbiter;
@@ -236,7 +241,7 @@ public sealed class ArbiterPlannerDiffRuleTests
     {
         using TempDirectory nonRepo = new();
         using TempDirectory home = new();
-        HookGitFacts gitFacts = new(nonRepo.Path, home.Path);
+        HookGitFacts gitFacts = new(new GitFacts(), new PlanPathResolver(), nonRepo.Path, home.Path);
 
         ArbiterEvent postEvent = new()
         {
@@ -296,7 +301,7 @@ public sealed class ArbiterPlannerDiffRuleTests
         probe.Git("commit", "-m", "feat: earlier task implementation");
         WriteRepoFile(probe.Root, "artifacts/gates.json", "{}\n");
 
-        HookGitFacts gitFacts = new(probe.Root, home.Path);
+        HookGitFacts gitFacts = new(new GitFacts(), new PlanPathResolver(), probe.Root, home.Path);
         ArbiterRule rule = ShippedRule();
 
         // 1. Unpaired PostToolUse with no pre-dispatch snapshot: the dispatch delta is

@@ -206,7 +206,7 @@ internal static class ArbiterHarnessGating
         List<string> sources = [];
         foreach (string eventName in new[] { "PreToolUse", "PostToolUse" })
         {
-            sources.AddRange(ClaudeHookCoverage.ProjectCandidateSources(root, home, eventName, AgentToolName));
+            sources.AddRange(ArbiterCommandComposition.ClaudeHooks.ProjectCandidateSources(root, home, eventName, AgentToolName));
         }
 
         return sources.Distinct(StringComparer.Ordinal).ToList();

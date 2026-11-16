@@ -1,3 +1,8 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Tests.Arbiter;
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
@@ -93,7 +98,7 @@ public sealed class ArbiterSummaryCommentTriageTests : IDisposable
     }
 
     private CommentTriageService Service(IArbiterProvider provider, IReadOnlyList<string>? botLogins) =>
-        new(provider, Root, ArbiterDirectory, new FixedClock(Now), botLogins: botLogins);
+        new(provider, Root, ArbiterDirectory, new FixedClock(Now), ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<IArbiterStateFactory>(), botLogins: botLogins);
 
     private static CommentSummaryRequest Summary(string? author, string body = KiloSummary) => new(body, author);
 

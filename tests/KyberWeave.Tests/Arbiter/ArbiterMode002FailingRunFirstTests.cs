@@ -1,3 +1,6 @@
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Rules;
@@ -63,7 +66,7 @@ public sealed class ArbiterMode002FailingRunFirstTests : IDisposable
         Write("task-gate-red.json", Failing(), Earlier);
         string pass = Write("task-gate.json", Passing(), Later);
 
-        Assert.True(GateReportFacts.FailingRunFirst(Claim(pass), _root));
+        Assert.True(new GateReportFacts().FailingRunFirst(Claim(pass), _root));
     }
 
     [Fact]
@@ -71,7 +74,7 @@ public sealed class ArbiterMode002FailingRunFirstTests : IDisposable
     {
         string pass = Write("task-gate.json", Passing(), Later);
 
-        Assert.False(GateReportFacts.FailingRunFirst(Claim(pass), _root));
+        Assert.False(new GateReportFacts().FailingRunFirst(Claim(pass), _root));
     }
 
     [Fact]
@@ -80,7 +83,7 @@ public sealed class ArbiterMode002FailingRunFirstTests : IDisposable
         Write("task-gate-red.json", Failing(), Later);
         string pass = Write("task-gate.json", Passing(), Earlier);
 
-        Assert.False(GateReportFacts.FailingRunFirst(Claim(pass), _root));
+        Assert.False(new GateReportFacts().FailingRunFirst(Claim(pass), _root));
     }
 
     [Fact]
@@ -88,7 +91,7 @@ public sealed class ArbiterMode002FailingRunFirstTests : IDisposable
     {
         string red = Write("task-gate.json", Failing(), Later);
 
-        Assert.False(GateReportFacts.FailingRunFirst(Claim(red), _root));
+        Assert.False(new GateReportFacts().FailingRunFirst(Claim(red), _root));
     }
 
     /// <summary>A rework dispatch adds a new passing run; the failing run of the task's first pass still precedes it.</summary>
@@ -99,7 +102,7 @@ public sealed class ArbiterMode002FailingRunFirstTests : IDisposable
         Write("task-gate.json", Passing(), Earlier.AddMinutes(5));
         string rework = Write("task-gate-rework.json", Passing(), Later);
 
-        Assert.True(GateReportFacts.FailingRunFirst(Claim(rework), _root));
+        Assert.True(new GateReportFacts().FailingRunFirst(Claim(rework), _root));
     }
 
     [Theory]
@@ -108,7 +111,7 @@ public sealed class ArbiterMode002FailingRunFirstTests : IDisposable
     [InlineData("TASK_GATE: PASS — agent=csharp-dev report=.agent_scratchpad/T3/missing.json")]
     public void AClaimOrReportThatCannotBeReadLeavesTheFactAbsent(string returned)
     {
-        Assert.Null(GateReportFacts.FailingRunFirst(returned, _root));
+        Assert.Null(new GateReportFacts().FailingRunFirst(returned, _root));
     }
 
     [Fact]
@@ -116,7 +119,7 @@ public sealed class ArbiterMode002FailingRunFirstTests : IDisposable
     {
         string failed = Write("task-gate.json", new GateReport(GateReport.CurrentSchema, [new GateResult("tests", true, 1, "1 failed")]), Later);
 
-        Assert.Null(GateReportFacts.FailingRunFirst($"TASK_GATE: FAIL report={failed}", _root));
+        Assert.Null(new GateReportFacts().FailingRunFirst($"TASK_GATE: FAIL report={failed}", _root));
     }
 
     [Fact]

@@ -1,17 +1,8 @@
+using KyberWeave.Core.Arbiter.ModelTargets;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Review;
 
 namespace KyberWeave.Core.Arbiter.Facts;
-
-/// <summary>One file a task touches, tagged with its extension and whether it matches the test-file patterns.</summary>
-/// <param name="Extension">The file extension, including its dot (<c>.cs</c>), or empty when the file has none.</param>
-/// <param name="Kind"><c>test</c> when a test-file pattern matches the path, otherwise <c>source</c>.</param>
-public sealed record ArbiterFileKind(string Extension, string Kind);
-
-/// <summary>The most recent earlier attempt at the same plan task, as the ledger and decision log record it.</summary>
-/// <param name="Result"><c>pass</c> or <c>fail</c>, from the attempt's task-review marker.</param>
-/// <param name="Profile">The profile the attempt ran on, when one was recorded.</param>
-/// <param name="Token">The model token the attempt ran on, when one was recorded.</param>
-public sealed record ArbiterPriorAttempt(string Result, string? Profile, string? Token);
 
 /// <summary>
 /// Supplies the model-targeting facts the <c>delegate.model</c> rules read: <c>plan.task.file-kinds</c>,
@@ -28,7 +19,7 @@ internal static class ModelTargetFacts
 {
     private const string FileKinds = "plan.task.file-kinds";
     private const string PriorAttempt = "ledger.task.prior-attempt";
-    internal const string PriorResult = "model-targeting.prior-result";
+    internal const string PriorResult = ModelTargetResolver.PriorResultFact;
     private const string PriorProfile = "model-targeting.prior-profile";
     private const string LadderNext = "model-targeting.ladder.next";
     private const string BudgetExceeded = "BUDGET_EXCEEDED";
@@ -43,8 +34,8 @@ internal static class ModelTargetFacts
     /// <param name="targeting">The model-targeting block, whose ladder the next rung comes from.</param>
     public static ArbiterFactSet Enrich(
         ArbiterFactSet facts,
-        InFlightLedger ledger,
-        DecisionLog decisions,
+        IArbiterLedger ledger,
+        IArbiterDecisionLog decisions,
         string ledgerId,
         ArbiterModelTargetingConfig targeting)
     {
@@ -117,8 +108,8 @@ internal static class ModelTargetFacts
 
     private static ArbiterPriorAttempt? PriorAttemptOf(
         ArbiterFactSet facts,
-        InFlightLedger ledger,
-        DecisionLog decisions,
+        IArbiterLedger ledger,
+        IArbiterDecisionLog decisions,
         string ledgerId)
     {
         string? task = Text(facts, "plan.task") ?? Text(facts, "delegation.task");

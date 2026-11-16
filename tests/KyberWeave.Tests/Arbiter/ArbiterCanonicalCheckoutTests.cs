@@ -1,3 +1,4 @@
+using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Data.Arbiter;
 using KyberWeave.Data.Hooks;
 using System.Diagnostics;
@@ -164,7 +165,7 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
     public void Return_ListsThePathsADispatchLeftInTheCanonicalCheckout()
     {
         StartInWorktree();
-        HookGitFacts facts = new(_repo, _home.Path);
+        HookGitFacts facts = new(new GitFacts(), new PlanPathResolver(), _repo, _home.Path);
         Enrich(facts, "pre");
 
         File.WriteAllText(Path.Combine(_repo, "src", "Job.cs"), "class Job { int Id; }\n");
@@ -184,7 +185,7 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
     {
         StartInWorktree();
         File.WriteAllText(Path.Combine(_repo, "notes.txt"), "a person's edit before the dispatch\n");
-        HookGitFacts facts = new(_repo, _home.Path);
+        HookGitFacts facts = new(new GitFacts(), new PlanPathResolver(), _repo, _home.Path);
         Enrich(facts, "pre");
 
         File.WriteAllText(Path.Combine(_worktree, "src", "Job.cs"), "class Job { int Id; }\n");
@@ -197,7 +198,7 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
     [Fact]
     public void Return_LeavesTheFactAbsentWithNoRunInAWorktreeOfItsOwn()
     {
-        HookGitFacts facts = new(_repo, _home.Path);
+        HookGitFacts facts = new(new GitFacts(), new PlanPathResolver(), _repo, _home.Path);
         Enrich(facts, "pre");
         File.WriteAllText(Path.Combine(_repo, "src", "Job.cs"), "class Job { int Id; }\n");
 
@@ -212,7 +213,7 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
     {
         StartInWorktree();
         File.WriteAllText(Path.Combine(_repo, "src", "Job.cs"), "class Job { int Stray; }\n");
-        HookGitFacts facts = new(_repo, _home.Path);
+        HookGitFacts facts = new(new GitFacts(), new PlanPathResolver(), _repo, _home.Path);
         Enrich(facts, "pre");
 
         Git(_repo, "restore", "src/Job.cs");
@@ -226,7 +227,7 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
     public void Return_ACopilotRootConductorsUnnamedDispatchIsCheckedToo()
     {
         StartInWorktree();
-        HookGitFacts facts = new(_repo, _home.Path);
+        HookGitFacts facts = new(new GitFacts(), new PlanPathResolver(), _repo, _home.Path);
         ArbiterFactSet pre = Enrich(facts, "pre", harness: "copilot-cli", caller: null);
         Assert.True(pre.TryGet("delegation.target-profile", out _));
 
@@ -254,9 +255,11 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
             _ => null,
             new InFlightLedger(arbiterDirectory),
             new DecisionLog(arbiterDirectory),
-            new HookGitFacts(_repo, _home.Path, arbiterDirectory),
+            new HookGitFacts(new GitFacts(), new PlanPathResolver(), _repo, _home.Path, arbiterDirectory),
             new ArbiterEvaluatorFixtures.PlanFacts(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
+            new GateReportFacts(),
+            new FileArbiterStateFactory(),
             TimeProvider.System);
         KyberWeaveConfig config = ArbiterEvaluatorFixtures.ConfigWith(ArbiterConfig.ProductDefaults.Rules);
 
@@ -357,7 +360,7 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
             Branch,
             "origin/main",
             new RunStartPlace(
-                GitFacts.GetCommonDirectory(_repo) ?? throw new InvalidOperationException("no git dir"),
+                new GitFacts().GetCommonDirectory(_repo) ?? throw new InvalidOperationException("no git dir"),
                 worktree,
                 DateTimeOffset.UtcNow));
 

@@ -1,3 +1,5 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Data.Arbiter;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Core.Arbiter;
@@ -125,6 +127,8 @@ public sealed class ArbiterForEachExpansionTests : IDisposable
             new PassThroughGitFacts(),
             new FileListPlanReader(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
+            new GateReportFacts(),
+            new FileArbiterStateFactory(),
             new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)));
 
         await evaluator.EvaluateAsync(DelegateEvent(), ConfigWith([ForEachRule()]));
@@ -144,6 +148,8 @@ public sealed class ArbiterForEachExpansionTests : IDisposable
             new PassThroughGitFacts(),
             new FileListPlanReader(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
+            new GateReportFacts(),
+            new FileArbiterStateFactory(),
             new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)));
 
         await evaluator.EvaluateAsync(DelegateEvent(), ConfigWith([ForEachRule()]));

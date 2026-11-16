@@ -1,3 +1,9 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Tests.Arbiter;
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Core.Arbiter.Plans;
+using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Cli.Commands.Arbiter;
 using Xunit;
 
@@ -43,7 +49,7 @@ public sealed class ArbiterSummaryCommentTriageCliTests : IDisposable
     public void Summary_PrintsOneLinePerTableRow()
     {
         WriteCitedFiles();
-        ArbiterCommentCommand command = new();
+        ArbiterCommentCommand command = new(ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<ICommentTriageFactory>());
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -60,7 +66,7 @@ public sealed class ArbiterSummaryCommentTriageCliTests : IDisposable
     public void Summary_HumanAuthor_PrintsEveryItemReal()
     {
         WriteCitedFiles();
-        ArbiterCommentCommand command = new();
+        ArbiterCommentCommand command = new(ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<ICommentTriageFactory>());
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -76,7 +82,7 @@ public sealed class ArbiterSummaryCommentTriageCliTests : IDisposable
     public void Summary_NoAuthor_ExitsZeroWithRealItems()
     {
         WriteCitedFiles();
-        ArbiterCommentCommand command = new();
+        ArbiterCommentCommand command = new(ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<ICommentTriageFactory>());
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -91,7 +97,7 @@ public sealed class ArbiterSummaryCommentTriageCliTests : IDisposable
     public void Summary_IssueWithMarkupCharacters_RendersLiterally()
     {
         WriteCitedFiles();
-        ArbiterCommentCommand command = new();
+        ArbiterCommentCommand command = new(ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<ICommentTriageFactory>());
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,

@@ -1,23 +1,16 @@
+using KyberWeave.Contracts.Repositories;
 using System.Text;
 using KyberWeave.Core.Arbiter.Sections;
 using KyberWeave.Core.Configuration;
 
 namespace KyberWeave.Core.Arbiter.Facts;
 
-/// <summary>A bounded window of a repository file, around one line.</summary>
-/// <param name="Path">The repository-relative path the excerpt was read from.</param>
-/// <param name="StartLine">The 1-based first line of the window.</param>
-/// <param name="EndLine">The 1-based last line of the window that was read.</param>
-/// <param name="Text">The window's lines joined with newlines, bounded by <see cref="FileTextFacts.MaxExcerptCharacters"/>.</param>
-/// <param name="Truncated">True when a line or the window was cut short to stay within bounds.</param>
-public sealed record FileExcerpt(string Path, int StartLine, int EndLine, string Text, bool Truncated);
-
 /// <summary>
 /// Reads the current text around a line of a repository file, so a review comment is judged against the code as it
 /// is now. Reads are bounded in lines, characters per line and characters overall, and a path that leaves the
 /// repository root is never read.
 /// </summary>
-public static class FileTextFacts
+public sealed class FileTextFacts : IFileTextFacts
 {
     /// <summary>The most characters one excerpt carries.</summary>
     public const int MaxExcerptCharacters = 4000;
@@ -42,7 +35,7 @@ public static class FileTextFacts
     /// <param name="path">A path relative to the root, or an absolute path under it.</param>
     /// <param name="line">The 1-based line the comment cites.</param>
     /// <returns>The excerpt, or null when the path leaves the root, the file is absent, or the line is past the end.</returns>
-    public static FileExcerpt? ReadExcerpt(string repoRoot, string path, int line)
+    public FileExcerpt? ReadExcerpt(string repoRoot, string path, int line)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -146,7 +139,7 @@ public static class FileTextFacts
     /// under the root.
     /// </summary>
     /// <returns>The full path, or null when the path would leave the root.</returns>
-    public static string? ResolveWithinRoot(string repoRoot, string path)
+    public string? ResolveWithinRoot(string repoRoot, string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -173,7 +166,7 @@ public static class FileTextFacts
     /// root is checked for a link before the file is tested for existence.
     /// </summary>
     /// <returns>The full path, or null when the path leaves the root, crosses a link, or names no file.</returns>
-    public static string? ResolveContainedFile(string repoRoot, string path)
+    public string? ResolveContainedFile(string repoRoot, string path)
     {
         string? full = ResolveWithinRoot(repoRoot, path);
         if (full is null)

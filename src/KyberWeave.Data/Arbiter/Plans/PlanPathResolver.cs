@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using System.Runtime.InteropServices;
 
 namespace KyberWeave.Core.Arbiter.Plans;
@@ -29,7 +30,7 @@ namespace KyberWeave.Core.Arbiter.Plans;
 /// root would reject every plan on the platform.
 /// </para>
 /// </remarks>
-public static class PlanPathResolver
+public sealed class PlanPathResolver : IPlanFileResolver
 {
     /// <summary>The platform's path comparison rule: case-insensitive on Windows and macOS.</summary>
     private static readonly StringComparison PathComparison =
@@ -49,7 +50,7 @@ public static class PlanPathResolver
     /// failure: the caller reads it as <c>plan.exists: false</c> and lets the rules decide
     /// on the absence.
     /// </returns>
-    public static string? Resolve(string? planFile, string repositoryRoot)
+    public string? Resolve(string? planFile, string repositoryRoot)
     {
         if (string.IsNullOrWhiteSpace(planFile))
         {

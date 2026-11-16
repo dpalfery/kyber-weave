@@ -1,3 +1,5 @@
+using KyberWeave.Contracts.Repositories;
+using Microsoft.Extensions.DependencyInjection;
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -140,7 +142,7 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
             return null;
         }
 
-        return ClaudeHookCoverage.CandidateSources(
+        return ArbiterServices.Shared.GetRequiredService<IClaudeHookCoverage>().CandidateSources(
             repoRoot,
             homeDirectory,
             GetString(payload, "agent_type"),

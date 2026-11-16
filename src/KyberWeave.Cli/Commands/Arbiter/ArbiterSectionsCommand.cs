@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Sections;
@@ -13,7 +14,7 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 /// The command has no repository root to read configuration from, so it selects with <see cref="NoneProvider"/> and
 /// lists every section; the served tool <c>arbiter_select_relevant_document_sections</c> uses the configured provider.
 /// </remarks>
-public sealed class ArbiterSectionsCommand : Command<ArbiterSectionsSettings>
+public sealed class ArbiterSectionsCommand(IFileTextFacts fileText) : Command<ArbiterSectionsSettings>
 {
     /// <summary>Prints each section's id, its line range and title. Exits 2 on a usage error, and 1 when the document is missing.</summary>
     public override int Execute(CommandContext context, ArbiterSectionsSettings settings, CancellationToken cancellationToken)
@@ -27,7 +28,7 @@ public sealed class ArbiterSectionsCommand : Command<ArbiterSectionsSettings>
         // The same containment and size cap as the served tool: a path outside the repository root, or a symbolic link
         // out of it, is refused the way the tool refuses it, and an oversized document is not read.
         string root = ArbiterRepoRoot.Find(System.IO.Path.GetFullPath("."));
-        string? full = FileTextFacts.ResolveContainedFile(root, settings.Path);
+        string? full = fileText.ResolveContainedFile(root, settings.Path);
         if (full is null)
         {
             AnsiConsole.MarkupLine($"[red]The document '{Markup.Escape(settings.Path)}' was not found under the repository root.[/]");

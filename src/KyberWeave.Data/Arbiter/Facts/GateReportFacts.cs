@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Core.Review;
@@ -21,7 +22,7 @@ namespace KyberWeave.Core.Arbiter.Facts;
 /// gate run at all, and reads the raw claim line and the report tail this class also supplies.
 /// </para>
 /// </remarks>
-public static class GateReportFacts
+public sealed class GateReportFacts : IGateReportFacts
 {
     /// <summary>The fact a returned digest's <c>TASK_GATE:</c> claim is verified into.</summary>
     public const string AgreesFact = "gate.report.agrees";
@@ -60,7 +61,7 @@ public static class GateReportFacts
 
     /// <summary>Reads the gate report for a repository root.</summary>
     /// <returns>The report, or <c>null</c> when it is missing or unreadable.</returns>
-    public static GateReport? TryRead(string repositoryRoot)
+    public GateReport? TryRead(string repositoryRoot)
     {
         if (string.IsNullOrWhiteSpace(repositoryRoot))
             return null;
@@ -69,7 +70,7 @@ public static class GateReportFacts
 
     /// <summary>Reads a gate report from its file path.</summary>
     /// <returns>The report, or <c>null</c> when it is missing or unreadable.</returns>
-    public static GateReport? TryReadFile(string gatesJsonPath)
+    public GateReport? TryReadFile(string gatesJsonPath)
     {
         try
         {
@@ -100,7 +101,7 @@ public static class GateReportFacts
     /// </summary>
     /// <param name="facts">The fact bag built for the event's trigger.</param>
     /// <param name="ev">The event; only a return carries the text to verify.</param>
-    public static ArbiterFactSet Enrich(ArbiterFactSet facts, ArbiterEvent ev)
+    public ArbiterFactSet Enrich(ArbiterFactSet facts, ArbiterEvent ev)
     {
         ArgumentNullException.ThrowIfNull(facts);
         ArgumentNullException.ThrowIfNull(ev);
@@ -135,7 +136,7 @@ public static class GateReportFacts
     /// report reader <see cref="Agrees(string?, string?)"/> uses, so a finding and a digest are checked against one source.
     /// </summary>
     /// <returns><c>true</c> when a gate ran and failed; <c>false</c> when the report is missing or shows none failed.</returns>
-    public static bool FailedGateCorroborates(string? repositoryRoot)
+    public bool FailedGateCorroborates(string? repositoryRoot)
     {
         GateReport? report = string.IsNullOrWhiteSpace(repositoryRoot) ? null : TryRead(repositoryRoot);
         return report?.Gates is not null
@@ -151,7 +152,7 @@ public static class GateReportFacts
     /// <c>null</c> when there is no claim or no report to read. False is a machine finding and
     /// escalates; null is undecidable and goes to the model question.
     /// </returns>
-    public static bool? Agrees(string? returnedText, string? repositoryRoot)
+    public bool? Agrees(string? returnedText, string? repositoryRoot)
     {
         if (string.IsNullOrWhiteSpace(returnedText))
             return null;
@@ -183,7 +184,7 @@ public static class GateReportFacts
     /// or is itself the failing-run report; <c>null</c> when there is no claim, no report, or the claimed report
     /// is not a clean pass (<c>KW-ARB-GATE-REPORT-001</c> judges that).
     /// </returns>
-    public static bool? FailingRunFirst(string? returnedText, string? repositoryRoot)
+    public bool? FailingRunFirst(string? returnedText, string? repositoryRoot)
     {
         if (Agrees(returnedText, repositoryRoot) is not true)
             return null;

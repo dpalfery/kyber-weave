@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.FileSystem;
@@ -21,7 +22,7 @@ namespace KyberWeave.Core.Arbiter.Plans;
 /// failure.
 /// </para>
 /// </remarks>
-public static partial class PlanFacts
+public sealed partial class PlanFacts(IPlanFileResolver planPaths) : IPlanFacts
 {
     /// <summary>
     /// How the dispatch's plan and task were identified: <c>headers</c> when the dispatch wrote <c>PLAN_FILE</c> or
@@ -42,7 +43,7 @@ public static partial class PlanFacts
     private const int MaxTitleChars = 160;
 
     /// <summary>Merges the plan facts for <paramref name="classification"/> into <paramref name="facts"/>.</summary>
-    public static ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification, string repositoryRoot)
+    public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification, string repositoryRoot)
     {
         ArgumentNullException.ThrowIfNull(facts);
         ArgumentNullException.ThrowIfNull(classification);
@@ -71,7 +72,7 @@ public static partial class PlanFacts
             return facts;
         }
 
-        string? resolved = PlanPathResolver.Resolve(planFile, repositoryRoot);
+        string? resolved = planPaths.Resolve(planFile, repositoryRoot);
         if (resolved is null || !File.Exists(resolved))
         {
             return facts.With("plan.exists", false, ArbiterFactLabel.Derived);
@@ -130,7 +131,7 @@ public static partial class PlanFacts
     /// The one Ready or In-progress plan directly in a planning folder of <paramref name="repositoryRoot"/>, or a
     /// specification folder's <c>tasks.md</c>; null when there is none or more than one.
     /// </summary>
-    internal static string? ActivePlan(ArbiterFactSet facts, string repositoryRoot)
+    internal string? ActivePlan(ArbiterFactSet facts, string repositoryRoot)
     {
         IEnumerable<string> globs = facts.TryGet("config.planning-dirs", out ArbiterFact? dirs) && dirs.Value is IEnumerable<string> list
             ? list

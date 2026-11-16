@@ -1,28 +1,11 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Arbiter.Stores;
-
-/// <summary>Size and retention limits for the run stores, from <c>arbiter.stores</c>.</summary>
-/// <param name="MaxItemBytes">The largest single item, in UTF-8 bytes. An item exactly at the limit is kept.</param>
-/// <param name="RetainDays">How many days a store directory is kept after its last write.</param>
-public sealed record ArbiterStoreOptions(int MaxItemBytes = 16384, int RetainDays = 14);
-
-/// <summary>What an append did with its item.</summary>
-public enum ArbiterStoreStatus
-{
-    /// <summary>The item was appended.</summary>
-    Stored,
-
-    /// <summary>The item was over the byte limit. It is refused, never shortened to fit.</summary>
-    TooLarge,
-
-    /// <summary>The store could not be written. Reported, never thrown.</summary>
-    Unavailable,
-}
 
 /// <summary>
 /// Holds the text of review findings, worker failures and the tails of worker returns under <c>&lt;arbiter-dir&gt;/stores/</c>,
@@ -41,7 +24,7 @@ public enum ArbiterStoreStatus
 /// is left for a later append, because the append itself is what the caller depends on.
 /// </para>
 /// </remarks>
-public sealed class ArbiterRunStore
+public sealed class ArbiterRunStore : IArbiterRunStore
 {
     private const string StoresDirectoryName = "stores";
     private const string FindingsFileName = "findings.jsonl";

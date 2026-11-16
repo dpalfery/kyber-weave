@@ -155,7 +155,7 @@ public sealed class DocsPacketCommand : Command<DocsPacketSettings>
     {
         string here = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
         List<(string Worktree, string Plan)> matches = [];
-        foreach (string worktree in (settings.ListWorktrees ?? (dir => GitFacts.ListWorktrees(dir)))(root))
+        foreach (string worktree in (settings.ListWorktrees ?? (dir => new GitFacts().ListWorktrees(dir)))(root))
         {
             string other = Path.TrimEndingDirectorySeparator(Path.GetFullPath(worktree));
             if (string.Equals(other, here, StringComparison.Ordinal) || !Directory.Exists(other))

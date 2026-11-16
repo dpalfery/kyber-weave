@@ -1,3 +1,9 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Tests.Arbiter;
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Core.Arbiter.Plans;
+using KyberWeave.Core.Arbiter.Facts;
 using System.Diagnostics;
 using System.Text.Json;
 using KyberWeave.Arbiter.Hooks;
@@ -375,7 +381,7 @@ public sealed class ConductorGuardTests
     }
 
     private static string GitRoot(string directory) =>
-        KyberWeave.Core.Arbiter.Facts.GitFacts.GetRoot(directory) ?? throw new InvalidOperationException("no git root");
+        new GitFacts().GetRoot(directory) ?? throw new InvalidOperationException("no git root");
 
     private static void Git(string directory, params string[] arguments)
     {

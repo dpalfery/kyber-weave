@@ -68,6 +68,6 @@ public static class RunBaseState
     /// <summary>Answers the branch question with <see cref="GitFacts" />, the way the dispatch guard always has.</summary>
     private sealed class GitFactsBranchReader : ICheckedOutBranchReader
     {
-        public string? Read(string workingDirectory) => GitFacts.GetCurrentBranch(workingDirectory);
+        public string? Read(string workingDirectory) => new GitFacts().GetCurrentBranch(workingDirectory);
     }
 }

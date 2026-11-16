@@ -1,5 +1,8 @@
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
+using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Data.Arbiter.Credentials;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -18,6 +21,14 @@ internal static class ArbiterDataServiceCollectionExtensions
         services.TryAddSingleton<IArbiterUserSettings>(sp => new FileArbiterUserSettings(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<ICredentialStore>(_ => OperatingSystemCredentialStore.Create());
         services.TryAddSingleton(sp => new ConfiguredArbiterProviderFactory(sp.GetRequiredService<IArbiterUserSettings>()));
+        services.TryAddSingleton<IArbiterStateFactory, FileArbiterStateFactory>();
+        services.TryAddSingleton<IGitRepositoryFacts, GitFacts>();
+        services.TryAddSingleton<IGateReportFacts, GateReportFacts>();
+        services.TryAddSingleton<IFileTextFacts, FileTextFacts>();
+        services.TryAddSingleton<IPlanFileResolver, PlanPathResolver>();
+        services.TryAddSingleton<IPlanRootResolver>(sp => new PlanRootResolver(sp.GetRequiredService<IGitRepositoryFacts>(), sp.GetRequiredService<IPlanFileResolver>()));
+        services.TryAddSingleton<IPlanFacts>(sp => new PlanFacts(sp.GetRequiredService<IPlanFileResolver>()));
+        services.TryAddSingleton<IClaudeHookCoverage, ClaudeHookCoverage>();
         return services;
     }
 }

@@ -1,3 +1,4 @@
+using KyberWeave.Application.Arbiter;
 using KyberWeave.Application.Hooks;
 using KyberWeave.Application.RunStart;
 using KyberWeave.Core.Squad.Briefs;
@@ -28,6 +29,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IEditHookService, EditHookService>();
         services.TryAddSingleton<IRunStartRunnerFactory, RunStartRunnerFactory>();
         services.TryAddSingleton<ISquadBriefService, SquadBriefService>();
+        _ = services.AddWeaveArbiterApplication();
         return services;
     }
 }

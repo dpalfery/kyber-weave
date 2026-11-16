@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Review;
 
 namespace KyberWeave.Core.Arbiter.Facts;
@@ -25,7 +26,7 @@ internal static class AttributedChangeFacts
     private const string PlanningDirs = "config.planning-dirs";
 
     /// <summary>Adds the two facts when the trigger declares them and the ledger can place the dispatch.</summary>
-    public static ArbiterFactSet Enrich(ArbiterFactSet facts, InFlightLedger ledger, DecisionLog decisions, string ledgerId)
+    public static ArbiterFactSet Enrich(ArbiterFactSet facts, IArbiterLedger ledger, IArbiterDecisionLog decisions, string ledgerId)
     {
         if (!facts.Contains(Attributed)
             || !facts.TryGet(SinceDispatch, out ArbiterFact? since)

@@ -1,3 +1,6 @@
+using Microsoft.Extensions.DependencyInjection;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Contracts.Repositories;
 using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
@@ -409,7 +412,7 @@ public sealed class ArbiterTools(ArbiterServeContext context)
             return ErrorJson("The document path is empty.");
         }
 
-        string? full = FileTextFacts.ResolveContainedFile(context.RepoRoot, path);
+        string? full = ArbiterServices.Shared.GetRequiredService<IFileTextFacts>().ResolveContainedFile(context.RepoRoot, path);
         if (full is null)
         {
             return ErrorJson($"The document '{OneLine(path)}' was not found under the repository root.");
@@ -495,7 +498,7 @@ public sealed class ArbiterTools(ArbiterServeContext context)
         {
             IReadOnlyList<string> botLogins = config?.Arbiter.CommentTriage.BotLogins ?? [];
             CommentSummaryResult summaryResult = WithProvider(provider =>
-                new CommentTriageService(provider, context.RepoRoot, arbiterDirectory, TimeProvider.System, ruleSet, botLogins, rules)
+                ArbiterServices.Shared.GetRequiredService<ICommentTriageFactory>().Create(provider, context.RepoRoot, arbiterDirectory, ruleSet, botLogins, rules)
                     .ClassifySummaryAsync(new CommentSummaryRequest(body, author))
                     .GetAwaiter()
                     .GetResult());
@@ -527,13 +530,13 @@ public sealed class ArbiterTools(ArbiterServeContext context)
         }
 
         // The same containment answer the sections tool gives: a path that leaves the root is an error, not a read.
-        if (FileTextFacts.ResolveWithinRoot(context.RepoRoot, path) is null)
+        if (ArbiterServices.Shared.GetRequiredService<IFileTextFacts>().ResolveWithinRoot(context.RepoRoot, path) is null)
         {
             return ErrorJson($"The document '{OneLine(path)}' was not found under the repository root.");
         }
 
         CommentTriageResult result = WithProvider(provider =>
-            new CommentTriageService(provider, context.RepoRoot, arbiterDirectory, TimeProvider.System, ruleSet, rules: rules)
+            ArbiterServices.Shared.GetRequiredService<ICommentTriageFactory>().Create(provider, context.RepoRoot, arbiterDirectory, ruleSet, rules: rules)
                 .ClassifyAsync(new CommentTriageRequest(path, line, body, commitSha))
                 .GetAwaiter()
                 .GetResult());

@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -20,7 +21,7 @@ namespace KyberWeave.Core.Arbiter;
 /// dispatch, so it must not make the user-level hook wait. Nothing here throws: an unreadable or
 /// malformed file is a source that does not fire.
 /// </remarks>
-public static class ClaudeHookCoverage
+public sealed class ClaudeHookCoverage : IClaudeHookCoverage
 {
     /// <summary>The command fragment that identifies a Claude hook running the Arbiter.</summary>
     public const string ArbiterClaudeHookMarker = "kyber-weave-arbiter hook --harness claude";
@@ -53,7 +54,7 @@ public static class ClaudeHookCoverage
     /// The relative path of each project source (for example <c>.claude/settings.json</c>), and the full
     /// path of each personal source, which lives outside the project.
     /// </returns>
-    public static IReadOnlyList<string> EffectiveSources(string projectRoot, string homeDirectory, string? agentType)
+    public IReadOnlyList<string> EffectiveSources(string projectRoot, string homeDirectory, string? agentType)
     {
         ArgumentNullException.ThrowIfNull(projectRoot);
         ArgumentNullException.ThrowIfNull(homeDirectory);
@@ -72,7 +73,7 @@ public static class ClaudeHookCoverage
     /// <param name="eventName"><c>PreToolUse</c> or <c>PostToolUse</c>.</param>
     /// <param name="toolName">The tool the event is for, matched against each entry's matcher.</param>
     /// <returns>The display path of each source that would fire, in a stable order.</returns>
-    public static IReadOnlyList<string> CandidateSources(
+    public IReadOnlyList<string> CandidateSources(
         string projectRoot,
         string homeDirectory,
         string? agentType,
@@ -100,7 +101,7 @@ public static class ClaudeHookCoverage
     /// <param name="eventName"><c>PreToolUse</c> or <c>PostToolUse</c>.</param>
     /// <param name="toolName">The tool the event is for, matched against each entry's matcher.</param>
     /// <returns>The display path of each source that would fire, in a stable order.</returns>
-    public static IReadOnlyList<string> ProjectCandidateSources(
+    public IReadOnlyList<string> ProjectCandidateSources(
         string projectRoot,
         string homeDirectory,
         string eventName,
@@ -259,7 +260,7 @@ public static class ClaudeHookCoverage
     /// <param name="eventName">The hook event.</param>
     /// <param name="toolName">The tool the event is for.</param>
     /// <param name="readSource">Reads the source's text (bounded); the file system when null. Lets a test make the read fail.</param>
-    internal static bool Fires(string path, string eventName, string toolName, Func<string, string>? readSource = null)
+    internal bool Fires(string path, string eventName, string toolName, Func<string, string>? readSource = null)
     {
         Func<string, string> read = readSource ?? (source => BoundedFileReader.ReadAllText(source, MaxSourceBytes));
         try

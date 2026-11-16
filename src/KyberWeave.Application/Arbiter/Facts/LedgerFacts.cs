@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter.Rules;
 
 namespace KyberWeave.Core.Arbiter.Facts;
@@ -17,8 +18,8 @@ internal static class LedgerFacts
     /// </summary>
     public static ArbiterFactSet Enrich(
         ArbiterFactSet facts,
-        InFlightLedger ledger,
-        DecisionLog decisions,
+        IArbiterLedger ledger,
+        IArbiterDecisionLog decisions,
         ArbiterEvent ev,
         string ledgerId)
     {
@@ -37,8 +38,8 @@ internal static class LedgerFacts
     /// and a refused dispatch never ran, so neither can hold a file.
     /// </summary>
     private static List<string> ReadInFlight(
-        InFlightLedger ledger,
-        DecisionLog decisions,
+        IArbiterLedger ledger,
+        IArbiterDecisionLog decisions,
         ArbiterEvent ev,
         string ledgerId)
     {
@@ -55,7 +56,7 @@ internal static class LedgerFacts
     /// that substituted a digest for the worker. The audit counts a spawn as a dispatch not in this set.
     /// </summary>
     /// <param name="decisions">The decision log the ids are read from.</param>
-    public static IReadOnlySet<string> NotDispatchedLedgerIds(DecisionLog decisions)
+    public static IReadOnlySet<string> NotDispatchedLedgerIds(IArbiterDecisionLog decisions)
     {
         ArgumentNullException.ThrowIfNull(decisions);
         return decisions.ReadAll()

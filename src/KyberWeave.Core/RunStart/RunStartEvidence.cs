@@ -43,7 +43,7 @@ public static class RunStartEvidence
             return null;
         }
 
-        string? repository = GitFacts.GetCommonDirectory(workingDirectory);
+        string? repository = new GitFacts().GetCommonDirectory(workingDirectory);
         return repository is null ? null : RunBaseState.HasLiveRun(homeDirectory, repository);
     }
 }

@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
@@ -253,7 +254,7 @@ internal readonly record struct LogTail(IReadOnlyList<string> Lines, bool Trunca
 /// repository root comes from <c>git rev-parse --show-toplevel</c> run in the
 /// payload's <c>cwd</c>, and the files sit in <c>artifacts/arbiter/</c> under it.
 /// </remarks>
-public sealed class InFlightLedger
+public sealed class InFlightLedger : IArbiterLedger
 {
     /// <summary>The ledger file name, relative to the arbiter directory.</summary>
     public const string FileName = "ledger.jsonl";
@@ -355,47 +356,11 @@ public sealed class InFlightLedger
     public string? MatchPre(ArbiterLedgerEvent post)
     {
         ArgumentNullException.ThrowIfNull(post);
-        if (post.PreId is not null)
-        {
-            return post.PreId;
-        }
-
-        IReadOnlyList<ArbiterLedgerEvent> events = ReadAll();
-
-        // A post's own stored claim must not count against itself, or a
-        // re-match of the same event would return null instead of the pre it
-        // already paired with. Claims by other posts still reserve the pre.
-        HashSet<string> paired = events
-            .Where(e => e.Phase == ArbiterLedgerPhases.Post && e.PreId is not null && e.Id != post.Id)
-            .Select(e => e.PreId!)
-            .ToHashSet(StringComparer.Ordinal);
-
-        if (post.CallId is not null)
-        {
-            string? byCallId = events
-                .Where(e => e.Phase == ArbiterLedgerPhases.Pre
-                    && !paired.Contains(e.Id)
-                    && string.Equals(e.CallId, post.CallId, StringComparison.Ordinal))
-                .Select(e => e.Id)
-                .FirstOrDefault();
-            if (byCallId is not null)
-            {
-                return byCallId;
-            }
-        }
-
-        return post.PairDigest is null
-            ? null
-            : events
-                .Where(e => e.Phase == ArbiterLedgerPhases.Pre
-                    && !paired.Contains(e.Id)
-                    && string.Equals(e.PairDigest, post.PairDigest, StringComparison.Ordinal))
-                .Select(e => e.Id)
-                .FirstOrDefault();
+        return post.PreId ?? ArbiterLedgerQueries.MatchPre(ReadAll(), post);
     }
 
     /// <summary>
-    /// The task files of the other unpaired <c>delegate</c> pre events — the
+    /// The task files of the other unpaired <c>delegate</c> pre events: the
     /// in-flight paths a scope rule checks the dispatch against.
     /// </summary>
     /// <param name="excludeEventId">The pre event being gated now, if it is already recorded.</param>
@@ -404,36 +369,13 @@ public sealed class InFlightLedger
     public IReadOnlyList<string> InFlightPaths(
         string? excludeEventId = null,
         string? session = null,
-        IReadOnlySet<string>? notDispatched = null)
-    {
-        IReadOnlyList<ArbiterLedgerEvent> events = ReadAll();
-        HashSet<string> paired = events
-            .Where(e => e.Phase == ArbiterLedgerPhases.Post && e.PreId is not null)
-            .Select(e => e.PreId!)
-            .ToHashSet(StringComparer.Ordinal);
-        return [.. events
-            .Where(e => e.Phase == ArbiterLedgerPhases.Pre
-                && e.Id != excludeEventId
-                && !paired.Contains(e.Id)
-                && notDispatched?.Contains(e.Id) != true
-                && (session is null || string.Equals(e.Session, session, StringComparison.Ordinal))
-                && string.Equals(e.Trigger, "delegate", StringComparison.Ordinal))
-            .SelectMany(e => e.TaskFiles ?? [])
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(path => path, StringComparer.Ordinal)];
-    }
+        IReadOnlySet<string>? notDispatched = null) =>
+        ArbiterLedgerQueries.InFlightPaths(ReadAll(), excludeEventId, session, notDispatched);
 
     /// <summary>
-    /// The writer dispatches (<c>delegate</c> and <c>delegate.planner</c>) that were in flight at any moment
-    /// between <paramref name="preId"/> and <paramref name="postId"/>, other than that dispatch itself: their
-    /// declared task files, and whether any of them declared none, so the paths it wrote cannot be told apart.
+    /// The writer dispatches that were in flight at any moment between <paramref name="preId"/> and
+    /// <paramref name="postId"/>, other than that dispatch itself. See <see cref="ArbiterLedgerQueries.ConcurrentWriters"/>.
     /// </summary>
-    /// <remarks>
-    /// A dispatch with no return yet overlaps from its start, unless it started more than
-    /// <see cref="UnreturnedDispatchHorizon"/> before this return: a harness that crashed never reports it, and it
-    /// must not hold a window open forever. Read-only dispatches write nothing, so they are not counted. A return
-    /// that paired with no pre event has no known start, so its window is taken as the whole horizon.
-    /// </remarks>
     /// <param name="preId">The pre event of the dispatch that returned, or null when the return paired with none.</param>
     /// <param name="postId">Its return.</param>
     /// <param name="notDispatched">Pre events that were refused, so never ran.</param>
@@ -441,42 +383,11 @@ public sealed class InFlightLedger
     public ConcurrentDispatches? ConcurrentWriters(string? preId, string postId, IReadOnlySet<string>? notDispatched = null)
     {
         ArgumentNullException.ThrowIfNull(postId);
-        IReadOnlyList<ArbiterLedgerEvent> events = ReadAll();
-        ArbiterLedgerEvent? post = events.FirstOrDefault(e => e.Id == postId);
-        ArbiterLedgerEvent? pre = preId is null ? null : events.FirstOrDefault(e => e.Id == preId);
-        if (post is null || (preId is not null && pre is null))
-        {
-            return null;
-        }
-
-        DateTimeOffset start = pre?.At ?? post.At - UnreturnedDispatchHorizon;
-
-        Dictionary<string, ArbiterLedgerEvent> returnsById = events
-            .Where(e => e.Phase == ArbiterLedgerPhases.Post && e.PreId is not null)
-            .GroupBy(e => e.PreId!, StringComparer.Ordinal)
-            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
-
-        List<ArbiterLedgerEvent> overlapping = [.. events
-            .Where(e => e.Phase == ArbiterLedgerPhases.Pre
-                && e.Id != preId
-                && WriterTriggers.Contains(e.Trigger ?? string.Empty)
-                && notDispatched?.Contains(e.Id) != true)
-            .Where(e => returnsById.GetValueOrDefault(e.Id) is { } otherPost
-                ? e.At <= post.At && start <= otherPost.At
-                : e.At <= post.At && post.At - e.At <= UnreturnedDispatchHorizon)];
-
-        return new ConcurrentDispatches(
-            [.. overlapping
-                .SelectMany(e => e.TaskFiles ?? [])
-                .Distinct(StringComparer.Ordinal)
-                .OrderBy(path => path, StringComparer.Ordinal)],
-            overlapping.Any(e => e.TaskFiles is not { Count: > 0 }));
+        return ArbiterLedgerQueries.ConcurrentWriters(ReadAll(), preId, postId, notDispatched);
     }
 
     /// <summary>How long a dispatch with no return still counts as in flight for <see cref="ConcurrentWriters"/>.</summary>
-    public static TimeSpan UnreturnedDispatchHorizon { get; } = TimeSpan.FromHours(4);
-
-    private static readonly HashSet<string> WriterTriggers = new(StringComparer.Ordinal) { "delegate", "delegate.planner" };
+    public static TimeSpan UnreturnedDispatchHorizon => ArbiterLedgerQueries.UnreturnedDispatchHorizon;
 
     /// <summary>
     /// The headers of the dispatch a return answers: the return's own, or else its paired pre event's, because a
@@ -485,100 +396,14 @@ public sealed class InFlightLedger
     public ArbiterLedgerHeaders? DispatchHeadersFor(string postId)
     {
         ArgumentNullException.ThrowIfNull(postId);
-        IReadOnlyList<ArbiterLedgerEvent> events = ReadAll();
-        ArbiterLedgerEvent? post = events.FirstOrDefault(e => string.Equals(e.Id, postId, StringComparison.Ordinal));
-        if (post is null)
-        {
-            return null;
-        }
-
-        if (post.Headers is not null || post.PreId is null)
-        {
-            return post.Headers;
-        }
-
-        return events.FirstOrDefault(e => string.Equals(e.Id, post.PreId, StringComparison.Ordinal))?.Headers;
+        return ArbiterLedgerQueries.DispatchHeadersFor(ReadAll(), postId);
     }
 
     /// <summary>
-    /// The completed tasks: a returned worker output whose
-    /// <c>^RESULT:\s+(PASS|FAIL)\b</c> marker read <c>PASS</c>, or an
-    /// attestation <c>&lt;task&gt;=complete</c> (D31).
+    /// The completed tasks: a returned worker output whose <c>^RESULT:\s+(PASS|FAIL)\b</c> marker read <c>PASS</c>,
+    /// or an attestation <c>&lt;task&gt;=complete</c> (D31).
     /// </summary>
     /// <param name="planFile">When set, only returns for this plan count.</param>
     public IReadOnlyList<string> CompletedTasks(string? planFile = null) =>
-        [.. ReturnsFor(planFile)
-            .SelectMany(item => CompletedTasksOf(item.Post, item.Task))
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(task => task, StringComparer.Ordinal)];
-
-    /// <summary>
-    /// Each post event with the task it answers. A specialist's headers are stripped
-    /// before it runs, so its post event names no task and the paired pre event supplies it.
-    /// </summary>
-    private List<(ArbiterLedgerEvent Post, string? Task)> ReturnsFor(string? planFile)
-    {
-        IReadOnlyList<ArbiterLedgerEvent> events = ReadAll();
-        Dictionary<string, ArbiterLedgerEvent> pres = events
-            .Where(e => e.Phase == ArbiterLedgerPhases.Pre)
-            .GroupBy(e => e.Id, StringComparer.Ordinal)
-            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
-
-        List<(ArbiterLedgerEvent Post, string? Task)> returns = [];
-        foreach (ArbiterLedgerEvent post in events.Where(e => e.Phase == ArbiterLedgerPhases.Post))
-        {
-            ArbiterLedgerHeaders? headers = post.Headers;
-            if (headers is null && post.PreId is not null && pres.TryGetValue(post.PreId, out ArbiterLedgerEvent? pre))
-            {
-                headers = pre.Headers;
-            }
-
-            if (planFile is null || (headers?.PlanFile is { } named && SamePlan(named, planFile)))
-            {
-                returns.Add((post, headers?.Task));
-            }
-        }
-
-        return returns;
-    }
-
-    private static bool SamePlan(string left, string right) =>
-        string.Equals(NormalizePlan(left), NormalizePlan(right), StringComparison.Ordinal);
-
-    private static string NormalizePlan(string path)
-    {
-        string normalized = path.Trim().Replace('\\', '/');
-        return normalized.StartsWith("./", StringComparison.Ordinal) ? normalized[2..] : normalized;
-    }
-
-    private static IEnumerable<string> CompletedTasksOf(ArbiterLedgerEvent e, string? task)
-    {
-        List<string> tasks = [];
-        if (task is not null && string.Equals(e.Returns?.TaskReview, "PASS", StringComparison.Ordinal))
-        {
-            tasks.Add(task);
-        }
-
-        tasks.AddRange(AttestedTasks(e, "complete"));
-        return tasks;
-    }
-
-    private static IEnumerable<string> AttestedTasks(ArbiterLedgerEvent e, string value)
-    {
-        foreach (string attested in e.Returns?.Attested ?? [])
-        {
-            int separator = attested.IndexOf('=', StringComparison.Ordinal);
-            if (separator > 0
-                && string.Equals(attested[(separator + 1)..].Trim(), value, StringComparison.Ordinal)
-                && attested[..separator].Trim() is { Length: > 0 } task)
-            {
-                yield return task;
-            }
-        }
-    }
+        ArbiterLedgerQueries.CompletedTasks(ReadAll(), planFile);
 }
-
-/// <summary>The writer dispatches that overlapped one dispatch's window.</summary>
-/// <param name="Paths">Their declared task files.</param>
-/// <param name="AnyWithoutFiles">Whether any of them declared no task files, so what it wrote is unknown.</param>
-public sealed record ConcurrentDispatches(IReadOnlyList<string> Paths, bool AnyWithoutFiles);

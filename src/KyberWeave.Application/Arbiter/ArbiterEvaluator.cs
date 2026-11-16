@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.ModelTargets;
@@ -11,39 +12,6 @@ using KyberWeave.Core.Arbiter.Stores;
 using KyberWeave.Core.Configuration;
 
 namespace KyberWeave.Core.Arbiter;
-
-/// <summary>The git-derived facts the evaluator merges into each trigger's fact bag.</summary>
-/// <remarks>
-/// A port the host implements; Core takes it as a constructor argument and
-/// constructs nothing itself. Tests inject a pass-through stub.
-/// </remarks>
-public interface IArbiterGitFacts
-{
-    /// <summary>Merges git-derived facts into <paramref name="facts"/>.</summary>
-    ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification, ArbiterEvent ev);
-}
-
-/// <summary>The plan facts the evaluator merges into each trigger's fact bag.</summary>
-/// <remarks>
-/// A port the host implements; Core takes it as a constructor argument and
-/// constructs nothing itself. Tests inject a pass-through stub.
-/// </remarks>
-public interface IArbiterPlanReader
-{
-    /// <summary>Merges plan-derived facts into <paramref name="facts"/>.</summary>
-    ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification);
-}
-
-/// <summary>Options for one <see cref="ArbiterEvaluator"/> call.</summary>
-/// <param name="DryRun">When true, the evaluator reads the ledger and writes nothing.</param>
-/// <param name="Source">Who observed the event: <c>hook</c>, <c>serve</c> or <c>eval</c>.</param>
-/// <param name="ConfirmModelWrite">Writes the model token into the harness input and reports whether it held. Asked
-/// before a delivered model is recorded, so the decision says delivered only for a write that happened. Null when no
-/// harness writes the model (serve, eval), in which case the decision is recorded as resolved.</param>
-public sealed record ArbiterEvaluatorOptions(
-    bool DryRun = false,
-    string Source = ArbiterSources.Hook,
-    Func<string, bool>? ConfirmModelWrite = null);
 
 /// <summary>
 /// The single entry point the hook host, <c>serve</c> and <c>eval</c> call,
@@ -62,7 +30,7 @@ public sealed record ArbiterEvaluatorOptions(
 /// could not reach. The key is resolved to prove the origin is served but is never
 /// logged.
 /// </remarks>
-public sealed class ArbiterEvaluator
+public sealed class ArbiterEvaluator : IArbiterEvaluator
 {
     /// <summary>The hook error code every evaluator failure carries.</summary>
     public const string HookErrorCode = "KW-ARB-HOOK-001";
@@ -71,11 +39,13 @@ public sealed class ArbiterEvaluator
 
     private readonly IArbiterProvider _provider;
     private readonly Func<Uri, string?> _keyResolver;
-    private readonly InFlightLedger _ledger;
-    private readonly DecisionLog _decisionLog;
+    private readonly IArbiterLedger _ledger;
+    private readonly IArbiterDecisionLog _decisionLog;
     private readonly IArbiterGitFacts _gitFacts;
     private readonly IArbiterPlanReader _planReader;
     private readonly IArbiterModelTargetsReader _modelTargets;
+    private readonly IGateReportFacts _gateReports;
+    private readonly IArbiterStateFactory _state;
     private readonly TimeProvider _clock;
     private readonly Func<string, ArbiterEvent, IReadOnlyList<string>> _secondaryTriggers;
 
@@ -87,16 +57,20 @@ public sealed class ArbiterEvaluator
     /// <param name="gitFacts">Git-derived facts.</param>
     /// <param name="planReader">Plan-derived facts.</param>
     /// <param name="modelTargets">Reads the harness's model targets table.</param>
+    /// <param name="gateReports">Reads the gate reports a return cites.</param>
+    /// <param name="state">Opens the run stores under the arbiter directory.</param>
     /// <param name="clock">The evaluation clock.</param>
     /// <param name="secondaryTriggers">Derives the secondary triggers of a primary dispatch; defaults to none.</param>
     public ArbiterEvaluator(
         IArbiterProvider provider,
         Func<Uri, string?> keyResolver,
-        InFlightLedger ledger,
-        DecisionLog decisionLog,
+        IArbiterLedger ledger,
+        IArbiterDecisionLog decisionLog,
         IArbiterGitFacts gitFacts,
         IArbiterPlanReader planReader,
         IArbiterModelTargetsReader modelTargets,
+        IGateReportFacts gateReports,
+        IArbiterStateFactory state,
         TimeProvider clock,
         Func<string, ArbiterEvent, IReadOnlyList<string>>? secondaryTriggers = null)
     {
@@ -107,6 +81,8 @@ public sealed class ArbiterEvaluator
         ArgumentNullException.ThrowIfNull(gitFacts);
         ArgumentNullException.ThrowIfNull(planReader);
         ArgumentNullException.ThrowIfNull(modelTargets);
+        ArgumentNullException.ThrowIfNull(gateReports);
+        ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(clock);
         _provider = provider;
         _keyResolver = keyResolver;
@@ -115,6 +91,8 @@ public sealed class ArbiterEvaluator
         _gitFacts = gitFacts;
         _planReader = planReader;
         _modelTargets = modelTargets;
+        _gateReports = gateReports;
+        _state = state;
         _clock = clock;
         _secondaryTriggers = secondaryTriggers ?? SecondaryTriggers.For;
     }
@@ -268,7 +246,7 @@ public sealed class ArbiterEvaluator
         // D29: a return's TASK_GATE: line is checked against the report it names. Absent
         // evidence answers absent, and the rule asks the model about the raw report instead;
         // an unexpected failure here reaches the catch in EvaluateAsync, which allows and logs.
-        facts = GateReportFacts.Enrich(facts, ev);
+        facts = _gateReports.Enrich(facts, ev);
         facts = WithTaskReturns(facts, config);
 
         // The review's REVIEW_RUN names the store its findings sit in. A lens return's first finding is the
@@ -279,7 +257,7 @@ public sealed class ArbiterEvaluator
             : [];
         // Each finding is judged on its own bag: the static facts plus that finding's own id, text and severity.
         ArbiterFactSet baseFacts = facts;
-        bool gateCorroborated = GateReportFacts.FailedGateCorroborates(ev.Cwd);
+        bool gateCorroborated = _gateReports.FailedGateCorroborates(ev.Cwd);
         if (returned.Count > 0)
         {
             facts = TriggerFactBuilder.WithReturnedFinding(baseFacts, returned[0], gateCorroborated);
@@ -312,7 +290,7 @@ public sealed class ArbiterEvaluator
             && FailureFacts.CurrentTextOf(prompt) is { } currentFailure)
         {
             classification.Headers.TryGetValue("PLAN_FILE", out string? failurePlan);
-            ArbiterRunStore failures = ReviewStore(config);
+            IArbiterRunStore failures = ReviewStore(config);
             FailureRecord? prior = FailureFacts.LastFor(failures.ReadFailures(failurePlan, planDigest, ev.Session), cluster);
             facts = facts
                 .With(FailureFacts.PreviousText, prior?.Text, ArbiterFactLabel.Derived)
@@ -786,8 +764,8 @@ public sealed class ArbiterEvaluator
                 : call.Status;
 
     /// <summary>The run store under this evaluator's Arbiter directory, sized by <c>arbiter.stores</c>.</summary>
-    private ArbiterRunStore ReviewStore(KyberWeaveConfig config) =>
-        new(
+    private IArbiterRunStore ReviewStore(KyberWeaveConfig config) =>
+        _state.OpenRunStore(
             _ledger.DirectoryPath,
             new ArbiterStoreOptions(config.Arbiter.Stores.MaxItemBytes, config.Arbiter.Stores.RetainDays),
             () => _clock.GetUtcNow());
@@ -797,7 +775,7 @@ public sealed class ArbiterEvaluator
     /// the one its own judgement reached.
     /// </summary>
     private static async Task RecordReturnedFindingsAsync(
-        ArbiterRunStore store,
+        IArbiterRunStore store,
         string reviewRun,
         IReadOnlyList<ReturnedFinding> findings,
         IReadOnlyList<bool> dropped)
