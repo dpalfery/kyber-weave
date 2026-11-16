@@ -1,5 +1,5 @@
 using KyberWeave.Contracts.Repositories;
-using KyberWeave.Core.Utilities.StatusLine;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Domain.StatusLine;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -18,14 +18,18 @@ namespace KyberWeave.Cli.Commands.Utilities;
 public sealed class UtilitiesStatusLineRemoveCommand : Command<UtilitiesStatusLineSettings>
 {
     private readonly IProcessEnvironment _environment;
+    private readonly IStatusLineDeploymentService _plans;
 
     /// <summary>Creates the command over the process environment its per-user roots are read from.</summary>
     /// <param name="environment">The process state the roots are read from.</param>
-    public UtilitiesStatusLineRemoveCommand(IProcessEnvironment environment)
+    /// <param name="plans">Plans and applies the removal.</param>
+    public UtilitiesStatusLineRemoveCommand(IProcessEnvironment environment, IStatusLineDeploymentService plans)
     {
         ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(plans);
 
         _environment = environment;
+        _plans = plans;
     }
 
     /// <inheritdoc />
@@ -63,9 +67,9 @@ public sealed class UtilitiesStatusLineRemoveCommand : Command<UtilitiesStatusLi
             StatusLineDeploymentPlan plan;
             try
             {
-                if (StatusLineDeploymentPlan.ReadReceipt(target, roots) is null) continue;
+                if (_plans.ReadReceipt(target, roots) is null) continue;
 
-                plan = StatusLineDeploymentPlan.CreateRemove(target, roots);
+                plan = _plans.CreateRemove(target, roots);
             }
             catch (Exception ex) when (
                 ex is StatusLineDeploymentConflictException or InvalidDataException or
@@ -80,7 +84,7 @@ public sealed class UtilitiesStatusLineRemoveCommand : Command<UtilitiesStatusLi
             anyReceipt = true;
             try
             {
-                plan.Apply();
+                _plans.Apply(plan);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {

@@ -1,4 +1,3 @@
-using KyberWeave.Core.Utilities.StatusLine;
 using KyberWeave.Domain.StatusLine;
 
 namespace KyberWeave.Cli.Commands.Utilities;

@@ -1,5 +1,5 @@
 using KyberWeave.Contracts.Repositories;
-using KyberWeave.Core.Utilities.StatusLine;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Domain.StatusLine;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -20,17 +20,23 @@ public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLi
 {
     private readonly IProcessEnvironment _environment;
     private readonly IProductRootLocator _productRoots;
+    private readonly IStatusLineDeploymentService _plans;
 
     /// <summary>Creates a deploy command over the process environment and the product-tree locator.</summary>
     /// <param name="environment">The process state the per-user roots and the checkout are read from.</param>
     /// <param name="productRoots">Finds the artifact tree in the checkout.</param>
-    public UtilitiesStatusLineDeployCommand(IProcessEnvironment environment, IProductRootLocator productRoots)
+    public UtilitiesStatusLineDeployCommand(
+        IProcessEnvironment environment,
+        IProductRootLocator productRoots,
+        IStatusLineDeploymentService plans)
     {
         ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(productRoots);
+        ArgumentNullException.ThrowIfNull(plans);
 
         _environment = environment;
         _productRoots = productRoots;
+        _plans = plans;
     }
 
     /// <inheritdoc />
@@ -92,7 +98,7 @@ public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLi
         return Execute(context, settings, CancellationToken.None);
     }
 
-    private static bool DeployOne(
+    private bool DeployOne(
         StatusLineTarget target,
         StatusLineTargetRoots roots,
         IUtilitiesStatusLineArtifactSource artifacts,
@@ -105,7 +111,7 @@ public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLi
         try
         {
             files = artifacts.Load(target);
-            plan = StatusLineDeploymentPlan.CreateDeploy(target, roots, files);
+            plan = _plans.CreateDeploy(target, roots, files);
         }
         catch (Exception ex) when (
             ex is StatusLineDeploymentConflictException or InvalidDataException or
@@ -128,7 +134,7 @@ public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLi
         {
             try
             {
-                plan.Apply();
+                _plans.Apply(plan);
                 UtilitiesStatusLineCommandComposition.ApplyExecutableBit(plan.StagingRoot, files);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

@@ -423,7 +423,7 @@ public sealed class DoctorEnsureTests : IDisposable
             throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'.");
         });
 
-        DoctorCommand command = new()
+        DoctorCommand command = new(DoctorServices.Doctor)
         {
             Executor = executor,
             IsTerminal = () => false,
@@ -489,7 +489,7 @@ public sealed class DoctorEnsureTests : IDisposable
             throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'.");
         });
 
-        DoctorCommand command = new()
+        DoctorCommand command = new(DoctorServices.Doctor)
         {
             Executor = executor,
             IsTerminal = () => false,
@@ -555,7 +555,7 @@ public sealed class DoctorEnsureTests : IDisposable
             throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'.");
         });
 
-        DoctorCommand command = new()
+        DoctorCommand command = new(DoctorServices.Doctor)
         {
             Executor = executor,
             IsTerminal = () => false,
@@ -669,7 +669,7 @@ public sealed class DoctorEnsureTests : IDisposable
     /// </summary>
     private int RunEnsure(ScriptedProcessExecutor executor)
     {
-        DoctorCommand command = new()
+        DoctorCommand command = new(DoctorServices.Doctor)
         {
             Executor = executor,
             IsTerminal = () => false,

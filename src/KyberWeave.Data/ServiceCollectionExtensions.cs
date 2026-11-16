@@ -1,10 +1,13 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Data.Docs.FileSystem;
+using KyberWeave.Data.CodeGraph;
+using KyberWeave.Data.Configuration;
 using KyberWeave.Data.Doctor;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Host;
 using KyberWeave.Data.RunStart;
+using KyberWeave.Data.Utilities;
 using KyberWeave.Kernel.FileSystem;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -36,6 +39,12 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IRunCheckout>(sp => new RunCheckoutGuard(sp.GetRequiredService<IWritableFileSystem>(), sp.GetRequiredService<IRunStateStore>()));
         services.TryAddSingleton<IHooksConfigSource>(sp => new YamlHooksConfigSource(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<ITestClassResolver>(sp => new ConventionTestClassResolver(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<ICodeGraphPortsFactory, CodeGraphPortsFactory>();
+        services.TryAddSingleton<ICodeGraphIndexWorkspace, FileCodeGraphIndexWorkspace>();
+        services.TryAddSingleton<IGitHookFiles, FileGitHookFiles>();
+        services.TryAddSingleton<IMcpStdioSessionFactory, StdioMcpSessionFactory>();
+        services.TryAddSingleton<IStatusLineFiles, FileStatusLineFiles>();
+        services.TryAddSingleton<IUserHostConfigStore, FileUserHostConfigStore>();
         return services;
     }
 }

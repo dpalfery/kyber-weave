@@ -62,6 +62,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
     private readonly IRunStartRunnerFactory _runners;
+    private readonly IWorktreeIndexGuard _worktreeIndex;
     private readonly IRunStateStore _state;
     private readonly IWritableFileSystem _files;
     private readonly IProcessEnvironment _environment;
@@ -70,6 +71,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
 
     /// <summary>Creates the command over the services it reads and writes through.</summary>
     /// <param name="runners">Opens the git runner for the repository the run starts in.</param>
+    /// <param name="worktreeIndex">Makes sure the tree the run works in has a CodeGraph index.</param>
     /// <param name="state">Where the base the branch was created from is recorded.</param>
     /// <param name="files">The file system worktree folders are checked on.</param>
     /// <param name="environment">The current directory, home directory and temporary directory.</param>
@@ -77,6 +79,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
     /// <param name="executor">The executor the CodeGraph index run goes through; the bounded production executor when none is registered.</param>
     public RunStartCommand(
         IRunStartRunnerFactory runners,
+        IWorktreeIndexGuard worktreeIndex,
         IRunStateStore state,
         IWritableFileSystem files,
         IProcessEnvironment environment,
@@ -84,12 +87,14 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         IProcessExecutor? executor = null)
     {
         ArgumentNullException.ThrowIfNull(runners);
+        ArgumentNullException.ThrowIfNull(worktreeIndex);
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(clock);
 
         _runners = runners;
+        _worktreeIndex = worktreeIndex;
         _state = state;
         _files = files;
         _environment = environment;
@@ -146,7 +151,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         // Before the tool checks, on purpose. A worker that cannot reach the standards and gates this
         // repository chose cannot use the tools anyway, and a tool failure reported first would send the
         // operator to repair a remote that was never the thing standing in the way.
-        if (RunStartPlanner.NeedsOnboarding(config, configPath is not null))
+        if (RunStartPlanner.NeedsOnboarding(config.ConfigReg, configPath is not null))
         {
             return StopForOnboarding(config, configPath, repositoryRoot);
         }
@@ -377,7 +382,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         // undo the branch: the operator repairs the index and the run continues in that tree.
         string indexTree = worktreePath ?? repositoryRoot;
         IProcessExecutor indexExecutor = _executor ?? ProcessExecutor.WithTimeout(IndexTimeout);
-        WorktreeIndexOutcome index = WorktreeIndexGuard.Ensure(
+        WorktreeIndexOutcome index = _worktreeIndex.Ensure(
             indexTree,
             new DoctorOptions(
                 IndexTimeout,

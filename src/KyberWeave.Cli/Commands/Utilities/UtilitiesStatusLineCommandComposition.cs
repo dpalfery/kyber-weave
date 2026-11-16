@@ -1,7 +1,6 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Deployment;
-using KyberWeave.Core.Utilities.StatusLine;
 using KyberWeave.Domain.StatusLine;
 using Spectre.Console;
 

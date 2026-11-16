@@ -160,7 +160,7 @@ public static class RunStartPlanner
     /// <summary>
     ///     Whether a run must stop before any other check because the onboarding question is unanswered.
     /// </summary>
-    /// <param name="config">The configuration the run loaded for the repository.</param>
+    /// <param name="config">The config-registry section the run loaded for the repository.</param>
     /// <param name="repositoryIsConfigured">
     ///     Whether the repository has a host configuration file at all, which is what makes the question
     ///     meaningful: an operator who never ran <c>docs init</c> has not been offered it.
@@ -187,9 +187,9 @@ public static class RunStartPlanner
     ///         opted in — the check speaks where the repository has, and stays quiet where it has not.
     ///     </para>
     /// </remarks>
-    public static bool NeedsOnboarding(KyberWeaveConfig config, bool repositoryIsConfigured)
+    public static bool NeedsOnboarding(ConfigRegConfig config, bool repositoryIsConfigured)
     {
         ArgumentNullException.ThrowIfNull(config);
-        return repositoryIsConfigured && string.IsNullOrWhiteSpace(config.ConfigReg.Onboarding);
+        return repositoryIsConfigured && string.IsNullOrWhiteSpace(config.Onboarding);
     }
 }

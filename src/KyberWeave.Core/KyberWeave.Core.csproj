@@ -34,6 +34,7 @@
     <ProjectReference Include="..\KyberWeave.Domain\KyberWeave.Domain.csproj" />
     <ProjectReference Include="..\KyberWeave.Contracts\KyberWeave.Contracts.csproj" />
     <ProjectReference Include="..\KyberWeave.Data\KyberWeave.Data.csproj" />
+    <ProjectReference Include="..\KyberWeave.Application\KyberWeave.Application.csproj" />
   </ItemGroup>
 
   <ItemGroup>

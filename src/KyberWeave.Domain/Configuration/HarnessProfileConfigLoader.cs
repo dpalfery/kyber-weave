@@ -6,13 +6,6 @@ namespace KyberWeave.Core.Configuration;
 /// <summary>Loads harness profile overrides from <c>kyber-weave.yml</c>.</summary>
 public static class HarnessProfileConfigLoader
 {
-    public static HarnessProfileConfig Load(string yamlPath)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(yamlPath);
-        KyberWeaveYamlDocument document = KyberWeaveYamlFile.ParseFile(yamlPath);
-        return Merge(HarnessProfileConfig.ProductDefaults, document.Harness);
-    }
-
     internal static HarnessProfileConfig Merge(HarnessProfileConfig defaults, HarnessYamlSection? section)
     {
         if (section?.Profiles is null || section.Profiles.Count == 0)

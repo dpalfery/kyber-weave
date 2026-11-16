@@ -164,7 +164,7 @@ public sealed class RepositoryDoctorTests : IDisposable
     public void Doctor_NonInteractive_Bare_BehavesAsCheck_PrintsHint()
     {
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
-        DoctorCommand command = new()
+        DoctorCommand command = new(DoctorServices.Doctor)
         {
             Executor = executor,
             IsTerminal = () => false,
@@ -433,7 +433,7 @@ public sealed class RepositoryDoctorTests : IDisposable
     public void Doctor_BlankPath_Exits2()
     {
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
-        DoctorCommand command = new()
+        DoctorCommand command = new(DoctorServices.Doctor)
         {
             Executor = executor,
             IsTerminal = () => false,
@@ -515,7 +515,7 @@ public sealed class RepositoryDoctorTests : IDisposable
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
 
         int exitCode = DoctorAppHarness.Run(
-            new KyberWeave.Cli.Commands.Doctor.DoctorCommand
+            new KyberWeave.Cli.Commands.Doctor.DoctorCommand(DoctorServices.Doctor)
             {
                 Executor = executor,
                 IsTerminal = () => false,

@@ -1,5 +1,5 @@
 using KyberWeave.Contracts.Repositories;
-using KyberWeave.Core.Utilities.StatusLine;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Domain.StatusLine;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -17,14 +17,18 @@ namespace KyberWeave.Cli.Commands.Utilities;
 public sealed class UtilitiesStatusLineStatusCommand : Command<UtilitiesStatusLineSettings>
 {
     private readonly IProcessEnvironment _environment;
+    private readonly IStatusLineDeploymentService _plans;
 
     /// <summary>Creates the command over the process environment its per-user roots are read from.</summary>
     /// <param name="environment">The process state the roots are read from.</param>
-    public UtilitiesStatusLineStatusCommand(IProcessEnvironment environment)
+    /// <param name="plans">Reads the receipts.</param>
+    public UtilitiesStatusLineStatusCommand(IProcessEnvironment environment, IStatusLineDeploymentService plans)
     {
         ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(plans);
 
         _environment = environment;
+        _plans = plans;
     }
 
     /// <inheritdoc />
@@ -47,7 +51,7 @@ public sealed class UtilitiesStatusLineStatusCommand : Command<UtilitiesStatusLi
             string stagingRoot = roots.ResolveStagingRoot(target);
             try
             {
-                receipt = StatusLineDeploymentPlan.ReadReceipt(target, roots);
+                receipt = _plans.ReadReceipt(target, roots);
             }
             catch (Exception ex) when (ex is InvalidDataException or StatusLineDeploymentConflictException)
             {

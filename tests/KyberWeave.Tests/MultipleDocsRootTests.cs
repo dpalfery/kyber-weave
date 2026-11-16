@@ -490,10 +490,10 @@ public class MultipleDocsRootTests : IDisposable
         OntologyConfig.ProductDefaults.WithDocsRoots(["docs", "automation", "lab"]);
 
     private OntologyConfig Load(string yaml) =>
-        OntologyConfigLoader.LoadMerged(OntologyConfig.ProductDefaults, WriteYaml(yaml));
+        KyberWeaveYamlFile.LoadOntologyMerged(OntologyConfig.ProductDefaults, WriteYaml(yaml));
 
     private OntologyConfigLoadResult TryLoad(string yaml) =>
-        OntologyConfigLoader.TryLoad(WriteYaml(yaml));
+        KyberWeaveYamlFile.TryLoadOntology(WriteYaml(yaml));
 
     private string WriteYaml(string yaml)
     {

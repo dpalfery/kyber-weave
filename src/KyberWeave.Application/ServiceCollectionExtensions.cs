@@ -1,8 +1,10 @@
+using KyberWeave.Application.Doctor;
 using KyberWeave.Application.Hooks;
 using KyberWeave.Application.RunStart;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Application.Utilities;
 using KyberWeave.Core.Squad.Briefs;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Data;
@@ -35,6 +37,12 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IRepositoryFileStore>(), sp.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton<IPlanTaskService>(sp => new PlanTaskService(
             sp.GetRequiredService<IRepositoryFileStore>(), sp.GetRequiredService<IBoundedProcessExecutor>()));
+        services.TryAddSingleton<IStatusLineDeploymentService, StatusLineDeploymentService>();
+        services.TryAddSingleton<ICodeGraphProvisioner, CodeGraphIndexProvisioner>();
+        services.TryAddSingleton<IWorktreeIndexGuard, WorktreeIndexEnsurer>();
+        services.TryAddSingleton<McpServerLiveProbe>();
+        services.TryAddSingleton<PostCheckoutHookInstaller>();
+        services.TryAddSingleton<IRepositoryDoctor, RepositoryDoctorService>();
         return services;
     }
 }

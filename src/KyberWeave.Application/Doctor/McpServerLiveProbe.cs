@@ -1,9 +1,11 @@
 using System.ComponentModel;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
+using KyberWeave.Domain.Doctor;
 
-namespace KyberWeave.Domain.Doctor;
+namespace KyberWeave.Application.Doctor;
 
 /// <summary>
 ///     Proves the Kyber-Weave docs MCP server answers for this checkout, over a real stdio session.
@@ -20,7 +22,7 @@ namespace KyberWeave.Domain.Doctor;
 ///         first error line, truncated, and the environment is never read or shown.
 ///     </para>
 /// </remarks>
-public static partial class McpLiveProbe
+public sealed partial class McpServerLiveProbe(IMcpStdioSessionFactory sessions)
 {
     /// <summary>
     ///     The metadata the provenance line carries after the root path, as <c>key=value</c> tokens:
@@ -58,13 +60,13 @@ public static partial class McpLiveProbe
     /// <summary>Runs the live proof and returns the <c>mcp.*</c> checks that ran.</summary>
     /// <param name="root">The resolved repository root that the server's provenance must name.</param>
     /// <param name="options">The MCP executable and total session budget.</param>
-    public static IReadOnlyList<DoctorCheck> Run(string root, DoctorOptions options)
+    public IReadOnlyList<DoctorCheck> Run(string root, DoctorOptions options)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentNullException.ThrowIfNull(options);
 
         List<DoctorCheck> checks = [];
-        using StdioSession? session = TryStart(root, options);
+        using IMcpStdioSession? session = TryStart(root, options);
         if (session is null)
         {
             // The reason names the executable only. The start failure's text and the environment are never echoed.
@@ -83,7 +85,7 @@ public static partial class McpLiveProbe
     }
 
     /// <summary>Starts the session, or returns null when the executable cannot be started. Ownership passes to the caller.</summary>
-    private static StdioSession? TryStart(string root, DoctorOptions options)
+    private IMcpStdioSession? TryStart(string root, DoctorOptions options)
     {
         try
         {
@@ -94,7 +96,7 @@ public static partial class McpLiveProbe
             //
             // --no-codegraph-refresh keeps the promise --check makes. The server refreshes CodeGraph on its
             // first tool call, so a probe without this flag would make the read-only verb write an index.
-            return new StdioSession(
+            return sessions.Start(
                 options.McpExecutable,
                 ["--repo-root", root, NoCodeGraphRefreshFlag],
                 options.McpTimeout);
@@ -108,7 +110,7 @@ public static partial class McpLiveProbe
     }
 
     /// <summary>Sends one line, turning a closed or broken pipe into <c>false</c> rather than an exception.</summary>
-    private static bool TrySend(StdioSession session, string line)
+    private static bool TrySend(IMcpStdioSession session, string line)
     {
         try
         {
@@ -134,7 +136,7 @@ public static partial class McpLiveProbe
         return $"kyber-weave doctor --check --mcp-timeout {suggested}";
     }
 
-    private static void Exchange(StdioSession session, string root, DoctorOptions options, List<DoctorCheck> checks)
+    private static void Exchange(IMcpStdioSession session, string root, DoctorOptions options, List<DoctorCheck> checks)
     {
         string budget = Seconds(options.McpTimeout);
 
@@ -234,7 +236,7 @@ public static partial class McpLiveProbe
     private static DoctorCheck Handshake(
         bool passed,
         string reason,
-        StdioSession session,
+        IMcpStdioSession session,
         DoctorOptions options,
         string root)
     {
@@ -265,7 +267,7 @@ public static partial class McpLiveProbe
     ///     Reads one reply line, turning a timeout, a closed stream, or a line past the session's cap into a reason
     ///     rather than an exception.
     /// </summary>
-    private static bool TryRead(StdioSession session, out string? line, out string? failure)
+    private static bool TryRead(IMcpStdioSession session, out string? line, out string? failure)
     {
         try
         {
