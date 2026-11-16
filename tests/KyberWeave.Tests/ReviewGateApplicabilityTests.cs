@@ -67,7 +67,7 @@ public sealed class ReviewGateApplicabilityTests : IDisposable
     [Fact]
     public void WithoutChangedPathsEveryGateRunsAndTheBaseIsAbsent()
     {
-        GateReport report = GateRunner.Run(
+        GateReport report = ReviewTestServices.Gates.Run(
             Config(DashGate(["dotnet", "--version"]), new ReviewGate("build", ["dotnet", "--version"])),
             _temp.Path);
 
@@ -79,7 +79,7 @@ public sealed class ReviewGateApplicabilityTests : IDisposable
     [Fact]
     public void ANonMatchingGateIsNotExecutedAndReportsItsReason()
     {
-        GateReport report = GateRunner.Run(
+        GateReport report = ReviewTestServices.Gates.Run(
             Config(DashGate(["definitely-missing-gate-binary-xyz", "--version"])),
             _temp.Path,
             changedPaths: ["src/Foo.cs"],
@@ -99,7 +99,7 @@ public sealed class ReviewGateApplicabilityTests : IDisposable
     [Fact]
     public void AMatchingGateRuns()
     {
-        GateReport report = GateRunner.Run(
+        GateReport report = ReviewTestServices.Gates.Run(
             Config(DashGate(["dotnet", "--version"])),
             _temp.Path,
             changedPaths: ["dash/src/x.ts"],
@@ -133,7 +133,7 @@ public sealed class ReviewGateApplicabilityTests : IDisposable
     [Fact]
     public void GateReportsRoundTripTheBaseAndTheReason()
     {
-        GateReport report = GateRunner.Run(
+        GateReport report = ReviewTestServices.Gates.Run(
             Config(new ReviewGate("build", ["dotnet", "--version"])),
             _temp.Path,
             baseRef: "main");

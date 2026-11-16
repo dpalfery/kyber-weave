@@ -143,7 +143,7 @@ public sealed class ReviewGatesIndexTests : IDisposable
     private CapturedConsoleExecution<int> Run(ScriptedProcessExecutor executor)
     {
         CommandApp app = new(new SeamRegistrar(new ReviewGatesCommand(
-            ReviewTestServices.WorkTrees, ReviewTestServices.Cycles, ReviewTestServices.Git, ReviewTestServices.Evidence, ReviewTestServices.NotSeated, ReviewTestServices.ProjectFiles)
+            ReviewTestServices.WorkTrees, ReviewTestServices.Cycles, ReviewTestServices.Git, ReviewTestServices.Evidence, ReviewTestServices.NotSeated, ReviewTestServices.ProjectFiles, ReviewTestServices.Gates)
         { Executor = executor }));
         app.Configure(configuration =>
         {

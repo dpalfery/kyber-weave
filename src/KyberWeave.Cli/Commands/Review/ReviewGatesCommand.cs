@@ -23,7 +23,7 @@ namespace KyberWeave.Cli.Commands.Review;
 ///     Runs the deterministic gates the host declares under <c>review.gates</c>, or, with <c>--agent</c>,
 ///     one developer agent's gates under <c>review.task-gates</c> against the change that agent made.
 /// </summary>
-public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, IReviewEvidenceService evidenceWriter, INotSeatedStore notSeatedStore, IProjectFileLocator projectFiles) : Command<ReviewGatesSettings>
+public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycleStore cycles, IGitChangeReader git, IReviewEvidenceService evidenceWriter, INotSeatedStore notSeatedStore, IProjectFileLocator projectFiles, IGateRunService gateRunner) : Command<ReviewGatesSettings>
 {
     private const string NoGatesDeclared = "KW-REVIEW-020";
     private const string IndexState = "KW-REVIEW-038";
@@ -287,7 +287,7 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
         TimeSpan? deadline = settings.Deadline
             ? TimeSpan.FromSeconds(config.Review.CouncilDeadlineSeconds)
             : null;
-        GateReport gates = GateRunner.Run(
+        GateReport gates = gateRunner.Run(
             new ReviewConfig { Gates = fullSuite.Admitted, Parallelism = config.Review.Parallelism },
             root,
             settings.StopOnFailure,
@@ -756,7 +756,7 @@ public sealed class ReviewGatesCommand(IReviewWorkTreeService trees, IReviewCycl
                 ? RedClassifier.BuildSkipReason(brokenBuildSymbols)
                 : null,
         };
-        TaskGateRun run = GateRunner.RunTaskGates(
+        TaskGateRun run = gateRunner.RunTaskGates(
             plan.Gates, root, settings.Fix, settings.StopOnFailure && !settings.Red, observer);
 
         GateReport finalReport = run.Report;

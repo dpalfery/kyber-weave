@@ -33,7 +33,7 @@ public sealed class GateRunnerConcurrentGateTests : IDisposable
         ReviewGate waiter = new("waits-for-release", WaitForReleaseFile(), TimeoutSeconds: 30) { Concurrent = true };
         ReviewGate release = new("release", WriteReleaseFile(), TimeoutSeconds: 30);
 
-        GateReport report = GateRunner.Run(new ReviewConfig { Gates = [waiter, release] }, _root.Path);
+        GateReport report = ReviewTestServices.Gates.Run(new ReviewConfig { Gates = [waiter, release] }, _root.Path);
 
         Assert.Equal(["waits-for-release", "release"], report.Gates.Select(gate => gate.Id));
         Assert.All(report.Gates, gate => Assert.True(gate.Passed, $"{gate.Id}: {gate.Summary}"));
@@ -46,7 +46,7 @@ public sealed class GateRunnerConcurrentGateTests : IDisposable
         ReviewGate waiter = new("waits-for-release", WaitForReleaseFile(), TimeoutSeconds: 2);
         ReviewGate release = new("release", WriteReleaseFile(), TimeoutSeconds: 30);
 
-        GateReport report = GateRunner.Run(new ReviewConfig { Gates = [waiter, release] }, _root.Path);
+        GateReport report = ReviewTestServices.Gates.Run(new ReviewConfig { Gates = [waiter, release] }, _root.Path);
 
         Assert.Equal(GateOutcome.TimedOut, report.Gates[0].Outcome);
         Assert.True(report.Gates[1].Passed, report.Gates[1].Summary);
@@ -58,7 +58,7 @@ public sealed class GateRunnerConcurrentGateTests : IDisposable
         ReviewGate slow = new("slow", Sleep30(), TimeoutSeconds: 1) { Concurrent = true };
         ReviewGate quick = new("quick", ["git", "--version"], TimeoutSeconds: 30);
 
-        GateReport report = GateRunner.Run(new ReviewConfig { Gates = [slow, quick] }, _root.Path);
+        GateReport report = ReviewTestServices.Gates.Run(new ReviewConfig { Gates = [slow, quick] }, _root.Path);
 
         Assert.Equal(["slow", "quick"], report.Gates.Select(gate => gate.Id));
         Assert.Equal(GateOutcome.TimedOut, report.Gates[0].Outcome);
@@ -80,7 +80,7 @@ public sealed class GateRunnerConcurrentGateTests : IDisposable
         ReviewGate never = new("never-started", ["git", "--version"], TimeoutSeconds: 30);
 
         long start = Stopwatch.GetTimestamp();
-        GateReport report = GateRunner.Run(
+        GateReport report = ReviewTestServices.Gates.Run(
             new ReviewConfig { Gates = [slow, started, failing, never] }, _root.Path, stopOnBlockingFailure: true);
 
         Assert.Equal(["slow-has-started", "failing"], report.Gates.Select(gate => gate.Id));
@@ -101,7 +101,7 @@ public sealed class GateRunnerConcurrentGateTests : IDisposable
         ReviewGate slower = new("slower", Sleep3(), TimeoutSeconds: 30);
         ReviewGate never = new("never-started", ["git", "--version"], TimeoutSeconds: 30);
 
-        GateReport report = GateRunner.Run(
+        GateReport report = ReviewTestServices.Gates.Run(
             new ReviewConfig { Gates = [failing, slower, never] }, _root.Path, stopOnBlockingFailure: true);
 
         Assert.Equal(["fails-at-once", "slower"], report.Gates.Select(gate => gate.Id));
@@ -115,7 +115,7 @@ public sealed class GateRunnerConcurrentGateTests : IDisposable
         ReviewGate failing = new("fails-late", FailAfterRelease(), TimeoutSeconds: 30) { Concurrent = true };
         ReviewGate release = new("release", WriteReleaseFile(), TimeoutSeconds: 30);
 
-        GateReport report = GateRunner.Run(new ReviewConfig { Gates = [failing, release] }, _root.Path);
+        GateReport report = ReviewTestServices.Gates.Run(new ReviewConfig { Gates = [failing, release] }, _root.Path);
 
         Assert.Equal(["fails-late", "release"], report.Gates.Select(gate => gate.Id));
         Assert.Equal(GateOutcome.Completed, report.Gates[0].Outcome);
@@ -137,8 +137,8 @@ public sealed class GateRunnerConcurrentGateTests : IDisposable
 
         ReviewGate[] gates = [Exclusive("a", true), Exclusive("b", true), Exclusive("c", false)];
 
-        GateReport bounded = GateRunner.Run(new ReviewConfig { Gates = gates, Parallelism = 1 }, _root.Path);
-        GateReport unbounded = GateRunner.Run(new ReviewConfig { Gates = gates, Parallelism = 3 }, _root.Path);
+        GateReport bounded = ReviewTestServices.Gates.Run(new ReviewConfig { Gates = gates, Parallelism = 1 }, _root.Path);
+        GateReport unbounded = ReviewTestServices.Gates.Run(new ReviewConfig { Gates = gates, Parallelism = 3 }, _root.Path);
 
         Assert.Equal(["a", "b", "c"], bounded.Gates.Select(gate => gate.Id));
         Assert.All(bounded.Gates, gate => Assert.True(gate.Passed, $"{gate.Id}: {gate.Summary}"));

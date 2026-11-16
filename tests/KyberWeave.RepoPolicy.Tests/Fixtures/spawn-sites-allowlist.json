@@ -779,19 +779,7 @@
       "file": "src/KyberWeave.Data/Review/ProcessProgramRunner.cs",
       "text": "return ProcessRunner.Run(startInfo, string.Empty, timeout, maxOutputBytes, cancellationToken);",
       "count": 1,
-      "bound": "ProcessRunner.Run with the caller's timeout: the process tree is killed on expiry or when the caller's token is cancelled, and maxOutputBytes caps what is buffered. Callers: git reads in GitChangeReader, SuppressionScanService (10 MB output cap) and FileRepositoryFileLister, each 60 s; git argv only, never a shell."
-    },
-    {
-      "file": "src/KyberWeave.Core/Review/GateRunner.cs",
-      "text": "ProcessStartInfo startInfo = new(argv[0])",
-      "count": 1,
-      "bound": "Builds only; nothing starts on this line. Started at GateRunner.cs:171 with the gate's timeout-seconds."
-    },
-    {
-      "file": "src/KyberWeave.Core/Review/GateRunner.cs",
-      "text": "ProcessResult process = ProcessRunner.Run(startInfo, string.Empty, timeout, cancellationToken: stop);",
-      "count": 1,
-      "bound": "ProcessRunner.Run with the gate's timeout-seconds (review.gates; ReviewConfigLoader defaults it to 900 s and rejects values <= 0). The process tree is killed on expiry and the TimeoutException is reported as TimedOut. A concurrent gate's tree is also killed when a run given --stop-on-failure cancels it."
+      "bound": "ProcessRunner.Run with the caller's timeout: the process tree is killed on expiry or when the caller's token is cancelled, and maxOutputBytes caps what is buffered. Callers: git reads in GitChangeReader, SuppressionScanService (10 MB output cap) and FileRepositoryFileLister, each 60 s; every review gate through GateRunService with the gate's timeout-seconds (review.gates; ReviewConfigLoader defaults it to 900 s and rejects values <= 0), where the TimeoutException is reported as TimedOut and a concurrent gate's tree is also killed when a run given --stop-on-failure cancels it; git argv only, never a shell."
     },
     {
       "file": "src/KyberWeave.Data/Squad/Instances/SquadHarnessLauncher.cs",

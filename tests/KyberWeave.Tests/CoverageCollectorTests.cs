@@ -35,7 +35,7 @@ public sealed class CoverageCollectorTests : IDisposable
             </coverage>
             """);
 
-        CoverageResult? coverage = CoverageCollector.ReadCobertura(path);
+        CoverageResult? coverage = ReviewTestServices.Coverage.ReadFile(path);
 
         Assert.NotNull(coverage);
         Assert.Equal(87.5, coverage.FileLinePercent);
@@ -60,8 +60,8 @@ public sealed class CoverageCollectorTests : IDisposable
         File.SetLastWriteTimeUtc(dotnet, started.AddSeconds(1));
         File.SetLastWriteTimeUtc(vitest, started.AddSeconds(2));
 
-        IReadOnlyList<CoverageReport> reports = CoverageCollector.ReadAll(_temp.Path, started);
-        CoverageResult? floor = CoverageCollector.ReadNewest(_temp.Path, started);
+        IReadOnlyList<CoverageReport> reports = ReviewTestServices.Coverage.ReadAll(_temp.Path, started);
+        CoverageResult? floor = ReviewTestServices.Coverage.ReadNewest(_temp.Path, started);
 
         string[] expected =
         [
