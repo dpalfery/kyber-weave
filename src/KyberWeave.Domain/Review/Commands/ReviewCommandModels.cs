@@ -2,17 +2,15 @@ using KyberWeave.Core.Diagnostics;
 
 namespace KyberWeave.Core.Review;
 
-/// <summary>What a review command's use case hands back: the exit code, the text to print, and the report to render.</summary>
+/// <summary>What a review command's use case hands back: the exit code, the report to render, and the lines after it.</summary>
 /// <param name="ExitCode">The process exit code.</param>
-/// <param name="Preface">Text printed before the report is rendered.</param>
 /// <param name="Report">The report to render, or null when the run produced none.</param>
-/// <param name="Epilogue">Text printed after the report is rendered.</param>
+/// <param name="Epilogue">Lines printed after the report is rendered.</param>
 /// <param name="ClientError">A refused input the caller formats in its own style; the run did nothing else.</param>
 public sealed record ReviewCommandResult(
     int ExitCode,
-    string Preface = "",
     DiagnosticReport? Report = null,
-    string Epilogue = "",
+    IReadOnlyList<string>? Epilogue = null,
     string? ClientError = null)
 {
     /// <summary>The exit code for an input the command refuses before anything runs.</summary>
@@ -25,7 +23,9 @@ public sealed record ReviewCommandResult(
     /// <summary>A run that ends by rendering <paramref name="report"/>.</summary>
     /// <param name="exitCode">The exit code.</param>
     /// <param name="report">The report.</param>
-    public static ReviewCommandResult Reported(int exitCode, DiagnosticReport report) => new(exitCode, Report: report);
+    /// <param name="epilogue">Lines printed after the report is rendered.</param>
+    public static ReviewCommandResult Reported(int exitCode, DiagnosticReport report, IReadOnlyList<string>? epilogue = null) =>
+        new(exitCode, report, epilogue ?? []);
 }
 
 /// <summary>The options of <c>review gates</c>, as the use case reads them.</summary>
@@ -45,6 +45,7 @@ public sealed record ReviewCommandResult(
 /// <param name="Fix">Whether <c>--fix</c> was given.</param>
 /// <param name="Red">Whether <c>--red</c> was given.</param>
 /// <param name="HumanOutput">Whether the output format is meant for a person, so the run prints its guidance lines.</param>
+/// <param name="Interactive">Whether the process has a person's terminal on standard input.</param>
 public sealed record ReviewGatesRequest(
     string Path,
     string? Config,
@@ -61,7 +62,8 @@ public sealed record ReviewGatesRequest(
     string? TaskSlug,
     bool Fix,
     bool Red,
-    bool HumanOutput)
+    bool HumanOutput,
+    bool Interactive)
 {
     /// <summary>Whether an option that only makes sense for one agent was given.</summary>
     public bool HasAgentOnlyOptions => TaskSlug is not null || Fix || Red;

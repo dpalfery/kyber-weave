@@ -142,9 +142,7 @@ public sealed class ReviewGatesIndexTests : IDisposable
     /// <summary>Runs <c>review gates</c> over the repository with the scripted CodeGraph seam, writing the report to --out.</summary>
     private CapturedConsoleExecution<int> Run(ScriptedProcessExecutor executor)
     {
-        CommandApp app = new(new SeamRegistrar(new ReviewGatesCommand(
-            ReviewTestServices.WorkTrees, ReviewTestServices.Cycles, ReviewTestServices.Git, ReviewTestServices.Evidence, ReviewTestServices.NotSeated, ReviewTestServices.ProjectFiles, ReviewTestServices.Gates, ReviewTestServices.Duplicates,
-            ReviewTestServices.CodeGraphs, ReviewTestServices.WorktreeIndex, ReviewTestServices.Files, ReviewTestServices.Environment, ReviewTestServices.CycleSelector, executor)));
+        CommandApp app = new(new SeamRegistrar(new ReviewGatesCommand(ReviewTestServices.ReviewGates, executor)));
         app.Configure(configuration =>
         {
             configuration.SetApplicationName("kyber-weave");

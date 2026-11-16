@@ -1,4 +1,5 @@
 using KyberWeave.Application.Doctor;
+using KyberWeave.Application.Configuration;
 using KyberWeave.Application.Arbiter;
 using KyberWeave.Application.Hooks;
 using KyberWeave.Contracts.Docs;
@@ -109,7 +110,27 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IDuplicateDetectionService, DuplicateDetectionService>();
         services.TryAddSingleton<IReviewDecisionSteps, ReviewDecisionSteps>();
         services.TryAddSingleton<ITaskGateSelectionService, TaskGateSelectionService>();
+        services.TryAddSingleton<IConfigLoadService, ConfigLoadService>();
         services.TryAddSingleton<IReviewCycleSelector, ReviewCycleSelector>();
+        services.TryAddSingleton<IReviewGatesService>(sp => new ReviewGatesService(
+            sp.GetRequiredService<IReviewWorkTreeService>(),
+            sp.GetRequiredService<IReviewCycleStore>(),
+            sp.GetRequiredService<IGitChangeReader>(),
+            sp.GetRequiredService<IReviewEvidenceService>(),
+            sp.GetRequiredService<INotSeatedStore>(),
+            sp.GetRequiredService<IProjectFileLocator>(),
+            sp.GetRequiredService<IGateRunService>(),
+            sp.GetRequiredService<IDuplicateDetectionService>(),
+            sp.GetRequiredService<ICodeGraphPortsFactory>(),
+            sp.GetRequiredService<IWorktreeIndexGuard>(),
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IReviewCycleSelector>(),
+            sp.GetRequiredService<IConfigLoadService>(),
+            sp.GetRequiredService<ITaskGateSelectionService>(),
+            sp.GetRequiredService<IPlanTaskTargetService>()));
+        services.TryAddSingleton<IPlanTaskTargetService>(sp => new PlanTaskTargetService(
+            sp.GetRequiredService<IPlanTaskService>(), sp.GetRequiredService<ITaskGateSelectionService>()));
         services.TryAddSingleton<IReviewDecisionModelFactory, ReviewDecisionModelFactory>();
         _ = services.AddWeaveArbiterApplication();
         return services;

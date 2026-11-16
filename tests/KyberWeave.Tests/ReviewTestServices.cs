@@ -51,6 +51,9 @@ internal static class ReviewTestServices
         return new ServiceCollectionTypeRegistrar(services);
     }
 
+    /// <summary>Runs the gates a review executes, repository-wide or for one agent.</summary>
+    public static IReviewGatesService ReviewGates { get; } = Provider.GetRequiredService<IReviewGatesService>();
+
     /// <summary>Finds the project file a source file belongs to.</summary>
     public static IProjectFileLocator ProjectFiles { get; } = Provider.GetRequiredService<IProjectFileLocator>();
 
