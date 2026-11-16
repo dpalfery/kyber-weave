@@ -20,20 +20,20 @@ namespace KyberWeave.Cli.Update;
 /// aim an installer at an arbitrary host, so those are refused rather than trusted.
 /// </para>
 /// </remarks>
-internal sealed record ReleaseOrigin(Uri ApiRoot, Uri DownloadRoot, bool IsLoopbackOverride)
+public sealed record ReleaseOrigin(Uri ApiRoot, Uri DownloadRoot, bool IsLoopbackOverride)
 {
     /// <summary>The environment variable naming a loopback Release host.</summary>
     internal const string EnvironmentVariable = "KYBER_WEAVE_RELEASE_ORIGIN";
 
     /// <summary>The github.com endpoints used by every ordinary install.</summary>
-    internal static ReleaseOrigin Default { get; } = new(
-        GitHubReleaseClient.ApiRoot,
-        GitHubReleaseClient.ReleaseDownloadBase,
+    public static ReleaseOrigin Default { get; } = new(
+        GitHubReleaseEndpoints.ApiRoot,
+        GitHubReleaseEndpoints.ReleaseDownloadBase,
         IsLoopbackOverride: false);
 
     /// <summary>Reads the override, falling back to github.com when it is unset.</summary>
     /// <exception cref="SelfUpdateException">The override is set to a value that is not a loopback origin.</exception>
-    internal static ReleaseOrigin Resolve(Func<string, string?> readEnvironment)
+    public static ReleaseOrigin Resolve(Func<string, string?> readEnvironment)
     {
         ArgumentNullException.ThrowIfNull(readEnvironment);
 
@@ -65,7 +65,7 @@ internal sealed record ReleaseOrigin(Uri ApiRoot, Uri DownloadRoot, bool IsLoopb
         Uri root = new Uri(origin.GetLeftPart(UriPartial.Authority) + "/");
         return new ReleaseOrigin(
             root,
-            new Uri(root, $"{GitHubReleaseClient.Owner}/{GitHubReleaseClient.Repo}/releases/download/"),
+            new Uri(root, $"{GitHubReleaseEndpoints.Owner}/{GitHubReleaseEndpoints.Repo}/releases/download/"),
             IsLoopbackOverride: true);
     }
 
@@ -88,7 +88,7 @@ internal sealed record ReleaseOrigin(Uri ApiRoot, Uri DownloadRoot, bool IsLoopb
         throw new SelfUpdateException($"refusing non-HTTPS {subject}: {uri}");
     }
 
-    internal static bool IsLoopbackAuthority(Uri uri)
+    public static bool IsLoopbackAuthority(Uri uri)
     {
         ArgumentNullException.ThrowIfNull(uri);
         if (!uri.IsAbsoluteUri)

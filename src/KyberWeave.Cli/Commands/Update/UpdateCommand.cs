@@ -1,41 +1,31 @@
 using KyberWeave.Cli.Update;
+using KyberWeave.Contracts.Services;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Update;
 
-public sealed class UpdateCommand : Command<UpdateSettings>
+/// <summary>Updates the installed kyber-weave binaries from a GitHub Release.</summary>
+/// <param name="updater">The self-update service.</param>
+public sealed class UpdateCommand(ISelfUpdateService updater) : Command<UpdateSettings>
 {
-    internal SelfUpdateHost? Host { get; init; }
-
-    internal HttpMessageHandler? Handler { get; init; }
-
-    internal Func<string, string?>? ReadEnvironment { get; init; }
-
-    internal IArbiterHookRefresher? ArbiterHookRefresher { get; init; }
-
-    internal Func<string, IReadOnlyList<string>, bool, int>? FinishingProcess { get; init; }
-
     public override int Execute(CommandContext context, UpdateSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
         try
         {
-            SelfUpdateHost host = Host ?? SelfUpdateHost.FromCurrentProcess();
-            IArbiterHookRefresher refresher = ArbiterHookRefresher ?? new ArbiterHookRefresher(Log, ReadEnvironment);
-            using SelfUpdater updater = Handler is null
-                ? SelfUpdater.Create(host, Log, refresher, FinishingProcess)
-                : new SelfUpdater(Handler, host, Log, ReadEnvironment, arbiterHookRefresher: refresher, finishingProcess: FinishingProcess);
-            SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions(
-                settings.Version,
-                settings.ReleaseCandidate,
-                settings.NoMcp,
-                settings.NoKyberDash,
-                settings.NoMenubar,
-                settings.NoArbiter,
-                settings.NoRestart,
-                settings.FinishUpdate));
+            SelfUpdateOutcome outcome = updater.Run(
+                new SelfUpdateOptions(
+                    settings.Version,
+                    settings.ReleaseCandidate,
+                    settings.NoMcp,
+                    settings.NoKyberDash,
+                    settings.NoMenubar,
+                    settings.NoArbiter,
+                    settings.NoRestart,
+                    settings.FinishUpdate),
+                Log);
             WriteOutcome(outcome);
             return outcome.ExitCode;
         }

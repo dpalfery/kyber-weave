@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
+using KyberWeave.Application.Squad;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Update;
@@ -823,9 +824,9 @@ public sealed class ArbiterInstallCommand : Command<ArbiterInstallSettings>
     {
         string? local = FindLocalSquadRoot();
         if (local is not null)
-            return new LocalCheckoutSquadReleaseSource(local);
+            return SquadReleaseSources.LocalCheckout(local);
 
-        return new GitHubSquadReleaseSource(
+        return SquadReleaseSources.GitHub(
             ReleaseOrigin.Resolve(_environmentReader ?? Environment.GetEnvironmentVariable).ApiRoot);
     }
 

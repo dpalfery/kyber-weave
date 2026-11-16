@@ -2,6 +2,7 @@ using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Update;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
@@ -18,41 +19,19 @@ internal static class SquadCliServices
     /// <returns>The same collection, for chaining.</returns>
     internal static IServiceCollection AddSquadCliServices(this IServiceCollection services)
     {
-        services.TryAddSingleton<ISquadReleaseSource>(sp => new GitHubSquadReleaseSource(
-            ReleaseOrigin.Resolve(sp.GetRequiredService<IProcessEnvironment>().GetVariable).ApiRoot));
-        services.TryAddSingleton<ISquadInstanceReleaseSource>(sp => new InstanceReleaseSource(
-            FindLocalProductSquadRoot(sp.GetRequiredService<ISquadFileAccess>()) is { } local
-                ? new LocalCheckoutSquadReleaseSource(local)
-                : sp.GetRequiredService<ISquadReleaseSource>()));
         services.TryAddSingleton<ISquadRenderer>(sp => new SquadRendererRegistry(
             SquadRendererSet.Create(),
             sp.GetRequiredService<ISquadRenderInputReader>()));
+        services.TryAddSingleton<Func<SelfUpdateHost>>(_ => SelfUpdateHostFactory.FromCurrentProcess);
+        services.TryAddSingleton<IArbiterRefreshTargets>(sp => new CliArbiterRefreshTargets(
+            sp.GetRequiredService<IProcessEnvironment>().GetVariable));
+        services.TryAddSingleton<IArbiterHookRefresherFactory>(sp => new ArbiterHookRefresherFactory(
+            sp.GetRequiredService<IProcessEnvironment>().GetVariable));
         services.TryAddSingleton(new SquadConsoleOptions());
         services.TryAddSingleton(new SquadRunOptions());
         services.TryAddSingleton(new SquadDoctorOptions());
         services.TryAddSingleton<ISquadProjectPicker, SpectreSquadProjectPicker>();
         services.TryAddSingleton(_ => KyberDashCapturePluginStep.CreateDefault());
         return services;
-    }
-
-    private static string? FindLocalProductSquadRoot(ISquadFileAccess files)
-    {
-        try
-        {
-            return files.FindCheckoutSquadSourceRoot();
-        }
-        catch (Exception ex) when (FileFailure.Is(ex))
-        {
-            return null;
-        }
-    }
-
-    /// <summary>The instance service's release source: a local checkout when one is found, otherwise the download.</summary>
-    private sealed class InstanceReleaseSource(ISquadReleaseSource inner) : ISquadInstanceReleaseSource
-    {
-        public Task<SquadReleaseResult> DownloadAndExtractAsync(SquadReleaseRequest request, CancellationToken cancellationToken) =>
-            inner.DownloadAndExtractAsync(request, cancellationToken);
-
-        public void Dispose() => inner.Dispose();
     }
 }

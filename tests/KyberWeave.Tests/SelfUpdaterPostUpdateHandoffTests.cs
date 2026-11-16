@@ -666,7 +666,8 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
             readEnvironment,
             spawn,
             captureProcess: capture,
-            arbiterHookRefresher: arbiter);
+            arbiterHookRefresher: arbiter,
+            arbiterTargets: new CliArbiterRefreshTargets(readEnvironment));
         Func<string, IReadOnlyList<string>, bool, int> loopbackSeam = loopback.Invoke;
         SeamProbe probe = new(record, handOff ?? loopbackSeam);
 
@@ -678,6 +679,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
             spawn,
             captureProcess: capture,
             arbiterHookRefresher: arbiter,
+            arbiterTargets: new CliArbiterRefreshTargets(readEnvironment),
             finishingProcess: probe.Invoke);
         return updater.Run(options);
     }

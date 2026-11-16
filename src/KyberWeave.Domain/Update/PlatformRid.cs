@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 namespace KyberWeave.Cli.Update;
 
 /// <summary>Maps the running OS and CPU to a published Release RID.</summary>
-internal static class PlatformRid
+public static class PlatformRid
 {
     private static readonly string[] Published =
     [
@@ -14,13 +14,13 @@ internal static class PlatformRid
         "win-x64"
     ];
 
-    internal static string Detect() => Detect(
+    public static string Detect() => Detect(
         OperatingSystem.IsWindows(),
         OperatingSystem.IsLinux(),
         OperatingSystem.IsMacOS(),
         RuntimeInformation.ProcessArchitecture);
 
-    internal static string Detect(bool windows, bool linux, bool macos, Architecture architecture)
+    public static string Detect(bool windows, bool linux, bool macos, Architecture architecture)
     {
         string os = windows ? "win"
             : linux ? "linux"
@@ -44,7 +44,7 @@ internal static class PlatformRid
         return rid;
     }
 
-    internal static bool IsWindowsRid(string rid) =>
+    public static bool IsWindowsRid(string rid) =>
         rid.StartsWith("win-", StringComparison.Ordinal);
 
     /// <summary>Maps a Kyber-Weave RID to the KyberDash Node SEA RID for the same platform.</summary>
@@ -55,7 +55,7 @@ internal static class PlatformRid
     /// first-install path. An unrecognised RID is returned verbatim rather than reshaped into a
     /// name no release publishes.
     /// </remarks>
-    internal static string KyberDashRid(string rid) => rid switch
+    public static string KyberDashRid(string rid) => rid switch
     {
         "osx-x64" => "darwin-x64",
         "osx-arm64" => "darwin-arm64",

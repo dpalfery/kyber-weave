@@ -4,16 +4,16 @@ namespace KyberWeave.Cli.Update;
 ///     Reads the guidance that KyberDash prints from its capture-plugin verb. KyberDash owns the wording
 ///     (ADR 0031, decision D22). Squad and the self-updater only relay it, so neither keeps a restart line of its own.
 /// </summary>
-internal static class KyberDashGuidance
+public static class KyberDashGuidance
 {
     /// <summary>The marker that starts every guidance line on the verb's stdout.</summary>
-    internal const string HarnessOpenCodePrefix = "harness opencode: ";
+    public const string HarnessOpenCodePrefix = "harness opencode: ";
 
     /// <summary>
     ///     The guidance lines in a verb's stdout, in printed order, with the marker removed. Any other line, including
     ///     a line that only mentions the marker mid-text, is not guidance and is left out.
     /// </summary>
-    internal static IReadOnlyList<string> HarnessOpenCodeLines(string standardOutput)
+    public static IReadOnlyList<string> HarnessOpenCodeLines(string standardOutput)
     {
         List<string> lines = [];
         foreach (string raw in standardOutput.Split('\n'))
@@ -43,7 +43,7 @@ internal static class KyberDashGuidance
     /// </param>
     /// <param name="standardOutput">Everything the verb printed on stdout.</param>
     /// <param name="verdict">The verdict line, which is the verb's own summary and never guidance.</param>
-    internal static IReadOnlyList<string> CapturePluginGuidanceLines(
+    public static IReadOnlyList<string> CapturePluginGuidanceLines(
         string harness,
         string standardOutput,
         string verdict)

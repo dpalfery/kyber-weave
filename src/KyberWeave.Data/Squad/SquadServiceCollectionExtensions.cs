@@ -1,4 +1,5 @@
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Cli.Update;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
@@ -37,6 +38,7 @@ public static class SquadServiceCollectionExtensions
         services.TryAddSingleton<ISquadFactoryHooksShadowing, FileFactoryHooksShadowing>();
         services.TryAddSingleton<ISquadInstanceLinkSync, FileSquadInstanceLinkSync>();
         services.TryAddSingleton<ISquadFileAccess, PhysicalSquadFileAccess>();
+        services.TryAddSingleton<ISelfUpdateSystem, SelfUpdateSystem>();
         services.TryAddSingleton<ISquadTargetResolver, FileSquadTargetResolver>();
         services.TryAddSingleton<ISquadStateMigration>(sp => new SquadStateMigration(
             sp.GetRequiredService<SquadStateStore>(),

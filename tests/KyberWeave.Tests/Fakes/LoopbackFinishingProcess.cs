@@ -1,4 +1,5 @@
 using KyberWeave.Cli.Update;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
 
 namespace KyberWeave.Tests.Fakes;
@@ -22,6 +23,7 @@ internal sealed class LoopbackFinishingProcess
     private readonly Func<string, bool>? _canWriteDirectory;
     private readonly Func<string, IReadOnlyList<string>, ProcessResult>? _captureProcess;
     private readonly IArbiterHookRefresher? _arbiterHookRefresher;
+    private readonly IArbiterRefreshTargets? _arbiterTargets;
 
     /// <summary>
     /// The outcome the finish-mode child returned on its last hand-off, with its own message. The parent only receives
@@ -38,7 +40,8 @@ internal sealed class LoopbackFinishingProcess
         Func<string, IReadOnlyList<string>, int>? runProcess = null,
         Func<string, bool>? canWriteDirectory = null,
         Func<string, IReadOnlyList<string>, ProcessResult>? captureProcess = null,
-        IArbiterHookRefresher? arbiterHookRefresher = null)
+        IArbiterHookRefresher? arbiterHookRefresher = null,
+        IArbiterRefreshTargets? arbiterTargets = null)
     {
         ArgumentNullException.ThrowIfNull(handler);
         ArgumentNullException.ThrowIfNull(parentHost);
@@ -51,6 +54,7 @@ internal sealed class LoopbackFinishingProcess
         _canWriteDirectory = canWriteDirectory;
         _captureProcess = captureProcess;
         _arbiterHookRefresher = arbiterHookRefresher;
+        _arbiterTargets = arbiterTargets;
     }
 
     /// <summary>The seam value: runs the hand-off's process and returns its exit code.</summary>
@@ -81,7 +85,8 @@ internal sealed class LoopbackFinishingProcess
             _canWriteDirectory,
             _captureProcess,
             _arbiterHookRefresher,
-            finishingProcess: null);
+            finishingProcess: null,
+            arbiterTargets: _arbiterTargets);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions(
             version,
             ReleaseCandidate: false,

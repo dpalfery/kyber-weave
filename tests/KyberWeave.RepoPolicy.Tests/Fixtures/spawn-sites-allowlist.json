@@ -704,31 +704,31 @@
       "bound": "Builds only; nothing starts on this line. It is started only through the injected UtilitiesStatusLineProcessRunner, which production binds to ResolveProcessRunner (5 s, UtilitiesStatusLineCommandComposition.cs:42)."
     },
     {
-      "file": "src/KyberWeave.Cli/Update/BinaryInstaller.cs",
+      "file": "src/KyberWeave.Data/Update/SelfUpdateSystem.cs",
       "text": "ProcessStartInfo startInfo = new ProcessStartInfo(\"xattr\")",
       "count": 1,
       "bound": "Builds only; nothing starts on this line. Started at BinaryInstaller.cs:123 with XattrTimeout = 30 s."
     },
     {
-      "file": "src/KyberWeave.Cli/Update/SelfUpdater.cs",
+      "file": "src/KyberWeave.Data/Update/SelfUpdateSystem.cs",
       "text": "ProcessStartInfo start = new(fileName)",
       "count": 1,
       "bound": "Builds only; nothing starts on this line. Started by RunCapture (SelfUpdater.cs:546) with CaptureVerbTimeout = 120 s."
     },
     {
-      "file": "src/KyberWeave.Cli/Update/SelfUpdater.cs",
+      "file": "src/KyberWeave.Data/Update/SelfUpdateSystem.cs",
       "text": "ProcessStartInfo start = new(fileName) { UseShellExecute = false };",
       "count": 1,
       "bound": "Builds only; nothing starts on this line. Started by RunProcess (Process.Start at SelfUpdater.cs:611), whose wait is bounded at TrayUpdateTimeout = 5 min with a tree kill."
     },
     {
-      "file": "src/KyberWeave.Cli/Update/SelfUpdater.cs",
+      "file": "src/KyberWeave.Data/Update/SelfUpdateSystem.cs",
       "text": "ProcessStartInfo child = new(fileName) { UseShellExecute = false };",
       "count": 1,
       "bound": "Builds only; nothing starts on this line. Started by StartFinishingProcess, whose hand-off waits FinishUpdateTimeout = 15 min and stops the whole process tree on expiry (TimeoutException). The pre-swap rehearsal is the same method with output discarded and RehearsalTimeout = 30 s, also tree-killed on expiry."
     },
     {
-      "file": "src/KyberWeave.Cli/Update/SelfUpdater.cs",
+      "file": "src/KyberWeave.Data/Update/SelfUpdateSystem.cs",
       "text": "using Process? started = Process.Start(child);",
       "count": 1,
       "bound": "Process.Start in StartFinishingProcess. The hand-off waits at most FinishUpdateTimeout = 15 min (longer than the child's own bounds: 120 s engine, 5 min tray, two 120 s plugin steps); the rehearsal waits at most RehearsalTimeout = 30 s. On expiry the whole process tree is killed and TimeoutException is raised."
@@ -830,19 +830,19 @@
       "bound": "ProcessRunner.Run with the executor's timeout: 60 s for ProcessExecutor.Instance (DefaultTimeout), or the WithTimeout value (120 s for the KyberDash plugin verb). WithTimeout rejects non-positive values. The tree is killed on expiry."
     },
     {
-      "file": "src/KyberWeave.Cli/Update/BinaryInstaller.cs",
+      "file": "src/KyberWeave.Data/Update/SelfUpdateSystem.cs",
       "text": "ProcessRunner.Run(startInfo, string.Empty, XattrTimeout);",
       "count": 1,
       "bound": "ProcessRunner.Run with XattrTimeout = 30 s (BinaryInstaller.cs:14); best-effort, so a timeout is caught as a failure to clear the attribute and the tree is killed on expiry."
     },
     {
-      "file": "src/KyberWeave.Cli/Update/SelfUpdater.cs",
+      "file": "src/KyberWeave.Data/Update/SelfUpdateSystem.cs",
       "text": "return ProcessRunner.Run(start, string.Empty, CaptureVerbTimeout);",
       "count": 1,
       "bound": "ProcessRunner.Run with CaptureVerbTimeout = 120 s (SelfUpdater.cs:51); the tree is killed on expiry and TimeoutException is raised (SelfUpdater.cs:531)."
     },
     {
-      "file": "src/KyberWeave.Cli/Update/SelfUpdater.cs",
+      "file": "src/KyberWeave.Data/Update/SelfUpdateSystem.cs",
       "text": "using Process? process = Process.Start(start);",
       "count": 1,
       "bound": "Process.Start for `kyberdash menubar --update`. RunProcess waits TrayUpdateTimeout = 5 min (SelfUpdater.cs:56); on expiry it kills the tree, waits 5 s, and throws TimeoutException (SelfUpdater.cs:617-632)."
