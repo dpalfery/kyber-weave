@@ -73,7 +73,8 @@ does not match the folder the file sits in.
 
 Clear a misplaced key by dropping it, or by making the document the type that takes the
 key when that is what it is and the file is already in the folder of that name under
-`<docs-root>/standards/`. A folder mismatch is cleared by changing the key to the
+`<docs-root>/standards/`. A standard lives at
+`standards/<technology>/<technology>.standards.md`. A folder mismatch is cleared by changing the key to the
 folder's name. A file anywhere else is cleared by moving it there; changing its key
 does not make the scope resolve. The folder name, the key, and `ontology.technologies`
 (or `ontology.roles`) are one value.

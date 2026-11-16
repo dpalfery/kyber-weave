@@ -170,10 +170,13 @@ Declaring one and re-running `docs init`:
 2. publishes `<technology-coding-standard>` in the configuration registry;
 3. legalizes `technology: <technology>` in that standard's frontmatter.
 
-Passing `--kyber-standards` to `kyber-weave docs init` seeds all 14 Kyber Squad rich coding
-standards templates (`csharp`, `test`, `typescript`, `rust`, `tauri`, `go`, `react`, `python`,
-`pulumi`, `maui`, `data-access-layer`, `sql`, `azure`, `github-actions`), merges them into `ontology.technologies`, and registers
-their paths in Config Reg.
+Passing `--kyber-standards` to `kyber-weave docs init` seeds all 16 Kyber Squad technology
+templates (`aws`, `azure`, `csharp`, `data-access-layer`, `github-actions`, `go`, `maui`,
+`pulumi`, `python`, `react`, `rust`, `sql`, `sql-server`, `tauri`, `test`, `typescript`), merges
+them into `ontology.technologies`, and registers their paths in Config Reg. `--standards
+<name,name>` installs exactly the folders named, from the same 16 technologies plus the four
+role folders (`conductor`, `architect`, `reviewer`, `devops`) and four platform folders
+(`github`, `azure-devops`, `gitlab`, `jira`), and declares each role in `ontology.roles`.
 
 One list, so the three cannot disagree — a standard whose folder, registry property and
 frontmatter came from separate sources is one that drifts the first time a name changes. A
