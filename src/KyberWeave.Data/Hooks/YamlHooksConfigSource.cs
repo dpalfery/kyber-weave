@@ -121,7 +121,7 @@ internal sealed class YamlHooksConfigSource(IFileSystem fileSystem, IProcessEnvi
         {
             warnings.Add(
                 $"{scope}: a repository file may tune the built-in rules but cannot name a command; " +
-                "the rule was ignored. Put a new rule in ~/.kyber-weave/hooks.yml.");
+                "the command was ignored. Put a new rule in ~/.kyber-weave/hooks.yml.");
         }
         foreach (string key in UnknownKeys(map, RuleKeys))
         {

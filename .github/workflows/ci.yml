@@ -256,17 +256,22 @@ jobs:
         run: |
           set -uo pipefail
           status=0
+          pids=()
+          # Each project runs in a background subshell, so a failure has to come back through
+          # wait on its own pid: a variable set inside the subshell never reaches this shell.
           run() {
             dotnet test "$1" -c "${CONFIGURATION}" --no-build \
-              --report-trx --report-trx-filename "$2" --results-directory TestResults || status=1
+              --report-trx --report-trx-filename "$2" --results-directory TestResults
           }
-          run tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj repo-policy.trx &
-          run tests/KyberWeave.PromptContent.Tests/KyberWeave.PromptContent.Tests.csproj prompt-content.trx &
-          run tests/KyberWeave.Domain.Tests/KyberWeave.Domain.Tests.csproj layers-Domain.trx &
-          run tests/KyberWeave.Application.Tests/KyberWeave.Application.Tests.csproj layers-Application.trx &
-          run tests/KyberWeave.Hooks.Tests/KyberWeave.Hooks.Tests.csproj layers-Hooks.trx &
-          run tests/KyberWeave.Architecture.Tests/KyberWeave.Architecture.Tests.csproj layers-Architecture.trx &
-          wait
+          run tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj repo-policy.trx & pids+=($!)
+          run tests/KyberWeave.PromptContent.Tests/KyberWeave.PromptContent.Tests.csproj prompt-content.trx & pids+=($!)
+          run tests/KyberWeave.Domain.Tests/KyberWeave.Domain.Tests.csproj layers-Domain.trx & pids+=($!)
+          run tests/KyberWeave.Application.Tests/KyberWeave.Application.Tests.csproj layers-Application.trx & pids+=($!)
+          run tests/KyberWeave.Hooks.Tests/KyberWeave.Hooks.Tests.csproj layers-Hooks.trx & pids+=($!)
+          run tests/KyberWeave.Architecture.Tests/KyberWeave.Architecture.Tests.csproj layers-Architecture.trx & pids+=($!)
+          for pid in "${pids[@]}"; do
+            wait "$pid" || status=1
+          done
           exit "$status"
 
       - name: Upload test results

@@ -57,6 +57,41 @@ public sealed class HooksConfigSourceTests : IDisposable
     }
 
     [Fact]
+    public void ARepositoryFileCannotSwapTheCommandOfABuiltInRule()
+    {
+        HookRule builtIn = Load().Rules[0];
+        Write(_repository, $$"""
+            rules:
+              - id: {{builtIn.Id}}
+                run: [rm, -rf, "{root}"]
+                timeout-seconds: 7
+            """);
+
+        HooksConfig config = Load();
+
+        HookRule tuned = Assert.Single(config.Rules, rule => rule.Id == builtIn.Id);
+        Assert.Equal(builtIn.Run, tuned.Run);
+        Assert.Equal(7, tuned.TimeoutSeconds);
+        Assert.Contains(config.Warnings, warning =>
+            warning.Contains(builtIn.Id, StringComparison.Ordinal)
+            && warning.Contains("~/.kyber-weave/hooks.yml", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AUserFileMaySwapTheCommandOfABuiltInRule()
+    {
+        HookRule builtIn = Load().Rules[0];
+        Write(_home, $$"""
+            rules:
+              - id: {{builtIn.Id}}
+                run: [echo, mine]
+            """);
+
+        HookRule tuned = Assert.Single(Load().Rules, rule => rule.Id == builtIn.Id);
+        Assert.Equal(["echo", "mine"], tuned.Run);
+    }
+
+    [Fact]
     public void AUserRuleThatNamesACommandIsHonoured()
     {
         Write(_home, """

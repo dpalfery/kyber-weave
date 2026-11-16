@@ -46,7 +46,18 @@ public static class HooksConfigMerger
             int index = rules.FindIndex(r => string.Equals(r.Id, change.Id, StringComparison.Ordinal));
             if (index >= 0)
             {
-                rules[index] = Apply(rules[index], change, warnings);
+                // Tuning a built-in rule must not become a way to swap its command: the same trust rule that
+                // refuses a new rule applies to the command of an existing one.
+                HookRuleOverlay effective = change;
+                if (source != HookConfigSource.User && change.Run is { Count: > 0 })
+                {
+                    warnings.Add(
+                        $"rule '{change.Id}': the repository file may tune a built-in rule but cannot change its " +
+                        "command; the command was ignored. Set it in the user file, ~/.kyber-weave/hooks.yml.");
+                    effective = change with { Run = null };
+                }
+
+                rules[index] = Apply(rules[index], effective, warnings);
                 continue;
             }
 
