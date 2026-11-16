@@ -1,0 +1,8 @@
+<Project>
+
+  <ItemGroup>
+    <!-- The moved Configuration types parse host YAML with YamlDotNet. -->
+    <PackageReference Include="YamlDotNet" Version="18.1.0" />
+  </ItemGroup>
+
+</Project>

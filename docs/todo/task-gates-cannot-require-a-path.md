@@ -23,7 +23,7 @@ The cost is the failure the council key exists to prevent, one layer lower. The 
 
 The files that would carry the key are:
 
-- `src/KyberWeave.Core/Configuration/ReviewConfig.cs` — the task gate record a planned gate is
+- `src/KyberWeave.Domain/Configuration/ReviewConfig.cs` — the task gate record a planned gate is
   built from.
 - `src/KyberWeave.Core/Configuration/ReviewConfigLoader.cs` — the unknown-key list for
   `review.task-gates` entries, and the validation that list sits beside.

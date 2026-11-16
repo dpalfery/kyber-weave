@@ -22,11 +22,6 @@ public sealed record PlannedTaskGate(
     public bool FailOnOutput { get; init; }
 }
 
-/// <summary>A task gate that does not run for this change, and why.</summary>
-/// <param name="Id">The gate's slug.</param>
-/// <param name="Reason">A sentence the operator can act on.</param>
-public sealed record SkippedTaskGate(string Id, string Reason);
-
 /// <summary>What one agent's task gates resolve to for one changed set.</summary>
 /// <param name="Gates">The gates that will start, in declaration order.</param>
 /// <param name="Skipped">The gates that do not apply to this host or to this change.</param>

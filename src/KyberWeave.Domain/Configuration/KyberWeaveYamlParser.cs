@@ -3,19 +3,15 @@ using KyberWeave.Core.Parsing;
 namespace KyberWeave.Core.Configuration;
 
 /// <summary>Shared YAML parse helpers for <c>.kyber-weave/kyber-weave.yml</c>.</summary>
+/// <remarks>
+/// This half is pure; the legacy <c>KyberWeaveYamlFile</c> reads the file and delegates here.
+/// </remarks>
 internal static class KyberWeaveYamlParser
 {
     public const string DefaultFileName = "kyber-weave.yml";
 
     /// <summary>Repo-root folder holding Kyber-Weave host configuration.</summary>
     public const string DefaultDirectoryName = ".kyber-weave";
-
-    public static KyberWeaveYamlDocument ParseFile(string yamlPath)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(yamlPath);
-        string yaml = File.ReadAllText(yamlPath);
-        return Parse(yaml);
-    }
 
     public static KyberWeaveYamlDocument Parse(string yaml)
     {

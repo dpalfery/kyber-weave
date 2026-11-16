@@ -1,5 +1,6 @@
 using KyberWeave.Core.Docs.Model;
 using YamlDotNet.Core;
+using KyberWeave.Domain.FileSystem;
 
 namespace KyberWeave.Core.Configuration;
 
@@ -18,7 +19,7 @@ public static class OntologyConfigLoader
         ArgumentNullException.ThrowIfNull(defaults);
         ArgumentException.ThrowIfNullOrWhiteSpace(yamlPath);
 
-        KyberWeaveYamlDocument document = KyberWeaveYamlParser.ParseFile(yamlPath);
+        KyberWeaveYamlDocument document = KyberWeaveYamlFile.ParseFile(yamlPath);
         return Merge(defaults, document.Ontology);
     }
 
@@ -28,7 +29,7 @@ public static class OntologyConfigLoader
 
         try
         {
-            KyberWeaveYamlDocument document = KyberWeaveYamlParser.ParseFile(yamlPath);
+            KyberWeaveYamlDocument document = KyberWeaveYamlFile.ParseFile(yamlPath);
             return OntologyConfigLoadResult.Ok(Merge(OntologyConfig.ProductDefaults, document.Ontology));
         }
         catch (YamlException ex)

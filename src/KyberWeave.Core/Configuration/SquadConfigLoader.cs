@@ -13,7 +13,7 @@ public static partial class SquadConfigLoader
         ArgumentNullException.ThrowIfNull(defaults);
         ArgumentException.ThrowIfNullOrWhiteSpace(yamlPath);
 
-        KyberWeaveYamlDocument document = KyberWeaveYamlParser.ParseFile(yamlPath);
+        KyberWeaveYamlDocument document = KyberWeaveYamlFile.ParseFile(yamlPath);
         return Merge(defaults, document.Squad);
     }
 

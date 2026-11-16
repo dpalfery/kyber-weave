@@ -116,6 +116,6 @@ public sealed record ArbiterRule(
     public bool ShouldAsk(string decideAnswer)
     {
         ArgumentNullException.ThrowIfNull(decideAnswer);
-        return Ask is not null && string.Equals(decideAnswer, RuleEngine.Undecidable, StringComparison.Ordinal);
+        return Ask is not null && string.Equals(decideAnswer, "undecidable", StringComparison.Ordinal);
     }
 }
