@@ -9,6 +9,9 @@ public interface IDocsHostConfiguration
     /// <summary>The finding code for a host configuration that could not be loaded; the value <c>KyberWeaveConfigLoader.ConfigLoadErrorCode</c> carries.</summary>
     public const string ConfigLoadErrorCode = "KW-CONFIG-001";
 
+    /// <summary>The finding code for a non-fatal problem in the host configuration, such as an unknown review key.</summary>
+    public const string ConfigWarningCode = "KW-CONFIG-002";
+
     /// <summary>
     /// Loads <c>kyber-weave.yml</c> for <paramref name="repositoryRoot"/>. A failure is added to <paramref name="report"/>
     /// and the product defaults are returned; warnings the configuration carries are added as findings.

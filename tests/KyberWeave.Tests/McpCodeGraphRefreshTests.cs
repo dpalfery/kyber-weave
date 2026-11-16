@@ -212,7 +212,7 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
         DocsTools tools = DocsToolsComposition.Create(
             host,
             null,
-            new CodeGraphFreshness(Root, refreshEnabled: true, ProvisionSucceeds()));
+            DocsTestCommands.Freshness(Root, ProvisionSucceeds()));
 
         string response = tools.Explore("anything");
         Assert.Contains("STATUS: TOOL_FAILURE", response, StringComparison.Ordinal);
@@ -366,7 +366,7 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
         return DocsToolsComposition.Create(
             host,
             null,
-            new CodeGraphFreshness(root, refreshEnabled: true, ProvisionSucceeds()));
+            DocsTestCommands.Freshness(root, ProvisionSucceeds()));
     }
 
     /// <summary>

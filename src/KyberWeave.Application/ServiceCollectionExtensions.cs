@@ -99,6 +99,7 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<McpServerRenamer>(),
             sp.GetRequiredService<McpWiringFixes>(),
             sp.GetRequiredService<ILaunchCommandResolverFactory>()));
+        services.TryAddSingleton<IDocsHostConfiguration, HostConfiguration>();
         services.TryAddSingleton<ICorpusProvenance>(sp => new CorpusProvenanceService(sp.GetRequiredService<IGitCheckoutProbe>()));
         services.TryAddSingleton(sp => new ReviewBlockWriter(
             sp.GetRequiredService<IRepositoryFileStore>(),

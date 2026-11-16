@@ -87,7 +87,7 @@ public sealed class DocsRootRegistry
         string? deliveryHome = null)
     {
         IServiceProvider provider = DocsToolsComposition.ServicesOrDefault(services);
-        OntologyConfig ontology = ResolveOntology(repoRoot);
+        OntologyConfig ontology = ResolveOntology(repoRoot, provider);
         ICodeGraphPortsFactory codeGraph = provider.GetRequiredService<ICodeGraphPortsFactory>();
         IDocumentSourceFactory documents = provider.GetRequiredService<IDocumentSourceFactory>();
         DocumentIndexHost host = new(
@@ -99,7 +99,12 @@ public sealed class DocsRootRegistry
         return DocsToolsComposition.Create(
             host,
             DocsToolsComposition.AnalysisReader(provider, repoRoot),
-            new CodeGraphFreshness(repoRoot, codeGraphRefreshEnabled),
+            new CodeGraphFreshness(
+                repoRoot,
+                codeGraphRefreshEnabled,
+                provider.GetRequiredService<ICodeGraphProvisioner>(),
+                provider.GetRequiredService<IKyberWeaveConfigRepository>(),
+                provider.GetRequiredService<TimeProvider>()),
             registry,
             services,
             deliveryExecutor,
@@ -111,9 +116,13 @@ public sealed class DocsRootRegistry
     /// reported on stderr and stepped over rather than being fatal: a client that has already spawned
     /// this process gets a server that answers and says why, instead of a transport that dies.
     /// </summary>
-    public static OntologyConfig ResolveOntology(string repoRoot)
+    /// <param name="repoRoot">The checkout whose configuration names the corpus.</param>
+    /// <param name="services">The container the configuration repository is resolved from.</param>
+    public static OntologyConfig ResolveOntology(string repoRoot, IServiceProvider services)
     {
-        KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(repoRoot);
+        ArgumentNullException.ThrowIfNull(services);
+        KyberWeaveConfigLoadResult loaded =
+            DocsToolsComposition.ServicesOrDefault(services).GetRequiredService<IKyberWeaveConfigRepository>().TryLoad(repoRoot);
         if (loaded is { Success: true, Config: not null })
         {
             return loaded.Config.Ontology;

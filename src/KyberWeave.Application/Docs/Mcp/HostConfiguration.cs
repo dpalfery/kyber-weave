@@ -2,14 +2,18 @@ using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 
-namespace KyberWeave.Mcp;
+namespace KyberWeave.Core.Docs.Mcp;
 
-/// <summary>
-/// Loads the repository's host configuration for the tools that need it, reporting a failure as a finding. It stays in
-/// the host while <see cref="KyberWeaveConfigLoader"/> lives in the legacy engine.
-/// </summary>
+/// <summary>Loads the repository's host configuration for the tools that need it, reporting a failure as a finding.</summary>
 internal sealed class HostConfiguration : IDocsHostConfiguration
 {
+    private readonly IKyberWeaveConfigRepository _config;
+
+    /// <summary>Creates the loader over the configuration repository the container provides.</summary>
+    /// <param name="config">Loads a repository's configuration.</param>
+    public HostConfiguration(IKyberWeaveConfigRepository config) =>
+        _config = config ?? throw new ArgumentNullException(nameof(config));
+
     /// <summary>
     /// Loads <c>kyber-weave.yml</c> for <paramref name="repositoryRoot"/>. A failure is added to <paramref name="report"/>
     /// and the product defaults are returned; warnings the configuration carries are added as findings.
@@ -20,11 +24,11 @@ internal sealed class HostConfiguration : IDocsHostConfiguration
     /// <returns>True when the configuration loaded.</returns>
     public bool TryLoad(string repositoryRoot, DiagnosticReport report, out KyberWeaveConfig config)
     {
-        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(repositoryRoot, null);
+        KyberWeaveConfigLoadResult result = _config.TryLoad(repositoryRoot);
         if (!result.Success)
         {
             report.Add(new Diagnostic(
-                KyberWeaveConfigLoader.ConfigLoadErrorCode,
+                IDocsHostConfiguration.ConfigLoadErrorCode,
                 Severity.Error,
                 result.Error ?? "Failed to load kyber-weave.yml.",
                 "kyber-weave.yml",
@@ -37,7 +41,7 @@ internal sealed class HostConfiguration : IDocsHostConfiguration
         foreach (string warning in config.Review.Warnings)
         {
             report.Add(new Diagnostic(
-                KyberWeaveConfigLoader.ConfigWarningCode,
+                IDocsHostConfiguration.ConfigWarningCode,
                 Severity.Warning,
                 warning,
                 "kyber-weave.yml",

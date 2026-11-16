@@ -5,6 +5,7 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Delivery;
 using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Mcp;
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using KyberWeave.Application;
 
@@ -86,6 +87,26 @@ internal static class DocsTestCommands
     }
 
     public static IPacketHostFacts HostFacts => Services().GetRequiredService<IPacketHostFacts>();
+
+    /// <summary>
+    /// A CodeGraph refresh schedule over <paramref name="root"/>, with the container's provisioner, the real
+    /// configuration repository and the system clock.
+    /// </summary>
+    /// <param name="root">The bound repository root.</param>
+    /// <param name="executor">Runs the CodeGraph child; null for the bounded production runner.</param>
+    /// <param name="refreshEnabled">False to model <c>--no-codegraph-refresh</c>.</param>
+    public static CodeGraphFreshness Freshness(
+        string root, IProcessExecutor? executor = null, bool refreshEnabled = true)
+    {
+        IServiceProvider provider = Services();
+        return new CodeGraphFreshness(
+            root,
+            refreshEnabled,
+            provider.GetRequiredService<ICodeGraphProvisioner>(),
+            provider.GetRequiredService<IKyberWeaveConfigRepository>(),
+            provider.GetRequiredService<TimeProvider>(),
+            executor);
+    }
 
     /// <summary>The review-gate catalogue over the real adapters the host wires.</summary>
     public static IReviewGateCatalogue Catalogue => Services().GetRequiredService<IReviewGateCatalogue>();
